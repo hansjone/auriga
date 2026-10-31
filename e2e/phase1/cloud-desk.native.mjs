@@ -47,17 +47,17 @@ export function nativeClient(request) {
         fiberPhase: 'active',
       };
     },
-    async createSession(cwd, provider) {
+    async createSession(cwd, provider, model = 'cloud-desk-fixture') {
       const { sessionId } = await rpc('session/create', {
         request: { cwd, agentPreset: 'standard' },
       });
       assert.equal(typeof sessionId, 'string');
       sessions.push(sessionId);
       const { selected } = await rpc('session/selectModel', {
-        request: { sessionId, provider, model: 'cloud-desk-fixture' },
+        request: { sessionId, provider, model },
       });
       assert.equal(selected.provider, provider);
-      assert.equal(selected.model, 'cloud-desk-fixture');
+      assert.equal(selected.model, model);
       return sessionId;
     },
     async prompt(sessionId, marker) {
@@ -345,7 +345,11 @@ export function assertConversation(report, state) {
         report.cloud?.httpsVerified === true),
     'authenticated cloud entry required',
   );
-  assert.equal(report.desktop?.installation, 'native-cli-tarball');
+  assert.ok(
+    ['native-cli-tarball', 'installed-app-tarball'].includes(
+      report.desktop?.installation,
+    ),
+  );
   assert.equal(report.desktop?.dshVersion, '0.2.1-rc.3');
   assert.match(report.desktop?.packageSHA256, /^[a-f0-9]{64}$/);
   assert.deepEqual(state.failures, []);

@@ -6,6 +6,10 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
 load_stack_env
+case "${AURIGA_IAM_EMERGENCY_REMOTE_ENABLED:-true}" in
+  true|false) ;;
+  *) die 'AURIGA_IAM_EMERGENCY_REMOTE_ENABLED must be true or false' ;;
+esac
 if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
   exec sh "$NAS_ROOT/scripts/installer.sh" render
 fi
@@ -16,6 +20,8 @@ SECRETS="$AURIGA_DATA_ROOT/secrets"
 CONFIG="$AURIGA_DATA_ROOT/config"
 [ -d "$SECRETS" ] || die "secrets directory missing; run init.sh first"
 bootstrap_nas_materials
+sh "$NAS_ROOT/scripts/render-collab.sh"
+sh "$NAS_ROOT/scripts/render-managed.sh"
 if [ -e "$CONFIG/panel" ] || [ -L "$CONFIG/panel" ]; then
   [ -d "$CONFIG/panel" ] && [ ! -L "$CONFIG/panel" ] || die "invalid panel output directory"
   [ "$(stat -c '%u:%g:%a' "$CONFIG/panel")" = "10001:10001:755" ] || die "invalid panel output ownership"
@@ -118,6 +124,7 @@ AURIGA_WORKSPACE_MIGRATION_PASSWORD=$PG_WS_OWNER
 AURIGA_IAM_ENCRYPTION_KEY=$IAM_KEY
 AURIGA_WORKSPACE_ENCRYPTION_KEY=$WS_KEY
 AURIGA_IAM_ISSUER=$ISSUER
+AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=${AURIGA_IAM_EMERGENCY_REMOTE_ENABLED:-true}
 AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:-3600}
 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:-60}
 AURIGA_EVENTS_NATS_URL=nats://platform:$NATS_PLATFORM@nats:4222

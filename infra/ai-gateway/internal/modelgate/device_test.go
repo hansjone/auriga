@@ -2,9 +2,12 @@ package modelgate
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/litellm"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/team"
 	iam "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
 	org "github.com/hansjone/auriga/infra/gen/auriga/org/v1"
@@ -195,6 +199,65 @@ func TestDeviceOnlineAuthority(t *testing.T) {
 	defer s.mu.Unlock()
 	if n != 6 || len(s.calls) <= n {
 		t.Fatal("authority was cached")
+	}
+}
+
+func TestManagedModelKeyUsesExactOnlineAuthorityAndMemberAccounting(t *testing.T) {
+	s, a, _ := controlFixture(t)
+	s.raw = "amc." + tenant + "." + account + "." + account + "." + device + "." + strings.Repeat("a", 43)
+	id, err := a.Check(t.Context(), s.raw)
+	if err != nil || id.Tenant() != tenant || id.Account() != account || id.Device() != device {
+		t.Fatalf("managed identity: %v", err)
+	}
+	s.mu.Lock()
+	s.verify.Active = false
+	s.mu.Unlock()
+	_, err = a.Check(t.Context(), s.raw)
+	wantCode(t, err, "common.unauthenticated")
+	s.mu.Lock()
+	s.verify.Active = true
+	s.verify.ExpiresAt = timestamppb.New(s.now.Add(306 * time.Second))
+	s.mu.Unlock()
+	_, err = a.Check(t.Context(), s.raw)
+	wantCode(t, err, "common.unauthenticated")
+}
+
+func TestManagedModelRelayForcesDesktopMemberUsageIdentity(t *testing.T) {
+	s, a, _ := controlFixture(t)
+	s.raw = "amc." + tenant + "." + account + "." + account + "." + device + "." + strings.Repeat("a", 43)
+	serviceKey := "sk-" + rand.Text()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			User     string            `json:"user"`
+			Metadata map[string]string `json:"metadata"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.User != tenant+":"+account || body.Metadata["account_id"] != account || body.Metadata["device_id"] != device || r.Header.Get("Authorization") != "Bearer "+serviceKey {
+			t.Error("managed usage or service key mismatch")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+	key := filepath.Join(t.TempDir(), "team-key")
+	if err := os.WriteFile(key, []byte(serviceKey), 0600); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := litellm.New(upstream.URL, key, func(ctx context.Context, raw string) (litellm.Principal, error) {
+		id, e := a.Check(ctx, raw)
+		if e != nil {
+			return litellm.Principal{}, e
+		}
+		return litellm.Principal{Tenant: id.Tenant(), Account: id.Account(), Device: id.Device(), Expires: id.ExpiresAt()}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(handler.Close)
+	request := httptest.NewRequest(http.MethodPost, "/ai/v1/chat/completions", strings.NewReader(`{"model":"pool-a","messages":[],"user":"attacker","metadata":{"account_id":"other"}}`))
+	request.Header.Set("Authorization", "Bearer "+s.raw)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("relay status %d", recorder.Code)
 	}
 }
 func TestDeviceAuthorityRejects(t *testing.T) {

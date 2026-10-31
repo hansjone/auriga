@@ -37,13 +37,15 @@ if project_is_running; then
   info "project already running — compose up -d is idempotent"
 fi
 
-sh "$NAS_ROOT/scripts/renew-panel.sh" --install || info "warning: panel auto-renew scheduler unavailable; inspect renewal health/status"
-# Check even when an earlier successful panel-prepare container already exists.
-sh "$NAS_ROOT/scripts/renew-panel.sh" || info "warning: panel startup publication failed; other services will still start"
-
 info "starting project $AURIGA_NAS_PROJECT (no build, no pull)"
 # Fail closed, including when Compose does not support --pull never.
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build --pull never
 
 info "start requested; use status.sh / smoke.sh to verify"
 info "after first seed start, set AURIGA_PLATFORM_SEED=false in stack.env and re-render"
+
+# Compose waits for platform health before starting its dependents, so seed has
+# finished here. Keep recovery material out of redirected installer/Compose logs.
+if ! sh "$NAS_ROOT/scripts/emergency.sh" --first-start; then
+  printf '%s\n' 'emergency handoff pending; in a private TTY run sh deploy-nas/scripts/emergency.sh show (requires root or Docker permission)' >&2
+fi

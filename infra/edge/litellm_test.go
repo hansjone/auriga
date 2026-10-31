@@ -54,6 +54,73 @@ func TestLiteLLMExternalPayload(t *testing.T) {
 	}
 }
 
+func TestLiteLLMExternalAllowedOrigins(t *testing.T) {
+	var calls atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get("Authorization") != "Bearer sk-virtual" || r.Header.Get("Origin") != "" || r.Header.Get("Cookie") != "" {
+			t.Error("external key or origin/cookie isolation changed")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer proxy.Close()
+	for _, configured := range []bool{false, true} {
+		g, _, _ := accessFixtureConfigured(t, false, nil, func(c *Config, _ map[string]any) {
+			c.LiteLLMOrigin = proxy.URL
+			if configured {
+				c.LinkOrigins = []string{"https://portal.example.com", "http://192.0.2.10:8080"}
+			}
+		})
+		for _, tc := range []struct {
+			name    string
+			origins []string
+			key     string
+			status  int
+		}{
+			{"no-origin", nil, "Bearer sk-virtual", 204},
+			{"domain", []string{"https://portal.example.com"}, "Bearer sk-virtual", 204},
+			{"ip", []string{"http://192.0.2.10:8080"}, "Bearer sk-virtual", 204},
+			{"foreign", []string{"https://foreign.example.com"}, "Bearer sk-virtual", 403},
+			{"suffix", []string{"https://portal.example.com.attacker.example.com"}, "Bearer sk-virtual", 403},
+			{"path", []string{"https://portal.example.com/"}, "Bearer sk-virtual", 403},
+			{"null", []string{"null"}, "Bearer sk-virtual", 403},
+			{"empty", []string{""}, "Bearer sk-virtual", 403},
+			{"duplicate", []string{"https://portal.example.com", "https://portal.example.com"}, "Bearer sk-virtual", 403},
+			{"combined", []string{"https://portal.example.com, https://portal.example.com"}, "Bearer sk-virtual", 403},
+			{"without-key", []string{"https://portal.example.com"}, "", 401},
+		} {
+			t.Run(fmt.Sprintf("configured=%t/%s", configured, tc.name), func(t *testing.T) {
+				before := calls.Load()
+				r := httptest.NewRequest("GET", "/ai/v1/models", nil)
+				if tc.origins != nil {
+					r.Header["Origin"] = tc.origins
+				}
+				r.Header.Set("Authorization", tc.key)
+				r.Header.Set("X-Forwarded-Host", "portal.example.com")
+				r.Header.Set("X-Forwarded-Proto", "https")
+				r.Header.Set("Cookie", "auriga_admin_session=fixture")
+				r = r.WithContext(context.WithValue(r.Context(), accessEntryKey{}, accessEntry{role: "portal"}))
+				w := httptest.NewRecorder()
+				g.proxyLiteLLM(w, r, "portal", "test")
+				want := tc.status
+				if !configured && want == 204 && tc.origins != nil {
+					want = 403
+				}
+				if w.Code != want {
+					t.Fatalf("status=%d want=%d", w.Code, want)
+				}
+				delta := int32(0)
+				if want == 204 {
+					delta = 1
+				}
+				if calls.Load() != before+delta {
+					t.Fatal("rejected request reached upstream")
+				}
+			})
+		}
+	}
+}
+
 func TestLiteLLMEntryBoundary(t *testing.T) {
 	for _, domain := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ip", true: "domain"}[domain], func(t *testing.T) {

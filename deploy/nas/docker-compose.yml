@@ -12,17 +12,114 @@ x-cap-drop-all: &cap_drop_all
   privileged: false
 
 services:
+  loki:
+    image: ${AURIGA_IMAGE_LOKI:-grafana/loki:3.5.5}
+    profiles: [observability]
+    <<: *cap_drop_all
+    user: '10001:10001'
+    read_only: true
+    restart: unless-stopped
+    command: ['-config.file=/etc/loki/auriga.yml']
+    networks: [observability]
+    volumes:
+      - ./observability/loki.yml:/etc/loki/auriga.yml:ro
+      - lokidata:/loki
+    healthcheck:
+      test: ['CMD', '/busybox/wget', '-qO-', 'http://127.0.0.1:3100/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+    cpus: 0.25
+    pids_limit: 64
+
+  alloy-prepare:
+    image: ${AURIGA_IMAGE_ALLOY:-grafana/alloy:v1.10.2}
+    profiles: [observability]
+    <<: *cap_drop_all
+    cap_add: [CHOWN]
+    user: '0:0'
+    read_only: true
+    network_mode: none
+    entrypoint: ['/bin/sh', '-ec']
+    # Only the volume root is reassigned. No recursive mutation or host mount.
+    command: ['chown 0:0 /var/lib/alloy']
+    volumes:
+      - alloydata:/var/lib/alloy
+    mem_limit: 32m
+    cpus: 0.10
+    pids_limit: 16
+
+  alloy:
+    image: ${AURIGA_IMAGE_ALLOY:-grafana/alloy:v1.10.2}
+    profiles: [observability]
+    <<: *cap_drop_all
+    user: '0:0'
+    read_only: true
+    restart: unless-stopped
+    command:
+      [
+        'run',
+        '--storage.path=/var/lib/alloy',
+        '--server.http.listen-addr=127.0.0.1:12345',
+        '/etc/alloy/config.alloy',
+      ]
+    networks: [observability]
+    environment:
+      COMPOSE_PROJECT_NAME: auriga-nas-test
+    volumes:
+      # The Docker API remains host-root equivalent even through a :ro socket.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
+      - ./observability/health.sh:/etc/alloy/health.sh:ro
+      - alloydata:/var/lib/alloy
+    depends_on:
+      alloy-prepare:
+        condition: service_completed_successfully
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', '/bin/bash', '/etc/alloy/health.sh']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 192m
+    cpus: 0.25
+    pids_limit: 64
+
   panel-prepare:
     image: ${AURIGA_IMAGE_EDGE}
     <<: *cap_drop_all
-    user: "10001:10001"
+    user: '10001:10001'
     read_only: true
     network_mode: none
-    entrypoint: ["/auriga-panel"]
+    entrypoint: ['/auriga-panel']
     command: ['-best-effort']
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/panel-signing.key:/run/panel.key:ro
       - ${AURIGA_DATA_ROOT}/config/panel:/out
+
+  panel-renew:
+    image: ${AURIGA_IMAGE_EDGE}
+    <<: *cap_drop_all
+    user: '10001:10001'
+    read_only: true
+    network_mode: none
+    restart: unless-stopped
+    entrypoint: ['/auriga-panel']
+    command: ['-renew']
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/materials/panel-signing.key:/run/panel.key:ro
+      - ${AURIGA_DATA_ROOT}/config/panel:/out
+    healthcheck:
+      test: ['CMD', '/auriga-panel', '-check']
+      interval: 1m
+      timeout: 5s
+      retries: 1
+      start_period: 15s
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 32
 
   postgres:
     image: ${AURIGA_IMAGE_POSTGRES}
@@ -55,7 +152,7 @@ services:
     pids_limit: 256
 
   litellm:
-    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    image: ${AURIGA_IMAGE_LITELLM:-ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06}
     <<: *cap_drop_all
     # Read only the group-readable runtime copies prepared by render.
     group_add: ['10003', '999']
@@ -90,7 +187,7 @@ services:
       start_period: 60s
 
   litellm-init:
-    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    image: ${AURIGA_IMAGE_LITELLM:-ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06}
     <<: *cap_drop_all
     group_add: ['10003', '999', '10001']
     entrypoint: ['python', '/etc/litellm/provision.py']
@@ -192,6 +289,10 @@ services:
       SERVER_ADDRESS: 0.0.0.0
       SERVER_SSL_ENABLED: 'true'
       AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
+      AURIGA_WORKSPACE_MANAGED_PLATFORM_ORIGIN: ${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
+      AURIGA_WORKSPACE_MANAGED_CA_FILE: /etc/auriga/managed-ca/ca.crt
+      AURIGA_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
+      AURIGA_LINKS_TRUSTED_PROXIES: ${AURIGA_INTERNAL_EDGE_IP}
       AURIGA_IAM_TLS_CERT_FILE: /etc/auriga/pki/iam.crt
       AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
       AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
@@ -202,6 +303,15 @@ services:
       AURIGA_IAM_EDGE_TOKEN_FILE: /run/auriga-internal/edge/service.jwt
       AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:-3600}
       AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:-60}
+      # Public PKCE/device client only: no secret, redirect, or browser OAuth grant.
+      AURIGA_IAM_CLIENTS_0_ID: auriga-dsh
+      AURIGA_IAM_CLIENTS_0_TENANT: ${AURIGA_NAS_NATIVE_CLIENT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
+      AURIGA_IAM_CLIENTS_0_SECRETHASH: ''
+      AURIGA_IAM_CLIENTS_0_REDIRECTURIS: ''
+      AURIGA_IAM_CLIENTS_0_SCOPES: auriga.connect
+      AURIGA_IAM_CLIENTS_0_GRANTS: urn:ietf:params:oauth:grant-type:device_code,refresh_token
+      AURIGA_IAM_CLIENTS_0_PLATFORM: 'true'
+      AURIGA_IAM_CLIENTS_0_NATIVECONNECT: 'true'
       AURIGA_GRPC_PORT: '9091'
       AURIGA_GRPC_SERVER_HOST: 0.0.0.0
       AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
@@ -212,6 +322,7 @@ services:
       AURIGA_PLATFORM_PORT: '8081'
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60 -XX:+UseContainerSupport
     volumes:
+      - ${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro
       - ${AURIGA_DATA_ROOT}/config/materials/platform-access.yaml:/etc/auriga/platform-access.yaml:ro
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/iam-healthcheck.sh:/etc/auriga/iam-healthcheck.sh:ro
@@ -252,7 +363,13 @@ services:
       - /tmp:size=16m,mode=1777
     user: '65532:65532'
     healthcheck:
-      test: ['CMD', '/auriga-panel', '-check', '-out', '/srv/auriga/panel']
+      test:
+        [
+          'CMD',
+          '/auriga-panel',
+          '-probe-tcp',
+          '127.0.0.1:${AURIGA_NAS_PORTAL_TARGET_PORT:-8080}',
+        ]
       interval: 1m
       timeout: 5s
       retries: 1
@@ -269,6 +386,11 @@ services:
         required: true
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
+      AURIGA_EDGE_MANAGED_ORIGIN: ${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
+      AURIGA_EDGE_MANAGED_CERT_FILE: /etc/auriga/managed/server.crt
+      AURIGA_EDGE_MANAGED_KEY_FILE: /etc/auriga/managed/server.key
+      AURIGA_EDGE_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
+      AURIGA_EDGE_LINKS_TRUSTED_PROXIES: ${AURIGA_LINKS_TRUSTED_PROXIES:-}
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/edge.config.json:/etc/auriga/edge.config.json:ro
       - ${AURIGA_DATA_ROOT}/config/panel:/srv/auriga/panel:ro
@@ -277,11 +399,13 @@ services:
       - ${AURIGA_DATA_ROOT}/internal-tokens:/run/auriga-internal:ro
       # Only edge leaf materials — not ca.key / workspace.key (M8).
       - ${AURIGA_DATA_ROOT}/config/pki-edge:/etc/auriga/pki:ro
+      - ${AURIGA_DATA_ROOT}/config/managed-edge:/etc/auriga/managed:ro
       # Ingress socket only — not data/agent private keys (H2).
       - ${AURIGA_DATA_ROOT}/socket-share:${AURIGA_DATA_ROOT}/socket-share:ro
     networks:
       internal:
         ipv4_address: ${AURIGA_INTERNAL_EDGE_IP}
+        aliases: ["${AURIGA_MANAGED_PLATFORM_HOST:-auriga-managed-disabled}"]
       lan:
         ipv4_address: ${AURIGA_EDGE_LAN_IP}
     expose:
@@ -368,6 +492,7 @@ services:
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
       AURIGA_AGENT_PANEL_KEYS_FILE: /etc/auriga/panel-keys.json
+      AURIGA_AGENT_MANAGED_CA_FILE: ${AURIGA_MANAGED_PLATFORM_ORIGIN:+/etc/auriga/managed-ca/ca.crt}
       # Trusted edge identity and internal alias come only from access.json.
       AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/socket-share/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
@@ -377,6 +502,7 @@ services:
       AURIGA_AGENT_CAPACITY_DISK_GB: ${AURIGA_AGENT_CAPACITY_DISK_GB:-10}
       DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
+      - ${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ${AURIGA_DATA_ROOT}/data/agent:${AURIGA_DATA_ROOT}/data/agent
       - ${AURIGA_DATA_ROOT}/socket-share:${AURIGA_DATA_ROOT}/socket-share
@@ -391,6 +517,8 @@ services:
     pids_limit: 256
 
 networks:
+  observability:
+    internal: true
   internal:
     name: auriga-nas-test_internal
     driver: bridge
@@ -398,6 +526,7 @@ networks:
     ipam:
       config:
         - subnet: ${AURIGA_INTERNAL_SUBNET}
+          ip_range: ${AURIGA_INTERNAL_DYNAMIC_RANGE:?set a dynamic CIDR inside the internal subnet excluding the fixed edge IP}
   publish:
     # Non-internal: required for 127.0.0.1 port publishes to reach host-network agent (H1).
     # Not attached to LAN; backends are still unreachable from the dedicated edge LAN IP path.
@@ -407,6 +536,10 @@ networks:
   lan:
     external: true
     name: ${AURIGA_LAN_NETWORK}
+
+volumes:
+  lokidata:
+  alloydata:
 
 secrets:
   litellm_master:

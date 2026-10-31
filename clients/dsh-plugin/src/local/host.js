@@ -1,3 +1,29 @@
+import { readFileSync } from 'node:fs';
+import { NATIVE_LOGIN_CHANNEL, NATIVE_LOGIN_METHODS } from './native-rpc.js';
+
+/** Use the same native boot table for Web and Electron's static carrier.
+ * @param {any} ctx */
+export function installLocalLoginBootstrap(ctx) {
+  if (typeof ctx.webServer.collectIndexInjections !== 'function') return;
+  const text = readFileSync(
+    new URL('../login/startup.js', import.meta.url),
+    'utf8',
+  );
+  ctx.on('webserver/index-inject', (/** @type {any[]} */ table) => {
+    table.push({ kind: 'script', placement: 'head', text });
+  });
+}
+
+// rc.3 Desktop reads only redacted configuration/credential metadata and its
+// native account state before opening a window. These methods cannot mutate
+// settings, return credential values, or operate an Auriga/DSH session.
+const desktopStartupReads = new Set([
+  '/api/settings/describe',
+  '/api/llm/listConfigurableProviders',
+  '/api/credentials/describe',
+  '/api/account/getState',
+]);
+
 /** Responses belong to a local browser session, independently of the shared
  * native Peer and keep-alive socket. Closing one must not cancel another.
  * @param {(request:import('node:http').IncomingMessage)=>{key:string}|null} resolve */
@@ -48,13 +74,10 @@ export function installHttpResponseTracking(ctx, bind) {
       /** @type {import('node:http').ServerResponse} */ response,
       /** @type {()=>Promise<unknown>} */ next,
     ) => {
-      if (!bind(request, response)) {
-        if (!response.destroyed && !response.writableEnded) {
-          response.writeHead(401);
-          response.end();
-        }
-        return;
-      }
+      // Tracking owns session-bound response lifetimes, not authorization.
+      // Startup and login requests have no local session yet; their route still
+      // owns native admission, origin and CSRF checks.
+      bind(request, response);
       return next();
     },
   );
@@ -151,6 +174,37 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
       return original;
     }
     if (
+      !upgrade &&
+      request.method === 'POST' &&
+      NATIVE_LOGIN_METHODS.has(
+        (request.url ?? '').slice(NATIVE_LOGIN_CHANNEL.length + 1),
+      ) &&
+      (request.url ?? '').startsWith(NATIVE_LOGIN_CHANNEL + '/') &&
+      request.headers['content-type']?.split(';')[0].trim().toLowerCase() ===
+        'application/json'
+    )
+      return sameOrigin(request) ? original : { rejection: 403 };
+    // Only a backend session established by that admitted owner RPC can open
+    // native business requests. Headers never select or supply this identity.
+    if (runtime.resolveNative?.(original.peer)) {
+      if (!sameOrigin(request)) return { rejection: 403 };
+      runtime.bindNativeRequest(original.peer, request);
+      runtime.bindSocket(request);
+      return original;
+    }
+    if (
+      !upgrade &&
+      request.method === 'POST' &&
+      desktopStartupReads.has(request.url ?? '') &&
+      request.headers['content-type']?.split(';')[0].trim().toLowerCase() ===
+        'application/json'
+    ) {
+      // Native Electron fetch has no Origin for these read-only RPCs. A
+      // supplied Origin must still be exact; browser cross-site requests fail.
+      // The native RPC carrier also binds envelope.method to this exact path.
+      return sameOrigin(request) ? original : { rejection: 403 };
+    }
+    if (
       !sameOrigin(
         request,
         upgrade ||
@@ -173,14 +227,9 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
       response.end();
       return false;
     }
-    if (!runtime.resolve(request)) {
-      response.writeHead(303, {
-        location: '/auriga/local-login',
-        'cache-control': 'no-store',
-      });
-      response.end();
-      return false;
-    }
+    // The authenticated native shell must boot before platform login (and
+    // before the connect runtime is ready). Serving its static index grants no
+    // business access: admit() still requires the local session for API/WS.
     return true;
   };
   const stopHttpTracking = runtime.installHttpTracking();

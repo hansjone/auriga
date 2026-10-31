@@ -45,7 +45,7 @@ async function get(page, path) {
     const result = await globalThis.fetch(path, {
       credentials: 'same-origin',
       redirect: 'error',
-      signal: globalThis.AbortSignal.timeout(15000),
+      signal: globalThis.AbortSignal.timeout(45000),
     });
     return { status: result.status, body: await result.json() };
   }, path);
@@ -229,7 +229,7 @@ export async function openExistingCloud({
             method: body === undefined ? 'GET' : 'POST',
             credentials: 'same-origin',
             redirect: 'error',
-            signal: globalThis.AbortSignal.timeout(15000),
+            signal: globalThis.AbortSignal.timeout(45000),
             headers:
               body === undefined
                 ? {}
@@ -407,7 +407,7 @@ export async function createCloudMember({
             method: body === undefined ? 'GET' : 'POST',
             credentials: 'same-origin',
             redirect: 'error',
-            signal: globalThis.AbortSignal.timeout(15000),
+            signal: globalThis.AbortSignal.timeout(45000),
             headers:
               body === undefined
                 ? {}

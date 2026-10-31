@@ -1,5 +1,9 @@
+import { networkTiming } from './timing.js';
 /* global AbortSignal */
 import { randomUUID, createHash } from 'node:crypto';
+import { setTimeout as retryDelay } from 'node:timers/promises';
+import { TransportError } from './transport/errors.js';
+import { SessionError } from './session/errors.js';
 import { join } from 'node:path';
 import { NatsTransport, createWsSocketFactory } from './transport/index.js';
 import { createFileLedgerStore } from './host/store.js';
@@ -29,6 +33,7 @@ import { connectionSourceClient } from './source-control/connection.js';
 import { stopSource } from './source-control/state.js';
 import { saveProducerEpoch } from './durable/outbox.js';
 import { createDeviceMessaging } from './durable/capability.js';
+import { createStableNetworkTools } from './stable-tools.js';
 import { hasCursorEvidence } from './durable/recovery.js';
 import {
   createDiagnosticLog,
@@ -38,6 +43,17 @@ import {
 
 // At most 64 pending protocol payloads (each already bounded by NatsLink).
 const MESSAGE_QUEUE_CAPACITY = 64;
+
+/** No identity/signature/store failures qualify as a control-plane retry.
+ * @param {unknown} error */
+function transientControl(error) {
+  return (
+    error instanceof DeviceControlUnavailable ||
+    [429, 503].includes(
+      /** @type {{status?:number}|null} */ (error)?.status ?? 0,
+    )
+  );
+}
 
 /** Strict known-identity handshake only; no delivery session or business ports.
  * @param {import('./session/memory-pipe.js').TransportLike} transport
@@ -109,7 +125,7 @@ async function normalReady(transport, trust, state, signal, now) {
       timer = setTimeout(
         () =>
           reject(diagnosticReason(new Error('READY timeout'), 'ready_timeout')),
-        5000,
+        networkTiming.operationMs,
       );
       off = transport.onMessage((bytes, receivedEpoch) => {
         void (async () => {
@@ -239,6 +255,7 @@ export async function openConnectionRuntime(options) {
     throw new Error('trusted WSS endpoint required');
   const signal = controller.signal,
     now = options.now ?? Date.now;
+  const stableRegistries = new Set();
   let closed = false,
     connected = false,
     started = false,
@@ -546,10 +563,15 @@ export async function openConnectionRuntime(options) {
     };
     const isCurrent = () =>
       entry.live && !closed && currentConnection === entry;
-    let transportFailure = diagnostics.scope('wss_connect', 10000, isCurrent);
+    let transportFailure = diagnostics.scope(
+      'wss_connect',
+      networkTiming.operationMs,
+      isCurrent,
+    );
     const transport = (
       options.transportFactory ?? ((o) => new NatsTransport(o))
     )({
+      connectTimeoutMs: networkTiming.operationMs,
       url: prepared.url,
       upSubject: 'auriga.net.up.a.' + 'a'.repeat(26),
       downSubject: 'auriga.net.down.' + 'a'.repeat(26),
@@ -558,7 +580,7 @@ export async function openConnectionRuntime(options) {
       async getTicket({ reason: ticketReason }) {
         const ticketFailure = diagnostics.scope(
           'ticket_http',
-          15000,
+          networkTiming.operationMs,
           () => entry.live && !closed && currentConnection === entry,
         );
         let requestingTicket = false;
@@ -569,7 +591,11 @@ export async function openConnectionRuntime(options) {
           requestingTicket = true;
           const ticket = await prepared.getTicket(signal);
           valid();
-          transportFailure = diagnostics.scope('wss_connect', 10000, isCurrent);
+          transportFailure = diagnostics.scope(
+            'wss_connect',
+            networkTiming.operationMs,
+            isCurrent,
+          );
           return ticket;
         } catch (error) {
           const e = /** @type {any} */ (error);
@@ -580,6 +606,9 @@ export async function openConnectionRuntime(options) {
             void close('revoked').catch(() => {});
           } else if (e?.status === 403) {
             void close('forbidden').catch(() => {});
+          } else if (!normal && transientControl(error)) {
+            // C1 has no business capability and still owns the original
+            // registration/writer. Its caller/transport may safely retry.
           } else if (
             ![429, 503].includes(e?.status) &&
             !(
@@ -693,7 +722,7 @@ export async function openConnectionRuntime(options) {
             const proof = await diagnostics
               .scope(
                 'normal_ready',
-                5000,
+                networkTiming.operationMs,
                 () =>
                   !closed &&
                   entry.live &&
@@ -733,7 +762,9 @@ export async function openConnectionRuntime(options) {
           })
           .catch((error) => {
             if (!closed && !handshakeSignal.aborted) {
-              diagnostics.scope('normal_ready', 5000).fail(error);
+              diagnostics
+                .scope('normal_ready', networkTiming.operationMs)
+                .fail(error);
               void close('unavailable').catch(() => {});
             }
           });
@@ -769,7 +800,7 @@ export async function openConnectionRuntime(options) {
       const registration = await run(
         'register_http',
         () => prepared.register(signal),
-        15000,
+        networkTiming.operationMs,
       );
       active();
       diagnostics.registered(registration.created);
@@ -801,38 +832,105 @@ export async function openConnectionRuntime(options) {
       );
       connectionTrust = trust;
       active();
-      await refreshTrust(trust);
+      if (ledger.state) await refreshTrust(trust);
+      else {
+        let failures = 0;
+        for (;;) {
+          try {
+            await refreshTrust(trust);
+            break;
+          } catch (error) {
+            active();
+            if (!transientControl(error)) throw error;
+            await retryDelay(
+              Math.min(30000, 250 * 2 ** Math.min(failures++, 7)),
+              undefined,
+              { signal },
+            );
+          }
+        }
+      }
       active();
       if (!ledger.state) {
-        const first = diagnostics
-          .scope('wss_connect', 10000)
-          .sync(() => connect(trust, false));
-        await run('wss_connect', () => first.transport.start(), 10000);
-        active();
-        first.entry.epoch = first.transport.epoch;
-        const bootstrapSignal = AbortSignal.any([
-          signal,
-          first.entry.attempt.signal,
-        ]);
-        const output = await run(
-          'bootstrap_ready',
-          () =>
-            bootstrapReady({
-              registration: { ...registration, created: true },
-              transport: first.facade,
-              trust,
-              signal: bootstrapSignal,
-              now,
-            }),
-          5000,
-        );
-        active();
+        /** @type {ReturnType<typeof connect>|undefined} */
+        let first = undefined;
+        /** @type {AbortSignal} */
+        let bootstrapSignal;
+        /** @type {Awaited<ReturnType<typeof bootstrapReady>>} */
+        let output;
+        let failures = 0;
+        for (;;) {
+          active();
+          try {
+            first = diagnostics
+              .scope('wss_connect', networkTiming.operationMs)
+              .sync(() => connect(trust, false));
+            const currentFirst = first;
+            await run(
+              'wss_connect',
+              () => currentFirst.transport.start(),
+              networkTiming.operationMs,
+            );
+            active();
+            first.entry.epoch = first.transport.epoch;
+            bootstrapSignal = AbortSignal.any([
+              signal,
+              first.entry.attempt.signal,
+            ]);
+            output = await run(
+              'bootstrap_ready',
+              () =>
+                bootstrapReady({
+                  registration: { ...registration, created: true },
+                  transport: currentFirst.facade,
+                  trust,
+                  signal: bootstrapSignal,
+                  now,
+                }),
+              networkTiming.operationMs,
+            );
+            active();
+            break;
+          } catch (error) {
+            active();
+            const transient =
+              transientControl(error) ||
+              (error instanceof TransportError &&
+                [
+                  'connection_closed',
+                  'connection_lost',
+                  'not_connected',
+                  'connect_failed',
+                  'timeout',
+                  'write_stalled',
+                ].includes(error.code)) ||
+              (error instanceof SessionError &&
+                ['timeout', 'stopped'].includes(error.code));
+            if (!transient) throw error;
+            // No initialize/commit has been attempted. Retain this live
+            // registration and its original writer, never persist created=true
+            // or reopen an absent ledger on a subsequent registration.
+            if (first) {
+              await first.entry.stop();
+              connections.delete(first.entry);
+            }
+            active();
+            await retryDelay(
+              Math.min(30000, 250 * 2 ** Math.min(failures++, 7)),
+              undefined,
+              { signal },
+            );
+          }
+        }
+        if (!first || !bootstrapSignal || !output)
+          throw new Error('bootstrap attempt unavailable');
+        const completedFirst = first;
         const firstCurrent = () => {
           active();
           bootstrapSignal.throwIfAborted();
           if (
-            first.transport.state !== 'ready' ||
-            first.transport.epoch !== first.entry.epoch
+            completedFirst.transport.state !== 'ready' ||
+            completedFirst.transport.epoch !== completedFirst.entry.epoch
           )
             throw new Error('bootstrap connection changed');
         };
@@ -861,6 +959,17 @@ export async function openConnectionRuntime(options) {
               'workspaceRegistry',
             ],
             (/** @type {any} */ ctx) => {
+              const stable = createStableNetworkTools(ctx.tools);
+              stableRegistries.add(stable);
+              const facade = {
+                register: (/** @type {any} */ definition) =>
+                  stable.register(definition),
+              };
+              ctx = new Proxy(ctx, {
+                get(target, key) {
+                  return key === 'tools' ? facade : Reflect.get(target, key);
+                },
+              });
               hostContext = ctx;
               installRegistration();
               const stopSession = (/** @type {string} */ id) => {
@@ -900,6 +1009,8 @@ export async function openConnectionRuntime(options) {
                   : [];
               ctx.effect(
                 () => () => {
+                  stable.close();
+                  stableRegistries.delete(stable);
                   if (hostContext === ctx) {
                     hostContext = undefined;
                     if (sourceCapability)
@@ -926,9 +1037,13 @@ export async function openConnectionRuntime(options) {
         /* Host unavailable: base READY remains independent. */
       }
       const normal = diagnostics
-        .scope('wss_connect', 10000)
+        .scope('wss_connect', networkTiming.operationMs)
         .sync(() => connect(trust, true));
-      await run('wss_connect', () => normal.transport.start(), 10000);
+      await run(
+        'wss_connect',
+        () => normal.transport.start(),
+        networkTiming.operationMs,
+      );
       active();
       let pending;
       do {
@@ -950,6 +1065,8 @@ export async function openConnectionRuntime(options) {
     if (closing) return closing;
     reason = why;
     closed = true;
+    for (const stable of stableRegistries) stable.close();
+    stableRegistries.clear();
     connected = false;
     retireRegistration();
     controller.abort();

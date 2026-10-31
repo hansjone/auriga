@@ -346,3 +346,8 @@ Java NetworkKeysController、真实 IAM、生产 provider 或双 DSH 验收。
 
 本代码改动不等于网关已部署或双 DSH 已通；须用匹配制品验证真实登录、在线准入、
 远程 MCP 和宿主投递的整条链。
+
+托管实例内部入口向 IAM 转发时，受认证 hop 的 `Host` 与门户入口标识均使用部署的
+规范门户来源；通过入口校验的内部 HTTPS 来源则保留在清洗后的 `X-Forwarded-Host/Proto`
+中，供 IAM 按允许来源列表派生 issuer。内部入口不会成为新的浏览器入口，客户端自带的
+转发头不能覆盖此来源，设备凭据及 IAM 在线授权检查保持不变。

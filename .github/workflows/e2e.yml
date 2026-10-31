@@ -44,6 +44,12 @@ jobs:
           sudo env PATH="$PATH" NAS_ALLOW_NONROOT=0 NAS_TEST_ACCESS_MODE=ip sh deploy/nas/test/run-tests.sh
           sudo env PATH="$PATH" NAS_ALLOW_NONROOT=0 NAS_TEST_ACCESS_MODE=proxy sh deploy/nas/test/run-tests.sh
 
+      - name: Verify first-admin protocol and encrypted handoff
+        run: |
+          python3 -m venv "$RUNNER_TEMP/nas-admin-python"
+          "$RUNNER_TEMP/nas-admin-python/bin/pip" install --disable-pip-version-check -r deploy/nas/test/admin-bootstrap-requirements.txt
+          "$RUNNER_TEMP/nas-admin-python/bin/python" deploy/nas/test/admin-bootstrap_test.py
+
       - name: Prepare materials (registry + PKI + template)
         working-directory: deploy/compose
         run: |

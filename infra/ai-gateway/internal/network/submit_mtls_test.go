@@ -108,6 +108,9 @@ func TestSubmitRuntimeMTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
+	if r.submitHTTP.ReadTimeout != 30*time.Second || r.submitHTTP.WriteTimeout != 30*time.Second {
+		t.Fatal("submit listener does not cover the mailbox RPC budget")
+	}
 	roots := x509.NewCertPool()
 	roots.AddCert(serverCA)
 	for _, name := range []string{"", "wrong", "iam-edge", "server-only", "edge"} {

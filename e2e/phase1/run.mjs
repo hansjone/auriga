@@ -2,10 +2,12 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { totp, totpNotBefore } from './checks.mjs';
 export { totp } from './checks.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { queryLoki } from './loki-query.mjs';
+import { healthInventory } from './health-inventory.mjs';
 
 export class StepError extends Error {}
 export class Skip extends StepError {}
@@ -211,6 +213,10 @@ export async function runPhase1(options, config, dependencies = {}) {
       identityReady = true;
     }
   };
+  const relayAdminRequest = async (url, state, settings) =>
+    config.relay?.browserAdmin === true
+      ? (await getAdapter()).relayAdminRequest(url, state, settings)
+      : request(url, state, settings);
   const cloud = async (state) => {
     if (!cloudReady) {
       await identity(state);
@@ -229,7 +235,10 @@ export async function runPhase1(options, config, dependencies = {}) {
       throw new Skip(
         '未提供--desktop-dsh隔离profile描述文件；不操作用户现有DSH',
       );
-    if (!config.desktop?.loggedInSelector)
+    if (
+      !config.desktop?.loggedInSelector &&
+      config.desktop?.installedApp !== true
+    )
       throw new Skip('PLUGIN-DIST尚未接线：缺少桌面安装/登录UI配置');
     if (!desktopReady) {
       await identity(state);
@@ -262,7 +271,7 @@ export async function runPhase1(options, config, dependencies = {}) {
         item.checks.push({ name: check.name, status: 'PASS' });
       }
       if (config.relay?.baseUrl) {
-        const data = await request(
+        const data = await relayAdminRequest(
           new URL('health/readiness', trailing(config.relay.baseUrl)),
           state,
           { key: config.relay.adminKey },
@@ -278,7 +287,12 @@ export async function runPhase1(options, config, dependencies = {}) {
           status: 'SKIP',
           reason: '未配置relay.baseUrl；LiteLLM未部署或未接线',
         });
-      if (!config.healthChecks?.length || !config.healthInventoryComplete)
+      if (config.healthInventory)
+        item.inventory = await healthInventory(config.healthInventory);
+      if (
+        !config.healthChecks?.length ||
+        (!item.inventory?.complete && !config.healthInventoryComplete)
+      )
         throw new Skip(
           '已完成列出的健康探测；缺少完整healthChecks清单及healthInventoryComplete，不能声称全部服务healthy',
         );
@@ -346,27 +360,32 @@ export async function runPhase1(options, config, dependencies = {}) {
       await desktop(state);
       await (await getAdapter()).messages(state);
     },
-    async (state) => {
+    async (state, item) => {
       if (!config.relay?.baseUrl)
         throw new Skip('RELAY-LITELLM尚未部署或未配置');
-      if (config.relay.allowModelCalls !== true || !config.relay.models?.length)
-        throw new Skip(
-          '模型调用未启用；需显式配置仅连接免费假上游的models和allowModelCalls',
+      const mode = modelCallMode(config.relay);
+      item.upstreamMode = mode;
+      requireThat(
+        new Set(config.relay.models.map((model) => model.name)).size >= 2,
+        '需至少两个不同的模型名称',
+      );
+      if (mode === 'fixture')
+        requireThat(
+          new Set(config.relay.models.map((model) => model.provider)).size >=
+            2 && config.relay.models.every((model) => model.provider),
+          '需至少两个独立假提供商',
         );
-      requireThat(
-        config.relay.models.every((model) => model.testOnly === true),
-        '拒绝未标testOnly的模型配置',
-      );
-      requireThat(
-        new Set(config.relay.models.map((model) => model.provider)).size >= 2 &&
-          config.relay.models.every((model) => model.provider),
-        '需至少两个独立假提供商',
-      );
-      if (!config.modelUi)
+      else
+        requireThat(
+          new Set(config.relay.models.map((model) => model.upstreamModel))
+            .size >= 2,
+          '真实提供商模式需至少两个不同的上游模型',
+        );
+      if (!config.modelUi && !config.modelNative)
         throw new Skip(
           '双DSH模型调用UI尚未接线：缺少modelUi；直接代理请求不能代替DSH调用',
         );
-      const pool = await request(
+      const pool = await relayAdminRequest(
         new URL('model/info', trailing(config.relay.baseUrl)),
         state,
         { key: config.relay.adminKey },
@@ -378,21 +397,33 @@ export async function runPhase1(options, config, dependencies = {}) {
             pool?.data?.some(
               (entry) =>
                 entry.model_name === model.name &&
-                entry.litellm_params?.api_base === model.apiBase,
+                entry.litellm_params?.api_base === model.apiBase &&
+                (mode !== 'live' ||
+                  entry.litellm_params?.model === model.upstreamModel),
             ),
         ),
-        'LiteLLM模型池与配置的免费假上游不匹配',
+        'LiteLLM模型池与配置的上游模型或地址不匹配',
       );
-      requireThat(
-        new Set(config.relay.models.map((model) => model.apiBase)).size >= 2,
-        '至少需要两个独立假上游地址',
-      );
+      if (mode === 'fixture')
+        requireThat(
+          new Set(config.relay.models.map((model) => model.apiBase)).size >= 2,
+          '至少需要两个独立假上游地址',
+        );
       await cloud(state);
       await desktop(state);
-      await (await getAdapter()).models(state);
+      await (await getAdapter()).models(state, item);
+      if (config.modelNative)
+        requireThat(
+          item.nativeModels?.failoverVerified === true,
+          '双端真实对话后仍须完成模型池故障切换验证',
+        );
     },
-    async (state) => {
-      await virtualKeys(config.relay, state);
+    async (state, item) => {
+      item.upstreamMode = await virtualKeys(
+        config.relay,
+        state,
+        relayAdminRequest,
+      );
     },
     async (state, item) => {
       if (
@@ -407,11 +438,16 @@ export async function runPhase1(options, config, dependencies = {}) {
         .filter((entry) => entry.status === 'FAIL')
         .map((entry) => entry.traceId);
       if (!traces.length) {
-        // Harmless failing request; no account mutation or expensive model call.
+        // An unknown login transaction cannot advance an account. Use the
+        // public controller's validation failure, rather than a security-chain
+        // 401 that may finish before the application's request logging filter.
         await request(
-          new URL('/api/iam/v1/phase1-not-found', options.baseUrl),
+          new URL(
+            `/api/iam/v1/login/transactions/${randomUUID()}/advance`,
+            options.baseUrl,
+          ),
           state,
-          { expected: [404] },
+          { method: 'POST', body: {}, expected: [400, 404] },
         );
         traces.push(state.traceId);
       }
@@ -460,6 +496,9 @@ export async function runPhase1(options, config, dependencies = {}) {
     );
   }
   const journey = adapter?.evidence?.();
+  if (adapter?.desktopEvidence) report.desktop = adapter.desktopEvidence;
+  if (adapter?.relayAdminEvidence)
+    report.relayAdmin = adapter.relayAdminEvidence;
   if (journey) report.cloudJourney = journey;
   report.finishedAt = new Date().toISOString();
   report.summary = Object.fromEntries(
@@ -476,19 +515,61 @@ function trailing(url) {
   return httpUrl(url).href.replace(/\/?$/, '/');
 }
 
-async function virtualKeys(relay, state) {
-  if (!relay?.baseUrl) throw new Skip('RELAY-LITELLM尚未部署或未配置');
+function modelCallMode(relay) {
   if (relay.allowModelCalls !== true || !relay.models?.length)
-    throw new Skip('外部虚拟Key调用未启用；需仅连接免费假上游的模型配置');
+    throw new Skip('模型调用未启用；需显式配置models和allowModelCalls');
+  const mode = relay.upstreamMode ?? 'fixture';
+  requireThat(['fixture', 'live'].includes(mode), '未知的模型上游模式');
+  if (mode === 'fixture') {
+    requireThat(
+      relay.models.every((model) => model.testOnly === true),
+      '假上游模式拒绝未标testOnly的模型配置',
+    );
+    return mode;
+  }
   requireThat(
-    relay.models.every((model) => model.testOnly === true),
-    '拒绝未标testOnly的模型配置',
+    relay.models.every(
+      (model) =>
+        (model.testOnly === undefined || model.testOnly === false) &&
+        typeof model.name === 'string' &&
+        model.name &&
+        typeof model.provider === 'string' &&
+        model.provider &&
+        typeof model.upstreamModel === 'string' &&
+        model.upstreamModel &&
+        typeof model.apiBase === 'string' &&
+        model.apiBase,
+    ),
+    '真实提供商须声明模型、提供商和上游地址，且不能伪标testOnly',
   );
+  requireThat(
+    new Set(relay.models.map((model) => model.name)).size ===
+      relay.models.length,
+    '真实模型名称不能重复',
+  );
+  for (const model of relay.models) httpUrl(model.apiBase);
+  return mode;
+}
+
+async function virtualKeys(relay, state, adminRequest = request) {
+  if (!relay?.baseUrl) throw new Skip('RELAY-LITELLM尚未部署或未配置');
+  const mode = modelCallMode(relay);
+  if (mode === 'live')
+    requireThat(
+      relay.publicBaseUrl,
+      '真实外部Key验收须声明publicBaseUrl公开OpenAI入口',
+    );
   requireThat(relay.adminKey, '虚拟Key管理缺少relay.adminKey');
   const base = trailing(relay.baseUrl);
+  const completionUrl = relay.publicBaseUrl
+    ? new URL('chat/completions', trailing(relay.publicBaseUrl))
+    : new URL('v1/chat/completions', base);
   const keys = [];
   const api = (path, options = {}) =>
-    request(new URL(path, base), state, { key: relay.adminKey, ...options });
+    adminRequest(new URL(path, base), state, {
+      key: relay.adminKey,
+      ...options,
+    });
   const generate = async (settings) => {
     const result = await api('key/generate', {
       method: 'POST',
@@ -507,12 +588,12 @@ async function virtualKeys(relay, state) {
     return result.key;
   };
   const call = (key, expected = [200]) =>
-    api('v1/chat/completions', {
+    request(completionUrl, state, {
       method: 'POST',
       key,
       body: {
         model: relay.models[0].name,
-        messages: [{ role: 'user', content: 'phase1-free-upstream-probe' }],
+        messages: [{ role: 'user', content: `phase1-${mode}-upstream-probe` }],
         max_tokens: 8,
         stream: false,
       },
@@ -536,35 +617,48 @@ async function virtualKeys(relay, state) {
     );
     // A zero budget tests enforcement without consuming a paid budget.
     const exhausted = await generate({ max_budget: 0 });
-    const denied = await call(exhausted, [400, 401, 402, 403, 429]);
+    const denied = await call(exhausted, [400, 401, 402, 403, 422, 429]);
     requireThat(
       /budget|exceed.*spend/i.test(JSON.stringify(denied?.error)),
       '预算请求被拒绝但没有明确budget错误，不能视为预算生效',
     );
     const infoUrl = new URL('key/info', base);
     infoUrl.searchParams.set('key', key);
-    const info = await request(infoUrl, state, { key: relay.adminKey });
+    const info = await adminRequest(infoUrl, state, { key: relay.adminKey });
     requireThat(Number.isFinite(info?.info?.spend), '虚拟Key用量不可查');
-    await waitSpend(relay, completion.id, state);
+    await waitSpend(relay, completion.id, state, adminRequest);
     await api('key/delete', { method: 'POST', body: { keys: [key] } });
     keys.splice(keys.indexOf(key), 1);
     await call(key, [401, 403]);
   } catch (error) {
     failure = error;
   }
+  const first =
+    failure instanceof StepError &&
+    /^HTTP状态\d{3}，预期[\d/]+$/.test(failure.message)
+      ? '；首失：' + failure.message
+      : '';
   for (const key of keys) {
     try {
       await api('key/delete', { method: 'POST', body: { keys: [key] } });
     } catch {
       failure = new StepError(
-        '虚拟Key清理失败；10分钟到期前请在LiteLLM管理界面检查phase1测试Key',
+        '虚拟Key清理失败' +
+          first +
+          '；10分钟到期前请在LiteLLM管理界面检查phase1测试Key',
       );
     }
   }
   if (failure) throw failure;
+  return mode;
 }
 
-export async function waitSpend(relay, requestId, state) {
+export async function waitSpend(
+  relay,
+  requestId,
+  state,
+  adminRequest = request,
+) {
   requireThat(
     typeof requestId === 'string' && requestId.length > 0,
     '模型响应缺少可关联的request id',
@@ -574,7 +668,7 @@ export async function waitSpend(relay, requestId, state) {
   url.searchParams.set('summarize', 'false');
   const deadline = Date.now() + 10000;
   do {
-    const rows = await request(url, state, { key: relay.adminKey });
+    const rows = await adminRequest(url, state, { key: relay.adminKey });
     requireThat(Array.isArray(rows), 'LiteLLM spend/logs返回格式不合法');
     if (
       rows.some(
@@ -591,6 +685,11 @@ export async function waitSpend(relay, requestId, state) {
 }
 
 async function verifyLogs(config, id, startedAt) {
+  const skew = config.clockSkewMs ?? 5000;
+  requireThat(
+    Number.isSafeInteger(skew) && skew >= 0 && skew <= 60000,
+    '日志查询clockSkewMs须为0到60000的整数',
+  );
   const url = new URL('loki/api/v1/query_range', trailing(config.lokiUrl));
   url.searchParams.set(
     'query',
@@ -598,13 +697,20 @@ async function verifyLogs(config, id, startedAt) {
   );
   url.searchParams.set(
     'start',
-    String(BigInt(new Date(startedAt).getTime()) * 1000000n),
+    String(BigInt(new Date(startedAt).getTime() - skew) * 1000000n),
   );
   url.searchParams.set('limit', '1000');
   const deadline = Date.now() + 10000;
   do {
-    url.searchParams.set('end', String(BigInt(Date.now()) * 1000000n));
-    const data = await request(url, traceState());
+    url.searchParams.set('end', String(BigInt(Date.now() + skew) * 1000000n));
+    let data;
+    if (config.queryCommand) {
+      try {
+        data = await queryLoki(config.queryCommand, url, config.queryTimeoutMs);
+      } catch {
+        throw new StepError('Loki远程查询失败、超时或返回无效JSON');
+      }
+    } else data = await request(url, traceState());
     requireThat(
       data?.status === 'success' && Array.isArray(data?.data?.result),
       'Loki query_range返回格式不合法',

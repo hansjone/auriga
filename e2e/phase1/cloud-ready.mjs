@@ -15,6 +15,8 @@ import {
   loginOutcome,
   totpNotBefore,
   otpField,
+  browserPortalOrigin,
+  assertAdminInvitation,
 } from './checks.mjs';
 import { realImageDigest } from '../lib/real-dsh.mjs';
 import { openAurigaPanel } from './dsh-entry.mjs';
@@ -145,23 +147,24 @@ export function cloudReadyJourney(options, config, host) {
       report.imageDigest = realImageDigest(
         JSON.parse(readFileSync(resolve(compose, 'var/real-dsh.json'), 'utf8')),
       );
-    portal = origin(access.portalOrigin);
-    assert.equal(new URL(options.baseUrl).origin, portal);
+    portal = browserPortalOrigin(access, options.baseUrl, config.portalProxy);
     host.access = access;
     const admin = origin(access.adminOrigin);
     if (config.admin?.url)
       assert.equal(new URL(config.admin.url).origin, admin);
-    const enrollment =
-      config.admin ??
-      JSON.parse(
-        readFileSync(
-          resolve(compose, 'var/enrollment/emergency-enrollment.json'),
-          'utf8',
-        ),
+    const enrollment = config.existingCloud
+      ? null
+      : (config.admin ??
+        JSON.parse(
+          readFileSync(
+            resolve(compose, 'var/enrollment/emergency-enrollment.json'),
+            'utf8',
+          ),
+        ));
+    if (!config.existingCloud)
+      assert.ok(
+        enrollment.username && enrollment.password && enrollment.totpSecret,
       );
-    assert.ok(
-      enrollment.username && enrollment.password && enrollment.totpSecret,
-    );
 
     await step('browser-launch', async () => {
       const loopback =
@@ -210,13 +213,48 @@ export function cloudReadyJourney(options, config, host) {
       });
       return ctx;
     };
+    if (config.existingCloud) {
+      assert.ok(
+        Array.isArray(options.only) && !options.only.includes(2),
+        'existingCloud cannot replace invitation acceptance',
+      );
+      const file = resolve(config.existingCloud.credentialsFile);
+      assert.ok(lstatSync(file).isFile() && !lstatSync(file).isSymbolicLink());
+      const credentials = JSON.parse(readFileSync(file, 'utf8'));
+      assert.equal(credentials.portalUrl, portal);
+      assert.ok(
+        credentials.accountId && credentials.username && credentials.password,
+      );
+      host.member = credentials;
+      memberId = credentials.accountId;
+      memberContext = host.memberContext = await context();
+      page = host.portalPage = await memberContext.newPage();
+      activePage = page;
+      await step('member-login', async () => {
+        await page.goto(portal + '/login');
+        await provider(page, 'team-account');
+        await fillLogin(page, credentials);
+        await page.waitForURL(portal + '/');
+        assert.equal((await json(page, '/api/iam/v1/me')).account.id, memberId);
+        return { accountId: memberId };
+      });
+      report.memberReused = true;
+      report.status = 'identity-passed';
+      return { memberVerified: true };
+    }
+
     const adminContext = await context();
     const adminPage = await adminContext.newPage();
     activePage = adminPage;
     adminPage.setDefaultTimeout(20_000);
     await step('admin-login', async () => {
       await adminPage.goto(admin + '/login');
-      await provider(adminPage, 'emergency');
+      const type = enrollment.providerType ?? 'emergency';
+      assert.ok(
+        ['emergency', 'team-account'].includes(type),
+        'unsupported admin provider type',
+      );
+      await provider(adminPage, type);
       await fillLogin(adminPage, enrollment);
       await adminPage.waitForURL(admin + '/overview');
       const me = await json(adminPage, '/api/iam/v1/me');
@@ -226,10 +264,14 @@ export function cloudReadyJourney(options, config, host) {
 
     if (config.nodeEnrollment !== false)
       await step('node-join', async () => {
+        const template = config.nodeTemplateLabel ?? 'real-dsh-e2e';
+        assert.match(template, /^[a-z0-9][a-z0-9._-]{0,62}$/);
         await adminPage.goto(admin + '/nodes');
         const nodes = await json(adminPage, '/api/workspace/v1/admin/nodes');
         if (shared) {
-          const available = nodes.items.find(sharedNodeReady);
+          const available = nodes.items.find((node) =>
+            sharedNodeReady(node, template),
+          );
           assert.ok(
             available,
             'shared deployment has no suitable real DSH node',
@@ -255,7 +297,9 @@ export function cloudReadyJourney(options, config, host) {
         assert.equal(response.status(), 201);
         const material = await response.json();
         assert.ok(typeof material.token === 'string' && material.token);
-        const tokenFile = resolve(compose, 'var/join/token');
+        const tokenFile = config.nodeJoinTokenFile
+          ? resolve(config.nodeJoinTokenFile)
+          : resolve(compose, 'var/join/token');
         assert.ok(
           lstatSync(tokenFile).isFile() &&
             !lstatSync(tokenFile).isSymbolicLink(),
@@ -282,14 +326,14 @@ export function cloudReadyJourney(options, config, host) {
         await details
           .getByRole('textbox', { name: '标签值', exact: true })
           .last()
-          .fill('real-dsh-e2e');
+          .fill(template);
         await details
           .getByRole('button', { name: '保存配置', exact: true })
           .click();
         await adminPage.getByTestId('confirm-action').click();
         await poll(
           () => json(adminPage, '/api/workspace/v1/admin/nodes'),
-          (value) => value.items[0]?.labels?.template === 'real-dsh-e2e',
+          (value) => value.items[0]?.labels?.template === template,
           20_000,
         );
         return { nodeId: id };
@@ -318,10 +362,7 @@ export function cloudReadyJourney(options, config, host) {
       const result = adminPage.getByTestId('invitation-url');
       await result.waitFor();
       invitation = (await result.textContent()).trim();
-      const url = new URL(invitation);
-      assert.equal(url.origin, portal);
-      assert.match(url.pathname, /^\/invite\/[^/]+$/);
-      assert.equal(url.username + url.password + url.search + url.hash, '');
+      assertAdminInvitation(invitation, access);
       return {};
     });
 
@@ -359,7 +400,7 @@ export function cloudReadyJourney(options, config, host) {
         tx = await submit(registration);
       }
       assert.equal(tx.status, 'completed');
-      await registration.waitForURL(portal + '/');
+      await registration.waitForURL(new URL(invitation).origin + '/');
       memberId = (await json(registration, '/api/iam/v1/me')).account.id;
       assert.ok(memberId);
       const preview = await json(
@@ -398,6 +439,7 @@ export function cloudReadyJourney(options, config, host) {
             username: member.username,
             password: member.password,
             totpSecret: member.totpSecret,
+            lastTotpCounter: member.lastTotpCounter,
           }) + '\n',
           { flag: 'wx', mode: 0o600 },
         );
@@ -417,6 +459,29 @@ export function cloudReadyJourney(options, config, host) {
       const observer = await memberContext.newPage();
       try {
         await observer.goto(portal + '/');
+        let button = '启动并进入';
+        if (config.existingCloud) {
+          const value = await json(observer, '/api/workspace/v1/me/instances');
+          instance = value.items.find(
+            (item) => item.id === config.existingCloud.instanceId,
+          );
+          assert.ok(instance, 'existing instance is missing');
+          assert.equal(instance.ownerId, memberId);
+          report.observedInstance = {
+            id: instance.id,
+            ownerId: instance.ownerId,
+            phase: instance.phase,
+            ready: instance.ready,
+            errorCode: /^[a-z][a-z0-9_.-]*$/.test(instance.error?.code ?? '')
+              ? instance.error.code
+              : undefined,
+          };
+          if (instance.ready) {
+            assertReady(instance, memberId);
+            button = '进入实例';
+          }
+        }
+        report.operation = 'open-instance-button';
         const open = page.waitForResponse(
           (r) =>
             r.request().method() === 'POST' &&
@@ -424,22 +489,26 @@ export function cloudReadyJourney(options, config, host) {
         );
         const [response] = await Promise.all([
           open,
-          page.getByRole('button', { name: '启动并进入', exact: true }).click(),
+          page.getByRole('button', { name: button, exact: true }).click(),
         ]);
         assert.equal(response.status(), 200);
         const trace = response.headers()['x-trace-id'];
         if (/^[0-9a-f]{32}$/.test(trace ?? '')) report.openTraceId = trace;
+        const matches = (item) =>
+          item.ownerId === memberId &&
+          (!config.existingCloud ||
+            item.id === config.existingCloud.instanceId);
+        report.operation = 'observe-instance-ready';
         const value = await poll(
           () => json(observer, '/api/workspace/v1/me/instances'),
           (result) =>
             result.items.some(
               (item) =>
-                item.ownerId === memberId &&
-                (item.ready || item.phase === 'failed'),
+                matches(item) && (item.ready || item.phase === 'failed'),
             ),
           125_000,
         );
-        instance = value.items.find((item) => item.ownerId === memberId);
+        instance = value.items.find(matches);
       } finally {
         await observer.close();
       }
@@ -456,7 +525,7 @@ export function cloudReadyJourney(options, config, host) {
       await page.waitForURL(
         (url) => {
           try {
-            assertEntry(url.href, access, instance.id);
+            assertEntry(url.href, access, instance.id, portal);
             return true;
           } catch {
             return false;

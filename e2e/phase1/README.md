@@ -15,6 +15,12 @@ node e2e/phase1/run.mjs --base-url http://127.0.0.1:8080 --admin-credentials .de
 
 NAS 验收从本机执行同一个入口，`--base-url` 换为已部署的 NAS 门户地址，例如 `https://portal.example.com`；凭据文件中的 `admin.url` 换为对应管理入口。域名和纯 IP/HTTP 均支持；管理员和门户使用独立浏览器上下文。脚本不改 DNS、系统信任或 TLS 校验。私有 CA 需由运行环境预先信任。
 
+IP 模式经既定 HTTPS 反代呈现时，私有凭据配置可显式增加
+`portalProxy: { "upstreamOrigin": "http://192.0.2.10:8080", "publicOrigin": "https://portal.example.com" }`。
+前者必须精确匹配部署 access 的门户 Origin，后者必须为 HTTPS 且精确匹配 `--base-url`；
+不允许凭据、路径、query 或 fragment。它只声明浏览器预期入口，不修改 access、issuer、
+请求 Host/Origin 或服务器返回的邀请链接；真实邀请与实例导航仍须留在该公网入口，失败照常记 FAIL。
+
 完整运行省略 `--only`，桌面端另加 `--desktop-dsh .dev/phase1-desktop.json`。`--only` 接受逗号分隔编号，例如 `--only 3,5`。编号 3–6 必要时自动创建并登录本次受邀成员、准备双端；未被选中的编号仍标 SKIP，准备动作不冒该编号已单独验收。不要在生产租户运行：每次会留下一个验收成员及其云端实例，脚本不删除共享栈业务数据。
 
 ## 输出与判定
@@ -48,7 +54,7 @@ HTTP 健康/中转站/日志探针发 W3C `traceparent`；浏览器正常页面�
 }
 ```
 
-省略 `browser` 使用 Playwright 安装的完整 Chromium headless 通道（不使用独立 Headless Shell）。管理员使用 `emergency` 身份源；WebAuthn、外部跳转、二维码暂不支持。邀请注册选 `team-account`；新用户名、密码和首个 TOTP 在本次运行内生成。重新登录使用全新上下文，核相同账号 ID，不复用注册会话。
+省略 `browser` 使用 Playwright 安装的完整 Chromium headless 通道（不使用独立 Headless Shell）。管理员默认使用 `emergency` 身份源；正常管理员可明确配置 `admin.providerType: "team-account"`，按真实口令及 TOTP 表单登录。WebAuthn、外部跳转、二维码暂不支持。NAS 的应急账号仍限真实回环，先按[公开首次管理员流程](../../docs/dev/nas.md#首次正常管理员真实回环)建正常账号再验收。邀请注册选 `team-account`；新用户名、密码和首个 TOTP 在本次运行内生成。重新登录使用全新上下文，核相同账号 ID，不复用注册会话。
 
 ① 默认仅探测公开 IAM 身份源；这不足以证明所有容器 healthy，所以标 SKIP 并列出已通过子检查。部署操作者需在 `healthChecks` 列全本次 compose 服务的实际健康 URL，包括数据库/NATS/节点等可通过部署的运维健康入口或汇总端点观察到的状态；确认清单完整后才设 `healthInventoryComplete: true`。不要用静态首页替代服务健康。支持 `kind: "spring"`（JSON `status=UP`）、`providers`（`items` 数组）及 `http`（HTTP 200 且可解析 JSON）。URL 可相对门户，也可为操作者可访问的完整运维地址。任何检查失败即 FAIL。
 
@@ -62,7 +68,37 @@ DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮�
 
 配置须提供公开部署生成的 `access.json`（以 `access` 对象提供）和 `admin`；也可仅用 `composeDir` 指向同一部署的 compose 目录，自动读取 `var/access.json`、真实镜像元数据和应急 enrollment。Windows 可读 WSL UNC 路径，秘密不进入报告。
 
-`shared` 默认为 true：复用在线、可调度、Docker、template=real-dsh-e2e 的节点，不改节点。全新部署设 false：脚本要求零节点，经管理台签加入令牌写同一 composeDir 的既有 var/join/token，等待上线再设模板标签。只有不验节点的独立部署可设 `nodeEnrollment:false`，其结果不能冒节点加入通过。
+`shared` 默认为 true：复用在线、可调度、Docker、template=real-dsh-e2e 的节点，不改节点。全新部署设 false：脚本要求零节点，经管理台签加入令牌写同一 composeDir 的既有 var/join/token，等待上线再设模板标签。NAS可配置 `nodeTemplateLabel` 和既有私有 `nodeJoinTokenFile`，按公开 `join-node.sh` 交付令牌。只有不验节点的独立部署可设 `nodeEnrollment:false`，其结果不能冒节点加入通过。
+
+仅重跑③或其他后续步骤时，可设 `existingCloud: { "credentialsFile": "先前真实成员交接文件", "instanceId": "该成员已有的实例ID" }`。
+它在空Cookie上下文正常登录、核实际 `/me` subject 和实例归属，再点击真实“进入实例”或“启动并进入”，等待同一实例READY；不创建邀请或成员。
+已有成员模式禁止选择②，不能用一次普通复登冒充邀请接受。完整邀请流程的私有交接另含最近TOTP计数，减少立即续做时的重放。
+
+第④项可复用已经通过安装版应用公开插件管理器装包的独立 `desktop` profile：
+设置 `desktop.installedApp:true`，`desktop.credentialsFile` 指向该平台测试成员的私有交接文件，
+`--desktop-dsh` 指向以下描述文件。`state` 必须位于本 worktree，不能链接到用户 HOME。
+
+```json
+{
+  "state": ".agent-evidence/desktop-app",
+  "profile": ".agent-evidence/desktop-app/dsh/profiles/desktop",
+  "runtime": {
+    "kind": "installed-app",
+    "executable": "C:/Program Files/DeepSeek Harness/DeepSeek Harness.exe",
+    "cli": "C:/Program Files/DeepSeek Harness/resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js"
+  },
+  "installation": "installed-app-tarball",
+  "dshVersion": "0.2.1-rc.3",
+  "pluginPackage": ".agent-evidence/plugin-package/auriga-dsh-VERSION.tgz",
+  "packageVersion": "VERSION",
+  "packageSHA256": "发布清单中的实际SHA256"
+}
+```
+
+可选 `connect` 为管理员提供的公开安装配置，平台地址必须与验收目标相同。
+脚本核 CLI 实际版本、包摘要和该 profile 安装版本，以独立 HOME 和 Electron user-data-dir
+启动应用，再经真实启动链接建立浏览器会话、正常登录/恢复同一成员、验证原生插件 active 与功能页。
+只清理自己启动的进程树，保留 profile；不会用 npm DSH 代替安装版，也不会伪造 Cookie。
 
 本机保留示例域名可设 `resolveLoopback:true`（或 AURIGA_PHASE1_RESOLVE_LOOPBACK=1）：只给本次 Chromium 设置 resolver 与禁用代理，不改系统 DNS、TLS 或信任；纯 IP 模式不使用此项。HTTP 健康探针仍使用实际可解析的地址（本机可给 healthChecks 配置回环运维端点），该设置不改变 Node 的 DNS。
 
@@ -153,11 +189,48 @@ DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮�
 }
 ```
 
-默认禁止模型请求。仅在这两个部署已接**免费本地假上游**后，把 `allowModelCalls` 设 true；`testOnly` 是操作者对免费上游的明确声明，脚本不能证明任意外部服务不会收费，不要指向付费提供商。脚本不会代管理员改 LiteLLM 模型池。
+默认禁止模型请求。免费夹具保持默认 `upstreamMode: "fixture"`，仅在两个部署已接**免费本地假上游**后把 `allowModelCalls` 设 true，并逐模型声明 `testOnly: true`；该声明不能证明任意外部服务不会收费。脚本不会代管理员改 LiteLLM 模型池。
 
-⑥ 先核配置至少两个独立假提供商及 apiBase，且 `/model/info` 的模型与实际 apiBase 一致；再经两个 DSH UI 对每个模型各调用一次。`modelUi.cloud`、`modelUi.desktop` 各配 `actions`、`responseSelector`、`requestIdAttribute`；动作可用 `valueFrom: "model"/"marker"`。假上游须回显唯一 marker，回复 UI 还需暴露可关联的 LiteLLM request ID 属性。脚本按该 ID 查询官方 `/spend/logs?request_id=...&summarize=false`，核本次非零 token 用量，最多等 10 秒。无 UI 能力或请求 ID 接线时 SKIP/FAIL，不用直接代理请求代替 DSH 调用。
+已有明确真实模型调用授权时，可配置 `relay.upstreamMode: "live"` 和 `allowModelCalls: true`。每个模型声明 `name`（LiteLLM公开模型名）、`provider`、`apiBase`、`upstreamModel`（对应 `/model/info` 的 `litellm_params.model`，如 `openai/model-a`），省略 `testOnly` 或明确设为 false；真实模式拒绝 `testOnly: true`。⑥要求至少两个不同公开模型名和上游模型，同一提供商及同一 API Base 可以承载这两个模型。示例：
 
-⑦ 需要 LiteLLM 数据库及 adminKey。签发 10 分钟有效的临时 Key：标准 OpenAI JSON 调用成功，第二次请求必须明确命中 RPM 限流；另一个预算为 0 的 Key 必须返回明确预算错误；查 Key spend 和本次请求 token 用量；吊销后相同 Key 必须 401/403。限流/预算的错误类型或消息必须符合对应语义，普通鉴权失败不能冒预算生效。所有新 Key 在成功/失败后均尝试删除；清理失败即 FAIL，请管理员检查别名为 `phase1-*` 的短期 Key。不调用付费模型。
+```json
+{
+  "relay": {
+    "baseUrl": "http://127.0.0.1:4000",
+    "publicBaseUrl": "https://portal.example.com/ai/v1",
+    "upstreamMode": "live",
+    "allowModelCalls": true,
+    "models": [
+      {
+        "name": "model-a",
+        "provider": "provider-a",
+        "apiBase": "https://models.example.com/v1",
+        "upstreamModel": "openai/model-a"
+      },
+      {
+        "name": "model-b",
+        "provider": "provider-a",
+        "apiBase": "https://models.example.com/v1",
+        "upstreamModel": "openai/model-b"
+      }
+    ]
+  }
+}
+```
+
+`baseUrl` 是操作者可达的 LiteLLM 管理 API 根地址，管理 Key仍只从私有凭据文件读取。真实模式⑦必须给出 `publicBaseUrl`，指向调用方实际使用的 OpenAI API 根路径；管理、用量查询走 `baseUrl`，所有成功调用及限流、预算、吊销探针均经 `publicBaseUrl/chat/completions`，只携带新签发的虚拟 Key。域名入口未配置时失败，不用内部直连代替外部验收。免费夹具未配置公开入口时保留原来的 `baseUrl/v1/chat/completions`。
+
+经 Auriga 的独立 LiteLLM 管理 listener 验收时，配置 `relay.browserAdmin: true`，
+`baseUrl` 填管理 listener 的 `/ai/` 根路径，例如 `http://192.0.2.10:8086/ai/`。
+私有 JSON 的 `admin` 提供正常管理员的 `url`、`accountId`、`username`、`password`、
+`totpSecret`。验收器真实填写管理台登录表单，核本人身份后点击概览的 LiteLLM 入口，让浏览器自动
+完成跨 listener 交接；不注入 cookie、不关闭 Origin 检查、不使用应急登录。
+健康、模型清单、Key 管理和用量请求复用该浏览器的真实管理会话，管理 Key仍只留在
+私有 JSON。管理请求限制在同一已配置来源和固定 API 路径；报告只记录交接状态码。
+
+⑥ 免费模式核至少两个独立假提供商及 apiBase；真实模式核两个不同上游模型，允许同提供商同地址。两者均检查 `/model/info` 与实际名称、地址一致，真实模式额外核上游模型名；再经两个 DSH UI 对每个模型各调用一次。`modelUi.cloud`、`modelUi.desktop` 各配 `actions`、`responseSelector`、`requestIdAttribute`；动作可用 `valueFrom: "model"/"marker"`。模型回复须含本次唯一 marker（真实模式的输入动作应要求模型原样回复 marker），回复 UI 还需提供可关联的 LiteLLM request ID 属性。脚本按该 ID查询官方 `/spend/logs?request_id=...&summarize=false`，核本次非零 token 用量，最多等10秒。无 UI 能力或请求 ID 接线时 SKIP/FAIL，不用直接代理请求代替 DSH 调用。
+
+⑦ 需要 LiteLLM 数据库及 adminKey。签发10分钟有效、预算1 USD、RPM为1的临时 Key：标准OpenAI JSON调用成功，第二次请求必须明确命中RPM限流；另一个预算为0的Key必须返回明确预算错误；查Key spend和本次请求token用量；吊销后相同Key必须401/403。每个调用请求限定 `max_tokens: 8`，真实模式可能产生费用，仅在已有授权下启用。限流/预算错误必须符合对应语义，普通鉴权失败不能冒预算生效。所有新Key在成功/失败后均尝试删除；清理失败即FAIL，请管理员检查别名为 `phase1-*` 的短期Key。单项报告标明实际 `upstreamMode`；本地HTTP夹具仍不是提供商或NAS验收证据。
 
 参考：[LiteLLM 虚拟 Key](https://docs.litellm.ai/docs/proxy/virtual_keys)、[预算与限流](https://docs.litellm.ai/docs/proxy/users)、[用量记录](https://docs.litellm.ai/docs/proxy/cost_tracking)。实际固定镜像对零预算、RPM、日志异步落库的行为仍须部署验收；不能用本分支 HTTP 夹具替代。
 

@@ -56,6 +56,9 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	if err := cfg.validateLinkOrigins(); err != nil {
+		return nil, err
+	}
 	if err := cfg.validateLiteLLMUI(); err != nil {
 		return nil, err
 	}
@@ -115,7 +118,14 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		activity.revoke(sid)
 		hub.CancelSession(sid)
 	})
-	networkWSS, err := newNetworkWSS(cfg.NetworkWSS, cfg.PortalHost)
+	wssConfig := cfg.NetworkWSS
+	if cfg.ManagedIngress.Origin != "" {
+		if _, err := cfg.managedEntry(); err != nil {
+			return nil, err
+		}
+		wssConfig.AllowedOrigins = append(append([]string{}, wssConfig.AllowedOrigins...), cfg.ManagedIngress.Origin)
+	}
+	networkWSS, err := newNetworkWSS(wssConfig, cfg.PortalHost)
 	if err != nil {
 		return nil, err
 	}
@@ -664,6 +674,13 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 
 func (g *Gateway) ticketRedirectURL(r *http.Request, instanceID, token string) string {
 	target := g.instanceTarget(r, instanceID)
+	// Only the browser-facing URL follows the approved presentation alias. The
+	// ticket/instance binding retains the validated installation origin.
+	if g.Cfg.Access.Valid() && g.Cfg.Access.Mode() == "ip" {
+		if origin, _ := r.Context().Value(linkOriginKey{}).(string); origin != "" {
+			target.Origin = origin
+		}
+	}
 	return target.Origin + target.Mount + "_auriga/ticket?t=" + url.QueryEscape(token)
 }
 

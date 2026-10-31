@@ -135,6 +135,7 @@ chown_required 65532:65532 "$AURIGA_DATA_ROOT/data/nats"
 : >"$AURIGA_DATA_ROOT/join/token"
 chmod 0600 "$AURIGA_DATA_ROOT/join/token"
 
+sh "$NAS_ROOT/scripts/render-collab.sh" --initialize
 sh "$NAS_ROOT/scripts/render.sh" || die "render failed after secrets created — fix and re-run render.sh (marker not written)"
 
 {
@@ -145,4 +146,5 @@ sh "$NAS_ROOT/scripts/render.sh" || die "render failed after secrets created —
 chmod 0644 "$MARKER"
 
 info "initialization complete"
-info "emergency enrollment is written by platform on first seed start (path only; contents never logged)"
+info "emergency account is generated on first seed start; start.sh displays it once in your terminal (never in container logs)"
+info "to display later in a private TTY: sh deploy-nas/scripts/emergency.sh show"

@@ -1,16 +1,16 @@
 # 云端插件面板的部署、版本与自动续签
 
 `web/panel` 构建自包含的 `auriga-team-panel.js`，随 edge 镜像发布。
-`/auriga-panel` 是短时、无网络 signer；普通 edge、platform、agent、实例及
-宿主定时器均不读取面板私钥。私钥 `panel-signing.key` 保持原安装的 0600，
+`/auriga-panel` 可作短时 signer；NAS 另有无网络常驻 `panel-renew` 侧车。
+普通 edge、platform、agent、实例及宿主定时器均不读取面板私钥。私钥 `panel-signing.key` 保持原安装的 0600，
 只读挂给 signer；独立公钥 `panel-keys.json` 经 agent renderer 写入实例只读材料，
 通过 `AURIGA_PANEL_KEYS_FILE` 下发。两者纳入原安装收据，与身份头钥分开。
 
 ## 启动故障只影响面板
 
 两套公开 Compose 的 edge 均不等待 `panel-prepare` 成功。
-NAS `start.sh` 和开发栈 `prepare.sh` 尝试安装定时器并检查签名；失败记告警，
-继续启动其他服务。启动用 signer 加 `-best-effort`：签名失败记录状态和日志，
+NAS `start.sh` 只启动 Compose 服务，不安装或调用宿主 cron；开发栈 `prepare.sh`
+仍按下文安装宿主定时器。启动用 signer 加 `-best-effort`：签名失败记录状态和日志，
 退出 0；手动直接调用不带此参数的 signer 仍以非零报告失败。
 
 edge 没有可读、结构合法、未过期且存在入口脚本的清单时，仅 `/panel/` 的
@@ -40,11 +40,26 @@ SHA-256 摘要维护每个安装内的单调版本：首次 `0.0.1`，相同字�
 新内容立即发布；过期后可用原钥恢复。制品/SRI 和清单最后原子替换，旧散列脚本
 继续保留，供已取得旧清单的浏览器加载。
 
-宿主有 `crontab`、`flock` 和运行中的 cron/crond 时，公开 prepare/start
-幂等安装每小时第 17 分钟的任务，保留其他 cron 条目。WSL 或精简开发宿主缺少
-条件时明确告警并跳过安装，启动检查仍执行；应配置宿主 cron 或定期手动续签。
-NAS container 模式使用与 start 相同的非 root operator 安装自己的 cron，
-不要求给 operator 增加数据目录写权限或宿主 sudo。
+NAS 的 `panel-renew` 以固定 UID10001、无网络、只读根、cap-drop ALL 和
+no-new-privileges 常驻运行。仅原签名私钥 RO 和公开输出目录 RW 两个挂载，
+不含 Docker socket、宿主目录、平台凭据或网络材料；与短时 signer 使用同一 OS 发布锁。
+它启动立即检查，此后每小时检查；失败记录标记和日志，继续下一轮，不依赖宿主 cron/sudo。
+停止 Compose 同时停止它；新启动恢复检查，不轮换原钥。侧车健康只反映面板状态。
+
+**风险边界**：这让私钥由无网络常驻容器持有，扩大了私钥在进程内可用的时间，
+不等于短时 signer 的暴露面。宿主存储/Docker 管理员仍可读取；输出目录写入者也不能
+被视为不可信隔离边界。容器无网络和最小挂载不能替代宿主访问控制。
+
+NAS edge 健康只探测自身数字回环监听，表示进程监听活性；面板缺失、过期、
+续签失败或心跳陈旧均不参与该健康判断，不影响门户/管理/实例路由。
+面板可用性仍由 `/panel/` 的503和插件验签独立约束；完整平台就绪另做接口验收。
+
+开发 Compose 保持宿主 cron 流程：有 `crontab` 和运行中的 cron/crond 时，
+公开 prepare 幂等安装每小时第17分钟任务，保留其他条目。缺条件时告警，启动检查仍执行。
+通过 `pgrep -x` 或精简宿主的 `pidof` 确认进程；`flock` 缺失时使用私有原子目录锁。
+目录锁正常结束/失败/信号后移除，强杀后不按PID抢占；确认无进程后由原调度用户
+核对本人所有的0700真实空目录并用 `rmdir` 清理，异常锁拒绝修复。
+新目录显式0700，已有元数据错误拒绝，不改共享上级ACL。
 
 定时器的 job、日志、锁和宿主失败状态放在数据根的直接父目录下
 `.auriga-panel-<标识>/`（开发 Compose 放在 `deploy/compose/` 下）。
@@ -64,11 +79,9 @@ sh deploy/nas/scripts/renew-panel.sh
 # 只安装或移除本安装的任务（用原安装任务的同一运维用户运行）。
 sh deploy/compose/scripts/renew-panel.sh --install
 sh deploy/compose/scripts/renew-panel.sh --remove
-sh deploy/nas/scripts/renew-panel.sh --install
-sh deploy/nas/scripts/renew-panel.sh --remove
 ```
 
-NAS `stop.sh` 自动调用 remove；卸载时先执行 `stop.sh` 再删除部署材料。
+NAS `stop.sh` 停止侧车；卸载时先执行 `stop.sh` 再删除部署材料。
 开发 Compose 停栈/卸载或移动脚本前先执行 `--remove`，新位置再 `--install`。
 移除只删本安装 marker 对应的条目，保留其他任务；日志留在私有目录便于诊断。
 
@@ -79,11 +92,9 @@ signer 在 OS 发布锁内写入/清除 `.panel-renew-failed`，成功检查刷�
 也不清除当前发布者的状态。宿主 Docker 命令失败在私有目录写 `failed`，
 无需取得 uid10001 输出目录写权限。
 
-edge Docker healthcheck 只读公开输出：签名失败标记、过期/缺失入口脚本、
-或两小时未刷新检查心跳都会 unhealthy。宿主 cron/Docker 失败由私有状态和日志
-立即可查，并在成功 signer 检查心跳超过两小时后反映为 unhealthy。
-缺 cron 的开发栈同样可能因心跳陈旧而 unhealthy，服务本身仍继续运行。
-该健康信号不控制其他服务启动，也不会自动重启全站。
+`panel-renew` 的健康检查只读公开输出，签名失败、过期/缺失入口或心跳超过两小时
+会反映在侧车状态和日志；NAS edge 不读取该状态，不会因此变为 unhealthy。
+开发 Compose 原有宿主状态与日志流程保持。
 
 检查 `docker compose ps`、edge 健康日志、`panel-prepare` 日志及任务目录的
 `failed`/`renew.log`。修复原因后手动续签，成功会恢复签名状态；宿主成功调用会

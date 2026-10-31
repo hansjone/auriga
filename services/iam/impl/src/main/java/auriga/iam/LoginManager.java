@@ -242,6 +242,8 @@ public final class LoginManager {
                   audience,
                   "origin",
                   origin,
+                  "linkOrigin",
+                  auriga.common.web.LinkOrigins.currentOr(origin),
                   "tenantId",
                   TenantContext.require().toString(),
                   "ip",
@@ -924,7 +926,7 @@ public final class LoginManager {
             "userAgent",
             tx.path("userAgent").asString(),
             "callbackUrl",
-            tx.path("origin").asString()
+            tx.path("linkOrigin").asString(tx.path("origin").asString())
                 + "/api/iam/v1/login/callback/"
                 + provider.path("providerId").asString(),
             "state",

@@ -18,6 +18,34 @@ fail_msg() { printf 'FAIL %s: %s\n' "$1" "$2"; fail=1; }
 # shellcheck disable=SC1091
 . "$ROOT/scripts/lib.sh"
 
+if python3 - "$ROOT" <<'PY'
+import ipaddress, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+env = dict(line.split('=', 1) for line in (root / 'env.example').read_text().splitlines() if line and not line.startswith('#'))
+subnet = ipaddress.ip_network(env['AURIGA_INTERNAL_SUBNET'])
+dynamic = ipaddress.ip_network(env['AURIGA_INTERNAL_DYNAMIC_RANGE'])
+edge = ipaddress.ip_address(env['AURIGA_INTERNAL_EDGE_IP'])
+assert dynamic.subnet_of(subnet) and edge in subnet and edge not in dynamic
+assert 'ip_range: ${AURIGA_INTERNAL_DYNAMIC_RANGE:?' in (root / 'docker-compose.yml').read_text()
+PY
+then pass internal_dynamic_pool_excludes_edge
+else fail_msg internal_dynamic_pool_excludes_edge 'dynamic allocation must not consume the fixed peer address'; fi
+
+if sh "$ROOT/test/join-node.sh"; then pass join_node_boundary
+else fail_msg join_node_boundary 'private join token import failed'; fi
+
+if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
+else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi
+
+if sh "$ROOT/test/emergency.sh"; then pass emergency_display_boundary
+else fail_msg emergency_display_boundary 'TTY-only emergency handoff failed'; fi
+if python3 "$ROOT/test/emergency_test.py"; then pass emergency_display_format
+else fail_msg emergency_display_format 'emergency origin/credential display failed'; fi
+if sh "$ROOT/test/emergency-remote.sh"; then pass emergency_remote_render
+else fail_msg emergency_remote_render 'emergency remote default/override failed'; fi
+if python3 "$ROOT/test/emergency_remote_test.py"; then pass emergency_remote_policy
+else fail_msg emergency_remote_policy 'unexpected emergency remote/proxy override accepted'; fi
+
 if sh "$ROOT/test/panel-renew-cron.sh"; then pass panel_renewal_cron_regressions
 else fail_msg panel_renewal_cron_regressions "hourly renewal scheduling failed"; fi
 if sh "$ROOT/test/panel-renew-nonroot.sh"; then pass panel_renewal_nonroot_regressions
@@ -27,6 +55,8 @@ else fail_msg litellm_permissions "LiteLLM group permissions regression failed";
 
 if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
 else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi
+if sh "$ROOT/test/runtime-upgrade.sh"; then pass runtime_upgrade_transaction
+else fail_msg runtime_upgrade_transaction "runtime activation or rollback failed"; fi
 if sh "$ROOT/test/container-installer.sh"; then pass container_installer_regressions
 else fail_msg container_installer_regressions "container installer boundary failed"; fi
 
@@ -145,6 +175,7 @@ cat >"$DATA/stack.env" <<EOF
 AURIGA_DATA_ROOT=$DATA
 AURIGA_ACCESS_FILE=$TMP/access.json
 AURIGA_INTERNAL_SUBNET=192.0.2.128/26
+AURIGA_INTERNAL_DYNAMIC_RANGE=192.0.2.160/27
 AURIGA_INTERNAL_EDGE_IP=192.0.2.138
 AURIGA_LAN_NETWORK=lan-example
 AURIGA_LAN_SUBNET=192.0.2.0/26
@@ -214,6 +245,15 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
     && grep -qx 'AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=60' "$DATA/config/platform.env"; then
     pass source_authority_defaults
   else fail_msg source_authority_defaults "missing default lifetimes"; fi
+  if grep -qx 'AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=true' "$DATA/config/platform.env"; then
+    pass emergency_remote_install_default
+  else fail_msg emergency_remote_install_default "remote emergency default missing"; fi
+  for _remote in true false; do
+    if AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=$_remote sh "$ROOT/scripts/render.sh" >"$TMP/emergency-render.log" 2>&1 \
+      && grep -qx "AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=$_remote" "$DATA/config/platform.env"; then
+      pass "emergency_remote_install_override_$_remote"
+    else fail_msg "emergency_remote_install_override_$_remote" "explicit boolean lost"; fi
+  done
   for _source_pair in '1200 30' '0 0'; do
     set -- $_source_pair
     if AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2 \
@@ -300,6 +340,7 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
 AURIGA_DATA_ROOT=$OTHER
 AURIGA_ACCESS_FILE=$TMP/access.json
 AURIGA_INTERNAL_SUBNET=192.0.2.128/26
+AURIGA_INTERNAL_DYNAMIC_RANGE=192.0.2.160/27
 AURIGA_INTERNAL_EDGE_IP=192.0.2.138
 AURIGA_LAN_NETWORK=lan-example
 AURIGA_LAN_SUBNET=192.0.2.0/26
@@ -400,6 +441,9 @@ done
 if [ "$fail" -ne 0 ]; then
   printf 'TESTS FAILED\n'
   exit 1
+fi
+if [ "$(id -u)" = 0 ]; then
+  sh "$ROOT/test/managed.sh" "$ROOT" "$TMP"
 fi
 printf 'ALL TESTS PASSED\n'
 exit 0

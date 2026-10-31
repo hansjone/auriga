@@ -16,6 +16,11 @@ if [ -e "$(marker_path)" ] || [ "${1:-}" != init ]; then
   done
 fi
 case "${1:-}" in
+  runtime-path|runtime-stage|runtime-commit|runtime-rollback)
+    _action=${1#runtime-}
+    set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source"
+    [ "$_action" = path ] || set -- "$@" -image "${NAS_RUNTIME_UPGRADE_IMAGE:?}" -bundle "${NAS_RUNTIME_UPGRADE_BUNDLE:?}"
+    exec "$(bootstrap_binary)" runtime-upgrade "$@" ;;
   init)
     if [ ! -e "$(marker_path)" ]; then
       # Only an empty directory or a single regular stack.env is adoptable.
@@ -28,6 +33,9 @@ case "${1:-}" in
       chmod 0755 "$AURIGA_DATA_ROOT"
     fi
     exec sh "$NAS_ROOT/scripts/init.sh" ;;
+  activate-collab)
+    bootstrap_nas_materials
+    exec sh "$NAS_ROOT/scripts/render-collab.sh" --stopped ;;
   render) exec sh "$NAS_ROOT/scripts/render.sh" ;;
   prepare-socket) prepare_socket_parent ;;
   check)
@@ -36,6 +44,21 @@ case "${1:-}" in
     bootstrap_nas_materials
     validate_ingress_ancestors ;;
   export-env)
-    exec tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env ;;
+    # The host operator cannot traverse root's private collab source. Export a
+    # checked decision alongside the already protected env stream, never keys.
+    _collab=0
+    _source="$AURIGA_DATA_ROOT/config/collab-source"
+    if [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
+      "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
+        -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2
+      _collab=1
+    fi
+    _export=$(mktemp -d)
+    trap 'rm -rf -- "$_export"' EXIT
+    printf '%s\n' "$_collab" >"$_export/collab.enabled"
+    runtime_directory >"$_export/runtime.path"
+    chmod 0600 "$_export/collab.enabled"
+    tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env \
+      -C "$_export" collab.enabled runtime.path ;;
   *) die 'unsupported installer operation' ;;
 esac

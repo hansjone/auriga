@@ -31,6 +31,8 @@ type Config struct {
 	InstanceParentDomain   string                        `json:"instanceParentDomain"`
 	SecureCookies          bool                          `json:"secureCookies"`
 	TrustedProxies         []string                      `json:"trustedProxies"`
+	LinkOrigins            []string                      `json:"linkOrigins,omitempty"`
+	LinkTrustedProxies     []string                      `json:"linkTrustedProxies,omitempty"`
 	Upstreams              map[string]string             `json:"upstreams"`
 	Static                 StaticConfig                  `json:"static"`
 	TLS                    TLSConfig                     `json:"tls"`
@@ -44,6 +46,7 @@ type Config struct {
 	NodeTLS                NodeTLSConfig                 `json:"nodeTLS"`
 	PublicPathPrefixes     []string                      `json:"publicPathPrefixes"`
 	NetworkWSS             NetworkWSSConfig              `json:"networkWss"`
+	ManagedIngress         ManagedIngressConfig          `json:"managedIngress"`
 }
 
 type StaticConfig struct {
@@ -124,11 +127,20 @@ func loadConfigWithAccess(path, accessPath string) (Config, error) {
 }
 
 func applyEnv(cfg *Config) {
+	if value := os.Getenv("AURIGA_EDGE_LINKS_ALLOWED_ORIGINS"); value != "" {
+		cfg.LinkOrigins = splitCSV(value)
+	}
+	if value := os.Getenv("AURIGA_EDGE_LINKS_TRUSTED_PROXIES"); value != "" {
+		cfg.LinkTrustedProxies = splitCSV(value)
+	}
 	set := func(key string, dst *string) {
 		if v := os.Getenv(key); v != "" {
 			*dst = v
 		}
 	}
+	set("AURIGA_EDGE_MANAGED_ORIGIN", &cfg.ManagedIngress.Origin)
+	set("AURIGA_EDGE_MANAGED_CERT_FILE", &cfg.ManagedIngress.CertFile)
+	set("AURIGA_EDGE_MANAGED_KEY_FILE", &cfg.ManagedIngress.KeyFile)
 	set("AURIGA_EDGE_LISTEN", &cfg.Listen)
 	set("AURIGA_EDGE_ACCESS_CONFIG", &cfg.AccessConfigFile)
 	set("AURIGA_EDGE_NODE_CERT_FILE", &cfg.NodeTLS.CertFile)
@@ -233,6 +245,9 @@ func applyEnv(cfg *Config) {
 }
 
 func (c Config) validate() error {
+	if err := c.validateLinkOrigins(); err != nil {
+		return err
+	}
 	if _, err := c.parseResourceUpstream(); err != nil {
 		return err
 	}

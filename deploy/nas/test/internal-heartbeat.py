@@ -15,6 +15,7 @@ edge_config = json.loads((root / 'config/materials/edge.config.json').read_text(
 services = compose['services']
 edge = services['edge']
 panel = services['panel-prepare']
+renew = services.get('panel-renew', {})
 agent = services['agent']
 env = agent['environment']
 failed = []
@@ -30,6 +31,12 @@ edge_name = 'auriga-nas-test-edge'
 check('panel-prepare' not in edge.get('depends_on', {}), 'panel_failure_not_startup_gate')
 check(panel.get('network_mode') == 'none' and not panel.get('cap_add') and panel.get('read_only'), 'panel_signer_isolation')
 check(panel.get('command') == ['-best-effort'], 'panel_startup_best_effort')
+check(renew.get('image') == panel.get('image') and renew.get('command') == ['-renew'], 'panel_hourly_sidecar')
+check(renew.get('network_mode') == 'none' and renew.get('read_only') and not renew.get('cap_add'), 'panel_renewal_isolated')
+check(renew.get('user') == '10001:10001' and renew.get('restart') == 'unless-stopped', 'panel_renewal_identity')
+check(renew.get('volumes') == panel.get('volumes'), 'panel_renewal_exact_mounts')
+check('panel-renew' not in edge.get('depends_on', {}), 'panel_renewal_not_startup_gate')
+check('-probe-tcp' in edge.get('healthcheck', {}).get('test', []) and '-check' not in edge.get('healthcheck', {}).get('test', []), 'edge_health_independent_of_panel')
 access = json.loads((root / 'config/materials/access.json').read_text())
 check(edge.get('container_name') == edge_name, 'stable_edge_name')
 check(edge.get('labels', {}).get('auriga.role') == 'edge', 'trusted_edge_label')
@@ -81,6 +88,28 @@ check(
     'no_new_privileges',
 )
 platform_env = services['platform']['environment']
+native = {
+    'ID': 'auriga-dsh',
+    'TENANT': values.get('AURIGA_NAS_NATIVE_CLIENT_TENANT_ID') or '00000000-0000-0000-0000-000000000001',
+    'SECRETHASH': '',
+    'REDIRECTURIS': '',
+    'SCOPES': 'auriga.connect',
+    'GRANTS': 'urn:ietf:params:oauth:grant-type:device_code,refresh_token',
+    'PLATFORM': 'true',
+    'NATIVECONNECT': 'true',
+}
+check(
+    {key: str(value) for key, value in platform_env.items()
+     if key.startswith('AURIGA_IAM_CLIENTS_')}
+    == {'AURIGA_IAM_CLIENTS_0_' + key: value for key, value in native.items()},
+    'native_public_client_exact_registration',
+)
+check(native['TENANT'] == access['tenantId'], 'native_client_matches_installation_tenant')
+edge_env = edge['environment']
+check(platform_env.get('AURIGA_LINKS_ALLOWED_ORIGINS', '') == values.get('AURIGA_LINKS_ALLOWED_ORIGINS', ''), 'links_platform_allowlist')
+check(platform_env.get('AURIGA_LINKS_TRUSTED_PROXIES') == values['AURIGA_INTERNAL_EDGE_IP'], 'links_backend_only_edge_peer')
+check(edge_env.get('AURIGA_EDGE_LINKS_ALLOWED_ORIGINS', '') == values.get('AURIGA_LINKS_ALLOWED_ORIGINS', ''), 'links_edge_allowlist')
+check(edge_env.get('AURIGA_EDGE_LINKS_TRUSTED_PROXIES', '') == values.get('AURIGA_LINKS_TRUSTED_PROXIES', ''), 'links_edge_proxy_trust')
 for key, default in [('AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS', '3600'),
                      ('AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS', '60')]:
     expected = values.get(key) or default
@@ -89,8 +118,10 @@ check(platform_env.get('SPRING_PROFILES_ACTIVE') == 'combined', 'no_dev_profile'
 check(platform_env.get('SERVER_SSL_ENABLED') == 'true' and platform_env.get('AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED') == 'true', 'mtls_and_publisher_enabled')
 check(services['platform']['user'] == '10001:10001' and '65532' in services['platform']['group_add'], 'publisher_fixed_uid_and_reader_group')
 check(
-    not any('EMERGENCY' in key and ('REMOTE' in key or 'PROXY' in key)
-            for key in platform_env),
+    {key: value for key, value in platform_env.items()
+     if 'EMERGENCY' in key and ('REMOTE' in key or 'PROXY' in key)}
+    == {'AURIGA_IAM_EMERGENCY_REMOTE_ENABLED': values.get('AURIGA_IAM_EMERGENCY_REMOTE_ENABLED') or 'true'}
+    and platform_env.get('AURIGA_IAM_EMERGENCY_REMOTE_ENABLED') in ('true', 'false'),
     'no_dev_emergency_override',
 )
 check(

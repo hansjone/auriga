@@ -219,6 +219,8 @@ func TestCordisPatchRejectsReservedAndMalformed(t *testing.T) {
 		{Path: "plugins.web-runtime.trustedHosts", ValueJson: `["evil.example.com"]`},
 		{Path: "plugins.auriga-dsh.browserOrigin.host", ValueJson: `"evil.example.com"`},
 		{Path: "plugins.auriga-dsh.browserOrigin", ValueJson: `null`},
+		{Path: "plugins.llm-pi-ai.providers", ValueJson: `{}`},
+		{Path: "plugins.credentials.path", ValueJson: `"/untrusted/keys.json"`},
 		{Path: "plugins.auriga-dsh.trustedHosts", ValueJson: `["evil.example.com"]`},
 		{Path: "plugins.auriga-mcp-team.url", ValueJson: `"https://evil.example.com"`},
 		{Path: "server.host", ValueJson: `"0.0.0.0"`},

@@ -169,7 +169,10 @@ public final class ProviderManager {
     JsonNode config = decryptedConfig(row);
     result.set("config", mask(config, registry.get(type).descriptor().path("configSchema")));
     result.put(
-        "callbackUrl", issuer + "/api/iam/v1/login/callback/" + row.path("providerId").asString());
+        "callbackUrl",
+        auriga.common.web.LinkOrigins.currentOr(issuer)
+            + "/api/iam/v1/login/callback/"
+            + row.path("providerId").asString());
     return result;
   }
 

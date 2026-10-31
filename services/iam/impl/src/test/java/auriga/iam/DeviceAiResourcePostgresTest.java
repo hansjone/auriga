@@ -715,6 +715,7 @@ class DeviceAiResourcePostgresTest {
                 sessions,
                 tokens,
                 new IamGrpcSessions(sessions),
+                mock(IamManagedDevices.class),
                 clock,
                 provider.getBeanProvider(InstanceAiAuthorization.class));
     var settings =

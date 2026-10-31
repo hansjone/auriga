@@ -6,7 +6,7 @@ import { Buffer } from 'node:buffer';
 import { runPhase1, totp } from './run.mjs';
 import { BrowserSteps, desktopEnvironment } from './browser.mjs';
 import { resolve, join } from 'node:path';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 
 // This deliberately tiny deployed-HTTP fixture tests browser orchestration,
 // cookies and form binding. It is not evidence of a real Auriga deployment.
@@ -15,6 +15,41 @@ const secret = () =>
     randomBytes(32),
     (byte) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[byte % 32],
   ).join('');
+
+test('browser login observation retains a safe fail code without private response fields', async (t) => {
+  const path = '/api/iam/v1/login/transactions/failure/advance';
+  const server = http.createServer((req, res) => {
+    if (req.url === path) {
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          status: 'failed',
+          token: 'private-token',
+          step: {
+            type: 'fail',
+            code: 'iam.emergency_local_only',
+            detail: 'private-detail',
+          },
+        }),
+      );
+    } else res.end('<!doctype html><title>login observer fixture</title>');
+  });
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  t.after(() => new Promise((done) => server.close(done)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const adapter = new BrowserSteps({ baseUrl }, {});
+  t.after(() => adapter.close());
+  const context = await adapter.context();
+  const page = await context.newPage();
+  await page.goto(baseUrl);
+  await page.evaluate(
+    (path) => globalThis.fetch(path, { method: 'POST' }).then((r) => r.json()),
+    path,
+  );
+  const retained = await adapter.retainedLogin(path);
+  assert.equal(retained.step.code, 'iam.emergency_local_only');
+  assert.equal(JSON.stringify(retained).includes('private-'), false);
+});
 const html = (
   mode,
   admin,
@@ -48,12 +83,21 @@ function render() {
   } else if (location.pathname === '/login') {
     const data=await api('login/providers'); main.innerHTML=data.items.map(p=>'<button data-provider-id="'+p.id+'">登录</button>').join('');
     main.querySelectorAll('button').forEach(btn=>btn.onclick=async()=>{tx=await api('login/transactions',{providerId:btn.dataset.providerId,invitationCode:new URLSearchParams(location.search).get('invitation')});render();});
+  } else if (!admin && location.pathname === '/') {
+    const response=await fetch('/api/workspace/v1/me/instances'); const value=await response.json();
+    if (!value.items?.length) { main.textContent='已登录'; return; }
+    const instance=value.items[0]; main.innerHTML='<button>'+(instance.ready?'进入实例':'启动并进入')+'</button>';
+    main.querySelector('button').onclick=async()=>{ const opened=await fetch('/api/workspace/v1/me/instance/open',{method:'POST'}); const value=await opened.json(); location.href='/open/'+value.instance.id; };
   } else main.textContent='已登录';
 })();
 </script>`;
 
-for (const mode of ['ip', 'domain']) {
-  test(`真实Playwright表单：${mode}模式邀请消费、TOTP登记、新上下文重新登录`, async (t) => {
+for (const [mode, adminConnector] of [
+  ['ip', 'emergency'],
+  ['domain', 'emergency'],
+  ['ip', 'team-account'],
+]) {
+  test(`真实Playwright表单：${mode}模式 ${adminConnector} 管理员邀请消费、TOTP登记、新上下文重新登录`, async (t) => {
     const adminSecret = secret();
     const adminPassword = randomBytes(20).toString('base64url');
     const sessions = new Map();
@@ -64,6 +108,8 @@ for (const mode of ['ip', 'domain']) {
     let loginCount = 0;
     let lastOtpCounter = -1;
     let baseUrl;
+    let cloudInstance;
+    let cloudOpens = 0;
     const handler = (admin) => async (req, res) => {
       const path = new URL(req.url, 'http://localhost').pathname;
       res.setHeader('traceparent', req.headers.traceparent || '');
@@ -86,6 +132,15 @@ for (const mode of ['ip', 'domain']) {
           .filter(Boolean)
           .map((pair) => pair.split('=')),
       );
+      if (path === '/api/workspace/v1/me/instances')
+        return json({ items: cloudInstance ? [cloudInstance] : [] });
+      if (path === '/api/workspace/v1/me/instance/open') {
+        assert.equal(sessions.get(cookies.session), 'member-account');
+        assert.equal(req.method, 'POST');
+        cloudOpens++;
+        cloudInstance = { ...cloudInstance, phase: 'running', ready: true };
+        return json({ instance: cloudInstance });
+      }
       if (path.endsWith('/login/providers'))
         return json({
           items: [
@@ -93,14 +148,16 @@ for (const mode of ['ip', 'domain']) {
               id: admin
                 ? '00000000-0000-0000-0000-000000000001'
                 : '00000000-0000-0000-0000-000000000002',
-              connectorType: admin ? 'emergency' : 'team-account',
+              connectorType: admin ? adminConnector : 'team-account',
             },
           ],
         });
       if (path.endsWith('/login/transactions')) {
         const id = randomBytes(8).toString('hex');
         const formId = admin
-          ? 'emergency'
+          ? adminConnector === 'emergency'
+            ? 'emergency'
+            : 'password'
           : body.invitationCode
             ? 'register'
             : 'password';
@@ -110,7 +167,7 @@ for (const mode of ['ip', 'domain']) {
           fields: [
             'username',
             'password',
-            ...(admin ? ['otp'] : []),
+            ...(admin && adminConnector === 'emergency' ? ['otp'] : []),
             ...(formId === 'register' ? ['displayName'] : []),
           ].map((name) => ({ name, kind: 'text', required: true })),
         };
@@ -121,8 +178,21 @@ for (const mode of ['ip', 'domain']) {
       if (path.endsWith('/advance')) {
         const tx = transactions.get(path.split('/').at(-2));
         if (admin) {
-          assert.equal(body.values.password, adminPassword);
-          assert.equal(body.values.otp, totp(adminSecret));
+          if (adminConnector === 'team-account' && body.formId === 'password') {
+            assert.equal(body.values.password, adminPassword);
+            tx.step = {
+              type: 'form',
+              formId: 'totp',
+              fields: [{ name: 'code', kind: 'otp', required: true }],
+            };
+            return json(tx);
+          }
+          if (adminConnector === 'emergency')
+            assert.equal(body.values.password, adminPassword);
+          assert.equal(
+            body.values[adminConnector === 'emergency' ? 'otp' : 'code'],
+            totp(adminSecret),
+          );
         } else if (body.formId === 'register') {
           registered = { ...body.values, secret: secret() };
           tx.step = {
@@ -251,6 +321,7 @@ for (const mode of ['ip', 'domain']) {
       },
       admin: {
         url: adminUrl,
+        providerType: adminConnector,
         username: 'fixture-admin',
         password: adminPassword,
         totpSecret: adminSecret,
@@ -273,6 +344,56 @@ for (const mode of ['ip', 'domain']) {
     assert.equal(JSON.stringify(report).includes(saved.totpSecret), false);
     assert.equal(adapter.loginResponses.size, 0);
     assert.equal(report.cleanupErrors.length, 0);
+    if (mode === 'ip' && adminConnector === 'team-account') {
+      saved.lastTotpCounter = Math.floor(Date.now() / 30_000);
+      await writeFile(memberCredentialsFile, JSON.stringify(saved));
+      const resume = new BrowserSteps(
+        { baseUrl, only: [3] },
+        {
+          ...config,
+          existingCloud: {
+            credentialsFile: memberCredentialsFile,
+            instanceId: '019a0000-0000-7000-8000-000000000001',
+          },
+        },
+      );
+      try {
+        assert.equal(
+          (await resume.invite({ requests: [] })).memberVerified,
+          true,
+        );
+        assert.deepEqual(
+          resume.evidence().steps.map((step) => step.name),
+          ['browser-launch', 'member-login'],
+        );
+        assert.equal(resume.evidence().memberReused, true);
+        cloudInstance = {
+          id: '019a0000-0000-7000-8000-000000000001',
+          ownerId: 'member-account',
+          phase: 'stopped',
+          ready: false,
+        };
+        // Only test browser orchestration here, not a deployed DSH surface.
+        resume.portalPage.waitForURL = async () => {
+          throw new Error('fixture_entry_boundary');
+        };
+        for (const expectedOpens of [1, 2]) {
+          await resume.portalPage.goto(baseUrl);
+          await assert.rejects(
+            resume.cloud({ requests: [] }),
+            /fixture_entry_boundary/,
+          );
+          assert.equal(cloudOpens, expectedOpens);
+          assert.equal(resume.evidence().failedStep, 'dsh-page');
+          const ready = resume.evidence().steps.at(-1);
+          assert.equal(ready.name, 'instance-ready');
+          assert.equal(ready.instanceId, cloudInstance.id);
+          assert.equal(ready.ready, true);
+        }
+      } finally {
+        await resume.close();
+      }
+    }
   });
 }
 

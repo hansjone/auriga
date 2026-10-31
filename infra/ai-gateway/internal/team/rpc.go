@@ -64,6 +64,9 @@ func DialRPC(c RPCConfig) (*grpc.ClientConn, error) {
 			ctx = metadata.AppendToOutgoingContext(ctx, "auriga-tenant-id", actor.TenantId)
 		}
 		ctx = observability.Outgoing(ctx)
+		if _, bounded := ctx.Deadline(); bounded {
+			return invoke(ctx, method, req, reply, cc, opts...)
+		}
 		bounded, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		return invoke(bounded, method, req, reply, cc, opts...)

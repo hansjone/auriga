@@ -1,8 +1,8 @@
 # 云端 DSH ↔ 桌面 DSH 验收
 
 `cloud-desk.mjs` 驱动节点代理实际创建的 managed 云实例和原生 CLI 安装 tgz 的独立桌面 profile。
-使用公开 IAM 登录/实例入口或浏览器登录、DSH Settings/Session RPC 和 Auriga 工具；只有模型响应来自本地固定 OpenAI 兼容服务。
-不注入登录态、来源身份、网络入站或回执，不调用付费模型，不修改系统 DNS、信任或 TLS 校验。
+使用公开 IAM 登录/实例入口或浏览器登录、DSH Settings/Session RPC 和 Auriga 工具；默认模型响应来自本地固定 OpenAI 兼容服务。
+不注入登录态、来源身份、网络入站或回执，不修改系统 DNS、信任或 TLS 校验。真实托管模型模式须显式同意调用。
 
 ## 验收口径
 
@@ -10,6 +10,13 @@
 桌面向云端发送请求，由云端 Agent 调用真实发送工具回复；随后反向再做一次。
 `passed` 必须同时具备两次入网结果、四次发送工具结果，以及正确接收端模型输入中的四个不同消息 ID。
 发起提示、本地回显、`request_submitted`、宿主 ACTIVE 或云实例 READY 都不能单独算互发通过。
+
+云端已有只读托管提供方时，可配置 `managedCloud: { "allowRealModels": true, "model": "team-pool" }`。
+模型必须存在于该实例的 `auriga-managed` 目录；此模式会调用真实模型并产生用量，保留其原有凭据和提供方设置。
+桌面仍使用本机回环固定模型，无须配置 `fixture` 或云端模型操作通道。
+云端工具证明取原生会话中匹配 call ID 的工具调用与成功结果；收件证明取原生 user/message，
+精确匹配消息正文、外部消息 ID 和宿主 request ID。模型复述或发起提示不能充当收件。
+桌面证明仍来自真实模型输入，报告分别标明两端模型来源；清理自己创建的活动请求、桌面临时提供方和接收开关。
 
 未完成真实云桌互发前，单测和桌面冒烟只能证明准备部分。部署须具备 managed N1 工具和接收控制，
 仅升级宿主不能证明该接线已完成。脚本遇到缺工具或缺路由会失败，不退回 connect 冒充 managed。
@@ -38,6 +45,10 @@ node e2e/phase1/cloud-desk.mjs prepare .agent-evidence/cloud-desk/prepare.json
 ```
 
 生成 `desktop/cloud-desk-desktop.json`，后续运行直接复用，不重复安装。
+已使用安装版应用准备的独立 `desktop` profile，可按 [统一入口说明](README.md) 提供
+`runtime.kind=installed-app` 的安装记录作为 `desktopDescriptor`。启动会核实际内置 CLI 版本、
+发行包摘要及 profile 的安装版本，并使用隔离 HOME/user-data-dir；Windows 结束时清理该进程树。
+该描述文件复用已有安装，不会让 npm CLI 管理安装版保留的 `desktop` profile。
 首次真实登录使用全新 profile；`usedForLiveRun=true` 的 profile 不自动重置或覆盖。
 中断恢复可设 `resumeDesktop:true`，必须保持记录中的同一平台与成员；已登录状态还核对真实 subject。
 需要正常轮换设备时可另显式设 `reauthenticateDesktop:true`：恢复并核同一成员，调用公开退出接口，
@@ -136,6 +147,30 @@ node e2e/phase1/cloud-desk.mjs run .agent-evidence/cloud-desk/run.json .agent-ev
 不保存 HTTP 正文、浏览器 DOM、cookie、模型系统提示或 fixture URL 能力键。非通过退出 1。
 结束时取消自己创建会话的活动请求、关闭接收、移除自己唯一的模型配置/测试 key，停止临时模型及桌面进程、关闭浏览器。
 新成员、云实例和会话历史作为测试证据保留，不停止共享服务或他人实例。
+
+NAS 等远端测试可在 `fixture.cloudInstanceId` 旁设置受信任的
+`fixture.containerCommand=["操作通道程序","固定参数"]`。入口不开 shell，追加唯一的实例 UUID
+作为最后一个 argv，stdin 是要在该实例 Node 中执行的源码，stdout 为原始结果，stderr 不进入报告。
+操作通道须限制目标实例、保护源码和结果中的临时 fixture 能力键，并在退出/取消时清理自己
+启动的进程；不得打印 native 令牌或借此改宿主/DSH。远端启动和单次控制各限时 60 秒。
+不配置时仍沿原本机 WSL `docker exec`；该传输只替换测试模型的操作通道，不替代真实
+IAM、插件、WSS、READY 或消息收件证明，也不能作为真实中转站第⑥项证据。
+
+编程调用 `run(cfg, output)` 的真实托管模型验收可提供受信任的
+`cfg.readReceiptWitness({sessionId, marker})` 异步只读回调。原生宿主用收件项 ID 去重，
+它与消息 ID 不同；回调须从真实、未改写的 durable inbox 中读取已完成的收件映射，返回
+`{sessionId, marker, messageId, recipientId, stage: 'committed'}`，尚未提交时返回 `null`。
+操作者应同时核对持久收件项、宿主会话及 `host_accepted` 回执；不返回正文、签名能力或凭据。
+脚本再将消息头/唯一正文、原生 `user/message` 的请求 ID 和这份映射逐一比对。
+模型参数、助手复述、已提交发送及未提交的 inbox 项不能提供此见证；未配置回调时保留原有直接请求 ID 匹配。
+
+云端 join 只有明确返回 `unavailable` 且 `retryable: true` 时，调用方才在原 120 秒总截止内
+最多重试三次并保留每次工具结果。发送动作不自动重试，最终仍须四条真实收件及全部清理通过。
+
+真实托管模型分支可设 `managedRounds: 3`（只接受整数 1–3，默认 1），让同一对原生会话
+连续完成三轮双向往返。每轮采用不同标记并严格核对四条收件，轮间留出一分钟配额窗口，
+最终要求全部 12 个消息 ID 不同。客户端保持运行，结束后统一关闭接收及清理；幂等接收开关
+遇临时 503 时在原有界限内重试，401/403 不重试。
 
 ## 检查
 

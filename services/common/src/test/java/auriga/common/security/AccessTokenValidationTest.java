@@ -96,7 +96,7 @@ class AccessTokenValidationTest {
             c ->
                 c.issueTime(issued)
                     .notBeforeTime(issued)
-                    .expirationTime(Date.from(now.minusSeconds(45)))));
+                    .expirationTime(Date.from(now.minusSeconds(75)))));
     assertNotNull(
         verifier.verify(
             tokens.token(
@@ -109,6 +109,34 @@ class AccessTokenValidationTest {
   @Test
   void rejectsNotYetValid() {
     assertRejected(tokens.token(c -> c.notBeforeTime(Date.from(Instant.now().plusSeconds(120)))));
+  }
+
+  @Test
+  void boundedClockToleranceAppliesToIssuedAtAndNotBefore() {
+    Instant now = Instant.now();
+    assertNotNull(
+        verifier.verify(
+            tokens.token(
+                c ->
+                    c.issueTime(Date.from(now.plusSeconds(45)))
+                        .notBeforeTime(Date.from(now.plusSeconds(45))))));
+    assertRejected(tokens.token(c -> c.issueTime(Date.from(now.plusSeconds(120)))));
+    assertRejected(tokens.token(c -> c.notBeforeTime(Date.from(now.plusSeconds(120)))));
+    var strict =
+        new AccessTokenVerifier(
+            AccessTokenDecoders.create(
+                new AccessTokenSettings(
+                    TestTokens.ISSUER,
+                    tokens.jwksUri(),
+                    null,
+                    Duration.ofSeconds(5),
+                    null,
+                    null,
+                    null,
+                    false)));
+    assertThrows(
+        AurigaException.class,
+        () -> strict.verify(tokens.token(c -> c.issueTime(Date.from(now.plusSeconds(45))))));
   }
 
   @Test

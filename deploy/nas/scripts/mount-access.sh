@@ -38,11 +38,14 @@ probe() (
 # Existing bootstrap already validates source metadata/trust and reads runtime
 # inputs as uid10001 with no supplementary groups. These are runtime access
 # checks only, including the separately owned edge copies and NATS config.
+_runtime=$(runtime_directory)
+case "$_runtime" in "$AURIGA_DATA_ROOT/"*) ;; *) die 'invalid privileged runtime path' ;; esac
+_runtime=${_runtime#"$AURIGA_DATA_ROOT/"}
 probe platform 10001:10001 65532 \
   access:public:config/materials/access.json platform-config:public:config/materials/platform-access.yaml \
   healthcheck:public:config/materials/iam-healthcheck.sh installation:installation:config/materials/iam-installation \
-  pki:platform-pki:config/materials/pki templates:tree:config/materials/templates \
-  runtime-keys:tree:config/materials/runtime-keys tokens:tokens:internal-tokens enrollment:dir:enrollment
+  pki:platform-pki:config/materials/pki "templates:tree:$_runtime/templates" \
+  "runtime-keys:tree:$_runtime/runtime-keys" tokens:tokens:internal-tokens enrollment:dir:enrollment
 probe edge 65532:65532 none \
   access:public:config/materials/access.json edge-config:public:config/materials/edge.config.json \
   identity-signing:secret:config/pki-edge/identity-signing-keys.json pki:edge-pki:config/pki-edge \
@@ -62,7 +65,7 @@ case "$postgres_entrypoint" in
 esac
 probe agent 0:0 none \
   access:public:config/materials/access.json identity-public:public:config/materials/identity-keys.json \
-  policy:public:config/materials/agent-policy.yaml proofs:tree:config/materials/runtime-proofs \
+  "policy:public:$_runtime/agent-policy.yaml" "proofs:tree:$_runtime/runtime-proofs" \
   join:join:join data:dir:data/agent ingress:dir:socket-share
 # Registry has no Compose user override. Refuse an unexpected image identity
 # instead of silently checking a different uid (the packaged registry runs root).

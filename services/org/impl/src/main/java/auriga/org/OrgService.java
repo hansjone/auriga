@@ -1387,7 +1387,11 @@ public final class OrgService {
               java.sql.Timestamp.from(now));
           ObjectNode inv = invitationJson(id);
           inv.put("code", code);
-          inv.put("url", deploymentAccess.portalUrl() + "/invite/" + code);
+          inv.put(
+              "url",
+              auriga.common.web.LinkOrigins.currentOr(deploymentAccess.portalUrl())
+                  + "/invite/"
+                  + code);
           return inv;
         });
   }

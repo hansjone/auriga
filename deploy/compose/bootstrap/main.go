@@ -118,7 +118,7 @@ func main() {
 	if err != nil {
 		fatalf("%v", err)
 	}
-	defer collab.clear()
+	defer collab.Clear()
 	if *validateOnly {
 		return
 	}
@@ -134,7 +134,7 @@ func main() {
 	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%s\n%t\n%t\n%s\n%s", composeRecipe(access.PortalOrigin().Scheme == "https"), *image, *fixture, *observer, *accessFile != "", browser.Digest(), ui.Digest()))...))
 	inputDigest := hex.EncodeToString(input[:])
 	if collab != nil {
-		combinedInput := sha256.Sum256(append(input[:], []byte(collab.digest())...))
+		combinedInput := sha256.Sum256(append(input[:], []byte(collab.Digest())...))
 		inputDigest = hex.EncodeToString(combinedInput[:])
 	}
 	existing, err := preflightRuntimeInstallation(*out)

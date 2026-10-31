@@ -14,6 +14,16 @@ import {
 } from '../network/support/native-install.mjs';
 
 const exec = promisify(execFile);
+export async function desktopJSON(response) {
+  try {
+    return await response.json();
+  } catch {
+    throw Object.assign(new Error('desktop_native_invalid_json'), {
+      code: 'desktop_native_invalid_json',
+      status: response.status,
+    });
+  }
+}
 export async function poll(action, label, timeout = 45000) {
   const end = Date.now() + timeout;
   do {
@@ -26,7 +36,32 @@ export async function poll(action, label, timeout = 45000) {
   throw Object.assign(new Error(label), { code: 'deadline_exceeded' });
 }
 
-async function nativeRuntime(runtime) {
+async function nativeRuntime(runtime, state) {
+  if (runtime?.kind === 'installed-app') {
+    assert.ok(
+      state,
+      'installed app requires an owned prepared desktop profile',
+    );
+    const executable = resolve(runtime.executable);
+    const cli = resolve(runtime.cli);
+    await access(executable);
+    const result = await exec(
+      executable,
+      ['--expose-internals', cli, '--version'],
+      {
+        env: { ...isolatedEnvironment(state), ELECTRON_RUN_AS_NODE: '1' },
+        cwd: join(state, 'cwd'),
+        windowsHide: true,
+        timeout: 15000,
+      },
+    );
+    assert.equal(
+      result.stdout.trim(),
+      hostPin.version,
+      'installed DSH version',
+    );
+    return { runtime, version: result.stdout.trim(), executable };
+  }
   runtime = resolve(runtime);
   const pkg = JSON.parse(
     await readFile(
@@ -179,7 +214,6 @@ export async function launchDesktop(
   prepared,
   { connect, caFile, dnsMappings } = {},
 ) {
-  const host = await nativeRuntime(prepared.runtime);
   const state = resolve(prepared.state);
   const ownedRoot = resolve(import.meta.dirname, '../..');
   const ownedRelative = relative(ownedRoot, state);
@@ -194,10 +228,41 @@ export async function launchDesktop(
     state,
     'desktop state must not redirect through a link',
   );
-  assert.equal(prepared.profile, join(state, 'dsh/profiles/web'));
+  const installed = prepared.runtime?.kind === 'installed-app';
+  const profile = resolve(prepared.profile);
+  assert.equal(
+    profile,
+    join(state, 'dsh/profiles', installed ? 'desktop' : 'web'),
+  );
+  if (installed) {
+    assert.equal(
+      await realpath(profile),
+      profile,
+      'desktop profile must not redirect through a link',
+    );
+    assert.equal(prepared.installation, 'installed-app-tarball');
+    assert.equal(
+      createHash('sha256')
+        .update(await readFile(prepared.pluginPackage))
+        .digest('hex'),
+      prepared.packageSHA256,
+      'installed package asset changed',
+    );
+    const pkg = JSON.parse(
+      await readFile(
+        join(profile, 'node_modules/auriga-dsh/package.json'),
+        'utf8',
+      ),
+    );
+    assert.equal(pkg.name, 'auriga-dsh');
+    assert.equal(pkg.version, prepared.packageVersion);
+    assert.equal(dnsMappings, undefined, 'installed app uses its normal DNS');
+  }
+  const host = await nativeRuntime(prepared.runtime, state);
+  assert.equal(host.version, prepared.dshVersion);
   if (connect)
     await writeFile(
-      join(prepared.profile, 'cordis.patch.yml'),
+      join(profile, 'cordis.patch.yml'),
       '- id: auriga-dsh\n  disabled: false\n  config: ' +
         JSON.stringify({ connect }) +
         '\n',
@@ -219,24 +284,27 @@ export async function launchDesktop(
     env.NO_PROXY = [...bypass, ...Object.keys(dnsMappings)].join(',');
   }
   const child = spawn(
-    process.execPath,
-    [
-      ...(dnsMappings
-        ? [
-            '--import',
-            pathToFileURL(resolve(import.meta.dirname, 'cloud-desk.dns.mjs'))
-              .href,
-          ]
-        : []),
-      host.bin,
-      '--profile',
-      'web',
-      '--host',
-      '127.0.0.1',
-      '--port',
-      '0',
-      '--no-open',
-    ],
+    installed ? host.executable : process.execPath,
+    installed
+      ? ['--user-data-dir=' + join(state, 'electron')]
+      : [
+          ...(dnsMappings
+            ? [
+                '--import',
+                pathToFileURL(
+                  resolve(import.meta.dirname, 'cloud-desk.dns.mjs'),
+                ).href,
+              ]
+            : []),
+          host.bin,
+          '--profile',
+          'web',
+          '--host',
+          '127.0.0.1',
+          '--port',
+          '0',
+          '--no-open',
+        ],
     {
       env,
       cwd: join(state, 'cwd'),
@@ -279,7 +347,7 @@ export async function launchDesktop(
     const response = await globalThis.fetch(origin + path, {
       method: body === undefined ? 'GET' : 'POST',
       redirect: 'error',
-      signal: globalThis.AbortSignal.timeout(15000),
+      signal: globalThis.AbortSignal.timeout(45000),
       headers: {
         cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join('; '),
         ...(body === undefined
@@ -296,7 +364,7 @@ export async function launchDesktop(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     accept(response);
-    const value = await response.json();
+    const value = await desktopJSON(response);
     if (response.status !== 200)
       throw Object.assign(new Error('desktop_native_http_failed'), {
         code: 'desktop_native_http_failed',
@@ -315,7 +383,15 @@ export async function launchDesktop(
     return value;
   };
   const stop = async () => {
-    if (!closed) child.kill();
+    if (!closed) {
+      if (installed && process.platform === 'win32') {
+        await exec(
+          join(process.env.SystemRoot, 'System32/taskkill.exe'),
+          ['/PID', String(child.pid), '/T', '/F'],
+          { windowsHide: true },
+        );
+      } else child.kill();
+    }
     const result = await Promise.race([
       done,
       new Promise((resolve) => {
@@ -338,6 +414,10 @@ export async function launchDesktop(
       return launch;
     }, 'desktop_startup_url_missing');
     origin = new URL(launch).origin;
+    assert.ok(
+      ['127.0.0.1', '[::1]', 'localhost'].includes(new URL(origin).hostname),
+      'desktop launch must use loopback',
+    );
     const response = await globalThis.fetch(launch, {
       redirect: 'manual',
       signal: globalThis.AbortSignal.timeout(5000),
@@ -351,12 +431,17 @@ export async function launchDesktop(
           connect ? '/auriga/local-login/status' : '/auriga/settings/state',
         );
       } catch (error) {
-        if ([404, 503].includes(error.status)) return null;
+        if (
+          [404, 503].includes(error.status) ||
+          (error.code === 'desktop_native_invalid_json' && error.status === 200)
+        )
+          return null;
         throw error;
       }
     }, 'desktop_plugin_not_ready');
     return {
       origin,
+      launchUrl: launch,
       request,
       stop,
       pid: child.pid,

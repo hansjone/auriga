@@ -8,7 +8,11 @@ import {
   diagnoseNativeSession,
   loginDesktop,
 } from './cloud-desk.native.mjs';
-import { validateRunConfig, requireTestLock } from './cloud-desk.mjs';
+import {
+  validateRunConfig,
+  requireTestLock,
+  containerNode,
+} from './cloud-desk.mjs';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +25,60 @@ import {
 } from './cloud-desk.browser.mjs';
 
 const tools = [{ type: 'function', function: { name: 'auriga_send_message' } }];
+
+test('managed cloud mode needs explicit real-model consent and no cloud fixture endpoint', () => {
+  const access = {
+    mode: 'ip',
+    portalOrigin: { scheme: 'https', host: '127.0.0.1', port: 8443 },
+    adminOrigin: { scheme: 'https', host: '127.0.0.1', port: 8444 },
+  };
+  const cfg = {
+    connect: {
+      platformOrigin: 'https://127.0.0.1:8443',
+      issuer: 'https://127.0.0.1:8443',
+      providerId: 'actual-provider',
+      clientId: 'actual-client',
+      network: {
+        realm: '1',
+        roots: [{}],
+        wssUrl: 'wss://127.0.0.1:8443/network',
+      },
+    },
+    cloudCwd: '/workspace',
+    desktopDescriptor: 'desktop.json',
+    enrollmentFile: 'new-stack.json',
+    managedCloud: { allowRealModels: true, model: 'team-pool' },
+  };
+  validateRunConfig(cfg, access);
+  validateRunConfig({ ...cfg, managedRounds: 3 }, access);
+  for (const managedRounds of [0, 4, -1, 1.5, '3'])
+    assert.throws(() => validateRunConfig({ ...cfg, managedRounds }, access));
+  for (const managedCloud of [
+    { model: 'team-pool' },
+    { allowRealModels: false, model: 'team-pool' },
+    { allowRealModels: true, model: '' },
+    { allowRealModels: true, model: 'team-pool', apiKey: 'must-not-be-used' },
+  ])
+    assert.throws(() => validateRunConfig({ ...cfg, managedCloud }, access));
+});
+
+test('remote container executor receives only a fixed instance argv and source on stdin, never a shell', async () => {
+  const id = '00000000-0000-7000-8000-000000000001';
+  const program =
+    "let source='';process.stdin.on('data',x=>source+=x);process.stdin.on('end',()=>console.log(JSON.stringify({instance:process.argv.at(-1),source})));";
+  const child = containerNode(id, 'console.log("source-on-stdin");', [
+    process.execPath,
+    '-e',
+    program,
+  ]);
+  assert.equal((await child.done).code, 0);
+  assert.deepEqual(JSON.parse(child.output), {
+    instance: id,
+    source: 'console.log("source-on-stdin");',
+  });
+  assert.throws(() => containerNode(id, '', []));
+  assert.throws(() => containerNode(id, '', ['node', '\0']));
+});
 
 test('shared-stack lock accepts any exact declared owner, rejects missing/foreign locks, and permits explicit remote opt-out', async (t) => {
   const locksDirectory = await mkdtemp(join(tmpdir(), 'auriga-lock-'));

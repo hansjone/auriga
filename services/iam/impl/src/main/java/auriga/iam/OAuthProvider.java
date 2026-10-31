@@ -63,22 +63,23 @@ public final class OAuthProvider {
   }
 
   public ObjectNode metadata() {
-    String issuer = tokens.issuer();
+    String issuer = tokens.requestIssuer();
+    String base = issuer;
     return Json.object(
         "issuer",
         issuer,
         "authorization_endpoint",
-        issuer + "/oauth2/authorize",
+        base + "/oauth2/authorize",
         "token_endpoint",
-        issuer + "/oauth2/token",
+        base + "/oauth2/token",
         "revocation_endpoint",
-        issuer + "/oauth2/revoke",
+        base + "/oauth2/revoke",
         "jwks_uri",
-        issuer + "/oauth2/jwks",
+        base + "/oauth2/jwks",
         "userinfo_endpoint",
-        issuer + "/userinfo",
+        base + "/userinfo",
         "device_authorization_endpoint",
-        issuer + "/oauth2/device_authorization",
+        base + "/oauth2/device_authorization",
         "response_types_supported",
         List.of("code"),
         "grant_types_supported",
@@ -557,9 +558,11 @@ public final class OAuthProvider {
               "user_code",
               user,
               "verification_uri",
-              tokens.issuer() + "/device",
+              auriga.common.web.LinkOrigins.currentOr(tokens.issuer()) + "/device",
               "verification_uri_complete",
-              tokens.issuer() + "/device?user_code=" + user,
+              auriga.common.web.LinkOrigins.currentOr(tokens.issuer())
+                  + "/device?user_code="
+                  + user,
               "expires_in",
               300,
               "interval",

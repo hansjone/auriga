@@ -187,7 +187,7 @@ test('trust rejects unknown, revoked, expired, inactive and wrong-algorithm keys
     (c) => (c.keys = []),
     (c) => (c.keys[0].state = 'revoked'),
     (c) => (c.keys[0].not_after = '2026-10-25T00:00:59Z'),
-    (c) => (c.keys[0].not_before = '2026-10-25T00:02:00Z'),
+    (c) => (c.keys[0].not_before = '2026-10-25T00:02:01Z'),
   ]) {
     const c = config();
     change(c);

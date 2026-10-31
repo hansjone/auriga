@@ -63,7 +63,11 @@ func (r *Runtime) startSubmitHTTP(ctx context.Context, c *SubmitHTTPConfig) erro
 	if err != nil {
 		return errors.New("network: submit listener unavailable")
 	}
-	r.submitHTTP = &http.Server{Handler: r.SubmitHandler(), TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}, ClientCAs: roots, ClientAuth: tls.RequireAndVerifyClientCert}, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32768, BaseContext: func(net.Listener) context.Context { return ctx }}
+	budget := r.budget
+	if budget.Operation == 0 {
+		budget, _ = networkTimeoutBudget(0)
+	}
+	r.submitHTTP = &http.Server{Handler: r.SubmitHandler(), TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}, ClientCAs: roots, ClientAuth: tls.RequireAndVerifyClientCert}, ReadHeaderTimeout: budget.Authority, ReadTimeout: budget.Operation, WriteTimeout: budget.Operation, IdleTimeout: 2 * budget.Operation, MaxHeaderBytes: 32768, BaseContext: func(net.Listener) context.Context { return ctx }}
 	r.done.Go(func() {
 		err := r.submitHTTP.ServeTLS(listener, "", "")
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {

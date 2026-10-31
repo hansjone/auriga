@@ -19,7 +19,8 @@ service DeviceAccessService {
   rpc VerifyDeviceAccess(VerifyDeviceAccessRequest) returns (VerifyDeviceAccessResponse);
   // Only svc:ai-gateway with an internal service JWT, a delegated non-platform
   // tenant and the existing authenticated internal transport. Accepts only the
-  // single-AI-audience device JWT (at+jwt/ES256, <=300s), never a platform/Team,
+  // single-AI-audience device JWT (at+jwt/ES256, <=300s) or the independent
+  // managed model key (auth/managed-model.md), never a platform/Team,
   // instance, service token or ait_. Online checks current member/model-invoke
   // permission plus device/account/backing session; no idle touch or refresh use.
   // Determinately invalid => inactive with empty identity; dependency faults =>
@@ -45,7 +46,8 @@ message VerifyDeviceAccessResponse {
   google.protobuf.Timestamp expires_at = 5;
 }
 message VerifyDeviceAiAccessRequest {
-  // Raw external AI device access JWT. Secret: never log, persist or include in errors.
+  // Raw AI device access JWT or managed model-only key (auth/managed-model.md).
+  // Secret: never log, persist or include in errors. Other device RPCs reject model keys.
   string access_token = 1;
 }
 message VerifyDeviceAiAccessResponse {
@@ -56,6 +58,7 @@ message VerifyDeviceAiAccessResponse {
   string account_id = 3;
   string device_id = 4;
   // Minimum of the AI JWT and current backing deadlines; future at completion.
+  // Managed model keys receive at most a 300-second lease, never their full 30-day lifetime.
   google.protobuf.Timestamp expires_at = 5;
 }
 message VerifyDeviceCredentialRequest {

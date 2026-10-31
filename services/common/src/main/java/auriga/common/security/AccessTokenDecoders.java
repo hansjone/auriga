@@ -20,7 +20,6 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 
@@ -101,7 +100,18 @@ public final class AccessTokenDecoders {
     validators.add(AccessTokenDecoders::requireType);
     validators.add(AccessTokenDecoders::requireExpiry);
     validators.add(timestamps);
-    validators.add(new JwtIssuerValidator(settings.issuer()));
+    validators.add(
+        jwt ->
+            jwt.getIssuedAt() != null
+                    && jwt.getIssuedAt()
+                        .isAfter(settings.clock().instant().plus(settings.clockSkew()))
+                ? failure("iat is beyond the configured clock tolerance")
+                : success());
+    validators.add(
+        jwt ->
+            settings.acceptedIssuers().contains(jwt.getClaimAsString("iss"))
+                ? success()
+                : failure("iss must match an approved installation origin"));
     validators.add(jwt -> audience(jwt, settings.audience()));
     validators.add(AccessTokenDecoders::platformClaims);
     validators.add(

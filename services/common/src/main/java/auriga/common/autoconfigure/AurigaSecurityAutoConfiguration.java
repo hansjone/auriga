@@ -10,16 +10,20 @@ import auriga.common.security.InternalTokenVerifier;
 import auriga.common.security.ProblemSecurityHandlers;
 import java.net.URI;
 import java.time.Clock;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.security.autoconfigure.web.servlet.ServletWebSecurityAutoConfiguration;
 import org.springframework.boot.security.oauth2.server.resource.autoconfigure.OAuth2ResourceServerAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.oauth2.jwt.BadJwtException;
@@ -39,18 +43,23 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 public class AurigaSecurityAutoConfiguration {
   private static final Logger log = LoggerFactory.getLogger(AurigaSecurityAutoConfiguration.class);
 
-  private static AccessTokenSettings settings(AurigaProperties properties, Clock clock) {
+  private static AccessTokenSettings settings(
+      AurigaProperties properties, Clock clock, Environment env) {
     AurigaProperties.Jwt jwt = properties.getSecurity().getJwt();
     if (jwt.getIssuer() == null || jwt.getJwkSetUri() == null) return null;
     return new AccessTokenSettings(
-        jwt.getIssuer(),
-        URI.create(jwt.getJwkSetUri()),
-        jwt.getAudience(),
-        jwt.getClockSkew(),
-        jwt.getJwksCacheTtl(),
-        jwt.getJwksMinRefreshInterval(),
-        clock,
-        jwt.isAllowInsecureJwksUri());
+            jwt.getIssuer(),
+            URI.create(jwt.getJwkSetUri()),
+            jwt.getAudience(),
+            jwt.getClockSkew(),
+            jwt.getJwksCacheTtl(),
+            jwt.getJwksMinRefreshInterval(),
+            clock,
+            jwt.isAllowInsecureJwksUri())
+        .withIssuerOrigins(
+            Binder.get(env)
+                .bind("auriga.links.allowed-origins", Bindable.listOf(String.class))
+                .orElse(List.of()));
   }
 
   private static JwtDecoder rejectAll() {
@@ -62,8 +71,8 @@ public class AurigaSecurityAutoConfiguration {
   /** Platform tokens for the HTTP API ({@code aud} contains {@code auriga}). */
   @Bean
   @ConditionalOnMissingBean
-  JwtDecoder aurigaAccessTokenDecoder(AurigaProperties properties, Clock clock) {
-    AccessTokenSettings settings = settings(properties, clock);
+  JwtDecoder aurigaAccessTokenDecoder(AurigaProperties properties, Clock clock, Environment env) {
+    AccessTokenSettings settings = settings(properties, clock, env);
     if (settings == null) {
       log.warn(
           "auriga.security.jwt.issuer / jwk-set-uri not configured: all access tokens are rejected");
@@ -81,8 +90,9 @@ public class AurigaSecurityAutoConfiguration {
   /** Internal service tokens for gRPC ({@code aud} = {@code auriga.internal}). */
   @Bean
   @ConditionalOnMissingBean
-  InternalTokenVerifier aurigaInternalTokenVerifier(AurigaProperties properties, Clock clock) {
-    AccessTokenSettings settings = settings(properties, clock);
+  InternalTokenVerifier aurigaInternalTokenVerifier(
+      AurigaProperties properties, Clock clock, Environment env) {
+    AccessTokenSettings settings = settings(properties, clock, env);
     return new InternalTokenVerifier(
         new AccessTokenVerifier(
             settings == null ? rejectAll() : AccessTokenDecoders.createInternal(settings)));

@@ -2,6 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { setImmediate } from 'node:timers';
 import {
   createAttemptDiagnostics,
@@ -165,7 +167,7 @@ for (const [name, respond, phase, code, status] of [
     assert.equal(event.code, code);
     assert.equal(event.http_status, status);
     assert.equal(event.created, null);
-    assert.equal(event.budget_ms, phase === 'register_http' ? 15000 : 0);
+    assert.equal(event.budget_ms, phase === 'register_http' ? 30000 : 0);
     assert.equal(f.calls.length, 1);
   });
 
@@ -210,6 +212,52 @@ test('device submit uses the fixed HTTPS path, device bearer and complete origin
     (error) => error.status === 401,
   );
   assert.equal(f.calls.length, 1);
+});
+
+test('ticket bounds use the shared configured clock tolerance', async (t) => {
+  if (process.env.AURIGA_TEST_TICKET_OFFSET !== undefined) {
+    const f = await deviceFixture(
+      t,
+      Number(process.env.AURIGA_TEST_TICKET_OFFSET),
+    );
+    await f.prepared.register(f.controller.signal);
+    if (process.env.AURIGA_TEST_TICKET_EXPECT === 'accept')
+      await f.prepared.getTicket(f.controller.signal);
+    else
+      await assert.rejects(
+        f.prepared.getTicket(f.controller.signal),
+        /invalid device network ticket/,
+      );
+    return;
+  }
+  for (const [seconds, offset, expected] of [
+    [0, -1, 'reject'],
+    [5, -5001, 'reject'],
+    [5, -3000, 'accept'],
+    [5, 35001, 'reject'],
+  ]) {
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    const child = spawnSync(
+      process.execPath,
+      [
+        '--test',
+        '--test-name-pattern=^ticket bounds use the shared configured clock tolerance$',
+        fileURLToPath(import.meta.url),
+      ],
+      {
+        env: {
+          ...env,
+          AURIGA_JWT_CLOCK_SKEW_SECONDS: String(seconds),
+          AURIGA_TEST_TICKET_OFFSET: String(offset),
+          AURIGA_TEST_TICKET_EXPECT: expected,
+        },
+        encoding: 'utf8',
+        timeout: 15000,
+      },
+    );
+    assert.equal(child.status, 0, child.stdout + child.stderr);
+  }
 });
 
 for (const offset of [-200, -59000, 59000])

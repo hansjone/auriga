@@ -72,7 +72,13 @@ class NativeConnectPostgresTest {
                   keys.activate(kid);
                   tokens =
                       new TokenService(
-                          keys, schemas, (t, s, c) -> effective, clock, issuer, Map.of());
+                          keys,
+                          schemas,
+                          (t, s, c) -> effective,
+                          clock,
+                          issuer,
+                          Map.of(),
+                          List.of("https://native.example.com"));
                   SessionKv kv = mock(SessionKv.class);
                   EventPublisher events = mock(EventPublisher.class);
                   AuditLogger audit = mock(AuditLogger.class);
@@ -267,6 +273,30 @@ class NativeConnectPostgresTest {
             "native-example",
             "refresh_token",
             token.path("refresh_token").asString()));
+  }
+
+  @Test
+  void approvedNativeOriginSignsLoginAndRefreshForStrictDesktopIssuer() {
+    String origin = "https://native.example.com";
+    var request = new org.springframework.mock.web.MockHttpServletRequest();
+    request.setScheme("https");
+    request.setRemoteAddr("192.0.2.30");
+    request.addHeader("Host", "native.example.com");
+    var origins = new auriga.common.web.LinkOrigins(List.of(origin), List.of());
+    TenantContext.run(
+        tenant,
+        () -> {
+          ObjectNode signed = origins.call(request, this::connected);
+          var claims = tokens.verify(signed.path("access_token").asString());
+          assertEquals(origin, claims.path("iss").asString());
+          ObjectNode refreshed = origins.call(request, () -> rotate(signed));
+          var renewed = tokens.verify(refreshed.path("access_token").asString());
+          assertEquals(origin, renewed.path("iss").asString());
+          assertEquals(claims.path("did"), renewed.path("did"));
+          assertNotNull(
+              new DeviceAccessAuthority(store, sessions, tokens)
+                  .access(refreshed.path("access_token").asString()));
+        });
   }
 
   @Test

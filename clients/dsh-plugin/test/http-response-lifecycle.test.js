@@ -63,7 +63,7 @@ test('late close of an old response cannot remove a newly tracked response for t
   assert.equal(next.destroyCalls, 1);
   next.emit('close');
 });
-test('runtime requires a native hook, refuses anonymous admission before next, and unregisters idempotently', async () => {
+test('runtime tracking leaves anonymous requests to route admission and unregisters idempotently', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-http-hook-'));
   let handler,
     unregistered = 0,
@@ -101,8 +101,8 @@ test('runtime requires a native hook, refuses anonymous admission before next, a
     await handler(request, res, () => {
       nextCalls++;
     });
-    assert.equal(res.status, 401);
-    assert.equal(nextCalls, 0);
+    assert.equal(res.status, undefined);
+    assert.equal(nextCalls, 1);
     assert.equal(res.listenerCount('close'), 0);
     stop();
     stop();

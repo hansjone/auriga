@@ -371,7 +371,8 @@ func (x *VerifyDeviceAccessResponse) GetExpiresAt() *timestamppb.Timestamp {
 
 type VerifyDeviceAiAccessRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Raw external AI device access JWT. Secret: never log, persist or include in errors.
+	// Raw AI device access JWT or managed model-only key (auth/managed-model.md).
+	// Secret: never log, persist or include in errors. Other device RPCs reject model keys.
 	AccessToken   string `protobuf:"bytes,1,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -423,6 +424,7 @@ type VerifyDeviceAiAccessResponse struct {
 	AccountId string `protobuf:"bytes,3,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	DeviceId  string `protobuf:"bytes,4,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	// Minimum of the AI JWT and current backing deadlines; future at completion.
+	// Managed model keys receive at most a 300-second lease, never their full 30-day lifetime.
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

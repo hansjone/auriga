@@ -125,6 +125,9 @@ func NATSContext(ctx context.Context, raw []byte) context.Context {
 		RequestID string `json:"request_id"`
 	}
 	if len(raw) <= 65536 && json.Unmarshal(raw, &request) == nil && natsID.MatchString(request.RequestID) {
+		if join := joinID.FindStringSubmatch(request.RequestID); len(join) == 2 && join[1] != strings.Repeat("0", 32) {
+			return context.WithValue(ctx, key{}, "00-"+join[1]+"-"+random(8)+"-01")
+		}
 		sum := sha256.Sum256([]byte("auriga-nats-request-v1:" + request.RequestID))
 		return context.WithValue(ctx, key{}, "00-"+hex.EncodeToString(sum[:16])+"-"+random(8)+"-01")
 	}
@@ -132,6 +135,7 @@ func NATSContext(ctx context.Context, raw []byte) context.Context {
 }
 
 var natsID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+var joinID = regexp.MustCompile(`^join-([a-f0-9]{32})-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$`)
 
 func Parent(ctx context.Context) string { v, _ := ctx.Value(key{}).(string); return v }
 func TraceID(ctx context.Context) string {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,88 @@ func networkSubmitTestServer(t *testing.T, handler http.Handler) (*httptest.Serv
 }
 
 // These are transport probes, not authenticated SEND/PG acceptance tests.
+func TestDeviceNetworkSubmitOriginPolicy(t *testing.T) {
+	for _, domain := range []bool{false, true} {
+		for _, configured := range []bool{false, true} {
+			t.Run(fmt.Sprintf("domain=%t/configured=%t", domain, configured), func(t *testing.T) {
+				var calls atomic.Int32
+				upstream, hop := networkSubmitTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					if r.Header.Get("Origin") != "" || r.Header.Get("Cookie") != "" {
+						t.Error("browser credentials reached device authority")
+					}
+					if r.Header.Get("Authorization") != "Bearer submit-device" {
+						writeProblem(w, problem(401, "network.unauthorized", "Unauthorized", "invalid device", "test"))
+						return
+					}
+					w.WriteHeader(http.StatusAccepted)
+				}))
+				g, addresses, _ := accessFixtureConfigured(t, domain, nil, func(c *Config, _ map[string]any) {
+					c.Upstreams["network-submit"] = upstream.URL
+					c.NetworkSubmitHop = hop
+					if configured {
+						c.LinkOrigins = []string{"https://portal.example.com", "http://192.0.2.10:8080"}
+					}
+				})
+				closeAIAdminTransports(t, g)
+				for _, tc := range []struct {
+					name   string
+					origin []string
+					bearer string
+					extra  http.Header
+					status int
+				}{
+					{"absent", nil, "Bearer submit-device", nil, 202},
+					{"domain", []string{"https://portal.example.com"}, "Bearer submit-device", nil, 202},
+					{"ip", []string{"http://192.0.2.10:8080"}, "Bearer submit-device", nil, 202},
+					{"foreign", []string{"https://foreign.example.com"}, "Bearer submit-device", nil, 403},
+					{"suffix", []string{"https://portal.example.com.attacker.example.com"}, "Bearer submit-device", nil, 403},
+					{"empty", []string{""}, "Bearer submit-device", nil, 403},
+					{"duplicate", []string{"https://portal.example.com", "https://portal.example.com"}, "Bearer submit-device", nil, 403},
+					{"missing-bearer", nil, "", nil, 401},
+					{"bad-bearer", nil, "Basic invalid", nil, 401},
+					{"invalid-device", nil, "Bearer invalid", nil, 401},
+					{"allowed-without-bearer", []string{"https://portal.example.com"}, "", nil, 401},
+					{"cookie", []string{"https://portal.example.com"}, "Bearer submit-device", http.Header{"Cookie": {"auriga_session=test"}}, 403},
+					{"referer", []string{"https://portal.example.com"}, "Bearer submit-device", http.Header{"Referer": {"https://portal.example.com/"}}, 403},
+					{"cross-site", []string{"https://portal.example.com"}, "Bearer submit-device", http.Header{"Sec-Fetch-Site": {"cross-site"}}, 403},
+					{"same-site", []string{"https://portal.example.com"}, "Bearer submit-device", http.Header{"Sec-Fetch-Site": {"same-site"}}, 403},
+					{"same-origin-browser", []string{"https://portal.example.com"}, "Bearer submit-device", http.Header{"Sec-Fetch-Site": {"same-origin"}}, 403},
+					{"browser-dest", []string{"https://portal.example.com"}, "Bearer submit-device", http.Header{"Sec-Fetch-Dest": {"empty"}}, 403},
+					{"native-fetch", []string{"https://portal.example.com"}, "Bearer submit-device", http.Header{"Sec-Fetch-Mode": {"cors"}}, 202},
+				} {
+					t.Run(tc.name, func(t *testing.T) {
+						h := tc.extra.Clone()
+						if h == nil {
+							h = make(http.Header)
+						}
+						if tc.origin != nil {
+							h["Origin"] = tc.origin
+						}
+						if tc.bearer != "" {
+							h.Set("Authorization", tc.bearer)
+						}
+						want := tc.status
+						if !configured && tc.origin != nil {
+							want = 403
+						}
+						before := calls.Load()
+						status, _, body := aiAdminRequest(t, g, addresses, "portal", "POST", "/api/ai/v1/network/submit", h)
+						if status != want {
+							t.Fatalf("status=%d want=%d body=%s", status, want, body)
+						}
+						if want == 403 || tc.bearer == "" || tc.bearer == "Basic invalid" {
+							if calls.Load() != before {
+								t.Fatal("rejected entry reached device authority")
+							}
+						}
+					})
+				}
+			})
+		}
+	}
+}
+
 func TestDeviceNetworkSubmitRoutes(t *testing.T) {
 	for _, domain := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ip", true: "domain"}[domain], func(t *testing.T) {

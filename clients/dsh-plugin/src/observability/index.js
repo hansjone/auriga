@@ -162,6 +162,12 @@ export function natsTraceparent(payload) {
   try {
     const id = JSON.parse(Buffer.from(payload).toString('utf8')).request_id;
     if (typeof id === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(id)) {
+      const join =
+        /^join-([a-f0-9]{32})-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.exec(
+          id,
+        );
+      if (join && join[1] !== '0'.repeat(32))
+        return `00-${join[1]}-${randomBytes(8).toString('hex')}-01`;
       const trace = createHash('sha256')
         .update('auriga-nats-request-v1:' + id)
         .digest('hex')
@@ -174,6 +180,9 @@ export function natsTraceparent(payload) {
   return newTraceparent();
 }
 const operations = new Set([
+  'local_register',
+  'ready',
+  'head',
   'source_register',
   'source_get',
   'source_revoke',

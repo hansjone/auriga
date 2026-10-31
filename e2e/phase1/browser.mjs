@@ -68,6 +68,11 @@ export class BrowserSteps {
               status: tx.status,
               step: tx.step && {
                 type: tx.step.type,
+                code: /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(
+                  tx.step.code ?? '',
+                )
+                  ? tx.step.code
+                  : undefined,
                 formId: tx.step.formId,
                 fields: tx.step.fields?.map(({ name, kind }) => ({
                   name,
@@ -131,11 +136,113 @@ export class BrowserSteps {
     return this.journey?.report;
   }
 
+  async relayAdminRequest(url, state, options) {
+    const { relayAdminRequest } = await import('./relay-admin.mjs');
+    return relayAdminRequest(this, url, state, options);
+  }
+
   async desktop(state) {
     this.state = state;
     const descriptor = JSON.parse(
       (await readFile(this.options.desktopDsh, 'utf8')).replace(/^\uFEFF/, ''),
     );
+    if (this.config.desktop?.installedApp === true) {
+      requireThat(
+        descriptor.runtime?.kind === 'installed-app',
+        '需要安装版DSH描述文件',
+      );
+      const member = this.config.desktop.credentialsFile
+        ? JSON.parse(
+            await readFile(this.config.desktop.credentialsFile, 'utf8'),
+          )
+        : this.member;
+      requireThat(
+        member.accountId &&
+          member.portalUrl === httpUrl(this.options.baseUrl).origin,
+        '桌面成员必须属于当前平台',
+      );
+      if (descriptor.connect)
+        requireThat(
+          descriptor.connect.platformOrigin === member.portalUrl,
+          '桌面连接地址与验收平台不符',
+        );
+      const { launchDesktop } = await import('./cloud-desk.desktop.mjs');
+      const { nativeClient } = await import('./cloud-desk.native.mjs');
+      const { loginInstalledDesktop } = await import('./installed-login.mjs');
+      const { openAurigaPanel } = await import('./dsh-entry.mjs');
+      this.nativeDesktop = await launchDesktop(descriptor, {
+        connect: descriptor.connect,
+      });
+      this.desktopEvidence = {
+        installation: descriptor.installation,
+        dshVersion: descriptor.dshVersion,
+        packageVersion: descriptor.packageVersion,
+        packageSHA256: descriptor.packageSHA256,
+        phase: 'login',
+      };
+      this.desktopOrigin = this.nativeDesktop.origin;
+      this.desktopContext = await this.context();
+      this.desktopPage = await this.desktopContext.newPage();
+      await this.desktopPage.goto(this.nativeDesktop.launchUrl);
+      const request = async (path, body, csrf) => {
+        const result = await this.desktopPage.evaluate(
+          async ({ path, body, csrf }) => {
+            const response = await globalThis.fetch(path, {
+              method: body === undefined ? 'GET' : 'POST',
+              credentials: 'same-origin',
+              redirect: 'error',
+              signal: globalThis.AbortSignal.timeout(15000),
+              headers:
+                body === undefined
+                  ? {}
+                  : {
+                      'content-type': 'application/json',
+                      ...(csrf ? { 'x-auriga-csrf': csrf } : {}),
+                    },
+              body: body === undefined ? undefined : JSON.stringify(body),
+            });
+            return { status: response.status, value: await response.json() };
+          },
+          { path, body, csrf },
+        );
+        const code = /^[a-z][a-z0-9_.-]{0,63}$/.test(result.value?.code ?? '')
+          ? result.value.code
+          : '';
+        requireThat(
+          result.status === 200,
+          `安装版DSH公开登录/RPC请求失败：HTTP ${result.status} ${code}`,
+        );
+        return result.value;
+      };
+      const login = await loginInstalledDesktop(
+        this.desktopPage,
+        member,
+        request,
+      );
+      this.desktopEvidence.phase = 'native-plugin';
+      const plugin = await nativeClient(request).activePlugin();
+      this.desktopEvidence.phase = 'plugin-panel';
+      await this.desktopPage.goto(this.desktopOrigin);
+      await openAurigaPanel(this.desktopPage);
+      await this.desktopPage.waitForFunction(() => {
+        const panel = document.querySelector('auriga-team-panel');
+        return (
+          panel?.context?.mode === 'connect' &&
+          !!panel.shadowRoot?.querySelector('.resources')
+        );
+      });
+      this.desktopEvidence = {
+        installation: descriptor.installation,
+        dshVersion: descriptor.dshVersion,
+        packageVersion: descriptor.packageVersion,
+        packageSHA256: descriptor.packageSHA256,
+        platformOrigin: member.portalUrl,
+        phase: 'passed',
+        ...login,
+        plugin,
+      };
+      return { installed: true, pluginLoggedIn: login.loggedIn };
+    }
     if (!descriptor.dshBin || !descriptor.pluginPackage)
       throw new Skip(
         'PLUGIN-DIST缺少dshBin或pluginPackage；仅接受公开成品tgz安装',
@@ -344,8 +451,12 @@ export class BrowserSteps {
     }
   }
 
-  async models(state) {
+  async models(state, item) {
     this.state = state;
+    if (this.config.modelNative) {
+      const { nativeModels } = await import('./native-models.mjs');
+      return nativeModels(this, state, item);
+    }
     for (const model of this.config.relay.models) {
       for (const [page, settings] of [
         [this.cloudPage, this.config.modelUi.cloud],
@@ -371,7 +482,15 @@ export class BrowserSteps {
           .locator(settings.responseSelector)
           .filter({ hasText: marker })
           .getAttribute(settings.requestIdAttribute);
-        await waitSpend(this.config.relay, requestId, state);
+        await waitSpend(
+          this.config.relay,
+          requestId,
+          state,
+          this.config.relay.browserAdmin === true
+            ? (url, state, options) =>
+                this.relayAdminRequest(url, state, options)
+            : undefined,
+        );
       }
     }
   }
@@ -382,6 +501,11 @@ export class BrowserSteps {
       await this.browser?.close();
     } catch {
       failure = new StepError('浏览器清理失败');
+    }
+    try {
+      await this.nativeDesktop?.stop();
+    } catch {
+      failure = new StepError('安装版DSH隔离进程清理失败');
     }
     for (const child of this.children.reverse()) {
       if (child.exitCode !== null || child.signalCode !== null) continue;

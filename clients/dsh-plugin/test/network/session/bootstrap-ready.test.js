@@ -200,7 +200,7 @@ test('delayed READY retry callback cannot send beyond the original monotonic dea
     },
   );
   retry.schedule();
-  clock = 5001;
+  clock = 30001;
   t.mock.timers.tick(500);
   assert.equal(sends, 0);
   assert.equal(failure.code, 'timeout');

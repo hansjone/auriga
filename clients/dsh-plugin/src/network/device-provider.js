@@ -1,3 +1,5 @@
+import { networkTiming } from './timing.js';
+import { clockToleranceMs } from './clock.js';
 import { tracedFetch } from '../observability/index.js';
 /* global AbortSignal */
 import { createHash } from 'node:crypto';
@@ -7,7 +9,6 @@ import { positiveVersion } from './trust/keyset.js';
 import { diagnosticReason } from './diagnostics.js';
 
 const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
-const CLOCK_SKEW_MS = 60000;
 /** Transient fetch failure only; validation and persistence errors never use it. */
 export class DeviceControlUnavailable extends Error {}
 /** Only proven credential invalidation may end the native login.
@@ -117,7 +118,10 @@ export function createDeviceProvider({
             method: body === undefined ? 'GET' : 'POST',
             credentials: 'omit',
             redirect: 'error',
-            signal: AbortSignal.any([active, AbortSignal.timeout(15000)]),
+            signal: AbortSignal.any([
+              active,
+              AbortSignal.timeout(networkTiming.operationMs),
+            ]),
             headers: {
               authorization: 'Bearer ' + current.accessToken,
               accept: 'application/json',
@@ -195,7 +199,7 @@ export function createDeviceProvider({
           const bytes = await run(
             'register_http',
             () => request('/api/iam/v1/network/register', {}, active),
-            15000,
+            networkTiming.operationMs,
           );
           const result = await run('register_validate', () =>
             registration(parseStrictJson(bytes), expected, true),
@@ -216,7 +220,7 @@ export function createDeviceProvider({
                 undefined,
                 active,
               ),
-            15000,
+            networkTiming.operationMs,
           );
           await run('keys_announcement_validate', () =>
             trust.announce(announcement),
@@ -225,7 +229,7 @@ export function createDeviceProvider({
           const keys = await run(
             'keys_http',
             () => request('/api/collab/v1/network/keys', undefined, active),
-            15000,
+            networkTiming.operationMs,
           );
           await run('keys_validate', () => trust.update(keys));
           active.throwIfAborted();
@@ -242,7 +246,7 @@ export function createDeviceProvider({
                 { node: identity.node },
                 active,
               ),
-            15000,
+            networkTiming.operationMs,
           );
           return run('ticket_validate', () => {
             const raw = parseStrictJson(bytes);
@@ -286,12 +290,12 @@ export function createDeviceProvider({
                   /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(v),
               ) ||
               !Number.isFinite(expires) ||
-              expires <= currentTime - CLOCK_SKEW_MS ||
-              expires > currentTime + 30000 + CLOCK_SKEW_MS ||
+              expires <= currentTime - clockToleranceMs ||
+              expires > currentTime + 30000 + clockToleranceMs ||
               !Number.isFinite(connectionExpires) ||
               connectionExpires < expires ||
-              connectionExpires <= currentTime - CLOCK_SKEW_MS ||
-              connectionExpires > currentTime + 3600000 + CLOCK_SKEW_MS
+              connectionExpires <= currentTime - clockToleranceMs ||
+              connectionExpires > currentTime + 3600000 + clockToleranceMs
             )
               throw diagnosticReason(
                 new Error('invalid device network ticket'),

@@ -1,3 +1,4 @@
+import { networkTiming } from '../timing.js';
 import * as natsCore from '@nats-io/nats-core';
 import { publicationContext, logEvent } from '../../observability/index.js';
 import { TransportError } from './errors.js';
@@ -197,7 +198,7 @@ export class NatsLink {
         servers: o.url,
         name: o.name ?? 'auriga-dsh',
         reconnect: false,
-        timeout: o.connectTimeoutMs ?? 10_000,
+        timeout: o.connectTimeoutMs ?? networkTiming.operationMs,
         pingInterval: o.pingIntervalMs ?? 30_000,
         maxPingOut: 2,
         inboxPrefix: o.inboxPrefix,
@@ -441,7 +442,7 @@ export class NatsLink {
    * Stop accepting sends and unsubscribe, let already accepted messages reach
    * the socket and the broker (bounded by `timeoutMs`), then close.
    */
-  async drainAndClose(timeoutMs = 5_000) {
+  async drainAndClose(timeoutMs = networkTiming.authorityMs) {
     if (this.#state !== 'ready') return this.close();
     this.#state = 'draining';
     try {

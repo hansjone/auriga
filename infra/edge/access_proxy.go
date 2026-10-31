@@ -249,9 +249,20 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			}
 		}
 		rewriteOutboundAPI(pr.Out, clientIP, bearer, rid, ensureTraceparent(r))
+		if origin, _ := r.Context().Value(linkOriginKey{}).(string); origin != "" {
+			if parsed, err := url.Parse(origin); err == nil {
+				pr.Out.Header.Set("X-Forwarded-Host", parsed.Host)
+				pr.Out.Header.Set("X-Forwarded-Proto", parsed.Scheme)
+			}
+		}
 		pr.Out.Header.Del("Cookie")
 		if iam {
 			pr.Out.Host = r.Host
+			if role, _ := r.Context().Value(accessRoleKey{}).(string); role == "managed" {
+				// IAM authenticates the canonical portal hop. The approved managed
+				// presentation remains in the sanitized forwarding headers above.
+				pr.Out.Host = originAuthority(g.Cfg.Access.PortalOrigin())
+			}
 			if selectedCookies != "" {
 				pr.Out.Header.Set("Cookie", selectedCookies)
 			}

@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -11,202 +9,29 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
+	"github.com/hansjone/auriga/deploy/bootstrap/collab"
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
 
-// Only installation projection: Java RootKeyPublication/SigningKeyLoader remain
-// authoritative for signatures, schema, state and PostgreSQL anti-rollback.
-type collabInput struct {
-	TenantID         string            `json:"tenantId"`
-	Realm            string            `json:"realm"`
-	RootKid          string            `json:"rootKid"`
-	RootFingerprint  string            `json:"rootFingerprint"`
-	MinimumVersion   string            `json:"minimumVersion"`
-	RootPublicFile   string            `json:"rootPublicFile"`
-	SignedFile       string            `json:"signedFile"`
-	AnnouncementFile string            `json:"announcementFile"`
-	StateFile        string            `json:"stateFile"`
-	PrivateFiles     map[string]string `json:"privateFiles"`
-	files            map[string][]byte
-	protocol         map[string]string
-}
+type collabInput = collab.Input
 
-var collabLeaves = []string{"root.der", "signed.json", "announcement.json", "state.json", "business.der", "protocol.der", "management.der", "collab.properties", "browser.crt", "ca.crt", "server.crt", "server.key", "client.crt", "client.key"}
-var collabKid = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
-
-func (c *collabInput) clear() {
-	if c != nil {
-		for _, raw := range c.files {
-			clear(raw)
-		}
-	}
-}
-func (c *collabInput) digest() string {
-	if c == nil {
-		return "disabled"
-	}
-	h := sha256.New()
-	raw, _ := json.Marshal(c)
-	_, _ = h.Write(raw)
-	for _, name := range collabLeaves {
-		_, _ = h.Write(c.files[name])
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
+var collabLeaves = collab.Leaves
+var collabKid = collab.KidPattern
 
 func readCollabInput(path string, access deploymentconfig.Config) (*collabInput, error) {
-	if path == "" {
-		return nil, nil
+	if path != "" && access.PortalOrigin().Scheme != "https" {
+		return nil, fmt.Errorf("invalid explicit collab installation input")
 	}
-	invalid := fmt.Errorf("invalid explicit collab installation input")
-	if access.PortalOrigin().Scheme != "https" {
-		return nil, invalid
-	}
-	raw, err := collabRead(path, 65536, false)
-	if err != nil {
-		return nil, invalid
-	}
-	c := &collabInput{files: map[string][]byte{}}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(c) != nil || decoder.Decode(new(any)) != io.EOF || c.TenantID != access.TenantID() || !collabKid.MatchString(c.RootKid) {
-		return nil, invalid
-	}
-	realm, e := strconv.ParseUint(c.Realm, 10, 64)
-	minimum, e2 := strconv.ParseInt(c.MinimumVersion, 10, 64)
-	if e != nil || realm == 0 || strconv.FormatUint(realm, 10) != c.Realm || e2 != nil || minimum < 1 || strconv.FormatInt(minimum, 10) != c.MinimumVersion {
-		return nil, invalid
-	}
-	read := func(name, source string) error {
-		if source == "" {
-			return invalid
-		}
-		if !filepath.IsAbs(source) {
-			source = filepath.Join(filepath.Dir(path), source)
-		}
-		secret := name == "business.der" || name == "protocol.der" || name == "management.der"
-		b, err := collabRead(source, 65536, secret)
-		if err != nil {
-			return invalid
-		}
-		c.files[name] = b
-		return nil
-	}
-	for name, source := range map[string]string{"root.der": c.RootPublicFile, "signed.json": c.SignedFile, "announcement.json": c.AnnouncementFile, "state.json": c.StateFile} {
-		if read(name, source) != nil {
-			c.clear()
-			return nil, invalid
-		}
-	}
-	pub, err := x509.ParsePKIXPublicKey(c.files["root.der"])
-	sum := sha256.Sum256(c.files["root.der"])
-	if _, ok := pub.(ed25519.PublicKey); err != nil || !ok || c.RootFingerprint != fmt.Sprintf("sha256:%x", sum) {
-		c.clear()
-		return nil, invalid
-	}
-	var signed struct {
-		Keyset struct {
-			Realm   string `json:"realm"`
-			Version string `json:"keyset_version"`
-			Issued  string `json:"issued_at"`
-			Until   string `json:"valid_until"`
-			Keys    []struct {
-				Kid     string `json:"kid"`
-				Purpose string `json:"purpose"`
-				Public  string `json:"public_key_spki"`
-				Before  string `json:"not_before"`
-				After   string `json:"not_after"`
-				State   string `json:"state"`
-			} `json:"keys"`
-		} `json:"keyset"`
-	}
-	if json.Unmarshal(c.files["signed.json"], &signed) != nil {
-		c.clear()
-		return nil, invalid
-	}
-	p := signed.Keyset
-	version, e := strconv.ParseInt(p.Version, 10, 64)
-	issued, e2 := time.Parse(time.RFC3339, p.Issued)
-	until, e3 := time.Parse(time.RFC3339, p.Until)
-	now := time.Now()
-	if e != nil || version < minimum || e2 != nil || e3 != nil || now.Before(issued) || !now.Before(until) || until.Sub(issued) <= 0 || until.Sub(issued) > 24*time.Hour || p.Realm != c.Realm || len(p.Keys) != 3 || len(c.PrivateFiles) != 3 {
-		c.clear()
-		return nil, invalid
-	}
-	purposes := map[string]string{"business_delivery": "business.der", "protocol_response": "protocol.der", "management_state": "management.der"}
-	seen := map[string]bool{}
-	for _, key := range p.Keys {
-		name, ok := purposes[key.Purpose]
-		if !ok || seen[name] || !collabKid.MatchString(key.Kid) || key.State != "active" || read(name, c.PrivateFiles[key.Kid]) != nil {
-			c.clear()
-			return nil, invalid
-		}
-		seen[name] = true
-		private, err := x509.ParsePKCS8PrivateKey(c.files[name])
-		secret, ok := private.(ed25519.PrivateKey)
-		before, eb := time.Parse(time.RFC3339, key.Before)
-		after, ea := time.Parse(time.RFC3339, key.After)
-		if err != nil || !ok || eb != nil || ea != nil || now.Before(before) || !now.Before(after) {
-			c.clear()
-			return nil, invalid
-		}
-		der, _ := x509.MarshalPKIXPublicKey(secret.Public())
-		if base64.RawURLEncoding.EncodeToString(der) != key.Public || bytes.Equal(der, c.files["root.der"]) {
-			c.clear()
-			return nil, invalid
-		}
-		if key.Purpose == "protocol_response" {
-			c.protocol = map[string]string{"keyId": key.Kid, "keysetVersion": p.Version, "notBefore": key.Before, "notAfter": key.After, "privateKeyFile": "/etc/auriga/network/protocol.key"}
-		}
-	}
-	return c, nil
+	return collab.Read(path, access.TenantID())
 }
-
 func collabRead(path string, limit int64, secret bool) ([]byte, error) {
-	// Same-file checks and no symlink ancestors, before reading private inputs.
-	for p := filepath.Clean(path); ; p = filepath.Dir(p) {
-		info, err := os.Lstat(p)
-		if err != nil || info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("collab input metadata refused")
-		}
-		if p == filepath.Dir(p) || p == "." {
-			break
-		}
-	}
-	before, err := os.Lstat(path)
-	if err != nil || !before.Mode().IsRegular() || before.Size() == 0 || before.Size() > limit {
-		return nil, fmt.Errorf("collab input refused")
-	}
-	if !collabSourceMetadata(before, secret) {
-		return nil, fmt.Errorf("collab input ownership refused")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	opened, err := f.Stat()
-	if err != nil || !os.SameFile(before, opened) {
-		return nil, fmt.Errorf("collab input changed")
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
-	final, se := os.Lstat(path)
-	if err != nil || se != nil || !os.SameFile(opened, final) || !final.ModTime().Equal(before.ModTime()) || int64(len(raw)) != before.Size() {
-		clear(raw)
-		return nil, fmt.Errorf("collab input changed")
-	}
-	return raw, nil
+	return collab.ReadFile(path, limit, secret)
 }
-
 func writeCollab(out string, c *collabInput, issuer string) error {
 	return writeCollabFrom(out, out, c, issuer)
 }
@@ -251,13 +76,13 @@ func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 	if !ok {
 		return fmt.Errorf("collab CA key type refused")
 	}
-	c.files["ca.crt"] = caPEM
-	c.files["server.crt"], c.files["server.key"] = mustIssue(caKey, ca, "collab", "auriga://collab/compose", []string{"collab.network.internal"}, []net.IP{net.ParseIP("127.0.0.1")}, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
-	c.files["client.crt"], c.files["client.key"] = mustIssue(caKey, ca, "collab-iam", "auriga://collab/compose", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	c.Files["ca.crt"] = caPEM
+	c.Files["server.crt"], c.Files["server.key"] = mustIssue(caKey, ca, "collab", "auriga://collab/compose", []string{"collab.network.internal"}, []net.IP{net.ParseIP("127.0.0.1")}, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+	c.Files["client.crt"], c.Files["client.key"] = mustIssue(caKey, ca, "collab-iam", "auriga://collab/compose", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	edgeCert, edgeKey := mustIssue(caKey, ca, "edge-collab", "auriga://edge/collab-compose", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(out, "pki", "edge-collab.crt"), edgeCert, 0644)
 	writeFile(filepath.Join(out, "pki", "edge-collab.key"), edgeKey, 0600)
-	c.files["browser.crt"], err = os.ReadFile(filepath.Join(base, "browser-tls", "browser.crt"))
+	c.Files["browser.crt"], err = os.ReadFile(filepath.Join(base, "browser-tls", "browser.crt"))
 	if err != nil {
 		return err
 	}
@@ -284,14 +109,14 @@ func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 			} `json:"keys"`
 		} `json:"keyset"`
 	}
-	_ = json.Unmarshal(c.files["signed.json"], &signed)
+	_ = json.Unmarshal(c.Files["signed.json"], &signed)
 	for _, k := range signed.Keyset.Keys {
 		name := map[string]string{"business_delivery": "business.der", "protocol_response": "protocol.der", "management_state": "management.der"}[k.Purpose]
 		fmt.Fprintf(&properties, "auriga.collab.network.key-operations.private-files[%s]=/etc/auriga/collab/%s\n", k.Kid, name)
 	}
-	c.files["collab.properties"] = []byte(properties.String())
+	c.Files["collab.properties"] = []byte(properties.String())
 	for _, name := range collabLeaves {
-		writeFile(filepath.Join(dir, name), c.files[name], 0600)
+		writeFile(filepath.Join(dir, name), c.Files[name], 0600)
 	}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
@@ -313,7 +138,7 @@ func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 		"platformOrigin": managedURL, "issuer": managedURL,
 		"network": map[string]any{"realm": c.Realm,
 			"wssUrl": strings.Replace(managedURL, "https://", "wss://", 1) + "/net/v1/ws",
-			"roots":  []map[string]string{{"kid": c.RootKid, "public_key_spki": base64.RawURLEncoding.EncodeToString(c.files["root.der"])}}},
+			"roots":  []map[string]string{{"kid": c.RootKid, "public_key_spki": base64.RawURLEncoding.EncodeToString(c.Files["root.der"])}}},
 	}, 0600)
 	team.WriteString("auriga.workspace.managed-network-installation-file=/etc/auriga/network/managed-network.json\n")
 	team.WriteString("auriga.platform.team-token-export.enabled=true\nauriga.iam.ai-gateway-token-export.enabled=false\nauriga.iam.network.server-audiences[0]=auriga-network\nauriga.iam.network.client-server-audience=auriga-network\n")
@@ -337,8 +162,8 @@ func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 	rpc := runtime["collab"].(map[string]any)
 	rpc["Target"] = "127.0.0.1:9092"
 	rpc["ServerName"] = "collab.network.internal"
-	runtime["protocolSigning"] = c.protocol
+	runtime["protocolSigning"] = c.Protocol
 	writeJSON(filepath.Join(out, "network", "runtime.json"), runtime, 0600)
-	writeFile(filepath.Join(out, "network", "protocol.key"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: c.files["protocol.der"]}), 0600)
+	writeFile(filepath.Join(out, "network", "protocol.key"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: c.Files["protocol.der"]}), 0600)
 	return nil
 }

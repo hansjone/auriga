@@ -77,6 +77,19 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   const sessions = new Map(),
     attempts = new Map(),
     sockets = new Map();
+  // Keys are actual admitted owner Peers supplied by DSH's RPC carrier, never
+  // ids or headers supplied by a browser. Request bindings stay backend-only.
+  /** @type {WeakMap<object,any>} */
+  const nativeOwners = new WeakMap();
+  /** @type {WeakMap<object,any>} */
+  const nativeRequests = new WeakMap();
+  const attemptId = (/** @type {any} */ request) =>
+    nativeRequests.get(request)?.attemptId ?? cookie(request, ATTEMPT_COOKIE);
+  const forgetAttempt = (/** @type {any} */ request) => {
+    attempts.delete(attemptId(request));
+    const owner = nativeRequests.get(request);
+    if (owner) owner.attemptId = undefined;
+  };
   const expiryTimer = setInterval(() => {
     let renew = false;
     for (const row of sessions.values()) {
@@ -147,11 +160,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       throw new Error('local connection superseded');
   };
   let finalizing = Promise.resolve();
-  const resolve = (/** @type {any} */ request) => {
-    if (closed) return null;
-    const bearer = cookie(request, SESSION_COOKIE);
-    if (!bearer || bearer.length !== 43) return null;
-    const row = sessions.get(hash(bearer));
+  const sessionForKey = (/** @type {string|undefined} */ key) => {
+    if (closed || !key) return null;
+    const row = sessions.get(key);
     if (
       !row ||
       row.expiresAt <= Date.now() ||
@@ -159,6 +170,12 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     )
       return null;
     return row;
+  };
+  const resolve = (/** @type {any} */ request) => {
+    const owner = nativeRequests.get(request);
+    if (owner) return sessionForKey(owner.sessionKey);
+    const bearer = cookie(request, SESSION_COOKIE);
+    return bearer?.length === 43 ? sessionForKey(hash(bearer)) : null;
   };
   const killSession = (/** @type {any} */ row) => {
     sessions.delete(row.key);
@@ -262,7 +279,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     };
   }
   function attemptFor(/** @type {any} */ request) {
-    const id = cookie(request, ATTEMPT_COOKIE),
+    const id = attemptId(request),
       row = attempts.get(id);
     if (!row || row.expiresAt <= Date.now())
       throw new Error('login attempt expired');
@@ -385,6 +402,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         accessExpiresAt: credential.claims.exp * 1000,
       };
     sessions.set(key, session);
+    const nativeOwner = nativeRequests.get(request);
+    if (nativeOwner) nativeOwner.sessionKey = key;
     models.login();
     // Native identity is verified and durably owned before session issuance.
     // Independent N1 must not wait for legacy Team/MCP availability.
@@ -393,13 +412,12 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     row.jar.clear();
     row.verifier = undefined;
     row.device = undefined;
-    attempts.delete(cookie(request, ATTEMPT_COOKIE));
+    forgetAttempt(request);
     return {
       step: { type: 'complete', redirectTo: '/' },
-      setCookie: [
-        setCookie(SESSION_COOKIE, bearer),
-        setCookie(ATTEMPT_COOKIE, '', 0),
-      ],
+      setCookie: nativeOwner
+        ? undefined
+        : [setCookie(SESSION_COOKIE, bearer), setCookie(ATTEMPT_COOKIE, '', 0)],
     };
   }
   /** Trusted settings changes also use the normal tombstone/revocation path.
@@ -461,6 +479,32 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     await drainRevocations();
   }
   return {
+    /** Only call from DSH's admitted owner RPC handler.
+     * @param {any} peer */
+    nativeRequest(peer) {
+      if (!peer || typeof peer !== 'object' || peer.principal?.kind !== 'owner')
+        throw new Error('native owner admission required');
+      let owner = nativeOwners.get(peer);
+      if (!owner) {
+        owner = {};
+        nativeOwners.set(peer, owner);
+      }
+      const request = { headers: {} };
+      nativeRequests.set(request, owner);
+      return request;
+    },
+    /** @param {object} peer */
+    resolveNative(peer) {
+      return sessionForKey(nativeOwners.get(peer)?.sessionKey);
+    },
+    /** Bind a request only after the native carrier admitted this exact Peer.
+     * @param {object} peer @param {any} request */
+    bindNativeRequest(peer, request) {
+      const owner = nativeOwners.get(peer);
+      if (!owner || !sessionForKey(owner.sessionKey)) return null;
+      nativeRequests.set(request, owner);
+      return resolve(request);
+    },
     resetAuthentication: clearAuthentication,
     config,
     resolve,
@@ -500,8 +544,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     },
     checkCsrf(/** @type {any} */ request) {
       const token = request.headers['x-auriga-csrf'];
-      const row =
-        resolve(request) ?? attempts.get(cookie(request, ATTEMPT_COOKIE));
+      const row = resolve(request) ?? attempts.get(attemptId(request));
       return !!row && equal(token, row.csrf);
     },
     status(/** @type {any} */ request) {
@@ -549,7 +592,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         connectTeam();
         return { body: this.status(request) };
       }
-      let id = cookie(request, ATTEMPT_COOKIE),
+      let id = attemptId(request),
         row = attempts.get(id);
       if (!row || row.expiresAt <= Date.now()) {
         for (const [key, value] of attempts)
@@ -569,8 +612,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         };
         attempts.set(id, row);
       }
+      const owner = nativeRequests.get(request);
+      if (owner) owner.attemptId = id;
       return {
-        setCookie: setCookie(ATTEMPT_COOKIE, id ?? '', 300),
+        setCookie: owner ? undefined : setCookie(ATTEMPT_COOKIE, id ?? '', 300),
         body: {
           ...this.status(request),
           csrf: row.csrf,
@@ -779,17 +824,17 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         return issueBrowserSession(row, request, credential);
       } catch (error) {
         await abandon(row);
-        attempts.delete(cookie(request, ATTEMPT_COOKIE));
+        forgetAttempt(request);
         throw error;
       } finally {
         row.busy = false;
       }
     },
     async cancelAttempt(/** @type {any} */ request) {
-      const id = cookie(request, ATTEMPT_COOKIE),
+      const id = attemptId(request),
         row = attempts.get(id);
       if (!row) return;
-      attempts.delete(id);
+      forgetAttempt(request);
       await abandon(row);
     },
     bindSocket(/** @type {any} */ request) {
@@ -808,18 +853,24 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     async logout(/** @type {any} */ request) {
       const row = resolve(request);
       if (!row) {
+        if (nativeRequests.has(request) && vault.snapshot().credential)
+          await clearAuthentication();
         await this.cancelAttempt(request);
         return {
-          setCookie: setCookie(ATTEMPT_COOKIE, '', 0),
+          setCookie: nativeRequests.has(request)
+            ? undefined
+            : setCookie(ATTEMPT_COOKIE, '', 0),
           body: this.status(request),
         };
       }
       await clearAuthentication(row);
       return {
-        setCookie: [
-          setCookie(SESSION_COOKIE, '', 0),
-          setCookie(ATTEMPT_COOKIE, '', 0),
-        ],
+        setCookie: nativeRequests.has(request)
+          ? undefined
+          : [
+              setCookie(SESSION_COOKIE, '', 0),
+              setCookie(ATTEMPT_COOKIE, '', 0),
+            ],
         body: {
           available: true,
           loggedIn: false,

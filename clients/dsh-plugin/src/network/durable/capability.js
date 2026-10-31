@@ -9,6 +9,7 @@ import { createMailboxClient } from './client.js';
 import { formatAddress } from '../host/address.js';
 import { decodeJson } from '../session/frames.js';
 import { canonicalize } from '../trust/jcs.js';
+import { sourceObservationDeadline } from '../source-control/frames.js';
 import {
   observeTool,
   sourceEvent,
@@ -142,12 +143,16 @@ export function createDeviceMessaging(options) {
             sourceReject('observation_missing');
             throw new Error('network.unauthorized');
           }
+          const witness =
+            state.sourceControl?.witnesses[observation.witness_id]?.request
+              .native_witness;
+          const expiresAt = sourceObservationDeadline(observation, witness);
           if (
             (observation.source.state !== 'active' &&
               sourceReject('source_inactive')) ||
             (observation.source.source_binding !== entry.head &&
               sourceReject('head_mismatch')) ||
-            (now() >= Date.parse(observation.valid_until ?? '') &&
+            ((!Number.isFinite(expiresAt) || now() >= expiresAt) &&
               sourceReject('observation_expired')) ||
             (state.bindings[address.local]?.hostSessionId !== hostSessionId &&
               sourceReject('session_mismatch'))
@@ -159,7 +164,7 @@ export function createDeviceMessaging(options) {
             address,
             senderKind: 'agent',
             sendAllowed: true,
-            expiresAt: Date.parse(observation.valid_until ?? ''),
+            expiresAt,
           };
         },
         // The HTTPS server resolves and authorizes the actual registration.
@@ -200,6 +205,7 @@ export function createDeviceMessaging(options) {
             properties: {
               status: { type: 'string', enum: ['request_submitted', 'error'] },
               code: { type: 'string' },
+              retryable: { type: 'boolean' },
             },
             required: ['status'],
             additionalProperties: false,

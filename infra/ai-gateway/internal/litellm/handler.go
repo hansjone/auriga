@@ -130,6 +130,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		for name := range fields {
 			if !allowed[name] {
+				if name == "store" {
+					w.Header().Set("Content-Type", "application/problem+json")
+					w.WriteHeader(http.StatusBadRequest)
+					_ = json.NewEncoder(w).Encode(map[string]any{"status": 400, "code": "common.validation_failed", "title": "Bad Request", "detail": "The store parameter is not supported", "params": map[string]string{"field": "/store"}})
+					return
+				}
 				reject(w, 400, "common.validation_failed")
 				return
 			}

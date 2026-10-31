@@ -1,3 +1,8 @@
+import { networkTiming } from '../network/timing.js';
+import {
+  clockToleranceSeconds as defaultClockToleranceSeconds,
+  resolveClockToleranceSeconds,
+} from '../network/clock.js';
 import { tracedFetch } from '../observability/index.js';
 /* global Headers, AbortSignal */
 import { createPublicKey, verify } from 'node:crypto';
@@ -166,8 +171,13 @@ export class LoginJar {
 }
 
 /** Every network request has a timeout, body cap and redirect refusal. No automatic write retries.
- * @param {ReturnType<typeof platformConfig>} config */
-export function createPlatform(config) {
+ * @param {ReturnType<typeof platformConfig>} config
+ * @param {{clockToleranceSeconds?:number}} [options] Bounded iat/nbf skew; expiry remains strict. */
+export function createPlatform(
+  config,
+  { clockToleranceSeconds = defaultClockToleranceSeconds } = {},
+) {
+  resolveClockToleranceSeconds(clockToleranceSeconds);
   /** @param {string} path @param {any} [options] */
   async function request(
     path,
@@ -211,8 +221,11 @@ export function createPlatform(config) {
             : JSON.stringify(body),
       redirect: 'error',
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
-        : AbortSignal.timeout(15000),
+        ? AbortSignal.any([
+            signal,
+            AbortSignal.timeout(networkTiming.operationMs),
+          ])
+        : AbortSignal.timeout(networkTiming.operationMs),
     });
     jar?.accept(response.headers);
     let size = 0;
@@ -249,7 +262,7 @@ export function createPlatform(config) {
     return data;
   }
   /** @param {string} token @param {any} [expected] @param {boolean} [ai] */
-  async function verifyDevice(token, expected, ai = false) {
+  async function verifyToken(token, expected, ai = false) {
     if (typeof token !== 'string' || token.length > 16384)
       throw new Error('invalid device credential');
     const parts = token.split('.');
@@ -277,9 +290,10 @@ export function createPlatform(config) {
       !Number.isSafeInteger(claims.exp) ||
       claims.exp <= now ||
       !Number.isSafeInteger(claims.iat) ||
-      claims.iat > now + 5 ||
+      claims.iat > now + clockToleranceSeconds ||
       (claims.nbf !== undefined &&
-        (!Number.isSafeInteger(claims.nbf) || claims.nbf > now)) ||
+        (!Number.isSafeInteger(claims.nbf) ||
+          claims.nbf > now + clockToleranceSeconds)) ||
       ![claims.tid, claims.sub, claims.did].every(
         (x) => typeof x === 'string' && x.length > 0 && x.length <= 512,
       )
@@ -290,7 +304,7 @@ export function createPlatform(config) {
       (header.typ !== 'at+jwt' ||
         claims.exp - claims.iat > 300 ||
         claims.exp <= claims.iat ||
-        claims.exp > now + 300 ||
+        claims.exp > now + (300 + clockToleranceSeconds) ||
         claims.sid !== undefined ||
         claims.instanceId !== undefined ||
         !Array.isArray(claims.perms) ||
@@ -332,8 +346,8 @@ export function createPlatform(config) {
   }
   return {
     request,
-    verifyDevice,
+    verifyDevice: verifyToken,
     verifyAi: (/** @type {string} */ token, /** @type {any} */ expected) =>
-      verifyDevice(token, expected, true),
+      verifyToken(token, expected, true),
   };
 }

@@ -20,7 +20,58 @@ edge 配置 `upstreams.network-submit=https://network:18443`，固定服务端�
 - trusted_proxy HTTPS：外部浏览器访问 HTTPS；前置代理到 edge 的 portal/admin 两个 socket 仍必须 TLS+mTLS，保留完整 authority。独立的代理 CA、`proxy-client` 证书与唯一 URI SAN `auriga://proxy/nas-test` 绑定代理身份，access 的规范 `peerCidrs` 再绑定真实 TCP 来源。转发头不能选择 scheme、tenant、audience。旧版「TLS在VPS终止后明文8080+X-Forwarded-*」配方应迁移，不能继续套用。
 - 三个 listener 必须在容器中分别绑定 `0.0.0.0`；内控 listener 单独使用 HTTP，内部 alias 必须与所有 browser Origin 分开。它不发布宿主端口，只接受正式 self/heartbeat。direct 公网 TLS、split 部署及其它 schema 能力需要另行装配，本配方会明确拒绝不支持的组合。
 
-同一个最终 `config/materials/access.json` 只读挂载给 edge、IAM、agent。issuer、team Origin、RP host 从它派生，包含非默认端口；agent 不再使用旧 `INSTANCE_PLATFORM_URL`/`INSTANCE_PARENT_DOMAIN`。旧 `AURIGA_PORTAL_HOST`、`ADMIN_HOST`、`INSTANCE_PARENT_DOMAIN`、`ISSUER`、`TEAM_ORIGIN`、`TEAM_RP_ID`、`TLS_UPSTREAM`、`SECURE_COOKIES`、`TRUSTED_PROXIES` 输入会明确报迁移错误，不静默降级。access 的 tenant 必须由安装者与实际 IAM/org 租户对应；加载成功不代表租户已创建。combined 的既有首次 seed 创建演示租户 `00000000-0000-0000-0000-000000000001`，无 dev profile 或远程紧急登录例外。
+同一个最终 `config/materials/access.json` 只读挂载给 edge、IAM、agent。issuer、team Origin、RP host 从它派生，包含非默认端口；agent 不再使用旧 `INSTANCE_PLATFORM_URL`/`INSTANCE_PARENT_DOMAIN`。旧 `AURIGA_PORTAL_HOST`、`ADMIN_HOST`、`INSTANCE_PARENT_DOMAIN`、`ISSUER`、`TEAM_ORIGIN`、`TEAM_RP_ID`、`TLS_UPSTREAM`、`SECURE_COOKIES`、`TRUSTED_PROXIES` 输入会明确报迁移错误，不静默降级。access 的 tenant 必须由安装者与实际 IAM/org 租户对应；加载成功不代表租户已创建。combined 的既有首次 seed 创建演示租户 `00000000-0000-0000-0000-000000000001`，不追加 dev profile；应急远程登录由下文显式配置控制。
+
+## 桌面原生登录客户端
+
+NAS Compose 注册与开发 HTTPS 配方相同的 `auriga-dsh` 公共客户端：只允许
+`auriga.connect`、PKCE 设备授权和刷新令牌；无客户端秘密、回调地址或浏览器授权码能力。
+`stack.env` 的 `AURIGA_NAS_NATIVE_CLIENT_TENANT_ID` 必须等于安装的 IAM 租户及
+`access.json.tenantId`，默认是首次 seed 的演示租户。修改为其他租户不会创建或迁移账号。
+此配置由 Compose 传给平台，不改写已封存的安装材料或身份根；更新已有部署后按公开
+`start.sh` 重新创建平台容器。未注册时原生登录返回 `iam.invalid_client`，门户登录成功
+不能代替桌面登录验收。
+
+## 按访问来源生成对外链接
+
+IP access 模式叠加外部呈现代理时，可在 `stack.env` 配置：
+
+```dotenv
+AURIGA_LINKS_ALLOWED_ORIGINS=http://192.0.2.10:8080,https://portal.example.com
+AURIGA_LINKS_TRUSTED_PROXIES=192.0.2.20/32
+```
+
+允许列表只接受完整、规范的 HTTP(S) origin（不含尾斜杠、路径、凭据、query 或 fragment）。
+edge 按实际 TCP 对端判断是否属于独立的链接代理信任列表；可信对端才可用单值
+`X-Forwarded-Host` 与 `X-Forwarded-Proto` 声明浏览器呈现来源。其他对端的这些头一律忽略，
+从原始 Host 和实际连接 scheme 选来源。候选必须精确命中允许列表，否则使用原默认来源。
+代理须覆盖客户端提供的这两个头，不透传不可信链；只登记实际代理 IP 或最小 CIDR，禁止 `/0`。
+
+edge 清除所有外来转发/内部身份头后，仅向平台 API 写入经校验的呈现头。NAS Compose 把
+platform 的链接代理信任范围固定为内部 edge IP；拆分部署须在后端配置同一允许列表和
+`auriga.links.trusted-proxies`（直接连接后端的 edge 地址），保留后端 mTLS 与网络隔离。
+后端必须使用 `server.forward-headers-strategy=none`，不能先让容器按外来头改写真实对端；
+链接信任配置与容器自动转发头处理同时启用时，启动会拒绝。
+邀请、连接器回调、OIDC 端点地址及设备验证链接跟随该请求来源；登录事务保存开始时的
+呈现地址，后续回调仍校验原 entry 绑定。相对回跳保持相对地址，自然跟随当前浏览器来源。
+重置操作目前没有生成绝对重置链接的公开接口，不新增一条私有流程。
+
+这份允许列表同时确定同一签名根下的 issuer 别名：可信请求经域名进入时，metadata、
+访问令牌和 ID token 的 issuer 使用该域名；直接经允许的 IP 进入时使用该 IP。
+未命中列表、未配置或无 HTTP 请求上下文时回落到 access 的默认 issuer。
+IAM 和各服务内部验签接受默认 issuer 与允许列表的精确集合，使用原安装的固定 JWKS/本地公钥；
+绝不按令牌自报的 issuer 选择密钥地址。刷新同样按当前可信请求来源签发，客户端应继续访问
+原平台地址。edge、模型网关的设备校验仍委托 IAM；托管设备交换也走同一签发/验证策略，
+内部调用无呈现请求时保持默认 issuer，插件的 issuer 与平台地址同源约束保持不变。
+同一签名根不等于任意 issuer 可接受：不在集合中的 issuer 即使签名正确也拒绝。
+tenant、audience、客户端 IP、Cookie、CSRF、会话/设备归属与撤销检查继续使用原门禁；
+此配置不替代 `trusted_proxy` 的 TLS+mTLS 配方。空列表保持原行为。
+经公网代理访问应产出公网链接，直接从 IP 访问应产出 IP 链接；从独立内网管理入口创建邀请时，
+其管理 Origin 不属于门户允许列表，邀请回落到默认门户 IP，不能把它强制改为域名链接。
+
+开发 Compose 也透传同名允许列表和 edge 链接代理列表，后端默认只认可 host 网络上
+edge 的回环对端；换用其他网络时显式设置 `AURIGA_LINKS_BACKEND_PROXY_PEERS`。
+NAS 的后端对端始终由已有 `AURIGA_INTERNAL_EDGE_IP` 派生，不能填成前置代理 IP。
 
 ## 初始化、启动、停止
 
@@ -119,13 +170,17 @@ sh deploy-nas/scripts/init.sh
 sh deploy-nas/scripts/preflight.sh
 sh deploy-nas/scripts/network-preflight.sh
 sh deploy-nas/scripts/start.sh
+# 首次 seed 成功后，私密 TTY 中会显示应急账号及管理台地址。
+# 导入 TOTP，直接用浏览器登录管理台 → 成员 → 邀请。
+# 需要重新查看，或之前的 start 输出被重定向：
+sh deploy-nas/scripts/emergency.sh show
 sh deploy-nas/scripts/smoke.sh
 sh deploy-nas/scripts/stop.sh
 ```
 
-面板签名和 cron 失败只告警，不阻止其他服务启动；缺少可用面板清单时仅面板路径返回 503。
-续签任务使用 operator 在数据根父目录创建的 0700 私有目录，不要求非 root operator 写 root 所有的 config。
-`stop.sh` 自动移除本安装的 cron；卸载或移动部署材料前，先以原调度用户运行 `stop.sh` 或 `renew-panel.sh --remove`。
+面板由无网络常驻 `panel-renew` 侧车每小时检查，不依赖宿主 cron 或 sudo。
+失败/心跳陈旧仅通过侧车状态与日志暴露，edge 监听健康不依赖面板；缺少可用清单仅面板路径返回503。
+`stop.sh` 同时停止侧车；卸载或移动部署材料前先运行 `stop.sh`。
 详细的日志、健康信号和手动恢复见 [面板部署与续签](panel-deployment.md)。
 
 所有操作脚本都显式用 `sh` 调用，不依赖执行位。源码 checkout 对应 `deploy/nas/`。数据根须绝对路径、至少三层且 basename 为 `auriga-*`；拒绝链接、点段及未初始化的外来非空目录。首装/root初始化只为新建且空的材料根通过已打开 FD 设置固定 `10001:10001`，再让清空补充组的同一预构建 binary 子进程生成材料。重入按原身份校验 receipt、输入和完整材料，原 key 不轮换；错 owner/mode、额外链接、错误祖先、缺 receipt、template-only、PKI/模板目录链接都拒绝，不自动 chmod/chown 旧材料。
@@ -144,7 +199,85 @@ Linux root只从固定 `/proc/self/exe` 打开当前0755普通可执行文件，
 
 operator的 `stack.env` 与派生 `materials/access.env` 分层处理：派生文件整份通过固定9个入口字段的格式检查后才导入，未知、重复、缺项或非法值整份拒绝，不能覆盖binary／数据根／project等控制配置；该格式检查不代表receipt已验证，后续bootstrap的receipt与材料元数据校验仍独立强制。
 
-第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不要给 NAS 配方追加 dev、远程 emergency 或 observer 例外。
+第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不追加 dev 或 observer 例外；唯一允许的应急远程开关为 `AURIGA_IAM_EMERGENCY_REMOTE_ENABLED`，值只接受 true/false。
+
+## 首次登录与邀请成员
+
+首装顺序为“安装 → 查看应急账号 → 登录管理台 → 成员 → 邀请”。`init.sh` 准备安装材料，
+`start.sh` 在 platform 首次 seed 完成后向操作者 TTY 显示一次应急用户名、口令、TOTP 密钥、
+`otpauth://` URI 和管理台地址；无需执行 admin-bootstrap 或准备收件公钥来取得这些凭据。
+URI 可导入验证器，无二维码依赖时不生成终端二维码。
+
+domain、ip 和 trusted_proxy 配方均使用已安装 `config/materials/access.json` 的
+`adminOrigin`（完整 scheme、host、port）；proxy 显示外部 HTTPS 管理来源，
+不是代理上游端口或门户链接。当前安装配置只有一个管理 Origin，门户的
+`AURIGA_LINKS_ALLOWED_ORIGINS` 不自动成为管理台来源列表。
+
+NAS 配方默认 `AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=true`，可直接用远程浏览器打开管理台，
+选择应急账号并输入口令和 TOTP，然后到“成员 → 邀请”。不需要 tunnel 或收件公钥。
+此开关仅启用 IAM 已有的远程应急登录能力，不改变完整管理 Origin、TLS/代理、会话、CSRF
+和每次登录 TOTP 校验。默认开启使应急登录可经已配置的公开入口访问，应妥善保护恢复凭据。
+需要只允许本机时，在 `stack.env` 显式设为 false，运行 `render.sh` 并用 `start.sh` 重建平台；
+关闭后远程应急登录将报 `iam.emergency_local_only`，正常成员登录不受此开关影响。
+
+再次查看：`sh deploy-nas/scripts/emergency.sh show`，需本机 root 或 Docker 权限，stdout
+必须是私密 TTY；重定向、管道均拒绝。非 TTY 首启仅给 show 提示，不创建已显示标记。
+成功显示后在已有 enrollment 目录写无凭据的 `.emergency-displayed`，重复启动跳过，
+显式 show 可重新显示。helper 无网络、不挂 Docker socket、关闭日志驱动，仅挂脚本、
+安装 access 和 enrollment；原 enrollment 叶只读，目录仅为写显示标记而可写。
+不创建新明文凭据文件，不进入 Compose/服务日志；操作者应关闭终端会话录制并保护滚屏。
+
+公开命令目前只有 `sh deploy-nas/scripts/emergency.sh show`；轮换入口只有契约声明，尚无平台
+实现，因此未提供 rotate 命令，留待后续，不直接修改数据库或重跑 seed。show 仅显示原安装
+凭据；后续公开轮换落地后还需接入安全交接和旧 enrollment 的处理，不能假定该文件会自动更新。
+
+## 可选：admin-bootstrap 自动化（真实回环）
+
+IP 部署可选择公开 `scripts/admin-bootstrap.sh`，在已运行 edge 的网络空间
+启动一个临时、无端口发布的 helper，通过真实 `127.0.0.1` 完成应急登录、普通团队账号
+注册/TOTP 登记和独立正常管理员登录。Host/Origin 使用已验证 access 的规范入口，仅用于
+listener/虚拟主机选择，不发送 Forwarded、X-Forwarded-For 或任何伪造来源头，不改数据库。
+当前脚本明确只接受 IP 模式；HTTPS 不跳过证书校验，可读取该部署的公开浏览器证书链。
+
+helper 复用已独立批准并加载的精确 LiteLLM 镜像中的 Python 3/cryptography，以10001身份、
+cap-drop ALL、只读根运行。仅只读挂脚本、access、enrollment、收件公钥及可选公开证书，
+不挂 Docker socket、私钥、模型 Key 或整个数据根。普通 NAS operator 无须 sudo。
+
+在**操作者本机**准备仅本人可读的私有目录（Windows 须受限ACL），生成一次性 RSA3072
+或更强收件密钥；只有公钥可传到 NAS 的独立规范路径：
+
+```sh
+umask 077
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /private/bootstrap-recipient.key
+openssl pkey -in /private/bootstrap-recipient.key -pubout -out /private/bootstrap-recipient.pub
+# 只传 .pub，允许安装器UID10001读取它；私钥绝不上传。
+# NAS 上，使用已初始化的数据根和包：
+export AURIGA_DATA_ROOT=/srv/container/auriga-test
+sh /srv/packages/deploy-nas/scripts/admin-bootstrap.sh /srv/approved/bootstrap-recipient.pub
+```
+
+stdout 仅含 `AURIGA_BOOTSTRAP_ENVELOPE` 加密检查点，可由命令通道在本机保存。
+管理员、测试成员及原应急恢复凭据均使用 RSA-OAEP-SHA256 + AES256-GCM 封装，
+明文只在 helper 内存及服务端既有账号存储中存在，不写 NAS 文件、命令参数或日志。
+先封装登记的 TOTP，再提交确认；异常时保留最后密文供恢复，**不要盲目重新创建账号**。
+脚本用内置 owner 角色建立第一个正常超管，再建立 member 测试成员，各用空 cookie jar
+重新登录验证；正常管理员通过角色和节点权限检查后，使用既有API登出应急会话再发布完整交接，
+最后清理本次其他会话。自动化仍通过真实回环认证；原 enrollment 保持私有，是否允许远程登录取决于上述开关。
+妥善保管密文、收件私钥和解密后的恢复材料。脚本不依赖契约中尚未实现的应急轮换接口。
+
+在本机建立隔离 Python 环境并安装固定依赖，解密到新的私有文件（不会覆盖）：
+
+```sh
+python -m venv /private/admin-python
+/private/admin-python/bin/pip install -r deploy/nas/test/admin-bootstrap-requirements.txt
+/private/admin-python/bin/python deploy/nas/scripts/admin-bootstrap-decrypt.py \
+  --input /private/bootstrap-encrypted.log --private-key /private/bootstrap-recipient.key \
+  --output /private/bootstrap-accounts.json
+```
+
+Windows 使用该环境的 `Scripts/python.exe`；解密器在写入前移除新文件的继承ACL并只授当前SID。
+默认仅接受 `stage=complete`；失败恢复须显式 `--allow-partial`，只代表取回已建立步骤的凭据。
+测试凭据不是正式运营账号；用户自行登录后应按现有账号流程更换口令/MFA。不要把该私有文件提交或粘贴到报告。
 
 ## 消费独立审核的正式运行时
 
@@ -171,6 +304,8 @@ bootstrap 不修改输入的 owner/mode，不复制发布私钥。即使以 root
 基础栈准备模式仍接受原来的内存输入范围。
 
 上述模板、公开根、原字节 proof、三项原输入与内容摘要和预算一起封入安装 receipt。
+已有安装的后续发行使用 [NAS runtime-upgrade 命令](../../deploy/nas/README.md#已有-nas-的签名-runtime-升级)，
+在原封存源之外追加验签、反回滚记录与活动投影；不能直接变更本段的 bootstrap 输入。
 同本版本同输入重入逐字节无损复用，不旋转、补叶或修权限；变 image、bundle/root 路径或内容、预算、启用模式，以及坏/缺 receipt、
 未知模板或 proof、链接/硬链接和异常 owner/mode 均拒绝。首装中途 I/O 失败保留痕迹，不能删除 receipt 来补全旧信任，
 应保留材料诊断并使用全新安装目录。旧目录缺新增固定叶/目录时拒绝，不自动补写或迁移；保留无 runtime 的原 receipt 摘要字节语义不代表完成旧安装兼容迁移。
@@ -241,10 +376,28 @@ PostgreSQL 的 PGDATA 分阶段检查：仅当丢弃全部 capability 的 root �
 
 ## 节点 label 与模板匹配
 
+首次启动后，在内网管理台“节点”生成一次性加入材料；将 token 单独保存到 NAS operator
+自己的规范私有文件（当前 UID、0600、单硬链接，所在目录建议0700），不要把令牌放在命令行或日志。
+普通共享目录的 operator 可通过无网络、最小挂载的公开 helper 交付给既有 root-owned agent 文件：
+
+```sh
+AURIGA_DATA_ROOT=/srv/container/auriga-test sh deploy-nas/scripts/join-node.sh /srv/operator-private/join-token
+```
+
+helper只使用已批准且本地存在的 `AURIGA_INSTALLER_IMAGE`，input文件只读，join目录为唯一可写挂载，
+无Docker socket或宿主网络；root UID只加DAC_OVERRIDE以读取operator的0600输入。
+它检查原join目录0:0/0750、token叶0:0/0600/单链接/空文件，不修权限、不覆盖非空令牌、不重签身份。
+agent按原正式TLS+CA pin流程消费一次性令牌。未入网时agent等待超时可能重启，running不能代替online。
+若已存在非空文件，先核实际加入状态及令牌有效期，不能直接重复导入覆盖。
+
+统一浏览器验收用于NAS时可显式设置 `nodeTemplateLabel:"real-dsh"` 和 `nodeJoinTokenFile`（既有空的私有输入文件），
+`shared:false` 时正常在管理台签发并写该文件；operator随后执行上述helper，脚本继续等待节点online。
+共享部署 `shared:true` 只复用匹配标签的在线节点，不修改它。默认仍为开发模板 `real-dsh-e2e` 及原composeDir路径。
+
 正式NAS模板的调度标签为`template=real-dsh`。节点已经入网、在线或有足够容量仍可能因label不匹配而无法调度；还需核对驱动、OS/架构、可调度状态及剩余容量。管理台的节点详情支持编辑名称、标签及是否调度；标签变更需确认并刷新服务端状态。没有该页面的旧版本也可使用正式管理API调整。在正式管理入口以具备`workspace.nodes.read`/`workspace.nodes.admin`权限的管理员调用`GET /api/workspace/v1/admin/nodes`及`PATCH /api/workspace/v1/admin/nodes/{nodeId}`，PATCH使用`application/merge-patch+json`，示例请求体：
 
 ```json
-{"labels":{"template":"real-dsh"},"schedulable":true}
+{ "labels": { "template": "real-dsh" }, "schedulable": true }
 ```
 
 `labels`更新替换整份标签映射：先读取当前值，将其他需要保留的标签一并带回；仅在节点确实可承载该正式模板且准备接收实例时设置上述值。浏览器管理写入仍走正式会话、完整管理Origin和CSRF流程（包括IP模式的内存CSRF token）；不要通过直接改数据库、修改封存模板/receipt或绕过管理权限排障。更新后重新读取节点确认，再通过正常门户重试实例申请，并检查正式调度诊断。

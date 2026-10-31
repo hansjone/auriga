@@ -157,6 +157,8 @@ services:
       SERVER_ADDRESS: 0.0.0.0
       SERVER_SSL_ENABLED: 'true'
       AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
+      AURIGA_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
+      AURIGA_LINKS_TRUSTED_PROXIES: ${AURIGA_LINKS_BACKEND_PROXY_PEERS:-127.0.0.1,::1}
       AURIGA_IAM_TLS_CERT_FILE: /etc/auriga/pki/iam.crt
       AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
       AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
@@ -326,6 +328,8 @@ services:
     command: ['-config', '/etc/auriga/edge.config.json']
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
+      AURIGA_EDGE_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
+      AURIGA_EDGE_LINKS_TRUSTED_PROXIES: ${AURIGA_LINKS_TRUSTED_PROXIES:-}
       AURIGA_LOG_LEVEL: ${AURIGA_LOG_LEVEL:-INFO}
     volumes:
       - ./var/access.json:/etc/auriga/access.json:ro

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -151,6 +152,12 @@ func (b *transportBarrier) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, value := range response.Header.Values(name) {
 			w.Header().Add(name, value)
 		}
+	}
+	// HEAD has no body from which net/http can infer the descriptor size. ORAS
+	// requires that metadata for existing blobs. The parsed upstream length has
+	// already passed the same byte-budget check as the bounded response body.
+	if response.ContentLength >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(response.ContentLength, 10))
 	}
 	w.WriteHeader(response.StatusCode)
 	n, copyErr := io.Copy(w, io.LimitReader(response.Body, b.maxBytes+1))
