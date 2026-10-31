@@ -97,6 +97,7 @@ try {
         await menu.click();
         await page.waitForURL((url) => url.pathname.includes('/' + route));
         await page.getByRole('heading', {name: file === 'models' ? 'Model Management' : file === 'keys' ? /Virtual Keys/ : /Usage/}).first().waitFor();
+        await page.waitForFunction(() => !document.querySelector('.animate-pulse,.ant-skeleton,.ant-spin-spinning'));
         await page.waitForLoadState('networkidle');
         assert.equal(await page.getByLabel('Username', {exact:true}).count(), 0);
         if (fixture.evidence) {

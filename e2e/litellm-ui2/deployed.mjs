@@ -59,6 +59,7 @@ try {
     await page.getByText(label,{exact:true}).first().click();
     await page.waitForURL((url)=>url.pathname.includes('/'+route));
     await page.getByRole('heading',{name:title,exact:true}).first().waitFor();
+    await page.waitForFunction(() => !document.querySelector('.animate-pulse,.ant-skeleton,.ant-spin-spinning'));
     assert.equal(await page.getByLabel('Username',{exact:true}).count(),0);
     await mkdir(input.evidence,{recursive:true});
     await page.screenshot({path:path.join(input.evidence,'nas-'+file+'.png'),fullPage:true});
