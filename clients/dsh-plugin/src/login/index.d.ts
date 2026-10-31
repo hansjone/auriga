@@ -9,6 +9,7 @@ export interface LoginOptions {
   onRestart(context: { signal: AbortSignal }): Promise<ClientStep>;
   onComplete(): void;
   onCancel?(): Promise<void>;
+  onSkip?(): void;
 }
 
 export interface LoginView {

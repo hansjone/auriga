@@ -10,30 +10,22 @@ import { createRefreshBroker } from '../ai/refresh-broker.js';
 import { createModelLifecycle } from '../ai/installation.js';
 import { createNetworkLifecycle } from '../network/lifecycle.js';
 import { createDeviceProvider } from '../network/device-provider.js';
-import {
-  createHttpResponseTracker,
-  installHttpResponseTracking,
-} from './host.js';
-
-export const SESSION_COOKIE = 'auriga_local_session';
-export const ATTEMPT_COOKIE = 'auriga_local_attempt';
 const random = () => randomBytes(32).toString('base64url');
-const hash = (/** @type {string} */ s) =>
-  createHash('sha256').update(s).digest('hex');
+const accountName = (/** @type {any} */ saved) =>
+  [
+    saved?.claims?.name,
+    saved?.claims?.preferred_username,
+    saved?.claims?.username,
+  ].find(
+    (value) =>
+      typeof value === 'string' && value.length > 0 && value.length <= 256,
+  );
 const equal = (/** @type {unknown} */ a, /** @type {unknown} */ b) =>
   typeof a === 'string' &&
   typeof b === 'string' &&
   a.length === b.length &&
   Buffer.byteLength(a) === Buffer.byteLength(b) &&
   timingSafeEqual(Buffer.from(a), Buffer.from(b));
-/** @param {{headers:{cookie?:string}}} request @param {string} name */
-export function cookie(request, name) {
-  const rows = (request.headers.cookie ?? '')
-    .split(';')
-    .map((x) => x.trim())
-    .filter((x) => x.startsWith(name + '='));
-  return rows.length === 1 ? rows[0].slice(name.length + 1) : undefined;
-}
 
 /** Publish the commit outcome before starting any asynchronous write, so
  * cancellation cannot compensate a backing session while its device is landing.
@@ -67,7 +59,7 @@ export function abandonNativeAttempt(attempt, compensate) {
   return attempt.abandoning;
 }
 
-/** Browser sessions are process-local. Restart can never revive a revoked old bearer from disk.
+/** Verified platform sessions are owner-scoped and process-local.
  * @param {{config:import('../generated/connect-config.js').ConnectConfig,directory:string,ctx:any}} options */
 export async function createConnectRuntime({ config: input, directory, ctx }) {
   const config = platformConfig(input),
@@ -75,20 +67,23 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     vault = await createVault(directory);
   /** @type {Map<string,any>} */
   const sessions = new Map(),
-    attempts = new Map(),
-    sockets = new Map();
-  // Keys are actual admitted owner Peers supplied by DSH's RPC carrier, never
-  // ids or headers supplied by a browser. Request bindings stay backend-only.
-  /** @type {WeakMap<object,any>} */
-  const nativeOwners = new WeakMap();
+    attempts = new Map();
+  // DSH's admitted owner is one installation principal across carrier Peers.
+  // Only trusted admission binds requests; headers never select this state.
+  const ownerState = /** @type {any} */ ({});
+  let backgroundKey = '',
+    ownerSessionKey = '';
   /** @type {WeakMap<object,any>} */
   const nativeRequests = new WeakMap();
   const attemptId = (/** @type {any} */ request) =>
-    nativeRequests.get(request)?.attemptId ?? cookie(request, ATTEMPT_COOKIE);
-  const forgetAttempt = (/** @type {any} */ request) => {
-    attempts.delete(attemptId(request));
+    nativeRequests.get(request)?.attemptId;
+  const forgetAttempt = (
+    /** @type {any} */ request,
+    expected = attemptId(request),
+  ) => {
+    attempts.delete(expected);
     const owner = nativeRequests.get(request);
-    if (owner) owner.attemptId = undefined;
+    if (owner && owner.attemptId === expected) owner.attemptId = undefined;
   };
   const expiryTimer = setInterval(() => {
     let renew = false;
@@ -114,6 +109,12 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   let communication = 'idle';
   /** @type {Promise<void>|undefined} */
   let teamStarting;
+  let teamFailures = 0,
+    teamRetryAt = 0;
+  let restoreFailures = 0,
+    restoreRetryAt = 0;
+  const retryDelay = (/** @type {number} */ failures) =>
+    Math.min(30000, 1000 * 2 ** Math.min(failures - 1, 5));
   /** @type {Promise<void>|undefined} */
   let revoking;
   async function drainRevocations() {
@@ -173,17 +174,13 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   };
   const resolve = (/** @type {any} */ request) => {
     const owner = nativeRequests.get(request);
-    if (owner) return sessionForKey(owner.sessionKey);
-    const bearer = cookie(request, SESSION_COOKIE);
-    return bearer?.length === 43 ? sessionForKey(hash(bearer)) : null;
+    if (owner)
+      return sessionForKey(ownerSessionKey) ?? sessionForKey(backgroundKey);
+    return null;
   };
   const killSession = (/** @type {any} */ row) => {
     sessions.delete(row.key);
-    httpResponses.close(row.key);
-    for (const socket of sockets.get(row.key) ?? []) socket.destroy();
-    sockets.delete(row.key);
   };
-  const httpResponses = createHttpResponseTracker(resolve);
   const network = createNetworkLifecycle({
     directory: join(directory, 'network'),
     installation: config.network,
@@ -251,8 +248,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     broker,
     origin: config.platformOrigin,
   });
-  /** @type {(()=>void)|undefined} */
-  let stopHttpTracking;
   /** @type {Promise<void>|undefined} */
   let networkClosing;
   async function getAccess() {
@@ -285,12 +280,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       throw new Error('login attempt expired');
     return row;
   }
-  const setCookie = (
-    /** @type {string} */ name,
-    /** @type {string} */ value,
-    /** @type {number|undefined} */ maxAge = undefined,
-  ) =>
-    `${name}=${value}; Path=/; HttpOnly; SameSite=Strict${ctx.webServer.protocol === 'https:' ? '; Secure' : ''}${maxAge === undefined ? '' : '; Max-Age=' + maxAge}`;
   async function abandon(/** @type {any} */ row) {
     return abandonNativeAttempt(row, async () => {
       if (!row.transactionId) return;
@@ -312,11 +301,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     });
   }
   async function startTeam(assertAttempt = () => {}) {
-    if (team) {
-      await team.verifyOnline();
-      assertAttempt();
-      return;
-    }
     if (
       !ctx.tools?.register ||
       !ctx.sessionController?.create ||
@@ -366,8 +350,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (startingTeam === candidate) startingTeam = undefined;
     }
   }
-  function connectTeam(verify = false) {
-    if (teamStarting || closed || (!verify && team && online)) return;
+  function connectTeam() {
+    if (teamStarting || closed || (team && online) || Date.now() < teamRetryAt)
+      return;
     if (team && !online) {
       team.close();
       team = undefined;
@@ -375,23 +360,86 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     const g = generation;
     communication = 'connecting';
     teamStarting = startTeam()
+      .then(() => {
+        teamFailures = 0;
+        teamRetryAt = 0;
+      })
       .catch(() => {
         if (!closed && generation === g) {
           online = false;
           communication = 'unavailable';
+          teamRetryAt = Date.now() + retryDelay(++teamFailures);
         }
       })
       .finally(() => {
         teamStarting = undefined;
       });
   }
-  function issueBrowserSession(
+  /** Restore platform capabilities without granting any browser a session. */
+  async function restorePlatform() {
+    if (
+      closed ||
+      !vault.snapshot().credential ||
+      broker.status.reauthenticationRequired
+    )
+      return;
+    if (sessionForKey(ownerSessionKey) || sessionForKey(backgroundKey)) {
+      connectTeam();
+      return;
+    }
+    if (Date.now() < restoreRetryAt) return;
+    const g = generation;
+    try {
+      const saved = vault.snapshot().credential;
+      const token = await getAccess();
+      const claims = await platform.verifyDevice(token, saved.claims);
+      active(g);
+      if (!sessionForKey(backgroundKey)) {
+        backgroundKey = random();
+        sessions.set(backgroundKey, {
+          key: backgroundKey,
+          subject: claims.sub,
+          tenantId: claims.tid,
+          deviceId: claims.did,
+          csrf: random(),
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          accessExpiresAt: claims.exp * 1000,
+        });
+      }
+      models.login();
+      network.login();
+      restoreFailures = 0;
+      restoreRetryAt = 0;
+      connectTeam();
+    } catch {
+      if (!closed && generation === g) {
+        online = false;
+        communication = 'unavailable';
+        restoreRetryAt = Date.now() + retryDelay(++restoreFailures);
+      }
+    }
+  }
+  let restoring = false;
+  const restore = async () => {
+    if (restoring || closed) return;
+    restoring = true;
+    try {
+      await restorePlatform();
+    } finally {
+      restoring = false;
+    }
+  };
+  const restoreTimer = setInterval(() => {
+    void restore();
+  }, 1000);
+  restoreTimer.unref();
+  void restore();
+  function issueOwnerSession(
     /** @type {any} */ row,
     /** @type {any} */ request,
     /** @type {any} */ credential,
   ) {
-    const bearer = random(),
-      key = hash(bearer),
+    const key = random(),
       session = {
         key,
         subject: credential.claims.sub,
@@ -402,22 +450,20 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         accessExpiresAt: credential.claims.exp * 1000,
       };
     sessions.set(key, session);
-    const nativeOwner = nativeRequests.get(request);
-    if (nativeOwner) nativeOwner.sessionKey = key;
+    ownerSessionKey = key;
     models.login();
     // Native identity is verified and durably owned before session issuance.
     // Independent N1 must not wait for legacy Team/MCP availability.
     network.login();
-    connectTeam(true);
+    teamFailures = 0;
+    teamRetryAt = 0;
+    connectTeam();
     row.jar.clear();
     row.verifier = undefined;
     row.device = undefined;
     forgetAttempt(request);
     return {
       step: { type: 'complete', redirectTo: '/' },
-      setCookie: nativeOwner
-        ? undefined
-        : [setCookie(SESSION_COOKIE, bearer), setCookie(ATTEMPT_COOKIE, '', 0)],
     };
   }
   /** Trusted settings changes also use the normal tombstone/revocation path.
@@ -484,25 +530,15 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     nativeRequest(peer) {
       if (!peer || typeof peer !== 'object' || peer.principal?.kind !== 'owner')
         throw new Error('native owner admission required');
-      let owner = nativeOwners.get(peer);
-      if (!owner) {
-        owner = {};
-        nativeOwners.set(peer, owner);
-      }
       const request = { headers: {} };
-      nativeRequests.set(request, owner);
+      nativeRequests.set(request, ownerState);
       return request;
-    },
-    /** @param {object} peer */
-    resolveNative(peer) {
-      return sessionForKey(nativeOwners.get(peer)?.sessionKey);
     },
     /** Bind a request only after the native carrier admitted this exact Peer.
      * @param {object} peer @param {any} request */
     bindNativeRequest(peer, request) {
-      const owner = nativeOwners.get(peer);
-      if (!owner || !sessionForKey(owner.sessionKey)) return null;
-      nativeRequests.set(request, owner);
+      this.nativeRequest(peer);
+      nativeRequests.set(request, ownerState);
       return resolve(request);
     },
     resetAuthentication: clearAuthentication,
@@ -520,25 +556,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     get networkStatus() {
       return network.status;
     },
-    /** @param {import('node:http').IncomingMessage} request @param {import('node:http').ServerResponse} response */
-    bindHttpResponse(request, response) {
-      return httpResponses.bind(request, response);
-    },
-    installHttpTracking() {
-      if (stopHttpTracking)
-        throw new Error('native HTTP tracking already installed');
-      const remove = installHttpResponseTracking(ctx, (req, res) =>
-        httpResponses.bind(req, res),
-      );
-      let removed = false;
-      stopHttpTracking = () => {
-        if (removed) return;
-        removed = true;
-        remove();
-        stopHttpTracking = undefined;
-      };
-      return stopHttpTracking;
-    },
     isReady() {
       return !!team && online && !closed;
     },
@@ -549,16 +566,41 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     },
     status(/** @type {any} */ request) {
       const row = resolve(request);
+      const saved = vault.snapshot().credential;
+      const resumable =
+        nativeRequests.has(request) &&
+        !!saved &&
+        !broker.status.reauthenticationRequired;
       return {
         available: true,
         loggedIn: !!row,
+        resumeAvailable: resumable,
+        platform:
+          !row && resumable
+            ? 'recovering'
+            : row
+              ? 'authenticated'
+              : 'signed_out',
         connected: !!row && !!team && online,
         communication: row ? communication : 'idle',
         models: models.status,
         network: row
           ? network.status
           : { available: false, connected: false, state: 'idle' },
-        account: row ? { subject: row.subject } : null,
+        account:
+          row || resumable
+            ? {
+                subject: row?.subject ?? saved.claims.sub,
+                ...(accountName(saved)
+                  ? { displayName: accountName(saved) }
+                  : {}),
+              }
+            : null,
+        deviceName: config.deviceName ?? null,
+        loginTime:
+          row || resumable
+            ? (vault.snapshot().credential?.loginTime ?? null)
+            : null,
         csrf: row?.csrf,
         remoteRevocation: (vault.snapshot().revocations ?? []).length
           ? 'pending'
@@ -585,6 +627,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     },
     prepare(/** @type {any} */ request) {
       active();
+      if (!nativeRequests.has(request))
+        throw new Error('native owner admission required');
       const current = resolve(request);
       if (current) {
         // An authenticated page/status refresh is the explicit retry trigger;
@@ -615,7 +659,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       const owner = nativeRequests.get(request);
       if (owner) owner.attemptId = id;
       return {
-        setCookie: owner ? undefined : setCookie(ATTEMPT_COOKIE, id ?? '', 300),
         body: {
           ...this.status(request),
           csrf: row.csrf,
@@ -627,6 +670,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     },
     async login(/** @type {any} */ request, /** @type {any} */ input) {
       const row = attemptFor(request),
+        id = attemptId(request),
         g = generation;
       if (row.busy) throw new Error('login attempt busy');
       row.busy = true;
@@ -648,10 +692,29 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           check();
           await platform.verifyDevice(token, saved.claims);
           check();
-          return issueBrowserSession(row, request, vault.snapshot().credential);
+          return issueOwnerSession(row, request, vault.snapshot().credential);
         }
         let transaction;
         if (input.action === 'begin') {
+          // Optional login can be reopened in any owner window. Preserve its
+          // current form and PKCE transaction until explicit restart/expiry.
+          if (row.transactionId && row.step) return { step: row.step };
+          if (!row.selectedProvider) {
+            const providers = await platform.request(
+              '/api/iam/v1/login/providers',
+              { signal: row.controller.signal },
+            );
+            check();
+            const teams = providers.items?.filter(
+              (/** @type {any} */ p) =>
+                p.connectorType === 'team-account' &&
+                p.primaryStep === 'form' &&
+                typeof p.id === 'string',
+            );
+            if (teams?.length !== 1)
+              throw new Error('team account login unavailable');
+            row.selectedProvider = teams[0].id;
+          }
           if (row.transactionId)
             throw new Error('restart login with a new attempt');
           row.verifier = randomBytes(48).toString('base64url');
@@ -662,7 +725,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
               jar: row.jar,
               signal: row.controller.signal,
               body: {
-                providerId: config.providerId,
+                providerId: row.selectedProvider,
                 purpose: 'login',
                 returnTo: '/',
                 nativeConnect: {
@@ -716,8 +779,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           !['form', 'fail', 'complete'].includes(transaction.step?.type)
         )
           throw new Error('unsupported native login step');
-        if (transaction.step.type !== 'complete')
+        if (transaction.step.type !== 'complete') {
+          row.step = transaction.step;
           return { step: transaction.step };
+        }
         if (
           transaction.status !== 'completed' ||
           Date.parse(row.device.expiresAt) <= Date.now()
@@ -761,7 +826,11 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           }
         }
         check();
-        const credential = await validateTokens(tokens);
+        const verified = await validateTokens(tokens);
+        const credential = {
+          ...verified,
+          loginTime: new Date().toISOString(),
+        };
         check();
         const finish = finalizing.then(async () => {
           check();
@@ -821,56 +890,40 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         finalizing = finish.catch(() => {});
         await finish;
         check();
-        return issueBrowserSession(row, request, credential);
+        return issueOwnerSession(row, request, credential);
       } catch (error) {
         await abandon(row);
-        forgetAttempt(request);
+        forgetAttempt(request, id);
         throw error;
       } finally {
         row.busy = false;
       }
     },
-    async cancelAttempt(/** @type {any} */ request) {
+    attemptToken: attemptId,
+    async cancelAttempt(
+      /** @type {any} */ request,
+      /** @type {string|undefined} */ expected = undefined,
+    ) {
       const id = attemptId(request),
         row = attempts.get(id);
-      if (!row) return;
+      if (!row || (expected !== undefined && expected !== id)) return;
       forgetAttempt(request);
       await abandon(row);
     },
-    bindSocket(/** @type {any} */ request) {
-      const row = resolve(request);
-      if (!row) return false;
-      if (request.headers.upgrade?.toLowerCase() !== 'websocket') return true;
-      let set = sockets.get(row.key);
-      if (!set) sockets.set(row.key, (set = new Set()));
-      const socket = request.socket;
-      if (socket && !set.has(socket)) {
-        set.add(socket);
-        socket.once('close', () => set.delete(socket));
-      }
-      return true;
-    },
     async logout(/** @type {any} */ request) {
+      if (!nativeRequests.has(request))
+        throw new Error('native owner admission required');
       const row = resolve(request);
       if (!row) {
         if (nativeRequests.has(request) && vault.snapshot().credential)
           await clearAuthentication();
         await this.cancelAttempt(request);
         return {
-          setCookie: nativeRequests.has(request)
-            ? undefined
-            : setCookie(ATTEMPT_COOKIE, '', 0),
           body: this.status(request),
         };
       }
       await clearAuthentication(row);
       return {
-        setCookie: nativeRequests.has(request)
-          ? undefined
-          : [
-              setCookie(SESSION_COOKIE, '', 0),
-              setCookie(ATTEMPT_COOKIE, '', 0),
-            ],
         body: {
           available: true,
           loggedIn: false,
@@ -888,9 +941,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       closed = true;
       broker.invalidate('closed');
       models.close();
-      stopHttpTracking?.();
       clearInterval(expiryTimer);
       clearInterval(revokeTimer);
+      clearInterval(restoreTimer);
       generation++;
       networkClosing = network.close();
       team?.close();

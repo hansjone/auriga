@@ -1,3 +1,4 @@
+import { ownerRequest } from '../owner-request.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
@@ -30,18 +31,19 @@ test('runtime: Team 401 disconnects communication without rejecting verified res
   const detach = await f.runtime.attachModels(ctx.llm);
   const previous = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', (url, init) =>
-    new URL(url).pathname === '/ai/mcp'
+    new URL(url).pathname === '/ai/mcp' ||
+    new URL(url).pathname.startsWith('/ai/team/node/')
       ? Promise.resolve(
           Response.json({ code: 'common.unauthenticated' }, { status: 401 }),
         )
       : previous(url, init),
   );
   try {
-    const attempt = { headers: {} };
-    attempt.headers.cookie = f.runtime.prepare(attempt).setCookie.split(';')[0];
-    const result = await f.runtime.login(attempt, { action: 'resume' });
-    assert.equal(result.step.type, 'complete');
-    attempt.headers.cookie = result.setCookie[0].split(';')[0];
+    const attempt = f.runtime.nativeRequest({ principal: { kind: 'owner' } });
+    f.runtime.prepare(attempt);
+
+    assert.equal(f.runtime.status(attempt).loggedIn, true);
+
     await waitFor(
       () => f.runtime.status(attempt).communication === 'unavailable',
     );
@@ -178,9 +180,9 @@ for (const scenario of ['same_owner', 'other_owner', 'other_platform'])
           s.credential.platformOrigin = 'https://other.example.com';
         });
       const request = { headers: {} },
-        prepared = f.runtime.prepare(request);
+        prepared = f.runtime.prepare(ownerRequest(f.runtime, request));
       assert.equal(prepared.body.resumeAvailable, false);
-      request.headers.cookie = prepared.setCookie.split(';')[0];
+
       await f.runtime.login(request, { action: 'begin' });
       t.mock.timers.tick(1000);
       const complete = f.runtime.login(request, {
@@ -204,8 +206,8 @@ for (const scenario of ['same_owner', 'other_owner', 'other_platform'])
         );
         assert.deepEqual(ctx.llm.listProviders(), []);
       } else {
-        const result = await complete;
-        request.headers.cookie = result.setCookie[0].split(';')[0];
+        await complete;
+
         const state = f.runtime.vault.snapshot();
         assert.equal(state.credential.refreshToken, 'fresh-native-refresh');
         assert.equal(state.credential.claims.did, 'new-device');

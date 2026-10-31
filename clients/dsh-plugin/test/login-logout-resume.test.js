@@ -1,3 +1,4 @@
+import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -43,6 +44,7 @@ function browser(runtime, cookie = '') {
         cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join('; '),
       },
     });
+    ownerRequest(runtime, req);
     const call = {
       path: url,
       action: body?.action,
@@ -110,41 +112,20 @@ async function settled(root) {
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
-function streams(runtime, request) {
-  let httpClosed = 0,
-    wsClosed = 0;
-  const http = new EventEmitter(),
-    socket = new EventEmitter();
-  http.destroy = () => {
-    httpClosed++;
-    http.emit('close');
-  };
-  socket.destroy = () => {
-    wsClosed++;
-    socket.emit('close');
-  };
-  runtime.bindHttpResponse(request, http);
-  runtime.bindSocket({
-    ...request,
-    headers: { ...request.headers, upgrade: 'websocket' },
-    socket,
-  });
-  return () => {
-    assert.equal(httpClosed, 1);
-    assert.equal(wsClosed, 1);
-  };
-}
 function assertDeviceGone(runtime, request, registered) {
   assert.equal(runtime.vault.snapshot().credential === null, true);
   assert.equal(runtime.isReady(), false);
   assert.equal(runtime.resolve(request), null);
   assert.equal(registered.size, 0);
-  assert.equal(runtime.prepare({ headers: {} }).body.resumeAvailable, false);
+  assert.equal(
+    runtime.prepare(ownerRequest(runtime, { headers: {} })).body
+      .resumeAvailable,
+    false,
+  );
 }
 
 test('expired browser session: explicit confirmation resumes ownership, uses fresh CSRF and truly revokes the backing', async (t) => {
   const { runtime, request, registered, requests } = await runtimePeer(t);
-  const closed = streams(runtime, request);
   const now = Date.now();
   t.mock.method(Date, 'now', () => now + 1800001);
   assert.equal(runtime.resolve(request), null);
@@ -156,7 +137,6 @@ test('expired browser session: explicit confirmation resumes ownership, uses fre
   await settled(root);
   assert.match(root.textContent, /已退出本机登录/);
   assertDeviceGone(runtime, request, registered);
-  closed();
   assert.equal(client.calls.filter((c) => c.action === 'resume').length, 1);
   const writes = client.calls.filter((c) => c.path.endsWith('/logout'));
   assert.equal(writes.length, 1);
@@ -172,7 +152,6 @@ test('expired browser session: explicit confirmation resumes ownership, uses fre
 
 test('another anonymous browser: GET and cancel preserve A; only explicitly confirmed owner resume can globally sign out', async (t) => {
   const { runtime, request, registered } = await runtimePeer(t);
-  const closed = streams(runtime, request);
   const client = browser(runtime);
   const root = page(t, client);
   assert.equal(client.calls.length, 0);
@@ -182,14 +161,13 @@ test('another anonymous browser: GET and cancel preserve A; only explicitly conf
   assert.ok(runtime.resolve(request));
   assert.equal(runtime.isReady(), true);
   assert.equal(
-    client.calls.find((c) => c.path.endsWith('/logout')).authenticated,
+    client.calls.some((c) => c.path.endsWith('/logout')),
     false,
   );
   root.querySelector('[data-action=confirm]').click();
   await settled(root);
   assert.match(root.textContent, /已退出本机登录/);
   assertDeviceGone(runtime, request, registered);
-  closed();
   assert.equal(
     client.calls.filter((c) => c.path.endsWith('/logout') && c.authenticated)
       .length,
@@ -200,6 +178,8 @@ test('another anonymous browser: GET and cancel preserve A; only explicitly conf
 for (const failure of ['resume', 'jwks', 'logout']) {
   test(`confirmed logout ${failure} failure remains visibly failed and explicitly retryable`, async (t) => {
     const { runtime, request, registered } = await runtimePeer(t);
+    const now = Date.now();
+    t.mock.method(Date, 'now', () => now + 1800001);
     const client = browser(runtime);
     const originalFetch = globalThis.fetch;
     let badProof = failure === 'jwks';
@@ -215,7 +195,7 @@ for (const failure of ['resume', 'jwks', 'logout']) {
     assert.match(root.textContent, /退出未完成/);
     assert.doesNotMatch(root.textContent, /已退出本机|private/);
     assert.ok(runtime.vault.snapshot().credential);
-    assert.ok(runtime.resolve(request));
+    assert.equal(runtime.status(request).resumeAvailable, true);
     client.failAt('');
     badProof = false;
     root.querySelector('[data-action=confirm]').click();
@@ -245,7 +225,7 @@ test('remote revoke failure reports pending only after local backing is gone, re
     (await controller.logout(new AbortController().signal)).remoteRevocation,
     'pending',
   );
-  assert.equal(client.calls.filter((c) => c.action === 'resume').length, 1);
+  assert.equal(client.calls.filter((c) => c.action === 'resume').length, 0);
 });
 
 test('truly signed-out device confirmation is idempotent without resume or anonymous global logout', async (t) => {

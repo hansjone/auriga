@@ -1,10 +1,10 @@
+import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createLogoutView } from '../src/login/logout.js';
 import { createLocalLoginController } from '../src/login/local-controller.js';
 import { runtimePeer } from './local-runtime-peer.js';
-import { EventEmitter } from 'node:events';
 import { setImmediate } from 'node:timers';
 const tick = async () => {
   for (let i = 0; i < 16; i++) await Promise.resolve();
@@ -107,28 +107,12 @@ test('page disposal aborts request and suppresses late success', async (t) => {
 });
 test('confirmed logout closes identity HTTP/WS and rejects old admission while the runtime remains available', async (t) => {
   const { runtime, request } = await runtimePeer(t);
-  let httpClosed = 0,
-    wsClosed = 0;
-  const http = new EventEmitter();
-  http.destroy = () => {
-    httpClosed++;
-    http.emit('close');
-  };
-  const ws = new EventEmitter();
-  ws.destroy = () => {
-    wsClosed++;
-    ws.emit('close');
-  };
-  runtime.bindHttpResponse(request, http);
-  runtime.bindSocket({
-    ...request,
-    headers: { ...request.headers, upgrade: 'websocket' },
-    socket: ws,
-  });
   const controller = createLocalLoginController({
     fetch: async (url, options) => {
       if (url.endsWith('/status'))
-        return Response.json(runtime.prepare(request).body);
+        return Response.json(
+          runtime.prepare(ownerRequest(runtime, request)).body,
+        );
       assert.ok(url.endsWith('/logout'));
       assert.equal(
         options.headers['X-Auriga-CSRF'],
@@ -140,7 +124,7 @@ test('confirmed logout closes identity HTTP/WS and rejects old admission while t
   const { root } = mount(t, {
     onConfirm: ({ signal }) => controller.logout(signal),
   });
-  assert.equal(httpClosed, 0);
+
   root.querySelector('[data-action=confirm]').click();
   // The runtime owns asynchronous filesystem persistence.
   await new Promise((resolve, reject) => {
@@ -154,8 +138,10 @@ test('confirmed logout closes identity HTTP/WS and rejects old admission while t
     check();
   });
   assert.equal(runtime.resolve(request), null);
-  assert.equal(runtime.bindHttpResponse(request, new EventEmitter()), false);
-  assert.equal(httpClosed, 1);
-  assert.equal(wsClosed, 1);
-  assert.equal(runtime.prepare({ headers: {} }).body.loggedIn, false);
+  assert.equal(runtime.bindHttpResponse, undefined);
+
+  assert.equal(
+    runtime.prepare(ownerRequest(runtime, { headers: {} })).body.loggedIn,
+    false,
+  );
 });

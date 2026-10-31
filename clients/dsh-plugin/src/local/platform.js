@@ -36,18 +36,8 @@ export async function savedPlatformConfig(
       : {}),
   });
   if (same) return config;
-  const providers = await createPlatform(config).request(
-    '/api/iam/v1/login/providers',
-  );
-  const teams = providers.items?.filter(
-    (/** @type {any} */ p) =>
-      p.connectorType === 'team-account' && p.primaryStep === 'form',
-  );
-  if (teams?.length !== 1)
-    throw new Error(
-      'one team-account form provider or explicit loader configuration required',
-    );
-  return platformConfig({ ...config, providerId: teams[0].id });
+  // Discovery belongs to login, never offline local runtime construction.
+  return config;
 }
 
 /** Installation-owned origin. No URL, issuer or redirect is accepted from UI/model input.
@@ -346,6 +336,11 @@ export function createPlatform(
   }
   return {
     request,
+    probe: (/** @type {AbortSignal} */ signal) =>
+      request(
+        new URL(config.issuer).pathname.replace(/\/$/, '') + '/oauth2/jwks',
+        { signal },
+      ),
     verifyDevice: verifyToken,
     verifyAi: (/** @type {string} */ token, /** @type {any} */ expected) =>
       verifyToken(token, expected, true),

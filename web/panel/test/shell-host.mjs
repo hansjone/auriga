@@ -292,6 +292,26 @@ export function surfaceHost(
       return consentFetch
         ? consentFetch(url, init)
         : Promise.resolve(response(503, { code: 'common.unavailable' }));
+    if (path.endsWith('/auriga/local-login/status'))
+      return Promise.resolve(fetchImpl(url, init)).then(async (result) => {
+        if (result.ok === false) return result;
+        const data = await result.json();
+        if (typeof data.loggedIn === 'boolean')
+          return response(result.status ?? 200, data);
+        // Bootstrap fixtures are not status responses. Supply the independent
+        // authenticated runtime projection used by the settings integration.
+        const loggedIn = ['managed', 'connect'].includes(data.mode);
+        return response(200, {
+          loggedIn,
+          connected: data.connection?.connected === true,
+          account: loggedIn ? { subject: 'fixture-member' } : null,
+          network: {
+            connected: data.connection?.connected === true,
+            state: 'unavailable',
+          },
+          connection: data.connection,
+        });
+      });
     return fetchImpl(url, init);
   };
   vm.runInNewContext(
@@ -342,7 +362,12 @@ export function surfaceHost(
                 'utf8',
               );
           const module = new vm.SourceTextModule(source, {
-            context: vm.createContext({ AbortSignal: globalThis.AbortSignal }),
+            context: vm.createContext({
+              AbortSignal: globalThis.AbortSignal,
+              document,
+              setInterval: window.setInterval.bind(window),
+              clearInterval: window.clearInterval.bind(window),
+            }),
           });
           await module.link(() => {
             throw new Error('Unexpected settings dependency');
