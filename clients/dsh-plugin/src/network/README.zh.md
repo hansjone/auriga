@@ -90,3 +90,5 @@ provider 接口：
 退出、凭据刷新失效、明确设备吊销、provider 卸载都会立即关闭发送入口、取消连接与订阅，晚到的 prepare/READY/验签结果不能恢复旧登录。文件写入结果不确定时保持失败关闭。密钥刷新统计在 runtime diagnostics；已知版本的缓存过期/写入失败仍可受限刷新；刷新成功后从 committed 游标重扫，不跳过暂时未知密钥的消息。
 
 工具在 READY 成功后注册，断连、票据错误或握手失败时撤销。runtime 通过 `onClosed(reason)` 在存储清理结束后通知 lifecycle；意外停机显示 unavailable，并按 500ms 至 30s 的有界退避重建。退出/吊销会使 generation 失效，不触发旧身份重建。故障诊断只含固定原因计数与最多 64 条摘要。
+
+首次连接尚未尝试账本提交时，socket 关闭/丢失、READY 超时等明确瞬时故障，允许在原运行时、原登记响应和原单写者句柄内退避重试。每轮先真实停止旧 transport，再取新票、建立新连接并重新验证新 nonce 的签名 READY；只有成功后才执行一次 initialize。退出、吊销、信任失效、协议/签名拒绝或写入未知不沿此路径重试。不持久缓存 created=true，也不把后续 created=false 改成 true；进程已退出且确实缺失账本的旧设备仍须权威恢复流程。

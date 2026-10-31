@@ -1,5 +1,8 @@
 /* global AbortSignal */
 import { randomUUID, createHash } from 'node:crypto';
+import { setTimeout as retryDelay } from 'node:timers/promises';
+import { TransportError } from './transport/errors.js';
+import { SessionError } from './session/errors.js';
 import { join } from 'node:path';
 import { NatsTransport, createWsSocketFactory } from './transport/index.js';
 import { createFileLedgerStore } from './host/store.js';
@@ -804,35 +807,84 @@ export async function openConnectionRuntime(options) {
       await refreshTrust(trust);
       active();
       if (!ledger.state) {
-        const first = diagnostics
-          .scope('wss_connect', 10000)
-          .sync(() => connect(trust, false));
-        await run('wss_connect', () => first.transport.start(), 10000);
-        active();
-        first.entry.epoch = first.transport.epoch;
-        const bootstrapSignal = AbortSignal.any([
-          signal,
-          first.entry.attempt.signal,
-        ]);
-        const output = await run(
-          'bootstrap_ready',
-          () =>
-            bootstrapReady({
-              registration: { ...registration, created: true },
-              transport: first.facade,
-              trust,
-              signal: bootstrapSignal,
-              now,
-            }),
-          5000,
-        );
-        active();
+        /** @type {ReturnType<typeof connect>|undefined} */
+        let first = undefined;
+        /** @type {AbortSignal} */
+        let bootstrapSignal;
+        /** @type {Awaited<ReturnType<typeof bootstrapReady>>} */
+        let output;
+        let failures = 0;
+        for (;;) {
+          active();
+          try {
+            first = diagnostics
+              .scope('wss_connect', 10000)
+              .sync(() => connect(trust, false));
+            const currentFirst = first;
+            await run(
+              'wss_connect',
+              () => currentFirst.transport.start(),
+              10000,
+            );
+            active();
+            first.entry.epoch = first.transport.epoch;
+            bootstrapSignal = AbortSignal.any([
+              signal,
+              first.entry.attempt.signal,
+            ]);
+            output = await run(
+              'bootstrap_ready',
+              () =>
+                bootstrapReady({
+                  registration: { ...registration, created: true },
+                  transport: currentFirst.facade,
+                  trust,
+                  signal: bootstrapSignal,
+                  now,
+                }),
+              5000,
+            );
+            active();
+            break;
+          } catch (error) {
+            active();
+            const transient =
+              (error instanceof TransportError &&
+                [
+                  'connection_closed',
+                  'connection_lost',
+                  'not_connected',
+                  'connect_failed',
+                  'timeout',
+                  'write_stalled',
+                ].includes(error.code)) ||
+              (error instanceof SessionError &&
+                ['timeout', 'stopped'].includes(error.code));
+            if (!transient) throw error;
+            // No initialize/commit has been attempted. Retain this live
+            // registration and its original writer, never persist created=true
+            // or reopen an absent ledger on a subsequent registration.
+            if (first) {
+              await first.entry.stop();
+              connections.delete(first.entry);
+            }
+            active();
+            await retryDelay(
+              Math.min(30000, 250 * 2 ** Math.min(failures++, 7)),
+              undefined,
+              { signal },
+            );
+          }
+        }
+        if (!first || !bootstrapSignal || !output)
+          throw new Error('bootstrap attempt unavailable');
+        const completedFirst = first;
         const firstCurrent = () => {
           active();
           bootstrapSignal.throwIfAborted();
           if (
-            first.transport.state !== 'ready' ||
-            first.transport.epoch !== first.entry.epoch
+            completedFirst.transport.state !== 'ready' ||
+            completedFirst.transport.epoch !== completedFirst.entry.epoch
           )
             throw new Error('bootstrap connection changed');
         };

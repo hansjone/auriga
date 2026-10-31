@@ -202,6 +202,7 @@ async function fixture(t, extra = {}) {
         state: 'idle',
         async start() {
           options.onState({ state: 'connecting', epoch: 0 });
+          await extra.start?.(connection.id);
           await options.getTicket({ reason: 'start', attempt: 0 });
           connection.state = 'ready';
           options.onState({ state: 'ready', epoch: 1 });
@@ -1809,6 +1810,35 @@ test('uncertain register response never reuses created and missing ledger is den
   await assert.rejects(next.runtime.start(), /ledger/);
   assert.equal(next.connections.length, 0);
   assert.equal(first.ledger.snapshot(), undefined);
+});
+
+test('first socket failure retries under the original registration and writer lock', async (t) => {
+  const f = await fixture(t, {
+    start(id) {
+      if (id === 1)
+        throw new TransportError('connection_closed', 'connection closed');
+    },
+  });
+  await f.runtime.start();
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(f.events.filter((x) => x === 'register').length, 1);
+  assert.equal(f.events.filter((x) => x === 'commit').length, 1);
+  assert.equal(f.connections.length, 3);
+  assert.ok(f.events.indexOf('stop-1') < f.events.indexOf('ready-2'));
+});
+
+test('C1 socket loss before commit retries a fresh nonce without replaying initialize authority', async (t) => {
+  const f = await fixture(t, {
+    ready(id) {
+      if (id === 1)
+        throw new TransportError('connection_lost', 'connection lost');
+    },
+  });
+  await f.runtime.start();
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(f.events.filter((x) => x === 'register').length, 1);
+  assert.equal(f.events.filter((x) => x === 'commit').length, 1);
+  assert.equal(new Set(f.sent.map((s) => s.request.channel_nonce)).size, 3);
 });
 test('C2 failure leaves complete ledger and next created false attempt skips bootstrap', async (t) => {
   const first = await fixture(t, {
