@@ -7,6 +7,7 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import NodesView from '../src/views/NodesView.vue';
 import InstancesView from '../src/views/InstancesView.vue';
 import MembersView from '../src/views/MembersView.vue';
+import MemberRoles from '../src/admin/MemberRoles.vue';
 import { apiClient, bindApiRouter } from '../src/api';
 import { adminApi, type Instance, type Node } from '../src/admin/api';
 
@@ -224,6 +225,20 @@ async function confirm() {
 const writes = () => calls.filter((call) => call.method !== 'GET');
 
 describe('administrative resource workflows', () => {
+  it('reports failed member readback after a role write without claiming refreshed permissions', async () => {
+    await render(MembersView);
+    await click('详情');
+    failure = {
+      path: `/api/org/v1/admin/members/${memberId}`,
+      method: 'GET',
+      status: 503,
+      code: 'common.unavailable',
+    };
+    wrapper!.findComponent(MemberRoles).vm.$emit('updated');
+    await flushPromises();
+    expect(wrapper!.text()).toContain('操作已提交，但刷新失败');
+    expect(wrapper!.text()).not.toContain('成员角色已更新，并重新读取当前权限');
+  });
   it('edits node labels using merge-patch, CSRF and explicit confirmation', async () => {
     await render(NodesView);
     await click('详情');
