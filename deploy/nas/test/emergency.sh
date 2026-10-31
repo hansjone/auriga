@@ -42,9 +42,9 @@ grep -q 'stdout to be a terminal' "$TMP/output"
 [ ! -s "$EMERGENCY_LOG" ]
 echo 'PASS emergency redirect refused before configuration/Docker'
 if sh "$NAS_ROOT/scripts/emergency.sh" rotate >"$TMP/output" 2>&1; then exit 1; fi
-grep -q 'not implemented' "$TMP/output"
+grep -qx 'Usage: sh emergency.sh show' "$TMP/output"
 [ ! -s "$EMERGENCY_LOG" ]
-echo 'PASS emergency rotate fails without touching platform/database'
+echo 'PASS emergency unsupported rotate is not a public command'
 sh "$NAS_ROOT/scripts/start.sh" >"$TMP/output" 2>&1 || { cat "$TMP/output"; exit 1; }
 grep -q 'handoff pending' "$TMP/output"
 ! grep -q '^run ' "$EMERGENCY_LOG"
@@ -61,6 +61,13 @@ echo 'PASS emergency compose failure preserved before handoff'
 if [ -t 1 ]; then
   sh "$NAS_ROOT/scripts/emergency.sh" show
   grep -q '^run .*--log-driver none --tty --network none' "$EMERGENCY_LOG"
+  grep -q -- '--env AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=true' "$EMERGENCY_LOG"
+  AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=false sh "$NAS_ROOT/scripts/emergency.sh" show
+  grep -q -- '--env AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=false' "$EMERGENCY_LOG"
+  : >"$EMERGENCY_LOG"
+  if AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=invalid sh "$NAS_ROOT/scripts/emergency.sh" show 2>"$TMP/output"; then exit 1; fi
+  grep -q 'must be true or false' "$TMP/output"
+  [ ! -s "$EMERGENCY_LOG" ]
   sh "$NAS_ROOT/scripts/start.sh"
   grep -q ' /emergency.py --once$' "$EMERGENCY_LOG"
   EMERGENCY_HELPER_EXIT=73; export EMERGENCY_HELPER_EXIT

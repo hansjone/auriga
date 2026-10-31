@@ -11,9 +11,10 @@
    TOTP 密钥和可导入验证器的 `otpauth://` URI。无额外二维码依赖时只提供 URI。
    管理台使用已安装 access 的 `adminOrigin`，proxy 模式显示外部 HTTPS 来源，
    不是内部 listener 或门户链接。无需为手工首装准备收件人公钥。
-3. 将 TOTP 导入验证器，用应急账号登录管理台，再进入“成员 → 邀请”。应急登录仍只
-   接受真实回环来源；远程浏览器直接访问上述地址会被拒绝。须使用部署者已有的受信回环
-   访问通道；本配方没有为普通远程浏览器新增该通道。没有该通道的 IP 部署可选下述自动化。
+3. 将 TOTP 导入验证器，直接用浏览器登录显示的管理台地址，再进入“成员 → 邀请”。
+   NAS 配方默认允许应急账号远程登录，每次仍须提供口令和 TOTP；不需要 tunnel 或收件公钥。
+   若将 `AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=false` 写入 `stack.env`，重新 render 并重启
+   平台后会收紧到仅回环来源，此时不能从远程浏览器使用应急账号。
 4. 成功显示后仅在已有私有 enrollment 目录记录 `.emergency-displayed`（不含凭据）。
    重复启动不再显示；显示失败保留重试机会，正常 Compose 启动结果不受显示失败影响。
    seed 完成后按指南关闭 `AURIGA_PLATFORM_SEED`，继续用正常成员账号工作。
@@ -23,7 +24,6 @@
 ```sh
 export AURIGA_DATA_ROOT=/srv/container/auriga-test
 sh deploy-nas/scripts/emergency.sh show
-sh deploy-nas/scripts/emergency.sh rotate
 ```
 
 `show` 只接受 stdout 为 TTY，管道和重定向均拒绝；SSH 使用分配了 TTY 的交互会话。
@@ -31,8 +31,10 @@ sh deploy-nas/scripts/emergency.sh rotate
 helper 复用已批准的本地 LiteLLM 镜像，以固定 UID10001、无网络、无 Docker socket、
 只读根运行；关闭 Docker 日志驱动，不经过 Compose/服务日志，不创建新的明文凭据文件。
 终端自身的录屏、会话记录和滚屏仍由操作者管理，不要在共享或录制中的终端查看。
-`rotate` 当前明确失败：公开契约已有轮换定义，平台尚无对应实现，因此不会改数据库、
-重跑 seed 或修改现有 enrollment。`show` 读取的是原始安装凭据，不会验证当前凭据是否有效。
+公开命令目前只有 `show`。应急轮换虽有契约定义，平台尚无对应实现，留待后续；
+不会改数据库、重跑 seed 或修改现有 enrollment。`show` 读取原始安装凭据，不验证其当前有效性。
+默认远程开启使应急登录可经已配置的公开管理入口访问；部署者应保护口令、TOTP 和入口的
+网络/TLS 边界，需要收紧时显式设为 false。普通会话、管理来源、CSRF 和 TOTP 校验保持生效。
 
 [`admin-bootstrap.sh`](scripts/admin-bootstrap.sh) 保留为**可选自动化**，不是手工首装必经步骤：
 目前只支持 IP 模式，通过真实回环登录、邀请并建立普通管理员/测试成员，将交接材料加密给

@@ -3,15 +3,18 @@
 # shellcheck shell=sh
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
-[ "$#" = 1 ] || die 'Usage: sh emergency.sh show|rotate'
+[ "$#" = 1 ] || die 'Usage: sh emergency.sh show'
 case "$1" in
   show|--first-start) operation=$1 ;;
-  rotate) die 'emergency rotate unavailable: the public rotate API is declared but not implemented; no credentials changed' ;;
-  *) die 'Usage: sh emergency.sh show|rotate' ;;
+  *) die 'Usage: sh emergency.sh show' ;;
 esac
 # Refuse before reading configuration, enrollment, or even contacting Docker.
 [ -t 1 ] || die 'emergency credentials require stdout to be a terminal; run sh deploy-nas/scripts/emergency.sh show in a private TTY (do not pipe or redirect)'
 load_stack_env >&2
+case "${AURIGA_IAM_EMERGENCY_REMOTE_ENABLED:-true}" in
+  true|false) ;;
+  *) die 'AURIGA_IAM_EMERGENCY_REMOTE_ENABLED must be true or false' ;;
+esac
 require_cmd docker readlink
 [ -f "$(marker_path)" ] || die 'not initialized; run init.sh first'
 docker info >/dev/null 2>&1 || die 'root or local Docker permission is required'
@@ -38,4 +41,5 @@ docker run --rm --pull never --log-driver none --tty --network none --user 10001
   --mount "type=bind,src=$AURIGA_DATA_ROOT/enrollment,dst=/enrollment" \
   --mount "type=bind,src=$AURIGA_DATA_ROOT/enrollment/emergency-enrollment.json,dst=/enrollment/emergency-enrollment.json,readonly" \
   --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONIOENCODING=utf-8 \
+  --env "AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=${AURIGA_IAM_EMERGENCY_REMOTE_ENABLED:-true}" \
   --entrypoint python "$image" /emergency.py "$@"

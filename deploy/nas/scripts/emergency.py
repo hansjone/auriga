@@ -13,7 +13,7 @@ class DisplayError(Exception):
     """Only fixed diagnostic messages may leave this helper."""
 
 
-def display(access, credentials, output):
+def display(access, credentials, output, remote_enabled=True):
     if not output.isatty():
         raise DisplayError('stdout must be a terminal; run emergency.sh show in a private TTY')
     origin = access.get('adminOrigin', {})
@@ -43,10 +43,12 @@ def display(access, credentials, output):
         f'TOTP 密钥：{credentials["totpSecret"]}\n'
         'otpauth URI（可导入验证器；此 helper 不依赖二维码库）：\n'
         f'{uri}\n'
-        '下一步：用它登录管理台 → 成员 → 邀请。\n'
-        '应急登录仍限真实回环来源；远程浏览器直接登录会被拒绝。\n'
-        '请使用已受信的回环访问通道；没有该通道时可选 admin-bootstrap 自动化。\n'
     )
+    if remote_enabled:
+        text += '下一步：直接用浏览器登录管理台 → 成员 → 邀请；每次应急登录均需口令和 TOTP。\n'
+    else:
+        text += ('应急远程登录已关闭，仅接受真实回环来源。\n'
+                 '如需浏览器远程登录，将 AURIGA_IAM_EMERGENCY_REMOTE_ENABLED 设为 true 后重新 render 并重启平台。\n')
     output.write(text)
     output.flush()
 
@@ -92,7 +94,10 @@ def handoff(directory, access_file, once, output):
                 return
         enrollment = json.loads(private_file(directory / 'emergency-enrollment.json'))
         access = json.loads(access_file.read_text(encoding='utf-8'))
-        display(access, enrollment, output)
+        remote = os.environ.get('AURIGA_IAM_EMERGENCY_REMOTE_ENABLED') or 'true'
+        if remote not in ('true', 'false'):
+            raise DisplayError('AURIGA_IAM_EMERGENCY_REMOTE_ENABLED must be true or false')
+        display(access, enrollment, output, remote_enabled=remote == 'true')
         # Flush the terminal before committing the non-secret receipt. A failure
         # leaves the handoff retryable; no credential is written to a new file.
         if not exists:

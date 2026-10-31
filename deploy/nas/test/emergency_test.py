@@ -50,7 +50,16 @@ class DisplayTests(unittest.TestCase):
                     'algorithm': ['SHA1'], 'digits': ['6'], 'period': ['30'],
                 })
                 self.assertIn('成员 → 邀请', text)
-                self.assertIn('回环', text)
+                self.assertIn('直接用浏览器登录管理台', text)
+                self.assertNotIn('远程浏览器直接登录会被拒绝', text)
+
+    def test_explicit_local_only_configuration_is_explained(self):
+        access = json.loads((ROOT / 'access-ip.example.json').read_text())
+        output = Terminal()
+        module.display(access, self.credentials, output, remote_enabled=False)
+        self.assertIn('已关闭', output.getvalue())
+        self.assertIn('回环', output.getvalue())
+        self.assertNotIn('直接用浏览器登录管理台', output.getvalue())
 
     def test_redirect_is_rejected_without_output(self):
         output = io.StringIO()
