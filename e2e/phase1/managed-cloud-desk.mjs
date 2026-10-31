@@ -65,12 +65,20 @@ export async function managedCloudConversation({
     ).records.map((row) => row.event);
   }
   async function cloudTool(name, accepts, status) {
+    const retried = new Set();
+    const deadline = Date.now() + 120000;
     return poll(
       async () => {
-        const proof = nativeToolEvidence(await events('cloud'), name, accepts);
+        const proof = nativeToolEvidence(
+          (await events('cloud')).filter(
+            (event) =>
+              event.type !== 'tool/call' || !retried.has(event.data.callId),
+          ),
+          name,
+          accepts,
+        );
         if (!proof) return null;
         const value = proof.value;
-        assert.equal(value.status, status);
         report.tools = report.tools.filter(
           (tool) => tool.callId !== proof.callId,
         );
@@ -79,8 +87,31 @@ export async function managedCloudConversation({
           name,
           callId: proof.callId,
           status: value.status,
+          ...(value.retryable === true ? { retryable: true } : {}),
           ...(value.address ? { address: value.address } : {}),
         });
+        if (
+          name === 'auriga_network_join' &&
+          status === 'registered' &&
+          value.status === 'unavailable' &&
+          value.retryable === true &&
+          retried.size < 3
+        ) {
+          retried.add(proof.callId);
+          const delay = Math.min(
+            4000 * 2 ** (retried.size - 1),
+            deadline - Date.now(),
+          );
+          if (delay <= 0) return null;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          if (Date.now() >= deadline) return null;
+          await clients.cloud.prompt(
+            sessions.cloud,
+            'The previous auriga_network_join result explicitly allowed retry. Call auriga_network_join exactly once with {} again now. Do not call other tools.',
+          );
+          return null;
+        }
+        assert.equal(value.status, status);
         return value;
       },
       'cloud_native_tool_result_missing',
