@@ -23,6 +23,27 @@ function result(message) {
   return null;
 }
 
+export function nativeAssistantEvidence(events, marker) {
+  for (const event of events) {
+    if (event.type !== 'assistant/message' || event.data?.interrupted) continue;
+    const usage = event.data.usage;
+    if (
+      text(event.data.message).trim() === marker &&
+      Number.isSafeInteger(usage?.inputTokens) &&
+      usage.inputTokens >= 0 &&
+      Number.isSafeInteger(usage?.outputTokens) &&
+      usage.outputTokens >= 0 &&
+      usage.inputTokens + usage.outputTokens > 0
+    )
+      return {
+        markerObserved: true,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+      };
+  }
+  return null;
+}
+
 // Pair the real tool events; model prose cannot supply a successful tool result.
 export function nativeToolEvidence(events, name, accepts) {
   for (const event of events) {

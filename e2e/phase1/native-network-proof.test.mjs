@@ -3,7 +3,36 @@ import assert from 'node:assert/strict';
 import {
   nativeToolEvidence,
   nativeNetworkReceipt,
+  nativeAssistantEvidence,
 } from './native-network-proof.mjs';
+
+test('managed reply arming waits past an earlier completed turn and requires a fresh assistant marker with usage', () => {
+  const old = [{ type: 'turn/end', data: {} }];
+  const reply = {
+    type: 'assistant/message',
+    data: {
+      message: { content: [{ type: 'text', text: 'current-arm' }] },
+      usage: { inputTokens: 20, outputTokens: 3 },
+    },
+  };
+  assert.equal(nativeAssistantEvidence(old, 'current-arm'), null);
+  assert.equal(
+    nativeAssistantEvidence([...old, reply], 'current-arm').inputTokens,
+    20,
+  );
+  for (const data of [
+    { ...reply.data, interrupted: true },
+    { ...reply.data, usage: { inputTokens: 0, outputTokens: 0 } },
+    {
+      ...reply.data,
+      message: { content: [{ type: 'text', text: 'old-arm' }] },
+    },
+  ])
+    assert.equal(
+      nativeAssistantEvidence([{ ...reply, data }], 'current-arm'),
+      null,
+    );
+});
 
 test('native network tool proof requires matching call identity, arguments and a non-error result', () => {
   const call = {

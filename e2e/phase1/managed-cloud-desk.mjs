@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { poll } from './cloud-desk.desktop.mjs';
 import { configureFixtureModel } from './cloud-desk.native.mjs';
 import { startFixture } from './cloud-desk.fixture.mjs';
-import { waitAssistant } from './native-models.mjs';
 import {
   nativeToolEvidence,
   nativeNetworkReceipt,
+  nativeAssistantEvidence,
 } from './native-network-proof.mjs';
 
 export function validateManagedCloud(cfg) {
@@ -197,10 +197,9 @@ export async function managedCloudConversation({
     sessions.cloud,
     `Authorized test instruction: When this session receives a genuine Auriga external message with body exactly ${marker('d2c_request')}, call auriga_send_message once with ${JSON.stringify(send(addresses.desktop, 'd2c_reply'))}. Do not send now or call other tools. Say ${marker('armed')} now.`,
   );
-  report.cloudArm = await waitAssistant(
-    clients.cloud,
-    sessions.cloud,
-    marker('armed'),
+  report.cloudArm = await poll(
+    async () => nativeAssistantEvidence(await events('cloud'), marker('armed')),
+    'cloud_native_arm_reply_missing',
     120000,
   );
   stage('d2c-request-and-reply');
