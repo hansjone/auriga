@@ -66,6 +66,7 @@ func TestManagedIngressExposesOnlyNativeDeviceNetworkAndModelPaths(t *testing.T)
 		{"POST", "/api/iam/v1/network/tickets", 204}, {"GET", "/api/collab/v1/network/keys", 204},
 		{"GET", "/api/collab/v1/network/keys/announcement", 204}, {"GET", "/oauth2/jwks", 204},
 		{"GET", "/ai/v1/models", 204}, {"POST", "/ai/v1/chat/completions", 204},
+		{"GET", "/api/iam/v1/network/systems", 204}, {"POST", "/api/ai/v1/network/submit", 204},
 		{"GET", "/api/iam/v1/admin/accounts", 404}, {"GET", "/api/workspace/v1/me/instance", 404},
 		{"POST", "/api/iam/v1/login/password", 404}, {"GET", "/", 404}, {"POST", "/ai/v1/models", 404},
 	} {
@@ -78,7 +79,7 @@ func TestManagedIngressExposesOnlyNativeDeviceNetworkAndModelPaths(t *testing.T)
 			t.Errorf("%s %s: %d", tc.method, tc.path, w.Code)
 		}
 	}
-	if calls != 8 {
+	if calls != 10 {
 		t.Fatalf("unexpected allowed path count %d", calls)
 	}
 	for _, header := range []string{"Cookie", "Origin"} {

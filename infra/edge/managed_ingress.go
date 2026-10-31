@@ -51,7 +51,7 @@ func managedPathAllowed(r *http.Request) bool {
 	}
 	if r.Method == http.MethodGet {
 		switch path {
-		case "/oauth2/jwks", "/.well-known/openid-configuration", "/api/collab/v1/network/keys", "/api/collab/v1/network/keys/announcement", "/ai/v1/models":
+		case "/oauth2/jwks", "/.well-known/openid-configuration", "/api/collab/v1/network/keys", "/api/collab/v1/network/keys/announcement", "/api/iam/v1/network/systems", "/ai/v1/models":
 			return true
 		case "/net/v1/ws":
 			return isUpgradeRequest(r)
@@ -59,7 +59,7 @@ func managedPathAllowed(r *http.Request) bool {
 	}
 	if r.Method == http.MethodPost {
 		switch path {
-		case "/oauth2/token", "/api/iam/v1/network/register", "/api/iam/v1/network/tickets", "/ai/v1/chat/completions", "/ai/v1/responses":
+		case "/oauth2/token", "/api/iam/v1/network/register", "/api/iam/v1/network/tickets", "/api/ai/v1/network/submit", "/ai/v1/chat/completions", "/ai/v1/responses":
 			return true
 		}
 	}
