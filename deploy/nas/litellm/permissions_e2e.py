@@ -49,9 +49,16 @@ def verify(mode, endpoint):
             for name in NAMES:
                 metadata = (source / name).stat()
                 assert (metadata.st_uid, metadata.st_mode & 0o777) == (10001, 0o600)
-        ui = root / 'litellm-ui'
-        ui.mkdir()
-        subprocess.run(['python3', str(DEPLOY / 'nas/litellm/prepare-ui.py'), str(ui)], check=True)
+        parent = root / 'ui-parent'
+        parent.mkdir(mode=0o755)
+        os.chown(parent, 0, 0)
+        ui = parent / 'litellm-ui'
+        # A Docker-authorized operator cannot create children under this parent
+        # or cd into root's 0700 secret directory on the second invocation.
+        socket_gid = Path(endpoint.removeprefix('unix://')).stat().st_gid
+        for _ in range(2):
+            subprocess.run(['setpriv', '--reuid=1001', '--regid=1001', '--groups='+str(socket_gid),
+                            'sh', str(DEPLOY / 'nas/litellm/prepare-ui.sh'), str(ui)], check=True)
         docker = ['docker', '--host', endpoint]
         # Compose itself resolves YAML anchors, service settings and bind paths.
         definition = json.loads(command(docker + ['compose', '-f',
