@@ -1,4 +1,8 @@
 import { networkTiming } from '../network/timing.js';
+import {
+  clockToleranceSeconds as defaultClockToleranceSeconds,
+  resolveClockToleranceSeconds,
+} from '../network/clock.js';
 import { tracedFetch } from '../observability/index.js';
 /* global Headers, AbortSignal */
 import { createPublicKey, verify } from 'node:crypto';
@@ -171,18 +175,9 @@ export class LoginJar {
  * @param {{clockToleranceSeconds?:number}} [options] Bounded iat/nbf skew; expiry remains strict. */
 export function createPlatform(
   config,
-  {
-    clockToleranceSeconds = Number(
-      process.env.AURIGA_JWT_CLOCK_SKEW_SECONDS ?? 60,
-    ),
-  } = {},
+  { clockToleranceSeconds = defaultClockToleranceSeconds } = {},
 ) {
-  if (
-    !Number.isSafeInteger(clockToleranceSeconds) ||
-    clockToleranceSeconds < 0 ||
-    clockToleranceSeconds > 120
-  )
-    throw new Error('invalid JWT clock tolerance');
+  resolveClockToleranceSeconds(clockToleranceSeconds);
   /** @param {string} path @param {any} [options] */
   async function request(
     path,

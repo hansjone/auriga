@@ -1,6 +1,7 @@
 import { SessionError } from '../session/errors.js';
 import { digest } from '../trust/verifier.js';
 import { timeValue } from '../trust/store.js';
+import { clockToleranceMs, platformStarted } from '../clock.js';
 
 /** @param {unknown} v @returns {v is string} */
 export const id = (v) =>
@@ -125,20 +126,45 @@ export function assertSourceResult(result, request, now) {
     !u64(result.policy_revision) ||
     result.witness_id !== request.native_witness.witness_id ||
     !Number.isFinite(timeValue(result.observed_at)) ||
-    timeValue(result.observed_at) > now + 60000 ||
-    now - timeValue(result.observed_at) > 60000
+    timeValue(result.observed_at) > now + clockToleranceMs ||
+    now - timeValue(result.observed_at) > clockToleranceMs ||
+    !(timeValue(request.native_witness.valid_until) > now) ||
+    !(timeValue(request.native_witness.observed_at) <= now)
   )
     invalid();
   if (result.source?.state === 'active') {
     const until = timeValue(result.valid_until);
     if (!(
-      until > now &&
+      sourceObservationDeadline(result, request.native_witness) > now &&
       until <= timeValue(request.native_witness.valid_until) &&
       until <= timeValue(result.source.expires_at) &&
       until > timeValue(result.observed_at) &&
       until <= timeValue(result.observed_at) + 60000 &&
-      timeValue(result.source.not_before) <= now
+      timeValue(result.source.not_before) <= timeValue(result.observed_at) &&
+      platformStarted(timeValue(result.source.not_before), now)
     ))
       invalid();
   } else if ('valid_until' in result) invalid();
+}
+
+/** A retained observation is only usable while its original local witness lives.
+ * @param {any} result @param {any} witness */
+export function sourceObservationDeadline(result, witness) {
+  if (
+    !witness ||
+    witness.witness_id !== result?.witness_id ||
+    result?.source?.state !== 'active'
+  )
+    return NaN;
+  // Both durations use platform time. Anchoring at local request observation
+  // is conservative: it predates the server observation, including network delay.
+  // Never grant longer than the original, strictly local native witness.
+  const observed = timeValue(result.observed_at);
+  return Math.min(
+    timeValue(witness.valid_until),
+    timeValue(witness.observed_at) + timeValue(result.valid_until) - observed,
+    timeValue(witness.observed_at) +
+      timeValue(result.source.expires_at) -
+      observed,
+  );
 }

@@ -62,6 +62,7 @@ URL 必须对应实际已发布版本；需要独立核验摘要时，优先下�
 - **连接失败 / 登录不可用**：检查平台地址可达；请管理员核实证书、`/oauth2/jwks` 和团队账号身份源。自动发现要求恰好一个 `team-account` 表单身份源，多身份源需管理员预配置。
 - **401 / 需要重新登录**：重新登录并确认团队地址；测试连接不代表账号已授权。
 - **时钟偏差**：原生登录立即验签，`iat`/`nbf` 默认允许 60 秒偏差，不再等待令牌生效。管理员可用插件进程环境变量 `AURIGA_JWT_CLOCK_SKEW_SECONDS` 配置 0–120 秒；已过期令牌仍拒绝，签名、来源、身份、用途和权限校验照常执行。持续失败请管理员检查两端时间同步状态。
+- **平台时间同步**：平台主机须开启并确认 NTP 时间同步；偏差超过配置容差会拒绝连接或发送。运行着 NTP 进程并不代表已经同步。
 - **安装下载失败**：检查 pnpm、代理和 npm 网络；无需允许本插件执行安装构建脚本。
 
 依据：[DSH 官方打包教程](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)、[CLI 插件管理](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/reference/README.md)。维护者验收边界见[发行说明](../dev/plugin-distribution.md)。

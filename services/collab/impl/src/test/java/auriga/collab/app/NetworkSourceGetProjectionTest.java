@@ -317,6 +317,52 @@ class NetworkSourceGetProjectionTest {
     }
   }
 
+  @ParameterizedTest
+  @ValueSource(ints = {-15, 15})
+  void sourceGetClampsToTheUnmodifiedNativeWitnessAcrossClockDomains(int clientOffset)
+      throws Exception {
+    try (var h = new Harness(NOW.plusSeconds(29))) {
+      var witness = (ObjectNode) h.frame.path("native_witness");
+      Instant localObserved = NOW.plusSeconds(clientOffset);
+      Instant witnessUntil = localObserved.plusSeconds(30);
+      witness
+          .put("observed_at", localObserved.toString())
+          .put("valid_until", witnessUntil.toString());
+      var reply = h.get();
+      assertEquals("source_get_result", reply.path("type").asString());
+      Instant until = Instant.parse(reply.path("valid_until").asString());
+      assertEquals(
+          Collections.min(
+              List.of(
+                  h.budget,
+                  witnessUntil,
+                  NOW.plusSeconds(30),
+                  Instant.parse(h.original.getExpiresAt()))),
+          until);
+      assertFalse(until.isAfter(witnessUntil));
+      assertEquals(
+          witnessUntil.toString(), h.frame.path("native_witness").path("valid_until").asString());
+      h.verifySignature(reply);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {-61, 61})
+  void sourceGetRejectsNativeWitnessBeyondClockUncertainty(int clientOffset) throws Exception {
+    try (var h = new Harness(NOW.plusSeconds(29))) {
+      var witness = (ObjectNode) h.frame.path("native_witness");
+      Instant observed = NOW.plusSeconds(clientOffset);
+      witness
+          .put("observed_at", observed.toString())
+          .put("valid_until", observed.plusSeconds(30).toString());
+      var reply = h.get();
+      assertEquals("error", reply.path("type").asString());
+      assertFalse(reply.has("valid_until"));
+      assertEquals(0, h.observationWrites.get());
+      h.verifySignature(reply);
+    }
+  }
+
   @Test
   void subsecondRemainingBudgetExpiresInsteadOfRoundingUpIntoNewPermission() throws Exception {
     try (var h = new Harness(NOW.plusMillis(985))) {

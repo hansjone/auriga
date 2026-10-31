@@ -17,3 +17,24 @@ JWT 校验：插件 `AURIGA_JWT_CLOCK_SKEW_SECONDS` 默认 60 秒、可设 0–1
 每个 join 生成独立 trace；其 local_register 请求 ID 包含该 trace 与独立 UUID，重试保持原请求 ID。插件、network 和 collab 使用同一 trace，认证不信任此字段。插件结构化日志记录 `stage`、累计 `elapsed_ms` 与失败点，不写输入正文。日志位于插件日志目录 `Auriga/logs/auriga-dsh-*.jsonl`，本地文件需要运维采集器导入 Loki；NAS Alloy 已采集 network/collab 容器日志。查询 `{job="auriga-nas"} |= "<trace_id>"`。
 
 edge 对 WSS 是透明字节隧道，不解析每条 join；其连接日志只能按连接和时间窗口关联，不能冒充每个 join 的应用 span。跨桌面文件采集与现场三轮真实往返必须另外验收，单元测试不代表现场 PASS。
+
+## 跨机时钟与来源观察
+
+平台主机须开启 NTP 时间同步。容差不是无限期授权：偏差超过 `AURIGA_JWT_CLOCK_SKEW_SECONDS`（默认 60 秒，范围 0–120 秒）时拒绝。不能只凭 NTP 进程存在就认定已同步，应核实同步状态。
+
+来源观察同时包含平台时间和本机 native witness 时间。客户端只在比较平台 `observed_at`、`not_before` 与本机时钟时使用这项共享容差。平台内部的 `not_before <= observed_at < valid_until <= source.expires_at`、最长观察窗口、签名覆盖的时间范围保持严格。collab 在签发前已经取平台截止、IAM 决策截止、源到期和原始 witness 截止的最小值并向下取整；客户端继续严格复核这个原值上限。
+
+发送前不再把平台 `valid_until` 直接当成本机截止。先计算平台剩余租期 `valid_until - observed_at`，以原本机 `witness.observed_at` 为起点换算，再取原本机 `witness.valid_until` 与源到期换算值的最小值。本机 witness 产生在服务端观察之前，因此网络传输只会缩短可用期。该换算不延长 witness，不修改已签名字段，不用收到响应的时刻刷新授权。通用发送工具拿到的 `expiresAt` 已属于本机时间域，继续严格检查到期。
+
+| 比较位置 | 时间域与处理 |
+|---|---|
+| source-control/frames：observed_at、not_before 对本机 now | 共享可配置容差；超界拒绝 |
+| source-control/controller：witness 观察、到期、持久化与 native fence | 本机对本机，严格；时钟倒退也拒绝 |
+| durable/capability → tools/send：观察授权截止 | 一次保守换算，再按本机截止严格检查 |
+| trust/store、trust/verifier：发布/密钥/封装的起始时间对本机 | 复用同一容差；签名、用途、版本、同平台签发窗口严格 |
+| 签名/密钥/票据/JWT/消息的最终过期检查 | 保持原有严格过期拒绝，不额外增加存活时间 |
+| collab：观察签发、最后事务 fence 与 native witness | 已取原 witness/源/平台上限的最小值；同域窗口和最终过期严格 |
+| IAM：源状态、决策、身份/权限/连接到期 | 平台时间域；在线权威与到期严格 |
+| network Go：source 帧窗口/签名结构、IAM 兑换/对账 | 同帧窗口或平台权威时间；不从未认证客户端接受时钟覆盖 |
+
+`source_get` 返回 active 也不足以允许发送：必须同时通过原签名/身份/绑定/权限、原 native witness 与保守截止检查。expired/revoked/stopped 均不能续成 active。
