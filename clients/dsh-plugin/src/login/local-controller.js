@@ -2,9 +2,13 @@ import { LoginFailure } from './errors.js';
 
 export const LOCAL_LOGIN_BASE = '/auriga/local-login';
 /** Browser transport for the existing local host contract, never the platform.
- * @param {{fetch?:typeof fetch,onStatus?:(state:{remoteRevocation?:string})=>void}} [options] */
+ * @param {{fetch?:typeof fetch,native?:boolean,onStatus?:(state:{remoteRevocation?:string})=>void}} [options] */
 export function createLocalLoginController(options = {}) {
   const transport = options.fetch ?? fetch;
+  // This selects a transport only. The backend accepts it exclusively through
+  // DSH's authenticated owner RPC carrier, never through a self-claimed header.
+  const native = options.native ?? globalThis.location?.protocol === 'dsh-app:';
+  let requestId = 0;
   let csrf = '';
   /** @param {string} path @param {object | undefined} body @param {AbortSignal} signal */
   async function call(path, body, signal) {
@@ -14,17 +18,33 @@ export function createLocalLoginController(options = {}) {
     if (signal.aborted) abort();
     const timer = setTimeout(abort, 15000);
     try {
-      const response = await transport(LOCAL_LOGIN_BASE + '/' + path, {
-        method: body ? 'POST' : 'GET',
-        credentials: 'same-origin',
-        cache: 'no-store',
-        redirect: 'error',
-        signal: controller.signal,
-        headers: body
-          ? { 'content-type': 'application/json', 'X-Auriga-CSRF': csrf }
-          : {},
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      const method = 'aurigaAuth/' + path;
+      const rpcId = 'auriga-local-' + ++requestId;
+      const response = await transport(
+        native ? '/auriga-native/' + method : LOCAL_LOGIN_BASE + '/' + path,
+        {
+          method: native || body ? 'POST' : 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          redirect: 'error',
+          signal: controller.signal,
+          headers: native
+            ? { 'content-type': 'application/json' }
+            : body
+              ? { 'content-type': 'application/json', 'X-Auriga-CSRF': csrf }
+              : {},
+          body: native
+            ? JSON.stringify({
+                type: 'client-request',
+                rpcId,
+                method,
+                payload: { args: path === 'login' ? { input: body } : {} },
+              })
+            : body
+              ? JSON.stringify(body)
+              : undefined,
+        },
+      );
       if (response.status === 404 && path === 'status') {
         const bootstrap = await transport('/auriga/bootstrap', {
           credentials: 'same-origin',
@@ -40,6 +60,21 @@ export function createLocalLoginController(options = {}) {
         data = await response.json();
       } catch {
         throw new LoginFailure('network');
+      }
+      if (native && response.ok) {
+        if (data?.type !== 'server-response' || data.rpcId !== rpcId)
+          throw new LoginFailure('network');
+        if (data.result?.ok !== true) {
+          const code = data.result?.error?.code;
+          throw new LoginFailure(
+            code === 'iam.invalid_credentials'
+              ? 'failed'
+              : code === 'common.unauthenticated'
+                ? 'expired'
+                : 'network',
+          );
+        }
+        data = data.result.value;
       }
       if (!response.ok) {
         if (
@@ -110,7 +145,7 @@ export function createLocalLoginController(options = {}) {
     // Never acquire an authenticated session's proof for an anonymous cancel.
     const state = await status(signal);
     if (state.loggedIn) throw new LoginFailure('expired');
-    if (!csrf) throw new LoginFailure('expired');
+    if (!native && !csrf) throw new LoginFailure('expired');
     const result = await call('logout', {}, signal);
     if (result.loggedIn !== false) throw new LoginFailure('failed');
     csrf = '';
@@ -122,7 +157,7 @@ export function createLocalLoginController(options = {}) {
     async start({ signal }) {
       const state = await status(signal);
       if (state.loggedIn) return ready(state);
-      if (!csrf) throw new LoginFailure('expired');
+      if (!native && !csrf) throw new LoginFailure('expired');
       return step(
         await call(
           'login',
@@ -139,13 +174,13 @@ export function createLocalLoginController(options = {}) {
       await cancel(signal);
       const fresh = await status(signal);
       if (fresh.loggedIn) return ready(fresh);
-      if (!csrf) throw new LoginFailure('expired');
+      if (!native && !csrf) throw new LoginFailure('expired');
       return step(await call('login', { action: 'begin' }, signal), signal);
     },
     /** @param {import('../generated/steps.js').StepInput} input @param {{signal:AbortSignal}} context */
     async submit(input, { signal }) {
       if (input.type !== 'form') throw new LoginFailure('unavailable');
-      if (!csrf) throw new LoginFailure('expired');
+      if (!native && !csrf) throw new LoginFailure('expired');
       return step(
         await call('login', { action: 'advance', input }, signal),
         signal,
@@ -157,7 +192,7 @@ export function createLocalLoginController(options = {}) {
       let state = await status(signal);
       if (!state.loggedIn) {
         if (state.resumeAvailable === false) return signedOut(state);
-        if (state.resumeAvailable !== true || !csrf)
+        if (state.resumeAvailable !== true || (!native && !csrf))
           throw new LoginFailure('expired');
         // Confirmation authorizes this recovery only. The host must verify the
         // saved device and establish an owned browser session before logout.
@@ -167,7 +202,7 @@ export function createLocalLoginController(options = {}) {
         state = await status(signal);
         ready(state);
       }
-      if (!csrf) throw new LoginFailure('expired');
+      if (!native && !csrf) throw new LoginFailure('expired');
       const result = await call('logout', {}, signal);
       if (
         result.loggedIn !== false ||

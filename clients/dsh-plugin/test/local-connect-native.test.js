@@ -173,6 +173,38 @@ test(
       );
       assert.equal(exchange.status, 303);
       const nativeCookie = exchange.headers.get('set-cookie').split(';')[0];
+      const nativeLoginPath = '/auriga-native/aurigaAuth/status';
+      for (const headers of [
+        { 'content-type': 'application/json' },
+        { 'content-type': 'application/json', 'x-auriga-native': 'true' },
+      ]) {
+        const rejected = await fetch(base + nativeLoginPath, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            type: 'client-request',
+            rpcId: 'forged-native',
+            method: 'aurigaAuth/status',
+            payload: { args: {} },
+          }),
+        });
+        assert.equal(rejected.status, 401);
+        await rejected.arrayBuffer();
+      }
+      const mismatch = await fetch(base + nativeLoginPath, {
+        method: 'POST',
+        headers: { cookie: nativeCookie, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: 'mismatch-native',
+          method: 'session/create',
+          payload: { args: {} },
+        }),
+      });
+      assert.equal(
+        (await mismatch.json()).result.error.code,
+        'gateway/bad-request',
+      );
       const index = await fetch(base + '/', {
         headers: { cookie: nativeCookie },
         redirect: 'manual',

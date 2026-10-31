@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { NATIVE_LOGIN_CHANNEL, NATIVE_LOGIN_METHODS } from './native-rpc.js';
 
 /** Use the same native boot table for Web and Electron's static carrier.
  * @param {any} ctx */
@@ -170,6 +171,25 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
         standaloneSockets.add(socket);
         socket.once('close', () => standaloneSockets.delete(socket));
       }
+      return original;
+    }
+    if (
+      !upgrade &&
+      request.method === 'POST' &&
+      NATIVE_LOGIN_METHODS.has(
+        (request.url ?? '').slice(NATIVE_LOGIN_CHANNEL.length + 1),
+      ) &&
+      (request.url ?? '').startsWith(NATIVE_LOGIN_CHANNEL + '/') &&
+      request.headers['content-type']?.split(';')[0].trim().toLowerCase() ===
+        'application/json'
+    )
+      return sameOrigin(request) ? original : { rejection: 403 };
+    // Only a backend session established by that admitted owner RPC can open
+    // native business requests. Headers never select or supply this identity.
+    if (runtime.resolveNative?.(original.peer)) {
+      if (!sameOrigin(request)) return { rejection: 403 };
+      runtime.bindNativeRequest(original.peer, request);
+      runtime.bindSocket(request);
       return original;
     }
     if (

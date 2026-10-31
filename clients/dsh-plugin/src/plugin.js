@@ -8,6 +8,7 @@ import { selectMode } from './index.js';
 import { createLocalSurfaceHandler } from './local-ui.js';
 import { createConnectRuntime } from './local/runtime.js';
 import { savedPlatformConfig } from './local/platform.js';
+import { installNativeLoginRPC } from './local/native-rpc.js';
 import {
   installLocalAdmission,
   installHttpResponseTracking,
@@ -85,6 +86,9 @@ export async function apply(ctx, config) {
       const gate = {
         isConfigured: () => configured,
         resolve: (req) => current()?.runtime.resolve(req) ?? null,
+        resolveNative: (peer) => current()?.runtime.resolveNative(peer) ?? null,
+        bindNativeRequest: (peer, req) =>
+          current()?.runtime.bindNativeRequest(peer, req) ?? null,
         bindSocket: (req) => current()?.runtime.bindSocket(req) ?? false,
         status: (req) =>
           current()?.runtime.status(req) ?? {
@@ -102,6 +106,7 @@ export async function apply(ctx, config) {
       admission = installLocalAdmission(ctx.connection, gate, {
         protocol: ctx.webServer.protocol,
       });
+      installNativeLoginRPC(ctx, () => current()?.runtime);
       ctx.effect(
         () => () => admission?.dispose(),
         'auriga-dsh: persistent local door',

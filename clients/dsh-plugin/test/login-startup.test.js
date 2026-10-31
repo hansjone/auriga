@@ -67,3 +67,45 @@ test('native login bootstrap waits for dependencies without requesting business 
   assert.equal(attempts, 2);
   assert.deepEqual(navigations, ['/auriga/local-login']);
 });
+
+test('Electron boot restores its admitted owner through RPC then reloads with business admission ready', async () => {
+  const script = await readFile(
+    new URL('../src/login/startup.js', import.meta.url),
+    'utf8',
+  );
+  const navigations = [];
+  let loggedIn = false;
+  await runInNewContext(script, {
+    location: {
+      protocol: 'dsh-app:',
+      replace: (path) => navigations.push(path),
+    },
+    fetch: async (path, init) => {
+      if (path === '/auriga/settings/state')
+        return {
+          ok: true,
+          json: async () => ({ platformOrigin: 'https://portal.example.com' }),
+        };
+      const envelope = JSON.parse(init.body);
+      assert.equal(path, '/auriga-native/' + envelope.method);
+      if (envelope.method === 'aurigaAuth/login') loggedIn = true;
+      return {
+        ok: true,
+        json: async () => ({
+          type: 'server-response',
+          rpcId: envelope.rpcId,
+          result: {
+            ok: true,
+            value: envelope.method.endsWith('/status')
+              ? { loggedIn, resumeAvailable: true }
+              : { step: { type: 'complete' } },
+          },
+        }),
+      };
+    },
+    Date,
+    setTimeout,
+  });
+  assert.equal(loggedIn, true);
+  assert.deepEqual(navigations, ['/']);
+});
