@@ -271,6 +271,9 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			}
 			resp.Header.Set("Location", location.String())
 		}
+		if !data {
+			return gzipStaticResponse(resp)
+		}
 		return nil
 	}
 	proxy.ServeHTTP(w, r)

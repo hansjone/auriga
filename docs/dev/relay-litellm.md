@@ -16,6 +16,8 @@ compose 默认另发布 edge 的 8086 端口；首次 prepare 可加 `--litellm-
 
 独立入口只暴露 LiteLLM，不提供 Auriga API。必须先从已登录的 Auriga 管理台打开“模型”；外部 Key 不能建立 UI 会话。edge 每次检查在线 admin 会话与 `ai.providers.write`，只转发 LiteLLM cookie 白名单，UI 和数据均剥离全部 `Access-Control-*` 响应头。
 
+若页面长期显示 `LiteLLM Loading...`，检查浏览器网络面板中每个 JavaScript 请求是否完整结束；HTML 或响应头为 200 不代表前端已就绪。edge 对 `/ai/_next/static/` 和管理台 `/assets/` 的 JS/CSS 协商 gzip，降低大脚本在慢链路上的传输量；仅压缩不超过 8 MiB 的构建资源，不压缩登录 HTML、配置 JSON、管理 API 或模型流。Range 请求保持原表示，匿名资源请求仍先经过管理员门禁。不要为加载问题放开根路径、CORS、会话或写请求 Origin。
+
 LiteLLM 不发布宿主端口。内部健康入口为 `http://litellm:4000/health/liveliness`，compose 健康检查另读 `/health/readiness`；`litellm-init` 正常退出后 ai-relay 才启动。若数据库已有旧卷但没有 LiteLLM 库，首次初始化 hook 不会重新运行，应使用新部署目录验收。
 
 两个 LiteLLM 容器均使用 `cap_drop: ALL`、`no-new-privileges`，无 `cap_add`。compose prepare 保留生成文件的 UID，设置文件为 0640：master/salt 属专用 GID **10003**，pg_password 属 GID **999**，team 属 GID **10001**。`litellm` 加入 10003/999，`litellm-init` 另加入 10001；PostgreSQL 和 ai-relay 沿各自原有组读取对应秘密。prepare 需要 root 或可非交互执行 chgrp 的 sudo；不要用额外 capability 或全局可读权限替代。
@@ -75,3 +77,5 @@ node deploy/compose/scripts/verify-relay.mjs \
 `--ca` 仅供当前进程验证本机测试证书；受信任 HTTPS 可省略。脚本从该栈秘密文件读取应急账号与 master key，创建临时角色、成员、模型及虚拟 Key，只输出检查名称；它会更改测试栈数据，应在验收完成后销毁该一次性栈。检查覆盖管理员与普通成员 UI、外部调用与管理边界，以及真实 IAM 原生设备协议签发的 AI 短票和成员用量归属。该协议检查不启动 DSH 插件进程。
 
 独立 UI 组件回归可在 `infra/edge` 执行 `AURIGA_LITELLM_UI_TEST_ORIGIN=http://127.0.0.1:<临时端口> go test -count=1 -run '^TestLiteLLMUIHandoff$' -v .`。目标须为本机临时 LiteLLM，配置 `SERVER_ROOT_PATH=/ai`；测试使用随机 edge 端口，覆盖 IP/子域 Origin 的一次性交接、真实页面和 JavaScript、撤销/过期及 CORS。此组件测试的 IAM 为夹具，真实身份链路仍由上面的整栈脚本验证。
+
+真实浏览器就绪检查见 `infra/edge/browser-tests/README.md`：同时设置真实 LiteLLM 上游与 `AURIGA_LITELLM_CHROMIUM_TEST=1`，会等待登录表单可见，避免把服务端 Loading 壳当作页面加载成功。`PROXY_BASE_URL` 应与安装输入的独立 UI Origin 加 `/ai` 一致；域名部署使用自己的受信 UI Origin，不复用另一现场的 IP，也不信任任意请求头改写该配置。
