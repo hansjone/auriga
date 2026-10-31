@@ -195,7 +195,7 @@ export async function managedCloudConversation({
   stage('arm-cloud-native-reply');
   await clients.cloud.prompt(
     sessions.cloud,
-    `Authorized test instruction: When this session receives a genuine Auriga external message with body exactly ${marker('d2c_request')}, call auriga_send_message once with ${JSON.stringify(send(addresses.desktop, 'd2c_reply'))}. Do not send now or call other tools. Say ${marker('armed')} now.`,
+    `Authorized test instruction: When this session receives a genuine Auriga external message with body exactly ${marker('d2c_request')}, call auriga_send_message once with ${JSON.stringify(send(addresses.desktop, 'd2c_reply'))}. Do not send now or call other tools. Your entire assistant response now must be exactly ${marker('armed')}, with no explanation, preface, suffix, quotes, or Markdown.`,
   );
   report.cloudArm = await poll(
     async () => nativeAssistantEvidence(await events('cloud'), marker('armed')),
