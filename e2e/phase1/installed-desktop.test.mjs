@@ -11,7 +11,26 @@ import {
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { launchDesktop } from './cloud-desk.desktop.mjs';
+import { launchDesktop, desktopJSON } from './cloud-desk.desktop.mjs';
+
+test('desktop JSON admission classifies an unready HTML route without retaining its body', async () => {
+  assert.deepEqual(await desktopJSON(Response.json({ ready: true })), {
+    ready: true,
+  });
+  for (const status of [200, 401, 503]) {
+    await assert.rejects(
+      desktopJSON(
+        new Response('<html>private bootstrap text</html>', { status }),
+      ),
+      (error) => {
+        assert.equal(error.code, 'desktop_native_invalid_json');
+        assert.equal(error.status, status);
+        assert.equal(error.message, 'desktop_native_invalid_json');
+        return true;
+      },
+    );
+  }
+});
 
 test('installed desktop refuses a profile outside this worktree before running its executable', async (t) => {
   const state = await mkdtemp(join(tmpdir(), 'auriga-foreign-profile-'));

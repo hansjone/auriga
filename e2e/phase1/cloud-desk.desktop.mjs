@@ -14,6 +14,16 @@ import {
 } from '../network/support/native-install.mjs';
 
 const exec = promisify(execFile);
+export async function desktopJSON(response) {
+  try {
+    return await response.json();
+  } catch {
+    throw Object.assign(new Error('desktop_native_invalid_json'), {
+      code: 'desktop_native_invalid_json',
+      status: response.status,
+    });
+  }
+}
 export async function poll(action, label, timeout = 45000) {
   const end = Date.now() + timeout;
   do {
@@ -354,7 +364,7 @@ export async function launchDesktop(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     accept(response);
-    const value = await response.json();
+    const value = await desktopJSON(response);
     if (response.status !== 200)
       throw Object.assign(new Error('desktop_native_http_failed'), {
         code: 'desktop_native_http_failed',
@@ -421,7 +431,11 @@ export async function launchDesktop(
           connect ? '/auriga/local-login/status' : '/auriga/settings/state',
         );
       } catch (error) {
-        if ([404, 503].includes(error.status)) return null;
+        if (
+          [404, 503].includes(error.status) ||
+          (error.code === 'desktop_native_invalid_json' && error.status === 200)
+        )
+          return null;
         throw error;
       }
     }, 'desktop_plugin_not_ready');
