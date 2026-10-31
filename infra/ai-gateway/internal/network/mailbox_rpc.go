@@ -19,6 +19,11 @@ type MailboxClient struct {
 	timeout time.Duration
 }
 
+// Leave time for the response within the client's five-second registration
+// attempt. Online authority checks and the durable receipt are business work,
+// independent of the short connection-reconciliation probe.
+const localRegistrationTimeout = 4 * time.Second
+
 func NewMailboxClient(conn grpc.ClientConnInterface, timeout time.Duration) (*MailboxClient, error) {
 	if conn == nil || timeout <= 0 || timeout > time.Second {
 		return nil, errors.New("network: invalid mailbox RPC configuration")
@@ -28,10 +33,13 @@ func NewMailboxClient(conn grpc.ClientConnInterface, timeout time.Duration) (*Ma
 
 func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation string, raw []byte) ([]byte, *AppError) {
 	timeout := c.timeout
-	// READY needs several online authority checks; other control methods retain
-	// their configured short budget and capacity occupancy.
+	// READY needs several online authority checks. HEAD and reconciliation
+	// probes retain their configured short budget and capacity occupancy.
 	if operation == "ready" {
 		timeout = time.Second
+	}
+	if operation == "local_register" {
+		timeout = localRegistrationTimeout
 	}
 	if operation == "submit" || receiveOperation(operation) {
 		timeout = 10 * time.Second
