@@ -2,6 +2,19 @@
 set -eu
 ROOT=$1
 PARENT=$2
+python3 - "$ROOT/docker-compose.yml" <<'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text(encoding='utf8')
+mount = '${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro'
+services = text.split('\nservices:\n', 1)[1]
+def service(name):
+    return re.search(r'^  ' + name + r':\n(.*?)(?=^  \S|\Z)', services, re.M | re.S).group(1)
+for name in ('platform', 'agent'):
+    block = service(name)
+    assert mount in block, name + ' must mount the configured managed CA'
+block = service('ai-relay')
+assert mount not in block, 'relay does not consume the managed CA'
+PY
 DATA="$PARENT/auriga-managed-tls-data"
 mkdir -p "$DATA/config/materials/pki" "$DATA/config/pki-edge"
 chmod 0755 "$DATA"

@@ -215,7 +215,6 @@ services:
         condition: service_healthy
     secrets: [litellm_team]
     volumes:
-      - ${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro
       - ${AURIGA_DATA_ROOT}/config/materials/litellm-runtime.json:/etc/auriga/litellm-runtime.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/pki/ca.crt:/etc/auriga/pki/ca.crt:ro
       - ${AURIGA_DATA_ROOT}/config/materials/pki/gateway.crt:/etc/auriga/pki/gateway.crt:ro
@@ -323,6 +322,7 @@ services:
       AURIGA_PLATFORM_PORT: '8081'
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60 -XX:+UseContainerSupport
     volumes:
+      - ${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro
       - ${AURIGA_DATA_ROOT}/config/materials/platform-access.yaml:/etc/auriga/platform-access.yaml:ro
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/iam-healthcheck.sh:/etc/auriga/iam-healthcheck.sh:ro
