@@ -20,6 +20,7 @@ public final class WorkspaceManagedModels {
   private final WorkspaceCrypto crypto;
   private final String baseUrl;
   private final boolean enabled;
+  private final javax.net.ssl.SSLContext tls;
 
   public WorkspaceManagedModels(
       WorkspaceService service, WorkspaceCrypto crypto, ObjectNode installation) {
@@ -30,6 +31,8 @@ public final class WorkspaceManagedModels {
             .path("modelBaseUrl")
             .asString(installation.path("platformOrigin").asString() + "/ai/v1");
     this.enabled = validBaseUrl(baseUrl);
+    String caFile = installation.path("modelCaFile").asString("");
+    this.tls = caFile.isEmpty() ? null : WorkspaceManagedInstallation.tls(caFile);
     if (!enabled)
       org.slf4j.LoggerFactory.getLogger(getClass())
           .warn(
@@ -100,11 +103,12 @@ public final class WorkspaceManagedModels {
 
   private ObjectNode catalog(IssueManagedDeviceResponse response, Map<String, Object> row) {
     try {
-      try (var client =
+      var builder =
           HttpClient.newBuilder()
               .connectTimeout(Duration.ofSeconds(5))
-              .followRedirects(HttpClient.Redirect.NEVER)
-              .build()) {
+              .followRedirects(HttpClient.Redirect.NEVER);
+      if (tls != null) builder.sslContext(tls);
+      try (var client = builder.build()) {
         var request =
             HttpRequest.newBuilder(URI.create(baseUrl + "/models"))
                 .timeout(Duration.ofSeconds(10))

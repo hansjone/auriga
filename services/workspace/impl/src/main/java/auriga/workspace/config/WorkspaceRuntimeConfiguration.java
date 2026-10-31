@@ -160,6 +160,12 @@ public class WorkspaceRuntimeConfiguration {
                     Path.of(
                         env.getRequiredProperty(
                             "auriga.workspace.managed-network-installation-file"))));
+    installation =
+        auriga.workspace.app.WorkspaceManagedInstallation.project(
+            installation,
+            env.getProperty("auriga.workspace.managed-platform-origin", ""),
+            java.util.Arrays.asList(env.getProperty("auriga.links.allowed-origins", "").split(",")),
+            env.getProperty("auriga.workspace.managed-ca-file", ""));
     var network = new WorkspaceManagedNetwork(service, crypto, devices, installation);
     var executor =
         Executors.newSingleThreadScheduledExecutor(

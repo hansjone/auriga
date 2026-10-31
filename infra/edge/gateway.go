@@ -118,7 +118,14 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		activity.revoke(sid)
 		hub.CancelSession(sid)
 	})
-	networkWSS, err := newNetworkWSS(cfg.NetworkWSS, cfg.PortalHost)
+	wssConfig := cfg.NetworkWSS
+	if cfg.ManagedIngress.Origin != "" {
+		if _, err := cfg.managedEntry(); err != nil {
+			return nil, err
+		}
+		wssConfig.AllowedOrigins = append(append([]string{}, wssConfig.AllowedOrigins...), cfg.ManagedIngress.Origin)
+	}
+	networkWSS, err := newNetworkWSS(wssConfig, cfg.PortalHost)
 	if err != nil {
 		return nil, err
 	}

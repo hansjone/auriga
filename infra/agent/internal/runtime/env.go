@@ -24,6 +24,7 @@ var platformEnvKeys = map[string]struct{}{
 	"AURIGA_DEVICE_CREDENTIAL_FILE": {},
 	"AURIGA_PANEL_KEYS_FILE":        {},
 	"DSH_HOME":                      {},
+	"NODE_EXTRA_CA_CERTS":           {},
 	"HTTPS_PROXY":                   {},
 	"HTTP_PROXY":                    {},
 	"NO_PROXY":                      {},

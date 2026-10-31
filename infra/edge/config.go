@@ -46,6 +46,7 @@ type Config struct {
 	NodeTLS                NodeTLSConfig                 `json:"nodeTLS"`
 	PublicPathPrefixes     []string                      `json:"publicPathPrefixes"`
 	NetworkWSS             NetworkWSSConfig              `json:"networkWss"`
+	ManagedIngress         ManagedIngressConfig          `json:"managedIngress"`
 }
 
 type StaticConfig struct {
@@ -137,6 +138,9 @@ func applyEnv(cfg *Config) {
 			*dst = v
 		}
 	}
+	set("AURIGA_EDGE_MANAGED_ORIGIN", &cfg.ManagedIngress.Origin)
+	set("AURIGA_EDGE_MANAGED_CERT_FILE", &cfg.ManagedIngress.CertFile)
+	set("AURIGA_EDGE_MANAGED_KEY_FILE", &cfg.ManagedIngress.KeyFile)
 	set("AURIGA_EDGE_LISTEN", &cfg.Listen)
 	set("AURIGA_EDGE_ACCESS_CONFIG", &cfg.AccessConfigFile)
 	set("AURIGA_EDGE_NODE_CERT_FILE", &cfg.NodeTLS.CertFile)

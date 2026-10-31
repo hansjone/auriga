@@ -422,5 +422,8 @@ if [ "$fail" -ne 0 ]; then
   printf 'TESTS FAILED\n'
   exit 1
 fi
+if [ "$(id -u)" = 0 ]; then
+  sh "$ROOT/test/managed.sh" "$ROOT" "$TMP"
+fi
 printf 'ALL TESTS PASSED\n'
 exit 0

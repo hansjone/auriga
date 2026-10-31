@@ -102,6 +102,7 @@ public final class WorkspaceManagedNetwork {
       }
       var file = installation.deepCopy();
       file.remove("modelBaseUrl");
+      file.remove("modelCaFile");
       file.put("tenantId", store.tenant().toString());
       file.put("ownerId", row.get("owner_id").toString());
       file.put("instanceId", id.toString());

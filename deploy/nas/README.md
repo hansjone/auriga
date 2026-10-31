@@ -1,5 +1,41 @@
 # Auriga NAS isolated test pack
 
+## Managed instances on isolated networks
+
+Managed device registration, tickets, keys, WSS and native model calls can use
+an installation-owned internal HTTPS origin, without public DNS or egress.
+Set `AURIGA_MANAGED_PLATFORM_HOST` to the exact `instanceControl.dnsAlias` in
+`access.json`, and `AURIGA_MANAGED_PLATFORM_ORIGIN` to
+`https://<that-alias>:<unused-port>` (for example port `18446`). Add that exact
+origin to `AURIGA_LINKS_ALLOWED_ORIGINS`. These values belong in `stack.env`.
+The internal bridge gets the same edge alias already used on instance networks;
+the NAS resolver, public ingress and instance isolation are unchanged.
+
+Run normal `scripts/render.sh` and `scripts/start.sh` using updated platform,
+edge, agent and real DSH images. The root installer uses its bundled OpenSSL to
+issue a separate one-year TLS server leaf from the existing installation TLS CA.
+It keeps the leaf in `config/managed-source`, projects only its leaf/key to edge,
+and projects only the public CA to platform and managed instances. The original
+sealed materials and all identity/network signing roots remain unchanged.
+Repeated render verifies the original source, key pair, CA, SAN, expiry and file
+permissions; it refuses origin changes, widened keys or interrupted preparation.
+Rotation/expiry requires an explicit operator procedure; render never replaces
+these materials silently.
+
+The listener reuses instance control's private-interface source/destination
+restrictions, excludes the LAN interface, checks exact Host and Origin and serves
+only native device/network/model paths. Browser cookies, admin APIs, login pages,
+instance pages and unapproved origins are denied. Normal authorization remains
+in force. Device JWT issuer, network URL and model URL use the internal origin.
+Node trusts the public CA through a renderer-owned, digest-bound file and reserved
+`NODE_EXTRA_CA_CERTS`; a profile cannot override it. TLS verification stays enabled.
+
+Existing material is versioned: after deployment, use the normal member stop/open
+workflow to rotate and deliver it. Confirm the new private file's origin without
+printing credentials, network READY, and a real native provider call with relay
+usage attributed to the member. Page health or a transport-only probe is not
+network/message acceptance.
+
 Public deployment templates for a separate NAS test stack (`auriga-nas-test`).
 
 普通 NAS 共享路径可显式设置 `AURIGA_INSTALL_MODE=container`，以预先审核并加载的不可变

@@ -153,6 +153,17 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 		role, _ := r.Context().Value(accessRoleKey{}).(string)
 		var origin deployment.Origin
 		switch role {
+		case "managed":
+			entry, err := g.Cfg.managedEntry()
+			if err != nil || len(r.Header.Values("Cookie")) != 0 || len(r.Header.Values("Origin")) != 0 && !strictOrigin(r, entry) {
+				fail(403, "common.forbidden")
+				return
+			}
+			if !managedPathAllowed(r) {
+				fail(404, "common.not_found")
+				return
+			}
+			origin = deployment.Origin{Scheme: entry.scheme, Host: entry.host, Port: int32(entry.port)}
 		case "portal":
 			origin = g.Cfg.Access.PortalOrigin()
 		case "admin":
@@ -173,7 +184,7 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 		if r.TLS != nil {
 			scheme = "https"
 		}
-		if g.Cfg.Access.IngressKind() == "trusted_proxy" && role != "instanceControl" {
+		if g.Cfg.Access.IngressKind() == "trusted_proxy" && role != "instanceControl" && role != "managed" {
 			if !g.authenticatedProxy(r) {
 				fail(403, "common.forbidden")
 				return
@@ -203,6 +214,9 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), linkOriginKey{}, g.Cfg.linkOrigin(r, scheme)))
 		stripUntrustedEntryHeaders(r.Header)
 		e := accessEntry{role: role, scheme: scheme, host: host, port: port}
+		if role == "managed" {
+			e.role = "portal"
+		}
 		r = r.WithContext(context.WithValue(r.Context(), accessEntryKey{}, e))
 		if role == "instanceControl" {
 			g.serveInstanceControl(w, r)

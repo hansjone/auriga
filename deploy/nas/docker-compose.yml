@@ -215,6 +215,7 @@ services:
         condition: service_healthy
     secrets: [litellm_team]
     volumes:
+      - ${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro
       - ${AURIGA_DATA_ROOT}/config/materials/litellm-runtime.json:/etc/auriga/litellm-runtime.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/pki/ca.crt:/etc/auriga/pki/ca.crt:ro
       - ${AURIGA_DATA_ROOT}/config/materials/pki/gateway.crt:/etc/auriga/pki/gateway.crt:ro
@@ -289,6 +290,8 @@ services:
       SERVER_ADDRESS: 0.0.0.0
       SERVER_SSL_ENABLED: 'true'
       AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
+      AURIGA_WORKSPACE_MANAGED_PLATFORM_ORIGIN: ${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
+      AURIGA_WORKSPACE_MANAGED_CA_FILE: /etc/auriga/managed-ca/ca.crt
       AURIGA_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
       AURIGA_LINKS_TRUSTED_PROXIES: ${AURIGA_INTERNAL_EDGE_IP}
       AURIGA_IAM_TLS_CERT_FILE: /etc/auriga/pki/iam.crt
@@ -383,6 +386,9 @@ services:
         required: true
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
+      AURIGA_EDGE_MANAGED_ORIGIN: ${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
+      AURIGA_EDGE_MANAGED_CERT_FILE: /etc/auriga/managed/server.crt
+      AURIGA_EDGE_MANAGED_KEY_FILE: /etc/auriga/managed/server.key
       AURIGA_EDGE_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
       AURIGA_EDGE_LINKS_TRUSTED_PROXIES: ${AURIGA_LINKS_TRUSTED_PROXIES:-}
     volumes:
@@ -393,11 +399,13 @@ services:
       - ${AURIGA_DATA_ROOT}/internal-tokens:/run/auriga-internal:ro
       # Only edge leaf materials — not ca.key / workspace.key (M8).
       - ${AURIGA_DATA_ROOT}/config/pki-edge:/etc/auriga/pki:ro
+      - ${AURIGA_DATA_ROOT}/config/managed-edge:/etc/auriga/managed:ro
       # Ingress socket only — not data/agent private keys (H2).
       - ${AURIGA_DATA_ROOT}/socket-share:${AURIGA_DATA_ROOT}/socket-share:ro
     networks:
       internal:
         ipv4_address: ${AURIGA_INTERNAL_EDGE_IP}
+        aliases: ["${AURIGA_MANAGED_PLATFORM_HOST:-auriga-managed-disabled}"]
       lan:
         ipv4_address: ${AURIGA_EDGE_LAN_IP}
     expose:
@@ -484,6 +492,7 @@ services:
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
       AURIGA_AGENT_PANEL_KEYS_FILE: /etc/auriga/panel-keys.json
+      AURIGA_AGENT_MANAGED_CA_FILE: ${AURIGA_MANAGED_PLATFORM_ORIGIN:+/etc/auriga/managed-ca/ca.crt}
       # Trusted edge identity and internal alias come only from access.json.
       AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/socket-share/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
@@ -493,6 +502,7 @@ services:
       AURIGA_AGENT_CAPACITY_DISK_GB: ${AURIGA_AGENT_CAPACITY_DISK_GB:-10}
       DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
+      - ${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ${AURIGA_DATA_ROOT}/data/agent:${AURIGA_DATA_ROOT}/data/agent
       - ${AURIGA_DATA_ROOT}/socket-share:${AURIGA_DATA_ROOT}/socket-share
