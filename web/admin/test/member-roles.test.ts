@@ -255,15 +255,24 @@ it.each(['grant', 'revoke'] as const)(
 );
 
 it.each(['*', 'org.*', 'org.roles.*'])(
-  'accepts covered read/grant permissions from %s',
+  'does not expand wildcard read/grant strings from %s',
   async (permission) => {
     permissions = [permission, 'system.*'];
     await render();
-    const options = wrapper!
-      .findComponent({ name: 'ElSelect' })
-      .props('options');
-    expect(options).toContainEqual(
-      expect.objectContaining({ value: 'owner-role', disabled: false }),
-    );
+    expect(rolesApi.list).not.toHaveBeenCalled();
+    expect(wrapper!.findComponent({ name: 'ElSelect' }).exists()).toBe(false);
   },
 );
+
+it('labels a readback failure separately from the rejected write', async () => {
+  await render();
+  vi.mocked(rolesApi.revoke).mockRejectedValue(
+    new ApiError({ status: 409, code: 'org.last_owner', title: 'Rejected' }),
+  );
+  vi.mocked(rolesApi.list).mockRejectedValue(new Error('unavailable'));
+  await click('撤销授权');
+  await confirm();
+  expect(wrapper!.text()).toContain('org.last_owner');
+  expect(wrapper!.text()).toContain('重新读取角色及绑定失败：');
+  expect(wrapper!.emitted('updated')).toBeUndefined();
+});

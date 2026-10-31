@@ -122,6 +122,7 @@ const candidates = useCursorList<{ id: string; label: string }>(
       };
     const result = await orgApi.listMembers({
       q: query.value.trim() || undefined,
+      status: 'active',
       limit: 50,
       cursor,
     });
@@ -536,7 +537,9 @@ async function confirm() {
   const rejection = error.value;
   await afterWrite(roleId);
   if (access.isAlive())
-    error.value = [rejection, error.value].filter(Boolean).join(' ');
+    error.value = error.value
+      ? `${rejection}; ${t('rolesReloadFailed', { error: error.value })}`
+      : rejection;
 }
 </script>
 <template>

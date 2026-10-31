@@ -166,7 +166,7 @@ paths:
       operationId: disableMember
       x-admin-only: true
       x-permission: org.members.write
-      description: 发 user.disabled。不能停用自己，不能停用最后一个超管（409 org.last_owner）。
+      description: 发 user.disabled。操作者须覆盖目标的有效权限（含组继承），否则 403 org.grant_exceeds_own。不能停用自己，不能停用最后一个超管（409 org.last_owner）。
       requestBody:
         content:
           application/json:
@@ -177,6 +177,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
   /admin/members/{accountId}/enable:
     parameters:
@@ -186,12 +187,14 @@ paths:
       operationId: enableMember
       x-admin-only: true
       x-permission: org.members.write
+      description: 操作者须覆盖目标停用期间保留的有效权限（含组继承），否则 403 org.grant_exceeds_own。
       responses:
         '200':
           description: 已启用（发 user.enabled）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
   /admin/members/{accountId}/offboard:
     parameters:
       - $ref: '#/components/parameters/AccountId'
@@ -200,7 +203,7 @@ paths:
       operationId: offboardMember
       x-admin-only: true
       x-permission: org.members.offboard
-      description: 离职。发 user.offboarded，后续的导出、归档、转交由各服务按事件处理。
+      description: 离职。操作者须覆盖目标的有效权限（含组继承），否则 403 org.grant_exceeds_own。发 user.offboarded，后续的导出、归档、转交由各服务按事件处理。
       requestBody:
         required: true
         content:
@@ -216,6 +219,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
   /admin/members/{accountId}/role-bindings:
     parameters:

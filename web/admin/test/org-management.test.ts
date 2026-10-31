@@ -357,21 +357,14 @@ describe('invitation management', () => {
     await flushPromises();
     expect(writes()).toHaveLength(0);
   });
-  it('supports wildcard coverage when choosing initial invitation roles', async () => {
+  it('does not expand wildcard invitation permissions', async () => {
     permissions = ['*'];
     await render(InvitationsView);
-    await click('创建成员邀请');
-    expect(wrapper!.text()).not.toContain('普通成员角色不可用');
-    const select = wrapper!
-      .findAllComponents({ name: 'ElSelect' })
-      .find((s) => s.props('ariaLabel') === '初始角色')!;
-    expect(select.props('options')).toContainEqual(
-      expect.objectContaining({ value: 'owner-role', disabled: false }),
-    );
-    await wrapper!.findAll('form').at(-1)!.trigger('submit');
-    await flushPromises();
-    await confirm();
-    expect(writes()).toHaveLength(1);
+    expect(rolesApi.list).not.toHaveBeenCalled();
+    expect(
+      wrapper!.findAll('button').some((b) => b.text() === '创建成员邀请'),
+    ).toBe(false);
+    expect(writes()).toHaveLength(0);
   });
   it.each([
     'https://portal.example.com:9443/team/invite/example%2Bcode?source=invitation',

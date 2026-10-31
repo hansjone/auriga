@@ -5,6 +5,7 @@ import auriga.collab.grpc.*;
 import auriga.collab.network.keys.*;
 import auriga.collab.network.local.LocalRegistry;
 import auriga.common.audit.OutboxAuditLogger;
+import auriga.common.context.RequestContext;
 import auriga.common.context.TenantContext;
 import auriga.common.events.*;
 import auriga.common.grpc.*;
@@ -35,6 +36,7 @@ import tools.jackson.databind.node.ObjectNode;
 public final class NetworkSourceJavaHost implements AutoCloseable {
   static final String PRIVATE_KEY_BEGIN = "-----BEGIN " + "PRIVATE KEY-----";
   final UUID tenant = UuidV7.next();
+  final UUID revocationActor = UuidV7.next();
   final Clock clock = Clock.systemUTC();
   final List<String> closed = new ArrayList<>();
   final Map<String, String> secrets =
@@ -107,6 +109,30 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
                     "INSERT INTO org.tenant(id,tenant_id,slug,display_name) VALUES(?,?,'bridge','Example bridge')",
                     tenant,
                     tenant);
+                // Explicit administrative fixture identity, backed by tenant-local Org grants.
+                org.store()
+                    .insertMember(
+                        new OrgStore.MemberRow(
+                            revocationActor,
+                            "Bridge revocation administrator",
+                            null,
+                            "member",
+                            "active",
+                            1,
+                            clock.instant(),
+                            null,
+                            null));
+                UUID role = UuidV7.next();
+                orgJdbc.update(
+                    "INSERT INTO org.role(id,tenant_id,key,name_en,name_zh,permissions) VALUES(?,?,'bridge_revocation_admin','Bridge revocation administrator','Bridge revocation administrator',ARRAY['org.roles.grant','auriga.connect','auriga.connect.collab.use'])",
+                    role,
+                    tenant);
+                orgJdbc.update(
+                    "INSERT INTO org.role_binding(id,tenant_id,role_id,subject_type,subject_id) VALUES(?,?,?,'member',?)",
+                    UuidV7.next(),
+                    tenant,
+                    role,
+                    revocationActor);
                 return null;
               });
       security();
@@ -567,7 +593,23 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
   }
 
   void revoke(Device device) {
-    TenantContext.run(tenant, () -> org.deleteRoleBinding(device.binding()));
+    var actor =
+        new AurigaPrincipal(
+            revocationActor.toString(),
+            tenant,
+            PrincipalType.USER,
+            TokenContext.ADMIN,
+            null,
+            null,
+            "member",
+            List.of("bridge_revocation_admin"),
+            Set.of("org.roles.grant", "auriga.connect", "auriga.connect.collab.use"),
+            clock.instant(),
+            clock.instant(),
+            UuidV7.next().toString());
+    RequestContext.start("network-source-org-revoke", null)
+        .withPrincipal(actor)
+        .run(() -> TenantContext.run(tenant, () -> org.deleteRoleBinding(device.binding())));
   }
 
   void assertRedeemFacts(NetworkAuthorityConnection connection, Device device) {

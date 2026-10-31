@@ -467,11 +467,31 @@ describe('role definition workflows', () => {
 });
 
 describe('binding workflows and permission separation', () => {
+  it('labels a failed binding reload while preserving the original rejection', async () => {
+    bindings = [binding()];
+    await render();
+    await click('详情');
+    await click('撤销授权');
+    fail = {
+      path: `${base}/role-bindings/${bindingId}`,
+      method: 'DELETE',
+      status: 409,
+      code: 'org.last_owner',
+    };
+    intercept = (path) =>
+      path === `${base}/roles`
+        ? Promise.resolve(problem(503, 'common.unavailable'))
+        : undefined;
+    await confirm();
+    expect(wrapper!.text()).toContain('org.last_owner');
+    expect(wrapper!.text()).toContain('重新读取角色及绑定失败：');
+    expect(wrapper!.text()).not.toContain('授权绑定已撤销');
+  });
   it.each(['disabled', 'offboarded'] as const)(
     'does not offer a %s member for grants',
     async (status) => {
       intercept = (path) =>
-        path === `${base}/members?limit=50`
+        path === `${base}/members?status=active&limit=50`
           ? Promise.resolve(json({ items: [{ ...member, status }] }))
           : undefined;
       await render();
@@ -674,7 +694,7 @@ describe('binding workflows and permission separation', () => {
   });
   it('paginates and searches member candidates without inventing UUIDs', async () => {
     intercept = (path) =>
-      path === `${base}/members?limit=50`
+      path === `${base}/members?status=active&limit=50`
         ? Promise.resolve(
             json({ items: [member], nextCursor: 'candidate+/cursor' }),
           )
@@ -697,7 +717,9 @@ describe('binding workflows and permission separation', () => {
     ).toBe(true);
     await wrapper!.get('input[aria-label="搜索候选成员"]').setValue('alice');
     await click('读取授权候选');
-    expect(calls.at(-1)!.path).toBe(`${base}/members?q=alice&limit=50`);
+    expect(calls.at(-1)!.path).toBe(
+      `${base}/members?q=alice&status=active&limit=50`,
+    );
   });
 });
 
@@ -759,7 +781,7 @@ describe('role page state boundaries', () => {
   it('rejects stale member candidates after switching subject type', async () => {
     let resolve!: (response: Response) => void;
     intercept = (path) =>
-      path === `${base}/members?limit=50`
+      path === `${base}/members?status=active&limit=50`
         ? new Promise((done) => {
             resolve = done;
           })

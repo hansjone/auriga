@@ -153,6 +153,98 @@ class OrgRoleIntegrityTest {
                             Stream.of(false, true).map(rr -> Arguments.of(first, second, rr))));
   }
 
+  static Stream<Arguments> memberLifecycleCeilings() {
+    return Stream.of("disable", "offboard", "enable")
+        .flatMap(action -> Stream.of(false, true).map(group -> Arguments.of(action, group)));
+  }
+
+  @ParameterizedTest
+  @MethodSource("memberLifecycleCeilings")
+  void memberLifecycleRejectsHigherDirectAndInheritedPermissions(String action, boolean inherited) {
+    UUID target = inherited ? member() : firstOwner;
+    if (inherited) {
+      UUID group = group();
+      create(OrgIds.ROLE_OWNER, "group", group);
+      store.tenant(
+          TENANT,
+          () -> {
+            store
+                .jdbc()
+                .update(
+                    "INSERT INTO group_member (id,tenant_id,group_id,account_id) VALUES (?,?,?,?)",
+                    UuidV7.next(),
+                    TENANT,
+                    group,
+                    target);
+            return null;
+          });
+    }
+    if (action.equals("enable")) setStatus(target, "disabled");
+    var before = TenantContext.call(TENANT, () -> svc.memberJson(target));
+    int events = eventCount();
+    assertError("org.grant_exceeds_own", () -> asActor(operator, () -> lifecycle(action, target)));
+    assertEquals(before, TenantContext.call(TENANT, () -> svc.memberJson(target)));
+    assertEquals(events, eventCount());
+  }
+
+  @ParameterizedTest
+  @MethodSource("memberLifecycleCeilings")
+  void memberLifecycleAllowsEqualPermissionsAndOwner(String action, boolean ownerActor) {
+    UUID target = ownerActor ? secondOwner : member();
+    if (!ownerActor)
+      store.tenant(
+          TENANT,
+          () -> {
+            bind(target, OrgIds.ROLE_ADMIN);
+            return null;
+          });
+    if (action.equals("enable")) setStatus(target, "disabled");
+    var result = asActor(ownerActor ? firstOwner : operator, () -> lifecycle(action, target));
+    assertEquals(
+        action.equals("enable") ? "active" : action.equals("offboard") ? "offboarded" : "disabled",
+        result.path("status").asString());
+    assertEquals(1, eventCount());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"disable", "offboard", "enable"})
+  void memberLifecycleRequiresExplicitActor(String action) {
+    if (action.equals("enable")) setStatus(firstOwner, "disabled");
+    assertError(
+        "org.not_found", () -> TenantContext.call(TENANT, () -> lifecycle(action, firstOwner)));
+    assertEquals(0, eventCount());
+  }
+
+  @Test
+  void bindingRevocationRequiresExplicitActor() {
+    assertError(
+        "org.not_found",
+        () -> TenantContext.run(TENANT, () -> svc.deleteRoleBinding(firstBinding)));
+    assertEquals(1, bindingsFor(firstOwner));
+    assertEquals(0, eventCount());
+  }
+
+  private ObjectNode lifecycle(String action, UUID member) {
+    return switch (action) {
+      case "disable" -> svc.disableMember(member, "ceiling test");
+      case "offboard" -> svc.offboardMember(member, null, "ceiling test");
+      case "enable" -> svc.enableMember(member);
+      default -> throw new AssertionError(action);
+    };
+  }
+
+  private void setStatus(UUID member, String status) {
+    store.tenant(
+        TENANT,
+        () -> {
+          store
+              .jdbc()
+              .update(
+                  "UPDATE member SET status=? WHERE tenant_id=? AND id=?", status, TENANT, member);
+          return null;
+        });
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"member", "group", "service_account"})
   void revokeCeilingRejectsHigherPermissionsWithoutWrites(String type) {
@@ -388,6 +480,7 @@ class OrgRoleIntegrityTest {
         () ->
             TenantContext.call(
                 TENANT, () -> svc.updateRole(OrgIds.ROLE_OWNER, null, null, List.of())));
+    giveOperatorOwnerPermissions();
     asActor(
         firstOwner,
         () -> {
@@ -398,8 +491,8 @@ class OrgRoleIntegrityTest {
     assertError(
         "org.last_owner",
         () ->
-            TenantContext.run(
-                TENANT, () -> svc.disableMember(secondOwner, "inherited owner does not count")));
+            asActor(
+                operator, () -> svc.disableMember(secondOwner, "inherited owner does not count")));
     assertEquals(1, owners());
     assertEquals(1, eventCount());
   }
@@ -431,7 +524,7 @@ class OrgRoleIntegrityTest {
   @ParameterizedTest
   @ValueSource(strings = {"revoke", "disable", "offboard", "create"})
   void callerRollbackRemovesMutationAndOutbox(String mutation) {
-    if (mutation.equals("revoke")) giveOperatorOwnerPermissions();
+    if (!mutation.equals("create")) giveOperatorOwnerPermissions();
     UUID member = member();
     var tenantBefore = TenantContext.call(TENANT, () -> svc.tenantJson(svc.getTenant()));
     var memberBefore = TenantContext.call(TENANT, () -> svc.memberJson(firstOwner));
@@ -457,6 +550,7 @@ class OrgRoleIntegrityTest {
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
   void metadataCannotRestoreOldOwnerStatus(boolean repeatableRead) throws Exception {
+    giveOperatorOwnerPermissions();
     assertEquals(
         repeatableRead ? "common.conflict" : "committed",
         race(
@@ -474,7 +568,7 @@ class OrgRoleIntegrityTest {
   @ValueSource(booleans = {false, true})
   void metadataCannotUndoEnableFromOldSnapshot(boolean repeatableRead) throws Exception {
     UUID member = member();
-    TenantContext.run(TENANT, () -> svc.disableMember(member, "before race"));
+    asActor(firstOwner, () -> svc.disableMember(member, "before race"));
     store.tenant(
         TENANT,
         () -> {
@@ -484,7 +578,7 @@ class OrgRoleIntegrityTest {
     assertEquals(
         repeatableRead ? "common.conflict" : "committed",
         race(
-            () -> svc.enableMember(member),
+            () -> asActor(firstOwner, () -> svc.enableMember(member)),
             () -> svc.updateMember(member, "renamed", null, null, null),
             repeatableRead));
     assertEquals(

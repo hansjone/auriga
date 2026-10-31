@@ -135,6 +135,12 @@ public final class OrgService {
     OrgError.require(r.allowed(), "grant_exceeds_own", 403);
   }
 
+  private void ensureMemberManagementAllowed(UUID actor, UUID target) {
+    Set<String> own = new LinkedHashSet<>(getEffectivePermissions(actor).permissions());
+    OrgError.require(
+        own.containsAll(getEffectivePermissions(target).permissions()), "grant_exceeds_own", 403);
+  }
+
   private List<String> roleKeysOf(UUID accountId) {
     Set<String> keys = new LinkedHashSet<>();
     keys.addAll(store.directRoleKeys(accountId));
@@ -289,10 +295,11 @@ public final class OrgService {
     return store.tx(
         () -> {
           store.lockGroupHierarchy();
-          UUID actor = actorId();
-          OrgError.require(actor == null || !actor.equals(accountId), "conflict", 409);
+          UUID actor = requireActor();
+          OrgError.require(!actor.equals(accountId), "conflict", 409);
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
           OrgError.require("active".equals(m.status()), "conflict", 409);
+          ensureMemberManagementAllowed(actor, accountId);
           if (store.isOwner(accountId))
             OrgError.require(store.countOwners() > 1, "last_owner", 409);
           Instant now = clock.instant();
@@ -317,8 +324,10 @@ public final class OrgService {
     return store.tx(
         () -> {
           store.lockGroupHierarchy();
+          UUID actor = requireActor();
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
           OrgError.require("disabled".equals(m.status()), "conflict", 409);
+          ensureMemberManagementAllowed(actor, accountId);
           var updated =
               new OrgStore.MemberRow(
                   m.id(),
@@ -331,7 +340,7 @@ public final class OrgService {
                   null,
                   m.offboardedAt());
           store.saveMember(updated);
-          userEvents.enabled(accountId, actorId());
+          userEvents.enabled(accountId, actor);
           return toMemberJson(updated);
         });
   }
@@ -340,10 +349,11 @@ public final class OrgService {
     return store.tx(
         () -> {
           store.lockGroupHierarchy();
-          UUID actor = actorId();
-          OrgError.require(actor == null || !actor.equals(accountId), "conflict", 409);
+          UUID actor = requireActor();
+          OrgError.require(!actor.equals(accountId), "conflict", 409);
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
           OrgError.require(!"offboarded".equals(m.status()), "conflict", 409);
+          ensureMemberManagementAllowed(actor, accountId);
           if (store.isOwner(accountId))
             OrgError.require(store.countOwners() > 1, "last_owner", 409);
           Instant now = clock.instant();

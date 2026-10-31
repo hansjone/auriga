@@ -158,7 +158,9 @@ async function confirm() {
   const rejection = error.value;
   await load();
   if (access.isAlive())
-    error.value = [rejection, error.value].filter(Boolean).join(' ');
+    error.value = error.value
+      ? `${rejection}; ${t('rolesReloadFailed', { error: error.value })}`
+      : rejection;
 }
 watch(
   () => props.disabled,

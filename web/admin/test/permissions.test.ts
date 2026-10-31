@@ -2,9 +2,10 @@ import { expect, it } from 'vitest';
 import { hasPermission } from '../src/admin/permissions';
 
 it.each([
-  [['*'], 'org.roles.grant', true],
-  [['org.*'], 'org.roles.grant', true],
-  [['org.roles.*'], 'org.roles.grant', true],
+  [['*'], 'org.roles.grant', false],
+  [['org.*'], 'org.roles.grant', false],
+  [['org.roles.*'], 'org.roles.grant', false],
+  [['org.roles.*'], 'org.roles.*', true],
   [['org.roles.grant'], 'org.roles.grant', true],
   [['org.role.*'], 'org.roles.grant', false],
   [['org.roles.read'], 'org.roles.*', false],
