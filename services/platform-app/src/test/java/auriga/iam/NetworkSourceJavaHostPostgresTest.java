@@ -69,7 +69,7 @@ class NetworkSourceJavaHostPostgresTest {
                           .store()
                           .jdbc()
                           .queryForObject(
-                              "SELECT envelope->'data'->>'actorId' FROM org.outbox_event WHERE tenant_id=? AND envelope->>'type'='user.permissions_changed' ORDER BY id DESC LIMIT 1",
+                              "SELECT envelope::jsonb->'data'->>'actorId' FROM org.outbox_event WHERE tenant_id=? AND event_type='user.permissions_changed' ORDER BY seq DESC LIMIT 1",
                               String.class,
                               host.tenant)));
       assertFalse(
