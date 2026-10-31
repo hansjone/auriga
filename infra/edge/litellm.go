@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -242,12 +241,7 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			return
 		}
 	}
-	if !data && staticAssetPath(r) {
-		ctx, cancel := context.WithTimeout(r.Context(), staticBodyTimeout)
-		defer cancel()
-		r = r.WithContext(ctx)
-	}
-	proxy := newReverseProxy(g.litellmURL, liteLLMTransport, false)
+	proxy := newReverseProxy(g.litellmURL, staticIdleTransport{base: liteLLMTransport, timeout: staticBodyTimeout}, false)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
@@ -275,6 +269,9 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			pr.Out.Header.Set("traceparent", ensureTraceparent(r))
 		} else {
 			pr.Out.Header.Set("Cookie", liteLLMCookies(pr.In.Header.Get("Cookie")))
+			if pr.In.URL.Path == liteLLMUIConfigPath {
+				pr.Out.Header.Set("Accept-Encoding", "identity")
+			}
 			if staticAssetPath(pr.In) && pr.In.Method == http.MethodHead && pr.In.Header.Get("Range") == "" && acceptsStaticGzip(pr.In) {
 				pr.Out.Method = http.MethodGet
 			}
@@ -327,7 +324,10 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			resp.Header.Set("Location", location.String())
 		}
 		if !data {
-			if err := gzipStaticResponseCached(resp, &g.litellmStaticCache); err != nil {
+			if r.Method == http.MethodGet && r.URL.Path == liteLLMUIConfigPath {
+				return rewriteLiteLLMUIConfig(resp, g.liteLLMPresentationOrigin(r))
+			}
+			if err := gzipStaticResponseCached(resp, g.litellmStaticCache); err != nil {
 				return err
 			}
 			if r.Method == http.MethodHead {

@@ -33,17 +33,21 @@ def main():
         password = 'sk-' + secrets.token_hex(32)
         for name in ['bootstrap', 'master', 'salt', 'team', 'pg_password']:
             leaf = root / name
-            leaf.write_text(password if name == 'master' else secrets.token_hex(32))
+            leaf.write_text(password if name == 'master' else ('sk-' if name in ['team', 'salt'] else '') + secrets.token_hex(32))
             leaf.chmod(0o640)
             os.chown(leaf, 0, 10003 if name in ['master', 'salt'] else 999)
         overlay = STATE / 'overlay.json'
         overlay.write_text(json.dumps({'services': {'litellm': {
-            'environment': {'SERVER_ROOT_PATH': '/ai', 'NO_DOCS': 'true'},
+            'environment': {'SERVER_ROOT_PATH': '/ai', 'NO_DOCS': 'true', 'PROXY_BASE_URL': 'http://192.0.2.20:8086/ai'},
             'ports': ['127.0.0.1::4000'], 'mem_limit': '1200m'},
             'postgres': {'mem_limit': '256m'}}}))
         data = {'project': 'auriga-ui2-' + secrets.token_hex(6), 'root': str(root)}
         record.write_text(json.dumps(data))
-        (STATE / 'password').write_text(password)
+        (root / 'ui').mkdir()
+        subprocess.run(['python3', str(REPO / 'deploy/nas/litellm/prepare-ui.py'), str(root / 'ui')], check=True)
+        (STATE / 'password').write_text((root / 'ui/password').read_text())
+        (STATE / 'reader').write_text((root / 'ui/reader').read_text())
+        (STATE / 'reader').chmod(0o600)
         (STATE / 'password').chmod(0o600)
     else:
         data = json.loads(record.read_text())
@@ -55,15 +59,17 @@ def main():
             '-f', str(STATE / 'overlay.json')]
     if sys.argv[1] == 'start':
         docker(*args, 'up', '-d', '--wait', '--wait-timeout', '240', 'postgres', 'fake-upstream', 'litellm')
+        docker(*args, 'run', '--rm', 'litellm-init')
         address = docker(*args, 'port', 'litellm', '4000', capture=True).stdout.strip()
         data['origin'] = 'http://' + address
         record.write_text(json.dumps(data))
-        print(json.dumps({'origin': data['origin'], 'passwordFile': str(STATE / 'password')}))
+        print(json.dumps({'origin': data['origin'], 'passwordFile': str(STATE / 'password'), 'readerFile': str(STATE / 'reader')}))
     elif sys.argv[1] == 'stop':
         docker(*args, 'down', '--volumes', '--remove-orphans')
         shutil.rmtree(root)
         record.unlink()
         (STATE / 'password').unlink()
+        (STATE / 'reader').unlink()
     else:
         raise RuntimeError('use start or stop')
 

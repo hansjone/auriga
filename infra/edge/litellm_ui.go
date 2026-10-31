@@ -63,8 +63,8 @@ func (c Config) validateLiteLLMUI() error {
 	if c.Access.IngressKind() == "direct" && (u.Listener.Port != u.Origin.Port || u.Listener.Tls != (u.Origin.Scheme == "https")) {
 		return invalid
 	}
-	if u.Login != nil && u.Login.PasswordFile == "" {
-		return fmt.Errorf("LiteLLM UI passwordFile is required")
+	if u.Login != nil && (u.Login.PasswordFile == "" || u.Login.KeyInfoKeyFile == "") {
+		return fmt.Errorf("LiteLLM UI passwordFile and keyInfoKeyFile are required")
 	}
 	return c.validateLiteLLMExternalOrigins()
 }

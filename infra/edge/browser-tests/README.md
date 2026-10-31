@@ -21,3 +21,5 @@ Pop-Location
 使用真实上游且配置 `AURIGA_LITELLM_UI_TEST_PASSWORD_FILE` 时，edge 从临时文件读取测试实例的 UI 凭据，通过原生登录换取 JWT。测试等待模型、Virtual Keys、Usage 的实际路由和页面标题，确认无登录表单、UI Key 不能经公开数据入口调用模型，并在平台会话撤销后保留 UI cookie 重访，必须返回 401。可设置 `AURIGA_LITELLM_UI_TEST_EVIDENCE` 保存三个页面和撤销后的截图；截图目录应位于不入库的测试产物目录。未配置密码文件时保留原先的独立登录表单回归。
 
 本机一次性 LiteLLM/PostgreSQL 夹具与真实部署验收见 `e2e/litellm-ui2/README.md`。夹具 IAM 为受控 gRPC，不代表真实平台登录；真实部署脚本另走平台登录和登出。
+
+R2 同时设置 `AURIGA_LITELLM_UI_TEST_KEY_INFO_FILE` 为夹具 `.runtime/reader` 的绝对路径；两文件均不包含 master。夹具故意把 `PROXY_BASE_URL` 设为不同的内部 HTTP 来源。浏览器回归增加随机端口自签 HTTPS 管理台/relay 反代，以当前进程精确 SPKI 固定证书，断言 UI config 指向展示来源、没有内部 API 请求或 mixed content，三页就绪及撤销拒绝；不更改 OS 信任和 VPS。

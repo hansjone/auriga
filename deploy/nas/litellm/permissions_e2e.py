@@ -49,6 +49,9 @@ def verify(mode, endpoint):
             for name in NAMES:
                 metadata = (source / name).stat()
                 assert (metadata.st_uid, metadata.st_mode & 0o777) == (10001, 0o600)
+        ui = root / 'litellm-ui'
+        ui.mkdir()
+        subprocess.run(['python3', str(DEPLOY / 'nas/litellm/prepare-ui.py'), str(ui)], check=True)
         docker = ['docker', '--host', endpoint]
         # Compose itself resolves YAML anchors, service settings and bind paths.
         definition = json.loads(command(docker + ['compose', '-f',
@@ -73,6 +76,7 @@ def verify(mode, endpoint):
         config = {'services': services, 'secrets': {
             'litellm_' + n: {'file': str(runtime / n)} for n in NAMES},
             'networks': {'default': {}}}
+        config['secrets'].update({'litellm_ui_password': {'file': str(ui / 'password')}, 'litellm_ui_reader': {'file': str(ui / 'reader')}})
         config_path = root / 'compose.json'
         config_path.write_text(json.dumps(config))
         config_path.chmod(0o600)

@@ -14,9 +14,9 @@ import (
 )
 
 type LiteLLMUILogin struct {
-	Username      string `json:"username,omitempty"`
-	PasswordFile  string `json:"passwordFile"`
-	MasterKeyFile string `json:"masterKeyFile,omitempty"`
+	Username       string `json:"username,omitempty"`
+	PasswordFile   string `json:"passwordFile"`
+	KeyInfoKeyFile string `json:"keyInfoKeyFile"`
 }
 
 func readLiteLLMUISecret(filename string) ([]byte, error) {
@@ -90,7 +90,7 @@ func (g *Gateway) loginLiteLLMUI(r *http.Request) (string, error) {
 		Role string `json:"user_role"`
 		Exp  int64  `json:"exp"`
 	}
-	if json.Unmarshal(claims, &ui) != nil || ui.Role != "proxy_admin" || ui.Key == "" || ui.Exp <= g.Now().Unix() {
+	if json.Unmarshal(claims, &ui) != nil || ui.Role != "proxy_admin" || ui.Key == "" || ui.Exp <= g.Now().Unix() || ui.Exp-g.Now().Unix() > int64((24*time.Hour)/time.Second) {
 		return "", rejected
 	}
 	// The response is from the configured private LiteLLM origin, never a
@@ -106,11 +106,7 @@ func (g *Gateway) checkLiteLLMExternalKey(r *http.Request) (int, string) {
 		return 0, ""
 	}
 	login := g.Cfg.LiteLLMUI.Login
-	filename := login.MasterKeyFile
-	if filename == "" {
-		filename = login.PasswordFile
-	}
-	master, err := readLiteLLMUISecret(filename)
+	reader, err := readLiteLLMUISecret(login.KeyInfoKeyFile)
 	if err != nil {
 		return 503, "common.unavailable"
 	}
@@ -121,7 +117,7 @@ func (g *Gateway) checkLiteLLMExternalKey(r *http.Request) (int, string) {
 	if err != nil {
 		return 503, "common.unavailable"
 	}
-	request.Header.Set("Authorization", "Bearer "+string(master))
+	request.Header.Set("Authorization", "Bearer "+string(reader))
 	client := &http.Client{Timeout: 5 * time.Second, Transport: liteLLMTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(request)
 	if err != nil {

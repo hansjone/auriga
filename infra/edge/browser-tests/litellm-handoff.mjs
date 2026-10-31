@@ -32,6 +32,7 @@ try {
     headless: true,
     args: [
       '--no-proxy-server',
+      ...(fixture.pin ? ['--ignore-certificate-errors-spki-list=' + fixture.pin] : []),
       '--host-resolver-rules=MAP *.example.com 127.0.0.1',
     ],
   });
@@ -48,6 +49,13 @@ try {
   ]);
   page = await context.newPage();
   page.setDefaultTimeout(30000);
+  const wrongOrigins = [];
+  const mixedContent = [];
+  page.on('request', request => {
+    const u = new URL(request.url());
+    if (u.pathname.startsWith('/ai/') && ![fixture.ui, fixture.admin].includes(u.origin)) wrongOrigins.push(u.origin);
+  });
+  page.on('console', message => {if (/Mixed Content/i.test(message.text())) mixedContent.push('mixed-content');});
   const origin = new Promise((resolve) => {
     page.on('request', async (request) => {
       if (request.url() === fixture.ui + '/ai/session') {
@@ -112,12 +120,17 @@ try {
     await page.getByLabel('Username', { exact: true }).waitFor();
     await page.getByLabel('Password', { exact: true }).waitFor();
     }
+    const config = await page.evaluate(async () => { const r = await fetch('/ai/.well-known/litellm-ui-config'); return {status:r.status, body:await r.json()}; });
+    assert.equal(config.status,200);
+    assert.equal(config.body.proxy_base_url,fixture.ui + '/ai');
+    assert.deepEqual(wrongOrigins,[]);
+    assert.deepEqual(mixedContent,[]);
     assert.equal(new URL(page.url()).origin, fixture.ui);
   }
   const cookies = await context.cookies(fixture.ui + '/ai/ui/');
   assert.ok(
     cookies.some(
-      (cookie) => cookie.name === 'auriga_litellm_session' && cookie.httpOnly,
+      (cookie) => cookie.name === (fixture.pin ? '__Host-auriga_litellm_session' : 'auriga_litellm_session') && cookie.httpOnly,
     ),
   );
   if (fixture.native) {

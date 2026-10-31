@@ -15,14 +15,14 @@ import (
 )
 
 func TestLiteLLMNativeUIKeyCannotEscapeToPublicData(t *testing.T) {
-	master, key := rand.Text(), "sk-"+rand.Text()
-	filename := filepath.Join(t.TempDir(), "master")
-	if err := os.WriteFile(filename, []byte(master), 0600); err != nil {
+	reader, key := rand.Text(), "sk-"+rand.Text()
+	filename := filepath.Join(t.TempDir(), "reader")
+	if err := os.WriteFile(filename, []byte(reader), 0600); err != nil {
 		t.Fatal(err)
 	}
 	mode := "dashboard"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/ai/key/info" || r.Header.Get("Authorization") != "Bearer "+master || r.Header.Get("Cookie") != "" || r.URL.Query().Get("key") != fmt.Sprintf("%x", sha256.Sum256([]byte(key))) || strings.Contains(r.URL.String(), key) || strings.Contains(r.URL.String(), master) {
+		if r.URL.Path != "/ai/key/info" || r.Header.Get("Authorization") != "Bearer "+reader || r.Header.Get("Cookie") != "" || r.URL.Query().Get("key") != fmt.Sprintf("%x", sha256.Sum256([]byte(key))) || strings.Contains(r.URL.String(), key) || strings.Contains(r.URL.String(), reader) {
 			t.Error("key inspection leaked credentials or used wrong authority")
 		}
 		switch mode {
@@ -40,7 +40,7 @@ func TestLiteLLMNativeUIKeyCannotEscapeToPublicData(t *testing.T) {
 	}))
 	defer upstream.Close()
 	u, _ := url.Parse(upstream.URL)
-	g := &Gateway{Cfg: Config{LiteLLMUI: &LiteLLMUIConfig{Login: &LiteLLMUILogin{PasswordFile: filename}}}, litellmURL: u}
+	g := &Gateway{Cfg: Config{LiteLLMUI: &LiteLLMUIConfig{Login: &LiteLLMUILogin{KeyInfoKeyFile: filename}}}, litellmURL: u}
 	r := httptest.NewRequest("POST", "/ai/v1/chat/completions", nil)
 	r.Header.Set("Authorization", "Bearer "+key)
 	for _, tc := range []struct {

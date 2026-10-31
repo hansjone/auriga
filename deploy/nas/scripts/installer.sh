@@ -59,6 +59,10 @@ if [ -n "$upgrade_bundle" ]; then
 fi
 # A bootstrap located inside the writable root was already rejected above.
 # No socket, host parent, host root, or network is exposed to this helper.
+if [ "$operation" = render ]; then
+  # Run on the host side: the restricted installer has no Docker socket/CLI.
+  sh "$NAS_ROOT/litellm/prepare-ui.sh" "$AURIGA_DATA_ROOT/config/litellm-ui"
+fi
 (
   umask 077
   _run_tmp=$(installer_private_dir installer)

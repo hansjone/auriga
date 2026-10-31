@@ -20,3 +20,5 @@
 仅对已获授权的部署运行 `node e2e/litellm-ui2/deployed.mjs`，JSON 从 stdin 输入，包含 `admin`、`relay` 两个完整 Origin，`evidence` 截图目录，以及该部署已有应急账号的 `credentials`（`providerId`、`username`、`password`、`totpSecret`）。凭据仅在进程内取用，不写 JSON 文件、不放 argv、不打印；无需 LiteLLM master。脚本建立一个自己的真实平台管理员会话，经实际管理台 LiteLLM 链接自动交接，等待模型/Key/用量页面标题并截图，再通过平台 CSRF 与 logout API 退出该会话，保留 UI cookie 重访应为 401。它不创建模型或 Key，不调用付费模型，不退出其他会话。
 
 脚本等待下一个 TOTP 周期避免重放；不要同时用同一应急账号跑其他登录验收。截图与失败日志保持私有、不入库；不要把真实域名、IP 或凭据写入公开材料。HTTPS 部署须有浏览器正常信任的证书，不设置跳过验证开关。
+
+R2 同时设置 `AURIGA_LITELLM_UI_TEST_KEY_INFO_FILE` 为夹具 `.runtime/reader` 的绝对路径；两文件均不包含 master。夹具故意把 `PROXY_BASE_URL` 设为不同的内部 HTTP 来源。浏览器回归增加随机端口自签 HTTPS 管理台/relay 反代，以当前进程精确 SPKI 固定证书，断言 UI config 指向展示来源、没有内部 API 请求或 mixed content，三页就绪及撤销拒绝；不更改 OS 信任和 VPS。

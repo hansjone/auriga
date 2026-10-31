@@ -43,11 +43,14 @@ func TestLiteLLMNativeLoginExchange(t *testing.T) {
 			_, _ = w.Write([]byte(`{"token":"invalid"}`))
 			return
 		}
-		if mode == "master" || mode == "expired" {
+		if mode == "master" || mode == "expired" || mode == "long" {
 			key, expiry := "sk-ui-only", time.Now().Add(time.Hour).Unix()
-			if mode == "master" {
+			switch mode {
+			case "master":
 				key = secret
-			} else {
+			case "long":
+				expiry = time.Now().Add(25 * time.Hour).Unix()
+			default:
 				expiry = time.Now().Add(-time.Hour).Unix()
 			}
 			claims, _ := json.Marshal(map[string]any{"key": key, "user_role": "proxy_admin", "exp": expiry})
@@ -59,7 +62,7 @@ func TestLiteLLMNativeLoginExchange(t *testing.T) {
 	defer upstream.Close()
 	u, _ := url.Parse(upstream.URL)
 	g := &Gateway{Cfg: Config{LiteLLMUI: &LiteLLMUIConfig{Login: &LiteLLMUILogin{PasswordFile: file}}}, litellmURL: u, Now: time.Now}
-	for _, scenario := range []string{"good", "redirect", "bad", "master", "expired"} {
+	for _, scenario := range []string{"good", "redirect", "bad", "master", "expired", "long"} {
 		mode = scenario
 		got, err := g.loginLiteLLMUI(httptest.NewRequest("POST", "/ai/session", nil))
 		if scenario == "good" && (err != nil || got != token || strings.Contains(got, secret)) {
@@ -69,7 +72,7 @@ func TestLiteLLMNativeLoginExchange(t *testing.T) {
 			t.Fatal("unsafe native response accepted")
 		}
 	}
-	if calls != 5 {
+	if calls != 6 {
 		t.Fatal("native exchange followed a redirect")
 	}
 

@@ -18,6 +18,7 @@ import (
 const maxCompressedStaticBytes = 8 << 20
 
 const staticBodyTimeout = 15 * time.Second
+const defaultStaticCacheBytes = 12 << 20
 
 type staticCacheKey struct {
 	path  string
@@ -32,10 +33,11 @@ type staticCacheItem struct {
 
 // Each server owns its cache. Limits cover both bytes and tiny-file metadata.
 type staticGzipCache struct {
-	mu    sync.Mutex
-	items map[staticCacheKey]*list.Element
-	lru   list.List
-	bytes int
+	mu       sync.Mutex
+	items    map[staticCacheKey]*list.Element
+	lru      list.List
+	bytes    int
+	maxBytes int
 }
 
 func (c *staticGzipCache) get(key staticCacheKey) []byte {
@@ -49,25 +51,32 @@ func (c *staticGzipCache) get(key staticCacheKey) []byte {
 }
 
 func (c *staticGzipCache) encode(key staticCacheKey, raw []byte) ([]byte, error) {
+	if data := c.get(key); data != nil {
+		return data, nil
+	}
+	data, err := compressStaticBytes(raw)
+	if err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// A concurrent miss may have inserted the same representation while gzip
+	// ran outside the lock. Keep the first immutable entry and its accounting.
 	if e := c.items[key]; e != nil {
 		c.lru.MoveToFront(e)
 		return e.Value.(staticCacheItem).data, nil
 	}
-	var encoded bytes.Buffer
-	writer := gzip.NewWriter(&encoded)
-	if _, err := writer.Write(raw); err != nil {
-		return nil, err
+	limit := c.maxBytes
+	if limit == 0 {
+		limit = defaultStaticCacheBytes
 	}
-	if err := writer.Close(); err != nil {
-		return nil, err
+	if len(data) > limit {
+		return data, nil
 	}
-	data := encoded.Bytes()
 	if c.items == nil {
 		c.items = make(map[staticCacheKey]*list.Element)
 	}
-	for c.bytes+len(data) > 32<<20 || c.lru.Len() >= 128 {
+	for c.bytes+len(data) > limit || c.lru.Len() >= 128 {
 		e := c.lru.Back()
 		item := e.Value.(staticCacheItem)
 		delete(c.items, item.key)
@@ -77,6 +86,18 @@ func (c *staticGzipCache) encode(key staticCacheKey, raw []byte) ([]byte, error)
 	c.items[key] = c.lru.PushFront(staticCacheItem{key, data})
 	c.bytes += len(data)
 	return data, nil
+}
+
+func compressStaticBytes(raw []byte) ([]byte, error) {
+	var encoded bytes.Buffer
+	writer := gzip.NewWriter(&encoded)
+	if _, err := writer.Write(raw); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return encoded.Bytes(), nil
 }
 
 func varyStaticEncoding(h http.Header) {
@@ -171,10 +192,12 @@ func gzipStaticResponseCached(resp *http.Response, cache *staticGzipCache) error
 	if err := resp.Body.Close(); err != nil {
 		return err
 	}
-	if !cacheable {
-		cache = &staticGzipCache{}
+	var encoded []byte
+	if cacheable {
+		encoded, err = cache.encode(key, raw)
+	} else {
+		encoded, err = compressStaticBytes(raw)
 	}
-	encoded, err := cache.encode(key, raw)
 	if err != nil {
 		return err
 	}

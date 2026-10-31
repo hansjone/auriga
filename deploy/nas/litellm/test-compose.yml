@@ -20,13 +20,14 @@ services:
   litellm:
     image: *litellm
     cap_drop: [ALL]
-    group_add: ['10003', '999']
+    group_add: ['10003', '999', '10004']
     security_opt: ['no-new-privileges:true']
     entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
     environment:
       LITELLM_LOG: ERROR
       STORE_MODEL_IN_DB: 'True'
-    secrets: [litellm_master, litellm_salt, litellm_pg_password]
+      LITELLM_UI_SESSION_DURATION: '8h'
+    secrets: [litellm_master, litellm_salt, litellm_pg_password, litellm_ui_password]
     volumes:
       - ./test-config.yaml:/etc/litellm/config.yaml:ro
       - ./entrypoint.sh:/etc/litellm/entrypoint.sh:ro
@@ -48,22 +49,24 @@ services:
   litellm-init:
     image: *litellm
     cap_drop: [ALL]
-    group_add: ['10003', '999', '10001']
+    group_add: ['10003', '999', '10001', '10004']
     security_opt: ['no-new-privileges:true']
     profiles: [verify]
     entrypoint: ['python', '/test/provision.py']
-    secrets: [litellm_master, litellm_team, litellm_pg_password]
+    secrets: [litellm_master, litellm_team, litellm_pg_password, litellm_ui_reader, litellm_ui_password]
     volumes:
       - ./provision.py:/test/provision.py:ro
   checker:
     image: *litellm
     profiles: [verify]
     entrypoint: ['python', '/test/verify.py']
-    secrets: [litellm_master, litellm_team, litellm_pg_password]
+    secrets: [litellm_master, litellm_team, litellm_pg_password, litellm_ui_reader, litellm_ui_password]
     volumes:
       - ./verify.py:/test/verify.py:ro
       - ./provision.py:/test/provision.py:ro
 secrets:
+  litellm_ui_password: { file: '${AURIGA_RELAY_TEST_ROOT}/ui/password' }
+  litellm_ui_reader: { file: '${AURIGA_RELAY_TEST_ROOT}/ui/reader' }
   bootstrap: { file: '${AURIGA_RELAY_TEST_ROOT}/bootstrap' }
   litellm_master: { file: '${AURIGA_RELAY_TEST_ROOT}/master' }
   litellm_salt: { file: '${AURIGA_RELAY_TEST_ROOT}/salt' }

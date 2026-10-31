@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -11,9 +12,53 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestStaticSharedBudgetConcurrentMisses(t *testing.T) {
+	g, _, _ := accessFixtureConfigured(t, false, nil, func(c *Config, _ map[string]any) {
+		c.Static.PortalRoot = t.TempDir()
+		c.Static.AdminRoot = t.TempDir()
+		c.Static.GzipCacheBytes = 2048
+	})
+	cache := g.litellmStaticCache
+	if g.portalStatic.(*spaFileServer).gzipCache != cache || g.adminStatic.(*spaFileServer).gzipCache != cache {
+		t.Fatal("static services do not share one budget")
+	}
+	raw := make([]byte, 512)
+	if _, err := rand.Read(raw); err != nil {
+		t.Fatal(err)
+	}
+	var workers sync.WaitGroup
+	for i := range 32 {
+		workers.Go(func() {
+			if _, err := cache.encode(staticCacheKey{strconv.Itoa(i % 8), 512, "mtime"}, raw); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	workers.Wait()
+	accounted := 0
+	for _, entry := range cache.items {
+		accounted += len(entry.Value.(staticCacheItem).data)
+	}
+	if accounted != cache.bytes || accounted > 2048 || len(cache.items) != cache.lru.Len() {
+		t.Fatal("concurrent misses broke global accounting")
+	}
+	large := make([]byte, 4096)
+	if _, err := rand.Read(large); err != nil {
+		t.Fatal(err)
+	}
+	key := staticCacheKey{"oversized", 4096, "mtime"}
+	if _, err := cache.encode(key, large); err != nil {
+		t.Fatal(err)
+	}
+	if cache.get(key) != nil || cache.bytes > 2048 {
+		t.Fatal("single oversized entry exceeded cache budget")
+	}
+}
 
 func TestStaticCacheMetadataHeadAndCanonicalPath(t *testing.T) {
 	root := t.TempDir()

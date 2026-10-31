@@ -18,8 +18,8 @@ class ComposePermissionsTest(unittest.TestCase):
                      DEPLOY / 'nas/docker-compose.yml',
                      DEPLOY / 'nas/litellm/test-compose.yml']:
             raw = file.read_text()
-            for name, groups in [('litellm', {10003, 999}),
-                                 ('litellm-init', {10003, 999, 10001})]:
+            for name, groups in [('litellm', {10003, 999, 10004}),
+                                 ('litellm-init', {10003, 999, 10001, 10004})]:
                 with self.subTest(file=str(file), service=name):
                     block = re.search(r'^  ' + name + r':\n(.*?)(?=^  [\w-]+:|\Z)',
                                       raw, re.M | re.S).group(1)
@@ -38,18 +38,22 @@ class ComposePermissionsTest(unittest.TestCase):
                       (DEPLOY / 'compose/scripts/prepare.sh').read_text())
         self.assertIn('install_litellm_materials',
                       (DEPLOY / 'nas/scripts/render.sh').read_text())
+        self.assertIn('litellm/prepare-ui.sh', (DEPLOY / 'nas/scripts/installer.sh').read_text())
+        self.assertIn('NAS_INSTALLER_ACTIVE', (DEPLOY / 'nas/scripts/render.sh').read_text())
         raw = (DEPLOY / 'nas/docker-compose.yml').read_text().split('\nsecrets:\n')[1]
         for name in GROUPS:
             self.assertIn('/config/litellm/' + name, raw)
         self.assertNotIn('/config/materials/litellm/', raw)
 
-    def test_edge_native_ui_exchange_uses_readonly_master_secret(self):
+    def test_edge_native_ui_has_independent_credentials_without_master(self):
         for file in [DEPLOY / 'compose/docker-compose.yml', DEPLOY / 'nas/docker-compose.yml']:
             block = re.search(r'^  edge:\n(.*?)(?=^  [\w-]+:|\Z)', file.read_text(), re.M | re.S).group(1)
-            self.assertIn('secrets: [litellm_master]', block)
-            self.assertIn("group_add: ['10003']", block)
-            self.assertIn('AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE: /run/secrets/litellm_master', block)
+            self.assertIn('secrets: [litellm_ui_password, litellm_ui_reader]', block)
+            self.assertIn("group_add: ['10004']", block)
+            self.assertIn('AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE: /run/secrets/litellm_ui_password', block)
             self.assertIn('AURIGA_EDGE_LITELLM_UI_EXTERNAL_ORIGINS:', block)
+            self.assertNotIn('litellm_master', block)
+            self.assertIn('AURIGA_EDGE_LITELLM_KEY_INFO_FILE: /run/secrets/litellm_ui_reader', block)
             self.assertNotIn('cap_add:', block)
 
 
