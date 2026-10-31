@@ -50,6 +50,9 @@ test('managed cloud mode needs explicit real-model consent and no cloud fixture 
     managedCloud: { allowRealModels: true, model: 'team-pool' },
   };
   validateRunConfig(cfg, access);
+  validateRunConfig({ ...cfg, managedRounds: 3 }, access);
+  for (const managedRounds of [0, 4, -1, 1.5, '3'])
+    assert.throws(() => validateRunConfig({ ...cfg, managedRounds }, access));
   for (const managedCloud of [
     { model: 'team-pool' },
     { allowRealModels: false, model: 'team-pool' },

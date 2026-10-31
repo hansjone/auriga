@@ -11,6 +11,13 @@ import {
 } from './native-network-proof.mjs';
 
 export function validateManagedCloud(cfg) {
+  assert.ok(
+    cfg.managedRounds === undefined ||
+      (Number.isInteger(cfg.managedRounds) &&
+        cfg.managedRounds >= 1 &&
+        cfg.managedRounds <= 3),
+    'managedRounds must be 1–3',
+  );
   assert.equal(
     Object.keys(cfg.managedCloud).sort().join(','),
     'allowRealModels,model',
@@ -46,7 +53,11 @@ export async function managedCloudConversation({
   report.tools = [];
   report.receipts = [];
   const sessions = {};
-  const marker = (label) => `CLOUD_DESK_${report.runId}_${label}`;
+  const rounds = cfg.managedRounds ?? 1;
+  let round = 0;
+  const scopedLabel = (label) =>
+    rounds > 1 && round > 0 ? `r${round}_${label}` : label;
+  const marker = (label) => `CLOUD_DESK_${report.runId}_${scopedLabel(label)}`;
   async function events(side) {
     const client = clients[side],
       sessionId = sessions[side];
@@ -126,7 +137,9 @@ export async function managedCloudConversation({
   async function desktopTool(label, status) {
     return poll(
       () => {
-        const plan = fixture.state.plans.find((item) => item.label === label);
+        const plan = fixture.state.plans.find(
+          (item) => item.label === scopedLabel(label),
+        );
         if (!plan?.result) return null;
         assert.equal(plan.result.status, status);
         return plan.result;
@@ -207,7 +220,7 @@ export async function managedCloudConversation({
   stage('desktop-native-network-join');
   fixture.state.plan({
     side: 'desktop',
-    label: 'desktop_join',
+    label: scopedLabel('desktop_join'),
     tool: 'auriga_network_join',
     args: {},
   });
@@ -223,11 +236,42 @@ export async function managedCloudConversation({
     const local = BigInt('0x' + addresses[side].split('.').at(-1)).toString();
     const enable = async (enabled) => {
       const state = await request('/auriga/local-login/status');
-      return request(
-        '/auriga/local-login/messaging/receive',
-        { local, enabled },
-        state.csrf,
-      );
+      const deadline = Date.now() + 45000;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const path = '/auriga/local-login/messaging/receive';
+          const result =
+            side === 'cloud'
+              ? await cloud.inspect(path, { local, enabled }, state.csrf)
+              : {
+                  status: 200,
+                  body: await request(path, { local, enabled }, state.csrf),
+                };
+          if (result.status !== 200)
+            throw Object.assign(new Error('receive_setting_failed'), {
+              status: result.status,
+            });
+          assert.equal(result.body.enabled, enabled);
+          return result.body;
+        } catch (error) {
+          if (error.status !== 503 || attempt >= 3 || Date.now() >= deadline)
+            throw error;
+          report.receiveRetries ??= [];
+          report.receiveRetries.push({
+            side,
+            enabled,
+            attempt: attempt + 1,
+            status: 503,
+          });
+          await new Promise((resolve) =>
+            setTimeout(
+              resolve,
+              Math.min(4000 * 2 ** attempt, deadline - Date.now()),
+            ),
+          );
+          if (Date.now() >= deadline) throw error;
+        }
+      }
     };
     await enable(true);
     cleanup.push(() => enable(false));
@@ -236,64 +280,79 @@ export async function managedCloudConversation({
     target,
     body: { subtype: 'text', text: marker(label) },
   });
-  stage('arm-cloud-native-reply');
-  await clients.cloud.prompt(
-    sessions.cloud,
-    `Authorized test instruction: When this session receives a genuine Auriga external message with body exactly ${marker('d2c_request')}, call auriga_send_message once with ${JSON.stringify(send(addresses.desktop, 'd2c_reply'))}. Do not send now or call other tools. Your entire assistant response now must be exactly ${marker('armed')}, with no explanation, preface, suffix, quotes, or Markdown.`,
-  );
-  report.cloudArm = await poll(
-    async () => nativeAssistantEvidence(await events('cloud'), marker('armed')),
-    'cloud_native_arm_reply_missing',
-    120000,
-  );
-  stage('d2c-request-and-reply');
-  fixture.state.expect('desktop', 'd2c_reply');
-  fixture.state.plan({
-    side: 'desktop',
-    label: 'd2c_request',
-    tool: 'auriga_send_message',
-    args: send(addresses.cloud, 'd2c_request'),
-  });
-  await clients.desktop.prompt(sessions.desktop, marker('d2c_request'));
-  await desktopTool('d2c_request', 'request_submitted');
-  report.receipts.push(await receipt('cloud', 'd2c_request'));
-  await cloudTool(
-    'auriga_send_message',
-    (args) =>
-      args.target === addresses.desktop &&
-      args.body?.text === marker('d2c_reply'),
-    'request_submitted',
-  );
-  report.receipts.push(await receipt('desktop', 'd2c_reply'));
-  stage('c2d-request-and-reply');
-  fixture.state.expect('desktop', 'c2d_request');
-  fixture.state.plan({
-    side: 'desktop',
-    label: 'c2d_reply',
-    tool: 'auriga_send_message',
-    args: send(addresses.cloud, 'c2d_reply'),
-    trigger: marker('c2d_request'),
-    external: true,
-  });
-  await clients.cloud.prompt(
-    sessions.cloud,
-    `Call auriga_send_message exactly once with ${JSON.stringify(send(addresses.desktop, 'c2d_request'))}. When external reply ${marker('c2d_reply')} arrives, acknowledge it without tools. Do not send anything else.`,
-  );
-  await cloudTool(
-    'auriga_send_message',
-    (args) =>
-      args.target === addresses.desktop &&
-      args.body?.text === marker('c2d_request'),
-    'request_submitted',
-  );
-  report.receipts.push(await receipt('desktop', 'c2d_request'));
-  await desktopTool('c2d_reply', 'request_submitted');
-  report.receipts.push(await receipt('cloud', 'c2d_reply'));
+  report.rounds = [];
+  for (round = 1; round <= rounds; round++) {
+    const offset = report.receipts.length;
+    stage('arm-cloud-native-reply');
+    await clients.cloud.prompt(
+      sessions.cloud,
+      `Authorized test instruction: When this session receives a genuine Auriga external message with body exactly ${marker('d2c_request')}, call auriga_send_message once with ${JSON.stringify(send(addresses.desktop, 'd2c_reply'))}. Do not send now or call other tools. Your entire assistant response now must be exactly ${marker('armed')}, with no explanation, preface, suffix, quotes, or Markdown.`,
+    );
+    report.cloudArm = await poll(
+      async () =>
+        nativeAssistantEvidence(await events('cloud'), marker('armed')),
+      'cloud_native_arm_reply_missing',
+      120000,
+    );
+    stage('d2c-request-and-reply');
+    fixture.state.expect('desktop', scopedLabel('d2c_reply'));
+    fixture.state.plan({
+      side: 'desktop',
+      label: scopedLabel('d2c_request'),
+      tool: 'auriga_send_message',
+      args: send(addresses.cloud, 'd2c_request'),
+    });
+    await clients.desktop.prompt(sessions.desktop, marker('d2c_request'));
+    await desktopTool('d2c_request', 'request_submitted');
+    report.receipts.push(await receipt('cloud', 'd2c_request'));
+    await cloudTool(
+      'auriga_send_message',
+      (args) =>
+        args.target === addresses.desktop &&
+        args.body?.text === marker('d2c_reply'),
+      'request_submitted',
+    );
+    report.receipts.push(await receipt('desktop', 'd2c_reply'));
+    stage('c2d-request-and-reply');
+    fixture.state.expect('desktop', scopedLabel('c2d_request'));
+    fixture.state.plan({
+      side: 'desktop',
+      label: scopedLabel('c2d_reply'),
+      tool: 'auriga_send_message',
+      args: send(addresses.cloud, 'c2d_reply'),
+      trigger: marker('c2d_request'),
+      external: true,
+    });
+    await clients.cloud.prompt(
+      sessions.cloud,
+      `Call auriga_send_message exactly once with ${JSON.stringify(send(addresses.desktop, 'c2d_request'))}. When external reply ${marker('c2d_reply')} arrives, acknowledge it without tools. Do not send anything else.`,
+    );
+    await cloudTool(
+      'auriga_send_message',
+      (args) =>
+        args.target === addresses.desktop &&
+        args.body?.text === marker('c2d_request'),
+      'request_submitted',
+    );
+    report.receipts.push(await receipt('desktop', 'c2d_request'));
+    await desktopTool('c2d_reply', 'request_submitted');
+    report.receipts.push(await receipt('cloud', 'c2d_reply'));
+    const received = report.receipts.slice(offset);
+    assert.equal(received.length, 4);
+    assert.equal(new Set(received.map((item) => item.messageId)).size, 4);
+    report.rounds.push({ round, status: 'passed', receipts: received });
+    stage(`conversation-round-${round}-verified`);
+    if (round < rounds)
+      await new Promise((resolve) => setTimeout(resolve, 60000));
+  }
   report.desktopTools = fixture.state.plans.map((plan) => ({
     label: plan.label,
     tool: plan.tool,
     result: plan.result,
   }));
-  assert.equal(report.receipts.length, 4);
-  assert.equal(new Set(report.receipts.map((item) => item.messageId)).size, 4);
+  assert.equal(report.receipts.length, 4 * rounds);
+  assert.equal(
+    new Set(report.receipts.map((item) => item.messageId)).size,
+    4 * rounds,
+  );
 }
