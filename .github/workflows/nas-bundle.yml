@@ -47,7 +47,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: maven
+      - uses: ./.github/actions/maven
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:

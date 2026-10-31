@@ -3,9 +3,42 @@
 ## Java
 
 `java.yml` 在 Ubuntu/Windows、Temurin 25 上运行 Maven Wrapper 的 `verify`，缓存
-Maven 仓库。覆盖契约生成、编译、PostgreSQL 17 测试、随机端口 health、ArchUnit、
+Maven 仓库及 wrapper 发行包。覆盖契约生成、编译、PostgreSQL 17 测试、随机端口 health、ArchUnit、
 Spotless。本地运行 `./mvnw -B verify`，Windows 为 `.\mvnw.cmd -B verify`。
 详见 [Java 开发](java.md)。
+
+`java.yml`、`e2e.yml`、`nas-bundle.yml` 共用 `.github/actions/maven`：
+通过 `actions/cache` 缓存 `~/.m2/repository` 与 `~/.m2/wrapper/dists/**/*.zip`，key 包含 OS、
+POM 与 wrapper 配置摘要。只缓存发行归档，避免直接执行缓存中的解压目录；每次恢复后由 wrapper
+校验发行包并解压。`.mvn/wrapper/bootstrap.sh` 只对 `mvnw -B --version`
+引导阶段最多尝试三次（间隔 2、4 秒），实际构建与测试失败立即返回。
+两个 platform Dockerfile 同样先引导发行包，再执行原构建命令。
+
+`.mvn/wrapper/maven-wrapper.jar` 为官方 3.3.4 二进制，不再在每次 CI/Docker 构建中下载。
+入库时核对 Maven Central 官方 `.jar.sha1`，并使用
+[Apache Maven KEYS](https://downloads.apache.org/maven/KEYS) 验证同址 `.jar.asc`：
+签名主钥指纹 `88BE34F94BDB2B5357044E2E3A387D43964143E3`。
+Maven 3.9.16 zip 另核对官方 `.zip.sha512`。
+两个制品的 SHA-256 固定在 wrapper properties，Linux/Windows wrapper 每次运行都校验
+jar，新发行包在执行前校验。升级时必须重新验证官方签名/摘要并同步 pin；缓存不能替代校验。
+
+## Go 测试 PostgreSQL 制品
+
+`go.yml` 在测试前运行 `.github/scripts/prepare-postgres.ps1`，按仓库中的
+`postgres-artifacts.json` 固定摘要预取 Zonky PostgreSQL 17.5.0 Windows/Linux amd64 jar。
+摘要源为对应 Maven Central 制品的官方 `.jar.sha256`。网络错误最多尝试三次，每次超时
+120 秒，间隔 2、4 秒；校验失败直接拒绝，下载未完成的文件不进入正式缓存。
+命中 `actions/cache` 后仍校验 jar，并从校验成功的 jar 重新提取 txz，避免信任独立的旧 txz。
+缓存 key 包含 OS、架构和摘要清单，不缓存数据库数据或解压后的运行目录。
+ctl 通过 `AURIGA_PG_CACHE_DIR` 复用归档；显式 CacheDir/`--cache-dir` 优先，
+未配置仍使用各数据目录中的 `cache`。更新 ctl 内嵌版本时需同步清单。
+
+本地验证下载逻辑与引导重试（不需要 Pester）：
+
+```sh
+node --test .github/scripts/bootstrap.test.mjs
+pwsh -NoProfile -File .github/scripts/artifacts.test.ps1
+```
 
 ## 契约
 
