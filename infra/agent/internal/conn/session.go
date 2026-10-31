@@ -68,6 +68,7 @@ type Session struct {
 	statusCh    chan *nodev1.InstanceStatus
 	usageCh     chan *nodev1.NodeUsage
 	wakeCh      chan *nodev1.WakeSchedule
+	resultCh    chan *nodev1.CommandResult
 }
 
 // New creates a session manager.
@@ -102,6 +103,7 @@ func New(cfg Config) *Session {
 		statusCh:  make(chan *nodev1.InstanceStatus, 64),
 		usageCh:   make(chan *nodev1.NodeUsage, 8),
 		wakeCh:    make(chan *nodev1.WakeSchedule, 16),
+		resultCh:  make(chan *nodev1.CommandResult, 64),
 	}
 }
 
@@ -389,6 +391,10 @@ func (s *Session) runOnce(ctx context.Context) error {
 			}); err != nil {
 				return err
 			}
+		case result := <-s.resultCh:
+			if err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_Result{Result: result}}); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -542,6 +548,19 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 		return nil
 	}
 	switch body := msg.Body.(type) {
+	case *nodev1.SessionResponse_Command:
+		if body.Command == nil {
+			return nil
+		}
+		command := body.Command
+		go func() {
+			result := s.cfg.Reconciler.Command(ctx, command)
+			select {
+			case s.resultCh <- result:
+			case <-ctx.Done():
+			}
+		}()
+		return nil
 	case *nodev1.SessionResponse_Apply:
 		if body.Apply == nil || body.Apply.GetSpec() == nil {
 			return nil

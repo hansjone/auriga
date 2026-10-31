@@ -40,8 +40,10 @@ type FakeWorkspace struct {
 
 	DropNextSession bool
 
-	applyCh  chan *nodev1.InstanceSpec
-	deleteCh chan *nodev1.DeleteInstance
+	applyCh   chan *nodev1.InstanceSpec
+	deleteCh  chan *nodev1.DeleteInstance
+	commandCh chan *nodev1.Command
+	results   chan *nodev1.CommandResult
 
 	lis           net.Listener
 	server        *grpc.Server
@@ -95,6 +97,8 @@ func StartFakeWorkspace(opts FakeWorkspaceOpts) (*FakeWorkspace, error) {
 		renewResponse: opts.RenewResponse,
 		applyCh:       make(chan *nodev1.InstanceSpec, 8),
 		deleteCh:      make(chan *nodev1.DeleteInstance, 8),
+		commandCh:     make(chan *nodev1.Command, 8),
+		results:       make(chan *nodev1.CommandResult, 8),
 	}
 
 	fw.SetArtifactSigningKeys(opts.ArtifactSigningKeys)
@@ -177,6 +181,9 @@ func (f *FakeWorkspace) PushApply(spec *nodev1.InstanceSpec) {
 func (f *FakeWorkspace) PushDelete(d *nodev1.DeleteInstance) {
 	f.deleteCh <- d
 }
+
+func (f *FakeWorkspace) PushCommand(command *nodev1.Command)   { f.commandCh <- command }
+func (f *FakeWorkspace) Results() <-chan *nodev1.CommandResult { return f.results }
 
 // Stats returns counters for assertions.
 func (f *FakeWorkspace) Stats() (hello, inventory, usage int) {
@@ -339,6 +346,13 @@ func (f *FakeWorkspace) Session(stream nodev1.NodeControlService_SessionServer) 
 				f.LastInventory = msg.GetInventory()
 				f.mu.Unlock()
 			}
+			if result := msg.GetResult(); result != nil {
+				select {
+				case f.results <- result:
+				case <-ctx.Done():
+					return
+				}
+			}
 		}
 	}()
 
@@ -358,6 +372,10 @@ func (f *FakeWorkspace) Session(stream nodev1.NodeControlService_SessionServer) 
 			if err := stream.Send(&nodev1.SessionResponse{
 				Body: &nodev1.SessionResponse_Delete{Delete: d},
 			}); err != nil {
+				return err
+			}
+		case command := <-f.commandCh:
+			if err := stream.Send(&nodev1.SessionResponse{Body: &nodev1.SessionResponse_Command{Command: command}}); err != nil {
 				return err
 			}
 		}

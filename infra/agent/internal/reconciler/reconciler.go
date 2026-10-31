@@ -41,9 +41,11 @@ type Reconciler struct {
 }
 
 type workItem struct {
-	kind string // apply | delete | tick
-	spec *nodev1.InstanceSpec
-	del  *nodev1.DeleteInstance
+	kind    string // apply | delete | tick
+	spec    *nodev1.InstanceSpec
+	del     *nodev1.DeleteInstance
+	command *nodev1.Command
+	result  chan *nodev1.CommandResult
 }
 
 // New creates a reconciler. maxConcurrentPrepare defaults to 4.
@@ -205,6 +207,8 @@ func (r *Reconciler) loop(id string, ch chan workItem) {
 	for item := range ch {
 		ctx := context.Background()
 		switch item.kind {
+		case "restart":
+			item.result <- r.handleRestart(ctx, item.command)
 		case "delete":
 			r.handleDelete(ctx, id, item.del)
 		default:
