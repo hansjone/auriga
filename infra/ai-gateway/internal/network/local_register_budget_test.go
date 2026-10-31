@@ -27,38 +27,40 @@ func (f *delayedRegistrationMailbox) LocalRegister(ctx context.Context, req *col
 }
 
 func TestLocalRegistrationHasIndependentBoundedBusinessBudget(t *testing.T) {
-	for _, parentBudget := range []time.Duration{0, 50 * time.Millisecond} {
-		t.Run(parentBudget.String(), func(t *testing.T) {
-			_, cfg, _ := runtimeFixture(t)
-			f := &delayedRegistrationMailbox{fakeMailboxRPC: fakeMailboxRPC{response: []byte(`{"proof":"unchanged"}`)}, delay: 350 * time.Millisecond, remaining: make(chan time.Duration, 1)}
-			cfg.Collab = startMailboxRPC(t, f)
-			run, err := StartRuntime(t.Context(), cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(run.Close)
-			ctx := t.Context()
-			if parentBudget > 0 {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, parentBudget)
-				defer cancel()
-			}
-			data, ae := run.mailbox.client.Call(ctx, liveBinding{Tenant: testTenant, Realm: "1", Node: "1"}, "local_register", []byte(validLocalRegister))
-			if parentBudget == 0 {
-				if ae != nil || string(data) != `{"proof":"unchanged"}` {
-					t.Fatalf("registration was cut off by the %dms reconciliation budget: %v", cfg.RequestTimeoutMillis, ae)
+	for _, delay := range []time.Duration{300 * time.Millisecond, time.Second} {
+		for _, parentBudget := range []time.Duration{0, 50 * time.Millisecond} {
+			t.Run(delay.String()+"/"+parentBudget.String(), func(t *testing.T) {
+				_, cfg, _ := runtimeFixture(t)
+				f := &delayedRegistrationMailbox{fakeMailboxRPC: fakeMailboxRPC{response: []byte(`{"proof":"unchanged"}`)}, delay: delay, remaining: make(chan time.Duration, 1)}
+				cfg.Collab = startMailboxRPC(t, f)
+				run, err := StartRuntime(t.Context(), cfg)
+				if err != nil {
+					t.Fatal(err)
 				}
-			} else if ae == nil || ae.Code != "network.overloaded" || !ae.Retryable || len(data) != 0 {
-				t.Fatalf("registration escaped the earlier parent deadline: data=%q error=%v", data, ae)
-			}
-			select {
-			case remaining := <-f.remaining:
-				if remaining <= 0 || remaining > 20*time.Second || parentBudget == 0 && remaining < 19*time.Second {
-					t.Fatalf("unexpected registration deadline: %s", remaining)
+				t.Cleanup(run.Close)
+				ctx := t.Context()
+				if parentBudget > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, parentBudget)
+					defer cancel()
 				}
-			case <-time.After(time.Second):
-				t.Fatal("registration never reached the fixed RPC target")
-			}
-		})
+				data, ae := run.mailbox.client.Call(ctx, liveBinding{Tenant: testTenant, Realm: "1", Node: "1"}, "local_register", []byte(validLocalRegister))
+				if parentBudget == 0 {
+					if ae != nil || string(data) != `{"proof":"unchanged"}` {
+						t.Fatalf("registration was cut off by the %dms reconciliation budget: %v", cfg.RequestTimeoutMillis, ae)
+					}
+				} else if ae == nil || ae.Code != "network.overloaded" || !ae.Retryable || len(data) != 0 {
+					t.Fatalf("registration escaped the earlier parent deadline: data=%q error=%v", data, ae)
+				}
+				select {
+				case remaining := <-f.remaining:
+					if remaining <= 0 || remaining > 20*time.Second || parentBudget == 0 && remaining < 19*time.Second {
+						t.Fatalf("unexpected registration deadline: %s", remaining)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("registration never reached the fixed RPC target")
+				}
+			})
+		}
 	}
 }
