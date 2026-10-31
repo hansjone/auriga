@@ -2657,7 +2657,10 @@ test('plugin actual entry resumes verified native device into official factory, 
   const before = await nativeFetch(localOrigin + '/auriga/local-login/status');
   const login = await before.json();
   assert.equal(login.network.connected, false);
-  assert.equal(calls.length, 0);
+  assert.ok(
+    calls.length > 0,
+    'saved device restores platform capabilities without a browser login',
+  );
   let cookie = before.headers.getSetCookie()[0].split(';')[0];
   const result = await nativeFetch(localOrigin + '/auriga/local-login/login', {
     method: 'POST',

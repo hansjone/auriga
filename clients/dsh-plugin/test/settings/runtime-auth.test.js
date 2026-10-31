@@ -345,12 +345,10 @@ test('saved origin replaces loader binding without carrying foreign provider ids
   const next = await savedPlatformConfig(loader, 'https://new.example.com');
   assert.equal(next.platformOrigin, 'https://new.example.com');
   assert.equal(next.issuer, 'https://new.example.com');
-  assert.equal(next.providerId, 'new-team');
+  assert.equal(next.providerId, 'discover');
   assert.equal(next.clientId, 'custom-client');
   assert.equal(next.network, undefined);
-  assert.deepEqual(calls, [
-    ['https://new.example.com/api/iam/v1/login/providers', null],
-  ]);
+  assert.deepEqual(calls, []);
 });
 
 test('formal plugin entry consumes saved settings, applies changes immediately and reloads them after restart', async (t) => {
@@ -485,7 +483,10 @@ test('formal plugin entry consumes saved settings, applies changes immediately a
   available = false;
   const down = await boot();
   try {
-    assert.equal((await down.call('/auriga/settings/state')).activeOrigin, '');
+    assert.equal(
+      (await down.call('/auriga/settings/state')).activeOrigin,
+      'http://127.0.0.1:8080',
+    );
     available = true;
     const applied = await down.call('/auriga/settings/save', {
       platformOrigin: 'http://127.0.0.1:8080',

@@ -93,6 +93,38 @@ test('broker: cross-resource serial rotation and same-resource single flight', a
   assert.doesNotMatch(JSON.stringify(vault.snapshot()), /ai-new/);
 });
 
+test('broker: offline probe preserves refresh token then automatically recovers after expiry', async () => {
+  const f = fixture();
+  let online = false;
+  f.platform.probe = async () => {
+    if (!online) throw Error('offline');
+  };
+  await assert.rejects(f.broker.getPlatformAccess(), /UPSTREAM_UNAVAILABLE/);
+  assert.equal(f.vault.snapshot().credential.refreshPending, undefined);
+  assert.equal(f.broker.status.reauthenticationRequired, false);
+  assert.equal(f.requests.length, 0);
+  online = true;
+  assert.equal(await f.broker.getPlatformAccess(), 'platform-new');
+  assert.equal(f.vault.snapshot().credential.refreshToken, 'r1');
+});
+
+test('broker: refused connection is retryable but ambiguous reset remains fenced', async () => {
+  const f = fixture();
+  f.failExchange(
+    Object.assign(Error('connect refused'), {
+      cause: { code: 'ECONNREFUSED' },
+    }),
+  );
+  await assert.rejects(f.broker.getPlatformAccess(), /UPSTREAM_UNAVAILABLE/);
+  assert.equal(f.vault.snapshot().credential.refreshPending, false);
+  assert.equal(f.broker.status.reauthenticationRequired, false);
+  f.failExchange(
+    Object.assign(Error('response lost'), { cause: { code: 'ECONNRESET' } }),
+  );
+  await assert.rejects(f.broker.getPlatformAccess(), /REAUTH_REQUIRED/);
+  assert.equal(f.vault.snapshot().credential.refreshPending, true);
+});
+
 test('broker: AI rotation preserves valid platform access and freezes old lease deadline', async () => {
   const { broker, vault, advance, requests } = fixture();
   await vault.update((s) => {

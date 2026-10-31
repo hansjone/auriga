@@ -160,7 +160,7 @@ test('verified identity remains visible when communication is unavailable', asyn
   fixture.render();
   await setImmediate();
   const tree = fixture.render();
-  assert.match(text(tree), /通信未就绪/);
+  assert.match(text(tree), /总部不可达/);
   assert.match(text(tree), /alice/);
   assert.doesNotMatch(text(tree), /Team 已连接|未登录/);
   assert.ok(button(tree, '退出本机登录'));

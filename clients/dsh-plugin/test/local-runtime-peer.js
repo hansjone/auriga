@@ -58,7 +58,13 @@ export async function runtimePeer(t, options = {}) {
     if (path === '/api/iam/v1/network/register' && options.networkRegister)
       return options.networkRegister(url, init);
     let data;
-    if (path === '/oauth2/jwks')
+    if (path === '/api/iam/v1/login/providers')
+      data = {
+        items: [
+          { id: 'team', connectorType: 'team-account', primaryStep: 'form' },
+        ],
+      };
+    else if (path === '/oauth2/jwks')
       data = {
         keys: [
           {

@@ -18,7 +18,7 @@ export function createConsentRoutes(runtime) {
       });
       res.end(JSON.stringify(body));
     };
-    if (!runtime.resolve(req))
+    if (!runtime.resolve(req) || runtime.resolve(req).localOnly)
       return send(401, { code: 'common.unauthenticated' });
     try {
       if (req.method === 'GET' && action === 'snapshot')

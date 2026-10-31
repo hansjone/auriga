@@ -33,7 +33,7 @@ test('native RPC bootstrap needs a real admitted Peer; browser native-looking he
   const connection = {
     admit: (req) =>
       req.headers.cookie === 'native=valid' ? { peer } : { rejection: 401 },
-    authorizeIndex: () => true,
+    authorizeIndex: () => false,
     isTrusted: () => true,
   };
   const runtime = {
@@ -67,9 +67,8 @@ test('native RPC bootstrap needs a real admitted Peer; browser native-looking he
       peer,
     );
     assert.equal(
-      connection.admit(request('native=valid', '/api/session/create'))
-        .rejection,
-      403,
+      connection.admit(request('native=valid', '/api/session/create')).peer,
+      peer,
     );
     signedIn = true;
     assert.equal(
@@ -78,9 +77,8 @@ test('native RPC bootstrap needs a real admitted Peer; browser native-looking he
     );
     signedIn = false;
     assert.equal(
-      connection.admit(request('native=valid', '/api/session/create'))
-        .rejection,
-      403,
+      connection.admit(request('native=valid', '/api/session/create')).peer,
+      peer,
     );
   } finally {
     admission.dispose();

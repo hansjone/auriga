@@ -87,6 +87,12 @@ async function nativeNetworkPeer(t, options = {}) {
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const path = new URL(url).pathname;
     requests.push(path);
+    if (path === '/api/iam/v1/login/providers')
+      return Response.json({
+        items: [
+          { id: 'team', connectorType: 'team-account', primaryStep: 'form' },
+        ],
+      });
     if (path === '/oauth2/jwks')
       return Response.json({
         keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'native-test' }],

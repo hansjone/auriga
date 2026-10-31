@@ -68,7 +68,7 @@ test('native login bootstrap waits for dependencies without requesting business 
   assert.deepEqual(navigations, ['/auriga/local-login']);
 });
 
-test('Electron boot restores its admitted owner through RPC then reloads with business admission ready', async () => {
+test('Electron boot leaves platform restoration to the backend without blocking or reloading local DSH', async () => {
   const script = await readFile(
     new URL('../src/login/startup.js', import.meta.url),
     'utf8',
@@ -106,6 +106,6 @@ test('Electron boot restores its admitted owner through RPC then reloads with bu
     Date,
     setTimeout,
   });
-  assert.equal(loggedIn, true);
-  assert.deepEqual(navigations, ['/']);
+  assert.equal(loggedIn, false);
+  assert.deepEqual(navigations, []);
 });

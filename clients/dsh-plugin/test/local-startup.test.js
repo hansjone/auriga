@@ -6,7 +6,7 @@ import {
 } from '../src/local/host.js';
 
 for (const state of ['unconfigured', 'signed-out', 'signed-in'])
-  test(`native desktop shell remains bootable while business admission is ${state}`, async () => {
+  test(`browser shell remains bootable while local session is ${state}`, async () => {
     const request = (extra = {}) => ({
       method: 'GET',
       url: '/',

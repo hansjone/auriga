@@ -10,7 +10,8 @@ const messages = {
     reachable: '平台接口可达；不代表已登录或模型已授权。',
     unconfigured: '尚未配置平台连接',
     connected: 'Team 已连接；模型授权需单独确认。',
-    disconnected: '通信未就绪；身份登录与非通信功能可继续使用。',
+    disconnected: '未登录或总部不可达；本地 DSH 可继续使用。',
+    offline: '总部不可达；平台功能暂不可用。',
     pending: '设置已保存，但连接暂未生效，请确认平台可用后重新保存。',
     reauthenticate: '平台连接已生效，请重新登录。',
     login: '登录',
@@ -46,6 +47,13 @@ const messages = {
     invalidPlatform: '响应不是有效的平台 JWKS 接口。',
     http: '平台接口返回 HTTP ',
     busy: '正在处理…',
+    emergency: '生成或重置本地应急账号',
+    emergencyHint:
+      '仅用于浏览器离线访问本地 DSH。重置后旧账号失效；口令与验证器密钥只显示本次，请妥善保存。',
+    emergencyClose: '已保存，隐藏凭据',
+    username: '用户名',
+    password: '口令',
+    totpSecret: '验证器密钥',
   },
   en: {
     connection: 'Platform connection',
@@ -58,7 +66,8 @@ const messages = {
     unconfigured: 'Platform connection is not configured',
     connected: 'Team connected; model authorization is separate.',
     disconnected:
-      'Communication is not ready; sign-in and non-communication features remain available.',
+      'Signed out or platform unreachable; local DSH remains available.',
+    offline: 'Platform unreachable; platform features are unavailable.',
     pending:
       'Settings saved, but the connection could not be applied. Check the platform and save again.',
     reauthenticate: 'Platform settings applied. Please sign in again.',
@@ -98,6 +107,13 @@ const messages = {
     invalidPlatform: 'Response is not a valid platform JWKS endpoint.',
     http: 'Platform API returned HTTP ',
     busy: 'Working…',
+    emergency: 'Generate or reset local emergency account',
+    emergencyHint:
+      'For offline browser access to local DSH only. Reset invalidates the previous account. Password and authenticator secret are shown once; save them securely.',
+    emergencyClose: 'Saved; hide credentials',
+    username: 'Username',
+    password: 'Password',
+    totpSecret: 'Authenticator secret',
   },
 };
 
@@ -256,6 +272,7 @@ export function createSettingsView(
     const t = messages[locale?.startsWith('zh') ? 'zh' : 'en'];
     const [state, setState] = React.useState(null);
     const [account, setAccount] = React.useState(null);
+    const [enrollment, setEnrollment] = React.useState(null);
     const [address, setAddress] = React.useState('');
     const [deployment, setDeployment] = React.useState('cloud');
     const [notice, setNotice] = React.useState('');
@@ -326,7 +343,9 @@ export function createSettingsView(
             ? t.statusUnavailable
             : account?.loggedIn === true && account?.connected === true
               ? t.connected
-              : t.disconnected,
+              : account?.loggedIn === true
+                ? t.offline
+                : t.disconnected,
       ),
       row(
         t.address,
@@ -366,6 +385,64 @@ export function createSettingsView(
         h('p', null, t.pending),
       h(ReceiveSettings, { t, account, revision }),
       h('h3', null, t.security),
+      globalThis.location?.protocol === 'dsh-app:' &&
+        h(
+          'div',
+          null,
+          h('p', null, t.emergencyHint),
+          h(
+            'button',
+            {
+              type: 'button',
+              disabled: busy,
+              onClick: () =>
+                run(async () => {
+                  setEnrollment(null);
+                  const method = 'aurigaAuth/emergency',
+                    rpcId = 'emergency-' + Date.now();
+                  const response = await fetcher(
+                    localURL('auriga-native/' + method),
+                    {
+                      method: 'POST',
+                      credentials: 'same-origin',
+                      redirect: 'error',
+                      cache: 'no-store',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({
+                        type: 'client-request',
+                        rpcId,
+                        method,
+                        payload: { args: {} },
+                      }),
+                      signal: AbortSignal.timeout(15000),
+                    },
+                  );
+                  const data = await response.json();
+                  if (
+                    !response.ok ||
+                    data.rpcId !== rpcId ||
+                    data.result?.ok !== true
+                  )
+                    throw new Error('unavailable');
+                  setEnrollment(data.result.value);
+                }),
+            },
+            t.emergency,
+          ),
+          enrollment &&
+            h(
+              'div',
+              { role: 'status' },
+              row(t.username, enrollment.username),
+              row(t.password, enrollment.password),
+              row(t.totpSecret, enrollment.totpSecret),
+              h(
+                'button',
+                { type: 'button', onClick: () => setEnrollment(null) },
+                t.emergencyClose,
+              ),
+            ),
+        ),
       row(
         t.identity,
         account === null
@@ -471,7 +548,8 @@ export function createSettingsView(
                   next.platformOrigin === next.activeOrigin &&
                   identity?.loggedIn === false;
                 setNotice(needsLogin ? t.reauthenticate : t.saved);
-                if (needsLogin) navigate(localURL('auriga/local-login'));
+                if (needsLogin && globalThis.location?.protocol !== 'dsh-app:')
+                  navigate(localURL('auriga/local-login'));
               } catch (error) {
                 // A failed apply may already have signed out the old platform
                 // and saved the new address. Never keep the old identity/Team

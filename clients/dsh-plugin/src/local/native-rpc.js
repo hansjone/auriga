@@ -5,6 +5,7 @@ export const NATIVE_LOGIN_METHODS = new Set([
   'aurigaAuth/status',
   'aurigaAuth/login',
   'aurigaAuth/logout',
+  'aurigaAuth/emergency',
 ]);
 
 const record = (/** @type {any} */ value) =>
@@ -82,6 +83,8 @@ export function installNativeLoginRPC(ctx, getRuntime) {
           value = runtime.prepare(request).body;
         else if (method === 'aurigaAuth/login')
           value = { step: (await runtime.login(request, args.input)).step };
+        else if (method === 'aurigaAuth/emergency')
+          value = await runtime.resetEmergency(request);
         else value = (await runtime.logout(request)).body;
         const safe = { ...value };
         delete safe.csrf;

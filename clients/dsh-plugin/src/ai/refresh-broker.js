@@ -90,6 +90,16 @@ export function createRefreshBroker({
         ['tid', 'sub', 'did'].every(
           (k) => current.claims[k] === saved.claims[k],
         );
+      // Read-only reachability precedes the rotating write. A failed probe
+      // cannot have consumed the refresh token and remains safely retryable.
+      if (platform.probe) {
+        try {
+          await platform.probe(signal);
+        } catch {
+          throw new AdapterError('UPSTREAM_UNAVAILABLE');
+        }
+        assert();
+      }
       try {
         await vault.update((/** @type {any} */ s) => {
           assert();
@@ -115,6 +125,26 @@ export function createRefreshBroker({
           });
         } catch (error) {
           const e = /** @type {any} */ (error);
+          // DNS/connect failures establish that no HTTP request was sent.
+          // Timeouts, resets and lost responses remain uncertain and fenced.
+          if (
+            [
+              'ECONNREFUSED',
+              'ENOTFOUND',
+              'EAI_AGAIN',
+              'ENETUNREACH',
+              'EHOSTUNREACH',
+              'UND_ERR_CONNECT_TIMEOUT',
+            ].includes(e.cause?.code)
+          ) {
+            assert();
+            await vault.update((/** @type {any} */ s) => {
+              assert();
+              if (!matches(s.credential)) throw fail();
+              s.credential.refreshPending = false;
+            });
+            throw new AdapterError('UPSTREAM_UNAVAILABLE');
+          }
           // An explicit OAuth rejection has no successful exchange to replay.
           // AI invalid_grant also means missing model permission, so never
           // claim Team/logout failed merely because this resource was denied.
@@ -197,7 +227,10 @@ export function createRefreshBroker({
         state = 'token_ready';
         return ai;
       } catch (error) {
-        if (error instanceof AdapterError && error.code === 'AI_NOT_AUTHORIZED')
+        if (
+          error instanceof AdapterError &&
+          ['AI_NOT_AUTHORIZED', 'UPSTREAM_UNAVAILABLE'].includes(error.code)
+        )
           throw error;
         invalidate('reauth_required');
         onUncertain();
