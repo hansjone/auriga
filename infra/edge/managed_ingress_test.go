@@ -6,8 +6,12 @@ import (
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func managedFixture(t *testing.T) Config {
@@ -26,6 +30,67 @@ func managedFixture(t *testing.T) Config {
 	c.InstanceControlIngress = &InstanceControlIngressConfig{DenyLocalIPv4: []string{"192.0.2.10"}}
 	c.ManagedIngress = ManagedIngressConfig{Origin: origin, CertFile: "server.crt", KeyFile: "server.key"}
 	return c
+}
+
+func TestManagedIngressPreservesIssuerSourceWithCanonicalIAMHop(t *testing.T) {
+	c := managedFixture(t)
+	portal, err := url.Parse(c.Access.PortalURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	iam := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		// IAM RequestIdentity requires Host to match the authenticated entry origin.
+		if r.Host != portal.Host || r.Header.Get("X-Auriga-Entry-Origin") != c.Access.PortalURL() || r.Header.Get("X-Auriga-Entry-Role") != "portal" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		managed, parseErr := url.Parse(c.ManagedIngress.Origin)
+		if parseErr != nil || r.Header.Get("X-Forwarded-Host") != managed.Host || r.Header.Get("X-Forwarded-Proto") != managed.Scheme {
+			t.Error("approved managed issuer source was lost or replaced")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer iam.Close()
+	target, err := url.Parse(iam.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := Gateway{Cfg: c, iamURL: target, IAMTransport: http.DefaultTransport, Now: time.Now}
+	handler := g.accessHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.proxyAccessAPI(w, r, target, "portal", "192.0.2.25", "managed-hop-test")
+	}))
+	for _, tc := range []struct {
+		name, host, header, value string
+		want                      int
+	}{
+		{"approved", "", "", "", 204},
+		{"spoofed-hop-headers", "", "X-Auriga-Entry-Origin", "https://attacker.example.com", 204},
+		{"spoofed-issuer-source", "", "X-Forwarded-Host", "attacker.example.com", 204},
+		{"wrong-host", "attacker.example.com", "", "", 403},
+		{"browser-cookie", "", "Cookie", "auriga_session=untrusted", 403},
+		{"foreign-origin", "", "Origin", "https://attacker.example.com", 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", c.ManagedIngress.Origin+"/oauth2/token", strings.NewReader("grant_type=urn:auriga:params:oauth:grant-type:managed-device"))
+			r.TLS = &tls.ConnectionState{}
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if tc.host != "" {
+				r.Host = tc.host
+			}
+			if tc.header != "" {
+				r.Header.Set(tc.header, tc.value)
+			}
+			r = r.WithContext(context.WithValue(r.Context(), accessRoleKey{}, "managed"))
+			before := calls.Load()
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != tc.want || tc.want == 403 && calls.Load() != before {
+				t.Fatalf("status=%d upstream calls=%d, want status=%d", w.Code, calls.Load()-before, tc.want)
+			}
+		})
+	}
 }
 
 func TestManagedIngressRequiresApprovedHTTPSAndExistingInstanceAlias(t *testing.T) {

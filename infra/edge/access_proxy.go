@@ -258,6 +258,11 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		pr.Out.Header.Del("Cookie")
 		if iam {
 			pr.Out.Host = r.Host
+			if role, _ := r.Context().Value(accessRoleKey{}).(string); role == "managed" {
+				// IAM authenticates the canonical portal hop. The approved managed
+				// presentation remains in the sanitized forwarding headers above.
+				pr.Out.Host = originAuthority(g.Cfg.Access.PortalOrigin())
+			}
 			if selectedCookies != "" {
 				pr.Out.Header.Set("Cookie", selectedCookies)
 			}
