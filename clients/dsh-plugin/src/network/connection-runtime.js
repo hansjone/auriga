@@ -42,6 +42,17 @@ import {
 // At most 64 pending protocol payloads (each already bounded by NatsLink).
 const MESSAGE_QUEUE_CAPACITY = 64;
 
+/** No identity/signature/store failures qualify as a control-plane retry.
+ * @param {unknown} error */
+function transientControl(error) {
+  return (
+    error instanceof DeviceControlUnavailable ||
+    [429, 503].includes(
+      /** @type {{status?:number}|null} */ (error)?.status ?? 0,
+    )
+  );
+}
+
 /** Strict known-identity handshake only; no delivery session or business ports.
  * @param {import('./session/memory-pipe.js').TransportLike} transport
  * @param {Awaited<ReturnType<typeof openTrustStore>>} trust
@@ -583,6 +594,9 @@ export async function openConnectionRuntime(options) {
             void close('revoked').catch(() => {});
           } else if (e?.status === 403) {
             void close('forbidden').catch(() => {});
+          } else if (!normal && transientControl(error)) {
+            // C1 has no business capability and still owns the original
+            // registration/writer. Its caller/transport may safely retry.
           } else if (
             ![429, 503].includes(e?.status) &&
             !(
@@ -804,7 +818,24 @@ export async function openConnectionRuntime(options) {
       );
       connectionTrust = trust;
       active();
-      await refreshTrust(trust);
+      if (ledger.state) await refreshTrust(trust);
+      else {
+        let failures = 0;
+        for (;;) {
+          try {
+            await refreshTrust(trust);
+            break;
+          } catch (error) {
+            active();
+            if (!transientControl(error)) throw error;
+            await retryDelay(
+              Math.min(30000, 250 * 2 ** Math.min(failures++, 7)),
+              undefined,
+              { signal },
+            );
+          }
+        }
+      }
       active();
       if (!ledger.state) {
         /** @type {ReturnType<typeof connect>|undefined} */
@@ -849,6 +880,7 @@ export async function openConnectionRuntime(options) {
           } catch (error) {
             active();
             const transient =
+              transientControl(error) ||
               (error instanceof TransportError &&
                 [
                   'connection_closed',

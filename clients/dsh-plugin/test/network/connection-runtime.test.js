@@ -1827,6 +1827,23 @@ test('first socket failure retries under the original registration and writer lo
   assert.ok(f.events.indexOf('stop-1') < f.events.indexOf('ready-2'));
 });
 
+test('first keys or ticket fetch outage does not abandon the original empty-ledger registration', async (t) => {
+  for (const phase of ['refresh', 'ticket']) {
+    let calls = 0;
+    const f = await fixture(t, {
+      [phase]() {
+        if (++calls === 1)
+          throw new DeviceControlUnavailable('temporary control failure');
+      },
+    });
+    await f.runtime.start();
+    assert.equal(f.runtime.status.connected, true);
+    assert.equal(f.events.filter((x) => x === 'register').length, 1);
+    assert.equal(f.events.filter((x) => x === 'commit').length, 1);
+    await f.runtime.close();
+  }
+});
+
 test('C1 socket loss before commit retries a fresh nonce without replaying initialize authority', async (t) => {
   const f = await fixture(t, {
     ready(id) {
