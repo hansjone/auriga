@@ -19,9 +19,9 @@ type MailboxClient struct {
 	timeout time.Duration
 }
 
-// Leave time for the response within the client's five-second registration
-// attempt. Online authority checks and the durable receipt are business work,
-// independent of the short connection-reconciliation probe.
+// Leave time for the response within the client's five-second attempt.
+// Registration, durable fetch and receipts perform online authority checks and
+// business work independently of the short connection-reconciliation probe.
 const localRegistrationTimeout = 4 * time.Second
 
 func NewMailboxClient(conn grpc.ClientConnInterface, timeout time.Duration) (*MailboxClient, error) {
@@ -38,7 +38,7 @@ func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation strin
 	if operation == "ready" {
 		timeout = time.Second
 	}
-	if operation == "local_register" {
+	if operation == "local_register" || operation == "fetch" || operation == "receipt" {
 		timeout = localRegistrationTimeout
 	}
 	if operation == "submit" || receiveOperation(operation) {
