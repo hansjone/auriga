@@ -26,6 +26,39 @@ import {
 
 const tools = [{ type: 'function', function: { name: 'auriga_send_message' } }];
 
+test('managed cloud mode needs explicit real-model consent and no cloud fixture endpoint', () => {
+  const access = {
+    mode: 'ip',
+    portalOrigin: { scheme: 'https', host: '127.0.0.1', port: 8443 },
+    adminOrigin: { scheme: 'https', host: '127.0.0.1', port: 8444 },
+  };
+  const cfg = {
+    connect: {
+      platformOrigin: 'https://127.0.0.1:8443',
+      issuer: 'https://127.0.0.1:8443',
+      providerId: 'actual-provider',
+      clientId: 'actual-client',
+      network: {
+        realm: '1',
+        roots: [{}],
+        wssUrl: 'wss://127.0.0.1:8443/network',
+      },
+    },
+    cloudCwd: '/workspace',
+    desktopDescriptor: 'desktop.json',
+    enrollmentFile: 'new-stack.json',
+    managedCloud: { allowRealModels: true, model: 'team-pool' },
+  };
+  validateRunConfig(cfg, access);
+  for (const managedCloud of [
+    { model: 'team-pool' },
+    { allowRealModels: false, model: 'team-pool' },
+    { allowRealModels: true, model: '' },
+    { allowRealModels: true, model: 'team-pool', apiKey: 'must-not-be-used' },
+  ])
+    assert.throws(() => validateRunConfig({ ...cfg, managedCloud }, access));
+});
+
 test('remote container executor receives only a fixed instance argv and source on stdin, never a shell', async () => {
   const id = '00000000-0000-7000-8000-000000000001';
   const program =

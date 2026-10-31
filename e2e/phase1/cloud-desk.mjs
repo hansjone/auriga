@@ -17,6 +17,10 @@ import {
   accessOrigin,
 } from './cloud-desk.browser.mjs';
 import { startFixture } from './cloud-desk.fixture.mjs';
+import {
+  managedCloudConversation,
+  validateManagedCloud,
+} from './managed-cloud-desk.mjs';
 import { openHttpsCloud, inviteDesktopMember } from './cloud-desk.http.mjs';
 import {
   nativeClient,
@@ -85,6 +89,10 @@ export function validateRunConfig(cfg, access) {
       cfg.desktopDescriptor &&
       (cfg.httpsCloud || cfg.existingCloud || cfg.enrollmentFile),
   );
+  if (cfg.managedCloud !== undefined) {
+    validateManagedCloud(cfg);
+    return;
+  }
   if (cfg.fixture?.cloudInstanceId) {
     assert.equal(
       cfg.fixture.cloudInstanceId,
@@ -509,6 +517,21 @@ export async function run(cfg, output) {
       report[side].nativePlugin = await clients[side].activePlugin();
     }
     stage('local-model-config');
+    if (cfg.managedCloud) {
+      await managedCloudConversation({
+        cfg,
+        cloud,
+        desktop,
+        clients,
+        descriptor,
+        report,
+        stage,
+        cleanup,
+      });
+      report.status = 'passed';
+      stage('conversation-verified');
+      return report;
+    }
     model = await startModelHost(cfg.fixture, report.runId);
     const provider = 'cloud-desk-' + randomBytes(6).toString('hex');
     const sessions = {};
