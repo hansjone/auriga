@@ -193,6 +193,10 @@ sh deploy-nas/scripts/status.sh
 `render.sh` / `start.sh` 重复执行只校验和补齐缺少的运行副本，不轮换密钥或覆盖漂移文件。
 已激活后清空输入变量不会禁用 collab；已有数据库回退/密钥续签需要专门的运维批次，不能删收据重做。
 
+清单最多有效 24 小时；一次性测试签发工具也把初始业务钥设为 24 小时。
+NAS 首次激活入口不支持带历史的 next/retired 轮换输入，不能用新文件覆盖原审批源续期。
+到期恢复的现有边界和待实现的自动续期接线见 [NAS network 续期方案](../../docs/dev/nas-network-renewal.md)。
+
 Compose 自动选入 `collab-compose.yml`。独立 collab 使用同一 platform 镜像、uid10002，
 容器安装模式由离线 helper 校验私有激活收据，并在既有受保护 env 导出流中附带启用标记；
 普通宿主用户不需要遍历 root 私有收据目录，缺失或无效标记拒绝执行 Compose。
