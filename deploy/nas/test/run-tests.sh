@@ -37,6 +37,15 @@ else fail_msg join_node_boundary 'private join token import failed'; fi
 if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
 else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi
 
+if sh "$ROOT/test/emergency.sh"; then pass emergency_display_boundary
+else fail_msg emergency_display_boundary 'TTY-only emergency handoff failed'; fi
+if python3 "$ROOT/test/emergency_test.py"; then pass emergency_display_format
+else fail_msg emergency_display_format 'emergency origin/credential display failed'; fi
+if sh "$ROOT/test/emergency-remote.sh"; then pass emergency_remote_render
+else fail_msg emergency_remote_render 'emergency remote default/override failed'; fi
+if python3 "$ROOT/test/emergency_remote_test.py"; then pass emergency_remote_policy
+else fail_msg emergency_remote_policy 'unexpected emergency remote/proxy override accepted'; fi
+
 if sh "$ROOT/test/panel-renew-cron.sh"; then pass panel_renewal_cron_regressions
 else fail_msg panel_renewal_cron_regressions "hourly renewal scheduling failed"; fi
 if sh "$ROOT/test/panel-renew-nonroot.sh"; then pass panel_renewal_nonroot_regressions
@@ -236,6 +245,15 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
     && grep -qx 'AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=60' "$DATA/config/platform.env"; then
     pass source_authority_defaults
   else fail_msg source_authority_defaults "missing default lifetimes"; fi
+  if grep -qx 'AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=true' "$DATA/config/platform.env"; then
+    pass emergency_remote_install_default
+  else fail_msg emergency_remote_install_default "remote emergency default missing"; fi
+  for _remote in true false; do
+    if AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=$_remote sh "$ROOT/scripts/render.sh" >"$TMP/emergency-render.log" 2>&1 \
+      && grep -qx "AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=$_remote" "$DATA/config/platform.env"; then
+      pass "emergency_remote_install_override_$_remote"
+    else fail_msg "emergency_remote_install_override_$_remote" "explicit boolean lost"; fi
+  done
   for _source_pair in '1200 30' '0 0'; do
     set -- $_source_pair
     if AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2 \

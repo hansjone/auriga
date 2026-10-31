@@ -20,7 +20,7 @@ edge 配置 `upstreams.network-submit=https://network:18443`，固定服务端�
 - trusted_proxy HTTPS：外部浏览器访问 HTTPS；前置代理到 edge 的 portal/admin 两个 socket 仍必须 TLS+mTLS，保留完整 authority。独立的代理 CA、`proxy-client` 证书与唯一 URI SAN `auriga://proxy/nas-test` 绑定代理身份，access 的规范 `peerCidrs` 再绑定真实 TCP 来源。转发头不能选择 scheme、tenant、audience。旧版「TLS在VPS终止后明文8080+X-Forwarded-*」配方应迁移，不能继续套用。
 - 三个 listener 必须在容器中分别绑定 `0.0.0.0`；内控 listener 单独使用 HTTP，内部 alias 必须与所有 browser Origin 分开。它不发布宿主端口，只接受正式 self/heartbeat。direct 公网 TLS、split 部署及其它 schema 能力需要另行装配，本配方会明确拒绝不支持的组合。
 
-同一个最终 `config/materials/access.json` 只读挂载给 edge、IAM、agent。issuer、team Origin、RP host 从它派生，包含非默认端口；agent 不再使用旧 `INSTANCE_PLATFORM_URL`/`INSTANCE_PARENT_DOMAIN`。旧 `AURIGA_PORTAL_HOST`、`ADMIN_HOST`、`INSTANCE_PARENT_DOMAIN`、`ISSUER`、`TEAM_ORIGIN`、`TEAM_RP_ID`、`TLS_UPSTREAM`、`SECURE_COOKIES`、`TRUSTED_PROXIES` 输入会明确报迁移错误，不静默降级。access 的 tenant 必须由安装者与实际 IAM/org 租户对应；加载成功不代表租户已创建。combined 的既有首次 seed 创建演示租户 `00000000-0000-0000-0000-000000000001`，无 dev profile 或远程紧急登录例外。
+同一个最终 `config/materials/access.json` 只读挂载给 edge、IAM、agent。issuer、team Origin、RP host 从它派生，包含非默认端口；agent 不再使用旧 `INSTANCE_PLATFORM_URL`/`INSTANCE_PARENT_DOMAIN`。旧 `AURIGA_PORTAL_HOST`、`ADMIN_HOST`、`INSTANCE_PARENT_DOMAIN`、`ISSUER`、`TEAM_ORIGIN`、`TEAM_RP_ID`、`TLS_UPSTREAM`、`SECURE_COOKIES`、`TRUSTED_PROXIES` 输入会明确报迁移错误，不静默降级。access 的 tenant 必须由安装者与实际 IAM/org 租户对应；加载成功不代表租户已创建。combined 的既有首次 seed 创建演示租户 `00000000-0000-0000-0000-000000000001`，不追加 dev profile；应急远程登录由下文显式配置控制。
 
 ## 桌面原生登录客户端
 
@@ -170,6 +170,10 @@ sh deploy-nas/scripts/init.sh
 sh deploy-nas/scripts/preflight.sh
 sh deploy-nas/scripts/network-preflight.sh
 sh deploy-nas/scripts/start.sh
+# 首次 seed 成功后，私密 TTY 中会显示应急账号及管理台地址。
+# 导入 TOTP，直接用浏览器登录管理台 → 成员 → 邀请。
+# 需要重新查看，或之前的 start 输出被重定向：
+sh deploy-nas/scripts/emergency.sh show
 sh deploy-nas/scripts/smoke.sh
 sh deploy-nas/scripts/stop.sh
 ```
@@ -195,12 +199,41 @@ Linux root只从固定 `/proc/self/exe` 打开当前0755普通可执行文件，
 
 operator的 `stack.env` 与派生 `materials/access.env` 分层处理：派生文件整份通过固定9个入口字段的格式检查后才导入，未知、重复、缺项或非法值整份拒绝，不能覆盖binary／数据根／project等控制配置；该格式检查不代表receipt已验证，后续bootstrap的receipt与材料元数据校验仍独立强制。
 
-第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不要给 NAS 配方追加 dev、远程 emergency 或 observer 例外。
+第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不追加 dev 或 observer 例外；唯一允许的应急远程开关为 `AURIGA_IAM_EMERGENCY_REMOTE_ENABLED`，值只接受 true/false。
 
-## 首次正常管理员（真实回环）
+## 首次登录与邀请成员
 
-IP 部署首次启动会生成私有 emergency enrollment；应急登录保持仅回环，不能拿它从
-另一台电脑直接登录管理台。公开 `scripts/admin-bootstrap.sh` 在已运行 edge 的网络空间
+首装顺序为“安装 → 查看应急账号 → 登录管理台 → 成员 → 邀请”。`init.sh` 准备安装材料，
+`start.sh` 在 platform 首次 seed 完成后向操作者 TTY 显示一次应急用户名、口令、TOTP 密钥、
+`otpauth://` URI 和管理台地址；无需执行 admin-bootstrap 或准备收件公钥来取得这些凭据。
+URI 可导入验证器，无二维码依赖时不生成终端二维码。
+
+domain、ip 和 trusted_proxy 配方均使用已安装 `config/materials/access.json` 的
+`adminOrigin`（完整 scheme、host、port）；proxy 显示外部 HTTPS 管理来源，
+不是代理上游端口或门户链接。当前安装配置只有一个管理 Origin，门户的
+`AURIGA_LINKS_ALLOWED_ORIGINS` 不自动成为管理台来源列表。
+
+NAS 配方默认 `AURIGA_IAM_EMERGENCY_REMOTE_ENABLED=true`，可直接用远程浏览器打开管理台，
+选择应急账号并输入口令和 TOTP，然后到“成员 → 邀请”。不需要 tunnel 或收件公钥。
+此开关仅启用 IAM 已有的远程应急登录能力，不改变完整管理 Origin、TLS/代理、会话、CSRF
+和每次登录 TOTP 校验。默认开启使应急登录可经已配置的公开入口访问，应妥善保护恢复凭据。
+需要只允许本机时，在 `stack.env` 显式设为 false，运行 `render.sh` 并用 `start.sh` 重建平台；
+关闭后远程应急登录将报 `iam.emergency_local_only`，正常成员登录不受此开关影响。
+
+再次查看：`sh deploy-nas/scripts/emergency.sh show`，需本机 root 或 Docker 权限，stdout
+必须是私密 TTY；重定向、管道均拒绝。非 TTY 首启仅给 show 提示，不创建已显示标记。
+成功显示后在已有 enrollment 目录写无凭据的 `.emergency-displayed`，重复启动跳过，
+显式 show 可重新显示。helper 无网络、不挂 Docker socket、关闭日志驱动，仅挂脚本、
+安装 access 和 enrollment；原 enrollment 叶只读，目录仅为写显示标记而可写。
+不创建新明文凭据文件，不进入 Compose/服务日志；操作者应关闭终端会话录制并保护滚屏。
+
+公开命令目前只有 `sh deploy-nas/scripts/emergency.sh show`；轮换入口只有契约声明，尚无平台
+实现，因此未提供 rotate 命令，留待后续，不直接修改数据库或重跑 seed。show 仅显示原安装
+凭据；后续公开轮换落地后还需接入安全交接和旧 enrollment 的处理，不能假定该文件会自动更新。
+
+## 可选：admin-bootstrap 自动化（真实回环）
+
+IP 部署可选择公开 `scripts/admin-bootstrap.sh`，在已运行 edge 的网络空间
 启动一个临时、无端口发布的 helper，通过真实 `127.0.0.1` 完成应急登录、普通团队账号
 注册/TOTP 登记和独立正常管理员登录。Host/Origin 使用已验证 access 的规范入口，仅用于
 listener/虚拟主机选择，不发送 Forwarded、X-Forwarded-For 或任何伪造来源头，不改数据库。
@@ -229,7 +262,7 @@ stdout 仅含 `AURIGA_BOOTSTRAP_ENVELOPE` 加密检查点，可由命令通道�
 先封装登记的 TOTP，再提交确认；异常时保留最后密文供恢复，**不要盲目重新创建账号**。
 脚本用内置 owner 角色建立第一个正常超管，再建立 member 测试成员，各用空 cookie jar
 重新登录验证；正常管理员通过角色和节点权限检查后，使用既有API登出应急会话再发布完整交接，
-最后清理本次其他会话。应急账号仍保持原来的私有、仅回环边界；保留原 enrollment，
+最后清理本次其他会话。自动化仍通过真实回环认证；原 enrollment 保持私有，是否允许远程登录取决于上述开关。
 妥善保管密文、收件私钥和解密后的恢复材料。脚本不依赖契约中尚未实现的应急轮换接口。
 
 在本机建立隔离 Python 环境并安装固定依赖，解密到新的私有文件（不会覆盖）：
