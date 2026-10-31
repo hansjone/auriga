@@ -34,6 +34,7 @@ class IamGrpcDevicesSpringTest {
               sessions,
               mock(TokenService.class),
               new IamGrpcSessions(sessions),
+              mock(IamManagedDevices.class),
               java.time.Clock.systemUTC(),
               new org.springframework.beans.factory.support.StaticListableBeanFactory()
                   .getBeanProvider(auriga.iam.api.InstanceAiAuthorization.class));
@@ -87,6 +88,7 @@ class IamGrpcDevicesSpringTest {
                         sessions,
                         fixture.tokens,
                         new IamGrpcSessions(sessions),
+                        mock(IamManagedDevices.class),
                         fixture.clock,
                         provider.getBeanProvider(auriga.iam.api.InstanceAiAuthorization.class)))
         .run(

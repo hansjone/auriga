@@ -1,5 +1,7 @@
 # 托管实例网络设备凭据
 
+独立的模型 Key 与原生模型配置见 [托管模型凭据](managed-model-credential.zh.md)；下文网络凭据不增加模型权限。
+
 IAM 是唯一签发方。workspace 经受认证内部接口提交 tenant、成员 account、instance 与凭据代次；IAM 核验活跃账号及成员后登记类型为 managed 的设备。每个实例仅保留一个当前代次。凭据是独立随机机密，IAM 保存核验散列及按租户/实例/代次隔离的加密重试副本，不能以实例控制令牌替代。设备访问令牌仅含桌面网络所需的设备权限，不附加管理员、实例或模型权限。
 
 契约新增内部托管凭据签发/吊销接口、外部换取接口及节点 Secrets 字段。网络是附加能力：永久拒绝记录 disabled/permission_denied 后照常无网络启动；暂时失败最多等30秒后先启动，后台每30秒有界探测，材料到位后排重启下发。Instance 的 managedNetworkState/Reason 供查询。workspace 把凭据经现有 HPKE 封装与规格一起下发；agent renderer 解密后原子写入实例材料目录的 0600 文件，以 `AURIGA_DEVICE_CREDENTIAL_FILE` 传递路径。平台 URL、网络安装信任根等非机密材料沿可信渲染配置下发，机密不进入环境变量、镜像或日志。

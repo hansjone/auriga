@@ -191,6 +191,8 @@ message Secrets {
   SealedSecret ai_gateway_token = 3;
   // Managed network device credential JSON; never the instance control token.
   SealedSecret device_credential = 4;
+  // Trusted managed model JSON (plugin/managed-model.schema.json), independent of network material.
+  SealedSecret model_credential = 5;
 }
 
 // 只有目标节点能解开的机密。

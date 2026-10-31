@@ -26,6 +26,7 @@ const (
 	ContainerInstanceToken    = ContainerMetaRoot + "/instance.token"
 	ContainerAIGatewayToken   = ContainerMetaRoot + "/ai-gateway.token"
 	ContainerDeviceCredential = ContainerMetaRoot + "/device-credential.json"
+	ContainerModelCredential  = ContainerMetaRoot + "/model-credential.json"
 	ContainerEnvFile          = ContainerMetaRoot + "/env"
 	ContainerCordisPatch      = ContainerMetaRoot + "/cordis.patch.yml"
 	ContainerPackageJSON      = ContainerMetaRoot + "/package.json"
@@ -105,6 +106,26 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	devicePath := filepath.Join(opt.MetaDir, "device-credential.json")
+	modelRaw, err := openSecret(opt.SealingPrivate, spec, "model_credential", spec.GetSecrets().GetModelCredential())
+	if err != nil {
+		return Result{}, err
+	}
+	model, err := decodeManagedModel(modelRaw, spec)
+	if err != nil {
+		return Result{}, err
+	}
+	modelPath := filepath.Join(opt.MetaDir, "model-credential.json")
+	// Remove the obsolete native-store copy, including on upgrades with live material.
+	if err := os.Remove(filepath.Join(opt.MetaDir, "model-keys.json")); err != nil && !os.IsNotExist(err) {
+		return Result{}, err
+	}
+	if model != nil {
+		if err := writeAtomic(modelPath, modelRaw, 0o600, restrict, opt); err != nil {
+			return Result{}, err
+		}
+	} else if err := os.Remove(modelPath); err != nil && !os.IsNotExist(err) {
+		return Result{}, err
+	}
 	if len(deviceCredential) > 0 {
 		if err := writeAtomic(devicePath, deviceCredential, 0o600, restrict, opt); err != nil {
 			return Result{}, err
@@ -118,7 +139,7 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	cordisPath := filepath.Join(opt.MetaDir, "cordis.patch.yml")
-	cordisRaw, err := buildCordisPatch(spec, opt)
+	cordisRaw, err := buildCordisPatch(spec, opt, model)
 	if err != nil {
 		return Result{}, err
 	}
@@ -150,6 +171,9 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	}
 
 	digestPaths := []string{pkgPath, cordisPath, keysPath, envPath, tokenPath}
+	if model != nil {
+		digestPaths = append(digestPaths, modelPath)
+	}
 	if len(deviceCredential) > 0 {
 		digestPaths = append(digestPaths, devicePath)
 	}

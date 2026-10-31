@@ -37,7 +37,8 @@ type DeviceAccessServiceClient interface {
 	VerifyDeviceAccess(ctx context.Context, in *VerifyDeviceAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAccessResponse, error)
 	// Only svc:ai-gateway with an internal service JWT, a delegated non-platform
 	// tenant and the existing authenticated internal transport. Accepts only the
-	// single-AI-audience device JWT (at+jwt/ES256, <=300s), never a platform/Team,
+	// single-AI-audience device JWT (at+jwt/ES256, <=300s) or the independent
+	// managed model key (auth/managed-model.md), never a platform/Team,
 	// instance, service token or ait_. Online checks current member/model-invoke
 	// permission plus device/account/backing session; no idle touch or refresh use.
 	// Determinately invalid => inactive with empty identity; dependency faults =>
@@ -100,7 +101,8 @@ type DeviceAccessServiceServer interface {
 	VerifyDeviceAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error)
 	// Only svc:ai-gateway with an internal service JWT, a delegated non-platform
 	// tenant and the existing authenticated internal transport. Accepts only the
-	// single-AI-audience device JWT (at+jwt/ES256, <=300s), never a platform/Team,
+	// single-AI-audience device JWT (at+jwt/ES256, <=300s) or the independent
+	// managed model key (auth/managed-model.md), never a platform/Team,
 	// instance, service token or ait_. Online checks current member/model-invoke
 	// permission plus device/account/backing session; no idle touch or refresh use.
 	// Determinately invalid => inactive with empty identity; dependency faults =>

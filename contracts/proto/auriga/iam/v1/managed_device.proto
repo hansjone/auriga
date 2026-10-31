@@ -27,6 +27,10 @@ message IssueManagedDeviceResponse {
   // Opaque secret, retried issuance of the same live version is idempotent.
   string credential = 2;
   google.protobuf.Timestamp expires_at = 3;
+  // Independent opaque model-only key. Empty when current member lacks model permission.
+  // amc.<tenant UUID>.<owner UUID>.<instance UUID>.<device UUID>.<43-char random secret>.
+  // Online verification via VerifyDeviceAiAccess only; never a network/device bearer.
+  string model_credential = 4;
 }
 
 message RevokeManagedDeviceRequest {

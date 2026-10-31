@@ -38,6 +38,8 @@ var reservedRows = map[string]struct{}{
 	"webserver":   {},
 	"web-runtime": {},
 	"connection":  {},
+	"llm-pi-ai":   {},
+	"credentials": {},
 }
 
 // Plugin config keys the renderer owns.
@@ -66,7 +68,7 @@ func jsString(s string) string {
 
 // buildCordisPatch renders a DSH Loader patch list (an `--patch` layer). Rows
 // with an id replace that row's whole config; `insert` appends new rows.
-func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
+func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options, model *managedModel) ([]byte, error) {
 	browser, err := BrowserOrigin(spec.InstanceId, opt.Access)
 	if err != nil {
 		return nil, err
@@ -173,6 +175,9 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 			"surfaceContext": true,
 			"trustedHosts":   trusted,
 		}},
+	}
+	if model != nil {
+		rows = append(rows, managedModelRow(model))
 	}
 	for _, row := range overrideOrder {
 		rows = append(rows, map[string]any{"id": row, "config": overrides[row]})
