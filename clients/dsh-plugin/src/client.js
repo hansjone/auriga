@@ -192,7 +192,7 @@ window.__ModuleLoader__.load({
 .auriga-settings p{color:var(--dsw-alias-label-secondary,inherit);font-size:12px;margin:8px 0 16px;overflow-wrap:anywhere}
 .auriga-setting{padding:14px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .auriga-setting>span:first-child{flex:1}.auriga-setting-value{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
-.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
+.auriga-settings-content{max-width:760px;display:grid;gap:24px}.auriga-settings-content h3{margin:0 0 4px}.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}.auriga-setting-actions{display:flex;gap:8px;margin:12px 0}.auriga-setting input{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:8px;min-width:0;flex:2}.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
 .auriga-consent{padding:16px 0;min-width:0;overflow:auto}
 .auriga-consent article{padding:16px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-consent pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:12em;overflow:auto;unicode-bidi:plaintext}
@@ -979,13 +979,6 @@ window.__ModuleLoader__.load({
               live = false;
             };
           }, []);
-          const row = (key, value) =>
-            h(
-              'div',
-              { className: 'auriga-setting', key },
-              h('span', null, t(key)),
-              h('span', { className: 'auriga-setting-value' }, value ?? '—'),
-            );
           return h(
             'section',
             {
@@ -993,50 +986,18 @@ window.__ModuleLoader__.load({
               'aria-label': 'Auriga',
             },
             h('h2', null, 'Auriga'),
-            h('h3', null, t('connection')),
-            notice(phase, retry, true),
-            boot && row('mode', t(boot.mode)),
-            boot && row('protocol', String(boot.protocol)),
-            boot?.connection && row('endpoint', boot.connection.endpointId),
-            boot?.connection &&
-              row('received', String(boot.connection.received ?? 0)),
-            boot?.connection &&
-              h(
-                'button',
-                {
-                  type: 'button',
-                  onClick: () =>
-                    window.location.assign(
-                      localURL('auriga/local-login') + '?logout=1',
-                    ),
-                },
-                t('logout'),
-              ),
-            boot &&
-              h(
-                'p',
-                null,
-                t(
-                  boot.source === 'package'
-                    ? boot.connection
-                      ? 'connectHint'
-                      : 'packageHint'
-                    : 'managedHint',
+            phase.status !== 'ready' && notice(phase, retry, true),
+            View
+              ? h(View, {
+                  locale: host.locale,
+                  boot,
+                  consent: h(ConsentSection, { settings: true }),
+                })
+              : h(
+                  'p',
+                  { role: 'status' },
+                  t(loadFailed ? 'unavailable' : 'loading'),
                 ),
-              ),
-            phase.status === 'ready' &&
-              (View
-                ? h(View, { locale: host.locale })
-                : h(
-                    'p',
-                    { role: 'status' },
-                    t(loadFailed ? 'unavailable' : 'loading'),
-                  )),
-            h(ConsentSection, { settings: true }),
-            h('h3', null, t('about')),
-            row('pluginVersion', boot?.pluginVersion),
-            row('panelVersion', boot?.panelVersion),
-            boot && row('uiSource', t(boot.source)),
           );
         }
         const navigate = (to) => {

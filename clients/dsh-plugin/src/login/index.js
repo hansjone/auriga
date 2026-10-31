@@ -11,6 +11,7 @@ import { failureReason } from './errors.js';
  * @property {(context: {signal: AbortSignal}) => Promise<ClientStep>} onRestart
  * @property {() => void} onComplete The host owns session verification and navigation.
  * @property {() => Promise<void>} [onCancel] Cancel only this anonymous attempt.
+ * @property {() => void} [onSkip] Leave optional platform login immediately.
  */
 
 let nextId = 0;
@@ -20,6 +21,8 @@ const messages = {
     submit: '继续',
     retry: '重新开始',
     cancel: '取消',
+    skip: '跳过',
+    platformUnreachable: '总部不可达',
     waiting: '正在处理…',
     complete: '登录步骤已完成',
     unavailable: '当前登录方式暂不可用，请联系管理员。',
@@ -41,6 +44,8 @@ const messages = {
     submit: 'Continue',
     retry: 'Start again',
     cancel: 'Cancel',
+    skip: 'Skip',
+    platformUnreachable: 'Platform unreachable',
     waiting: 'Working…',
     complete: 'Sign-in step completed',
     unavailable:
@@ -247,10 +252,21 @@ export function createLoginView(root, options) {
     title.id = `${id}-title`;
     card.setAttribute('aria-labelledby', title.id);
     card.append(title);
+    if (options.onSkip) {
+      const skip = element('button', words().skip, 'secondary');
+      skip.type = 'button';
+      skip.dataset.action = 'skip';
+      skip.addEventListener('click', options.onSkip);
+      card.append(skip);
+    }
     shell.append(style, brand, card);
     if (notice) {
       const text =
-        notice === 'expired' ? words().credentialExpired : words()[notice];
+        notice === 'network' && options.onSkip
+          ? words().platformUnreachable
+          : notice === 'expired'
+            ? words().credentialExpired
+            : words()[notice];
       const status = element(
         'p',
         text,

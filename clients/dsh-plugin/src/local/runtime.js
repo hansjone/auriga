@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { platformConfig, createPlatform, LoginJar } from './platform.js';
 import { createVault } from './vault.js';
-import { createLocalEmergency } from './emergency.js';
 import { createTeam } from './team.js';
 import { createRefreshBroker } from '../ai/refresh-broker.js';
 import { createModelLifecycle } from '../ai/installation.js';
@@ -74,19 +73,15 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   const config = platformConfig(input),
     platform = createPlatform(config),
     vault = await createVault(directory);
-  const emergency = createLocalEmergency({
-    vault,
-    secure: ctx.webServer.protocol === 'https:',
-  });
   /** @type {Map<string,any>} */
   const sessions = new Map(),
     attempts = new Map(),
     sockets = new Map();
-  // Keys are actual admitted owner Peers supplied by DSH's RPC carrier, never
-  // ids or headers supplied by a browser. Request bindings stay backend-only.
-  /** @type {WeakMap<object,any>} */
-  const nativeOwners = new WeakMap();
-  let backgroundKey = '';
+  // DSH's admitted owner is one installation principal across carrier Peers.
+  // Only trusted admission binds requests; headers never select this state.
+  const ownerState = /** @type {any} */ ({});
+  let backgroundKey = '',
+    ownerSessionKey = '';
   /** @type {WeakMap<object,any>} */
   const nativeRequests = new WeakMap();
   const attemptId = (/** @type {any} */ request) =>
@@ -179,7 +174,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   };
   const resolve = (/** @type {any} */ request) => {
     const owner = nativeRequests.get(request);
-    if (owner) return sessionForKey(owner.sessionKey);
+    if (owner)
+      return sessionForKey(ownerSessionKey) ?? sessionForKey(backgroundKey);
     const bearer = cookie(request, SESSION_COOKIE);
     return bearer?.length === 43 ? sessionForKey(hash(bearer)) : null;
   };
@@ -222,12 +218,11 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       : undefined,
     ctx,
     getAccess,
-    authorizeLocal: async (request) =>
-      !!resolve(request) && !resolve(request).localOnly,
+    authorizeLocal: async (request) => !!resolve(request),
     onRevoked: () => {
       broker.invalidate('revoked');
       models.logout();
-      for (const row of sessions.values()) if (!row.localOnly) killSession(row);
+      for (const row of sessions.values()) killSession(row);
       team?.close();
       startingTeam?.close();
       team = undefined;
@@ -251,7 +246,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       team = undefined;
       online = false;
       communication = 'unavailable';
-      for (const row of sessions.values()) if (!row.localOnly) killSession(row);
+      for (const row of sessions.values()) killSession(row);
     },
   });
   const models = createModelLifecycle({
@@ -460,6 +455,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         accessExpiresAt: credential.claims.exp * 1000,
       };
     sessions.set(key, session);
+    ownerSessionKey = key;
     const nativeOwner = nativeRequests.get(request);
     if (nativeOwner) nativeOwner.sessionKey = key;
     models.login();
@@ -476,26 +472,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       setCookie: nativeOwner
         ? undefined
         : [setCookie(SESSION_COOKIE, bearer), setCookie(ATTEMPT_COOKIE, '', 0)],
-    };
-  }
-  function issueLocalSession(/** @type {any} */ request) {
-    const bearer = random(),
-      key = hash(bearer);
-    sessions.set(key, {
-      key,
-      subject: 'owner',
-      localOnly: true,
-      csrf: random(),
-      expiresAt: Date.now() + 1800000,
-      accessExpiresAt: Number.MAX_SAFE_INTEGER,
-    });
-    forgetAttempt(request);
-    return {
-      step: { type: 'complete', redirectTo: '/' },
-      setCookie: [
-        setCookie(SESSION_COOKIE, bearer),
-        setCookie(ATTEMPT_COOKIE, '', 0),
-      ],
     };
   }
   /** Trusted settings changes also use the normal tombstone/revocation path.
@@ -515,8 +491,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     const abandoned = [...attempts.values()];
     attempts.clear();
     for (const attempt of abandoned) attempt.controller.abort();
-    for (const session of sessions.values())
-      if (!session.localOnly) killSession(session);
+    for (const session of sessions.values()) killSession(session);
     // Close access immediately; persist the tombstone before reporting logout success.
     team?.close();
     startingTeam?.close();
@@ -563,38 +538,24 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     nativeRequest(peer) {
       if (!peer || typeof peer !== 'object' || peer.principal?.kind !== 'owner')
         throw new Error('native owner admission required');
-      let owner = nativeOwners.get(peer);
-      if (!owner) {
-        owner = {};
-        nativeOwners.set(peer, owner);
-      }
-      if (!sessionForKey(owner.sessionKey) && sessionForKey(backgroundKey))
-        owner.sessionKey = backgroundKey;
       const request = { headers: {} };
-      nativeRequests.set(request, owner);
+      nativeRequests.set(request, ownerState);
       return request;
     },
-    /** @param {object} peer */
+    /** @param {any} peer */
     resolveNative(peer) {
-      return sessionForKey(nativeOwners.get(peer)?.sessionKey);
+      return peer?.principal?.kind === 'owner'
+        ? (sessionForKey(ownerSessionKey) ?? sessionForKey(backgroundKey))
+        : null;
     },
     /** Bind a request only after the native carrier admitted this exact Peer.
      * @param {object} peer @param {any} request */
     bindNativeRequest(peer, request) {
       this.nativeRequest(peer);
-      const owner = nativeOwners.get(peer);
-      nativeRequests.set(request, owner);
+      nativeRequests.set(request, ownerState);
       return resolve(request);
     },
     resetAuthentication: clearAuthentication,
-    async resetEmergency(/** @type {any} */ request) {
-      if (!nativeRequests.has(request))
-        throw new Error('native owner admission required');
-      const result = await emergency.reset();
-      for (const session of sessions.values())
-        if (session.localOnly) killSession(session);
-      return result;
-    },
     config,
     resolve,
     getAccess,
@@ -641,42 +602,46 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       return {
         available: true,
         loggedIn: !!row,
-        localOnly: row?.localOnly === true,
-        connected: !!row && !row.localOnly && !!team && online,
-        communication: row?.localOnly
-          ? 'unavailable'
-          : row
-            ? communication
-            : 'idle',
+        connected: !!row && !!team && online,
+        communication: row ? communication : 'idle',
         models: models.status,
-        network:
-          row && !row.localOnly
-            ? network.status
-            : { available: false, connected: false, state: 'idle' },
-        account: row ? { subject: row.subject } : null,
+        network: row
+          ? network.status
+          : { available: false, connected: false, state: 'idle' },
+        account: row
+          ? {
+              subject: row.subject,
+              ...(vault.snapshot().credential?.accountName
+                ? { displayName: vault.snapshot().credential.accountName }
+                : {}),
+            }
+          : null,
+        deviceName: config.deviceName ?? null,
+        loginTime: row
+          ? (vault.snapshot().credential?.loginTime ?? null)
+          : null,
         csrf: row?.csrf,
         remoteRevocation: (vault.snapshot().revocations ?? []).length
           ? 'pending'
           : 'complete',
-        connection:
-          row && !row.localOnly
-            ? {
-                endpointId: vault.snapshot().endpoint,
-                received: Object.keys(vault.snapshot().deliveries).filter(
-                  (id) => vault.snapshot().deliveries[id].accepted,
-                ).length,
-                unsupported: Object.values(vault.snapshot().deliveries).filter(
-                  (/** @type {any} */ delivery) =>
-                    delivery.status === 'unsupported',
-                ).length,
-                pendingSourceOpens: Object.keys(
-                  vault.snapshot().pendingOpens ?? {},
-                ).length,
-                unknownSourceOpens: Object.keys(
-                  vault.snapshot().openOutcomes ?? {},
-                ).length,
-              }
-            : null,
+        connection: row
+          ? {
+              endpointId: vault.snapshot().endpoint,
+              received: Object.keys(vault.snapshot().deliveries).filter(
+                (id) => vault.snapshot().deliveries[id].accepted,
+              ).length,
+              unsupported: Object.values(vault.snapshot().deliveries).filter(
+                (/** @type {any} */ delivery) =>
+                  delivery.status === 'unsupported',
+              ).length,
+              pendingSourceOpens: Object.keys(
+                vault.snapshot().pendingOpens ?? {},
+              ).length,
+              unknownSourceOpens: Object.keys(
+                vault.snapshot().openOutcomes ?? {},
+              ).length,
+            }
+          : null,
       };
     },
     prepare(/** @type {any} */ request) {
@@ -685,7 +650,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (current) {
         // An authenticated page/status refresh is the explicit retry trigger;
         // communication retries never hold up identity or mint a new session.
-        if (!current.localOnly) connectTeam();
+        connectTeam();
         return { body: this.status(request) };
       }
       let id = attemptId(request),
@@ -737,34 +702,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           throw new Error('login attempt superseded');
       };
       try {
-        if (input.action === 'advance' && row.choices) {
-          if (
-            input.input?.type !== 'form' ||
-            input.input.formId !== 'auriga-provider' ||
-            Object.keys(input.input.values ?? {}).join(',') !== 'provider'
-          )
-            throw new Error('invalid provider selection');
-          const choice = row.choices.find(
-            (/** @type {any} */ p) => p.id === input.input.values.provider,
-          );
-          if (!choice) throw new Error('invalid provider selection');
-          row.selectedProvider = choice.id;
-          row.localOnly = choice.localOnly === true;
-          row.choices = undefined;
-          input = { action: 'begin' };
-        }
-        const clientIp = request.socket?.remoteAddress ?? 'local';
-        if (row.localOnly) {
-          const result =
-            input.action === 'begin'
-              ? await emergency.begin(clientIp)
-              : await emergency.advance(row.localTx, input.input, clientIp);
-          check();
-          row.localTx = 'txId' in result ? result.txId : row.localTx;
-          return result.step.type === 'complete'
-            ? issueLocalSession(request)
-            : { step: result.step };
-        }
         if (input.action === 'resume') {
           const saved = vault.snapshot().credential;
           if (!saved) throw new Error('no device credential');
@@ -774,76 +711,28 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           check();
           return issueBrowserSession(row, request, vault.snapshot().credential);
         }
+        if (
+          input.action === 'advance' &&
+          typeof input.input?.values?.username === 'string'
+        )
+          row.accountName = input.input.values.username.slice(0, 256);
         let transaction;
         if (input.action === 'begin') {
           if (!row.selectedProvider) {
-            let choices;
-            try {
-              const providers = await platform.request(
-                '/api/iam/v1/login/providers',
-                { signal: row.controller.signal },
-              );
-              check();
-              choices = providers.items?.filter(
-                (/** @type {any} */ p) =>
-                  typeof p.id === 'string' &&
-                  p.id.length > 0 &&
-                  p.id.length <= 128 &&
-                  p.primaryStep === 'form',
-              );
-              if (!choices?.length || choices.length > 64)
-                throw new Error('unsupported login providers');
-            } catch (error) {
-              check();
-              if (nativeRequests.has(request) || !emergency.available())
-                throw error;
-              choices = [
-                {
-                  id: 'local-emergency',
-                  localOnly: true,
-                  name: {
-                    en: 'Local emergency account (local DSH only)',
-                    'zh-CN': '本地应急账号（仅本地 DSH）',
-                  },
-                },
-              ];
-            }
-            if (choices.length === 1 && !choices[0].localOnly)
-              row.selectedProvider = choices[0].id;
-            else {
-              row.choices = choices;
-              return {
-                step: {
-                  type: 'form',
-                  formId: 'auriga-provider',
-                  title: { en: 'Sign in to Auriga', 'zh-CN': '登录 Auriga' },
-                  fields: [
-                    {
-                      name: 'provider',
-                      kind: 'select',
-                      required: true,
-                      label: { en: 'Sign-in method', 'zh-CN': '登录方式' },
-                      options: choices.map((/** @type {any} */ p) => ({
-                        value: p.id,
-                        label:
-                          p.name && typeof p.name === 'object'
-                            ? p.name
-                            : {
-                                en:
-                                  p.connectorType === 'emergency'
-                                    ? 'Platform emergency account'
-                                    : String(p.name ?? p.id),
-                                'zh-CN':
-                                  p.connectorType === 'emergency'
-                                    ? '平台应急账号'
-                                    : String(p.name ?? p.id),
-                              },
-                      })),
-                    },
-                  ],
-                },
-              };
-            }
+            const providers = await platform.request(
+              '/api/iam/v1/login/providers',
+              { signal: row.controller.signal },
+            );
+            check();
+            const teams = providers.items?.filter(
+              (/** @type {any} */ p) =>
+                p.connectorType === 'team-account' &&
+                p.primaryStep === 'form' &&
+                typeof p.id === 'string',
+            );
+            if (teams?.length !== 1)
+              throw new Error('team account login unavailable');
+            row.selectedProvider = teams[0].id;
           }
           if (row.transactionId)
             throw new Error('restart login with a new attempt');
@@ -954,7 +843,12 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           }
         }
         check();
-        const credential = await validateTokens(tokens);
+        const verified = await validateTokens(tokens);
+        const credential = {
+          ...verified,
+          accountName: row.accountName ?? verified.claims.sub,
+          loginTime: new Date().toISOString(),
+        };
         check();
         const finish = finalizing.then(async () => {
           check();
@@ -1023,10 +917,14 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         row.busy = false;
       }
     },
-    async cancelAttempt(/** @type {any} */ request) {
+    attemptToken: attemptId,
+    async cancelAttempt(
+      /** @type {any} */ request,
+      /** @type {string|undefined} */ expected = undefined,
+    ) {
       const id = attemptId(request),
         row = attempts.get(id);
-      if (!row) return;
+      if (!row || (expected !== undefined && expected !== id)) return;
       forgetAttempt(request);
       await abandon(row);
     },
@@ -1045,13 +943,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     },
     async logout(/** @type {any} */ request) {
       const row = resolve(request);
-      if (row?.localOnly) {
-        killSession(row);
-        return {
-          setCookie: setCookie(SESSION_COOKIE, '', 0),
-          body: this.status(request),
-        };
-      }
       if (!row) {
         if (nativeRequests.has(request) && vault.snapshot().credential)
           await clearAuthentication();

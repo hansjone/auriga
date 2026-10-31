@@ -11,7 +11,6 @@ import { savedPlatformConfig } from './local/platform.js';
 import { installNativeLoginRPC } from './local/native-rpc.js';
 import {
   installLocalAdmission,
-  installHttpResponseTracking,
   installLocalLoginBootstrap,
 } from './local/host.js';
 import {
@@ -36,20 +35,17 @@ export async function apply(ctx, config) {
   installObservability(ctx);
   const mode = selectMode();
   let binding, profileOwner;
-  // Unknown preferences must never temporarily expose native DSH surfaces.
+  // Preferences select Auriga surfaces; DSH owns local admission independently.
   let configured = true;
   let admission;
   const setConfigured = (next) => {
     configured = next;
-    // Close the door before destroying old transports: even synchronous close
-    // listeners must reauthenticate before opening a new native Peer.
-    if (configured) admission?.closeStandaloneSockets();
   };
   const settings = installSettings(
     ctx,
     config,
     mode === 'managed'
-      ? {}
+      ? { mode: 'managed' }
       : {
           activeOrigin: () => binding?.runtime.config.platformOrigin ?? '',
           nativeAuth: {
@@ -67,8 +63,7 @@ export async function apply(ctx, config) {
         'auriga-dsh: local UI requires native host authentication',
       );
     {
-      // The parent owns the closed door while native providers are pending or
-      // being unloaded. Only the injected child owns the runtime and tools.
+      // The parent keeps local owner admission alive while platform services load.
       const current = () => {
         if (!binding) return undefined;
         try {
@@ -84,24 +79,13 @@ export async function apply(ctx, config) {
         }
       };
       const gate = {
-        isConfigured: () => configured,
-        resolve: (req) => current()?.runtime.resolve(req) ?? null,
-        resolveNative: (peer) => current()?.runtime.resolveNative(peer) ?? null,
         bindNativeRequest: (peer, req) =>
           current()?.runtime.bindNativeRequest(peer, req) ?? null,
-        bindSocket: (req) => current()?.runtime.bindSocket(req) ?? false,
         status: (req) =>
           current()?.runtime.status(req) ?? {
             connected: false,
             connection: null,
           },
-        installHttpTracking: () =>
-          installHttpResponseTracking(
-            ctx,
-            (req, res) =>
-              !configured ||
-              (current()?.runtime.bindHttpResponse(req, res) ?? false),
-          ),
       };
       admission = installLocalAdmission(ctx.connection, gate, {
         protocol: ctx.webServer.protocol,
@@ -305,7 +289,7 @@ export async function apply(ctx, config) {
               );
             });
             // Keep settings/retry ownership alive even when the platform is down.
-            // The parent login door stays closed and activeOrigin remains empty.
+            // Only platform status is unavailable when its runtime cannot load.
             await configure(store.snapshot().platformOrigin).catch(() => {});
           },
         );

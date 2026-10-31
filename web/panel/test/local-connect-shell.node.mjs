@@ -117,6 +117,8 @@ async function exerciseRealSettings(delayed) {
               loggedIn: true,
               connected: true,
               account: { subject: 'alice' },
+              network: { connected: true, state: 'ready' },
+              connection: localBoot(true).connection,
               csrf: 'native-csrf',
             }
           : localBoot(true);
@@ -203,26 +205,21 @@ async function exerciseRealSettings(delayed) {
     await ready;
     const panel = main.root.querySelector('auriga-team-panel'),
       context = panel.context;
-    assert.match(settings.root.textContent, /本机通信端点.*已接受的消息3/);
+    assert.match(settings.root.textContent, /本机端点.*已收消息3/);
     assert.match(settings.root.textContent, /alice.*Auriga DSH/);
     const input = settings.root.querySelector('input[aria-label="平台地址"]');
     assert.ok(input, 'real settings asset evaluated in registered native slot');
     input.value = 'https://next.example.com';
     input.onchange({ target: input });
-    const select = settings.root.querySelector(
-      'select[aria-label="默认部署位置"]',
-    );
-    select.value = 'local';
-    select.onchange({ target: select });
     await flush();
     await [...settings.root.querySelectorAll('button')]
       .find((b) => b.textContent === '保存')
       .onclick();
     await flush();
-    assert.match(settings.root.textContent, /设置已保存/);
+    assert.match(settings.root.textContent, /已保存/);
     assert.deepEqual((await createSettingsStore(directory)).snapshot(), {
       platformOrigin: 'https://next.example.com',
-      deployment: 'local',
+      deployment: 'cloud',
     });
     assert.equal(
       calls.find((c) => c.url.endsWith('/save')).init.credentials,
@@ -232,7 +229,7 @@ async function exerciseRealSettings(delayed) {
     // Both merged entry points coexist: the shell keeps LOGIN's explicit
     // confirmation page while SETTINGS retains its reviewed view and handlers.
     const logout = [...settings.root.querySelectorAll('button')].find(
-      (b) => b.textContent === '退出本机登录',
+      (b) => b.textContent === '退出登录',
     );
     assert.ok(logout);
     logout.click();
@@ -304,9 +301,9 @@ test('local connection state drives the real shell entry and endpoint/acceptance
       );
       assert.match(
         settings.root.textContent,
-        /本机通信端点00000000-0000-4000-8000-000000000001/,
+        /本机端点00000000-0000-4000-8000-000000000001/,
       );
-      assert.match(settings.root.textContent, /已接受的消息3/);
+      assert.match(settings.root.textContent, /已收消息3/);
       assert.doesNotMatch(settings.root.textContent, /尚未配置总部连接/);
       main.close();
       settings.close();
@@ -357,7 +354,12 @@ test('consent children use independent hooks and the authenticated HTTP bridge w
       response(
         200,
         new URL(url).pathname.endsWith('/status')
-          ? { loggedIn: true, csrf: 'native-csrf' }
+          ? {
+              loggedIn: true,
+              connected: true,
+              account: { subject: 'alice' },
+              csrf: 'native-csrf',
+            }
           : localBoot(true),
       ),
     {

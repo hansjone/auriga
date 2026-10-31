@@ -101,6 +101,7 @@ export function createLocalLoginController(options = {}) {
   /** @param {AbortSignal} signal */
   async function status(signal) {
     const state = await call('status', undefined, signal);
+    if (state.configured === false) throw new LoginFailure('unconfigured');
     if (
       state.available !== true ||
       typeof state.loggedIn !== 'boolean' ||

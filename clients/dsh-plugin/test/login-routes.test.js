@@ -230,7 +230,7 @@ test('unconfigured host still serves login and recovery UI behind native admissi
   });
   assert.equal((await request(handler, '')).status, 200);
   assert.equal((await request(handler, '/assets/page.js')).status, 200);
-  assert.equal((await request(handler, '/status')).status, 404);
+  assert.equal((await request(handler, '/status')).status, 200);
   assert.equal(
     (await request(handler, '/login', { action: 'begin' })).status,
     403,

@@ -13,7 +13,6 @@ import { createHostOutput } from '../../scripts/beta-ui/plugin-dsh.mjs';
 import { poll } from './cloud-desk.desktop.mjs';
 import { nativeClient, configureFixtureModel } from './cloud-desk.native.mjs';
 import { startFixture } from './cloud-desk.fixture.mjs';
-import { nextTotp } from './run.mjs';
 import { loginInstalledDesktop } from './installed-login.mjs';
 
 const [fixtureArgument, packageArgument, stateArgument] = process.argv.slice(2);
@@ -39,9 +38,6 @@ const connect = JSON.parse(
 ).cloudDesk.connect;
 const member = JSON.parse(
   await readFile(join(fixtures, 'R3b-member.json'), 'utf8'),
-);
-const emergency = JSON.parse(
-  await readFile(join(fixtures, 'nas-emergency-enrollment.json'), 'utf8'),
 );
 const report = {
   status: 'failed',
@@ -87,7 +83,7 @@ async function launch(label, isolation = false) {
     {
       env: isolation ? isolated : env,
       cwd: join(state, 'cwd'),
-      windowsHide: true,
+      windowsHide: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -149,6 +145,19 @@ async function launch(label, isolation = false) {
         return null;
       }
     }, 'native_startup_not_ready');
+    const targets = [];
+    for (const p of browser.contexts().flatMap((c) => c.pages())) {
+      const u = new URL(p.url());
+      if (u.protocol === 'dsh-app:')
+        targets.push({
+          path: u.host + u.pathname,
+          buttons: await p.getByRole('button').allTextContents(),
+        });
+    }
+    await writeFile(
+      join(state, label + '-targets.json'),
+      JSON.stringify(targets, null, 2),
+    );
     return { page, browser, stop, launchURL: () => launchURL };
   } catch (error) {
     await stop();
@@ -206,24 +215,8 @@ async function assertLocal(page, label, fixtureProvider) {
   await client.cancel();
   report.steps.push(label);
 }
-async function login(page, credential, providerType) {
+async function login(page, credential) {
   await page.goto('dsh-app://app/auriga/local-login');
-  const selector = page.locator('#auriga-login select[name="provider"]');
-  await selector.waitFor({ timeout: 45000 });
-  const option = await selector
-    .locator('option')
-    .evaluateAll(
-      (rows, providerType) =>
-        rows.find((r) =>
-          providerType === 'emergency'
-            ? /应急|emergency/i.test(r.textContent)
-            : !/应急|emergency/i.test(r.textContent),
-        )?.value,
-      providerType,
-    );
-  assert.ok(option, 'requested platform provider must be visible');
-  await selector.selectOption(option);
-  await page.locator('#auriga-login button[type="submit"]').click();
   await loginInstalledDesktop(page, credential, (path, body) =>
     request(page, path, body),
   );
@@ -233,6 +226,66 @@ async function login(page, credential, providerType) {
     90000,
   );
 }
+async function captureSettings(page, label) {
+  try {
+    await page.bringToFront();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const settings = page.getByRole('button', { name: /^(Settings|设置)$/ });
+    if (await settings.count()) await settings.first().click({ timeout: 8000 });
+    else {
+      await page.keyboard.press('Control+Comma');
+      try {
+        await page
+          .getByText('Auriga', { exact: true })
+          .nth(1)
+          .waitFor({ timeout: 2000 });
+      } catch {
+        await page.keyboard.press('Control+Alt+Comma');
+      }
+    }
+    await page
+      .getByText('Auriga', { exact: true })
+      .last()
+      .click({ timeout: 8000 });
+    await page.locator('.auriga-settings-content').waitFor({ timeout: 8000 });
+    await page.screenshot({
+      path: join(state, label + '.png'),
+      timeout: 10000,
+    });
+    (report.screenshots ??= []).push({ label, status: 'passed' });
+    await page.keyboard.press('Escape');
+  } catch (error) {
+    (report.screenshots ??= []).push({
+      label,
+      status: 'failed',
+      error: error.name,
+    });
+    await writeFile(
+      join(state, label + '-ui.txt'),
+      await page
+        .locator('body')
+        .innerText()
+        .catch(() => ''),
+    );
+    await page
+      .screenshot({ path: join(state, label + '-failure.png'), timeout: 5000 })
+      .catch(() => {});
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+}
+async function skipLogin(page, offline) {
+  await page.goto('dsh-app://app/auriga/local-login');
+  const skip = page.locator('[data-action=skip]');
+  await skip.waitFor();
+  if (offline)
+    await page
+      .locator('[role=alert]')
+      .filter({ hasText: /Platform unreachable|总部不可达/ })
+      .waitFor({ timeout: 30000 });
+  await skip.click();
+  await page.waitForURL('dsh-app://app/');
+}
+
 try {
   report.stage = 'install';
   app = await launch('install');
@@ -276,10 +329,6 @@ try {
   report.stage = 'install-bundle';
   const isolationSpec = resolve(spec, '../auriga-offline-isolation-0.0.0.tgz');
   await client.rpc('pluginManager/installBundle', {
-    spec: isolationSpec,
-    options: { enabled: true, requestId: randomUUID() },
-  });
-  await client.rpc('pluginManager/installBundle', {
     spec,
     options: { enabled: true, requestId: randomUUID() },
   });
@@ -297,9 +346,50 @@ try {
   });
   await app.stop();
   app = undefined;
+  const installedFixture = await promisify(execFile)(
+    runtime.executable,
+    [
+      '--expose-internals',
+      runtime.cli,
+      'plugin',
+      '--profile',
+      'desktop',
+      'add',
+      isolationSpec,
+      '--ignore-scripts',
+      '--store-dir',
+      join(state, 'cache/pnpm-home/store'),
+    ],
+    {
+      env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
+      cwd: join(state, 'cwd'),
+      windowsHide: true,
+      timeout: 180000,
+      maxBuffer: 8 * 1024 * 1024,
+    },
+  );
+  await writeFile(
+    join(state, 'isolation-cli.log'),
+    installedFixture.stdout + installedFixture.stderr,
+  );
+  const installedProfile = JSON.parse(
+    await readFile(join(state, 'dsh/profiles/desktop/package.json'), 'utf8'),
+  );
+  assert.ok(
+    installedProfile.dependencies['auriga-dsh'] &&
+      installedProfile.dependencies['auriga-offline-isolation'],
+    'both isolated plugins must remain installed',
+  );
   await writeFile(
     join(state, 'dsh/profiles/desktop/cordis.patch.yml'),
-    '- id: auriga-dsh\n  disabled: false\n  config: ' +
+    '- id: auriga-offline-isolation\n  disabled: false\n  config: ' +
+      JSON.stringify({
+        file: switchFile,
+        targets: [connect.platformOrigin, connect.network?.wssUrl].filter(
+          Boolean,
+        ),
+      }) +
+      '\n- id: auriga-dsh\n  disabled: false\n  config: ' +
       JSON.stringify({ connect }) +
       '\n',
   );
@@ -309,14 +399,42 @@ try {
   report.stage = 'offline-cold-start';
   await writeFile(switchFile, 'offline');
   app = await launch('offline', true);
+  await poll(async () => {
+    try {
+      return !!(await readFile(switchFile + '.active', 'utf8'));
+    } catch {
+      return false;
+    }
+  }, 'isolation_plugin_not_loaded');
   const local = nativeClient((path, body) => request(app.page, path, body));
   await configureFixtureModel(local, model.urls.desktop, provider, []);
   await assertLocal(app.page, 'offline-cold-start-local-prompt', provider);
   assert.equal((await auth(app.page, 'status')).loggedIn, false);
+  await captureSettings(app.page, 'settings-signed-out');
+  await skipLogin(app.page, true);
+  await assertLocal(
+    app.page,
+    'unreachable-login-skipped-local-prompt',
+    provider,
+  );
   report.stage = 'team-login';
   await writeFile(switchFile, 'online');
-  await login(app.page, member, 'team');
+  await poll(
+    async () => {
+      const probe = await request(app.page, '/auriga/settings/test', {
+        platformOrigin: connect.platformOrigin,
+      });
+      return probe.reachable;
+    },
+    'platform_probe_not_reachable',
+    30000,
+  );
+  await skipLogin(app.page, false);
+  assert.equal((await auth(app.page, 'status')).loggedIn, false);
+  await assertLocal(app.page, 'team-login-skipped-local-prompt', provider);
+  await login(app.page, member);
   report.steps.push('team-login-ready');
+  await captureSettings(app.page, 'settings-ready');
   report.stage = 'offline-after-login';
   await writeFile(switchFile, 'offline');
   await poll(
@@ -324,6 +442,7 @@ try {
     'network_did_not_disconnect',
   );
   await assertLocal(app.page, 'signed-in-offline-local-prompt', provider);
+  await captureSettings(app.page, 'settings-offline');
   report.stage = 'automatic-recovery';
   await writeFile(switchFile, 'online');
   await poll(
@@ -334,14 +453,6 @@ try {
   report.steps.push('automatic-recovery-ready');
   await auth(app.page, 'logout');
   await assertLocal(app.page, 'platform-logout-local-prompt', provider);
-  report.stage = 'platform-emergency-login';
-  await login(
-    app.page,
-    emergency.credentials ?? emergency.enrollment ?? emergency,
-    'emergency',
-  );
-  report.steps.push('platform-emergency-login-ready');
-  await auth(app.page, 'logout');
   await app.stop();
   app = undefined;
   report.stage = 'final-cold-start';
@@ -352,8 +463,26 @@ try {
     'final-offline-cold-start-local-prompt',
     provider,
   );
-  report.status = 'passed';
+  report.status = report.screenshots?.some((x) => x.status !== 'passed')
+    ? 'failed'
+    : 'passed';
+  if (report.status !== 'passed') process.exitCode = 1;
 } catch (error) {
+  if (app)
+    await writeFile(
+      join(state, 'failure-ui.txt'),
+      await app.page
+        .locator('body')
+        .innerText()
+        .catch(() => ''),
+    );
+  await app?.page
+    .screenshot({
+      timeout: 5000,
+      path: join(state, 'failure.png'),
+      fullPage: true,
+    })
+    .catch(() => {});
   report.failure = {
     name: error.name,
     code: error.code,

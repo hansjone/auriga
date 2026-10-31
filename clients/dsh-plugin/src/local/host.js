@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-import { NATIVE_LOGIN_CHANNEL, NATIVE_LOGIN_METHODS } from './native-rpc.js';
 
 /** Use the same native boot table for Web and Electron's static carrier.
  * @param {any} ctx */
@@ -13,15 +12,6 @@ export function installLocalLoginBootstrap(ctx) {
     table.push({ kind: 'script', placement: 'head', text });
   });
 }
-
-// rc.3's main process uses browser admission for its redacted welcome metadata
-// before opening its window. Keep these reads bootable.
-const desktopStartupReads = new Set([
-  '/api/settings/describe',
-  '/api/llm/listConfigurableProviders',
-  '/api/credentials/describe',
-  '/api/account/getState',
-]);
 
 /** Responses belong to a local browser session, independently of the shared
  * native Peer and keep-alive socket. Closing one must not cancel another.
@@ -90,182 +80,57 @@ export function installHttpResponseTracking(ctx, bind) {
   };
 }
 
-/** Preserve native owner access; require local login for browser business calls.
+/** DSH owns local authentication. Platform sessions control only Auriga.
  * @param {any} connection @param {any} runtime @param {{protocol:string}} options */
 export function installLocalAdmission(connection, runtime, { protocol }) {
   if (!connection.admit || !connection.authorizeIndex || !connection.isTrusted)
-    throw new Error(
-      'auriga-dsh: 需要 DSH 0.2.1-rc.3 或更高版本的原生连接准入 API，请升级 DSH。 Native connection admission API required; upgrade DSH to 0.2.1-rc.3 or later.',
-    );
-  if (typeof runtime.installHttpTracking !== 'function')
-    throw new Error('native HTTP response tracking required');
-  const original = Symbol.for('cordis.original');
-  // Cordis shadow method proxies do not carry `original`; inspect the service
-  // target only for exact method ownership/restoration, never for tool ownership.
-  const target = connection[original] ?? connection;
-  const nativeAdmit = target.admit,
-    nativeIndex = target.authorizeIndex;
-  /** @type {Set<import('node:net').Socket>} */
-  const standaloneSockets = new Set();
-  function closeStandaloneSockets() {
-    for (const socket of standaloneSockets) {
-      standaloneSockets.delete(socket);
-      socket.destroy();
-    }
-  }
+    throw new Error('auriga-dsh: native connection admission API required');
+  const target = connection[Symbol.for('cordis.original')] ?? connection;
+  const nativeAdmit = target.admit;
+  const admit = (/** @type {any} */ request) => {
+    const result = nativeAdmit.call(connection, request);
+    if ('rejection' in result) return result;
+    if (result.peer?.principal?.kind !== 'owner') return { rejection: 403 };
+    runtime.bindNativeRequest?.(result.peer, request);
+    return result;
+  };
   const nativeAuth = {
-    /** @param {any} request */
-    requestRejection: (request) => {
-      const result = nativeAdmit.call(connection, request);
-      if (
-        !('rejection' in result) &&
-        (isNativeOwner(request, result.peer) ||
-          runtime.resolveNative?.(result.peer))
-      )
-        runtime.bindNativeRequest?.(result.peer, request);
+    requestRejection(/** @type {any} */ request) {
+      const result = admit(request);
       return 'rejection' in result ? result.rejection : undefined;
     },
   };
-  // Public rc.3 admission accepts browser cookies and independent API Peers.
-  // authorizeIndex accepts only browser authentication. Probe its fixed clean
-  // root AFTER admit verified the credential; headers never supply authority.
-  const isNativeOwner = (/** @type {any} */ request, /** @type {any} */ peer) =>
-    peer?.principal?.kind === 'owner' &&
-    !nativeIndex.call(
-      connection,
-      { headers: request.headers, method: 'GET', url: '/' },
-      { writeHead() {}, end() {} },
-    );
-  /** @param {import('node:http').IncomingMessage} request @param {boolean} [required] */
-  function sameOrigin(request, required = false) {
+  // Browser writes still require an exact origin and CSRF at their own route.
+  const sameOrigin = (/** @type {any} */ request, required = false) => {
     if (!connection.isTrusted(request)) return false;
     if (
       request.headers['sec-fetch-site'] &&
       !['same-origin', 'none'].includes(request.headers['sec-fetch-site'])
     )
       return false;
-    const origin = request.headers.origin,
-      host = request.headers.host;
+    const origin = request.headers.origin;
     if (origin === undefined) return !required;
-    if (
-      typeof origin !== 'string' ||
-      typeof host !== 'string' ||
-      !request.rawHeaders
-    )
-      return false;
-    const count = (/** @type {string} */ name) =>
-      request.rawHeaders.filter(
-        (v, i) => i % 2 === 0 && v.toLowerCase() === name,
+    const count = (/** @type {string} */ key) =>
+      (request.rawHeaders ?? []).filter(
+        (/** @type {string} */ x, /** @type {number} */ i) =>
+          i % 2 === 0 && x.toLowerCase() === key,
       ).length;
-    if (count('origin') !== 1 || count('host') !== 1) return false;
     try {
       return (
-        new URL(origin).origin === origin &&
-        origin === new URL(protocol + '//' + host).origin
+        count('host') === 1 &&
+        count('origin') === 1 &&
+        origin === new URL(protocol + '//' + request.headers.host).origin
       );
     } catch {
       return false;
     }
-  }
-  const admit = function (
-    /** @type {import('node:http').IncomingMessage} */ request,
-  ) {
-    const original = nativeAdmit.call(connection, request);
-    if ('rejection' in original) return original;
-    const upgrade = request.headers.upgrade?.toLowerCase() === 'websocket';
-    if (isNativeOwner(request, original.peer)) {
-      if (!sameOrigin(request)) return { rejection: 403 };
-      // DSH owns local authority, even when Auriga is loading or offline.
-      return original;
-    }
-    if ((request.url ?? '').startsWith(NATIVE_LOGIN_CHANNEL + '/')) {
-      // rc.3 Electron uses the shared browser credential for this carrier too.
-      // Preserve existing platform login, but never expose credential reset to
-      // this ambiguous transport. It requires an independent owner API Peer.
-      if (
-        !upgrade &&
-        request.method === 'POST' &&
-        request.headers['content-type']?.split(';')[0].trim().toLowerCase() ===
-          'application/json' &&
-        NATIVE_LOGIN_METHODS.has(
-          (request.url ?? '').slice(NATIVE_LOGIN_CHANNEL.length + 1),
-        ) &&
-        request.url !== NATIVE_LOGIN_CHANNEL + '/aurigaAuth/emergency' &&
-        sameOrigin(request)
-      )
-        return original;
-      return { rejection: 403 };
-    }
-    if (runtime.isConfigured?.() === false) {
-      // Native multiplexed peers survive subsequent admission changes. Keep
-      // their transport in the parent scope even without a platform runtime.
-      const socket = request.socket;
-      if (
-        upgrade &&
-        socket &&
-        !socket.destroyed &&
-        !standaloneSockets.has(socket)
-      ) {
-        standaloneSockets.add(socket);
-        socket.once('close', () => standaloneSockets.delete(socket));
-      }
-      return original;
-    }
-    if (runtime.resolveNative?.(original.peer)) {
-      if (!sameOrigin(request)) return { rejection: 403 };
-      runtime.bindNativeRequest(original.peer, request);
-      runtime.bindSocket(request);
-      return original;
-    }
-    if (
-      !upgrade &&
-      request.method === 'POST' &&
-      desktopStartupReads.has(request.url ?? '') &&
-      request.headers['content-type']?.split(';')[0].trim().toLowerCase() ===
-        'application/json'
-    )
-      return sameOrigin(request) ? original : { rejection: 403 };
-    if (
-      !sameOrigin(
-        request,
-        upgrade ||
-          !['GET', 'HEAD', 'OPTIONS'].includes(request.method ?? 'GET'),
-      )
-    )
-      return { rejection: 403 };
-    if (!runtime.resolve(request)) return { rejection: 401 };
-    runtime.bindSocket(request);
-    return original;
   };
-  const authorizeIndex = function (
-    /** @type {import('node:http').IncomingMessage} */ request,
-    /** @type {import('node:http').ServerResponse} */ response,
-  ) {
-    if (!nativeIndex.call(connection, request, response)) return false;
-    if (runtime.isConfigured?.() === false) return true;
-    if (!sameOrigin(request)) {
-      response.writeHead(403);
-      response.end();
-      return false;
-    }
-    // The authenticated native shell must boot before platform login (and
-    // before the connect runtime is ready). Serving its static index grants no
-    // business access: browser API/WS still requires a local session.
-    return true;
-  };
-  const stopHttpTracking = runtime.installHttpTracking();
   connection.admit = admit;
-  connection.authorizeIndex = authorizeIndex;
   return {
     nativeAuth,
     sameOrigin,
-    closeStandaloneSockets,
     dispose() {
-      closeStandaloneSockets();
-      stopHttpTracking();
       if (target.admit === admit) target.admit = nativeAdmit;
-      if (target.authorizeIndex === authorizeIndex)
-        target.authorizeIndex = nativeIndex;
     },
   };
 }

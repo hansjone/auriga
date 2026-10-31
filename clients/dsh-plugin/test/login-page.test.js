@@ -46,10 +46,30 @@ test('actual login page mounts transport and exposes a recoverable network failu
   ]);
   assert.match(root.textContent, /正在处理/);
   await flush();
-  assert.match(root.textContent, /网络不可达/);
+  assert.match(root.textContent, /总部不可达/);
+  assert.ok(root.querySelector('[data-action=skip]'));
   assert.ok(root.querySelector('[data-action=restart]'));
   assert.equal(requests[0].url, '/auriga/local-login/status');
 });
+
+for (const locale of ['zh-CN', 'en'])
+  test(`R2 ${locale}: skipping unreachable platform login returns immediately without logging out`, async (t) => {
+    const { root, requests, navigations } = fixture(
+      t,
+      [new TypeError('offline')],
+      { locale },
+    );
+    await flush();
+    assert.match(
+      root.textContent,
+      locale === 'en' ? /Platform unreachable/ : /总部不可达/,
+    );
+    const skip = root.querySelector('[data-action=skip]');
+    assert.equal(skip.textContent, locale === 'en' ? 'Skip' : '跳过');
+    skip.click();
+    assert.deepEqual(navigations, ['/']);
+    assert.equal(requests.length, 1);
+  });
 test('complete returns to current DSH only after verified ready status; ignores remote redirectTo', async (t) => {
   const { navigations } = fixture(t, [
     status(),

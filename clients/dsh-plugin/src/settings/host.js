@@ -19,7 +19,7 @@ function trustedOrigin(value) {
 /** Public host service adapter. Business preferences do not modify loader config
  * or reuse credentials when an origin changes.
  * @param {any} ctx @param {any} config
- * @param {{uiOrigin?:string,activeOrigin?:()=>string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
+ * @param {{uiOrigin?:string,activeOrigin?:()=>string,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
 export function installSettings(
   ctx,
   config,
@@ -27,6 +27,7 @@ export function installSettings(
     uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN,
     activeOrigin,
     nativeAuth,
+    mode = 'connect',
   } = {},
 ) {
   /** @type {Map<string,ReturnType<typeof createSettingsStore>>} */
@@ -62,12 +63,13 @@ export function installSettings(
           path: '/auriga/settings',
           handler: createSettingsHandler({
             store,
+            mode,
             auth: nativeAuth ?? scoped.connection,
             uiOrigin: expectedOrigin,
             activeOrigin:
               activeOrigin ?? (() => store.snapshot().platformOrigin),
             deviceName: config?.connect
-              ? (config.connect.deviceName ?? 'Auriga DSH')
+              ? (config.connect.deviceName ?? null)
               : null,
           }),
         }),
@@ -77,17 +79,19 @@ export function installSettings(
   return { getStore };
 }
 
-/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,uiOrigin?:string}} options */
+/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,uiOrigin?:string,mode?:string}} options */
 export function createSettingsHandler({
   store,
   auth,
   activeOrigin,
   deviceName = null,
   uiOrigin,
+  mode = 'connect',
 }) {
   const expectedOrigin = trustedOrigin(uiOrigin);
   const snapshot = () => ({
     ...store.snapshot(),
+    mode,
     activeOrigin:
       typeof activeOrigin === 'function' ? activeOrigin() : activeOrigin,
     deviceName,
@@ -133,7 +137,15 @@ export function createSettingsHandler({
     if (
       (req.headers['sec-fetch-site'] &&
         !['same-origin', 'none'].includes(req.headers['sec-fetch-site'])) ||
-      ((write || req.headers.origin) && !sameOrigin)
+      ((write || req.headers.origin) &&
+        !sameOrigin &&
+        !(
+          write &&
+          req.headers.origin === undefined &&
+          req.headers['x-auriga-settings'] === '1' &&
+          req.headers['content-type']?.split(';')[0].trim() ===
+            'application/json'
+        ))
     )
       return json(403, { reason: 'forbidden' });
     const path = req.url?.split('?')[0];
@@ -149,6 +161,7 @@ export function createSettingsHandler({
       }
       if (req.method === 'GET' && path === '/auriga/settings/state')
         return json(200, snapshot());
+      if (mode === 'managed') return json(403, { reason: 'managed' });
       if (
         !write ||
         !['/auriga/settings/save', '/auriga/settings/test'].includes(path ?? '')

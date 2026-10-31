@@ -1,18 +1,15 @@
 // Test-process transport isolation only; never changes system networking.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { Socket } from 'node:net';
 
 export const name = 'auriga-offline-isolation';
-export function apply() {}
-
-if (process.env.AURIGA_DESKTOP_OFFLINE_FILE) {
-  const targets = JSON.parse(process.env.AURIGA_DESKTOP_OFFLINE_TARGETS);
+export function apply(_ctx, options) {
+  if (!options?.file) return;
+  writeFileSync(options.file + '.active', String(process.pid));
+  const targets = options.targets;
   const offline = () => {
     try {
-      return (
-        readFileSync(process.env.AURIGA_DESKTOP_OFFLINE_FILE, 'utf8') ===
-        'offline'
-      );
+      return readFileSync(options.file, 'utf8') === 'offline';
     } catch {
       return true;
     }
@@ -45,8 +42,9 @@ if (process.env.AURIGA_DESKTOP_OFFLINE_FILE) {
   const sockets = new Set(),
     connect = Socket.prototype.connect;
   Socket.prototype.connect = function (...args) {
-    const options =
-      typeof args[0] === 'object'
+    const options = Array.isArray(args[0])
+      ? args[0][0]
+      : typeof args[0] === 'object'
         ? args[0]
         : {
             port: args[0],

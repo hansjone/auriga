@@ -377,7 +377,7 @@ test('formal plugin entry consumes saved settings, applies changes immediately a
       connection: {
         requestRejection() {},
         admit() {
-          return { peer: {} };
+          return { peer: { principal: { kind: 'owner' } } };
         },
         authorizeIndex() {
           return true;

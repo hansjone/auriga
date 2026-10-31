@@ -67,6 +67,15 @@ export function createConnectRoutes({
     }
     const path = (req.url ?? '').split('?')[0];
     let operation = 'request';
+    if (!runtime && req.method === 'GET' && path === BASE + '/status')
+      return json(res, 200, {
+        available: true,
+        configured: false,
+        loggedIn: false,
+        connected: false,
+        account: null,
+        network: { connected: false, state: 'unconfigured' },
+      });
     if (!runtime && path !== BASE && !path.startsWith(BASE + '/assets/'))
       return json(res, 404, { code: 'common.not_found' });
     if (path.startsWith(BASE + '/consent/')) return consent(req, res);

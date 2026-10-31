@@ -1,11 +1,11 @@
 import { PlatformError } from './platform.js';
+import { localFailureDiagnostic } from './diagnostic.js';
 
 export const NATIVE_LOGIN_CHANNEL = '/auriga-native';
 export const NATIVE_LOGIN_METHODS = new Set([
   'aurigaAuth/status',
   'aurigaAuth/login',
   'aurigaAuth/logout',
-  'aurigaAuth/emergency',
 ]);
 
 const record = (/** @type {any} */ value) =>
@@ -72,8 +72,10 @@ export function installNativeLoginRPC(ctx, getRuntime) {
       const runtime = getRuntime();
       if (!runtime) return fail('common.unavailable');
       const request = runtime.nativeRequest(peer);
+      const attempt = runtime.attemptToken?.(request);
       const cancel = () => {
-        void runtime.cancelAttempt(request).catch(() => {});
+        if (method === 'aurigaAuth/login' && attempt)
+          void runtime.cancelAttempt(request, attempt).catch(() => {});
       };
       signal.addEventListener('abort', cancel, { once: true });
       try {
@@ -83,13 +85,18 @@ export function installNativeLoginRPC(ctx, getRuntime) {
           value = runtime.prepare(request).body;
         else if (method === 'aurigaAuth/login')
           value = { step: (await runtime.login(request, args.input)).step };
-        else if (method === 'aurigaAuth/emergency')
-          value = await runtime.resetEmergency(request);
         else value = (await runtime.logout(request)).body;
         const safe = { ...value };
         delete safe.csrf;
         return { ok: true, value: safe };
       } catch (error) {
+        console.warn(
+          '[auriga-dsh] native login failure ' +
+            JSON.stringify({
+              operation: method.slice('aurigaAuth/'.length),
+              ...localFailureDiagnostic(error),
+            }),
+        );
         if (
           error instanceof PlatformError &&
           [

@@ -128,9 +128,9 @@ async function fixture(api, locale = 'zh', http) {
     effects = [];
     return component(props);
   };
-  const settings = shallow(slots.get('settings.section'));
+  const settings = shallow(slots.get('main'));
   const section = all(settings).find((n) => n.type?.name === 'ConsentSection');
-  assert.ok(section, 'native settings includes consent component');
+  assert.ok(section, 'native shell includes shared consent component');
   values = [];
   effects = [];
   const render = async (settings = false) => {

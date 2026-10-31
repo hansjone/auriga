@@ -10,15 +10,14 @@ test('admitted owner resumes without plugin cookies; logout and expiry fence nat
   assert.equal(request.headers.cookie, undefined);
   const prepared = runtime.prepare(request);
   assert.equal(prepared.setCookie, undefined);
-  assert.equal(prepared.body.loggedIn, false);
-  const loggedIn = await runtime.login(request, { action: 'resume' });
-  assert.equal(loggedIn.setCookie, undefined);
+  assert.equal(prepared.body.loggedIn, true);
+
   assert.equal(runtime.resolveNative(peer).subject, credential.claims.sub);
   const business = { headers: {} };
   assert.ok(runtime.bindNativeRequest(peer, business));
   assert.equal(runtime.status(business).loggedIn, true);
   const other = { principal: { kind: 'owner' } };
-  assert.equal(runtime.resolveNative(other), null);
+  assert.equal(runtime.resolveNative(other).subject, credential.claims.sub);
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 1800001 });
   assert.equal(runtime.resolveNative(peer), null);
   assert.equal(runtime.bindNativeRequest(peer, { headers: {} }), null);

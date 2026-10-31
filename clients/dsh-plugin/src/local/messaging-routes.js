@@ -15,7 +15,7 @@ export function createMessagingRoutes(runtime) {
       });
       res.end(JSON.stringify(value));
     };
-    if (!runtime.resolve(req) || runtime.resolve(req).localOnly)
+    if (!runtime.resolve(req))
       return send(401, { code: 'common.unauthenticated' });
     const action = (req.url ?? '')
       .split('?')[0]
