@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -177,6 +178,15 @@ func TestLiteLLMEntryBoundary(t *testing.T) {
 				{"management", "relayAdmin", "POST", "/ai/key/generate", http.Header{"Cookie": {"auriga_litellm_session=admin"}, "Origin": {g.Cfg.liteLLMUIURL()}}, 204},
 				{"ui-playground", "relayAdmin", "POST", "/ai/v1/chat/completions", http.Header{"Cookie": {"auriga_litellm_session=admin"}, "Origin": {g.Cfg.liteLLMUIURL()}, "Authorization": {"Bearer ui-session-token"}}, 204},
 				{"ui-api-alias", "relayAdmin", "GET", "/ai/v1/model/info", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 204},
+				{"ui-next-segment", "relayAdmin", "GET", "/ai/ui/models-and-endpoints/__next.%21KGRhc2hib2FyZCk.models-and-endpoints.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 204},
+				{"ui-next-head", "relayAdmin", "HEAD", "/ai/ui/__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 204},
+				{"ui-next-anonymous", "relayAdmin", "GET", "/ai/ui/__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{}, 401},
+				{"ui-next-cross-site", "relayAdmin", "GET", "/ai/ui/__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}, "Sec-Fetch-Site": {"same-site"}, "Sec-Fetch-Mode": {"cors"}}, 403},
+				{"ui-next-write", "relayAdmin", "POST", "/ai/ui/__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}, "Origin": {g.Cfg.liteLLMUIURL()}}, 400},
+				{"ui-next-separator", "relayAdmin", "GET", "/ai/ui/__next.%21KGRhc2hib2FyZCk%2f.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 400},
+				{"ui-next-double-encoded", "relayAdmin", "GET", "/ai/ui/__next.%2521KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 400},
+				{"ui-next-traversal", "relayAdmin", "GET", "/ai/ui/../__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 400},
+				{"ui-encoded-api", "relayAdmin", "GET", "/ai/model/%21info", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 400},
 				{"ui-no-auriga-admin-api", "relayAdmin", "GET", "/api/org/v1/admin/roles", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 403},
 				{"ui-options", "relayAdmin", "OPTIONS", "/ai/ui/", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 405},
 				{"ui-cross-origin-fetch", "relayAdmin", "GET", "/ai/model/info", http.Header{"Cookie": {"auriga_litellm_session=admin"}, "Sec-Fetch-Site": {"same-site"}, "Sec-Fetch-Mode": {"cors"}}, 403},
@@ -201,7 +211,11 @@ func TestLiteLLMEntryBoundary(t *testing.T) {
 							t.Fatal("untrusted upstream Set-Cookie escaped isolation")
 						}
 						r := <-seen
-						if strings.Contains(r.Header.Get("Cookie"), "auriga_") || r.Header.Get("Auriga-Identity") != "" || r.URL.Path != tc.path {
+						wantPath, err := url.PathUnescape(tc.path)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if strings.Contains(r.Header.Get("Cookie"), "auriga_") || r.Header.Get("Auriga-Identity") != "" || r.URL.Path != wantPath {
 							t.Fatalf("bad boundary %s %v", r.URL.Path, r.Header)
 						}
 						if tc.name == "ui-admin" && r.Header.Get("Cookie") != "token=litellm" {

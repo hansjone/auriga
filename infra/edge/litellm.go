@@ -72,6 +72,44 @@ func liteLLMCookies(header string) string {
 	return strings.Join(kept, "; ")
 }
 
+func liteLLMPathAllowed(r *http.Request) bool {
+	escaped := r.URL.EscapedPath()
+	if r.URL.RawPath == "" && escaped == r.URL.Path {
+		return true
+	}
+	// Next.js segment files encode their layout marker as %21. Permit only
+	// that encoding in fixed UI text resources; APIs and writes remain strict.
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.HasPrefix(r.URL.Path, "/ai/ui/") ||
+		!strings.Contains(escaped, "%21") || strings.ReplaceAll(escaped, "%21", "!") != r.URL.Path {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/ai/ui/"), "/")
+	for _, directory := range parts[:len(parts)-1] {
+		if directory == "" {
+			return false
+		}
+		for _, c := range directory {
+			switch {
+			case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-', c == '_':
+			default:
+				return false
+			}
+		}
+	}
+	file := parts[len(parts)-1]
+	if !strings.HasPrefix(file, "__next.") || !strings.HasSuffix(file, ".txt") || strings.Contains(file, "..") {
+		return false
+	}
+	for _, c := range file {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', strings.ContainsRune("_.!-", c):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience, rid string) {
 	fail := func(status int, code string) {
 		writeProblem(w, problem(status, code, http.StatusText(status), "LiteLLM request rejected", rid))
@@ -81,7 +119,7 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 		fail(403, "common.forbidden")
 		return
 	}
-	if r.URL.RawPath != "" || r.URL.EscapedPath() != r.URL.Path {
+	if !liteLLMPathAllowed(r) {
 		fail(400, "common.validation_failed")
 		return
 	}

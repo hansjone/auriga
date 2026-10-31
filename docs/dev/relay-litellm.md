@@ -18,6 +18,8 @@ compose 默认另发布 edge 的 8086 端口；首次 prepare 可加 `--litellm-
 
 若页面长期显示 `LiteLLM Loading...`，检查浏览器网络面板中每个 JavaScript 请求是否完整结束；HTML 或响应头为 200 不代表前端已就绪。edge 对 `/ai/_next/static/` 和管理台 `/assets/` 的 JS/CSS 协商 gzip，降低大脚本在慢链路上的传输量；仅压缩不超过 8 MiB 的构建资源，不压缩登录 HTML、配置 JSON、管理 API 或模型流。Range 请求保持原表示，匿名资源请求仍先经过管理员门禁。不要为加载问题放开根路径、CORS、会话或写请求 Origin。
 
+Next.js 的 UI 分段资源名可能包含 `%21`（布局标记 `!`）。edge 仅在 `/ai/ui/` 下固定 `__next.*.txt` 文件的 GET/HEAD 中接受这一编码，避免客户端导航退回整页加载；其他编码、目录穿越、编码分隔符及写方法仍拒绝。这些资源同样要求有效管理员会话和同源检查。
+
 LiteLLM 不发布宿主端口。内部健康入口为 `http://litellm:4000/health/liveliness`，compose 健康检查另读 `/health/readiness`；`litellm-init` 正常退出后 ai-relay 才启动。若数据库已有旧卷但没有 LiteLLM 库，首次初始化 hook 不会重新运行，应使用新部署目录验收。
 
 两个 LiteLLM 容器均使用 `cap_drop: ALL`、`no-new-privileges`，无 `cap_add`。compose prepare 保留生成文件的 UID，设置文件为 0640：master/salt 属专用 GID **10003**，pg_password 属 GID **999**，team 属 GID **10001**。`litellm` 加入 10003/999，`litellm-init` 另加入 10001；PostgreSQL 和 ai-relay 沿各自原有组读取对应秘密。prepare 需要 root 或可非交互执行 chgrp 的 sudo；不要用额外 capability 或全局可读权限替代。
