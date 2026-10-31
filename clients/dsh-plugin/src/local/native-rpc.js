@@ -1,5 +1,6 @@
 import { PlatformError } from './platform.js';
 import { localFailureDiagnostic } from './diagnostic.js';
+import { logEvent } from '../observability/index.js';
 
 export const NATIVE_LOGIN_CHANNEL = '/auriga-native';
 export const NATIVE_LOGIN_METHODS = new Set([
@@ -90,12 +91,13 @@ export function installNativeLoginRPC(ctx, getRuntime) {
         delete safe.csrf;
         return { ok: true, value: safe };
       } catch (error) {
+        const diagnostic = {
+          operation: method.slice('aurigaAuth/'.length),
+          ...localFailureDiagnostic(error),
+        };
+        logEvent('WARN', 'Native login failed', diagnostic);
         console.warn(
-          '[auriga-dsh] native login failure ' +
-            JSON.stringify({
-              operation: method.slice('aurigaAuth/'.length),
-              ...localFailureDiagnostic(error),
-            }),
+          '[auriga-dsh] native login failure ' + JSON.stringify(diagnostic),
         );
         if (
           error instanceof PlatformError &&

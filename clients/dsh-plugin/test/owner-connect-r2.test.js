@@ -104,4 +104,28 @@ test('R2 discovery accepts only the team-account form and never offers emergency
   const result = await runtime.login(otherOwnerRequest, { action: 'begin' });
   assert.equal(result.step.formId, 'team');
   assert.equal(result.step.fields.length, 0);
+  // Leaving an optional form does not log out the shared owner. Reopening it
+  // must continue the same transaction rather than reporting an outage.
+  const reopened = await runtime.login(request, { action: 'begin' });
+  assert.deepEqual(reopened.step, result.step);
+});
+
+test('R3 cancellation finishing late cannot erase a new owner login attempt', async (t) => {
+  const { runtime } = await runtimePeer(t);
+  const request = runtime.nativeRequest({ principal: { kind: 'owner' } });
+  await runtime.logout(request);
+  runtime.prepare(request);
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.mock.method(globalThis, 'fetch', () => pending);
+  const old = runtime.login(request, { action: 'begin' });
+  const rejected = assert.rejects(old, /superseded/);
+  await runtime.cancelAttempt(request);
+  runtime.prepare(request);
+  const fresh = runtime.attemptToken(request);
+  release(Response.json({ items: [] }));
+  await rejected;
+  assert.equal(runtime.attemptToken(request), fresh);
 });

@@ -4,6 +4,7 @@ import { createConsentRoutes } from './consent-routes.js';
 import { createMessagingRoutes } from './messaging-routes.js';
 import { PlatformError } from './platform.js';
 import { localFailureDiagnostic } from './diagnostic.js';
+import { logEvent } from '../observability/index.js';
 const BASE = '/auriga/local-login';
 const assets = new Map([
   ['adapter.js', new URL('../login/local-adapter.js', import.meta.url)],
@@ -34,8 +35,10 @@ export function createUnconfiguredLoginRoutes(connection) {
 export function createConnectRoutes({
   runtime,
   admission,
-  diagnostic = (value) =>
-    console.warn('[auriga-dsh] local route failure ' + JSON.stringify(value)),
+  diagnostic = (value) => {
+    logEvent('WARN', 'Local login failed', { ...value });
+    console.warn('[auriga-dsh] local route failure ' + JSON.stringify(value));
+  },
 }) {
   const consent = createConsentRoutes(runtime);
   const messaging = createMessagingRoutes(runtime);

@@ -98,7 +98,23 @@ test('fallback diagnosis preserves TLS/platform/native categories without except
           code: 'ECONNREFUSED',
         }),
       }),
-      { category: 'network', code: 'ECONNREFUSED' },
+      { category: 'connection', code: 'ECONNREFUSED' },
+    ],
+    [
+      new TypeError('private SECRET', {
+        cause: Object.assign(new Error('private DNS name'), {
+          code: 'ENOTFOUND',
+        }),
+      }),
+      { category: 'dns', code: 'ENOTFOUND' },
+    ],
+    [
+      new TypeError('private SECRET', {
+        cause: Object.assign(new Error('private timeout target'), {
+          code: 'UND_ERR_CONNECT_TIMEOUT',
+        }),
+      }),
+      { category: 'timeout', code: 'UND_ERR_CONNECT_TIMEOUT' },
     ],
     [
       new PlatformError(403, 'common.forbidden'),

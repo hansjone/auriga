@@ -8,6 +8,8 @@ const tlsCodes = new Set([
   'CERT_HAS_EXPIRED',
   'ERR_TLS_CERT_ALTNAME_INVALID',
   'ERR_TLS_HANDSHAKE_TIMEOUT',
+  'ERR_SSL_WRONG_VERSION_NUMBER',
+  'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE',
 ]);
 const networkCodes = new Set([
   'ECONNREFUSED',
@@ -65,7 +67,18 @@ export function localFailureDiagnostic(error) {
     if (typeof value.code === 'string' && tlsCodes.has(value.code))
       return { category: 'tls', code: value.code };
     if (typeof value.code === 'string' && networkCodes.has(value.code))
-      return { category: 'network', code: value.code };
+      return {
+        category: ['ENOTFOUND', 'EAI_AGAIN'].includes(value.code)
+          ? 'dns'
+          : [
+                'ETIMEDOUT',
+                'UND_ERR_CONNECT_TIMEOUT',
+                'UND_ERR_HEADERS_TIMEOUT',
+              ].includes(value.code)
+            ? 'timeout'
+            : 'connection',
+        code: value.code,
+      };
     if (value.name === 'TimeoutError') return { category: 'timeout' };
     if (value.name === 'AbortError') return { category: 'cancelled' };
     current = value.cause;

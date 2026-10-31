@@ -79,7 +79,11 @@ async function launch(label, isolation = false) {
     launchURL;
   const child = spawn(
     runtime.executable,
-    ['--user-data-dir=' + join(state, 'electron'), '--remote-debugging-port=0'],
+    [
+      '--user-data-dir=' + join(state, 'electron'),
+      '--remote-debugging-port=0',
+      '--disable-gpu',
+    ],
     {
       env: isolation ? isolated : env,
       cwd: join(state, 'cwd'),
@@ -220,6 +224,7 @@ async function login(page, credential) {
   await loginInstalledDesktop(page, credential, (path, body) =>
     request(page, path, body),
   );
+  report.steps.push('team-login-identity');
   await poll(
     async () => (await auth(page, 'status')).network?.connected === true,
     'platform_network_not_ready',
@@ -227,27 +232,48 @@ async function login(page, credential) {
   );
 }
 async function captureSettings(page, label) {
+  let stage = 'foreground';
   try {
     await page.bringToFront();
+    stage = 'viewport';
     await page.setViewportSize({ width: 1280, height: 900 });
+    stage = 'open-settings';
     const settings = page.getByRole('button', { name: /^(Settings|设置)$/ });
     if (await settings.count()) await settings.first().click({ timeout: 8000 });
     else {
-      await page.keyboard.press('Control+Comma');
-      try {
+      const account = page.getByRole('button', {
+        name: /^(Account menu|账号菜单)$/,
+      });
+      if (await account.count()) await account.click();
+      else
         await page
-          .getByText('Auriga', { exact: true })
-          .nth(1)
-          .waitFor({ timeout: 2000 });
-      } catch {
-        await page.keyboard.press('Control+Alt+Comma');
-      }
+          .getByRole('button', { name: /^(More|更多)$/ })
+          .first()
+          .click();
+      await page
+        .getByText(/^(Settings|设置)$/)
+        .last()
+        .click({ timeout: 8000 });
     }
+    stage = 'select-auriga';
     await page
       .getByText('Auriga', { exact: true })
       .last()
       .click({ timeout: 8000 });
+    stage = 'content';
     await page.locator('.auriga-settings-content').waitFor({ timeout: 8000 });
+    stage = 'status';
+    const expected = label.endsWith('signed-out')
+      ? /^(未登录|Not signed in)$/
+      : label.endsWith('offline')
+        ? /总部不可达|Platform unreachable/
+        : /消息网络 就绪|Message network Ready/;
+    await page
+      .locator('.auriga-status-card [role=status]')
+      .filter({ hasText: expected })
+      .first()
+      .waitFor({ timeout: 10000 });
+    stage = 'screenshot';
     await page.screenshot({
       path: join(state, label + '.png'),
       timeout: 10000,
@@ -259,6 +285,7 @@ async function captureSettings(page, label) {
       label,
       status: 'failed',
       error: error.name,
+      stage,
     });
     await writeFile(
       join(state, label + '-ui.txt'),

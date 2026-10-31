@@ -86,10 +86,13 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   const nativeRequests = new WeakMap();
   const attemptId = (/** @type {any} */ request) =>
     nativeRequests.get(request)?.attemptId ?? cookie(request, ATTEMPT_COOKIE);
-  const forgetAttempt = (/** @type {any} */ request) => {
-    attempts.delete(attemptId(request));
+  const forgetAttempt = (
+    /** @type {any} */ request,
+    expected = attemptId(request),
+  ) => {
+    attempts.delete(expected);
     const owner = nativeRequests.get(request);
-    if (owner) owner.attemptId = undefined;
+    if (owner && owner.attemptId === expected) owner.attemptId = undefined;
   };
   const expiryTimer = setInterval(() => {
     let renew = false;
@@ -688,6 +691,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     },
     async login(/** @type {any} */ request, /** @type {any} */ input) {
       const row = attemptFor(request),
+        id = attemptId(request),
         g = generation;
       if (row.busy) throw new Error('login attempt busy');
       row.busy = true;
@@ -718,6 +722,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           row.accountName = input.input.values.username.slice(0, 256);
         let transaction;
         if (input.action === 'begin') {
+          // Optional login can be reopened in any owner window. Preserve its
+          // current form and PKCE transaction until explicit restart/expiry.
+          if (row.transactionId && row.step) return { step: row.step };
           if (!row.selectedProvider) {
             const providers = await platform.request(
               '/api/iam/v1/login/providers',
@@ -798,8 +805,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           !['form', 'fail', 'complete'].includes(transaction.step?.type)
         )
           throw new Error('unsupported native login step');
-        if (transaction.step.type !== 'complete')
+        if (transaction.step.type !== 'complete') {
+          row.step = transaction.step;
           return { step: transaction.step };
+        }
         if (
           transaction.status !== 'completed' ||
           Date.parse(row.device.expiresAt) <= Date.now()
@@ -911,7 +920,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         return issueBrowserSession(row, request, credential);
       } catch (error) {
         await abandon(row);
-        forgetAttempt(request);
+        forgetAttempt(request, id);
         throw error;
       } finally {
         row.busy = false;
