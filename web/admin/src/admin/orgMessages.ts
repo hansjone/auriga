@@ -8,11 +8,15 @@ export const orgZh = {
     expired: '已过期',
     revoked: '已撤销',
   },
-  newInvitation: '创建普通成员邀请',
+  newInvitation: '创建成员邀请',
+  initialRoles: '初始角色',
+  invitationRolesReadRequired: '选择初始角色需要角色查看权限，请联系管理员。',
+  defaultMemberRoleUnavailable:
+    '普通成员角色不可用或超出本人权限，请检查角色配置。',
   invitationDefaults:
-    '创建普通成员邀请，不附加角色或分组；限使用一次，有效期由服务端默认设置（当前七天），不限制身份源。不会自动发送邮件。',
+    '默认授予普通成员角色；可选择成员类型和初始角色，不附加分组。限使用一次，有效期由服务端设置，不限制身份源，不会自动发送邮件。',
   invitationConfirm:
-    '确认创建普通成员邀请？限定邮箱：{email}。不附加角色或分组，不会自动发送邮件。',
+    '确认创建{type}邀请？限定邮箱：{email}；初始角色：{roles}。不附加分组，不会自动发送邮件。',
   optional: '可选',
   anyEmail: '不限邮箱',
   invalidEmail: '请输入有效邮箱。',
@@ -82,11 +86,16 @@ export const orgEn = {
     expired: 'Expired',
     revoked: 'Revoked',
   },
-  newInvitation: 'Create member invitation',
+  newInvitation: 'Create invitation',
+  initialRoles: 'Initial roles',
+  invitationRolesReadRequired:
+    'Role-read permission is required to select initial roles. Contact an administrator.',
+  defaultMemberRoleUnavailable:
+    'The ordinary member role is unavailable or exceeds your permissions. Check role configuration.',
   invitationDefaults:
-    'Invite an ordinary member without extra roles or groups. One use; server-default expiry (currently seven days). Any identity provider is allowed. No email is sent automatically.',
+    'The ordinary member role is selected by default. Choose member type and initial roles; no groups are added. One use, server-default expiry, any identity provider. No email is sent automatically.',
   invitationConfirm:
-    'Create an ordinary member invitation? Email restriction: {email}. No extra roles or groups; no email will be sent.',
+    'Create a {type} invitation? Email restriction: {email}; initial roles: {roles}. No groups are added; no email will be sent.',
   optional: 'Optional',
   anyEmail: 'Any email',
   invalidEmail: 'Enter a valid email address.',
