@@ -40,6 +40,31 @@ func Open(ctx context.Context, c Config) (*Store, error) {
 	if err != nil {
 		return nil, errors.New("invalid AI PostgreSQL DSN")
 	}
+	// Default grants must never let the runtime forge migration history.
+	migrationCfg, parseErr := pgx.ParseConfig(c.MigrationDSN)
+	if parseErr != nil {
+		return nil, errors.New("invalid migration connection")
+	}
+	migration, openErr := pgx.ConnectConfig(ctx, migrationCfg)
+	if openErr != nil {
+		return nil, errors.New("cannot restrict migration table")
+	}
+	aclTx, aclErr := migration.Begin(ctx)
+	if aclErr == nil {
+		_, aclErr = aclTx.Exec(ctx, "SELECT pg_advisory_xact_lock(718245010)")
+	}
+	if aclErr == nil {
+		_, aclErr = aclTx.Exec(ctx, "REVOKE ALL ON ai.schema_migration FROM "+pgx.Identifier{cfg.ConnConfig.User}.Sanitize())
+	}
+	if aclErr == nil {
+		aclErr = aclTx.Commit(ctx)
+	} else if aclTx != nil {
+		_ = aclTx.Rollback(ctx)
+	}
+	closeErr := migration.Close(ctx)
+	if aclErr != nil || closeErr != nil {
+		return nil, errors.New("cannot restrict migration table")
+	}
 	cfg.MaxConns = 8
 	if c.MaxConnections > 0 {
 		cfg.MaxConns = c.MaxConnections

@@ -20,14 +20,14 @@ import (
 )
 
 type bifrostConfig struct {
-	Listen            string               `json:"listen"`
-	TLSCertFile       string               `json:"tlsCertFile"`
-	TLSKeyFile        string               `json:"tlsKeyFile"`
-	Origin            string               `json:"origin"`
-	AdminPasswordFile string               `json:"adminPasswordFile"`
-	MemberPolicy      bifrost.MemberPolicy `json:"memberPolicy"`
-	IAM               team.RPCConfig       `json:"iam"`
-	Org               team.RPCConfig       `json:"org"`
+	Listen             string               `json:"listen"`
+	TLSCertFile        string               `json:"tlsCertFile"`
+	TLSKeyFile         string               `json:"tlsKeyFile"`
+	Origin             string               `json:"origin"`
+	MemberPasswordFile string               `json:"memberPasswordFile"`
+	MemberPolicy       bifrost.MemberPolicy `json:"memberPolicy"`
+	IAM                team.RPCConfig       `json:"iam"`
+	Org                team.RPCConfig       `json:"org"`
 }
 
 func serveBifrost(path string) error {
@@ -66,7 +66,7 @@ func serveBifrost(path string) error {
 	if err != nil {
 		return err
 	}
-	handler, err := bifrost.New(c.Origin, c.AdminPasswordFile, c.MemberPolicy, func(ctx context.Context, raw string) (bifrost.Principal, error) {
+	handler, err := bifrost.New(c.Origin, c.MemberPasswordFile, c.MemberPolicy, func(ctx context.Context, raw string) (bifrost.Principal, error) {
 		id, e := authority.Check(ctx, raw)
 		if e != nil {
 			return bifrost.Principal{}, e

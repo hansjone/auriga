@@ -48,6 +48,9 @@ func (l *Ledger) Settle(ctx context.Context, ref Ref, revision int64, f Finish) 
 				return failure("common.precondition_failed")
 			} else {
 				r.usage = &api.Usage{InputTokens: *api.NewNullableInt64(&u.InputTokens), OutputTokens: *api.NewNullableInt64(&u.OutputTokens), CostMicros: *api.NewNullableInt64(&n), UsageQuality: "confirmed"}
+				if f.Estimated {
+					r.usage.UsageQuality = "estimated"
+				}
 			}
 		}
 		if r.usage == nil {
@@ -194,7 +197,7 @@ func recordUsage(ctx context.Context, tx pgx.Tx, r *record) error {
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO ai.budget_usage(tenant_id,subject,request_id,document,recorded_at) VALUES ($1,$2,$3,$4,$5)`, a.TenantId, a.AccountId, a.RequestId, raw, now); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO ai.budget_usage(tenant_id,subject,request_id,document,recorded_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (tenant_id,subject,request_id) DO UPDATE SET document=EXCLUDED.document,recorded_at=EXCLUDED.recorded_at`, a.TenantId, a.AccountId, a.RequestId, raw, now); err != nil {
 		return err
 	}
 	// Map the generated Usage DTO to the event data schema, which omits frozen
@@ -220,6 +223,6 @@ func recordUsage(ctx context.Context, tx pgx.Tx, r *record) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO ai.budget_outbox(tenant_id,subject,id,request_id,envelope,created_at) VALUES ($1,$2,$3,$4,$5,$6)`, a.TenantId, a.AccountId, id, a.RequestId, envelope, now)
+	_, err = tx.Exec(ctx, `INSERT INTO ai.budget_outbox(tenant_id,subject,id,request_id,envelope,created_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id,subject,request_id) DO UPDATE SET id=EXCLUDED.id,envelope=EXCLUDED.envelope,created_at=EXCLUDED.created_at`, a.TenantId, a.AccountId, id, a.RequestId, envelope, now)
 	return err
 }

@@ -156,10 +156,12 @@ services:
     image: ${AURIGA_IMAGE_BIFROST}
     <<: *cap_drop_all
     user: '10003:10003'
-    group_add: ['10005', '999']
+    group_add: ['10005', '10006', '999']
     read_only: true
     tmpfs: ['/tmp:rw,noexec,nosuid,size=64m']
-    secrets: [bifrost_admin_password, bifrost_encryption_key, bifrost_pg_password, bifrost_pg_migration_password]
+    secrets: [bifrost_admin_password, bifrost_member_password, bifrost_encryption_key, bifrost_pg_password, bifrost_pg_migration_password]
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -187,14 +189,14 @@ services:
         condition: service_healthy
       platform:
         condition: service_healthy
-    secrets: [bifrost_admin_password]
+    secrets: [bifrost_member_password]
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/bifrost-runtime.json:/etc/auriga/bifrost-runtime.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/pki/ca.crt:/etc/auriga/pki/ca.crt:ro
       - ${AURIGA_DATA_ROOT}/config/materials/pki/gateway.crt:/etc/auriga/pki/gateway.crt:ro
       - ${AURIGA_DATA_ROOT}/config/materials/pki/gateway.key:/etc/auriga/pki/gateway.key:ro
       - ${AURIGA_DATA_ROOT}/network-tokens:/run/auriga-network-token:ro
-    group_add: ['65533', '10005']
+    group_add: ['65533', '10006']
     networks: [internal]
 
   nats:
@@ -519,6 +521,8 @@ volumes:
   alloydata:
 
 secrets:
+  bifrost_member_password:
+    file: ${AURIGA_DATA_ROOT:?}/config/bifrost/member_password
   bifrost_admin_password:
     file: ${AURIGA_DATA_ROOT}/config/bifrost/admin_password
   bifrost_encryption_key:

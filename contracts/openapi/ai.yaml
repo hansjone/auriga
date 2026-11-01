@@ -2933,7 +2933,14 @@
           "common.unavailable"
         ],
         "x-events": [],
-        "parameters": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
         "responses": {
           "200": {
             "description": "成功；凭据仅在明示的签发响应返回。",
@@ -3406,7 +3413,14 @@
           "common.unavailable"
         ],
         "x-events": [],
-        "parameters": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
         "responses": {
           "200": {
             "description": "成功；凭据仅在明示的签发响应返回。",
@@ -3627,7 +3641,14 @@
           "iam.step_up_required"
         ],
         "x-events": [],
-        "parameters": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
         "responses": {
           "200": {
             "description": "成功；凭据仅在明示的签发响应返回。",
@@ -5454,6 +5475,20 @@
             "items": {
               "type": "string"
             }
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "每个Key同时执行的请求上限。成员默认16，对外Key默认32。"
+          },
+          "maxInFlightTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。"
           }
         },
         "additionalProperties": false
@@ -5508,6 +5543,20 @@
             "items": {
               "type": "string"
             }
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "每个Key同时执行的请求上限。成员默认16，对外Key默认32。"
+          },
+          "maxInFlightTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。"
           }
         },
         "additionalProperties": false
@@ -5558,6 +5607,20 @@
             "format": "int64",
             "minimum": 1,
             "maximum": 1000000
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "每个Key同时执行的请求上限。成员默认16，对外Key默认32。"
+          },
+          "maxInFlightTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。"
           }
         },
         "additionalProperties": false
@@ -5594,6 +5657,10 @@
             "items": {
               "$ref": "#/components/schemas/RelayProvider"
             }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "后续页游标，绑定当前租户和资源。"
           }
         },
         "additionalProperties": false
@@ -5609,6 +5676,10 @@
             "items": {
               "$ref": "#/components/schemas/RelayPool"
             }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "后续页游标，绑定当前租户和资源。"
           }
         },
         "additionalProperties": false
@@ -5624,6 +5695,10 @@
             "items": {
               "$ref": "#/components/schemas/RelayKey"
             }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "后续页游标，绑定当前租户和资源。"
           }
         },
         "additionalProperties": false

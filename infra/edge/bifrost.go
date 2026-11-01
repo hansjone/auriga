@@ -39,7 +39,7 @@ func (c Config) parseRelayOrigin() (*url.URL, error) {
 	return u, nil
 }
 
-var relayTransport = &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 60 * time.Second, IdleConnTimeout: 60 * time.Second, MaxIdleConnsPerHost: 32}
+var relayTransport = &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 165 * time.Second, IdleConnTimeout: 60 * time.Second, MaxIdleConnsPerHost: 32}
 
 // A member VK must never bypass the live IAM/org checks at ai-gateway. There is
 // no local allow cache: quota lookup uses the caller's VK on every public call.

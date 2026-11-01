@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -38,21 +39,32 @@ const denied = fault("common.forbidden")
 const missing = fault("common.not_found")
 
 type Backend struct {
-	db           *store.Store
-	ledger       *budget.Ledger
-	aead         cipher.AEAD
-	signing      []byte
-	password     [32]byte
-	allowPrivate bool
+	tenant         string
+	db             *store.Store
+	ledger         *budget.Ledger
+	aead           cipher.AEAD
+	signing        []byte
+	password       [32]byte
+	memberPassword [32]byte
+	allowPrivate   bool
 }
 
-func New(db *store.Store, masterHex, password string, allowPrivate bool) (*Backend, error) {
+func New(db *store.Store, masterHex, password, memberPassword string, allowPrivate bool) (*Backend, error) {
 	master, err := hex.DecodeString(masterHex)
-	if err != nil || len(master) != 32 || len(password) < 32 || db == nil {
+	if err != nil || len(master) != 32 || len(password) < 32 || len(memberPassword) < 32 || password == memberPassword || db == nil {
 		return nil, invalid
 	}
 	defer clear(master)
-	block, err := aes.NewCipher(master)
+	encryption, err := hkdf.Key(sha256.New, master, nil, "auriga/relay/encryption/v1", 32)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(encryption)
+	signing, err := hkdf.Key(sha256.New, master, nil, "auriga/relay/signing/v1", 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(encryption)
 	if err != nil {
 		return nil, err
 	}
@@ -60,14 +72,12 @@ func New(db *store.Store, masterHex, password string, allowPrivate bool) (*Backe
 	if err != nil {
 		return nil, err
 	}
-	mac := hmac.New(sha256.New, master)
-	_, _ = mac.Write([]byte("auriga/relay/virtual-key/v1"))
-	flight := int64(8 << 20)
-	ledger, err := budget.New(db, "USD", &api.AdmissionPolicy{MaxActiveRequestsPerSubject: 2, MaxInFlightPercent: 100, MaxInFlightTokens: &flight})
+	flight := int64(128 << 20)
+	ledger, err := budget.New(db, "USD", &api.AdmissionPolicy{MaxActiveRequestsPerSubject: 32, MaxInFlightPercent: 100, MaxInFlightTokens: &flight})
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{db: db, ledger: ledger, aead: aead, signing: mac.Sum(nil), password: sha256.Sum256([]byte(password)), allowPrivate: allowPrivate}, nil
+	return &Backend{db: db, ledger: ledger, aead: aead, signing: signing, password: sha256.Sum256([]byte(password)), memberPassword: sha256.Sum256([]byte(memberPassword)), allowPrivate: allowPrivate}, nil
 }
 
 func validUUID(s string) bool {
@@ -86,6 +96,9 @@ func (b *Backend) parseToken(raw string) (string, string, error) {
 	if !strings.HasPrefix(raw, "sk-bf-") || len(parts) != 3 || !validUUID(parts[0]) || !validUUID(parts[1]) || !hmac.Equal([]byte(raw), []byte(b.token(parts[0], parts[1]))) {
 		return "", "", fault("common.unauthenticated")
 	}
+	if b.tenant != "" && parts[0] != b.tenant {
+		return "", "", denied
+	}
 	return parts[0], parts[1], nil
 }
 func memberName(tenant, account string) string {
@@ -94,18 +107,19 @@ func memberName(tenant, account string) string {
 	return "auriga-member:" + hex.EncodeToString(sum[:])
 }
 func (b *Backend) encrypt(tenant, id, secret string) ([]byte, error) {
-	nonce := make([]byte, b.aead.NonceSize())
-	if _, e := rand.Read(nonce); e != nil {
+	nonce := make([]byte, 1+b.aead.NonceSize())
+	nonce[0] = 1
+	if _, e := rand.Read(nonce[1:]); e != nil {
 		return nil, e
 	}
-	return b.aead.Seal(nonce, nonce, []byte(secret), []byte(tenant+":"+id)), nil
+	return b.aead.Seal(nonce, nonce[1:], []byte(secret), []byte("v1:"+tenant+":"+id)), nil
 }
 func (b *Backend) decrypt(tenant, id string, sealed []byte) (string, error) {
 	n := b.aead.NonceSize()
-	if len(sealed) < n+b.aead.Overhead() {
+	if len(sealed) < 1+n+b.aead.Overhead() || sealed[0] != 1 {
 		return "", denied
 	}
-	raw, e := b.aead.Open(nil, sealed[:n], sealed[n:], []byte(tenant+":"+id))
+	raw, e := b.aead.Open(nil, sealed[1:1+n], sealed[1+n:], []byte("v1:"+tenant+":"+id))
 	if e != nil {
 		return "", denied
 	}
@@ -114,6 +128,9 @@ func (b *Backend) decrypt(tenant, id string, sealed []byte) (string, error) {
 }
 
 func keyInputValid(k api.RelayKeyInput) bool {
+	if _, _, e := limits(k.MaxConcurrency, k.MaxInFlightTokens, false); e != nil {
+		return false
+	}
 	return strings.TrimSpace(k.Name) == k.Name && len(k.Name) > 0 && len(k.Name) <= 128 && k.MonthlyBudgetMicros >= 0 && k.MonthlyBudgetMicros <= maxInteger && k.RequestsPerMinute > 0 && k.RequestsPerMinute <= 1000000 && modelsValid(k.Models)
 }
 func modelsValid(models []string) bool {
@@ -146,6 +163,7 @@ func (b *Backend) readKey(ctx context.Context, tenant, id string, rpm bool) (api
 		if json.Unmarshal(raw, &k) != nil || k.Id != id {
 			return denied
 		}
+		normalizeLimits(&k)
 		if !k.Active {
 			return denied
 		}
@@ -169,10 +187,17 @@ func (b *Backend) readKey(ctx context.Context, tenant, id string, rpm bool) (api
 }
 func (b *Backend) EnsureMember(ctx context.Context, m api.RelayMemberEnsure) (api.RelayKeyIssued, error) {
 	var out api.RelayKeyIssued
+	if b.tenant != "" && m.TenantId != b.tenant {
+		return out, denied
+	}
 	if !validUUID(m.TenantId) || !validUUID(m.AccountId) || m.MonthlyBudgetMicros < 0 || m.MonthlyBudgetMicros > maxInteger || m.RequestsPerMinute < 1 || m.RequestsPerMinute > 1000000 {
 		return out, invalid
 	}
-	k := api.RelayKey{Id: m.AccountId, Name: memberName(m.TenantId, m.AccountId), Source: "member", AccountId: m.AccountId, Active: true, MonthlyBudgetMicros: m.MonthlyBudgetMicros, RequestsPerMinute: m.RequestsPerMinute, Models: []string{"*"}}
+	c, n, err := limits(m.MaxConcurrency, m.MaxInFlightTokens, true)
+	if err != nil {
+		return out, err
+	}
+	k := api.RelayKey{MaxConcurrency: &c, MaxInFlightTokens: &n, Id: m.AccountId, Name: memberName(m.TenantId, m.AccountId), Source: "member", AccountId: m.AccountId, Active: true, MonthlyBudgetMicros: m.MonthlyBudgetMicros, RequestsPerMinute: m.RequestsPerMinute, Models: []string{"*"}}
 	raw, e := json.Marshal(k)
 	if e != nil {
 		return out, e
@@ -222,6 +247,9 @@ func (b *Backend) SaveKey(ctx context.Context, tenant, id string, input api.Rela
 				return denied
 			}
 		}
+		if k.Source != "member" && strings.HasPrefix(input.Name, "auriga-member:") {
+			return invalid
+		}
 		if k.Source == "member" { // Member ownership/name is immutable; only policy/active state changes.
 			input.Name = k.Name
 		}
@@ -230,6 +258,12 @@ func (b *Backend) SaveKey(ctx context.Context, tenant, id string, input api.Rela
 		k.MonthlyBudgetMicros = input.MonthlyBudgetMicros
 		k.RequestsPerMinute = input.RequestsPerMinute
 		k.Models = slices.Clone(input.Models)
+		c, n, e := limits(input.MaxConcurrency, input.MaxInFlightTokens, k.Source == "member")
+		if e != nil {
+			return e
+		}
+		k.MaxConcurrency = &c
+		k.MaxInFlightTokens = &n
 		raw, err := json.Marshal(k)
 		if err != nil {
 			return err
@@ -250,15 +284,21 @@ func (b *Backend) SaveKey(ctx context.Context, tenant, id string, input api.Rela
 	}
 	return out, nil
 }
-func (b *Backend) ListKeys(ctx context.Context, tenant string) (api.RelayKeyPage, error) {
+func (b *Backend) ListKeys(ctx context.Context, tenant string, pages ...listPage) (api.RelayKeyPage, error) {
+	page := pageFor(pages)
 	out := api.RelayKeyPage{Items: []api.RelayKey{}}
 	e := b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT document FROM ai.relay_key WHERE tenant_id=$1 ORDER BY name LIMIT 200`, tenant)
+		rows, e := tx.Query(ctx, `SELECT document FROM ai.relay_key WHERE tenant_id=$1 AND id>$2::uuid ORDER BY id LIMIT $3`, tenant, afterUUID(page.After), page.Limit+1)
 		if e != nil {
 			return e
 		}
 		defer rows.Close()
 		for rows.Next() {
+			if len(out.Items) == page.Limit {
+				cursor := listCursor(tenant, "virtual-keys", out.Items[len(out.Items)-1].Id)
+				out.NextCursor = &cursor
+				break
+			}
 			var raw []byte
 			var k api.RelayKey
 			if e = rows.Scan(&raw); e != nil {
@@ -267,6 +307,7 @@ func (b *Backend) ListKeys(ctx context.Context, tenant string) (api.RelayKeyPage
 			if json.Unmarshal(raw, &k) != nil {
 				return denied
 			}
+			normalizeLimits(&k)
 			out.Items = append(out.Items, k)
 		}
 		return rows.Err()
@@ -306,8 +347,14 @@ func (b *Backend) SaveProvider(ctx context.Context, tenant, id string, p api.Rel
 				}
 				return err
 			}
-			if secret != nil && json.Unmarshal(raw, &p) != nil {
+			var previous api.RelayProviderInput
+			if json.Unmarshal(raw, &previous) != nil {
 				return denied
+			}
+			if secret != nil {
+				p = previous
+			} else if p.BaseUrl != previous.BaseUrl || p.Kind != previous.Kind {
+				sealed = nil
 			}
 		}
 		if secret != nil {
@@ -334,15 +381,21 @@ func (b *Backend) SaveProvider(ctx context.Context, tenant, id string, p api.Rel
 	})
 	return out, e
 }
-func (b *Backend) ListProviders(ctx context.Context, tenant string) (api.RelayProviderPage, error) {
+func (b *Backend) ListProviders(ctx context.Context, tenant string, pages ...listPage) (api.RelayProviderPage, error) {
+	page := pageFor(pages)
 	out := api.RelayProviderPage{Items: []api.RelayProvider{}}
 	e := b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT id::text,document,secret IS NOT NULL FROM ai.relay_provider WHERE tenant_id=$1 ORDER BY id LIMIT 200`, tenant)
+		rows, e := tx.Query(ctx, `SELECT id::text,document,secret IS NOT NULL FROM ai.relay_provider WHERE tenant_id=$1 AND id>$2::uuid ORDER BY id LIMIT $3`, tenant, afterUUID(page.After), page.Limit+1)
 		if e != nil {
 			return e
 		}
 		defer rows.Close()
 		for rows.Next() {
+			if len(out.Items) == page.Limit {
+				cursor := listCursor(tenant, "providers", out.Items[len(out.Items)-1].Id)
+				out.NextCursor = &cursor
+				break
+			}
 			var raw []byte
 			var p api.RelayProvider
 			if e = rows.Scan(&p.Id, &raw, &p.HasCredential); e != nil {
@@ -391,15 +444,21 @@ func (b *Backend) SavePool(ctx context.Context, tenant string, p api.RelayPool) 
 		return e
 	})
 }
-func (b *Backend) ListPools(ctx context.Context, tenant string) (api.RelayPoolPage, error) {
+func (b *Backend) ListPools(ctx context.Context, tenant string, pages ...listPage) (api.RelayPoolPage, error) {
+	page := pageFor(pages)
 	out := api.RelayPoolPage{Items: []api.RelayPool{}}
 	e := b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT document FROM ai.relay_pool WHERE tenant_id=$1 ORDER BY id LIMIT 200`, tenant)
+		rows, e := tx.Query(ctx, `SELECT document FROM ai.relay_pool WHERE tenant_id=$1 AND id>$2 ORDER BY id LIMIT $3`, tenant, page.After, page.Limit+1)
 		if e != nil {
 			return e
 		}
 		defer rows.Close()
 		for rows.Next() {
+			if len(out.Items) == page.Limit {
+				cursor := listCursor(tenant, "pools", out.Items[len(out.Items)-1].Id)
+				out.NextCursor = &cursor
+				break
+			}
 			var raw []byte
 			var p api.RelayPool
 			if e = rows.Scan(&raw); e != nil {
@@ -452,4 +511,10 @@ func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayP
 		e = fault("common.unavailable")
 	}
 	return p, routes, e
+}
+
+func (b *Backend) pseudonym(tenant, id string) string {
+	mac := hmac.New(sha256.New, b.signing)
+	_, _ = mac.Write([]byte("provider-user/v1:" + tenant + ":" + id))
+	return "auriga-" + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

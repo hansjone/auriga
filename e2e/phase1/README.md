@@ -58,7 +58,7 @@ HTTP 健康/中转站/日志探针发 W3C `traceparent`；浏览器正常页面�
 
 ① 默认仅探测公开 IAM 身份源；这不足以证明所有容器 healthy，所以标 SKIP 并列出已通过子检查。部署操作者需在 `healthChecks` 列全本次 compose 服务的实际健康 URL，包括数据库/NATS/节点等可通过部署的运维健康入口或汇总端点观察到的状态；确认清单完整后才设 `healthInventoryComplete: true`。不要用静态首页替代服务健康。支持 `kind: "spring"`（JSON `status=UP`）、`providers`（`items` 数组）及 `http`（HTTP 200 且可解析 JSON）。URL 可相对门户，也可为操作者可访问的完整运维地址。任何检查失败即 FAIL。
 
-LiteLLM 未配置时，①显示已通过的基础检查和 LiteLLM SKIP，整体为 SKIP；配置 `relay.baseUrl` 后调用 `/health/readiness`，必须返回 `status=healthy/ok`，故障即 FAIL。
+中转站未配置时第①、⑥、⑦项为 FAIL，不能作为未部署 SKIP 处理。管理就绪检查读取平台同源池列表；列表鉴权失败或后端故障均 FAIL。
 
 ②③ 共用 `cloud-ready.mjs` 中一套真实浏览器步骤，不再保留另一套邀请/登录/open 实现。② 从管理台控件创建邀请，成员点击公开邀请页、设置口令、从真实页面完成 first_totp 登记，再用空 cookie jar 以口令和 MFA 重新登录，核相同账号与邀请已消费。登录的 OTP 字段按真实 form 的 kind 识别（登记 otp、登录 code），避免复用已消费的 TOTP counter。
 
@@ -163,76 +163,15 @@ DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮�
 
 ## 中转站与外部虚拟 Key
 
-本分支基线尚无 `docs/design/relay-litellm.zh.md`，因此采用 LiteLLM 官方接口：`/health/readiness`、`/model/info`、`/v1/chat/completions`、`/key/generate`、`/key/info`、`/key/delete`、`/spend/logs`。`relay.baseUrl` 为这些入口的共同根（例如 `https://relay.example.com/`，不要再附 `/v1`）。后续正式 edge 路由设计不同需由主控接线。
+管理入口仅为管理员来源的 `/api/ai/v1/admin/relay/`，使用正常平台管理员浏览器登录和近期 MFA，不配置管理 Bearer 或服务口令。`relay.baseUrl` 必须与 `admin.url` 同源。`relay.publicBaseUrl` 是门户 `/ai/v1`。浏览器写请求沿用 CSRF，POST 带幂等键。
 
-```json
-{
-  "relay": {
-    "baseUrl": "http://127.0.0.1:4000/",
-    "adminKey": "LITELLM_ADMIN_KEY_FROM_PRIVATE_FILE",
-    "allowModelCalls": false,
-    "models": [
-      {
-        "name": "phase1-fake-a",
-        "provider": "fake-a",
-        "apiBase": "http://127.0.0.1:4101/v1",
-        "testOnly": true
-      },
-      {
-        "name": "phase1-fake-b",
-        "provider": "fake-b",
-        "apiBase": "http://127.0.0.1:4102/v1",
-        "testOnly": true
-      }
-    ]
-  }
-}
-```
+显式设置 `allowModelCalls:true`；真实模型采用 `upstreamMode:"live"`，每个模型声明 `name`（公开池 ID）、`provider`、`apiBase`（HTTPS 根地址）和 `upstreamModel`。免费夹具采用 `upstreamMode:"fixture"` 且每模型 `testOnly:true`；夹具不能作为真实部署证据。
 
-默认禁止模型请求。免费夹具保持默认 `upstreamMode: "fixture"`，仅在两个部署已接**免费本地假上游**后把 `allowModelCalls` 设 true，并逐模型声明 `testOnly: true`；该声明不能证明任意外部服务不会收费。脚本不会代管理员改 LiteLLM 模型池。
+第⑦项签发全新受限外部 Key，验证普通调用、RPM 429、零预算拒绝、按 Key 查用量和吊销。所有已签发测试 Key 均在 finally 中禁用；没有自动到期假设，清理失败直接 FAIL 并由管理员检查 `phase1-` 名称。
 
-已有明确真实模型调用授权时，可配置 `relay.upstreamMode: "live"` 和 `allowModelCalls: true`。每个模型声明 `name`（LiteLLM公开模型名）、`provider`、`apiBase`、`upstreamModel`（对应 `/model/info` 的 `litellm_params.model`，如 `openai/model-a`），省略 `testOnly` 或明确设为 false；真实模式拒绝 `testOnly: true`。⑥要求至少两个不同公开模型名和上游模型，同一提供商及同一 API Base 可以承载这两个模型。示例：
+第⑥项通过公开 DSH Settings/Session RPC 核验真实新回复和按 `accountId` 查询的新用量；桌面使用已登录成员提供方，云端用实例已交付的 `auriga-managed`。禁止签发外部 Key 模拟成员。两端均为隔离验收 profile；不读复制托管 Authorization。
 
-```json
-{
-  "relay": {
-    "baseUrl": "http://127.0.0.1:4000",
-    "publicBaseUrl": "https://portal.example.com/ai/v1",
-    "upstreamMode": "live",
-    "allowModelCalls": true,
-    "models": [
-      {
-        "name": "model-a",
-        "provider": "provider-a",
-        "apiBase": "https://models.example.com/v1",
-        "upstreamModel": "openai/model-a"
-      },
-      {
-        "name": "model-b",
-        "provider": "provider-a",
-        "apiBase": "https://models.example.com/v1",
-        "upstreamModel": "openai/model-b"
-      }
-    ]
-  }
-}
-```
-
-`baseUrl` 是操作者可达的 LiteLLM 管理 API 根地址，管理 Key仍只从私有凭据文件读取。真实模式⑦必须给出 `publicBaseUrl`，指向调用方实际使用的 OpenAI API 根路径；管理、用量查询走 `baseUrl`，所有成功调用及限流、预算、吊销探针均经 `publicBaseUrl/chat/completions`，只携带新签发的虚拟 Key。域名入口未配置时失败，不用内部直连代替外部验收。免费夹具未配置公开入口时保留原来的 `baseUrl/v1/chat/completions`。
-
-经 Auriga 的独立 LiteLLM 管理 listener 验收时，配置 `relay.browserAdmin: true`，
-`baseUrl` 填管理 listener 的 `/ai/` 根路径，例如 `http://192.0.2.10:8086/ai/`。
-私有 JSON 的 `admin` 提供正常管理员的 `url`、`accountId`、`username`、`password`、
-`totpSecret`。验收器真实填写管理台登录表单，核本人身份后点击概览的 LiteLLM 入口，让浏览器自动
-完成跨 listener 交接；不注入 cookie、不关闭 Origin 检查、不使用应急登录。
-健康、模型清单、Key 管理和用量请求复用该浏览器的真实管理会话，管理 Key仍只留在
-私有 JSON。管理请求限制在同一已配置来源和固定 API 路径；报告只记录交接状态码。
-
-⑥ 免费模式核至少两个独立假提供商及 apiBase；真实模式核两个不同上游模型，允许同提供商同地址。两者均检查 `/model/info` 与实际名称、地址一致，真实模式额外核上游模型名；再经两个 DSH UI 对每个模型各调用一次。`modelUi.cloud`、`modelUi.desktop` 各配 `actions`、`responseSelector`、`requestIdAttribute`；动作可用 `valueFrom: "model"/"marker"`。模型回复须含本次唯一 marker（真实模式的输入动作应要求模型原样回复 marker），回复 UI 还需提供可关联的 LiteLLM request ID 属性。脚本按该 ID查询官方 `/spend/logs?request_id=...&summarize=false`，核本次非零 token 用量，最多等10秒。无 UI 能力或请求 ID 接线时 SKIP/FAIL，不用直接代理请求代替 DSH 调用。
-
-⑦ 需要 LiteLLM 数据库及 adminKey。签发10分钟有效、预算1 USD、RPM为1的临时 Key：标准OpenAI JSON调用成功，第二次请求必须明确命中RPM限流；另一个预算为0的Key必须返回明确预算错误；查Key spend和本次请求token用量；吊销后相同Key必须401/403。每个调用请求限定 `max_tokens: 8`，真实模式可能产生费用，仅在已有授权下启用。限流/预算错误必须符合对应语义，普通鉴权失败不能冒预算生效。所有新Key在成功/失败后均尝试删除；清理失败即FAIL，请管理员检查别名为 `phase1-*` 的短期Key。单项报告标明实际 `upstreamMode`；本地HTTP夹具仍不是提供商或NAS验收证据。
-
-参考：[LiteLLM 虚拟 Key](https://docs.litellm.ai/docs/proxy/virtual_keys)、[预算与限流](https://docs.litellm.ai/docs/proxy/users)、[用量记录](https://docs.litellm.ai/docs/proxy/cost_tracking)。实际固定镜像对零预算、RPM、日志异步落库的行为仍须部署验收；不能用本分支 HTTP 夹具替代。
+池演练须显式 `modelNative.allowPoolDisruption:true`，只支持已声明的双供应商池；禁用一个供应商后验证剩余路由仍有真实对话，最后恢复原配置并读回。发现并发管理员修改则拒绝覆盖并 FAIL。用量中的 provider 字段当前表示 admission 快照，不能冒充 fallback 实际选中供应商，见架构限制。
 
 ## 集中日志验证
 

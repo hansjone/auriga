@@ -20,10 +20,14 @@ var _ MappedNullable = &RelayMemberEnsure{}
 
 // RelayMemberEnsure struct for RelayMemberEnsure
 type RelayMemberEnsure struct {
-	TenantId             string `json:"tenantId"`
-	AccountId            string `json:"accountId"`
-	MonthlyBudgetMicros  int64  `json:"monthlyBudgetMicros"`
-	RequestsPerMinute    int64  `json:"requestsPerMinute"`
+	TenantId            string `json:"tenantId"`
+	AccountId           string `json:"accountId"`
+	MonthlyBudgetMicros int64  `json:"monthlyBudgetMicros"`
+	RequestsPerMinute   int64  `json:"requestsPerMinute"`
+	// 每个Key同时执行的请求上限。成员默认16，对外Key默认32。
+	MaxConcurrency *int64 `json:"maxConcurrency,omitempty"`
+	// 每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。
+	MaxInFlightTokens    *int64 `json:"maxInFlightTokens,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -146,6 +150,70 @@ func (o *RelayMemberEnsure) SetRequestsPerMinute(v int64) {
 	o.RequestsPerMinute = v
 }
 
+// GetMaxConcurrency returns the MaxConcurrency field value if set, zero value otherwise.
+func (o *RelayMemberEnsure) GetMaxConcurrency() int64 {
+	if o == nil || IsNil(o.MaxConcurrency) {
+		var ret int64
+		return ret
+	}
+	return *o.MaxConcurrency
+}
+
+// GetMaxConcurrencyOk returns a tuple with the MaxConcurrency field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayMemberEnsure) GetMaxConcurrencyOk() (*int64, bool) {
+	if o == nil || IsNil(o.MaxConcurrency) {
+		return nil, false
+	}
+	return o.MaxConcurrency, true
+}
+
+// HasMaxConcurrency returns a boolean if a field has been set.
+func (o *RelayMemberEnsure) HasMaxConcurrency() bool {
+	if o != nil && !IsNil(o.MaxConcurrency) {
+		return true
+	}
+
+	return false
+}
+
+// SetMaxConcurrency gets a reference to the given int64 and assigns it to the MaxConcurrency field.
+func (o *RelayMemberEnsure) SetMaxConcurrency(v int64) {
+	o.MaxConcurrency = &v
+}
+
+// GetMaxInFlightTokens returns the MaxInFlightTokens field value if set, zero value otherwise.
+func (o *RelayMemberEnsure) GetMaxInFlightTokens() int64 {
+	if o == nil || IsNil(o.MaxInFlightTokens) {
+		var ret int64
+		return ret
+	}
+	return *o.MaxInFlightTokens
+}
+
+// GetMaxInFlightTokensOk returns a tuple with the MaxInFlightTokens field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayMemberEnsure) GetMaxInFlightTokensOk() (*int64, bool) {
+	if o == nil || IsNil(o.MaxInFlightTokens) {
+		return nil, false
+	}
+	return o.MaxInFlightTokens, true
+}
+
+// HasMaxInFlightTokens returns a boolean if a field has been set.
+func (o *RelayMemberEnsure) HasMaxInFlightTokens() bool {
+	if o != nil && !IsNil(o.MaxInFlightTokens) {
+		return true
+	}
+
+	return false
+}
+
+// SetMaxInFlightTokens gets a reference to the given int64 and assigns it to the MaxInFlightTokens field.
+func (o *RelayMemberEnsure) SetMaxInFlightTokens(v int64) {
+	o.MaxInFlightTokens = &v
+}
+
 func (o RelayMemberEnsure) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -160,6 +228,12 @@ func (o RelayMemberEnsure) ToMap() (map[string]interface{}, error) {
 	toSerialize["accountId"] = o.AccountId
 	toSerialize["monthlyBudgetMicros"] = o.MonthlyBudgetMicros
 	toSerialize["requestsPerMinute"] = o.RequestsPerMinute
+	if !IsNil(o.MaxConcurrency) {
+		toSerialize["maxConcurrency"] = o.MaxConcurrency
+	}
+	if !IsNil(o.MaxInFlightTokens) {
+		toSerialize["maxInFlightTokens"] = o.MaxInFlightTokens
+	}
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -210,6 +284,8 @@ func (o *RelayMemberEnsure) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "accountId")
 		delete(additionalProperties, "monthlyBudgetMicros")
 		delete(additionalProperties, "requestsPerMinute")
+		delete(additionalProperties, "maxConcurrency")
+		delete(additionalProperties, "maxInFlightTokens")
 		o.AdditionalProperties = additionalProperties
 	}
 

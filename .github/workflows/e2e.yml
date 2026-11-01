@@ -60,7 +60,7 @@ jobs:
           source var/compose.env
           set +a
           # Keep startup diagnostics safe even if a dependency prints a DSN/key.
-          for name in admin_password encryption_key pg_password pg_migration_password; do
+          for name in admin_password member_password encryption_key pg_password pg_migration_password; do
             printf '::add-mask::%s\n' "$(cat "var/bifrost/$name")"
           done
           echo "AURIGA_IAM_ENCRYPTION_KEY=$AURIGA_IAM_ENCRYPTION_KEY" >> "$GITHUB_ENV"

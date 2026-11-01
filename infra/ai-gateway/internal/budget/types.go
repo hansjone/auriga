@@ -86,6 +86,7 @@ type Finish struct {
 	Outcome          string
 	Usage            *FinalUsage
 	ExecutionStopped bool
+	Estimated        bool
 }
 
 // RecoveryEvidence is asserted only by a trusted execution supervisor. Time or

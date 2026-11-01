@@ -1,83 +1,103 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyPoolFailover } from './relay-failover.mjs';
 
-for (const fails of [false, true]) {
-  test(`pool outage drill uses only configured deployments and restores its block: ${fails}`, async () => {
-    let blocked = false;
-    const calls = [];
-    const entries = [
-      {
-        model_name: 'pool',
-        model_info: { id: 'deployment-a' },
-        litellm_params: { model: 'openai/a' },
+function fixture({
+  fails = false,
+  restoreFails = false,
+  disabled = false,
+} = {}) {
+  let off = disabled;
+  const calls = [];
+  const entries = [
+    {
+      id: 'a',
+      hasCredential: true,
+      configuration: {
+        name: 'A',
+        kind: 'openai-compatible',
+        baseUrl: 'https://a.example.com',
+        enabled: true,
       },
-      {
-        model_name: 'pool',
-        model_info: { id: 'deployment-b' },
-        litellm_params: { model: 'openai/b' },
+    },
+    {
+      id: 'b',
+      hasCredential: true,
+      configuration: {
+        name: 'B',
+        kind: 'openai-compatible',
+        baseUrl: 'https://b.example.com',
+        enabled: true,
       },
-    ];
-    const api = async (path, options) => {
+    },
+  ];
+  return {
+    calls,
+    isOff: () => off,
+    api: async (path, options) => {
       calls.push({ path, options });
-      if (path === 'model/info')
-        return { data: blocked ? [entries[1]] : entries };
-      assert.equal(options.discardBody, true);
-      assert.deepEqual(options.body, { model_id: 'deployment-a' });
-      if (path === 'model/block') blocked = true;
-      else if (path === 'model/unblock') blocked = false;
-      else assert.fail('unexpected API');
-      return null;
-    };
-    const run = () =>
-      verifyPoolFailover(
-        { pool: 'pool', allowPoolDisruption: true },
-        [{ upstreamModel: 'openai/a' }, { upstreamModel: 'openai/b' }],
-        api,
-        async (side, model) => {
-          assert.ok(['cloud', 'desktop'].includes(side));
-          assert.equal(model, 'pool');
-          if (fails) throw Error('conversation_failed');
-          return { deploymentId: 'deployment-b' };
-        },
-      );
+      if (path.startsWith('pools?'))
+        return {
+          items: [
+            {
+              id: 'pool',
+              enabled: true,
+              routes: [
+                { providerId: 'a', model: 'one' },
+                { providerId: 'b', model: 'two' },
+              ],
+            },
+          ],
+        };
+      if (path.startsWith('providers?'))
+        return {
+          items: entries.map((row) => ({
+            ...row,
+            configuration: {
+              ...row.configuration,
+              enabled: row.id === 'a' ? !off : true,
+            },
+          })),
+        };
+      assert.equal(path, 'providers/a');
+      assert.equal(options.method, 'PUT');
+      assert.equal(options.body.baseUrl, entries[0].configuration.baseUrl);
+      assert.equal('secret' in options.body, false);
+      if (options.body.enabled && restoreFails) throw Error('private-detail');
+      off = !options.body.enabled;
+      return {};
+    },
+    converse: async () => {
+      if (fails) throw Error('conversation_failed');
+      return { requestId: 'fresh', totalTokens: 3 };
+    },
+  };
+}
+const config = { pool: 'pool', allowPoolDisruption: true };
+const models = [{ upstreamModel: 'one' }, { upstreamModel: 'two' }];
+for (const fails of [false, true]) {
+  test(`故障演练在会话成功或失败后恢复供应商：${fails}`, async () => {
+    const f = fixture({ fails });
+    const run = () => verifyPoolFailover(config, models, f.api, f.converse);
     if (fails) await assert.rejects(run());
     else assert.equal((await run()).verified, true);
-    assert.equal(blocked, false);
+    assert.equal(f.isOff(), false);
     assert.equal(
-      calls.filter((call) => call.path !== 'model/info').at(-1).path,
-      'model/unblock',
+      f.calls.filter((row) => row.options?.method === 'PUT').length,
+      2,
     );
   });
 }
-
-test('desktop-only outage proof never invokes cloud and retains its narrower scope', async () => {
-  let disabled = false;
-  const called = [];
-  const entries = [
-    {
-      model_name: 'pool',
-      model_info: { id: 'a' },
-      litellm_params: { model: 'openai/a' },
-    },
-    {
-      model_name: 'pool',
-      model_info: { id: 'b' },
-      litellm_params: { model: 'openai/b' },
-    },
-  ];
-  const api = async (path) => {
-    if (path === 'model/info')
-      return { data: disabled ? [entries[1]] : entries };
-    disabled = path === 'model/block';
-  };
+test('单桌面验收保留范围，不冒双端完成', async () => {
+  const f = fixture(),
+    called = [];
   const result = await verifyPoolFailover(
-    { pool: 'pool', allowPoolDisruption: true },
-    [{ upstreamModel: 'openai/a' }, { upstreamModel: 'openai/b' }],
-    api,
+    config,
+    models,
+    f.api,
     async (side) => {
       called.push(side);
-      return { deploymentId: 'b' };
+      return { requestId: 'fresh', totalTokens: 1 };
     },
     {},
     ['desktop'],
@@ -86,73 +106,22 @@ test('desktop-only outage proof never invokes cloud and retains its narrower sco
   assert.deepEqual(result.sides, ['desktop']);
   assert.equal(result.restored, true);
 });
-
-test('pool outage drill refuses missing approval, an already blocked deployment, or an unverified fallback', async () => {
-  const entries = [
-    {
-      model_name: 'pool',
-      model_info: { id: 'a', blocked: true },
-      litellm_params: { model: 'openai/a' },
-    },
-    {
-      model_name: 'pool',
-      model_info: { id: 'b' },
-      litellm_params: { model: 'openai/b' },
-    },
-  ];
-  let mutations = 0;
-  const api = async (path) => {
-    if (path !== 'model/info') mutations++;
-    return { data: entries };
-  };
-  await assert.rejects(
-    verifyPoolFailover({ pool: 'pool' }, [], api, async () => {}),
+test('未授权或原供应商已禁用均不修改配置', async () => {
+  const f = fixture({ disabled: true });
+  await assert.rejects(verifyPoolFailover({}, models, f.api, f.converse));
+  await assert.rejects(verifyPoolFailover(config, models, f.api, f.converse));
+  assert.equal(
+    f.calls.some((row) => row.options?.method === 'PUT'),
+    false,
   );
-  await assert.rejects(
-    verifyPoolFailover(
-      { pool: 'pool', allowPoolDisruption: true },
-      [{ upstreamModel: 'openai/a' }, { upstreamModel: 'openai/b' }],
-      api,
-      async () => {},
-    ),
-  );
-  assert.equal(mutations, 0);
 });
-
 for (const restoreFails of [false, true]) {
-  test(`unverified fallback cannot pass; recovery evidence retains the exact deployment: ${restoreFails}`, async () => {
-    let unavailable = false;
-    const evidence = {};
-    const entries = [
-      {
-        model_name: 'pool',
-        model_info: { id: 'a' },
-        litellm_params: { model: 'openai/a' },
-      },
-      {
-        model_name: 'pool',
-        model_info: { id: 'b' },
-        litellm_params: { model: 'openai/b' },
-      },
-    ];
-    const api = async (path) => {
-      if (path === 'model/info')
-        return { data: unavailable ? [entries[1]] : entries };
-      if (path === 'model/block') unavailable = true;
-      if (path === 'model/unblock') {
-        if (restoreFails) throw Error('private-manager-detail');
-        unavailable = false;
-      }
-    };
+  test(`缺用量不可通过，恢复失败保留精确供应商与安全错误：${restoreFails}`, async () => {
+    const f = fixture({ restoreFails }),
+      evidence = {};
     await assert.rejects(
-      verifyPoolFailover(
-        { pool: 'pool', allowPoolDisruption: true },
-        [{ upstreamModel: 'openai/a' }, { upstreamModel: 'openai/b' }],
-        api,
-        async () => ({ deploymentId: 'unrelated' }),
-        evidence,
-      ),
-      (error) => !error.message.includes('private-manager-detail'),
+      verifyPoolFailover(config, models, f.api, async () => ({}), evidence),
+      (error) => !error.message.includes('private-detail'),
     );
     assert.equal(evidence.verified, false);
     assert.equal(evidence.restored, !restoreFails);

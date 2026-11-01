@@ -21,6 +21,8 @@ import (
 type MemberPolicy struct {
 	MonthlyBudgetMicros int64 `json:"monthlyBudgetMicros"`
 	RequestsPerMinute   int64 `json:"requestsPerMinute"`
+	MaxConcurrency      int64 `json:"maxConcurrency"`
+	MaxInFlightTokens   int64 `json:"maxInFlightTokens"`
 }
 type Client struct {
 	target       *url.URL
@@ -31,6 +33,15 @@ type Client struct {
 }
 
 func NewClient(origin, passwordFile string, policy MemberPolicy) (*Client, error) {
+	if policy.MaxConcurrency == 0 {
+		policy.MaxConcurrency = 16
+	}
+	if policy.MaxInFlightTokens == 0 {
+		policy.MaxInFlightTokens = 64 << 20
+	}
+	if policy.MaxConcurrency < 1 || policy.MaxConcurrency > 100 || policy.MaxInFlightTokens < 1 || policy.MaxInFlightTokens > 1<<30 {
+		return nil, errors.New("invalid relay member limits")
+	}
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || strings.Contains(origin, "#") || passwordFile == "" || policy.MonthlyBudgetMicros < 0 || policy.MonthlyBudgetMicros > 9007199254740991 || policy.RequestsPerMinute < 1 || policy.RequestsPerMinute > 1000000 {
 		return nil, errors.New("invalid Bifrost bridge configuration")
@@ -41,7 +52,7 @@ func NewClient(origin, passwordFile string, policy MemberPolicy) (*Client, error
 			return nil, errors.New("relay requires HTTPS or private deployment service")
 		}
 	}
-	tr := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 60 * time.Second, IdleConnTimeout: 60 * time.Second, MaxIdleConnsPerHost: 32}
+	tr := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 165 * time.Second, IdleConnTimeout: 60 * time.Second, MaxIdleConnsPerHost: 32}
 	return &Client{target: u, passwordFile: passwordFile, policy: policy, transport: tr, http: &http.Client{Transport: tr, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
@@ -71,7 +82,7 @@ func (c *Client) MemberKey(ctx context.Context, tenant, account string) (api.Rel
 	if tenant == "" || account == "" {
 		return out, errors.New("common.unauthenticated")
 	}
-	raw, e := json.Marshal(api.RelayMemberEnsure{TenantId: tenant, AccountId: account, MonthlyBudgetMicros: c.policy.MonthlyBudgetMicros, RequestsPerMinute: c.policy.RequestsPerMinute})
+	raw, e := json.Marshal(api.RelayMemberEnsure{TenantId: tenant, AccountId: account, MaxConcurrency: &c.policy.MaxConcurrency, MaxInFlightTokens: &c.policy.MaxInFlightTokens, MonthlyBudgetMicros: c.policy.MonthlyBudgetMicros, RequestsPerMinute: c.policy.RequestsPerMinute})
 	if e != nil {
 		return out, e
 	}
@@ -83,7 +94,7 @@ func (c *Client) MemberKey(ctx context.Context, tenant, account string) (api.Rel
 	if e != nil {
 		return out, e
 	}
-	req.SetBasicAuth("auriga", password)
+	req.SetBasicAuth("auriga-member", password)
 	req.Header.Set("Content-Type", "application/json")
 	resp, e := c.http.Do(req)
 	if e != nil {

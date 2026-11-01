@@ -21,7 +21,7 @@ func TestMemberKeyCreationIsolationAndRevocation(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		u, p, ok := r.BasicAuth()
-		if !ok || u != "auriga" || p != "test-password" || r.URL.Path != "/internal/members/ensure" || r.Method != "POST" {
+		if !ok || u != "auriga-member" || p != "test-password" || r.URL.Path != "/internal/members/ensure" || r.Method != "POST" {
 			t.Error("private member boundary")
 			w.WriteHeader(401)
 			return

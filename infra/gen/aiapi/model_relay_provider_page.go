@@ -22,6 +22,8 @@ var _ MappedNullable = &RelayProviderPage{}
 // RelayProviderPage struct for RelayProviderPage
 type RelayProviderPage struct {
 	Items []RelayProvider `json:"items"`
+	// 后续页游标，绑定当前租户和资源。
+	NextCursor *string `json:"nextCursor,omitempty"`
 }
 
 type _RelayProviderPage RelayProviderPage
@@ -68,6 +70,38 @@ func (o *RelayProviderPage) SetItems(v []RelayProvider) {
 	o.Items = v
 }
 
+// GetNextCursor returns the NextCursor field value if set, zero value otherwise.
+func (o *RelayProviderPage) GetNextCursor() string {
+	if o == nil || IsNil(o.NextCursor) {
+		var ret string
+		return ret
+	}
+	return *o.NextCursor
+}
+
+// GetNextCursorOk returns a tuple with the NextCursor field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayProviderPage) GetNextCursorOk() (*string, bool) {
+	if o == nil || IsNil(o.NextCursor) {
+		return nil, false
+	}
+	return o.NextCursor, true
+}
+
+// HasNextCursor returns a boolean if a field has been set.
+func (o *RelayProviderPage) HasNextCursor() bool {
+	if o != nil && !IsNil(o.NextCursor) {
+		return true
+	}
+
+	return false
+}
+
+// SetNextCursor gets a reference to the given string and assigns it to the NextCursor field.
+func (o *RelayProviderPage) SetNextCursor(v string) {
+	o.NextCursor = &v
+}
+
 func (o RelayProviderPage) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -79,6 +113,9 @@ func (o RelayProviderPage) MarshalJSON() ([]byte, error) {
 func (o RelayProviderPage) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["items"] = o.Items
+	if !IsNil(o.NextCursor) {
+		toSerialize["nextCursor"] = o.NextCursor
+	}
 	return toSerialize, nil
 }
 

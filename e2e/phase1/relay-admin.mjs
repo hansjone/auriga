@@ -13,7 +13,7 @@ export async function relayAdminRequest(
   {
     method = 'GET',
     body,
-    key,
+    idempotencyKey,
     expected = [200],
     timeout = 15000,
     discardBody = false,
@@ -21,41 +21,25 @@ export async function relayAdminRequest(
 ) {
   const base = httpUrl(adapter.config.relay.baseUrl);
   const url = new URL(target);
-  const paths = [
-    'health/readiness',
-    'model/info',
-    'model/block',
-    'model/unblock',
-    'key/generate',
-    'key/info',
-    'key/delete',
-    'spend/logs',
-  ];
+  const origin = httpUrl(adapter.config.admin?.url).origin;
   requireThat(
-    base.pathname === '/ai/' &&
-      url.origin === base.origin &&
+    base.origin === origin &&
+      base.pathname === '/api/ai/v1/admin/relay/' &&
+      url.origin === origin &&
       !url.username &&
       !url.password &&
       !url.hash &&
-      paths.some((path) => url.pathname === base.pathname + path),
-    '管理请求必须留在已配置的LiteLLM管理入口',
+      /^\/api\/ai\/v1\/admin\/relay\/(providers|pools|virtual-keys|logs)(\/[A-Za-z0-9-]+(\/keys)?)?$/.test(
+        url.pathname,
+      ),
+    '管理请求必须留在平台同源中转站入口',
   );
-  if (['/ai/model/block', '/ai/model/unblock'].includes(url.pathname))
-    requireThat(
-      adapter.config.modelNative?.allowPoolDisruption === true &&
-        method === 'POST' &&
-        discardBody === true &&
-        body &&
-        Object.keys(body).length === 1 &&
-        /^[A-Za-z0-9_-]{1,128}$/.test(body.model_id ?? ''),
-      '故障演练须显式授权、只提交一个部署id并丢弃模型响应正文',
-    );
   adapter.state = state;
   if (!adapter.relayAdminPage) {
     const admin = adapter.config.admin;
     requireThat(
       admin?.url && admin.accountId && admin.username && admin.password,
-      'LiteLLM交接缺少正常管理员凭据',
+      '中转站管理缺少正常管理员凭据',
     );
     const origin = httpUrl(admin.url).origin;
     const context = await adapter.context();
@@ -70,7 +54,7 @@ export async function relayAdminRequest(
         .filter((row) => row.connectorType === 'team-account')
         .map((row) => row.id);
     });
-    requireThat(teams.length === 1, 'LiteLLM交接要求唯一普通团队身份源');
+    requireThat(teams.length === 1, '中转站管理要求唯一普通团队身份源');
     await page.locator(`[data-provider-id="${teams[0]}"]`).click();
     await page.locator('input[name="username"]').fill(admin.username);
     await page.locator('input[name="password"]').fill(admin.password);
@@ -84,7 +68,7 @@ export async function relayAdminRequest(
       );
       await page.locator('button[type="submit"]').click();
       const result = await response;
-      requireThat(result.status() === 200, 'LiteLLM管理员登录响应失败');
+      requireThat(result.status() === 200, '中转站管理员登录响应失败');
       return adapter.retainedLogin(new URL(result.url()).pathname);
     };
     let outcome = await submit();
@@ -104,10 +88,7 @@ export async function relayAdminRequest(
         .fill(await nextTotp(admin));
       outcome = await submit();
     }
-    requireThat(
-      outcome.status === 'completed',
-      'LiteLLM交接前管理员登录未完成',
-    );
+    requireThat(outcome.status === 'completed', '中转站管理前管理员登录未完成');
     await page.waitForURL(
       (current) => current.origin === origin && current.pathname !== '/login',
     );
@@ -121,44 +102,57 @@ export async function relayAdminRequest(
           ).json()
         ).account?.id,
     );
-    requireThat(accountId === admin.accountId, 'LiteLLM交接管理员身份不匹配');
-    const handoff = page.waitForResponse(
-      (r) =>
-        r.url() === base.origin + '/ai/session' &&
-        r.request().method() === 'POST',
-    );
-    const landed = page.waitForResponse(
-      (r) =>
-        r.url() === base.origin + '/ai/ui/' &&
-        r.request().isNavigationRequest(),
-    );
-    const [gate, final] = await Promise.all([
-      handoff,
-      landed,
-      page.locator('a[href="/ai/ui/"]').click(),
-    ]);
-    requireThat(
-      (await gate.request().allHeaders()).origin === origin &&
-        gate.status() === 303 &&
-        final.status() === 200,
-      'LiteLLM真实浏览器交接失败',
-    );
-    await page.waitForURL(base.origin + '/ai/ui/');
-    // The UI may navigate to its own sign-in route after loading. A separate
-    // same-origin JSON document keeps management fetches in a stable browser
-    // page while retaining the genuine handoff cookie in this context.
-    const apiPage = await context.newPage();
-    const readiness = await apiPage.goto(base.href + 'health/readiness');
-    requireThat(readiness.status() === 200, 'LiteLLM管理API浏览器入口未就绪');
-    adapter.relayAdminPage = apiPage;
-    adapter.relayAdminEvidence = {
-      authentication: 'public-admin-browser-handoff',
-      handoffStatus: 303,
-      uiStatus: 200,
-    };
+    requireThat(accountId === admin.accountId, '中转站管理管理员身份不匹配');
+    await page.goto(origin + '/models/relay');
+    adapter.relayAdminPage = page;
+    adapter.relayAdminEvidence = { authentication: 'platform-admin-session' };
   }
+
   const response = await adapter.relayAdminPage.evaluate(
-    async ({ url, method, body, key, traceparent, timeout, discardBody }) => {
+    async ({
+      url,
+      method,
+      body,
+      idempotencyKey,
+      traceparent,
+      timeout,
+      discardBody,
+      ipMode,
+    }) => {
+      let csrf;
+      if (!['GET', 'HEAD'].includes(method)) {
+        if (ipMode) {
+          const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+          csrf = btoa(String.fromCharCode(...bytes))
+            .replaceAll('+', '-')
+            .replaceAll('/', '_')
+            .replaceAll('=', '');
+          const registered = await globalThis.fetch(
+            '/api/iam/v1/admin/session/csrf-tokens',
+            {
+              method: 'POST',
+              credentials: 'same-origin',
+              redirect: 'error',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Auriga-CSRF-Bootstrap': 'admin-session-v1',
+              },
+              body: JSON.stringify({ token: csrf }),
+            },
+          );
+          if (registered.status !== 200)
+            return { status: registered.status, headers: {}, body: null };
+        } else {
+          csrf = document.cookie
+            .split(';')
+            .map((x) => x.trim())
+            .find((x) => /^(?:__Host-)?auriga_csrf=/.test(x))
+            ?.split('=')
+            .slice(1)
+            .join('=');
+          csrf = csrf ? decodeURIComponent(csrf) : '';
+        }
+      }
       const result = await globalThis.fetch(url, {
         method,
         credentials: 'same-origin',
@@ -167,7 +161,8 @@ export async function relayAdminRequest(
         headers: {
           accept: 'application/json',
           traceparent,
-          ...(key ? { authorization: 'Bearer ' + key } : {}),
+          ...(csrf ? { 'X-Auriga-CSRF': csrf } : {}),
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -183,7 +178,8 @@ export async function relayAdminRequest(
       url: url.href,
       method,
       body,
-      key,
+      idempotencyKey,
+      ipMode: adapter.access?.mode === 'ip',
       traceparent: traceHeader(state),
       timeout,
       discardBody,

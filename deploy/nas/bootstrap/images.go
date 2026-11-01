@@ -221,7 +221,7 @@ func openImageFile(file string) (*os.File, error) {
 	}
 	after, err := f.Stat()
 	if err != nil || !os.SameFile(before, after) {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.New("image input changed while opening")
 	}
 	return f, nil
@@ -232,7 +232,7 @@ func readImageFile(file string, max int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(f, max+1))
 	if int64(len(raw)) > max {
 		return nil, errors.New("image metadata byte budget exceeded")
@@ -245,7 +245,7 @@ func imageFileSHA(ctx context.Context, file string, max int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	r := &imageBudgetReader{ctx: ctx, r: f, left: max}
 	if _, err := io.Copy(h, r); err != nil {
@@ -316,7 +316,7 @@ func safeImageTarPath(name string) bool {
 		}
 	}
 	for _, c := range name {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("/._-", c)) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("/._-", c) {
 			return false
 		}
 	}
@@ -814,7 +814,7 @@ type imageLimitedBuffer struct {
 
 func (b *imageLimitedBuffer) Write(p []byte) (int, error) {
 	if len(p) > b.max-b.Len() {
-		return 0, errors.New("Docker metadata byte budget exceeded")
+		return 0, errors.New("docker metadata byte budget exceeded")
 	}
 	return b.Buffer.Write(p)
 }

@@ -9,6 +9,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /bifrost ./cmd/relay-ba
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates
 COPY --from=build /bifrost /usr/local/bin/bifrost
+COPY third_party/bifrost/LICENSE third_party/bifrost/THIRD_PARTY_NOTICES.md /usr/share/licenses/bifrost/
 COPY deploy/nas/bifrost/config.json /etc/auriga/bifrost-backend.json
 USER 10003:10003
 ENTRYPOINT ["/usr/local/bin/bifrost", "-config", "/etc/auriga/bifrost-backend.json"]

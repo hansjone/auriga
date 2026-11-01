@@ -954,7 +954,7 @@ components:
           type: object
           deprecated: true
           readOnly: true
-          description: 仅保留契约兼容；已由 LiteLLM customer 预算取代。服务拒绝写入，不读取也不返回该字段。
+          description: 仅保留契约兼容；已由 中转站成员 Key 预算取代。服务拒绝写入，不读取也不返回该字段。
           properties:
             monthlyBudgetMicros: { type: [integer, 'null'], minimum: 0, deprecated: true }
             currency: { type: string, pattern: '^[A-Z]{3}$', deprecated: true }

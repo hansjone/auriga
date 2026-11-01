@@ -69,6 +69,14 @@ func (b *Backend) basic(r *http.Request) bool {
 	sum := sha256.Sum256([]byte(p))
 	return ok && u == "auriga" && hmac.Equal(sum[:], b.password[:])
 }
+func (b *Backend) memberBasic(r *http.Request) bool {
+	if len(r.Header.Values("Authorization")) != 1 {
+		return false
+	}
+	u, p, ok := r.BasicAuth()
+	sum := sha256.Sum256([]byte(p))
+	return ok && u == "auriga-member" && hmac.Equal(sum[:], b.memberPassword[:])
+}
 func bearer(r *http.Request) string {
 	if len(r.Header.Values("X-Bf-Vk")) == 1 {
 		return r.Header.Get("X-Bf-Vk")
@@ -94,7 +102,7 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/internal/members/ensure" {
-		if r.Method != http.MethodPost || !b.basic(r) || r.URL.RawQuery != "" {
+		if r.Method != http.MethodPost || !b.memberBasic(r) || r.URL.RawQuery != "" {
 			reject(w, denied)
 			return
 		}
@@ -141,7 +149,7 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Member keys are internal capabilities. A leaked value never bypasses IAM/org.
-		if k.Source == "member" && !b.basic(r) {
+		if k.Source == "member" && !b.memberBasic(r) {
 			reject(w, denied)
 			return
 		}
@@ -150,15 +158,22 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				reject(w, invalid)
 				return
 			}
-			pools, e := b.ListPools(r.Context(), tenant)
-			if e != nil {
-				reject(w, e)
-				return
-			}
 			data := []map[string]string{}
-			for _, p := range pools.Items {
-				if p.Enabled && (slices.Contains(k.Models, "*") || slices.Contains(k.Models, p.Id)) {
-					data = append(data, map[string]string{"id": p.Id, "object": "model", "owned_by": "auriga"})
+			page := listPage{Limit: 200}
+			for {
+				pools, e := b.ListPools(r.Context(), tenant, page)
+				if e != nil {
+					reject(w, e)
+					return
+				}
+				for _, p := range pools.Items {
+					if p.Enabled && (slices.Contains(k.Models, "*") || slices.Contains(k.Models, p.Id)) {
+						data = append(data, map[string]string{"id": p.Id, "object": "model", "owned_by": "auriga"})
+					}
+					page.After = p.Id
+				}
+				if pools.NextCursor == nil {
+					break
 				}
 			}
 			respond(w, map[string]any{"object": "list", "data": data})
@@ -180,7 +195,7 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tenants := r.Header.Values("X-Auriga-Tenant")
-	if len(tenants) != 1 || !validUUID(tenants[0]) {
+	if len(tenants) != 1 || !validUUID(tenants[0]) || (b.tenant != "" && tenants[0] != b.tenant) {
 		reject(w, denied)
 		return
 	}
@@ -195,12 +210,21 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant string) error {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
-	if parts[0] != "logs" && (r.URL.RawQuery != "" || r.URL.ForceQuery) {
+	list := len(parts) == 1 && r.Method == http.MethodGet && (parts[0] == "providers" || parts[0] == "pools" || parts[0] == "virtual-keys")
+	var page listPage
+	if list {
+		var err error
+		page, err = parseListPage(r, tenant, parts[0])
+		if err != nil {
+			return err
+		}
+	}
+	if !list && parts[0] != "logs" && (r.URL.RawQuery != "" || r.URL.ForceQuery) {
 		return invalid
 	}
 	switch {
 	case len(parts) == 1 && parts[0] == "providers" && r.Method == http.MethodGet:
-		out, e := b.ListProviders(r.Context(), tenant)
+		out, e := b.ListProviders(r.Context(), tenant, page)
 		if e != nil {
 			return e
 		}
@@ -245,7 +269,7 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 		}
 		respond(w, p)
 	case len(parts) == 1 && parts[0] == "virtual-keys" && r.Method == http.MethodGet:
-		out, e := b.ListKeys(r.Context(), tenant)
+		out, e := b.ListKeys(r.Context(), tenant, page)
 		if e != nil {
 			return e
 		}
@@ -370,6 +394,10 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		reject(w, e)
 		return
 	}
+	if e = b.reconcileSubject(r.Context(), tenant, key.Id); e != nil {
+		reject(w, e)
+		return
+	}
 	maxTokens := pool.MaxOutputTokens
 	for _, name := range []string{"max_tokens", "max_completion_tokens"} {
 		if v := fields[name]; v != nil {
@@ -400,7 +428,7 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	delete(fields, "metadata")
 	delete(fields, "max_completion_tokens")
 	fields["max_tokens"], _ = json.Marshal(maxTokens)
-	fields["user"], _ = json.Marshal(tenant + ":" + key.Id)
+	fields["user"], _ = json.Marshal(b.pseudonym(tenant, key.Id))
 	if stream {
 		fields["stream_options"] = json.RawMessage(`{"include_usage":true}`)
 	}
@@ -415,7 +443,7 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		device = r.Header.Get("X-Auriga-Device")
 	}
 	snapshot := budget.TrustedSnapshot{Admission: &ai.BudgetAdmission{TenantId: tenant, AccountId: key.Id, ModelId: pool.Id, ProviderId: routes[0].ID, CredentialId: routes[0].ID, Currency: "USD", PriceVersion: pool.Price.Version, InputTokenUpperBound: pool.ContextWindow - maxTokens, MaxOutputTokens: maxTokens, MonthlyBudgetMicros: &key.MonthlyBudgetMicros, Origin: &ai.BudgetAdmission_DeviceId{DeviceId: device}, TokenExpiresAt: timestamppb.New(expiry)}, Price: pool.Price, ValidUntil: expiry}
-	reservation, e := b.ledger.Admit(r.Context(), snapshot, budget.Request{Method: "POST", Path: "/ai/v1/chat/completions", Key: r.Header.Get("Idempotency-Key"), Fingerprint: sha256.Sum256(raw)})
+	reservation, e := b.admit(r.Context(), key, snapshot, budget.Request{Method: "POST", Path: "/ai/v1/chat/completions", Key: r.Header.Get("Idempotency-Key"), Fingerprint: sha256.Sum256(raw)})
 	if e != nil {
 		reject(w, e)
 		return
@@ -442,8 +470,28 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		}
 		return http.NewResponseController(w).Flush()
 	})
-	finish := budget.Finish{Outcome: "unknown", ExecutionStopped: true}
+	finish := budget.Finish{Outcome: "failed", ExecutionStopped: true, Usage: &budget.FinalUsage{Price: pool.Price}}
+	if !result.NoCharge {
+		finish.Estimated = true
+		finish.Usage.InputTokens = min(pool.ContextWindow-maxTokens, int64(len(raw))*2+64)
+		// Remote media cannot be bounded by the bytes of its URL. Preserve the
+		// admitted input ceiling when no provider usage is available.
+		for _, marker := range []string{"image_url", "input_audio", "video_url", "input_file", "file_data"} {
+			if bytes.Contains(raw, []byte(marker)) {
+				finish.Usage.InputTokens = pool.ContextWindow - maxTokens
+				break
+			}
+		}
+		finish.Usage.OutputTokens = min(maxTokens, result.ObservedBytes)
+		if result.ObservedBytes == 0 {
+			finish.Usage.OutputTokens = maxTokens
+		}
+		if runErr == nil {
+			finish.Outcome = "completed"
+		}
+	}
 	if result.Confirmed {
+		finish.Estimated = false
 		finish.Outcome = "completed"
 		if runErr != nil {
 			finish.Outcome = "failed"
@@ -455,7 +503,11 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	_, settleErr := b.ledger.Settle(settleCtx, ref, reservation.Revision, finish)
 	if runErr != nil || settleErr != nil {
 		if !started {
-			reject(w, fault("common.unavailable"))
+			if settleErr != nil {
+				reject(w, fault("common.unavailable"))
+			} else {
+				providerReject(w, runErr)
+			}
 		} else {
 			_, _ = io.WriteString(w, "event: error\ndata: {\"error\":{\"code\":\"common.unavailable\",\"message\":\"Relay request incomplete\"}}\n\n")
 		}
@@ -470,4 +522,17 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	}
+}
+
+func providerReject(w http.ResponseWriter, err error) {
+	status, code := 502, "provider_unavailable"
+	var upstream *ProviderFailure
+	if errors.As(err, &upstream) {
+		status, code = upstream.Status, upstream.Code
+	} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		status, code = 504, "provider_timeout"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"type": "provider_error", "code": code, "message": code}})
 }

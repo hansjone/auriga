@@ -137,10 +137,14 @@ func TestNASPublicProxyAndDirectExamples(t *testing.T) {
 		}
 		if mode == "proxy" {
 			var doc map[string]any
-			json.Unmarshal(raw, &doc)
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				t.Fatal(err)
+			}
 			doc["listeners"].(map[string]any)["portal"].(map[string]any)["tls"] = false
 			bad, _ := json.Marshal(doc)
-			os.WriteFile(file, bad, 0o600)
+			if err := os.WriteFile(file, bad, 0o600); err != nil {
+				t.Fatal(err)
+			}
 			if _, _, err := loadNASAccess(file, "192.0.2.138", "192.0.2.128/26", 15000); err == nil {
 				t.Fatal("trusted proxy plaintext hop accepted")
 			}

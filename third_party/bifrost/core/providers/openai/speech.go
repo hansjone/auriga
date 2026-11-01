@@ -1,3 +1,5 @@
+// Auriga modifications: trimmed relay core/providers; see third_party/bifrost/UPSTREAM.md.
+
 package openai
 
 import "github.com/maximhq/bifrost/core/schemas"

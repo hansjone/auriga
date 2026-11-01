@@ -44,7 +44,7 @@ func loadNASAccess(path, peerIP, subnet string, registryPort int) ([]byte, deplo
 	if err != nil {
 		return nil, deploymentconfig.Config{}, fmt.Errorf("open access file")
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
 	if err != nil {
 		return nil, deploymentconfig.Config{}, fmt.Errorf("read access file")
@@ -97,7 +97,7 @@ func nasMaterialSet(https ...bool) materials.MaterialSet {
 		"pki/ca.crt", "pki/ca.key", "pki/workspace.crt", "pki/workspace.key", "pki/edge.crt", "pki/edge.key", "pki/iam.crt", "pki/iam.key", "pki/edge-iam.crt", "pki/edge-iam.key",
 		"identity-signing-keys.json", "identity-keys.json", "panel-keys.json", "panel-signing.key", "ca-sha256.txt", "access.json", "access.env", "edge.config.json", "platform-access.yaml", "iam-healthcheck.sh", "agent-policy.yaml",
 		"pki/gateway.crt", "pki/gateway.key", "bifrost-runtime.json",
-		"bifrost/admin_password", "bifrost/encryption_key", "bifrost/pg_password", "bifrost/pg_migration_password",
+		"bifrost/admin_password", "bifrost/member_password", "bifrost/encryption_key", "bifrost/pg_password", "bifrost/pg_migration_password",
 	}}
 	if len(https) > 0 && https[0] {
 		set.PublicFiles = append(set.PublicFiles, "browser-tls/browser.crt", "browser-tls/browser.key")

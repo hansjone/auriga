@@ -5,8 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
+	"net"
 	"strings"
 	"time"
 
@@ -28,6 +27,8 @@ type Route struct {
 type Result struct {
 	InputTokens, OutputTokens int64
 	Confirmed                 bool
+	ObservedBytes             int64
+	NoCharge                  bool
 }
 type account struct {
 	routes  []Route
@@ -68,7 +69,7 @@ func (a account) GetKeysForProvider(_ context.Context, id schemas.ModelProvider)
 func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emit func([]byte) error) (Result, error) {
 	var result Result
 	if len(routes) == 0 || emit == nil {
-		return result, errors.New("no enabled provider")
+		return Result{NoCharge: true}, errors.New("no enabled provider")
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
 	defer cancel()
@@ -95,12 +96,12 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 	}
 	client, err := core.Init(requestCtx, schemas.BifrostConfig{Account: account{ordered, allowPrivate}, InitialPoolSize: 2, DropExcessRequests: true, Logger: core.NewDefaultLogger(schemas.LogLevelError)})
 	if err != nil {
-		return result, errors.New("provider initialization failed")
+		return Result{NoCharge: true}, errors.New("provider initialization failed")
 	}
 	defer client.Shutdown()
 	var input openai.OpenAIChatRequest
 	if json.Unmarshal(raw, &input) != nil {
-		return result, errors.New("invalid chat request")
+		return Result{NoCharge: true}, errors.New("invalid chat request")
 	}
 	input.Model = ordered[0].Model
 	req := input.ToBifrostChatRequest(bc)
@@ -112,7 +113,8 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 	capture := func(resp *schemas.BifrostChatResponse) {
 		if resp != nil && resp.Usage != nil {
 			u := resp.Usage
-			result = Result{int64(u.PromptTokens), int64(u.CompletionTokens), u.PromptTokens >= 0 && u.CompletionTokens >= 0 && u.TotalTokens == u.PromptTokens+u.CompletionTokens}
+			result.InputTokens, result.OutputTokens = int64(u.PromptTokens), int64(u.CompletionTokens)
+			result.Confirmed = u.PromptTokens >= 0 && u.CompletionTokens >= 0 && u.TotalTokens > 0 && u.TotalTokens == u.PromptTokens+u.CompletionTokens
 		}
 	}
 	encode := func(resp *schemas.BifrostChatResponse) error {
@@ -129,19 +131,24 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 		if e != nil {
 			return e
 		}
+		result.ObservedBytes += outputBytes(b)
 		return emit(b)
 	}
 	if input.Stream == nil || !*input.Stream {
 		response, failure := client.ChatCompletionRequest(bc, req)
 		if failure != nil {
-			return result, providerFailure(failure)
+			err := providerFailure(failure)
+			result.NoCharge = err.Definitive
+			return result, err
 		}
 		capture(response)
 		return result, encode(response)
 	}
 	stream, failure := client.ChatCompletionStreamRequest(bc, req)
 	if failure != nil {
-		return result, providerFailure(failure)
+		err := providerFailure(failure)
+		result.NoCharge = err.Definitive
+		return result, err
 	}
 	var streamErr error
 	for chunk := range stream {
@@ -167,24 +174,106 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 	if requestCtx.Err() != nil && streamErr == nil {
 		streamErr = requestCtx.Err()
 	}
+	if streamErr != nil && result.ObservedBytes == 0 {
+		var f *ProviderFailure
+		if errors.As(streamErr, &f) {
+			result.NoCharge = f.Definitive
+		}
+	}
 	return result, streamErr
 }
 
-func providerFailure(f *schemas.BifrostError) error {
-	// Upstream error text can include credentials or request content.
-	if f == nil {
-		return io.ErrUnexpectedEOF
-	}
-	code := 0
-	if f.StatusCode != nil {
-		code = *f.StatusCode
-	}
-	return fmt.Errorf("provider request failed (HTTP %d)", code)
+type ProviderFailure struct {
+	Status     int
+	Code       string
+	Definitive bool
 }
 
+func (e *ProviderFailure) Error() string { return e.Code }
+func providerFailure(f *schemas.BifrostError) *ProviderFailure {
+	out := &ProviderFailure{Status: 502, Code: "provider_unavailable"}
+	if f == nil {
+		return out
+	}
+	if f.StatusCode != nil {
+		code := *f.StatusCode
+		if code >= 400 && code < 500 {
+			out.Status = code
+			out.Code = "provider_rejected_request"
+		}
+		if code >= 400 && code < 600 && !f.IsBifrostError {
+			out.Definitive = true
+		}
+		if code == 408 || code == 504 {
+			out.Status = 504
+			out.Code = "provider_timeout"
+		}
+	}
+	if f.Error != nil {
+		var dial *net.OpError
+		if errors.As(f.Error.Error, &dial) && dial.Op == "dial" {
+			out.Definitive = true
+		}
+		if errors.Is(f.Error.Error, context.DeadlineExceeded) {
+			out.Status = 504
+			out.Code = "provider_timeout"
+			out.Definitive = false
+		}
+		if f.Error.Code != nil {
+			switch *f.Error.Code {
+			case "context_length_exceeded", "invalid_request_error", "rate_limit_exceeded":
+				out.Code = *f.Error.Code
+			}
+		}
+	}
+	return out
+}
 func providerKind(kind string) string {
 	if kind == "openai-compatible" {
 		return "openai"
 	}
 	return strings.ToLower(kind)
+}
+
+func outputBytes(raw []byte) int64 {
+	var fields struct {
+		Choices []struct {
+			Delta   map[string]json.RawMessage
+			Message map[string]json.RawMessage
+		}
+	}
+	if json.Unmarshal(raw, &fields) != nil {
+		return 0
+	}
+	var total int64
+	var count func(any)
+	count = func(value any) {
+		switch v := value.(type) {
+		case string:
+			total += int64(len(v))
+		case []any:
+			for _, x := range v {
+				count(x)
+			}
+		case map[string]any:
+			for _, x := range v {
+				count(x)
+			}
+		}
+	}
+	for _, c := range fields.Choices {
+		m := c.Delta
+		if m == nil {
+			m = c.Message
+		}
+		for _, name := range []string{"content", "tool_calls", "function_call", "reasoning_content", "reasoning"} {
+			if value, ok := m[name]; ok {
+				var decoded any
+				if json.Unmarshal(value, &decoded) == nil {
+					count(decoded)
+				}
+			}
+		}
+	}
+	return total
 }

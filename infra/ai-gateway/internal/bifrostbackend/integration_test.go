@@ -23,7 +23,8 @@ func TestPostgresMemberKeyBudgetsRPMRevocationAndUsage(t *testing.T) {
 		t.Fatal(e)
 	}
 	password := rand.Text() + rand.Text()
-	b, e := New(db, hex.EncodeToString(master), password, true)
+	memberPassword := rand.Text() + rand.Text()
+	b, e := New(db, hex.EncodeToString(master), password, memberPassword, true)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -109,7 +110,11 @@ func TestPostgresMemberKeyBudgetsRPMRevocationAndUsage(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer "+key)
 		}
 		if admin {
-			r.SetBasicAuth("auriga", password)
+			if key != "" || path == "/internal/members/ensure" {
+				r.SetBasicAuth("auriga-member", memberPassword)
+			} else {
+				r.SetBasicAuth("auriga", password)
+			}
 			r.Header.Set("X-Auriga-Tenant", tid)
 			if key != "" {
 				r.Header.Set("X-Bf-Vk", key)

@@ -1,4 +1,5 @@
 {
+  "accessFile": "/etc/auriga/access.json",
   "listen": "0.0.0.0:8080",
   "privateNetwork": true,
   "adminPasswordFile": "/run/secrets/bifrost_admin_password",
@@ -13,5 +14,6 @@
     "passwordFile": "/run/secrets/bifrost_pg_password",
     "migrationPasswordFile": "/run/secrets/bifrost_pg_migration_password",
     "sslMode": "disable"
-  }
+  },
+  "memberPasswordFile": "/run/secrets/bifrost_member_password"
 }

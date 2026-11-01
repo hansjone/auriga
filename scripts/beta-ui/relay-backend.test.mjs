@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { configuration } from './runner.mjs';
 
-function fixture(litellm) {
+function fixture(relay) {
   const ports = Object.fromEntries(
     [
       'portal',
@@ -16,7 +16,6 @@ function fixture(litellm) {
       'networkSubmit',
       'networkBroker',
       'networkWebsocket',
-      'litellmUI',
     ].map((name, index) => [name, 18000 + index]),
   );
   const roles = {
@@ -31,7 +30,7 @@ function fixture(litellm) {
   );
   return configuration(
     path.resolve('.private-fixture'),
-    { ports, roles, database: 'fixture', pgPort: 15432, litellm },
+    { ports, roles, database: 'fixture', pgPort: 15432, relay },
     secrets,
   );
 }
@@ -46,17 +45,17 @@ test('Beta without LiteLLM has no old relay runtime or admin upstream', () => {
 test('Beta uses the service key file and retains independent network control RPCs', () => {
   const connection = {
     origin: 'http://127.0.0.1:14000',
-    teamKeyFile: '/private/team.key',
+    memberPasswordFile: '/private/member.key',
+    adminPasswordFile: '/private/admin.key',
   };
   const cfg = fixture(connection);
-  assert.equal(cfg.edge.litellmOrigin, connection.origin);
-  assert.equal(cfg.edge.litellmUI.origin.port, 18009);
-  assert.notDeepEqual(cfg.edge.litellmUI.origin, cfg.access.adminOrigin);
-  assert.equal(cfg.edge.litellmUI.listener.port, 18009);
+  assert.deepEqual(cfg.edge.relay, {
+    origin: connection.origin,
+    adminPasswordFile: connection.adminPasswordFile,
+  });
+  assert.equal(cfg.ai.memberPasswordFile, connection.memberPasswordFile);
+  assert.equal(cfg.ai.adminPasswordFile, undefined);
   assert.equal(cfg.ai.origin, connection.origin);
-  assert.equal(cfg.ai.keyFile, connection.teamKeyFile);
-  assert.equal(cfg.ai.masterKeyFile, undefined);
-  assert.equal(cfg.ai.store, undefined);
   assert.equal(
     cfg.ai.iam.ServiceTokenFile,
     cfg.networkOptions.iam.ServiceTokenFile,

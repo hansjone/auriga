@@ -212,31 +212,25 @@ export function configuration(state, manifest, secrets) {
     CAFile: p('tls/ca.pem'),
     ServerName: 'platform.beta.internal',
   };
-  const ai = manifest.litellm
+  const ai = manifest.relay
     ? {
         listen: `127.0.0.1:${ports.ai}`,
-        origin: manifest.litellm.origin,
-        keyFile: manifest.litellm.teamKeyFile,
+        origin: manifest.relay.origin,
+        memberPasswordFile: manifest.relay.memberPasswordFile,
+        memberPolicy: {
+          monthlyBudgetMicros: 100000000,
+          requestsPerMinute: 60,
+          maxConcurrency: 16,
+          maxInFlightTokens: 67108864,
+        },
         iam: gatewayRPC,
         org: gatewayRPC,
       }
     : undefined;
-  if (manifest.litellm) {
-    if (
-      !Number.isSafeInteger(ports.litellmUI) ||
-      ports.litellmUI < 1 ||
-      ports.litellmUI > 65535 ||
-      Object.entries(ports).some(
-        ([name, value]) => name !== 'litellmUI' && value === ports.litellmUI,
-      )
-    )
-      throw new Error(
-        'Independent LiteLLM UI port missing; use a fresh Beta StateDir',
-      );
-    edge.litellmOrigin = manifest.litellm.origin;
-    edge.litellmUI = {
-      origin: origin(ports.litellmUI),
-      listener: { address: '127.0.0.1', port: ports.litellmUI, tls: false },
+  if (manifest.relay) {
+    edge.relay = {
+      origin: manifest.relay.origin,
+      adminPasswordFile: manifest.relay.adminPasswordFile,
     };
     edge.upstreams['ai-device'] = `http://127.0.0.1:${ports.ai}`;
   }
@@ -335,7 +329,6 @@ function initialize(state, pgPort) {
       networkBroker: 18085,
       networkWebsocket: 18086,
       networkSubmit: 18087,
-      litellmUI: 18088,
     },
   };
   const secrets = Object.fromEntries(
@@ -757,9 +750,9 @@ export async function startServices(state, manifest) {
     )
       throw new Error('Invalid IAM public JWKS');
     json(path.join(state, 'jwks.json'), jwks);
-    if (manifest.litellm)
+    if (manifest.relay)
       launch('ai', path.join(state, 'bin/ai-gateway.exe'), [
-        '--litellm-config',
+        '--bifrost-config',
         path.join(state, 'ai.json'),
       ]);
     launch('network-broker', path.join(state, 'bin/network-broker.exe'), [
@@ -797,7 +790,7 @@ export async function startServices(state, manifest) {
         const admin = await fetch(`http://127.0.0.1:${manifest.ports.admin}/`, {
           signal: AbortSignal.timeout(2000),
         });
-        if (!manifest.litellm) return admin.ok;
+        if (!manifest.relay) return admin.ok;
         const ai = await fetch(
           `http://127.0.0.1:${manifest.ports.ai}/ai/v1/models`,
           { signal: AbortSignal.timeout(2000) },
@@ -923,7 +916,7 @@ export async function main(args) {
         }
         return;
       }
-      case 'litellm': {
+      case 'relay': {
         const origin = new URL(values['--origin']);
         if (
           !['http:', 'https:'].includes(origin.protocol) ||
@@ -933,17 +926,24 @@ export async function main(args) {
           origin.search ||
           origin.hash
         )
-          throw new Error('LiteLLM must be a fixed origin');
+          throw new Error('Relay must be a fixed origin');
         if (
           origin.protocol === 'http:' &&
           !['127.0.0.1', '[::1]'].includes(origin.hostname)
         )
-          throw new Error('Plain HTTP LiteLLM requires numeric loopback');
-        const teamKeyFile = path.resolve(values['--team-key-file']);
-        privatePath(teamKeyFile);
-        manifest.litellm = {
+          throw new Error('Plain HTTP relay requires numeric loopback');
+        const adminPasswordFile = path.resolve(values['--admin-password-file']);
+        const memberPasswordFile = path.resolve(
+          values['--member-password-file'],
+        );
+        if (adminPasswordFile === memberPasswordFile)
+          throw new Error('Relay credentials must be distinct');
+        privatePath(adminPasswordFile);
+        privatePath(memberPasswordFile);
+        manifest.relay = {
           origin: origin.origin,
-          teamKeyFile: unix(teamKeyFile),
+          adminPasswordFile: unix(adminPasswordFile),
+          memberPasswordFile: unix(memberPasswordFile),
         };
         json(path.join(state, 'installation.json'), manifest);
         writeConfiguration(

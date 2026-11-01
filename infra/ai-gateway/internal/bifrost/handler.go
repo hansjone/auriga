@@ -47,7 +47,7 @@ func New(origin, keyFile string, policy MemberPolicy, authenticate Authenticate)
 	}
 	return &Handler{target: u, client: client, authenticate: authenticate, transport: &http.Transport{
 		Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 60 * time.Second, IdleConnTimeout: 60 * time.Second, MaxIdleConnsPerHost: 32,
+		TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 165 * time.Second, IdleConnTimeout: 60 * time.Second, MaxIdleConnsPerHost: 32,
 	}}, nil
 }
 func (h *Handler) Close() { h.transport.CloseIdleConnections(); h.client.Close() }
@@ -188,7 +188,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			pr.Out.Header.Set("traceparent", observability.Parent(pr.In.Context()))
 			pr.Out.Header.Set("Content-Type", "application/json")
-			pr.Out.SetBasicAuth("auriga", password)
+			pr.Out.SetBasicAuth("auriga-member", password)
 			pr.Out.Header.Set("X-Bf-Vk", key)
 			pr.Out.Header.Set("X-Auriga-Device", actor.Device)
 		},

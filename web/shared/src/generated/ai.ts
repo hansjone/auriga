@@ -723,6 +723,16 @@ export interface components {
       /** Format: int64 */
       requestsPerMinute: number;
       models: string[];
+      /**
+       * Format: int64
+       * @description 每个Key同时执行的请求上限。成员默认16，对外Key默认32。
+       */
+      maxConcurrency?: number;
+      /**
+       * Format: int64
+       * @description 每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。
+       */
+      maxInFlightTokens?: number;
     };
     RelayKey: {
       /** Format: uuid */
@@ -737,6 +747,16 @@ export interface components {
       /** Format: int64 */
       requestsPerMinute: number;
       models: string[];
+      /**
+       * Format: int64
+       * @description 每个Key同时执行的请求上限。成员默认16，对外Key默认32。
+       */
+      maxConcurrency?: number;
+      /**
+       * Format: int64
+       * @description 每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。
+       */
+      maxInFlightTokens?: number;
     };
     RelayKeyIssued: {
       key: components['schemas']['RelayKey'];
@@ -752,6 +772,16 @@ export interface components {
       monthlyBudgetMicros: number;
       /** Format: int64 */
       requestsPerMinute: number;
+      /**
+       * Format: int64
+       * @description 每个Key同时执行的请求上限。成员默认16，对外Key默认32。
+       */
+      maxConcurrency?: number;
+      /**
+       * Format: int64
+       * @description 每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。
+       */
+      maxInFlightTokens?: number;
     };
     RelayProvider: {
       /** Format: uuid */
@@ -761,12 +791,18 @@ export interface components {
     };
     RelayProviderPage: {
       items: components['schemas']['RelayProvider'][];
+      /** @description 后续页游标，绑定当前租户和资源。 */
+      nextCursor?: string;
     };
     RelayPoolPage: {
       items: components['schemas']['RelayPool'][];
+      /** @description 后续页游标，绑定当前租户和资源。 */
+      nextCursor?: string;
     };
     RelayKeyPage: {
       items: components['schemas']['RelayKey'][];
+      /** @description 后续页游标，绑定当前租户和资源。 */
+      nextCursor?: string;
     };
     /** @description 第一步供应商配置。网络期限与并发由中转服务固定安全上限控制，不接受尚未映射的高级参数。 */
     RelayProviderInput: {
@@ -2947,7 +2983,11 @@ export interface operations {
   };
   listRelayProviders: {
     parameters: {
-      query?: never;
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -3299,7 +3339,11 @@ export interface operations {
   };
   listRelayPools: {
     parameters: {
-      query?: never;
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -3471,7 +3515,11 @@ export interface operations {
   };
   listRelayKeys: {
     parameters: {
-      query?: never;
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;

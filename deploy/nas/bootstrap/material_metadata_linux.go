@@ -45,7 +45,7 @@ func openNASDirectory(parent int, name string, source bool) (*os.File, error) {
 	}
 	f := os.NewFile(uintptr(fd), name)
 	if unix.Fstat(fd, &opened) != nil || unix.Fstatat(parent, name, &after, unix.AT_SYMLINK_NOFOLLOW) != nil || !valid(opened) || !sameNASMetadata(before, opened) || !sameNASMetadata(opened, after) {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("changed NAS source directory")
 	}
 	return f, nil
@@ -62,7 +62,7 @@ func openNASSourceRoot(path string) (*os.File, error) {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for i, part := range parts {
 		next, err := openNASDirectory(int(current.Fd()), part, i == len(parts)-1)
-		current.Close()
+		_ = current.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +134,7 @@ func (g *nasMaterialGuard) pinRuntimeProof(name string) error {
 
 func (g *nasMaterialGuard) Close() {
 	for _, dir := range g.dirs {
-		dir.Close()
+		_ = dir.Close()
 	}
 }
 
@@ -143,7 +143,7 @@ func (g *nasMaterialGuard) Validate(allowMissing bool) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	var held, current unix.Stat_t
 	if unix.Fstat(int(g.dirs[""].Fd()), &held) != nil || unix.Fstat(int(root.Fd()), &current) != nil || !sameNASMetadata(held, current) {
 		return fmt.Errorf("changed NAS source root")
@@ -158,7 +158,7 @@ func (g *nasMaterialGuard) Validate(allowMissing bool) error {
 			return err
 		}
 		statErr := unix.Fstat(int(dir.Fd()), &current)
-		dir.Close()
+		_ = dir.Close()
 		if statErr != nil || unix.Fstat(int(heldDir.Fd()), &held) != nil || !sameNASMetadata(held, current) {
 			return fmt.Errorf("changed NAS source child directory")
 		}
@@ -223,7 +223,7 @@ func (g *nasMaterialGuard) Validate(allowMissing bool) error {
 			return fmt.Errorf("open NAS source leaf: %s", name)
 		}
 		statErr := unix.Fstat(fd, &opened)
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		if statErr != nil || unix.Fstatat(int(dir.Fd()), leaf, &after, unix.AT_SYMLINK_NOFOLLOW) != nil || !valid(opened) || !valid(after) || !sameNASMetadata(before, opened) || !sameNASMetadata(opened, after) {
 			return fmt.Errorf("changed NAS source leaf: %s", name)
 		}

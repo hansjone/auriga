@@ -193,7 +193,7 @@ func verifyNASCollabBase(base string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer binary.Close()
+	defer func() { _ = binary.Close() }()
 	cmd := exec.Command("/proc/self/fd/3", "collab-base", base)
 	cmd.ExtraFiles = []*os.File{binary}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 10001, Gid: 10001, Groups: []uint32{10001}}}

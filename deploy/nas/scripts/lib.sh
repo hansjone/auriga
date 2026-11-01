@@ -561,10 +561,11 @@ install_bifrost_materials() (
     chown_required 0:0 "$_runtime_dir"
     chmod 0700 "$_runtime_dir"
   fi
-  for _name in admin_password encryption_key pg_password pg_migration_password; do
+  for _name in admin_password member_password encryption_key pg_password pg_migration_password; do
     case "$_name" in
       encryption_key) _owner=10001:10003 ;;
       admin_password) _owner=10001:10005 ;;
+        member_password) _owner=10001:10006 ;;
       pg_password|pg_migration_password) _owner=999:999 ;;
     esac
     _source="$_source_dir/$_name"; _target="$_runtime_dir/$_name"

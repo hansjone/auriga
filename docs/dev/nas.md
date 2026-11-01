@@ -160,7 +160,7 @@ sh deploy-nas/scripts/load-images.sh "$PWD"
 mkdir -p /srv/container/auriga-test
 cp deploy-nas/env.example /srv/container/auriga-test/stack.env
 cp deploy-nas/access-ip.example.json /srv/container/auriga-access.json
-# 将 loader 输出的三条 AURIGA_IMAGE_* 和上面已准备的三个基础镜像引用填入 stack.env；另按 LiteLLM 指南预载固定镜像。
+# 将 loader 输出的三条 AURIGA_IMAGE_* 和上面已准备的三个基础镜像引用填入 stack.env；另预载 Bifrost 与 operator 的审核镜像。
 # 再编辑上述两份文件，七项镜像都必须已经在本机且为 linux/amd64。
 # 若正式 runtime image 的已批准 locator 使用 127.0.0.1:50123，
 # 签发/审批前就把 AURIGA_HOST_PUBLISH_REGISTRY 设为 50123（示例默认15000）。
@@ -239,7 +239,7 @@ IP 部署可选择公开 `scripts/admin-bootstrap.sh`，在已运行 edge 的网
 listener/虚拟主机选择，不发送 Forwarded、X-Forwarded-For 或任何伪造来源头，不改数据库。
 当前脚本明确只接受 IP 模式；HTTPS 不跳过证书校验，可读取该部署的公开浏览器证书链。
 
-helper 复用已独立批准并加载的精确 LiteLLM 镜像中的 Python 3/cryptography，以10001身份、
+helper 使用已独立批准并加载的精确 operator 镜像中的 Python 3/cryptography，以10001身份、
 cap-drop ALL、只读根运行。仅只读挂脚本、access、enrollment、收件公钥及可选公开证书，
 不挂 Docker socket、私钥、模型 Key 或整个数据根。普通 NAS operator 无须 sudo。
 
@@ -433,4 +433,8 @@ AURIGA_MOUNT_TEST_IMAGE=sha256:<platform-image-id> \
 
 后3条真实权限/安装交叉测试须在独立Linux root测试环境运行；非root普通Go测试具名跳过固定uid安装，自动CI另有强制root步骤，不能以skip当通过。NAS脚本/Go负例在自动PR E2E中运行，不只在手动bundle workflow。smoke检查真实浏览器URL、mTLS健康与未登录拒绝；没有完整E2E hook时仍exit2/PARTIAL。静态Compose、配置加载或本机测试不等于真实NAS网络、浏览器登录、real DSH心跳或IP3完整验收。
 
-???????????????? Key ?????? [LiteLLM ?????](relay-litellm.md)?
+模型、外部 Key 与用量配置见 [Bifrost 中转站](../architecture/relay-bifrost.zh.md)。
+
+## 已有数据库卷接入中转站
+
+不依赖 postgres entrypoint 的首次初始化。先核验安装材料中五份 Bifrost 秘密和审核镜像，确认原 PostgreSQL 健康，然后运行 `sh scripts/upgrade-bifrost.sh`（在 NAS 发布包根目录）。它以一次性 helper 连接原库，幂等创建角色/库/schema，保留既有数据与密码，并撤销运行账号对迁移历史表的写权限。错误 owner 或特权角色立即失败，不能通过清卷绕过。再按原部署流程更新服务。原测试中转库、角色、秘密和旧发布材料不自动删除，由主控按保留证据另行批准清理。

@@ -58,13 +58,15 @@ test('managed model acceptance uses the installed provider and a fresh member-at
     },
   };
   const api = async (path) => {
-    assert.ok(path.startsWith('spend/logs?'));
-    return [
-      { request_id: 'old', end_user: 'tenant:member', total_tokens: 8 },
-      ...(generated
-        ? [{ request_id: 'new', end_user: 'tenant:member', total_tokens: 3 }]
-        : []),
-    ];
+    assert.ok(path.startsWith('logs?accountId=member&'));
+    return {
+      items: [
+        { requestId: 'old', inputTokens: 5, outputTokens: 3 },
+        ...(generated
+          ? [{ requestId: 'new', inputTokens: 2, outputTokens: 1 }]
+          : []),
+      ],
+    };
   };
   const result = await managedConversation(client, api, {
     baseUrl: 'https://platform.internal:18446/ai/v1',

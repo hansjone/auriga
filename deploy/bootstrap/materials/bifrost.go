@@ -12,7 +12,7 @@ import (
 // EnsureBifrostSecrets never rotates a key or repairs a partial installation.
 // The caller owns this private directory independently of the network receipt.
 func EnsureBifrostSecrets(dir string, fresh ...bool) error {
-	names := []string{"admin_password", "encryption_key", "pg_password", "pg_migration_password"}
+	names := []string{"admin_password", "member_password", "encryption_key", "pg_password", "pg_migration_password"}
 	info, err := os.Lstat(dir)
 	if err == nil {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -32,6 +32,11 @@ func EnsureBifrostSecrets(dir string, fresh ...bool) error {
 			}
 			b, e := os.ReadFile(filepath.Join(dir, name))
 			if e != nil || len(b) < 64 || len(b) > 68 || strings.ContainsAny(string(b), " \r\n\t") {
+				return errors.New("invalid Bifrost secret")
+			}
+			decoded, decodeErr := hex.DecodeString(string(b))
+			clear(decoded)
+			if decodeErr != nil || len(decoded) != 32 {
 				return errors.New("invalid Bifrost secret")
 			}
 		}

@@ -638,7 +638,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// 实例配额。调用方：workspace；模型预算已由 LiteLLM customer 预算取代。
+// 实例配额。调用方：workspace；模型预算已由 中转站成员 Key 预算取代。
 type QuotaServiceClient interface {
 	// 按 成员覆盖 → 组 → 租户默认 合并后的结果。
 	GetEffectiveQuota(ctx context.Context, in *GetEffectiveQuotaRequest, opts ...grpc.CallOption) (*GetEffectiveQuotaResponse, error)
@@ -666,7 +666,7 @@ func (c *quotaServiceClient) GetEffectiveQuota(ctx context.Context, in *GetEffec
 // All implementations must embed UnimplementedQuotaServiceServer
 // for forward compatibility.
 //
-// 实例配额。调用方：workspace；模型预算已由 LiteLLM customer 预算取代。
+// 实例配额。调用方：workspace；模型预算已由 中转站成员 Key 预算取代。
 type QuotaServiceServer interface {
 	// 按 成员覆盖 → 组 → 租户默认 合并后的结果。
 	GetEffectiveQuota(context.Context, *GetEffectiveQuotaRequest) (*GetEffectiveQuotaResponse, error)

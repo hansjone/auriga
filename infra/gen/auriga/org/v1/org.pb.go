@@ -1485,7 +1485,7 @@ func (x *GetEffectiveQuotaResponse) GetQuota() *Quota {
 type Quota struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Instance *InstanceQuota         `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
-	// 仅保留协议兼容：已由 LiteLLM customer 预算取代，服务拒绝写入且不读取。
+	// 仅保留协议兼容：已由 中转站成员 Key 预算取代，服务拒绝写入且不读取。
 	//
 	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 	Model         *ModelQuota `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
@@ -1617,7 +1617,7 @@ func (x *InstanceQuota) GetAlwaysOnAllowed() bool {
 	return false
 }
 
-// 仅保留协议兼容，已由 LiteLLM customer 预算取代；服务拒绝写入且不读取。
+// 仅保留协议兼容，已由 中转站成员 Key 预算取代；服务拒绝写入且不读取。
 //
 // Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 type ModelQuota struct {

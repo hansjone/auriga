@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
+	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
 
 type PostgreSQL struct {
@@ -28,8 +29,10 @@ type PostgreSQL struct {
 	SSLMode               string `json:"sslMode"`
 }
 type Config struct {
+	AccessFile            string     `json:"accessFile"`
 	Listen                string     `json:"listen"`
 	PrivateNetwork        bool       `json:"privateNetwork"`
+	MemberPasswordFile    string     `json:"memberPasswordFile"`
 	AdminPasswordFile     string     `json:"adminPasswordFile"`
 	EncryptionKeyFile     string     `json:"encryptionKeyFile"`
 	PostgreSQL            PostgreSQL `json:"postgres"`
@@ -85,6 +88,14 @@ func Serve(ctx context.Context, path string) error {
 	if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF {
 		return errors.New("invalid relay configuration")
 	}
+	accessData, e := os.ReadFile(c.AccessFile)
+	if e != nil {
+		return errors.New("relay deployment identity unavailable")
+	}
+	access, e := deploymentconfig.Load(accessData)
+	if e != nil {
+		return errors.New("invalid relay deployment identity")
+	}
 	host, _, e := net.SplitHostPort(c.Listen)
 	if e != nil {
 		return errors.New("invalid relay listener")
@@ -94,6 +105,10 @@ func Serve(ctx context.Context, path string) error {
 		return errors.New("relay listener requires an explicit private network")
 	}
 	admin, e := readSecret(c.AdminPasswordFile)
+	if e != nil {
+		return e
+	}
+	memberPassword, e := readSecret(c.MemberPasswordFile)
 	if e != nil {
 		return e
 	}
@@ -127,10 +142,15 @@ func Serve(ctx context.Context, path string) error {
 		return e
 	}
 	defer db.Close()
-	backend, e := New(db, master, admin, c.AllowPrivateProviders)
+	backend, e := New(db, master, admin, memberPassword, c.AllowPrivateProviders)
 	if e != nil {
 		return e
 	}
+	backend.tenant = access.TenantID()
+	recoveryCtx, stopRecovery := context.WithCancel(ctx)
+	recoveryDone := make(chan struct{})
+	go func() { defer close(recoveryDone); backend.recoveryLoop(recoveryCtx) }()
+	defer func() { stopRecovery(); <-recoveryDone }()
 	listener, e := net.Listen("tcp", c.Listen)
 	if e != nil {
 		return errors.New("relay listener unavailable")

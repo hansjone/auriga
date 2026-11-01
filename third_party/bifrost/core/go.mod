@@ -1,3 +1,5 @@
+// Auriga modifications: trimmed relay core/providers; see third_party/bifrost/UPSTREAM.md.
+
 module github.com/maximhq/bifrost/core
 
 go 1.27.3
