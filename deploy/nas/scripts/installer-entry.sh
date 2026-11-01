@@ -16,6 +16,13 @@ if [ -e "$(marker_path)" ] || [ "${1:-}" != init ]; then
   done
 fi
 case "${1:-}" in
+  collab-publish|collab-install|collab-status|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired)
+    _action=${1#collab-}
+    set -- "$_action" -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"
+    [ "$_action" = path ] || set -- "$@" -image "${AURIGA_IMAGE_PLATFORM:?}"
+    [ "$_action" = path ] || set -- "$@" -operator-jar-sha256 "${AURIGA_COLLAB_OPERATOR_JAR_SHA256:-}"
+    [ -z "${NAS_COLLAB_ROTATION_INPUT:-}" ] || set -- "$@" -input "$NAS_COLLAB_ROTATION_INPUT"
+    exec "$(bootstrap_binary)" collab-rotation "$@" ;;
   runtime-path|runtime-stage|runtime-commit|runtime-rollback)
     _action=${1#runtime-}
     set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source"
@@ -47,18 +54,22 @@ case "${1:-}" in
     # The host operator cannot traverse root's private collab source. Export a
     # checked decision alongside the already protected env stream, never keys.
     _collab=0
+    _rotation=
     _source="$AURIGA_DATA_ROOT/config/collab-source"
     if [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
       "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
         -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2
       _collab=1
+      _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT")
     fi
     _export=$(mktemp -d)
     trap 'rm -rf -- "$_export"' EXIT
     printf '%s\n' "$_collab" >"$_export/collab.enabled"
     runtime_directory >"$_export/runtime.path"
     chmod 0600 "$_export/collab.enabled"
+    printf '%s' "$_rotation" >"$_export/collab.rotation.path"
+    chmod 0600 "$_export/collab.rotation.path"
     tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env \
-      -C "$_export" collab.enabled runtime.path ;;
+      -C "$_export" collab.enabled collab.rotation.path runtime.path ;;
   *) die 'unsupported installer operation' ;;
 esac

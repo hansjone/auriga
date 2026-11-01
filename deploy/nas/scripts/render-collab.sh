@@ -6,13 +6,15 @@ case "${1:-}" in ''|--initialize|--stopped) ;; *) die 'invalid collab render ope
 _source="$AURIGA_DATA_ROOT/config/collab-source"
 _boot=$(bootstrap_binary)
 _input=${AURIGA_COLLAB_INPUT_DIR:-}
+_rotation=
 if [ -n "$_input" ]; then
   case "$_input" in /*) ;; *) die 'AURIGA_COLLAB_INPUT_DIR must be canonical absolute' ;; esac
   [ -d "$_input" ] && [ ! -L "$_input" ] && [ "$(readlink -f -- "$_input")" = "$_input" ] || die 'invalid collab approval directory'
 fi
 if [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
   "$_boot" collab -base "$AURIGA_DATA_ROOT/config/materials" -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check
-  if [ -n "$_input" ]; then "$_boot" collab -base "$AURIGA_DATA_ROOT/config/materials" -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -input "$_input/input.json"; fi
+  _rotation=$("$_boot" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT")
+  if [ -z "$_rotation" ] && [ -n "$_input" ]; then "$_boot" collab -base "$AURIGA_DATA_ROOT/config/materials" -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -input "$_input/input.json"; fi
 elif [ -n "$_input" ]; then
   case "${1:-}" in
     --initialize) [ ! -e "$(marker_path)" ] || die 'existing installation requires activate-collab.sh' ;;
@@ -23,7 +25,13 @@ elif [ -n "$_input" ]; then
 else
   exit 0
 fi
-sh "$NAS_ROOT/scripts/collab-materials.sh" "$_source" "$AURIGA_DATA_ROOT/config/collab-runtime"
+if [ -n "$_rotation" ]; then
+  sh "$NAS_ROOT/scripts/collab-materials.sh" "$_source" "$AURIGA_DATA_ROOT/config/collab-runtime" --rotated
+  _gateway="$_rotation/network/runtime.json"
+else
+  sh "$NAS_ROOT/scripts/collab-materials.sh" "$_source" "$AURIGA_DATA_ROOT/config/collab-runtime"
+  _gateway="$AURIGA_DATA_ROOT/config/collab-runtime/network/runtime.json"
+fi
 # Public policy projections are separate from all sealed/byte-exact materials.
 _policy="$AURIGA_DATA_ROOT/config/network-policy"
 if [ -e "$_policy" ] || [ -L "$_policy" ]; then
@@ -31,7 +39,7 @@ if [ -e "$_policy" ] || [ -L "$_policy" ]; then
 else
   mkdir "$_policy"; chown 0:0 "$_policy"; chmod 0755 "$_policy"
 fi
-"$_boot" network-budget -runtime "$AURIGA_DATA_ROOT/config/collab-runtime/network/runtime.json" -broker "$AURIGA_DATA_ROOT/config/materials/network/broker.conf" -out-runtime "$_policy/runtime.json" -out-broker "$_policy/broker.conf" -operation-ms "${AURIGA_NETWORK_OPERATION_TIMEOUT_MS:-30000}"
+"$_boot" network-budget -runtime "$_gateway" -broker "$AURIGA_DATA_ROOT/config/materials/network/broker.conf" -out-runtime "$_policy/runtime.json" -out-broker "$_policy/broker.conf" -operation-ms "${AURIGA_NETWORK_OPERATION_TIMEOUT_MS:-30000}"
 
 if [ -e "$AURIGA_DATA_ROOT/collab-tokens" ] || [ -L "$AURIGA_DATA_ROOT/collab-tokens" ]; then
   [ -d "$AURIGA_DATA_ROOT/collab-tokens" ] && [ ! -L "$AURIGA_DATA_ROOT/collab-tokens" ] \

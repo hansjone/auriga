@@ -3,12 +3,16 @@
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
-  init|render|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback) operation=$1 ;;
+  init|render|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
 upgrade_image=
+rotation_input=
 case "$operation" in
+  collab-publish|collab-install|collab-recover-expired)
+    [ "$#" = 2 ] || die 'collab rotation requires an approved directory'
+    rotation_input=$2 ;;
   runtime-stage|runtime-commit|runtime-rollback)
     [ "$#" = 3 ] || die 'runtime operation requires bundle and exact image'
     upgrade_bundle=$2; upgrade_image=$3 ;;
@@ -57,8 +61,26 @@ if [ -n "$upgrade_bundle" ]; then
   validate_input_path "$upgrade_bundle"
   set -- "$@" --mount "type=bind,src=$upgrade_bundle,dst=$upgrade_bundle,readonly"
 fi
+if [ -n "$rotation_input" ]; then
+  case "$rotation_input" in
+    "$AURIGA_DATA_ROOT/config/collab-operations/requests/"*)
+      # The host operator cannot traverse root's private archive. Only a single
+      # canonical version component is admitted here; the root bootstrap checks
+      # every ancestor, inode, owner, permission and material before use.
+      _request_version=${rotation_input#"$AURIGA_DATA_ROOT/config/collab-operations/requests/"}
+      case "$_request_version" in ''|0*|*[!0-9]*) die 'noncanonical collab request' ;; esac ;;
+    *) validate_input_path "$rotation_input"
+       set -- "$@" --mount "type=bind,src=$rotation_input,dst=$rotation_input,readonly" ;;
+  esac
+fi
+case "$operation" in
+  collab-publish|collab-install|collab-status|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired)
+    set -- "$@" --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+      --label auriga.nas.rotation.controller=true ;;
+esac
 # A bootstrap located inside the writable root was already rejected above.
-# No socket, host parent, host root, or network is exposed to this helper.
+# Only explicit collab operations receive the local socket. Normal offline
+# installation/render helpers still receive neither a socket nor a network.
 (
   umask 077
   _run_tmp=$(installer_private_dir installer)
@@ -82,5 +104,6 @@ fi
     "$@" --env "NAS_ROOT=$NAS_ROOT" --env "AURIGA_DATA_ROOT=$AURIGA_DATA_ROOT" \
     --env "AURIGA_NAS_BOOTSTRAP_BINARY=$_boot" --env NAS_INSTALLER_ACTIVE=1 \
     --env "NAS_RUNTIME_UPGRADE_BUNDLE=$upgrade_bundle" --env "NAS_RUNTIME_UPGRADE_IMAGE=$upgrade_image" \
+    --env "NAS_COLLAB_ROTATION_INPUT=$rotation_input" \
     --entrypoint /bin/sh "$_image" "$NAS_ROOT/scripts/installer-entry.sh" "$operation"
 )

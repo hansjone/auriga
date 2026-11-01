@@ -160,6 +160,238 @@ class NetworkKeyOperatorPostgresTest {
     return p;
   }
 
+  ObjectNode expiredPayload(Instant now) {
+    var old = m.payload(1, now.minusSeconds(26 * 3600));
+    old.put("valid_until", now.minusSeconds(7200).toString());
+    for (var key : old.path("keys"))
+      ((ObjectNode) key)
+          .put("not_before", now.minusSeconds(26 * 3600).toString())
+          .put("not_after", now.minusSeconds(7200).toString());
+    return old;
+  }
+
+  ObjectNode recoveryPayload(ObjectNode old, Instant now, Map<String, KeyPair> pairs) {
+    var payload = next(old, 2, now, pairs, true);
+    for (var key : payload.path("keys"))
+      if (pairs.containsKey(key.path("kid").asString()))
+        ((ObjectNode) key)
+            .put("state", "active")
+            .put("not_before", now.toString())
+            .put("not_after", now.plusSeconds(7 * 86400).toString());
+    return payload;
+  }
+
+  @Test
+  void authorizedExpiredRecoveryKeepsHistoryAndUsesRealNewFirstPublication() throws Exception {
+    Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    var old = expiredPayload(now);
+    var first = initial(old);
+    var pairs =
+        Map.of(
+            "new-business",
+            KeyTestMaterial.pair(),
+            "new-protocol",
+            KeyTestMaterial.pair(),
+            "new-management",
+            KeyTestMaterial.pair());
+    var payload = recoveryPayload(old, now, pairs);
+    var release = m.release(payload);
+    var op = operator(now);
+    byte[] original = Files.readAllBytes(settings("1").stateFile());
+    assertThrows(
+        RuntimeException.class,
+        () -> op.publish(first, release),
+        "normal publication cannot inherit the exception");
+    op.preflightExpiredRecovery(first, release);
+    assertEquals("1", op.status(first).path("version").asString());
+    var status = op.recoverExpired(first, release);
+    for (String kid : pairs.keySet())
+      assertEquals(now.toString(), status.path("firstPublished").path(kid).asString());
+    assertArrayEquals(original, Files.readAllBytes(settings("1").stateFile()));
+    op.install(release, settings("1").stateFile(), secrets(pairs));
+    try (var loaded =
+        SigningKeyLoader.load(
+            payload,
+            settings("1").stateFile(),
+            secrets(pairs),
+            clock(now),
+            (keys, signature) ->
+                new NetworkKeyOperations(
+                        new JdbcTemplate(source),
+                        new TenantTransactionManager(source),
+                        tenant,
+                        "2",
+                        m.verifier(clock(now)),
+                        "1",
+                        clock(now))
+                    .signApproved(keys.publicKeysJson("2"), signature))) {
+      assertEquals(NetworkJson.canonical(payload), loaded.publicKeysJson("2"));
+    }
+    for (int i = 0; i < 3; i++)
+      for (String field :
+          new String[] {"kid", "alg", "purpose", "public_key_spki", "not_before", "not_after"})
+        assertEquals(old.path("keys").get(i).path(field), payload.path("keys").get(i).path(field));
+  }
+
+  @Test
+  @EnabledIfSystemProperty(named = "auriga.operator.jar", matches = ".+")
+  void packagedExpiredRecoveryPreflightsRollsBackAndCommitsCurrentFirstPublication()
+      throws Exception {
+    Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    var old = expiredPayload(now);
+    var first = initial(old);
+    var pairs =
+        Map.of(
+            "new-business",
+            KeyTestMaterial.pair(),
+            "new-protocol",
+            KeyTestMaterial.pair(),
+            "new-management",
+            KeyTestMaterial.pair());
+    var candidate = m.release(recoveryPayload(old, now, pairs));
+    Path previous =
+        protectedFile(
+            directory.resolve("old-signed.json"),
+            first.signedKeyset().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    Path previousAnn =
+        protectedFile(
+            directory.resolve("old-announcement.json"),
+            first.announcement().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    Path signed =
+        protectedFile(
+            directory.resolve("new-signed.json"),
+            candidate.signedKeyset().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    Path ann =
+        protectedFile(
+            directory.resolve("new-announcement.json"),
+            candidate.announcement().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var data = (org.postgresql.ds.PGSimpleDataSource) source;
+    String prefix = "auriga.collab.network.key-operations.";
+    String properties =
+        "spring.datasource.url="
+            + data.getURL()
+            + "\nspring.datasource.username="
+            + data.getUser()
+            + "\nspring.datasource.password="
+            + data.getPassword()
+            + "\n"
+            + prefix
+            + "tenant-id="
+            + tenant
+            + "\n"
+            + prefix
+            + "realm=2\n"
+            + prefix
+            + "root-kid=root\n"
+            + prefix
+            + "root-fingerprint="
+            + RootKeyPublication.fingerprint(m.root.getPublic())
+            + "\n"
+            + prefix
+            + "minimum-version=1\n";
+    Path config =
+        protectedFile(
+            directory.resolve("recovery.properties"),
+            properties.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var plan =
+        KeyTestMaterial.JSON
+            .createObjectNode()
+            .put("configFile", config.toString())
+            .put("rootFile", settings("1").rootPublicFile().toString())
+            .put("expectedSignedFile", previous.toString())
+            .put("expectedAnnouncementFile", previousAnn.toString())
+            .put("signedFile", signed.toString())
+            .put("announcementFile", ann.toString())
+            .put("stateFile", settings("1").stateFile().toString())
+            .put("expectedHistoryFile", "")
+            .put(
+                "expectedStateSha256",
+                java.util.HexFormat.of()
+                    .formatHex(
+                        java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(Files.readAllBytes(settings("1").stateFile()))));
+    plan.putObject("privateFiles");
+    Path input =
+        protectedFile(
+            directory.resolve("recovery-plan.json"),
+            NetworkJson.canonical(plan).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    Path jar = Path.of(System.getProperty("auriga.operator.jar")).toAbsolutePath();
+    assertEquals(
+        1,
+        NetworkKeyOperatorLauncherTest.launch(
+            directory, jar, input, "regular-reject", "preflight"));
+    assertEquals(
+        0,
+        NetworkKeyOperatorLauncherTest.launch(
+            directory, jar, input, "recovery-preflight", "preflight-recovery"));
+    assertEquals("1", operator(now).status(first).path("version").asString());
+    assertEquals(
+        0,
+        NetworkKeyOperatorLauncherTest.launch(
+            directory, jar, input, "recovery-publish", "recover-expired"));
+    var status = operator(Instant.now()).status(candidate);
+    assertEquals("2", status.path("version").asString());
+    for (String kid : pairs.keySet())
+      assertTrue(!Instant.parse(status.path("firstPublished").path(kid).asString()).isBefore(now));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "one-live-key",
+        "clearance-359",
+        "live-manifest",
+        "missing-history",
+        "changed-old-expiry",
+        "revoked-revival",
+        "new-next",
+        "new-long-lived",
+        "stale-issued",
+        "clock-skew"
+      })
+  void expiredRecoveryRefusesIncompleteExpiryOrChangedAuthority(String bad) throws Exception {
+    Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    var old = expiredPayload(now);
+    if (bad.equals("one-live-key"))
+      ((ObjectNode) old.path("keys").get(0)).put("not_after", now.plusSeconds(60).toString());
+    if (bad.equals("clearance-359"))
+      ((ObjectNode) old.path("keys").get(0)).put("not_after", now.minusSeconds(359).toString());
+    if (bad.equals("live-manifest"))
+      old.put("issued_at", now.minusSeconds(3600).toString())
+          .put("valid_until", now.plusSeconds(3600).toString());
+    if (bad.equals("revoked-revival"))
+      ((ObjectNode) old.path("keys").get(0)).put("state", "revoked");
+    var first = initial(old);
+    var pairs =
+        Map.of(
+            "new-business",
+            KeyTestMaterial.pair(),
+            "new-protocol",
+            KeyTestMaterial.pair(),
+            "new-management",
+            KeyTestMaterial.pair());
+    Instant at = bad.equals("clock-skew") ? now.plusSeconds(120) : now;
+    var payload = recoveryPayload(old, at, pairs);
+    switch (bad) {
+      case "missing-history" -> ((ArrayNode) payload.path("keys")).remove(0);
+      case "changed-old-expiry" ->
+          ((ObjectNode) payload.path("keys").get(0))
+              .put("not_after", now.minusSeconds(400).toString());
+      case "new-next" -> ((ObjectNode) payload.path("keys").get(3)).put("state", "next");
+      case "new-long-lived" ->
+          ((ObjectNode) payload.path("keys").get(3))
+              .put("not_after", at.plusSeconds(8 * 86400).toString());
+      case "stale-issued" ->
+          payload
+              .put("issued_at", now.minusSeconds(7200).toString())
+              .put("valid_until", now.plusSeconds(86400 - 7200).toString());
+      default -> {}
+    }
+    var op = operator(at);
+    assertThrows(RuntimeException.class, () -> op.recoverExpired(first, m.release(payload)));
+    assertEquals("1", operator(now).status(first).path("version").asString());
+  }
+
   @Test
   void expiredOldRecoveryUsesRealPublicationHistoryCeilingAndLoaderWithoutChangingOldKeys()
       throws Exception {

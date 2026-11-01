@@ -310,6 +310,25 @@ services:
 EOF
 }
 
+write_collab_rotation_override() {
+  _rotation_path=$1
+  [ -n "$_rotation_path" ] || return 0
+  _rotation_version=${_rotation_path##*/}
+  case "$_rotation_version" in ''|*[!0-9]*|0*) die 'invalid privileged collab version' ;; esac
+  [ "$_rotation_path" = "$AURIGA_DATA_ROOT/config/collab-operations/installs/$_rotation_version" ] \
+    || die 'invalid privileged collab path'
+  _rotation_yaml=$(printf '%s' "$_rotation_path" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  cat <<EOF
+services:
+  collab:
+    volumes:
+      - '$_rotation_yaml/config:/etc/auriga/collab:ro'
+  network:
+    volumes:
+      - '$_rotation_yaml/network/protocol.key:/etc/auriga/network/protocol.key:ro'
+EOF
+}
+
 run_compose() (
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
     container_compose "$@"
@@ -320,8 +339,15 @@ run_compose() (
   trap 'rm -rf -- "$_runtime_private"' EXIT
   _runtime=$(runtime_directory)
   write_runtime_override "$_runtime" >"$_runtime_private/runtime.yml"
+  _rotation=
+  if [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
+    _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT")
+  fi
+  write_collab_rotation_override "$_rotation" >"$_runtime_private/rotation.yml"
+  if [ -s "$_runtime_private/rotation.yml" ]; then set -- -f "$_runtime_private/rotation.yml" "$@"; fi
   if [ -s "$_runtime_private/runtime.yml" ]; then set -- -f "$_runtime_private/runtime.yml" "$@"; fi
   if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
+  case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in true) set -- --profile collab-renew "$@" ;; false) ;; *) die 'invalid collab renewal flag' ;; esac
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
     COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" \
@@ -357,6 +383,9 @@ services:
 EOF
   _cc=$(compose_cmd)
   _runtime=$(cat "$_private/runtime.path")
+  _rotation=$(cat "$_private/collab.rotation.path")
+  write_collab_rotation_override "$_rotation" >"$_private/rotation.yml"
+  if [ -s "$_private/rotation.yml" ]; then set -- -f "$_private/rotation.yml" "$@"; fi
   write_runtime_override "$_runtime" >"$_private/runtime.yml"
   if [ -s "$_private/runtime.yml" ]; then set -- -f "$_private/runtime.yml" "$@"; fi
   case "$(cat "$_private/collab.enabled")" in
@@ -364,6 +393,7 @@ EOF
     0) ;;
     *) die 'invalid privileged collab Compose decision' ;;
   esac
+  case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in true) set -- --profile collab-renew "$@" ;; false) ;; *) die 'invalid collab renewal flag' ;; esac
   # Only the fixed main file and generated env_file override have authority.
   # shellcheck disable=SC2086
   env COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" $_cc \

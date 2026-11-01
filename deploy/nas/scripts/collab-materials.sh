@@ -1,7 +1,9 @@
 #!/bin/sh
 # Root projects an independently sealed activation into least-privilege readers.
 set -eu
-[ "$#" = 2 ] && [ "$(id -u)" = 0 ] || exit 2
+[ "$#" = 2 ] || [ "$#" = 3 ] || exit 2
+[ "$(id -u)" = 0 ] || exit 2
+case "${3:-}" in ''|--rotated) ;; *) exit 2 ;; esac
 SOURCE=$1
 RUNTIME=$2
 directory() {
@@ -31,16 +33,20 @@ directory "$RUNTIME/edge" 0 65532 750
 directory "$RUNTIME/network" 10001 10001 700
 directory "$RUNTIME/platform" 10001 10001 700
 directory "$RUNTIME/db" 0 0 700
-for name in root.der signed.json announcement.json business.der protocol.der management.der collab.properties browser.crt ca.crt server.crt server.key client.crt client.key; do
-  project "$SOURCE/collab-installation/$name" "$RUNTIME/collab/$name" 10002 10002 600
-done
-project "$SOURCE/collab-installation/state.json" "$RUNTIME/state/state.json" 10002 10002 600
+if [ "${3:-}" != --rotated ]; then
+  for name in root.der signed.json announcement.json business.der protocol.der management.der collab.properties browser.crt ca.crt server.crt server.key client.crt client.key; do
+    project "$SOURCE/collab-installation/$name" "$RUNTIME/collab/$name" 10002 10002 600
+  done
+  project "$SOURCE/collab-installation/state.json" "$RUNTIME/state/state.json" 10002 10002 600
+fi
 if [ -e "$RUNTIME/state/state.json.lock" ] || [ -L "$RUNTIME/state/state.json.lock" ]; then
   [ -f "$RUNTIME/state/state.json.lock" ] && [ ! -L "$RUNTIME/state/state.json.lock" ] \
     && [ "$(stat -c '%u:%g:%a:%h' "$RUNTIME/state/state.json.lock")" = 10002:10002:600:1 ] || exit 1
 fi
 for name in ca.crt edge-collab.crt edge-collab.key; do project "$SOURCE/pki/$name" "$RUNTIME/edge/$name" 0 65532 640; done
 project "$SOURCE/edge.config.json" "$RUNTIME/edge/edge.config.json" 0 65532 640
-for name in runtime.json protocol.key; do project "$SOURCE/network/$name" "$RUNTIME/network/$name" 10001 10001 600; done
+if [ "${3:-}" != --rotated ]; then
+  for name in runtime.json protocol.key; do project "$SOURCE/network/$name" "$RUNTIME/network/$name" 10001 10001 600; done
+fi
 for name in platform.properties gateway.secret collab.secret managed-network.json; do project "$SOURCE/network-platform/$name" "$RUNTIME/platform/$name" 10001 10001 600; done
 project "$SOURCE/roles.sql" "$RUNTIME/db/roles.sql" 0 0 600

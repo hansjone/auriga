@@ -26,6 +26,9 @@ sh "$NAS_ROOT/scripts/network-preflight.sh" || {
 }
 
 sh "$NAS_ROOT/scripts/render.sh"
+if [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
+  sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" check
+fi
 
 if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
   sh "$NAS_ROOT/scripts/installer.sh" prepare-socket
