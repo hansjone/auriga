@@ -16,7 +16,7 @@ if [ -e "$(marker_path)" ] || [ "${1:-}" != init ]; then
   done
 fi
 case "${1:-}" in
-  collab-publish|collab-install|collab-status|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired)
+  collab-publish|collab-install|collab-status|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume)
     _action=${1#collab-}
     set -- "$_action" -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"
     [ "$_action" = path ] || set -- "$@" -image "${AURIGA_IMAGE_PLATFORM:?}"

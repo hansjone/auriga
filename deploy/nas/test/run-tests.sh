@@ -38,6 +38,8 @@ if sh "$ROOT/test/start-edge-recovery.sh"; then pass start_edge_recovery
 else fail_msg start_edge_recovery 'public start did not recover instance bridges'; fi
 if sh "$ROOT/test/collab-rotation-routing.sh"; then pass collab_rotation_public_routing
 else fail_msg collab_rotation_public_routing 'fixed NAS key operations routing failed'; fi
+if python3 "$ROOT/test/collab_queue_test.py"; then pass collab_weekly_offline_signer
+else fail_msg collab_weekly_offline_signer 'weekly offline approval boundary failed'; fi
 
 if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
 else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi

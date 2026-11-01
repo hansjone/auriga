@@ -1,5 +1,5 @@
 #!/bin/sh
-# No root key and no network: prepare immutable requests and report expiry only.
+# No root key or external network: publish only explicitly approved schedules.
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 load_stack_env

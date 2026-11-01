@@ -5,7 +5,7 @@ services:
     image: ${AURIGA_INSTALLER_IMAGE:-${AURIGA_IMAGE_PLATFORM}}
     user: '0:0'
     cap_drop: [ALL]
-    cap_add: [DAC_OVERRIDE, SETUID, SETGID]
+    cap_add: [DAC_OVERRIDE, CHOWN, FOWNER, SETUID, SETGID]
     security_opt: ['no-new-privileges:true']
     read_only: true
     network_mode: none
@@ -37,6 +37,10 @@ services:
         target: ${AURIGA_NAS_BOOTSTRAP_BINARY:-${NAS_ROOT}/bin/auriga-nas-bootstrap}
         read_only: true
         bind: { create_host_path: false }
+      - type: bind
+        source: ${AURIGA_DATA_ROOT}/config/collab-runtime/state
+        target: ${AURIGA_DATA_ROOT}/config/collab-runtime/state
+        bind: { create_host_path: false }
       - /var/run/docker.sock:/var/run/docker.sock
     tmpfs: ['/tmp:mode=1777,size=16m']
     mem_limit: 128m
@@ -50,6 +54,7 @@ services:
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/platform:/etc/auriga/network:ro
       - ${AURIGA_DATA_ROOT}/collab-tokens:/run/auriga-collab-token
   collab-db:
+    profiles: [collab-network]
     image: ${AURIGA_IMAGE_POSTGRES}
     user: '0:0'
     cap_drop: [ALL]
@@ -76,6 +81,7 @@ services:
     cpus: 0.25
     pids_limit: 32
   collab:
+    profiles: [collab-network]
     image: ${AURIGA_IMAGE_PLATFORM}
     user: '10002:10002'
     group_add: ['65534']
@@ -123,15 +129,18 @@ services:
     cpus: 1
     pids_limit: 256
   edge:
-    depends_on:
-      collab: { condition: service_healthy }
+    depends_on: !override
+      platform: { condition: service_healthy }
+      nats: { condition: service_healthy }
     volumes:
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/edge/edge.config.json:/etc/auriga/edge.config.json:ro
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/edge:/etc/auriga/collab-edge:ro
   network-broker:
+    profiles: [collab-network]
     volumes:
       - ${AURIGA_DATA_ROOT}/config/network-policy/broker.conf:/etc/auriga/network/broker.conf:ro
   network:
+    profiles: [collab-network]
     depends_on:
       collab: { condition: service_healthy }
     volumes:

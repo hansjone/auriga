@@ -134,7 +134,11 @@ func (e *nasRotationEngine) owned(r *nasRotation, c nasRotationContainer) error 
 		return fmt.Errorf("NAS rotation missing fixed recipe")
 	}
 	if c.Config.Labels["com.docker.compose.service"] == "collab" || c.Config.Labels["com.docker.compose.service"] == "platform" {
-		if c.Image != r.binding.Image {
+		expected := r.controlImage
+		if expected == "" {
+			expected = r.binding.Image
+		}
+		if c.Image != expected {
 			return fmt.Errorf("NAS rotation platform image differs from approval")
 		}
 	}
@@ -220,7 +224,7 @@ func (e *nasRotationEngine) stop(r *nasRotation) error {
 	if len(services) != 4 {
 		return fmt.Errorf("NAS rotation requires four existing control services")
 	}
-	for _, s := range []string{"edge", "network", "collab"} {
+	for _, s := range []string{"network", "collab"} {
 		c := services[s]
 		if c.State.Paused || c.State.Restarting {
 			return fmt.Errorf("NAS rotation unstable control process")
@@ -247,7 +251,7 @@ func (e *nasRotationEngine) stop(r *nasRotation) error {
 			continue
 		}
 		for _, m := range c.Mounts {
-			if c.Config.Labels["com.docker.compose.service"] == "collab-renew" && c.Config.Labels["com.docker.compose.project"] == nasRotationProject && m.Source == r.data && !m.RW && len(c.Config.Entrypoint) == 2 && c.Config.Entrypoint[0] == "/bin/sh" && c.Config.Entrypoint[1] == filepath.Join(r.recipe, "scripts/renew-collab-loop.sh") {
+			if c.Config.Labels["com.docker.compose.service"] == "collab-renew" && c.Config.Labels["com.docker.compose.project"] == nasRotationProject && (m.Source == r.data && !m.RW || m.Source == filepath.Dir(r.state) && m.RW) && len(c.Config.Entrypoint) == 2 && c.Config.Entrypoint[0] == "/bin/sh" && c.Config.Entrypoint[1] == filepath.Join(r.recipe, "scripts/renew-collab-loop.sh") {
 				if err := e.owned(r, c); err != nil {
 					return err
 				}
@@ -292,9 +296,7 @@ func (e *nasRotationEngine) database(r *nasRotation) (string, error) {
 		return "", fmt.Errorf("NAS rotation database mount or state refused")
 	}
 	if !pg.State.Running {
-		if _, err = e.call("POST", "/containers/"+pg.ID+"/start", nil); err != nil {
-			return "", err
-		}
+		return "", fmt.Errorf("NAS rotation database stopped; observer never starts it")
 	}
 	deadline := time.Now().Add(120 * time.Second)
 	for {
@@ -383,7 +385,11 @@ func (e *nasRotationEngine) operator(r *nasRotation, action, work string, plan n
 		mounts = append(mounts, map[string]any{"Type": "bind", "Source": filepath.Join(r.recipe, "bin/collab-key-operator.jar"), "Target": classpath, "ReadOnly": true})
 	}
 	location := (&url.URL{Scheme: "file", Path: loader}).String()
-	body := map[string]any{"Image": r.binding.Image, "User": "0:0", "WorkingDir": "/app", "Entrypoint": []string{"java"}, "Cmd": []string{"-Dloader.main=auriga.collab.network.keys.NetworkKeyOperator", "-Dloader.config.location=" + location, "-cp", classpath, "org.springframework.boot.loader.launch.PropertiesLauncher", action, path}, "Env": []string{"LANG=C.UTF-8"}, "Labels": map[string]string{"auriga.nas.key-operator": "true"}, "HostConfig": map[string]any{"NetworkMode": network, "ReadonlyRootfs": true, "CapDrop": []string{"ALL"}, "CapAdd": []string{"DAC_OVERRIDE", "FOWNER"}, "SecurityOpt": []string{"no-new-privileges:true"}, "Mounts": mounts, "Tmpfs": map[string]string{"/tmp": "mode=1777,size=67108864"}, "Memory": 536870912, "NanoCpus": 1000000000, "PidsLimit": 256}}
+	helperImage := r.binding.Image
+	if r.binding.Jar != "" && r.controlImage != "" {
+		helperImage = r.controlImage
+	}
+	body := map[string]any{"Image": helperImage, "User": "0:0", "WorkingDir": "/app", "Entrypoint": []string{"java"}, "Cmd": []string{"-Dloader.main=auriga.collab.network.keys.NetworkKeyOperator", "-Dloader.config.location=" + location, "-cp", classpath, "org.springframework.boot.loader.launch.PropertiesLauncher", action, path}, "Env": []string{"LANG=C.UTF-8"}, "Labels": map[string]string{"auriga.nas.key-operator": "true"}, "HostConfig": map[string]any{"NetworkMode": network, "ReadonlyRootfs": true, "CapDrop": []string{"ALL"}, "CapAdd": []string{"DAC_OVERRIDE", "FOWNER"}, "SecurityOpt": []string{"no-new-privileges:true"}, "Mounts": mounts, "Tmpfs": map[string]string{"/tmp": "mode=1777,size=67108864"}, "Memory": 536870912, "NanoCpus": 1000000000, "PidsLimit": 256}}
 	b, err := e.call("POST", "/containers/create", body)
 	var created struct {
 		ID string `json:"Id"`
@@ -402,7 +408,7 @@ func (e *nasRotationEngine) operator(r *nasRotation, action, work string, plan n
 	if err != nil || json.Unmarshal(b, &exit) != nil || exit.Status == nil {
 		return nil, fmt.Errorf("NAS rotation operator completion missing")
 	}
-	if err = nasRotationWriteJSON(filepath.Join(work, action+"-result.json"), map[string]any{"action": action, "image": r.binding.Image, "operatorJarSha256": r.binding.Jar, "exitCode": *exit.Status}); err != nil {
+	if err = nasRotationWriteJSON(filepath.Join(work, action+"-result.json"), map[string]any{"action": action, "image": helperImage, "operatorJarSha256": r.binding.Jar, "exitCode": *exit.Status}); err != nil {
 		return nil, err
 	}
 	if *exit.Status != 0 {
@@ -450,6 +456,7 @@ func nasRotationOpen(data, recipe, image, jar string, create bool) (*nasRotation
 			return nil, err
 		}
 	}
+	r.controlImage = image
 	r.binding = nasRotationBinding{Base: baseHash, Source: nasRotationHash(raw), Image: image, Jar: jar, Data: data, Recipe: recipe}
 	if _, err = os.Lstat(r.root); os.IsNotExist(err) {
 		if !create {
@@ -486,9 +493,11 @@ func nasRotationOpen(data, recipe, image, jar string, create bool) (*nasRotation
 	if jar == "" {
 		r.binding.Jar = binding.Jar
 	}
-	if binding != r.binding || !strings.HasPrefix(binding.Image, "sha256:") || !nasRotationDigest.MatchString(strings.TrimPrefix(binding.Image, "sha256:")) {
+	historical, err := nasRotationHistoricalBinding(binding, r.binding)
+	if err != nil || !strings.HasPrefix(binding.Image, "sha256:") || !nasRotationDigest.MatchString(strings.TrimPrefix(binding.Image, "sha256:")) {
 		return nil, fmt.Errorf("NAS rotation installation binding changed")
 	}
+	r.binding = historical
 	if r.binding.Jar != "" {
 		if err = nasRotationJar(recipe, r.binding.Jar); err != nil {
 			return nil, err
@@ -506,11 +515,19 @@ func nasRotationLocked(r *nasRotation, body func() error) error {
 	if unix.Fstat(fd, &st) != nil || st.Uid != 0 || st.Gid != 0 || st.Mode&07777 != 0600 || st.Nlink != 1 || st.Mode&unix.S_IFMT != unix.S_IFREG {
 		return fmt.Errorf("NAS rotation lock metadata refused")
 	}
-	if unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB) != nil {
-		return fmt.Errorf("NAS rotation operation in progress")
+	wait := r.lockWait
+	if wait == 0 {
+		wait = 5 * time.Minute
+	}
+	deadline := time.Now().Add(wait)
+	for unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB) != nil {
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("NAS rotation lock wait deadline exceeded")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	defer func() { _ = unix.Flock(fd, unix.LOCK_UN) }()
-	if _, err = os.Lstat(filepath.Join(r.root, ".pending")); !os.IsNotExist(err) {
+	if _, err = os.Lstat(filepath.Join(r.root, ".pending")); !r.allowPending && !os.IsNotExist(err) {
 		return fmt.Errorf("NAS rotation interrupted; preserve pending evidence")
 	}
 	return body()
@@ -535,6 +552,7 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 	recipe := f.String("recipe", "", "fixed NAS recipe")
 	image := f.String("image", "", "approved immutable local platform image")
 	jar := f.String("operator-jar-sha256", "", "independently approved fixed offline operator jar digest")
+	count := f.Int("count", 14, "weekly queue count, 1..28")
 	input := f.String("input", "", "approved directory")
 	if len(args) == 0 {
 		return fmt.Errorf("NAS rotation action required")
@@ -547,11 +565,11 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		return fmt.Errorf("unexpected NAS rotation arguments")
 	}
 	switch action {
-	case "publish", "install", "status", "path", "check", "stop", "prepare", "renew", "prepare-recovery", "recover-expired":
+	case "publish", "install", "status", "path", "check", "stop", "prepare", "renew", "prepare-recovery", "recover-expired", "queue-prepare", "queue-import", "queue-export", "recover-pending", "pause", "resume":
 	default:
 		return fmt.Errorf("unsupported NAS rotation action")
 	}
-	create := action == "publish" || action == "prepare" || action == "renew" || action == "prepare-recovery" || action == "recover-expired"
+	create := action == "publish" || action == "prepare" || action == "renew" || action == "prepare-recovery" || action == "recover-expired" || action == "queue-prepare"
 	if action == "path" || action == "check" {
 		if os.Geteuid() != 0 {
 			return fmt.Errorf("NAS rotation requires Linux installer root")
@@ -594,11 +612,13 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		}
 		return fmt.Errorf("NAS rotation not initialized")
 	}
+	r.inspectOnly = action == "path" || action == "status"
+	r.allowPending = r.inspectOnly || action == "check" || action == "recover-pending" || action == "pause" || action == "resume" || action == "stop"
 	r.recovery = action == "recover-expired" || action == "prepare-recovery"
 	if r.recovery && r.binding.Jar == "" {
 		return fmt.Errorf("expired recovery requires independently approved operator jar")
 	}
-	if action == "publish" || action == "install" || action == "recover-expired" {
+	if action == "publish" || action == "install" || action == "recover-expired" || action == "queue-import" {
 		if !filepath.IsAbs(*input) || filepath.Clean(*input) != *input {
 			return fmt.Errorf("NAS rotation approved canonical input required")
 		}
@@ -614,7 +634,12 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 	}
 	if action == "stop" {
 		r.stopOnly = true
-		return r.engine.stop(r)
+		return nasRotationLocked(r, func() error {
+			if err := r.schedulerControl("pause"); err != nil {
+				return err
+			}
+			return r.engine.stop(r)
+		})
 	}
 	return nasRotationLocked(r, func() error {
 		rows, err := r.releases()
@@ -632,43 +657,30 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 				return err
 			}
 			return json.NewEncoder(stdout).Encode(s)
-		case "prepare", "renew", "prepare-recovery":
+		case "pause", "resume":
+			return r.schedulerControl(action)
+		case "queue-export":
+			return r.queueExport(stdout)
+		case "queue-prepare":
+			return r.queuePrepare(rows, *count, stdout)
+		case "queue-import":
+			return r.queueImport(stdout)
+		case "recover-pending":
+			return r.recoverPending(rows, stdout)
+		case "renew":
+			return r.queueTick(rows, stdout)
+		case "prepare", "prepare-recovery":
 			return r.prepare(rows, stdout)
-		case "path", "check":
-			if len(rows) == 0 {
-				if _, err := r.stateCheckpoint(rows); err != nil {
-					return err
-				}
-				if action == "path" {
-					return nil
-				}
-				_, err := r.status(rows)
+		case "check":
+			if err = r.available(rows, time.Now()); err != nil {
 				return err
 			}
-			dir, _, err := r.installed(rows, true)
+			_, err = r.status(rows)
+			return err
+		case "path":
+			dir, err := r.runtimePath(rows)
 			if err != nil {
 				return err
-			}
-			if action == "check" {
-				if _, err = r.status(rows); err != nil {
-					return err
-				}
-				signed, err := nasRotationRead(filepath.Join(dir, "config/signed.json"), 10002)
-				if err != nil {
-					return err
-				}
-				p, err := nasRotationParsePayload(signed)
-				if err != nil {
-					return err
-				}
-				if _, err = nasRotationActive(p, time.Now()); err != nil {
-					return err
-				}
-				until, err := time.Parse(time.RFC3339, p.Until)
-				if err != nil || !time.Now().Before(until) {
-					return fmt.Errorf("NAS rotation publication expired")
-				}
-				return nil
 			}
 			_, err = fmt.Fprint(stdout, dir)
 			return err

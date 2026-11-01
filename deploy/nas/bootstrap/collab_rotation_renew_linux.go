@@ -131,15 +131,7 @@ func (r *nasRotation) prepare(rows []nasRotationRelease, stdout io.Writer) error
 		if nasRotationDecode(b, &p) != nil || p.Version != v || p.Realm != old.Realm {
 			return fmt.Errorf("NAS renewal pending request changed")
 		}
-		expiry, e := time.Parse(time.RFC3339, p.Until)
-		// A pre-maturity request must not mask the newly eligible active request.
-		containsNext := false
-		for _, key := range p.Keys {
-			if key.State == "next" {
-				containsNext = true
-			}
-		}
-		if e == nil && now.Before(expiry.Add(-6*time.Hour)) && (!mature || !containsNext) {
+		if nasRotationReusable(p, now, mature) && (reusable == "" || n > mustNASRotationVersion(filepath.Base(reusable))) {
 			reusable = dir
 		}
 	}
@@ -169,7 +161,14 @@ func (r *nasRotation) prepare(rows []nasRotationRelease, stdout io.Writer) error
 		return fmt.Errorf("NAS renewal version exhausted")
 	}
 	p.Version = strconv.FormatInt(max+1, 10)
-	// Each unsigned request is immutable. Root-signed publication/install is separate.
+	if e = r.saveRequest(rows, p, private); e != nil {
+		return e
+	}
+	return json.NewEncoder(stdout).Encode(map[string]any{"status": "awaiting_offline_root_signature", "requestDirectory": filepath.Join(r.root, "requests", p.Version), "warning": warning, "operatorIntervalHours": 12, "earliestNextActivation": nasRotationEligible(old, status.First)})
+}
+
+func (r *nasRotation) saveRequest(rows []nasRotationRelease, p nasRotationPayload, private map[string][]byte) error {
+	var e error
 	return r.mutate("prepare", func(work string) error {
 		stage := filepath.Join(work, "request")
 		if e := os.Mkdir(stage, 0700); e != nil {
@@ -250,7 +249,7 @@ func (r *nasRotation) prepare(rows []nasRotationRelease, stdout io.Writer) error
 		if e = nasRotationSync(filepath.Join(r.root, "requests")); e != nil {
 			return e
 		}
-		return json.NewEncoder(stdout).Encode(map[string]any{"status": "awaiting_offline_root_signature", "requestDirectory": dir, "warning": warning, "operatorIntervalHours": 12, "earliestNextActivation": nasRotationEligible(old, status.First)})
+		return nil
 	})
 }
 func mustNASRotationVersion(s string) int64 { n, _ := strconv.ParseInt(s, 10, 64); return n }

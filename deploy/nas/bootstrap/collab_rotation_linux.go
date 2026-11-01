@@ -69,6 +69,7 @@ type nasRotationRelease struct {
 	Files    map[string]string  `json:"files"`
 	Approval string             `json:"approval"`
 	Mode     string             `json:"mode"`
+	Refresh  bool               `json:"requireClientRefresh"`
 }
 type nasRotationInstall struct {
 	Binding       nasRotationBinding `json:"binding"`
@@ -107,6 +108,11 @@ type nasRotation struct {
 	engine                                      *nasRotationEngine
 	stopOnly                                    bool
 	recovery                                    bool
+	inspectOnly, allowPending                   bool
+	controlImage                                string
+	lockWait                                    time.Duration
+	recoveryPrevious                            []byte
+	recoveryRootState                           bool
 	operator                                    func(string, string, nasRotationPlan) ([]byte, error)
 }
 
@@ -221,7 +227,10 @@ func nasRotationDecode(raw []byte, value any) error {
 func nasRotationRead(path string, uid uint32) ([]byte, error) {
 	for p := filepath.Clean(path); ; p = filepath.Dir(p) {
 		s, e := os.Lstat(p)
-		if e != nil || s.Mode()&os.ModeSymlink != 0 {
+		if e != nil {
+			return nil, e
+		}
+		if s.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("rotation symlink or missing path")
 		}
 		if p == filepath.Dir(p) {
@@ -319,17 +328,25 @@ func (r *nasRotation) releases() ([]nasRotationRelease, error) {
 			return nil, e
 		}
 		var row nasRotationRelease
-		if nasRotationDecode(raw, &row) != nil || row.Binding != r.binding || row.Version != v || row.Previous != previous || len(row.Files) != 3 || (row.Mode != "regular" && row.Mode != "expired_recovery") {
+		if nasRotationDecode(raw, &row) != nil || row.Binding != r.binding || row.Version != v || row.Previous != previous || (len(row.Files) != 3 && len(row.Files) != 5) || (row.Mode != "regular" && row.Mode != "expired_recovery") {
 			return nil, fmt.Errorf("rotation publication chain refused")
 		}
 		for _, name := range []string{"signed.json", "announcement.json", "pg-status.json"} {
+			if !nasRotationDigest.MatchString(row.Files[name]) {
+				return nil, fmt.Errorf("rotation required archive file missing")
+			}
+		}
+		for name := range row.Files {
+			if name != "signed.json" && name != "announcement.json" && name != "pg-status.json" && name != "approval.json" && name != "payload.json" {
+				return nil, fmt.Errorf("rotation archive unknown file")
+			}
 			b, e := nasRotationRead(filepath.Join(dir, name), 0)
 			if e != nil || !nasRotationDigest.MatchString(row.Files[name]) || nasRotationHash(b) != row.Files[name] {
 				return nil, fmt.Errorf("rotation archive changed")
 			}
 		}
 		leaves, e := os.ReadDir(dir)
-		if e != nil || len(leaves) != 4 {
+		if e != nil || len(leaves) != len(row.Files)+1 {
 			return nil, fmt.Errorf("rotation archive contains unknown files")
 		}
 		previous = nasRotationHash(raw)
@@ -369,6 +386,10 @@ func (r *nasRotation) installed(rows []nasRotationRelease, latest bool) (string,
 	if e != nil {
 		return "", "", e
 	}
+	return r.installedRecord(rows, latest, raw)
+}
+func (r *nasRotation) installedRecord(rows []nasRotationRelease, latest bool, raw []byte) (string, string, error) {
+	var e error
 	var current nasRotationCurrent
 	if nasRotationDecode(raw, &current) != nil || !nasRotationVersion(current.Version) || !nasRotationDigest.MatchString(current.Receipt) {
 		return "", "", fmt.Errorf("rotation selector refused")
@@ -448,8 +469,8 @@ func (r *nasRotation) installed(rows []nasRotationRelease, latest bool) (string,
 	if e != nil || seen != len(receipt.Files) {
 		return "", "", fmt.Errorf("rotation installed file set changed")
 	}
-	state, e := nasRotationRead(r.state, 10002)
-	if e != nil || nasRotationHash(state) != receipt.State {
+	state, e := r.stateBytes()
+	if !r.inspectOnly && (e != nil || nasRotationHash(state) != receipt.State) {
 		return "", "", fmt.Errorf("rotation original state changed")
 	}
 	return dir, receipt.State, nil
@@ -472,7 +493,7 @@ func (r *nasRotation) stateCheckpoint(rows []nasRotationRelease) (string, error)
 	if e != nil {
 		return "", e
 	}
-	state, e := nasRotationRead(r.state, 10002)
+	state, e := r.stateBytes()
 	if e != nil || !bytes.Equal(initial, state) {
 		return "", fmt.Errorf("rotation initial state changed")
 	}
@@ -481,6 +502,11 @@ func (r *nasRotation) stateCheckpoint(rows []nasRotationRelease) (string, error)
 func (r *nasRotation) plan(rows []nasRotationRelease, signed, ann, state string, private map[string]string) (nasRotationPlan, error) {
 	expected, expectedAnn, history := r.latest(rows)
 	hash, e := r.stateCheckpoint(rows)
+	if r.inspectOnly {
+		b, err := r.stateBytes()
+		e = err
+		hash = nasRotationHash(b)
+	}
 	if e != nil {
 		return nasRotationPlan{}, e
 	}
@@ -549,6 +575,14 @@ func mapValues(m map[string]string) []string {
 
 func (r *nasRotation) mutate(action string, body func(string) error) (result error) {
 	work := filepath.Join(r.root, ".pending")
+	if action == "prepare" {
+		work = filepath.Join(r.root, ".preparing")
+		if _, e := os.Lstat(work); !os.IsNotExist(e) {
+			if _, e = r.archiveWork(work, "prepare"); e != nil {
+				return e
+			}
+		}
+	}
 	if e := os.Mkdir(work, 0700); e != nil {
 		return fmt.Errorf("rotation pending exists; preserve evidence")
 	}
@@ -573,6 +607,22 @@ func (r *nasRotation) mutate(action string, body func(string) error) (result err
 			result = nasRotationSync(r.root)
 		}
 	}()
+	before, err := r.stateBytes()
+	if err != nil {
+		return err
+	}
+	if r.recoveryPrevious != nil {
+		before = r.recoveryPrevious
+	}
+	if err = nasRotationWriteJSON(filepath.Join(work, "intent.json"), nasRotationIntent{Action: action, Input: r.inputDir, Before: nasRotationHash(before)}); err != nil {
+		return err
+	}
+	if err = nasRotationSync(work); err != nil {
+		return err
+	}
+	if err = nasRotationSync(r.root); err != nil {
+		return err
+	}
 	return body(work)
 }
 func (r *nasRotation) publish() error {
@@ -581,6 +631,10 @@ func (r *nasRotation) publish() error {
 		return e
 	}
 	defer clear(signed)
+	until, err := time.Parse(time.RFC3339, p.Until)
+	if err != nil || time.Until(until) < 12*time.Hour {
+		return fmt.Errorf("publication requires at least 12 hours remaining; prepare a fresh request")
+	}
 	if (in.Mode == "expired_recovery") != r.recovery || r.recovery && r.binding.Jar == "" {
 		return fmt.Errorf("explicit expired-recovery action and approved operator jar required")
 	}
@@ -627,6 +681,17 @@ func (r *nasRotation) publish() error {
 				return e
 			}
 		}
+		auditFiles := map[string]string{}
+		for _, name := range []string{"approval.json", "payload.json"} {
+			b, err := nasRotationRead(filepath.Join(r.inputDir, name), 0)
+			if err != nil {
+				return err
+			}
+			if err = nasRotationWrite(filepath.Join(stage, name), b); err != nil {
+				return err
+			}
+			auditFiles[name] = nasRotationHash(b)
+		}
 		plan, e := r.plan(rows, filepath.Join(stage, "signed.json"), filepath.Join(stage, "announcement.json"), r.state, map[string]string{})
 		if e != nil {
 			return e
@@ -664,6 +729,10 @@ func (r *nasRotation) publish() error {
 			prev = nasRotationHash(b)
 		}
 		receipt := nasRotationRelease{Binding: r.binding, Version: p.Version, Previous: prev, Approval: in.Approval, Mode: in.Mode, Files: map[string]string{"signed.json": nasRotationHash(signed), "announcement.json": nasRotationHash(ann), "pg-status.json": nasRotationHash(status)}}
+		for name, hash := range auditFiles {
+			receipt.Files[name] = hash
+		}
+		receipt.Refresh = in.Mode == "expired_recovery"
 		if e = nasRotationWriteJSON(filepath.Join(stage, "publication.receipt"), receipt); e != nil {
 			return e
 		}
@@ -865,9 +934,12 @@ func (r *nasRotation) install() error {
 			return e
 		}
 		plan.State = r.state
-		previousState, e := nasRotationRead(r.state, 10002)
+		previousState, e := r.stateBytes()
 		if e != nil {
 			return e
+		}
+		if r.recoveryPrevious != nil {
+			previousState = r.recoveryPrevious
 		}
 		if e = nasRotationWrite(filepath.Join(stage, "previous-state.json"), previousState); e != nil {
 			return e
@@ -878,7 +950,7 @@ func (r *nasRotation) install() error {
 		if e = os.Chown(r.state, 10002, 10002); e != nil {
 			return e
 		}
-		state, e := nasRotationRead(r.state, 10002)
+		state, e := r.stateBytes()
 		if e != nil {
 			return e
 		}
@@ -1030,4 +1102,14 @@ func nasRotationRequest(old nasRotationPayload, first map[string]string, now tim
 		p.Keys = append(p.Keys, nasRotationKey{Kid: kid, Alg: "Ed25519", Purpose: purpose, Public: base64.RawURLEncoding.EncodeToString(pubDER), Before: p.Issued, After: now.Add(7 * 24 * time.Hour).Format(time.RFC3339), State: "next"})
 	}
 	return p, private, nil
+}
+
+// Only explicit recovery of an interrupted root Java install may read root-owned
+// state; normal availability continues to require the dedicated signer owner.
+func (r *nasRotation) stateBytes() ([]byte, error) {
+	b, e := nasRotationRead(r.state, 10002)
+	if e != nil && r.recoveryRootState {
+		return nasRotationRead(r.state, 0)
+	}
+	return b, e
 }

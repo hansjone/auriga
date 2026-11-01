@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start only the fixed hourly request/expiry observer, before a stop-signing batch.
+# Start only the fixed hourly approved-queue publisher and expiry observer.
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 [ "$#" = 0 ] || die 'schedule-collab-renewal accepts no arguments'

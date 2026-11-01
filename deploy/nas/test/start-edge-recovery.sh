@@ -38,3 +38,13 @@ touch "$temp/fail"
 if sh "$temp/scripts/start.sh"; then exit 1; else [ "$?" -eq 73 ]; fi
 [ "$(wc -l <"$temp/compose.log")" -eq 1 ]
 echo 'PASS failed_start_does_not_recover_or_report_success'
+
+rm "$temp/fail"
+: >"$temp/compose.log"
+mkdir -p "$temp/data/config/collab-source"
+printf '#!/bin/sh\nexit 9\n' >"$temp/scripts/rotate-collab-keys.sh"
+if ! sh "$temp/scripts/start.sh" >"$temp/degraded.log" 2>&1; then cat "$temp/degraded.log"; exit 1; fi
+grep -q 'message_network=degraded' "$temp/degraded.log"
+grep -q ' up -d --no-build --pull never$' "$temp/compose.log"
+grep -q ' stop collab network network-broker$' "$temp/compose.log"
+printf 'PASS expired_network_does_not_block_core_start\n'

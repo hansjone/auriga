@@ -274,13 +274,13 @@ func TestNASRotationPublishInstallModesPreserveSourceAndLock(t *testing.T) {
 			if e != nil || len(rows) != 1 {
 				t.Fatalf("publication: %v", e)
 			}
-			if f.stops != 3 {
+			if f.stops != 2 {
 				t.Fatalf("wrong stop scope %d", f.stops)
 			}
 			if e = r.publish(); e != nil {
 				t.Fatal(e)
 			}
-			if f.stops != 3 {
+			if f.stops != 2 {
 				t.Fatal("same publication reentry mutated services")
 			}
 			if e = r.install(); e != nil {
@@ -483,7 +483,7 @@ func TestNASRotationStopEscapeDoesNotRequireRepairedState(t *testing.T) {
 		t.Fatal(e)
 	}
 	for _, c := range f.containers {
-		if c.Config.Labels["com.docker.compose.service"] != "platform" && c.State.Running {
+		if (c.Config.Labels["com.docker.compose.service"] == "collab" || c.Config.Labels["com.docker.compose.service"] == "network") && c.State.Running {
 			t.Fatal("escape did not stop fixed signer service")
 		}
 	}

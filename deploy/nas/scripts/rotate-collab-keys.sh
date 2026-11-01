@@ -4,13 +4,13 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 load_stack_env
 case "${1:-}" in
-  publish|install|recover-expired) [ "$#" = 2 ] || die 'expected action and approved directory' ;;
-  status|check|prepare|renew|stop|prepare-recovery) [ "$#" = 1 ] || die 'expected one fixed collab action' ;;
+  publish|install|recover-expired|queue-import) [ "$#" = 2 ] || die 'expected action and approved directory' ;;
+  status|check|prepare|renew|stop|prepare-recovery|queue-prepare|queue-export|recover-pending|pause|resume) [ "$#" = 1 ] || die 'expected one fixed collab action' ;;
   *) die 'expected publish|install|status|check|prepare|renew|stop' ;;
 esac
 if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
   case "$1" in
-    publish|install|recover-expired) exec sh "$NAS_ROOT/scripts/installer.sh" "collab-$1" "$2" ;;
+    publish|install|recover-expired|queue-import) exec sh "$NAS_ROOT/scripts/installer.sh" "collab-$1" "$2" ;;
     *) exec sh "$NAS_ROOT/scripts/installer.sh" "collab-$1" ;;
   esac
 fi

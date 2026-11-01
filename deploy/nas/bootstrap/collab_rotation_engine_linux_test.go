@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNASRotationDockerOperatorScopeAndCleanup(t *testing.T) {
@@ -119,7 +120,7 @@ func TestNASRotationLockAndPendingCannotBeBypassed(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("root storage lock fixture")
 	}
-	r := &nasRotation{root: t.TempDir()}
+	r := &nasRotation{root: t.TempDir(), lockWait: 30 * time.Millisecond}
 	if err := nasRotationLocked(r, func() error {
 		if err := nasRotationLocked(r, func() error { return nil }); err == nil {
 			t.Fatal("concurrent lock admitted")

@@ -21,27 +21,27 @@
 ## 版本化记录与运维边界
 
 初装 `config/materials`、`config/collab-source` 和旧 activation receipt 保持原样。
-新记录放在 `config/collab-operations`：
+新记录放在 `config/collab-operations`（root 0700、文件 0600）：
 
-- `binding.json` 绑定原 base/source 收据、固定数据根、配方路径、明确批准的平台镜像本地 ID 和可选独立 operator jar 摘要。
+- `binding.json` 绑定原 base/source 收据、固定数据根、配方路径、最初批准的平台镜像本地 ID 和可选独立 operator jar 摘要（历史记录不重写）。
 - `releases/<version>` 追加完整 signed/announcement、实际 PG 状态和 publication receipt 链。
 - `installs/<version>` 追加配置、active/next 私钥、网关 protocol、切换前 state 快照及 install receipt。
 - `requests/<version>` 保存未签请求及新业务私钥；待签内容不覆盖，不代表已发布或已安装。
+- `batches/<firstVersion>` 保存公开批次计划，`queues/<firstVersion>.json` 保存通过根签与审批校验的队列及各文件摘要。
 - `current.json` 只选择完整提交的安装。原运行 state 由生产安装器原子更新，旧字节另外保留；原 state.lock 不删除或重建。
 
-所有变更持同一个 NAS 文件锁。PG 发布后未安装、版本回退、同版本改字节、缺历史、
-元数据/挂载漂移或半提交都阻断启动。`.pending` 与首失证据保留，不能删除后盲重试。
+所有变更持同一个 NAS 文件锁，竞争时最多等 5 分钟，超时明确失败。PG 发布后未安装、清单/业务钥过期或轮换半提交只使消息网络降级；公开 start 仍启动登录、管理、中转站、模型和 agent，并输出 `message_network=degraded`。版本回退、同版本改字节、缺历史或材料篡改仍拒绝签名。`.pending` 与首失证据保留，不能删除后盲重试。只读 status/path 允许存在 pending，status 使用真实受保护 state 摘要查询 PG；stop 不依赖最新发布已经安装。
 `rotate-collab-keys.sh stop` 是固定项目的停签逃生入口，不修 state、不改 PG 或 selector。
 
 普通安装/render helper 不挂 Docker socket。只有显式轮换命令和受信续期任务接入本机 socket；
 Java helper 仅使用批准镜像、固定主类与固定计划，数据根只读，写范围限本次暂存及必要的原 state 目录。
-PG 操作先核现有数据库容器、数据挂载和内部网桥；数据库缺失不创建空库。
-发布会停止该项目的 edge/network/collab，保留 platform、实例及数据卷。
+PG 操作先核现有数据库容器、数据挂载和内部网桥；数据库缺失不创建空库，已停的 postgres 不由巡检或轮换命令拉起。
+发布只停止该项目的 network/collab；保留 platform、edge、agent、实例及数据卷。
 
 ## 准备请求与启动小时巡检
 
 使用更新后的公开 NAS 包和 linux/amd64 bootstrap（0755）。`stack.env` 中的平台/安装器镜像
-必须是独立核准、已存在本机的不可变引用。更换绑定的平台镜像或配方路径须另行运维批次。
+必须是独立核准、已存在本机的不可变引用。绑定独立 operator jar 后，平台正常升级只需按公开 load/start 更新 `AURIGA_IMAGE_PLATFORM`，固定 jar 在新批准镜像的 JRE 中执行；历史 binding、输入与 receipts 保留原 image 字段，不需要重签或修改历史。未绑定 jar 时仍固定原操作器镜像；配方路径、数据根或 jar 字节改变属于独立迁移，不能改历史收据绕过。
 过期恢复还须从公开源码构建新的 platform executable jar，部署到固定
 `deploy-nas/bin/collab-key-operator.jar`（root:root、不可组写、非链接），并在 `stack.env` 配置
 `AURIGA_COLLAB_OPERATOR_JAR_SHA256=<独立核准的小写SHA256>`。固定 helper 在批准镜像的 JRE
@@ -66,13 +66,57 @@ sh deploy-nas/scripts/rotate-collab-keys.sh prepare
 sh deploy-nas/scripts/schedule-collab-renewal.sh
 ```
 
-`collab-renew` 使用现有安装器镜像、无网络、只读数据根及专用可写 operations 目录。
-它每小时检查一次，复用未到期请求，清单剩余不足 6 小时输出
-`keyset_expires_within_6h_operator_signature_required`；清单仍充足而任一 active 业务钥剩余不超过 6 小时时，
-输出 `business_keys_expire_within_6h_operator_action_required`。失败只告警并保留证据，不延长旧钥或自动回滚。
-该进程是持同一运维锁的受信只读 state 观察者；不会自行签根、发布或恢复签名服务。
+`collab-renew` 使用现有安装器镜像、无网络、只读数据根，专用 operations 与原 state 目录可写。它每小时检查一次。已导入预签队列时，到点复用生产 Java publish/install，按原容器定义只重建 collab/network，使新配置挂载生效，不启动 PG 或其余控制服务。业务私钥只在 NAS，原根只在离线设施。默认业务钥 7 天，到期前 48h 准备 next；新 next 最早在计划首发 36h 后转 active，给小时调度留 1h 余量，真正首发成熟仍由 PG 强制。停机超出计划余量时，不跳过不成熟门禁，告警并由运营者重新排队。
 
-## 运营者根签（每 12 小时）
+没有队列时巡检只准备单份请求，并在清单或业务钥不足 6h 时告警。单份请求只在剩余至少 18h 时复用，publish 要求至少剩余 12h；过旧请求需要重新 prepare/根签，不会把旧签名当作续期。`stop.sh` 先暂停调度，`start.sh` 正常启动后恢复；`start.sh --network-offline` 明确只启动核心服务并暂停消息调度。也可用 `rotate-collab-keys.sh pause|resume` 控制；不删除历史或改变有效期。
+
+## 每周一次离线批签（默认 14 份）
+
+```sh
+sh deploy-nas/scripts/rotate-collab-keys.sh queue-prepare
+sh deploy-nas/scripts/rotate-collab-keys.sh queue-export > /private/public-queue.tar
+```
+
+默认 14 份，每份 24h、签发时间相隔 12h，连续覆盖约 7.5 天。先核对导出 tar 只有 `batch.json` 与各版本的 payload/trust/input 三个公开 JSON，再在离线运营者专用目录解包。导出不含 install-input 或 keys，不取回 NAS 业务私钥。第一份签发时间与签名机相差必须 ≤5 分钟，未来份只允许计划内的固定间隔；如准备后耽搁，重新 queue-prepare 取更高版本。独立核 tenant/realm/base/source 与原根 kid/指纹，然后执行：
+
+```sh
+python3 deploy-nas/scripts/sign-collab-queue.py \
+  --request /private/public-queue --output /private/approved-week \
+  --jar /private/platform-exec.jar --jar-sha256 APPROVED_SHA256 \
+  --root-kid original-root-kid --root-fingerprint sha256:PINNED_ROOT_SHA256 \
+  --root-private /offline/root-private.der --approved-by alice
+```
+
+脚本调用固定的生产 OfflineKeySigning；原根私钥路径仅交给本机 Java，不复制、不回显。输出必须全新目录，失败保留部分产物，不覆盖已签同版本。未来 issued_at 仅用于预签；生产 Java 仍拒绝提前发布。把整个 approved-week 目录交回 NAS 外部 root 0700/文件 0600 的批准输入目录（不含任何私钥），导入前核摘要：
+
+```sh
+sh deploy-nas/scripts/rotate-collab-keys.sh queue-import /private/approved-week
+sh deploy-nas/scripts/rotate-collab-keys.sh renew
+sh deploy-nas/scripts/schedule-collab-renewal.sh
+```
+
+导入先验证全部根签、announcement、审批、原始请求与计划摘要，再追加同字节材料。重复导入只允许逐字节相同。小时任务只用最高批次，未到签发时刻不发布；剩余覆盖 ≤48h 时日志明确告警“预签队列即将用完”。运营者每周在固定时间准备并签下一批；告警后最迟在队列耗尽前完成。首次导入后执行 renew 可立即发布第一份，此后由小时任务推进。
+
+紧急吊销使用现有人工签发流程：版本必须 **高于全部已排队版本**，保留完整历史，根签并 publish/install/start。PG 或本地最新发布一旦跳出队列的 base/成员版本，旧队列全部拒绝使用，不回退、不补发。必须根据紧急批次的新真实 PG 状态重新 queue-prepare 并离线审批。不要更改系统时钟来加速预签验收。
+
+## 中断恢复与审计
+
+```sh
+sh deploy-nas/scripts/rotate-collab-keys.sh status
+sh deploy-nas/scripts/rotate-collab-keys.sh recover-pending
+```
+
+恢复命令在同一有界锁内核 intent、原 state 摘要、准确 PG pair 与审批输入。PG/原 state 未变则把 pending 移入 `failures`，允许原输入重试；PG 已准确提交候选则补本地 publication receipt，随后显式 install；install 已推进 state 则用原 before-state 快照经生产 loader 重入，或核完整安装 receipt/文件集后补 selector。失败现场从不退 PG 或回写旧 state。恢复后正常 start；仅配置信息切换失败时也可公开 start 重新创建固定服务，不需改容器挂载。
+
+`.preparing` 只含未签请求，下一次准备会自动归档前次未完成暂存。`.pending` 缺失/不可信 intent、PG 是第三个版本、state 元数据异常或 before-state 快照缺失时，恢复明确拒绝；运营者保留现场并排查真实 PG/文件属主，不删除 pending/state.lock，不伪造 firstPublished。旧版本没有 intent 的 pending 也需人工审查，不能自动采纳。此时公开 start 仍保证核心服务可用，消息网络维持降级。重建签名容器中断时保留 root 私有 `activation-<service>-<id>.json` 作为原定义证据，按公开 start 恢复。
+
+新 publication receipt 归档原始 approval/payload 与 `requireClientRefresh`，兼容旧三文件 receipt。receipt 链只防误改和半提交，不能防已取得 NAS root 的人篡改；PG 与客户端独立反回退仍是最终门禁。同宿主 PG/应用时钟比较只发现配置错误，不能抵抗修改宿主时钟。revoked 历史钥也必须全部过期后才允许独立过期恢复，保留这个保守条件。
+
+业务私钥不自动清理：先确认不再是 active/next、无排队/回滚审计引用，再由运营者按批准的保留策略离线加密归档；不在此流程删除 NAS 数据。续期 sidecar 的 root + docker.sock 权限风险与长期新鲜度钥设计另列主控 backlog，本轮不宣称已经隔离。插件模型状态每次 GET 的探测/内网 HTTP 边界及 bidi 显示名处理另行评估；自有 cookie jar 使用 fetch credentials=omit，避免同时混入宿主 cookie，保持现有行为。
+
+## 临时单份根签
+
+没有使用周队列时，运营者仍至少每 12h 完成一次新鲜请求签名。以下为既有手工流程，不能替代周队列覆盖告警。
 
 运营者至少每 12 小时处理一次新请求，完成根签、明确审计记录、发布/安装和公开 start。
 清单上限仍是 24 小时，小时巡检不会自动延长它；仅重复同版下载不会续期。
@@ -110,11 +154,11 @@ sh deploy-nas/scripts/start.sh
 `publish` 使用 input.json（不得含私钥映射）；`install` 使用同目录 install-input.json，
 必须精确匹配最新已发布 pair 及全部 active/next 私钥。生产预检在停机前完成；正式提交前
 再停受信签名进程，确认没有其他活跃写者占用原 state。失败不写成功 receipt。
-start/render 读取已核 selector，保持其他预算/网关字段，启动前再核真实 PG、原 state 与当前有效期。
+start/render 读取已核 selector，保持其他预算/网关字段；只有消息网络在启动前核真实 PG、原 state 与当前有效期。
 同版、同字节和同私钥重入只读复用；改变同版或回退均拒绝。
 
 若使用普通的分阶段过期恢复，首版必须是“旧 active→retired + 新 next”，旧 kid 其他字段全部不变。
-发布后没有三个有效 active，install 和 start 会明确拒绝；签名服务保持停止，小时巡检可继续。
+发布后没有三个有效 active，install 会拒绝，start 只让消息网络降级；核心服务继续，小时巡检可继续。
 从 status 的新 kid `firstPublished` 最大值加 86400 秒，并向上取整到整秒，才是最早激活时间。
 本机生成时间、签名时间和文件时间不能替代真实 PG 首发。
 
