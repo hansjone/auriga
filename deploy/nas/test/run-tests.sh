@@ -6,6 +6,8 @@ set -eu
 ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 export NAS_ROOT="$ROOT"
 export NAS_ALLOW_EXAMPLE_ENV=1
+export AURIGA_IMAGE_BIFROST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+export AURIGA_IMAGE_OPERATOR=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 export NAS_ALLOW_NONROOT=${NAS_ALLOW_NONROOT:-0}
 TMP=$(mktemp -d)
 chmod 0755 "$TMP"
@@ -50,10 +52,6 @@ if sh "$ROOT/test/panel-renew-cron.sh"; then pass panel_renewal_cron_regressions
 else fail_msg panel_renewal_cron_regressions "hourly renewal scheduling failed"; fi
 if sh "$ROOT/test/panel-renew-nonroot.sh"; then pass panel_renewal_nonroot_regressions
 else fail_msg panel_renewal_nonroot_regressions "container-mode non-root startup failed"; fi
-if python3 "$ROOT/litellm/permissions_test.py"; then pass litellm_permissions
-else fail_msg litellm_permissions "LiteLLM group permissions regression failed"; fi
-if python3 "$ROOT/litellm/prepare_ui_test.py"; then pass litellm_ui_preparation
-else fail_msg litellm_ui_preparation "image-independent atomic UI credential preparation failed"; fi
 
 if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
 else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi

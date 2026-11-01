@@ -235,7 +235,7 @@ func TestImageResolveAcceptsEngineSpecificImmutableIDs(t *testing.T) {
 			if err := resolveImages(context.Background(), proofs, &out, inspect, export); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Count(out.String(), "AURIGA_IMAGE_") != 3 {
+			if strings.Count(out.String(), "AURIGA_IMAGE_") != len(imageNames) {
 				t.Fatal(out.String())
 			}
 			for id, name := range selectors {

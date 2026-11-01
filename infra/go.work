@@ -1,10 +1,11 @@
-go 1.27.0
+go 1.27.3
 
 use (
- ./gen
- ./edge
- ./ai-gateway
- ./egress
- ./agent
- ./ctl
+	../third_party/bifrost/core
+	./agent
+	./ai-gateway
+	./ctl
+	./edge
+	./egress
+	./gen
 )

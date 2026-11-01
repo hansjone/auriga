@@ -1,5 +1,5 @@
 // Package modelgate verifies device identity and current member model ACL.
-// LiteLLM owns model budgets and usage admission.
+// Bifrost owns model budgets and usage admission.
 package modelgate
 
 import (

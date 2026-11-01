@@ -1,0 +1,5 @@
+# Standalone operator tools; the model relay has no Python runtime.
+FROM python:3.13.8-slim-bookworm
+COPY deploy/nas/test/admin-bootstrap-requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --disable-pip-version-check -r /tmp/requirements.txt
+USER 10001:10001

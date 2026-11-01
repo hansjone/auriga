@@ -22,7 +22,6 @@ import (
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	"github.com/hansjone/auriga/deploy/bootstrap/panel"
-	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 	"math/big"
 	"net"
 	"net/url"
@@ -60,7 +59,6 @@ func main() {
 	accessFile := flag.String("access-file", "", "required trusted access JSON")
 	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
 	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
-	uiOrigin := flag.String("litellm-ui-origin", "", "independent LiteLLM UI origin (default: admin host on port 8086)")
 	validateOnly := flag.Bool("validate-access", false, "validate without writing installation materials")
 	peerIP := flag.String("edge-peer-ip", "", "fixed edge component-network IPv4")
 	subnet := flag.String("internal-subnet", "", "component-network IPv4 prefix")
@@ -90,12 +88,8 @@ func main() {
 	if err := validateNASLAN(*lanIP, *lanSubnet, *subnet); err != nil {
 		fatalf("%v", err)
 	}
-	ui, err := relayui.Resolve(cfg, *uiOrigin)
-	if err != nil {
-		fatalf("%v", err)
-	}
 	directHTTPS := cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https"
-	hosts := []string{cfg.PortalOrigin().Host, cfg.AdminOrigin().Host, ui.Origin.Host}
+	hosts := []string{cfg.PortalOrigin().Host, cfg.AdminOrigin().Host}
 	if parent := cfg.InstanceParentDomain(); parent != "" {
 		hosts = append(hosts, "*."+parent)
 	}
@@ -107,7 +101,7 @@ func main() {
 	if !*validateOnly && *out == "" {
 		fatalf("-out is required")
 	}
-	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly, *uiOrigin, browser); err != nil {
+	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly, browser); err != nil {
 		fatalf("%v", err)
 	}
 	verified, err := runtime.verify()
@@ -124,7 +118,7 @@ func main() {
 	}
 	defer guard.Close()
 	pki := filepath.Join(*out, "pki")
-	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified, ui.Digest(), browser.Digest())
+	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified, browser.Digest())
 	reuse, err := materials.CheckReceipt(*out, inputDigest, set)
 	if err != nil {
 		fatalf("%v", err)
@@ -143,7 +137,7 @@ func main() {
 		return
 	}
 	mustPKI(pki)
-	writeLiteLLM(*out, ui)
+	writeBifrost(*out)
 	if err := browser.Write(*out); err != nil {
 		fatalf("%v", err)
 	}
@@ -152,7 +146,7 @@ func main() {
 		fatalf("generate network deployment: %v", err)
 	}
 	mustIdentity(*out)
-	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP, maxMemoryMB, ui)
+	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP, maxMemoryMB)
 	if err := writeRuntimeMaterials(*out, verified, maxMemoryMB); err != nil {
 		fatalf("%v", err)
 	}

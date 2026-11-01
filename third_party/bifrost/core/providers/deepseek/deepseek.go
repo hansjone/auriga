@@ -1,0 +1,622 @@
+package deepseek
+
+import (
+	"context"
+	"maps"
+	"strings"
+	"time"
+
+	"github.com/maximhq/bifrost/core/providers/anthropic"
+	"github.com/maximhq/bifrost/core/providers/openai"
+	providerUtils "github.com/maximhq/bifrost/core/providers/utils"
+	schemas "github.com/maximhq/bifrost/core/schemas"
+	"github.com/valyala/fasthttp"
+)
+
+type DeepSeekProvider struct {
+	logger               schemas.Logger
+	client               *fasthttp.Client
+	streamingClient      *fasthttp.Client
+	customProviderConfig *schemas.CustomProviderConfig
+	networkConfig        schemas.NetworkConfig
+	sendBackRawRequest   bool
+	sendBackRawResponse  bool
+}
+
+func NewDeepSeekProvider(config *schemas.ProviderConfig, logger schemas.Logger) (*DeepSeekProvider, error) {
+	config.CheckAndSetDefaults()
+
+	requestTimeout := time.Second * time.Duration(config.NetworkConfig.DefaultRequestTimeoutInSeconds)
+	client := &fasthttp.Client{
+		ReadTimeout:         requestTimeout,
+		WriteTimeout:        requestTimeout,
+		MaxConnsPerHost:     config.NetworkConfig.MaxConnsPerHost,
+		MaxIdleConnDuration: time.Second * time.Duration(config.NetworkConfig.KeepAliveTimeoutInSeconds),
+		MaxConnWaitTimeout:  requestTimeout,
+		MaxConnDuration:     time.Second * time.Duration(schemas.DefaultMaxConnDurationInSeconds),
+		ConnPoolStrategy:    fasthttp.FIFO,
+	}
+
+	client = providerUtils.ConfigureProxy(client, config.ProxyConfig, logger)
+	client = providerUtils.ConfigureDialer(client, config.NetworkConfig.AllowPrivateNetwork)
+	client = providerUtils.ConfigureTLS(client, config.NetworkConfig, logger)
+	streamingClient := providerUtils.BuildStreamingClient(client)
+
+	if config.NetworkConfig.BaseURL == "" {
+		config.NetworkConfig.BaseURL = "https://api.deepseek.com"
+	}
+	config.NetworkConfig.BaseURL = strings.TrimRight(config.NetworkConfig.BaseURL, "/")
+
+	return &DeepSeekProvider{
+		logger:               logger,
+		client:               client,
+		streamingClient:      streamingClient,
+		customProviderConfig: config.CustomProviderConfig,
+		networkConfig:        config.NetworkConfig,
+		sendBackRawRequest:   config.SendBackRawRequest,
+		sendBackRawResponse:  config.SendBackRawResponse,
+	}, nil
+}
+
+func (provider *DeepSeekProvider) anthropicHeaders(key schemas.Key) map[string]string {
+	headers := map[string]string{}
+	if key.Value.GetValue() != "" {
+		headers["x-api-key"] = key.Value.GetValue()
+	}
+	return headers
+}
+
+func applyDeepSeekThinkingCompatibility(request *schemas.BifrostChatRequest) *schemas.BifrostChatRequest {
+	if request == nil || request.Params == nil {
+		return request
+	}
+	if !requiresDeepSeekThinkingDisabled(request) {
+		return request
+	}
+
+	paramsCopy := *request.Params
+	extraParams := make(map[string]any, len(paramsCopy.ExtraParams)+1)
+	maps.Copy(extraParams, paramsCopy.ExtraParams)
+	extraParams["thinking"] = map[string]any{"type": "disabled"}
+	paramsCopy.ExtraParams = extraParams
+
+	requestCopy := *request
+	requestCopy.Params = &paramsCopy
+	return &requestCopy
+}
+
+func requiresDeepSeekThinkingDisabled(request *schemas.BifrostChatRequest) bool {
+	if tc := request.Params.ToolChoice; tc != nil {
+		switch {
+		case tc.ChatToolChoiceStr != nil:
+			switch schemas.ChatToolChoiceType(*tc.ChatToolChoiceStr) {
+			case schemas.ChatToolChoiceTypeRequired, schemas.ChatToolChoiceTypeAny:
+				return true
+			}
+		case tc.ChatToolChoiceStruct != nil:
+			switch tc.ChatToolChoiceStruct.Type {
+			case schemas.ChatToolChoiceTypeRequired, schemas.ChatToolChoiceTypeAny,
+				schemas.ChatToolChoiceTypeFunction, schemas.ChatToolChoiceTypeCustom,
+				schemas.ChatToolChoiceTypeAllowedTools:
+				return true
+			}
+		}
+	}
+
+	for _, msg := range request.Input {
+		if msg.Role != schemas.ChatMessageRoleAssistant || msg.ChatAssistantMessage == nil {
+			continue
+		}
+		if len(msg.ChatAssistantMessage.ToolCalls) == 0 {
+			continue
+		}
+
+		if msg.ChatAssistantMessage.Reasoning == nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+func stampServedModel(extraFields *schemas.BifrostResponseExtraFields, usage *schemas.BifrostLLMUsage, requested, served string) {
+	if served == "" {
+		return
+	}
+	if strings.EqualFold(served, requested) {
+		served = ""
+		if caps := providerUtils.CapabilitiesFor(schemas.DeepSeek, requested); caps != nil && caps.ServerSideModel != nil {
+			served = *caps.ServerSideModel
+		}
+	}
+	if served == "" || strings.EqualFold(served, requested) {
+		return
+	}
+	if extraFields != nil {
+		extraFields.RoutingInfo.ServerSideFallbackModel = new(served)
+	}
+	if usage != nil {
+		usage.ServerSideFallbackModel = new(served)
+	}
+}
+
+func servedModelPostHookRunner(requested string, next schemas.PostHookRunner) schemas.PostHookRunner {
+	var served string
+	return func(ctx *schemas.BifrostContext, result *schemas.BifrostResponse, bifrostErr *schemas.BifrostError) (*schemas.BifrostResponse, *schemas.BifrostError) {
+		var usage *schemas.BifrostLLMUsage
+		if result != nil {
+			switch {
+			case result.ChatResponse != nil:
+				if result.ChatResponse.Model != "" {
+					served = result.ChatResponse.Model
+				}
+				usage = result.ChatResponse.Usage
+			case result.TextCompletionResponse != nil:
+				if result.TextCompletionResponse.Model != "" {
+					served = result.TextCompletionResponse.Model
+				}
+				usage = result.TextCompletionResponse.Usage
+			case result.ResponsesStreamResponse != nil && result.ResponsesStreamResponse.Response != nil:
+				if result.ResponsesStreamResponse.Response.Model != "" {
+					served = result.ResponsesStreamResponse.Response.Model
+				}
+			}
+			stampServedModel(result.GetExtraFields(), usage, requested, served)
+		}
+		if accumulated, ok := ctx.Value(schemas.BifrostContextKeyStreamAccumulatedUsage).(*schemas.BifrostLLMUsage); ok {
+			stampServedModel(nil, accumulated, requested, served)
+		}
+		if bifrostErr != nil {
+			stampServedModel(nil, bifrostErr.ExtraFields.BilledUsage, requested, served)
+		}
+		return next(ctx, result, bifrostErr)
+	}
+}
+
+func (provider *DeepSeekProvider) GetProviderKey() schemas.ModelProvider {
+	return providerUtils.GetProviderName(schemas.DeepSeek, provider.customProviderConfig)
+}
+
+func (provider *DeepSeekProvider) ListModels(ctx *schemas.BifrostContext, keys []schemas.Key, request *schemas.BifrostListModelsRequest) (*schemas.BifrostListModelsResponse, *schemas.BifrostError) {
+	return openai.HandleOpenAIListModelsRequest(
+		ctx,
+		provider.client,
+		request,
+		provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/models"),
+		keys,
+		provider.networkConfig.ExtraHeaders,
+		provider.GetProviderKey(),
+		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
+		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
+	)
+}
+
+func (provider *DeepSeekProvider) TextCompletion(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostTextCompletionRequest) (*schemas.BifrostTextCompletionResponse, *schemas.BifrostError) {
+	ctx.SetValue(schemas.BifrostContextKeyPassthroughExtraParams, true)
+	resp, bifrostErr := openai.HandleOpenAITextCompletionRequest(
+		ctx,
+		provider.client,
+		provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/beta/completions"),
+		request,
+		openai.BearerAuthHeader(key),
+		provider.networkConfig.ExtraHeaders,
+		provider.GetProviderKey(),
+		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
+		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
+		nil,
+		nil,
+		provider.logger,
+	)
+	if resp != nil {
+		stampServedModel(&resp.ExtraFields, resp.Usage, request.Model, resp.Model)
+	}
+	return resp, bifrostErr
+}
+
+func (provider *DeepSeekProvider) TextCompletionStream(ctx *schemas.BifrostContext, postHookRunner schemas.PostHookRunner, postHookSpanFinalizer func(context.Context), key schemas.Key, request *schemas.BifrostTextCompletionRequest) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
+	ctx.SetValue(schemas.BifrostContextKeyPassthroughExtraParams, true)
+	return openai.HandleOpenAITextCompletionStreaming(
+		ctx,
+		provider.streamingClient,
+		provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/beta/completions"),
+		request,
+		openai.BearerAuthHeader(key),
+		provider.networkConfig.ExtraHeaders,
+		provider.networkConfig.StreamIdleTimeoutInSeconds,
+		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
+		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
+		provider.GetProviderKey(),
+		nil,
+		servedModelPostHookRunner(request.Model, postHookRunner),
+		nil,
+		nil,
+		provider.logger,
+		postHookSpanFinalizer,
+	)
+}
+
+func (provider *DeepSeekProvider) ChatCompletion(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostChatRequest) (*schemas.BifrostChatResponse, *schemas.BifrostError) {
+	resp, bifrostErr := provider.chatCompletion(ctx, key, request)
+	if resp != nil {
+		stampServedModel(&resp.ExtraFields, resp.Usage, request.Model, resp.Model)
+	}
+	return resp, bifrostErr
+}
+
+func (provider *DeepSeekProvider) chatCompletion(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostChatRequest) (*schemas.BifrostChatResponse, *schemas.BifrostError) {
+	if anthropic.ResolveUseAnthropicEndpoints(ctx, key) {
+		if bifrostErr := rejectUnsupportedChatContent(request); bifrostErr != nil {
+			return nil, bifrostErr
+		}
+		return anthropic.HandleAnthropicChatCompletionRequest(
+			ctx,
+			provider.client,
+			provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/anthropic/v1/messages"),
+			request,
+			anthropic.AnthropicRequestBuildConfig{
+				Provider:                  schemas.DeepSeek,
+				ShouldSendBackRawRequest:  provider.sendBackRawRequest,
+				ShouldSendBackRawResponse: provider.sendBackRawResponse,
+			},
+			provider.anthropicHeaders(key),
+			provider.networkConfig.ExtraHeaders,
+			nil,
+			provider.logger,
+		)
+	}
+
+	ctx.SetValue(schemas.BifrostContextKeyPassthroughExtraParams, true)
+	request = applyDeepSeekThinkingCompatibility(request)
+	return openai.HandleOpenAIChatCompletionRequest(
+		ctx,
+		provider.client,
+		provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/chat/completions"),
+		request,
+		openai.BearerAuthHeader(key),
+		provider.networkConfig.ExtraHeaders,
+		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
+		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
+		provider.GetProviderKey(),
+		nil,
+		nil,
+		nil,
+		provider.logger,
+	)
+}
+
+func (provider *DeepSeekProvider) ChatCompletionStream(ctx *schemas.BifrostContext, postHookRunner schemas.PostHookRunner, postHookSpanFinalizer func(context.Context), key schemas.Key, request *schemas.BifrostChatRequest) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
+	postHookRunner = servedModelPostHookRunner(request.Model, postHookRunner)
+	if anthropic.ResolveUseAnthropicEndpoints(ctx, key) {
+		if bifrostErr := rejectUnsupportedChatContent(request); bifrostErr != nil {
+			return nil, bifrostErr
+		}
+		jsonData, bifrostErr := anthropic.BuildAnthropicChatRequestBody(ctx, request, anthropic.AnthropicRequestBuildConfig{
+			Provider:                  schemas.DeepSeek,
+			IsStreaming:               true,
+			ShouldSendBackRawRequest:  provider.sendBackRawRequest,
+			ShouldSendBackRawResponse: provider.sendBackRawResponse,
+		})
+		if bifrostErr != nil {
+			return nil, bifrostErr
+		}
+
+		return anthropic.HandleAnthropicChatCompletionStreaming(
+			ctx,
+			provider.streamingClient,
+			provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/anthropic/v1/messages"),
+			jsonData,
+			provider.anthropicHeaders(key),
+			provider.networkConfig.ExtraHeaders,
+			provider.networkConfig.StreamIdleTimeoutInSeconds,
+			provider.networkConfig.BetaHeaderOverrides,
+			providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
+			providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
+			schemas.DeepSeek,
+			postHookRunner,
+			nil,
+			nil,
+			provider.logger,
+			postHookSpanFinalizer,
+		)
+	}
+
+	ctx.SetValue(schemas.BifrostContextKeyPassthroughExtraParams, true)
+	request = applyDeepSeekThinkingCompatibility(request)
+	return openai.HandleOpenAIChatCompletionStreaming(
+		ctx,
+		provider.streamingClient,
+		provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/chat/completions"),
+		request,
+		openai.BearerAuthHeader(key),
+		provider.networkConfig.ExtraHeaders,
+		provider.networkConfig.StreamIdleTimeoutInSeconds,
+		providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
+		providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
+		schemas.DeepSeek,
+		postHookRunner,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		provider.logger,
+		postHookSpanFinalizer,
+	)
+}
+
+func (provider *DeepSeekProvider) Responses(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostResponsesRequest) (*schemas.BifrostResponsesResponse, *schemas.BifrostError) {
+	if anthropic.ResolveUseAnthropicEndpoints(ctx, key) {
+		if bifrostErr := rejectUnsupportedResponsesContent(request); bifrostErr != nil {
+			return nil, bifrostErr
+		}
+		resp, bifrostErr := anthropic.HandleAnthropicResponsesRequest(
+			ctx,
+			provider.client,
+			provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/anthropic/v1/messages"),
+			request,
+			anthropic.AnthropicRequestBuildConfig{
+				Provider:                  schemas.DeepSeek,
+				ShouldSendBackRawRequest:  provider.sendBackRawRequest,
+				ShouldSendBackRawResponse: provider.sendBackRawResponse,
+			},
+			provider.anthropicHeaders(key),
+			provider.networkConfig.ExtraHeaders,
+			nil,
+			provider.logger,
+		)
+		if resp != nil {
+			stampServedModel(&resp.ExtraFields, nil, request.Model, resp.Model)
+		}
+		return resp, bifrostErr
+	}
+
+	chatResponse, err := provider.ChatCompletion(ctx, key, request.ToChatRequest())
+	if err != nil {
+		return nil, err
+	}
+
+	response := chatResponse.ToBifrostResponsesResponse()
+	stampServedModel(&response.ExtraFields, nil, request.Model, response.Model)
+
+	return response, nil
+}
+
+func (provider *DeepSeekProvider) ResponsesStream(ctx *schemas.BifrostContext, postHookRunner schemas.PostHookRunner, postHookSpanFinalizer func(context.Context), key schemas.Key, request *schemas.BifrostResponsesRequest) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
+	if anthropic.ResolveUseAnthropicEndpoints(ctx, key) {
+		if bifrostErr := rejectUnsupportedResponsesContent(request); bifrostErr != nil {
+			return nil, bifrostErr
+		}
+		jsonData, bifrostErr := anthropic.BuildAnthropicResponsesRequestBody(ctx, request, anthropic.AnthropicRequestBuildConfig{
+			Provider:                  schemas.DeepSeek,
+			IsStreaming:               true,
+			ShouldSendBackRawRequest:  provider.sendBackRawRequest,
+			ShouldSendBackRawResponse: provider.sendBackRawResponse,
+		})
+		if bifrostErr != nil {
+			return nil, bifrostErr
+		}
+
+		return anthropic.HandleAnthropicResponsesStream(
+			ctx,
+			provider.streamingClient,
+			provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/anthropic/v1/messages"),
+			jsonData,
+			provider.anthropicHeaders(key),
+			provider.networkConfig.ExtraHeaders,
+			provider.networkConfig.StreamIdleTimeoutInSeconds,
+			provider.networkConfig.BetaHeaderOverrides,
+			providerUtils.ShouldSendBackRawRequest(ctx, provider.sendBackRawRequest),
+			providerUtils.ShouldSendBackRawResponse(ctx, provider.sendBackRawResponse),
+			provider.GetProviderKey(),
+			servedModelPostHookRunner(request.Model, postHookRunner),
+			nil,
+			nil,
+			provider.logger,
+			postHookSpanFinalizer,
+		)
+	}
+
+	ctx.SetValue(schemas.BifrostContextKeyIsResponsesToChatCompletionFallback, true)
+	return provider.ChatCompletionStream(
+		ctx,
+		postHookRunner,
+		postHookSpanFinalizer,
+		key,
+		request.ToChatRequest(),
+	)
+}
+
+func (provider *DeepSeekProvider) Embedding(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostEmbeddingRequest) (*schemas.BifrostEmbeddingResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.EmbeddingRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) Speech(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostSpeechRequest) (*schemas.BifrostSpeechResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.SpeechRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) Rerank(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostRerankRequest) (*schemas.BifrostRerankResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.RerankRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) Decision(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostDecisionRequest) (*schemas.BifrostDecisionResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.DecisionRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) OCR(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostOCRRequest) (*schemas.BifrostOCRResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.OCRRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) SpeechStream(ctx *schemas.BifrostContext, postHookRunner schemas.PostHookRunner, postHookSpanFinalizer func(context.Context), key schemas.Key, request *schemas.BifrostSpeechRequest) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.SpeechStreamRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) Transcription(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostTranscriptionRequest) (*schemas.BifrostTranscriptionResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.TranscriptionRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) TranscriptionStream(ctx *schemas.BifrostContext, postHookRunner schemas.PostHookRunner, postHookSpanFinalizer func(context.Context), key schemas.Key, request *schemas.BifrostTranscriptionRequest) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.TranscriptionStreamRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ImageGeneration(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostImageGenerationRequest) (*schemas.BifrostImageGenerationResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ImageGenerationRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ImageGenerationStream(ctx *schemas.BifrostContext, postHookRunner schemas.PostHookRunner, postHookSpanFinalizer func(context.Context), key schemas.Key, request *schemas.BifrostImageGenerationRequest) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ImageGenerationStreamRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ImageEdit(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostImageEditRequest) (*schemas.BifrostImageGenerationResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ImageEditRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ImageEditStream(ctx *schemas.BifrostContext, postHookRunner schemas.PostHookRunner, postHookSpanFinalizer func(context.Context), key schemas.Key, request *schemas.BifrostImageEditRequest) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ImageEditStreamRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ImageVariation(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostImageVariationRequest) (*schemas.BifrostImageGenerationResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ImageVariationRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) VideoGeneration(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoGenerationRequest) (*schemas.BifrostVideoGenerationResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoGenerationRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) VideoRetrieve(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoRetrieveRequest) (*schemas.BifrostVideoGenerationResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoRetrieveRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) VideoDownload(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoDownloadRequest) (*schemas.BifrostVideoDownloadResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoDownloadRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) VideoDelete(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoDeleteRequest) (*schemas.BifrostVideoDeleteResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoDeleteRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) VideoList(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoListRequest) (*schemas.BifrostVideoListResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoListRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) VideoEdit(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoEditRequest) (*schemas.BifrostVideoEditResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoEditRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) VideoRemix(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostVideoRemixRequest) (*schemas.BifrostVideoGenerationResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.VideoRemixRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) FileUpload(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostFileUploadRequest) (*schemas.BifrostFileUploadResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.FileUploadRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) FileList(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostFileListRequest) (*schemas.BifrostFileListResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.FileListRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) FileRetrieve(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostFileRetrieveRequest) (*schemas.BifrostFileRetrieveResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.FileRetrieveRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) FileDelete(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostFileDeleteRequest) (*schemas.BifrostFileDeleteResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.FileDeleteRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) FileContent(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostFileContentRequest) (*schemas.BifrostFileContentResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.FileContentRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) BatchCreate(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostBatchCreateRequest) (*schemas.BifrostBatchCreateResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.BatchCreateRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) BatchList(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostBatchListRequest) (*schemas.BifrostBatchListResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.BatchListRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) BatchRetrieve(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostBatchRetrieveRequest) (*schemas.BifrostBatchRetrieveResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.BatchRetrieveRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) BatchCancel(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostBatchCancelRequest) (*schemas.BifrostBatchCancelResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.BatchCancelRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) BatchDelete(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostBatchDeleteRequest) (*schemas.BifrostBatchDeleteResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.BatchDeleteRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) BatchResults(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostBatchResultsRequest) (*schemas.BifrostBatchResultsResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.BatchResultsRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) CountTokens(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostResponsesRequest) (*schemas.BifrostCountTokensResponse, *schemas.BifrostError) {
+	return anthropic.HandleAnthropicCountTokensRequest(
+		ctx,
+		provider.client,
+		provider.networkConfig.BaseURL+providerUtils.GetPathFromContext(ctx, "/anthropic/v1/messages/count_tokens"),
+		request,
+		anthropic.AnthropicRequestBuildConfig{
+			Provider:                  schemas.DeepSeek,
+			ShouldSendBackRawRequest:  provider.sendBackRawRequest,
+			ShouldSendBackRawResponse: provider.sendBackRawResponse,
+		},
+		provider.anthropicHeaders(key),
+		provider.networkConfig.ExtraHeaders,
+		nil,
+		provider.logger,
+	)
+}
+
+func (provider *DeepSeekProvider) ModelRetrieve(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostModelRetrieveRequest) (*schemas.BifrostModelRetrieveResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ModelRetrieveRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) Compaction(ctx *schemas.BifrostContext, key schemas.Key, request *schemas.BifrostCompactionRequest) (*schemas.BifrostCompactionResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.CompactionRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerCreate(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostContainerCreateRequest) (*schemas.BifrostContainerCreateResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerCreateRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerList(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostContainerListRequest) (*schemas.BifrostContainerListResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerListRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerRetrieve(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostContainerRetrieveRequest) (*schemas.BifrostContainerRetrieveResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerRetrieveRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerDelete(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostContainerDeleteRequest) (*schemas.BifrostContainerDeleteResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerDeleteRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerFileCreate(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostContainerFileCreateRequest) (*schemas.BifrostContainerFileCreateResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerFileCreateRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerFileList(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostContainerFileListRequest) (*schemas.BifrostContainerFileListResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerFileListRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerFileRetrieve(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostContainerFileRetrieveRequest) (*schemas.BifrostContainerFileRetrieveResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerFileRetrieveRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerFileContent(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostContainerFileContentRequest) (*schemas.BifrostContainerFileContentResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerFileContentRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) ContainerFileDelete(_ *schemas.BifrostContext, _ []schemas.Key, _ *schemas.BifrostContainerFileDeleteRequest) (*schemas.BifrostContainerFileDeleteResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.ContainerFileDeleteRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) Passthrough(_ *schemas.BifrostContext, _ schemas.Key, _ *schemas.BifrostPassthroughRequest) (*schemas.BifrostPassthroughResponse, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.PassthroughRequest, provider.GetProviderKey())
+}
+
+func (provider *DeepSeekProvider) PassthroughStream(_ *schemas.BifrostContext, _ schemas.PostHookRunner, _ func(context.Context), _ schemas.Key, _ *schemas.BifrostPassthroughRequest) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
+	return nil, providerUtils.NewUnsupportedOperationError(schemas.PassthroughStreamRequest, provider.GetProviderKey())
+}

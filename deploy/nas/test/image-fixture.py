@@ -22,7 +22,7 @@ def digest(raw):
 
 
 images = {}
-for name in ("platform", "edge", "agent"):
+for name in ("platform", "edge", "agent", "bifrost", "operator"):
     layer = ("unit test layer " + name).encode()
     config = json.dumps({"os": "linux", "architecture": "amd64", "rootfs": {
         "type": "layers", "diff_ids": ["sha256:" + digest(layer)]}}).encode()

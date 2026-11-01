@@ -62,10 +62,6 @@ export const router = createRouter({
         { path: 'settings', component: SettingsView },
         {
           path: 'models/:pathMatch(.*)*',
-          beforeEnter: () => {
-            window.location.assign('/ai/ui/');
-            return false;
-          },
           component: WorkflowUnavailableView,
         },
         ...unavailable.map((path) => ({

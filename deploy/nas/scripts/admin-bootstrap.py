@@ -1,6 +1,6 @@
 """Local first-admin setup through the real edge loopback, never a database edit.
 
-Requires Python 3 and cryptography from the explicitly approved LiteLLM image.
+Requires Python 3 and cryptography from the explicitly built Auriga operator helper image.
 Only recipient-encrypted checkpoints go to stdout; no plaintext credential file
 is created on the NAS. The private recipient key stays on the operator computer.
 """

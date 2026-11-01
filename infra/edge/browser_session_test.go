@@ -71,6 +71,9 @@ func (s *browserRPCServer) IntrospectSession(ctx context.Context, request *iamv1
 		}
 	}
 	result := &iamv1.IntrospectSessionResponse{Active: true, AccessToken: row.AccessToken, AccessTokenExpiresAt: timestamppb.New(row.AccessTokenExpiresAt), Session: &iamv1.Session{SessionId: row.SessionID, AccountId: row.AccountID, TenantId: row.TenantID, Audience: request.Audience, CreatedAt: timestamppb.New(row.AuthTime), ExpiresAt: timestamppb.New(row.ExpiresAt), IdleExpiresAt: timestamppb.New(row.IdleExpiresAt), Mfa: row.MFA}}
+	if !row.StepUpAt.IsZero() {
+		result.Session.StepUpAt = timestamppb.New(row.StepUpAt)
+	}
 	switch s.mode {
 	case "sid":
 		result.Session.SessionId = "different"

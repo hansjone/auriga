@@ -268,21 +268,9 @@ permissions: {
 实例请求体总体上限 64 MiB（已知长度和未知长度都限制，超限 413），允许超过 1 MiB 的上传；API 的 1 MiB 上限保持原样。拨号／TLS 握手上限 10 秒，不设置实例短响应头超时和服务器整体 ReadTimeout。Transport 按节点 ID 和入口复用并限制池数量，地址变化和进程退出关闭空闲连接。
 
 E2 测试见 `ingress*_test.go`、`local_*_test.go`：正常身份与路径、越权／跨租户、错误节点／CA、非法 scheme、WebSocket 吊销断连、路由迁移删除、2 MiB 上传及未知长度超限、本机 TLS。Windows 假节点使用随机命名管道上的真实 TLS，避开本机 HTTPS 扫描对 loopback TCP 证书的替换；Linux 使用 httptest 随机 TCP 端口，并另测 Unix socket。
-## LiteLLM 独立管理入口
+## 中转站管理代理
 
-旧 ai-admin 上游与 aiAdminHop 已删除。安装器生成 LiteLLM 数据上游和第四个独立 UI listener，配置片段如下（其余 Access、IAM RPC 和上游仍必需）：
-
-```json
-{
-  "litellmOrigin": "http://litellm:4000",
-  "litellmUI": {
-    "origin": { "scheme": "https", "host": "admin.example.com", "port": 8086 },
-    "listener": { "address": "0.0.0.0", "port": 8086, "tls": true }
-  }
-}
-```
-
-管理台 /ai/ui/ 通过一次性 POST code 交接至独立 UI Origin；每次请求仍在线检查 admin 会话和 ai.providers.write。UI socket 不提供 Auriga API。TLS 证书必须覆盖 UI hostname。数据接口仍在门户 /ai/v1，只开放 models 和 chat/completions；管理接口不接受外部 Key。部署说明见 [LiteLLM](relay-litellm.md)。
+门户 `/ai/v1` 保持数据入口。管理员来源 `/api/ai/v1/admin/relay` 经实时平台会话、权限、同源、CSRF 和近期二次验证代理到内网 Bifrost 服务；不再有独立 UI listener、relay 域名或 UI handoff。配置使用 `relay.origin` 和 `relay.adminPasswordFile`，由安装器生成。详见 [Bifrost 架构与部署](../architecture/relay-bifrost.zh.md)。
 
 ## 网络根签名清单的精确 GET
 

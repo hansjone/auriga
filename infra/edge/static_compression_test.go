@@ -3,78 +3,14 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
-	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
-
-func TestLiteLLMStaticCompression(t *testing.T) {
-	asset := strings.Repeat("const dashboard = 'LiteLLM';\n", 24000)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/javascript")
-		w.Header().Set("Content-Length", strconv.Itoa(len(asset)))
-		_, _ = io.WriteString(w, asset)
-	}))
-	defer upstream.Close()
-	g, _, store := accessFixtureConfigured(t, false, nil, func(c *Config, _ map[string]any) { c.LiteLLMOrigin = upstream.URL })
-	backend, _ := browserRPCFixture(t, g, store)
-	admin := putBrowserSession(g, backend, "admin", "admin")
-	claims, err := json.Marshal(map[string]any{"ctx": "admin", "tid": admin.TenantID, "sub": admin.AccountID, "perms": []string{"ai.providers.write"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	admin.AccessToken = "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".fixture"
-	store.Put("admin", admin)
-	for _, tc := range []struct {
-		name, path, encoding, cookie string
-		status                       int
-		compressed                   bool
-	}{
-		{"asset", "/ai/_next/static/chunks/dashboard.js", "gzip, deflate, br", "admin", 200, true},
-		{"q-value", "/ai/_next/static/chunks/dashboard.js", "br, gzip;q=0.5", "admin", 200, true},
-		{"identity", "/ai/_next/static/chunks/dashboard.js", "identity", "admin", 200, false},
-		{"disabled", "/ai/_next/static/chunks/dashboard.js", "gzip;q=0, *;q=1", "admin", 200, false},
-		{"api-not-compressed", "/ai/model/info", "gzip", "admin", 200, false},
-		{"anonymous", "/ai/_next/static/chunks/dashboard.js", "gzip", "", 401, false},
-		{"wrong-session", "/ai/_next/static/chunks/dashboard.js", "gzip", "invalid", 401, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, tc.path, nil)
-			r.Header.Set("Accept-Encoding", tc.encoding)
-			if tc.cookie != "" {
-				r.Header.Set("Cookie", "auriga_litellm_session="+tc.cookie)
-			}
-			r = r.WithContext(context.WithValue(r.Context(), accessEntryKey{}, accessEntry{role: "relayAdmin", scheme: "http"}))
-			w := httptest.NewRecorder()
-			g.proxyLiteLLM(w, r, "relayAdmin", "compression")
-			if w.Code != tc.status {
-				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
-			}
-			assertStaticEncoding(t, w, asset, tc.compressed, tc.status == 200)
-		})
-	}
-	r := httptest.NewRequest(http.MethodHead, "/ai/_next/static/chunks/dashboard.js", nil)
-	r.Header.Set("Accept-Encoding", "gzip")
-	r.Header.Set("Cookie", "auriga_litellm_session=admin")
-	r = r.WithContext(context.WithValue(r.Context(), accessEntryKey{}, accessEntry{role: "relayAdmin", scheme: "http"}))
-	w := httptest.NewRecorder()
-	g.proxyLiteLLM(w, r, "relayAdmin", "head-compression")
-	get := r.Clone(r.Context())
-	get.Method = http.MethodGet
-	want := httptest.NewRecorder()
-	g.proxyLiteLLM(want, get, "relayAdmin", "get-compression")
-	if w.Code != 200 || w.Body.Len() != 0 || w.Header().Get("Content-Encoding") != "gzip" || w.Header().Get("Content-Length") != want.Header().Get("Content-Length") {
-		t.Fatal("upstream HEAD differs from compressed GET")
-	}
-}
 
 func TestSPAStaticCompression(t *testing.T) {
 	root := t.TempDir()

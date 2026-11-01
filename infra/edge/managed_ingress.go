@@ -27,7 +27,7 @@ func (c Config) managedEntry() (accessEntry, error) {
 		return accessEntry{}, fmt.Errorf("managed ingress must use the existing instance control DNS alias")
 	}
 	ls := c.Access.Listeners()
-	if port == int(ls.Portal.Port) || port == int(ls.Admin.Port) || port == int(ls.InstanceControl.Port) || c.LiteLLMUI != nil && port == int(c.LiteLLMUI.Listener.Port) {
+	if port == int(ls.Portal.Port) || port == int(ls.Admin.Port) || port == int(ls.InstanceControl.Port) {
 		return accessEntry{}, fmt.Errorf("managed ingress needs a separate port")
 	}
 	policy, err := c.parseControlIngress()

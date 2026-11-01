@@ -9,7 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/litellm"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/bifrost"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -37,9 +37,9 @@ func TestEdgeSubmitRuntimeFixture(t *testing.T) {
 	network.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots}
 	network.StartTLS()
 	t.Cleanup(network.Close)
-	// A real LiteLLM member handler rejects the invalid device ticket.
-	deviceHandler, err := litellm.New("http://litellm:4000", "unused-key", func(context.Context, string) (litellm.Principal, error) {
-		return litellm.Principal{}, errors.New("common.unauthenticated")
+	// A real Bifrost member handler rejects the invalid device ticket.
+	deviceHandler, err := bifrost.New("http://bifrost:8080", "unused-key", bifrost.MemberPolicy{MonthlyBudgetMicros: 10, RequestsPerMinute: 60}, func(context.Context, string) (bifrost.Principal, error) {
+		return bifrost.Principal{}, errors.New("common.unauthenticated")
 	})
 	if err != nil {
 		t.Fatal(err)

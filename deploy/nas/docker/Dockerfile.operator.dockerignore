@@ -1,0 +1,5 @@
+**
+!deploy/
+!deploy/nas/
+!deploy/nas/test/
+!deploy/nas/test/admin-bootstrap-requirements.txt

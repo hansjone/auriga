@@ -60,8 +60,8 @@ jobs:
           source var/compose.env
           set +a
           # Keep startup diagnostics safe even if a dependency prints a DSN/key.
-          for name in master salt team pg_password; do
-            printf '::add-mask::%s\n' "$(cat "var/litellm/$name")"
+          for name in admin_password encryption_key pg_password pg_migration_password; do
+            printf '::add-mask::%s\n' "$(cat "var/bifrost/$name")"
           done
           echo "AURIGA_IAM_ENCRYPTION_KEY=$AURIGA_IAM_ENCRYPTION_KEY" >> "$GITHUB_ENV"
           echo "AURIGA_WORKSPACE_ENCRYPTION_KEY=$AURIGA_WORKSPACE_ENCRYPTION_KEY" >> "$GITHUB_ENV"
@@ -130,7 +130,7 @@ jobs:
         working-directory: deploy/compose
         run: |
           docker compose ps || true
-          for s in postgres nats platform edge agent registry litellm litellm-init ai-relay; do
+          for s in postgres nats platform edge agent registry bifrost ai-relay; do
             echo "===== logs $s ====="
             docker compose logs --tail=200 "$s" || true
           done

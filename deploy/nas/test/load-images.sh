@@ -20,6 +20,8 @@ case "$1 $2" in
       auriga/platform:nas) h=a ;;
       auriga/edge:nas) h=b ;;
       auriga/agent:nas) h=c ;;
+      auriga/bifrost:nas) h=d ;;
+      auriga/operator:nas) h=e ;;
       *) exit 92 ;;
     esac
     id=$(printf '%064d' 0 | tr 0 "$h")
@@ -33,6 +35,8 @@ case "$1 $2" in
       sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) name=platform ;;
       sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) name=edge ;;
       sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc) name=agent ;;
+      sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd) name=bifrost ;;
+      sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee) name=operator ;;
       *) exit 93 ;;
     esac
     if [ "${NAS_WRONG_IMAGE:-}" = 1 ] && [ "$name" = agent ]; then name=edge; fi
@@ -51,9 +55,9 @@ cp "$STACK_ENV" "$TMP/stack.before"
 unset AURIGA_RELEASE_DIR
 sh "$ROOT/scripts/load-images.sh" "$TMP/bundle" >"$TMP/load.log"
 cmp "$TMP/bundle/images/manifest.json" "$TMP/bundle/.auriga-release"
-[ "$(grep -c '^load -i ' "$TMP/docker.log")" = 3 ]
+[ "$(grep -c '^load -i ' "$TMP/docker.log")" = 5 ]
 grep -qx 'AURIGA_IMAGE_PLATFORM=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$TMP/load.log"
-[ "$(grep -c '^AURIGA_IMAGE_' "$TMP/load.log")" = 3 ]
+[ "$(grep -c '^AURIGA_IMAGE_' "$TMP/load.log")" = 5 ]
 [ ! -e "$AURIGA_DATA_ROOT" ]
 cmp "$STACK_ENV" "$TMP/stack.before"
 printf 'PASS load_images_default_release_with_versions_and_verified_local_ids\n'
@@ -140,7 +144,7 @@ for kind in marker versions; do
   [ ! "$STACK_ENV" -ef "$target" ]
   cmp "$TMP/bundle/images/manifest.json" "$release/.auriga-release"
   cmp "$TMP/bundle/versions.txt" "$release/versions.txt"
-  [ "$(grep -c '^AURIGA_IMAGE_' "$release.log")" = 3 ]
+  [ "$(grep -c '^AURIGA_IMAGE_' "$release.log")" = 5 ]
   [ ! -e "$AURIGA_DATA_ROOT" ]
   printf 'PASS load_images_%s_hardlink_replaced_without_env_write\n' "$kind"
 done

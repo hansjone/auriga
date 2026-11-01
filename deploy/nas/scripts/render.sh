@@ -30,8 +30,7 @@ else
   chown_required 10001:10001 "$CONFIG/panel"
 fi
 load_nas_access_env "$CONFIG/materials/access.env"
-install_litellm_materials
-sh "$NAS_ROOT/litellm/prepare-ui.sh" "$AURIGA_DATA_ROOT/config/litellm-ui"
+install_bifrost_materials
 
 for _name in ca.crt edge.crt edge-iam.crt proxy-ca.crt proxy-edge.crt; do
   install_edge_material "$CONFIG/materials/pki/$_name" "$CONFIG/pki-edge/$_name" 644

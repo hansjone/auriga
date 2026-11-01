@@ -1,0 +1,9 @@
+package schemas
+
+type ModelInfoProvider interface {
+	GetModelInfo(provider ModelProvider, model string) *Model
+
+	CalculateRequestCost(ctx *BifrostContext, resp *BifrostResponse) float64
+
+	CalculateRequestCostBreakdown(ctx *BifrostContext, resp *BifrostResponse) *BifrostCost
+}

@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-var imageNames = []string{"platform", "edge", "agent"}
+var imageNames = []string{"platform", "edge", "agent", "bifrost", "operator"}
 var imageDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var imageHex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var imageCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -129,8 +129,8 @@ func verifyImageBundle(ctx context.Context, bundle string, limits imageLimits) (
 	if err := imageJSON(raw, &manifest); err != nil {
 		return nil, err
 	}
-	if !imageCommit.MatchString(manifest.Commit) || !imageCommit.MatchString(manifest.Tree) || len(manifest.Images) != 3 {
-		return nil, errors.New("missing commit/source_tree or exactly three image records")
+	if !imageCommit.MatchString(manifest.Commit) || !imageCommit.MatchString(manifest.Tree) || len(manifest.Images) != len(imageNames) {
+		return nil, errors.New("missing commit/source_tree or the required image records")
 	}
 	if manifest.Bootstrap.File != "deploy-nas/bin/auriga-nas-bootstrap" || !imageHex.MatchString(manifest.Bootstrap.SHA256) ||
 		manifest.Runtime.File != "deploy-nas/bin/runtime-release" || !imageHex.MatchString(manifest.Runtime.SHA256) ||
@@ -159,7 +159,7 @@ func verifyImageBundle(ctx context.Context, bundle string, limits imageLimits) (
 			return nil, fmt.Errorf("root checksum mismatch: %s", file)
 		}
 	}
-	sums, err := imageChecksums(filepath.Join(bundle, "images", "SHA256SUMS"), []string{"platform.tar", "edge.tar", "agent.tar"})
+	sums, err := imageChecksums(filepath.Join(bundle, "images", "SHA256SUMS"), []string{"platform.tar", "edge.tar", "agent.tar", "bifrost.tar", "operator.tar"})
 	if err != nil {
 		return nil, err
 	}

@@ -10,7 +10,7 @@ printf '#!/bin/sh\n[ "$1" = check ]\n' >"$TMP/package/scripts/installer.sh"
 export AURIGA_DATA_ROOT="$TMP/srv/container/auriga-bootstrap" NAS_ROOT="$TMP/package" BOOTSTRAP_LOG="$TMP/docker.log"
 unset NAS_ALLOW_NONROOT NAS_INSTALLER_ACTIVE
 touch "$AURIGA_DATA_ROOT/.auriga-initialized" "$AURIGA_DATA_ROOT/enrollment/emergency-enrollment.json" "$TMP/recipient.pem"
-printf 'AURIGA_DATA_ROOT=%s\nAURIGA_INSTALL_MODE=container\nAURIGA_IMAGE_LITELLM=sha256:%064d\n' "$AURIGA_DATA_ROOT" 1 >"$AURIGA_DATA_ROOT/stack.env"
+printf 'AURIGA_DATA_ROOT=%s\nAURIGA_INSTALL_MODE=container\nAURIGA_IMAGE_OPERATOR=sha256:%064d\n' "$AURIGA_DATA_ROOT" 1 >"$AURIGA_DATA_ROOT/stack.env"
 printf 'AURIGA_ACCESS_FILE=%s/access.json\n' "$TMP" >>"$AURIGA_DATA_ROOT/stack.env"
 chmod 600 "$AURIGA_DATA_ROOT/stack.env"
 cat >"$TMP/bin/docker" <<'EOF'

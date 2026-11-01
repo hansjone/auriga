@@ -28,7 +28,7 @@ sh deploy-nas/scripts/emergency.sh show
 
 `show` 只接受 stdout 为 TTY，管道和重定向均拒绝；SSH 使用分配了 TTY 的交互会话。
 首次启动被重定向时仅提示执行 `show`，不会显示凭据或写“已显示”标记。
-helper 复用已批准的本地 LiteLLM 镜像，以固定 UID10001、无网络、无 Docker socket、
+helper 使用 bundle 内已校验的独立 operator 镜像，以固定 UID10001、无网络、无 Docker socket、
 只读根运行；关闭 Docker 日志驱动，不经过 Compose/服务日志，不创建新的明文凭据文件。
 终端自身的录屏、会话记录和滚屏仍由操作者管理，不要在共享或录制中的终端查看。
 公开命令目前只有 `show`。应急轮换虽有契约定义，平台尚无对应实现，留待后续；
@@ -203,7 +203,7 @@ JWKS 固定走 `https://platform:8081/oauth2/jwks`，进程内客户端证书/�
 
 现场需要：新的 `linux/amd64` bootstrap、包含上述脚本与 overlay 的完整 NAS 包、带 curl/openssl/keytool
 及现行 collab/managed-network 后端的 platform 镜像，以及原已审核的 edge、agent、PostgreSQL、
-NATS、registry、LiteLLM 镜像与签名 DSH runtime 包。edge/agent 没有本次二进制改动，仍须与批准
+NATS、registry、Bifrost、operator 镜像与签名 DSH runtime 包。edge/agent 没有本次二进制改动，仍须与批准
 基线相容。目标桌面用同一现行 Auriga 插件包，按网络安装指南导出可信 loader 配置；
 云端新的 managed-network 文件随托管凭据下发，已有实例由原 reconcile 机制更新，必要时经公开入口重开。
 
@@ -230,7 +230,7 @@ AURIGA_NAS_COLLAB_LIVE_IMAGE=sha256:<approved-local-platform-id> \
 
 PostgreSQL仅对只读探针可确认完全为空的PGDATA放行官方entrypoint准备阶段，支持`umask 077`初始化产生的`root:root/0700`空目录。非空（含隐藏项、悬空链接）或无法确认空时，仍按999:999检查数据目录；SQL始终按999:999检查。探针不执行chown/chmod。
 
-LiteLLM 原秘密保留在 `config/materials/litellm/`，归安装器 UID10001、文件0600；render 生成 `config/litellm/` 运行时副本（文件0640，master/salt组10003、数据库口令组999、团队Key组10001）。compose secrets 仅挂副本，LiteLLM 与 init 无额外 capability。备份原件、回执和数据库并保留 UID/GID/模式；恢复后由 render 校验或重建副本，已有内容或元数据漂移会拒绝。详见[中转站部署与备份](../../docs/dev/relay-litellm.md)。
+Bifrost 四份原秘密保存在 `config/materials/bifrost/`（安装 UID10001、0600），运行时副本位于 `config/bifrost/`（0640）。encryption_key 组10003，admin_password 组10005，运行/迁移数据库口令组999。备份原件、回执与 bifrost 数据库；已有内容或元数据漂移拒绝，不自动旋转。详见[中转站架构](../../docs/architecture/relay-bifrost.zh.md)。
 
 - Do not put real domains, LAN IPs, or credentials in this tree
 - Build images via `.github/workflows/nas-bundle.yml` (`workflow_dispatch` + exact commit)
@@ -310,7 +310,7 @@ inspect 各 30 秒、每次不可变 Id 导出各 3 分钟，失败取消并回�
 工具不自动启动 registry、不管理 registry 认证，也不自动执行现场部署。
 完成摘要检查、材料验证或基础栈初始化不代表已能登录、真实实例已就绪或现场验收通过。
 
-模型接入、独立 UI Origin、成员预算和外部 Key 操作见 [LiteLLM 部署指南](../../docs/dev/relay-litellm.md)。
+模型接入、成员预算和外部 Key 见 [Bifrost 架构](../../docs/architecture/relay-bifrost.zh.md)；中文管理页面在第二步交付。
 
 ## 可选集中日志
 

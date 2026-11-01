@@ -1,0 +1,13 @@
+**
+!infra/
+!infra/**
+!third_party/
+!third_party/bifrost/
+!third_party/bifrost/core/
+!third_party/bifrost/core/**
+!deploy/
+!deploy/nas/
+!deploy/nas/bifrost/
+!deploy/nas/bifrost/config.json
+infra/**/.dev
+infra/**/node_modules

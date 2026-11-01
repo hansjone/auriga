@@ -34,6 +34,7 @@ RUN pnpm gen:api \
 FROM golang:1.27.3 AS build
 WORKDIR /src/infra
 COPY infra/ ./
+COPY third_party/bifrost/core /src/third_party/bifrost/core
 WORKDIR /src/infra/edge
 RUN CGO_ENABLED=0 go build -o /out/auriga-edge .
 WORKDIR /src/infra/ai-gateway
