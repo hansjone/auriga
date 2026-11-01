@@ -39,6 +39,7 @@ export function createManagedNetwork(options) {
   /** @type {string|undefined} */
   let displayName;
   let profileRetryAt = 0;
+  let materialUntil = 0;
   /** @type {(renew?:boolean)=>Promise<{accessToken:string,claims:any}>} */
   let getDevice = async () => {
     throw new Error('managed credential unavailable');
@@ -108,7 +109,6 @@ export function createManagedNetwork(options) {
   async function retire() {
     generation++;
     access = undefined;
-    displayName = undefined;
     profileRetryAt = 0;
     const previous = lifecycle;
     lifecycle = undefined;
@@ -121,6 +121,7 @@ export function createManagedNetwork(options) {
     if (refreshing) return refreshing;
     const operation = Promise.resolve().then(async () => {
       if (closed) return;
+      let sameVerifiedMaterial = false;
       try {
         const next = await readMaterial();
         if (closed) return;
@@ -136,6 +137,8 @@ export function createManagedNetwork(options) {
           await retire();
           if (closed) return;
           const { value, config } = validate(next);
+          materialUntil = Date.parse(value.expiresAt);
+          if (next !== raw) displayName = undefined;
           raw = next;
           rejected = '';
           const expected = generation;
@@ -235,6 +238,7 @@ export function createManagedNetwork(options) {
           lifecycle.login();
         } else {
           validate(next);
+          sameVerifiedMaterial = true;
           await getDevice(force);
         }
         if (Date.now() >= retryAt) {
@@ -258,6 +262,19 @@ export function createManagedNetwork(options) {
             .catch(() => {});
         }
       } catch {
+        // Transport failure is not revocation. Keep only an unexpired verified
+        // token for the unchanged valid file; never extend its deadline.
+        if (
+          sameVerifiedMaterial &&
+          raw !== rejected &&
+          access &&
+          access.claims.exp * 1000 > Date.now() &&
+          materialUntil > Date.now()
+        ) {
+          retryAt =
+            Date.now() + Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
+          return;
+        }
         lifecycle?.logout();
         access = undefined;
         // Retry transient outage, but never resurrect a proven revoked file.
@@ -273,6 +290,15 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    get sessionAvailable() {
+      return (
+        !closed &&
+        raw !== rejected &&
+        !!access &&
+        access.claims.exp * 1000 > Date.now() &&
+        materialUntil > Date.now()
+      );
+    },
     get consentAvailable() {
       return !closed && lifecycle?.consentAvailable === true;
     },

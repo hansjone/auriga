@@ -91,6 +91,37 @@ const signedIn = {
   network: { connected: true, state: 'ready' },
   models: { available: false },
 };
+for (const phase of ['signed-out', 'unavailable', 'pending'])
+  test(
+    'R7 managed identity never falls back to signed out: ' + phase,
+    async () => {
+      const fixture = harness(async (url) =>
+        Response.json(
+          url.endsWith('/status')
+            ? {
+                loggedIn: phase !== 'signed-out',
+                session: { available: false },
+                account: { subject: 'member-id' },
+              }
+            : { ...settings, mode: 'managed' },
+        ),
+      );
+      try {
+        fixture.render();
+        await setImmediate();
+        const content = fixture
+          .render()
+          .children.filter((n) => n?.type !== 'details')
+          .map(text)
+          .join(' ');
+        assert.doesNotMatch(content, /未登录|未提供/);
+        assert.match(content, /系统托管/);
+        assert.match(content, /实例会话已失效，请从门户重新进入/);
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );
 for (const consent of [false, true, undefined])
   test(
     'R2 settings only mount first-contact controls for an advertised capability: ' +

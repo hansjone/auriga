@@ -3,6 +3,8 @@ import { createManagedModelStatus } from '../ai/managed-status.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedNetwork } from '../network/managed-device.js';
+import { installManagedSessionGuard } from '../managed/session.js';
+import { installManagedSettingsOwnership } from '../managed/settings.js';
 import { createConsentRoutes } from '../local/consent-routes.js';
 import { createMessagingRoutes } from '../local/messaging-routes.js';
 import {
@@ -253,6 +255,8 @@ export async function createManaged(options = {}) {
   let disposeHostAuth;
   let disposeDoor;
   let disposeHttpGuard;
+  let disposeSession;
+  let disposeSettingsOwnership;
   let network;
   let llm;
   const models = createManagedModelStatus({ tenantId, ownerId, instanceId });
@@ -320,7 +324,10 @@ export async function createManaged(options = {}) {
           role: 'owner',
         }),
       });
-      registerHealthRoute(ctx, { pluginVersion });
+      registerHealthRoute(ctx, {
+        pluginVersion,
+        ready: () => network?.sessionAvailable === true,
+      });
 
       // Same public host services, provider and network lifecycle as connect mode.
       // Profile storage is only durable partitioning; it is not an isolation claim.
@@ -408,6 +415,9 @@ export async function createManaged(options = {}) {
                       authenticated: true,
                       mode: 'managed',
                       loggedIn: true,
+                      session: {
+                        available: network?.sessionAvailable === true,
+                      },
                       connected: network?.status?.connected === true,
                       account: network?.account ?? { subject: ownerId },
                       models: models.status,
@@ -481,7 +491,12 @@ export async function createManaged(options = {}) {
 
       // Door is outermost: even forbidden native writes must authenticate first.
       disposeHttpGuard = installNativePluginHttpGuard(server);
+      disposeSession = installManagedSessionGuard(
+        server,
+        () => network?.sessionAvailable === true,
+      );
       disposeDoor = door.install(server);
+      disposeSettingsOwnership = installManagedSettingsOwnership(ctx);
 
       if (options.startHeartbeat !== false) heartbeat.start();
 
@@ -491,6 +506,8 @@ export async function createManaged(options = {}) {
         heartbeat.stop();
         disposeActivity?.();
         disposeDoor?.();
+        disposeSettingsOwnership?.();
+        disposeSession?.();
         disposeHttpGuard?.();
         disposeHostAuth?.();
         server.off('upgrade', onUpgrade);
@@ -506,6 +523,8 @@ export async function createManaged(options = {}) {
       guardWorkspaceRegistry(registry, workspaceRoot),
     getManifest,
     close() {
+      disposeSettingsOwnership?.();
+      disposeSession?.();
       models.close();
       void network?.close();
       heartbeat.stop();

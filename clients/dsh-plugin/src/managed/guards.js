@@ -2,6 +2,7 @@
 import { posix } from 'node:path';
 import { sendProblem } from './problem.js';
 import { normalizeHttpPath, rawRequestPath } from './raw-path.js';
+import { guardDirectoryPicker } from './directories.js';
 
 /** Native DSH pluginManager mutations blocked in managed mode (DSH 0.2.0-rc.2). */
 export const NATIVE_PLUGIN_MUTATIONS = Object.freeze([
@@ -157,6 +158,12 @@ export function installNativePluginHttpGuard(server) {
  */
 export function installManagedGuards(ctx, opts = {}) {
   const root = opts.workspaceRoot ?? DEFAULT_WORKSPACE_ROOT;
+  ctx.inject?.(['directoryPicker'], (dctx) => {
+    dctx.effect(
+      () => guardDirectoryPicker(dctx.directoryPicker, root),
+      'auriga-dsh: workspace directory picker',
+    );
+  });
   try {
     ctx.inject?.(['pluginManager'], (pctx) => {
       guardPluginManager(pctx.pluginManager);

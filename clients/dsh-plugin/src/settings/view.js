@@ -20,6 +20,9 @@ const messages = {
     signedOut: '未登录',
     local: '本地可正常使用，平台功能暂停',
     managed: '系统托管',
+    managedExpired: '实例会话已失效，请从门户重新进入',
+    managedVerifying: '正在验证实例会话',
+    memberLoading: '正在读取成员资料',
     networkTitle: '消息网络',
     networkReady: '就绪',
     networkPending: '未就绪',
@@ -82,6 +85,9 @@ const messages = {
     signedOut: 'Signed out',
     local: 'Local DSH available; platform features paused',
     managed: 'System managed',
+    managedExpired: 'Instance session has expired. Re-enter from the portal.',
+    managedVerifying: 'Verifying instance session',
+    memberLoading: 'Loading member profile',
     networkTitle: 'Message network',
     networkReady: 'Ready',
     networkPending: 'Not ready',
@@ -367,26 +373,33 @@ export function createSettingsView(
     const recovering = !loggedIn && account?.resumeAvailable === true;
     const network = account?.network;
     const ready = network?.connected === true;
-    const name = account?.account?.displayName ?? t.notProvided;
-    const reason = !loggedIn
-      ? recovering
-        ? t.recovering
-        : account?.models?.reauthenticationRequired
-          ? t.expired
-          : t.signedOut
-      : network?.state === 'unconfigured' ||
-          network?.reason === 'configuration_missing'
-        ? t.unconfiguredNetwork
-        : ['connecting', 'registering', 'joining'].includes(network?.state)
-          ? t.joining
-          : account?.communication === 'unavailable' ||
-              ['unavailable', 'reconnecting', 'disconnected'].includes(
-                network?.state,
-              )
-            ? t.network
-            : network?.reason
-              ? network.reason
-              : t.networkPending;
+    const name =
+      account?.account?.displayName ??
+      (managed ? t.memberLoading : t.notProvided);
+    const managedFailure =
+      managed &&
+      (account?.session?.available === false || account?.loggedIn === false);
+    const reason = managedFailure
+      ? t.managedExpired
+      : !loggedIn
+        ? recovering
+          ? t.recovering
+          : account?.models?.reauthenticationRequired
+            ? t.expired
+            : t.signedOut
+        : network?.state === 'unconfigured' ||
+            network?.reason === 'configuration_missing'
+          ? t.unconfiguredNetwork
+          : ['connecting', 'registering', 'joining'].includes(network?.state)
+            ? t.joining
+            : account?.communication === 'unavailable' ||
+                ['unavailable', 'reconnecting', 'disconnected'].includes(
+                  network?.state,
+                )
+              ? t.network
+              : network?.reason
+                ? network.reason
+                : t.networkPending;
     const networkText = ready
       ? t.networkReady
       : t.networkPending + ' · ' + reason;
@@ -394,7 +407,13 @@ export function createSettingsView(
       ? t.modelReady
       : t.modelMissing;
     const summary =
-      statusError ||
+      (managed && (managedFailure || statusError || !account)
+        ? t.managed +
+          ' · ' +
+          (managedFailure || statusError
+            ? t.managedExpired
+            : t.managedVerifying)
+        : statusError) ||
       (!configured
         ? t.unconfigured
         : !loggedIn
@@ -527,7 +546,9 @@ export function createSettingsView(
         h('h3', null, t.account),
         row(
           t.identity,
-          statusError || (loggedIn || recovering ? name : t.signedOut),
+          managed
+            ? name
+            : statusError || (loggedIn || recovering ? name : t.signedOut),
         ),
         managed
           ? h('p', null, t.managed)
