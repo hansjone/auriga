@@ -13,6 +13,10 @@ import IdentityProvidersView from './views/IdentityProvidersView.vue';
 import SettingsView from './views/SettingsView.vue';
 import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
 import OverviewView from './views/OverviewView.vue';
+import RelayView from './views/models/RelayView.vue';
+import ProvidersView from './views/models/ProvidersView.vue';
+import KeysView from './views/models/KeysView.vue';
+import UsageView from './views/models/UsageView.vue';
 import { navigation } from './admin/navigation';
 
 const existing = new Set([
@@ -30,6 +34,7 @@ const existing = new Set([
   '/providers',
   '/models/relay',
   '/models/usage',
+  '/models/keys',
 ]);
 const unavailable = [
   ...new Set(
@@ -60,6 +65,10 @@ export const router = createRouter({
         { path: 'roles', component: RolesView },
         { path: 'providers', component: IdentityProvidersView },
         { path: 'settings', component: SettingsView },
+        { path: 'models/relay', component: RelayView },
+        { path: 'models/providers', component: ProvidersView },
+        { path: 'models/keys', component: KeysView },
+        { path: 'models/usage', component: UsageView },
         {
           path: 'models/:pathMatch(.*)*',
           component: WorkflowUnavailableView,
