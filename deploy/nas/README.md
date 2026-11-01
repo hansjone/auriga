@@ -358,4 +358,6 @@ prepare 命令并验证可持久写入；结束时仅清理标签匹配的测试
 
 不依赖 postgres entrypoint 的首次初始化。先核验安装材料中五份 Bifrost 秘密和审核镜像，确认原 PostgreSQL 健康，然后运行 `sh scripts/upgrade-bifrost.sh`（在 NAS 发布包根目录）。它以一次性 helper 连接原库，幂等创建角色/库/schema，保留既有数据与密码，并撤销运行账号对迁移历史表的写权限。错误 owner 或特权角色立即失败，不能通过清卷绕过。再按原部署流程更新服务。原测试中转库、角色、秘密和旧发布材料不自动删除，由主控按保留证据另行批准清理。
 
+旧 LiteLLM 安装先运行 `sh scripts/materials-upgrade.sh status` 核对原收据 SHA256，再执行 `stage SHA256`、`render.sh`、上述建库步骤及服务切换；健康和真实调用验收后执行 `commit SHA256`。原封存目录、identity/TLS/runtime根及collab收据不改写，新秘密和版本收据独立追加。commit 前可用 `rollback SHA256` 标记回退并从保留的旧 bundle/stack.env 恢复服务；失败后 stage 复用原批秘密。不能删除旧收据或重建身份绕过校验。完整步骤与限制见 [NAS 开发说明](../../docs/dev/nas.md#已有数据库卷接入中转站)。
+
 安装材料边界：此数据库脚本不迁移已封存的安装收据。旧配方的 bootstrap.receipt 与新配方/文件集合不一致时，render 会拒绝自动轮换。须由主控准备经过审核的材料升级或独立测试部署切换，保留原 IAM/网络身份及现场证据；不能删除收据、重建 CA 或覆盖旧身份材料来绕过。该条件满足前，不应把建库成功视为整套 NAS 升级成功。

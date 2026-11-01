@@ -24,8 +24,9 @@ EOF
 printf '{}\n' >"$temp/access.json"
 for leaf in platform edge agent; do printf 'FIXTURE_KEY=value\n' >"$temp/export/$leaf.env"; done
 printf '0\n' >"$temp/export/collab.enabled"
+printf '0\n' >"$temp/export/bifrost.enabled"
 printf '%s\n' "$temp/operator/auriga-data/config/materials" >"$temp/export/runtime.path"
-tar -C "$temp/export" -cf "$temp/export.tar" platform.env edge.env agent.env collab.enabled runtime.path
+tar -C "$temp/export" -cf "$temp/export.tar" platform.env edge.env agent.env collab.enabled runtime.path bifrost.enabled
 for script in preflight network-preflight render; do printf '#!/bin/sh\nexit 0\n' >"$temp/package/scripts/$script.sh"; done
 cat >"$temp/package/scripts/installer.sh" <<'EOF'
 #!/bin/sh

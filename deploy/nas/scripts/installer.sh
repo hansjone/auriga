@@ -3,15 +3,19 @@
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
-  init|render|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback) operation=$1 ;;
+  init|render|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
 upgrade_image=
+materials_expected=
 case "$operation" in
   runtime-stage|runtime-commit|runtime-rollback)
     [ "$#" = 3 ] || die 'runtime operation requires bundle and exact image'
     upgrade_bundle=$2; upgrade_image=$3 ;;
+  materials-stage|materials-commit|materials-rollback)
+    [ "$#" = 2 ] || die 'materials operation requires original receipt SHA256'
+    materials_expected=$2 ;;
   *) [ "$#" = 1 ] || die 'installer accepts exactly one operation' ;;
 esac
 load_stack_env >&2
@@ -82,5 +86,6 @@ fi
     "$@" --env "NAS_ROOT=$NAS_ROOT" --env "AURIGA_DATA_ROOT=$AURIGA_DATA_ROOT" \
     --env "AURIGA_NAS_BOOTSTRAP_BINARY=$_boot" --env NAS_INSTALLER_ACTIVE=1 \
     --env "NAS_RUNTIME_UPGRADE_BUNDLE=$upgrade_bundle" --env "NAS_RUNTIME_UPGRADE_IMAGE=$upgrade_image" \
+    --env "NAS_MATERIALS_EXPECTED_BASE=$materials_expected" \
     --entrypoint /bin/sh "$_image" "$NAS_ROOT/scripts/installer-entry.sh" "$operation"
 )

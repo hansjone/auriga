@@ -221,7 +221,7 @@ func checkNASCollabBase(base string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	set := nasMaterialSet(cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https")
+	set := nasBaseMaterialSet(base, cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https")
 	if raw, err := os.ReadFile(filepath.Join(base, "templates", "real-dsh.pb")); err == nil {
 		var spec nodev1.InstanceSpec
 		if proto.Unmarshal(raw, &spec) != nil {

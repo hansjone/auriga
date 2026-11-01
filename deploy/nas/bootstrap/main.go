@@ -31,6 +31,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "materials-upgrade" {
+		if err := nasMaterialsUpgrade(os.Args[2:], os.Stdout); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "network-budget" {
 		if err := networkBudgetCommand(os.Args[2:]); err != nil {
 			fatalf("%v", err)

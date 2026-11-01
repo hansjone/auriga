@@ -16,6 +16,11 @@ if [ -e "$(marker_path)" ] || [ "${1:-}" != init ]; then
   done
 fi
 case "${1:-}" in
+  materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project)
+    _action=${1#materials-}
+    set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/materials-upgrades" -access-file "$AURIGA_ACCESS_FILE"
+    [ -z "${NAS_MATERIALS_EXPECTED_BASE:-}" ] || set -- "$@" -expected-base-sha256 "$NAS_MATERIALS_EXPECTED_BASE"
+    exec "$(bootstrap_binary)" materials-upgrade "$@" ;;
   runtime-path|runtime-stage|runtime-commit|runtime-rollback)
     _action=${1#runtime-}
     set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source"
@@ -57,8 +62,14 @@ case "${1:-}" in
     trap 'rm -rf -- "$_export"' EXIT
     printf '%s\n' "$_collab" >"$_export/collab.enabled"
     runtime_directory >"$_export/runtime.path"
+    _bifrost=0
+    if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
+      materials_upgrade check >&2
+      _bifrost=1
+    fi
+    printf '%s\n' "$_bifrost" >"$_export/bifrost.enabled"
     chmod 0600 "$_export/collab.enabled"
     tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env \
-      -C "$_export" collab.enabled runtime.path ;;
+      -C "$_export" collab.enabled runtime.path bifrost.enabled ;;
   *) die 'unsupported installer operation' ;;
 esac

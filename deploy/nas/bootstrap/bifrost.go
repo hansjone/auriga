@@ -10,6 +10,10 @@ func writeBifrost(out string) {
 	if err := materials.EnsureBifrostSecrets(filepath.Join(out, "bifrost"), true); err != nil {
 		fatalf("%v", err)
 	}
+	writeJSON(filepath.Join(out, "bifrost-runtime.json"), bifrostRuntimeConfig(), 0644)
+}
+
+func bifrostRuntimeConfig() map[string]any {
 	rpc := map[string]string{"Target": "platform:9091", "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": "platform"}
-	writeJSON(filepath.Join(out, "bifrost-runtime.json"), map[string]any{"listen": "0.0.0.0:18445", "tlsCertFile": "/etc/auriga/pki/gateway.crt", "tlsKeyFile": "/etc/auriga/pki/gateway.key", "origin": "http://bifrost:8080", "memberPasswordFile": "/run/secrets/bifrost_member_password", "memberPolicy": map[string]any{"monthlyBudgetMicros": 100000000, "requestsPerMinute": 60, "maxConcurrency": 16, "maxInFlightTokens": 67108864}, "iam": rpc, "org": rpc}, 0644)
+	return map[string]any{"listen": "0.0.0.0:18445", "tlsCertFile": "/etc/auriga/pki/gateway.crt", "tlsKeyFile": "/etc/auriga/pki/gateway.key", "origin": "http://bifrost:8080", "memberPasswordFile": "/run/secrets/bifrost_member_password", "memberPolicy": map[string]any{"monthlyBudgetMicros": 100000000, "requestsPerMinute": 60, "maxConcurrency": 16, "maxInFlightTokens": 67108864}, "iam": rpc, "org": rpc}
 }

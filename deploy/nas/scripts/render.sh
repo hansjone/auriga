@@ -31,6 +31,9 @@ else
 fi
 load_nas_access_env "$CONFIG/materials/access.env"
 install_bifrost_materials
+if [ -e "$CONFIG/materials-upgrades" ] || [ -L "$CONFIG/materials-upgrades" ]; then
+  materials_upgrade project
+fi
 
 for _name in ca.crt edge.crt edge-iam.crt proxy-ca.crt proxy-edge.crt; do
   install_edge_material "$CONFIG/materials/pki/$_name" "$CONFIG/pki-edge/$_name" 644

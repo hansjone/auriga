@@ -439,6 +439,21 @@ AURIGA_MOUNT_TEST_IMAGE=sha256:<platform-image-id> \
 
 不依赖 postgres entrypoint 的首次初始化。先核验安装材料中五份 Bifrost 秘密和审核镜像，确认原 PostgreSQL 健康，然后运行 `sh scripts/upgrade-bifrost.sh`（在 NAS 发布包根目录）。它以一次性 helper 连接原库，幂等创建角色/库/schema，保留既有数据与密码，并撤销运行账号对迁移历史表的写权限。错误 owner 或特权角色立即失败，不能通过清卷绕过。再按原部署流程更新服务。原测试中转库、角色、秘密和旧发布材料不自动删除，由主控按保留证据另行批准清理。
 
-安装材料边界：此数据库脚本不迁移已封存的安装收据。旧配方的 bootstrap.receipt 与新配方/文件集合不一致时，render 会拒绝自动轮换。须由主控准备经过审核的材料升级或独立测试部署切换，保留原 IAM/网络身份及现场证据；不能删除收据、重建 CA 或覆盖旧身份材料来绕过。该条件满足前，不应把建库成功视为整套 NAS 升级成功。
+已有 LiteLLM 安装必须先显式升级材料，不能直接运行新版本的首次安装生成器。使用已审核的新 bundle（含新 bootstrap、Bifrost/operator/edge 镜像），保留原 `stack.env`、账号、实例、PG卷与旧 bundle。以下命令在新 bundle 的 `deploy-nas` 下执行，数据根仍指向原安装：
+
+```sh
+# status 验证原材料并显示原 bootstrap.receipt 的 SHA256，不输出秘密。
+sh scripts/materials-upgrade.sh status
+sh scripts/materials-upgrade.sh stage ORIGINAL_RECEIPT_SHA256
+sh scripts/render.sh
+sh scripts/upgrade-bifrost.sh
+# 按原公开启动流程切换，检查健康、管理员登录、成员和外部 Key 真实调用。
+sh scripts/start.sh
+sh scripts/materials-upgrade.sh commit ORIGINAL_RECEIPT_SHA256
+```
+
+`config/materials` 的原 identity、TLS、runtime 根、模板、IAM及collab封存内容不改写。新材料位于独立的 `config/materials-upgrades/v-00000000000000000001`，升级收据绑定原收据、collab收据与五份秘密/运行配置摘要。激活事件只追加，校验哈希链、版本和状态；已提交后禁止回退。domain、IP直连和trusted proxy均使用原访问配置与证书。渲染时先校验原封存与升级链，再将 Bifrost 代理配置合并到已核验的当前 collab edge 投影；不覆盖原 edge 配置。
+
+stage 普通失败会清理新建的待发布目录，原材料保持不变。切换或验收失败时，在 commit 前执行 `sh scripts/materials-upgrade.sh rollback ORIGINAL_RECEIPT_SHA256`，并从保留的旧 bundle/原 stack.env 恢复服务；不要使用新配方重新生成原身份。失败的升级收据和秘密保留供核查，后续 stage 复用同一批秘密并追加恢复事件。进程异常留下的未知待发布目录会失败关闭，需保留证据后人工核查，不自动清除。新建的空隔离数据库可保留，不能清卷或删除旧库、角色与秘密来“回滚”。模型主密钥不因此轮换；此命令只支持首次从旧配方增加 Bifrost，不是通用密钥轮换或网络参数修改命令。
 
 本机 Compose 对应入口是 `sh deploy/compose/scripts/upgrade-bifrost.sh`。它通过 Bash 调用固定的 `upgrade-bifrost` 生命周期操作，不接受额外参数，也不开放通用 `run`。原安装和密钥轮换安装均沿用封存项目、配方及状态门禁；轮换安装还须通过历史、安装收据和权威状态检查。先确认原 PostgreSQL 正常运行，升级 helper 不会自动启动或重建数据库。

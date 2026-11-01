@@ -24,4 +24,4 @@ PostgreSQL 独立 bifrost 数据库，迁移 owner 与运行账号/口令分离�
 
 已有 PostgreSQL 卷的升级：先生成并保护新的五份中转站材料、加载审核镜像，确保原 postgres 健康，再运行 `sh deploy/nas/scripts/upgrade-bifrost.sh`（Compose 为 `sh deploy/compose/scripts/upgrade-bifrost.sh`）。脚本仅启动一次性 psql helper，幂等创建隔离角色、数据库和 schema，不清卷、不重启原库、不更改已有角色密码；错误 owner 或特权角色会拒绝升级。成功后再更新 Bifrost/ai-relay/edge。旧测试数据库和秘密不迁移，清理由主控单独批准。
 
-安装材料边界：此数据库脚本不迁移已封存的安装收据。旧配方的 bootstrap.receipt 与新配方/文件集合不一致时，render 会拒绝自动轮换。须由主控准备经过审核的材料升级或独立测试部署切换，保留原 IAM/网络身份及现场证据；不能删除收据、重建 CA 或覆盖旧身份材料来绕过。该条件满足前，不应把建库成功视为整套 NAS 升级成功。
+安装材料边界：数据库脚本不迁移已封存收据。旧 NAS 安装通过公开 `scripts/materials-upgrade.sh` 显式 stage，再 render/建库/切换，验收后 commit。原 identity、TLS、runtime根和collab收据保持原字节；新增秘密/运行配置在独立目录，升级与激活记录按版本和哈希链追加，失败在commit前rollback并恢复旧服务。不能删除收据、重建CA或覆盖原身份绕过门禁。具体操作与异常恢复见 [NAS说明](../dev/nas.md#已有数据库卷接入中转站)。

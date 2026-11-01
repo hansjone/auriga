@@ -289,6 +289,45 @@ runtime_directory() {
   fi
 }
 
+materials_upgrade() (
+  _materials_action=$1
+  _materials_expected=${2:-}
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    if [ -n "$_materials_expected" ]; then
+      sh "$NAS_ROOT/scripts/installer.sh" "materials-$_materials_action" "$_materials_expected"
+    else
+      sh "$NAS_ROOT/scripts/installer.sh" "materials-$_materials_action"
+    fi
+  else
+    set -- -action "$_materials_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/materials-upgrades" -access-file "$AURIGA_ACCESS_FILE"
+    [ -z "$_materials_expected" ] || set -- "$@" -expected-base-sha256 "$_materials_expected"
+    "$(bootstrap_binary)" materials-upgrade "$@"
+  fi
+)
+
+bifrost_directory() {
+  if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
+    materials_upgrade path
+  else
+    printf '%s' "$AURIGA_DATA_ROOT/config/materials"
+  fi
+}
+
+write_bifrost_override() {
+  _bifrost_enabled=$1
+  case "$_bifrost_enabled" in 0) return ;; 1) ;; *) die 'invalid materials Compose decision' ;; esac
+  _bifrost_yaml=$(printf '%s' "$AURIGA_DATA_ROOT/config/bifrost" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  cat <<EOF
+services:
+  edge:
+    volumes:
+      - '$_bifrost_yaml/edge.config.json:/etc/auriga/edge.config.json:ro'
+  ai-relay:
+    volumes:
+      - '$_bifrost_yaml/bifrost-runtime.json:/etc/auriga/bifrost-runtime.json:ro'
+EOF
+}
+
 write_runtime_override() {
   _runtime_path=$1
   case "$_runtime_path" in
@@ -318,6 +357,11 @@ run_compose() (
   _cc=$(compose_cmd)
   _runtime_private=$(installer_private_dir runtime-compose)
   trap 'rm -rf -- "$_runtime_private"' EXIT
+  if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
+    materials_upgrade check
+    write_bifrost_override 1 >"$_runtime_private/bifrost.yml"
+    set -- -f "$_runtime_private/bifrost.yml" "$@"
+  fi
   _runtime=$(runtime_directory)
   write_runtime_override "$_runtime" >"$_runtime_private/runtime.yml"
   if [ -s "$_runtime_private/runtime.yml" ]; then set -- -f "$_runtime_private/runtime.yml" "$@"; fi
@@ -356,6 +400,8 @@ services:
         required: true
 EOF
   _cc=$(compose_cmd)
+  write_bifrost_override "$(cat "$_private/bifrost.enabled")" >"$_private/bifrost.yml"
+  if [ -s "$_private/bifrost.yml" ]; then set -- -f "$_private/bifrost.yml" "$@"; fi
   _runtime=$(cat "$_private/runtime.path")
   write_runtime_override "$_runtime" >"$_private/runtime.yml"
   if [ -s "$_private/runtime.yml" ]; then set -- -f "$_private/runtime.yml" "$@"; fi
@@ -536,6 +582,12 @@ validate_nas_access() {
 }
 
 bootstrap_nas_materials() {
+  if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
+    # Explicit additive activation verifies the original byte seal, rather than
+    # feeding a legacy installation to the new first-install generator.
+    materials_upgrade check
+    return
+  fi
   _boot=$(bootstrap_binary)
   (umask 022; "$_boot" -out "$AURIGA_DATA_ROOT/config/materials" -access-file "$AURIGA_ACCESS_FILE" \
     -edge-peer-ip "${AURIGA_INTERNAL_EDGE_IP:?}" -internal-subnet "${AURIGA_INTERNAL_SUBNET:?}" \
@@ -550,7 +602,7 @@ bootstrap_nas_materials() {
 install_bifrost_materials() (
   # A private runtime directory holds leaf bind sources. Installation originals
   # stay uid10001/0600, independent of service readers and receipt validation.
-  _source_dir="$AURIGA_DATA_ROOT/config/materials/bifrost"
+  _source_dir="$(bifrost_directory)/bifrost"
   _runtime_dir="$AURIGA_DATA_ROOT/config/bifrost"
   [ -d "$_source_dir" ] && [ ! -L "$_source_dir" ] || die "invalid Bifrost source directory"
   if [ -e "$_runtime_dir" ] || [ -L "$_runtime_dir" ]; then
