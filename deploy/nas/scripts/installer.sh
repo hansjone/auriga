@@ -82,7 +82,7 @@ fi
   docker run --rm --pull never --cidfile "$_run_tmp/cid" \
     --network none --user 0:0 --cap-drop ALL \
     --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
-    --security-opt no-new-privileges:true --read-only --tmpfs /tmp:mode=1777 \
+    --security-opt no-new-privileges:true --read-only --tmpfs /tmp:mode=1777,exec \
     "$@" --env "NAS_ROOT=$NAS_ROOT" --env "AURIGA_DATA_ROOT=$AURIGA_DATA_ROOT" \
     --env "AURIGA_NAS_BOOTSTRAP_BINARY=$_boot" --env NAS_INSTALLER_ACTIVE=1 \
     --env "NAS_RUNTIME_UPGRADE_BUNDLE=$upgrade_bundle" --env "NAS_RUNTIME_UPGRADE_IMAGE=$upgrade_image" \

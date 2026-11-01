@@ -441,6 +441,8 @@ AURIGA_MOUNT_TEST_IMAGE=sha256:<platform-image-id> \
 
 已有 LiteLLM 安装必须先显式升级材料，不能直接运行新版本的首次安装生成器。使用已审核的新 bundle（含新 bootstrap、Bifrost/operator/edge 镜像），保留原 `stack.env`、账号、实例、PG卷与旧 bundle。以下命令在新 bundle 的 `deploy-nas` 下执行，数据根仍指向原安装：
 
+先备份原 `stack.env`；将其中显式固定的 `AURIGA_NAS_BOOTSTRAP_BINARY` 更新为新 bundle 的预编译工具路径，并核对新镜像引用。旧环境里的显式工具路径优先于 bundle 默认路径，不能把旧 bootstrap 拒绝新子命令误认为材料损坏。容器安装器给独占 `/tmp` 指定 `exec`，用于固定 uid 校验子进程；只复制当前运行的公开工具到独占临时目录，不放宽原私有 bundle 或材料目录权限，结束即清理。
+
 ```sh
 # status 验证原材料并显示原 bootstrap.receipt 的 SHA256，不输出秘密。
 sh scripts/materials-upgrade.sh status

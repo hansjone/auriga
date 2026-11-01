@@ -61,6 +61,7 @@ check helper_boundary 0 sh "$NAS_ROOT/scripts/installer.sh" init
 if grep -q -- '--network none --user 0:0 --cap-drop ALL' "$INSTALL_LOG" &&
    grep -q -- '--pull never' "$INSTALL_LOG" &&
    grep -q -- '--security-opt no-new-privileges:true' "$INSTALL_LOG" &&
+   grep -q -- '--tmpfs /tmp:mode=1777,exec' "$INSTALL_LOG" &&
    ! grep -Eq 'docker.sock|--privileged| pull ' "$INSTALL_LOG"; then printf 'PASS helper_restrictions\n'
 else printf 'FAIL helper_restrictions\n'; fail=1; fi
 INSTALL_EXIT=73; export INSTALL_EXIT
