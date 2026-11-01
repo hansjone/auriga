@@ -109,6 +109,7 @@ type nasRotation struct {
 	stopOnly                                    bool
 	recovery                                    bool
 	inspectOnly, allowPending                   bool
+	readyOnly                                   bool
 	controlImage                                string
 	lockWait                                    time.Duration
 	recoveryPrevious                            []byte

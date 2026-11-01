@@ -13,7 +13,10 @@ if [ -n "$_input" ]; then
 fi
 if [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
   "$_boot" collab -base "$AURIGA_DATA_ROOT/config/materials" -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check
-  _rotation=$("$_boot" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT")
+  if ! _rotation=$("$_boot" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"); then
+    printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; retaining existing projections for core startup' >&2
+    exit 0
+  fi
   if [ -z "$_rotation" ] && [ -n "$_input" ] && [ ! -d "$AURIGA_DATA_ROOT/config/collab-operations" ]; then "$_boot" collab -base "$AURIGA_DATA_ROOT/config/materials" -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -input "$_input/input.json"; fi
 elif [ -n "$_input" ]; then
   case "${1:-}" in

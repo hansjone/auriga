@@ -307,6 +307,9 @@ func (e *nasRotationEngine) database(r *nasRotation) (string, error) {
 		if c.State.Running && c.State.Health.Status == "healthy" {
 			break
 		}
+		if r.readyOnly {
+			return "", fmt.Errorf("NAS rotation PostgreSQL not ready; observer does not wait or start it")
+		}
 		if !time.Now().Before(deadline) {
 			return "", fmt.Errorf("NAS rotation database not healthy")
 		}
@@ -565,7 +568,7 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		return fmt.Errorf("unexpected NAS rotation arguments")
 	}
 	switch action {
-	case "publish", "install", "status", "history-check", "path", "check", "stop", "prepare", "renew", "prepare-recovery", "recover-expired", "queue-prepare", "queue-import", "queue-export", "recover-pending", "pause", "resume":
+	case "publish", "install", "status", "history-check", "history-check-pg", "path", "check", "stop", "prepare", "renew", "prepare-recovery", "recover-expired", "queue-prepare", "queue-import", "queue-export", "recover-pending", "pause", "resume":
 	default:
 		return fmt.Errorf("unsupported NAS rotation action")
 	}
@@ -579,7 +582,7 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		}
 	}
 	var engine *nasRotationEngine
-	if action != "path" {
+	if action != "path" && action != "history-check" {
 		var err error
 		engine, err = nasRotationEngineOpen()
 		if err != nil {
@@ -602,7 +605,11 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 			*image = info.ID
 		}
 	}
-	r, err := nasRotationOpen(*data, *recipe, *image, *jar, create)
+	openImage := *image
+	if action == "history-check" {
+		openImage = ""
+	} // offline: retain the archived image binding
+	r, err := nasRotationOpen(*data, *recipe, openImage, *jar, create)
 	if err != nil {
 		return err
 	}
@@ -612,7 +619,11 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		}
 		return fmt.Errorf("NAS rotation not initialized")
 	}
-	r.inspectOnly = action == "path" || action == "status" || action == "history-check"
+	r.inspectOnly = action == "path" || action == "status" || action == "history-check" || action == "history-check-pg"
+	r.readyOnly = action == "check" || action == "history-check-pg"
+	if action == "path" || action == "check" || action == "history-check" || action == "pause" || action == "resume" {
+		r.lockWait = time.Nanosecond // optional message operations must not hold up core startup
+	}
 	r.allowPending = r.inspectOnly || action == "check" || action == "recover-pending" || action == "pause" || action == "resume" || action == "stop"
 	r.recovery = action == "recover-expired" || action == "prepare-recovery"
 	if r.recovery && r.binding.Jar == "" {
@@ -626,7 +637,7 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 	} else if *input != "" {
 		return fmt.Errorf("NAS rotation unexpected input")
 	}
-	if action != "path" {
+	if action != "path" && action != "history-check" {
 		r.engine = engine
 		r.operator = func(action, work string, p nasRotationPlan) ([]byte, error) {
 			return r.engine.operator(r, action, work, p)
@@ -659,6 +670,8 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 			return json.NewEncoder(stdout).Encode(s)
 		case "history-check":
 			return r.historyCheck(rows, stdout)
+		case "history-check-pg":
+			return r.historyCheckPG(rows, stdout)
 		case "pause", "resume":
 			return r.schedulerControl(action)
 		case "queue-export":

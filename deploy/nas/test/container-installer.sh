@@ -18,8 +18,9 @@ mkdir "$TMP/export"
 for leaf in platform edge agent; do printf 'FIXTURE_KEY=value\n' >"$TMP/export/$leaf.env"; done
 printf '0\n' >"$TMP/export/collab.enabled"
 : >"$TMP/export/collab.rotation.path"
+printf '1\n' >"$TMP/export/collab.rotation.available"
 printf '%s\n' "$AURIGA_DATA_ROOT/config/materials" >"$TMP/export/runtime.path"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path runtime.path
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path collab.rotation.available runtime.path
 export INSTALL_ARCHIVE="$TMP/export.tar" INSTALL_OVERRIDE="$TMP/override-path"
 unset NAS_ALLOW_NONROOT NAS_INSTALLER_ACTIVE AURIGA_NAS_BOOTSTRAP_BINARY INSTALL_EXIT INSTALL_PLATFORM INSTALL_COMPOSE_EXIT
 cat >"$TMP/bin/docker" <<'EOF'
@@ -85,12 +86,18 @@ if [ -f "$INSTALL_OVERRIDE" ] && [ ! -e "$(dirname "$(cat "$INSTALL_OVERRIDE")")
 else printf 'FAIL compose_failure_cleanup\n'; fail=1; fi
 unset INSTALL_COMPOSE_EXIT
 printf '1\n' >"$TMP/export/collab.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path runtime.path
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path collab.rotation.available runtime.path
 check compose_activated_overlay 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 if grep -q -- "$NAS_ROOT/collab-compose.yml" "$INSTALL_LOG"; then printf 'PASS compose_checked_overlay_selected\n'
 else printf 'FAIL compose_checked_overlay_selected\n'; fail=1; fi
+printf '0\n' >"$TMP/export/collab.rotation.available"
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path collab.rotation.available runtime.path
+check busy_rotation_core_config_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
+check busy_rotation_stop_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose stop collab network'
+check busy_rotation_message_start_refused 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose --profile collab-network up -d collab network'
+printf '1\n' >"$TMP/export/collab.rotation.available"
 printf 'invalid\n' >"$TMP/export/collab.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path runtime.path
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path collab.rotation.available runtime.path
 check reject_invalid_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env
 check reject_missing_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'

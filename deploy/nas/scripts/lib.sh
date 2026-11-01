@@ -329,6 +329,19 @@ services:
 EOF
 }
 
+# Starting message consumers requires a checked snapshot. Stops/config/core up
+# retain the service definitions even when a publisher currently owns the lock.
+collab_snapshot_required() {
+  _snapshot_up=0; _snapshot_message=0
+  for _snapshot_arg do
+    case "$_snapshot_arg" in
+      up) _snapshot_up=1 ;;
+      collab-network|collab|collab-db|network|network-broker) _snapshot_message=1 ;;
+    esac
+  done
+  [ "$_snapshot_up" = 1 ] && [ "$_snapshot_message" = 1 ]
+}
+
 run_compose() (
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
     container_compose "$@"
@@ -340,8 +353,16 @@ run_compose() (
   _runtime=$(runtime_directory)
   write_runtime_override "$_runtime" >"$_runtime_private/runtime.yml"
   _rotation=
+  _collab_available=1
   if [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
-    _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT")
+    if ! _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"); then
+      _collab_available=0
+      printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; core Compose remains available' >&2
+    fi
+  fi
+  if [ "$_collab_available" = 0 ] && collab_snapshot_required "$@"; then
+    printf '%s\n' 'message_network=degraded refusing message startup without a checked rotation snapshot' >&2
+    return 1
   fi
   write_collab_rotation_override "$_rotation" >"$_runtime_private/rotation.yml"
   if [ -s "$_runtime_private/rotation.yml" ]; then set -- -f "$_runtime_private/rotation.yml" "$@"; fi
@@ -384,6 +405,14 @@ EOF
   _cc=$(compose_cmd)
   _runtime=$(cat "$_private/runtime.path")
   _rotation=$(cat "$_private/collab.rotation.path")
+  case "$(cat "$_private/collab.rotation.available")" in
+    1) ;;
+    0) if collab_snapshot_required "$@"; then
+         printf '%s\n' 'message_network=degraded refusing message startup without a checked rotation snapshot' >&2
+         return 1
+       fi ;;
+    *) die 'invalid privileged rotation availability decision' ;;
+  esac
   write_collab_rotation_override "$_rotation" >"$_private/rotation.yml"
   if [ -s "$_private/rotation.yml" ]; then set -- -f "$_private/rotation.yml" "$@"; fi
   write_runtime_override "$_runtime" >"$_private/runtime.yml"

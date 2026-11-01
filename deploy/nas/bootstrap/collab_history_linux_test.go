@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func TestNASHistoryCheckAuthenticatesCurrentPGAndDoesNotPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err = f.r.historyCheck(nil, &out); err != nil {
+	if err = f.r.historyCheckPG(nil, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "history_lifetime_checked") {
@@ -43,8 +44,19 @@ func TestNASHistoryCheckAuthenticatesCurrentPGAndDoesNotPublish(t *testing.T) {
 		t.Fatal("precheck changed runtime")
 	}
 	f.status.Version = "999"
-	if err = f.r.historyCheck(nil, &out); err == nil {
+	if err = f.r.historyCheckPG(nil, &out); err == nil {
 		t.Fatal("accepted a different PG publication")
+	}
+}
+
+func TestNASHistoryLifetimeCanBeCheckedWithDatabaseStopped(t *testing.T) {
+	f := nasRotationTestFixture(t, "ip")
+	f.r.operator = func(string, string, nasRotationPlan) ([]byte, error) {
+		return nil, fmt.Errorf("PostgreSQL is stopped; offline precheck must not call it")
+	}
+	var out bytes.Buffer
+	if err := f.r.historyCheck(nil, &out); err != nil {
+		t.Fatal(err)
 	}
 }
 

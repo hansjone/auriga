@@ -54,7 +54,12 @@ if [ -d "$AURIGA_DATA_ROOT/config/collab-source" ]; then
     if [ "${AURIGA_MESSAGE_NETWORK_OFFLINE:-0}" = 1 ]; then _schedule=pause; else _schedule=resume; fi
     sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" "$_schedule" || printf '%s\n' 'message_network=degraded scheduler_control_failed' >&2
   fi
-  if [ "${AURIGA_MESSAGE_NETWORK_OFFLINE:-0}" != 1 ] && sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" check; then
+  _history_ready=1
+  if [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
+    sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" history-check || _history_ready=0
+  fi
+  if [ "${AURIGA_MESSAGE_NETWORK_OFFLINE:-0}" != 1 ] && [ "$_history_ready" = 1 ] \
+    && sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" check; then
     if ! run_compose --profile collab-network --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never collab network; then
       printf '%s\n' 'message_network=degraded startup_failed; core services remain available' >&2
       run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" stop collab network network-broker || :

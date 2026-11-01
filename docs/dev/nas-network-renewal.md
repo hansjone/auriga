@@ -99,7 +99,11 @@ python3 deploy-nas/scripts/sign-collab-queue.py \
 
 签名 JAR 的核准摘要只从独立核准的 Auriga 发布构建（CI 构建记录或本机完整验证的发行构建）取得，保留源码 commit、构建日志及制品 SHA256 对照；不得从 NAS 导出文件取签名 JAR 的信任 pin。审批 reason 中的精确 JAR 摘要用于关联这些发行证据，不把 NAS 的 trust.json 当来源证明。
 
-升级含 8 天限制的 operator/collab 镜像之前，执行公开只读命令 `sh deploy-nas/scripts/rotate-collab-keys.sh history-check`。它通过生产 status 核对 PG 当前清单与不可变发布归档，独立核原根双签名，再对清单全部历史逐把核 `0 < not_after - not_before ≤ 8 天`（包括 retired/revoked、三种用途），输出版本、已检查钥数及清单摘要。`preflight.sh` 在已有 collab-operations 时自动调用，start 与 runtime-upgrade 均覆盖；runtime-upgrade 在 stage 和重建控制服务之前完成预检。首次尚无操作归档的安装仍走原始签发/启动门禁。任一失败则停止升级，交由运营者处理，不删除历史、不替换旧绑定 JAR。升级新 JAR 前也可用其只读 `verify-archived` 复核同一对材料。覆盖不足 48h 的小时任务告警会附当前或下一个可准备时段的准确 UTC 起止：UTC 00:00–06:00、12:00–18:00（北京时间 08:00–14:00、20:00–次日02:00，截止点可用）。正在窗口内则立即准备，错过后不能调钟或缩短离线窗口。
+升级含 8 天限制的 operator/collab 镜像之前，执行公开只读命令 `sh deploy-nas/scripts/rotate-collab-keys.sh history-check`。它离线核不可变归档的原根双签名，再对清单全部历史逐把核 `0 < not_after - not_before ≤ 8 天`（包括 retired/revoked、三种用途），输出版本、已检查钥数及清单摘要；bootstrap 本身不调用 Engine 或 PG，容器安装模式仍通过已有 Docker 启动无网络 helper。PG 已运行且就绪后，再执行 `history-check-pg`，通过生产 status 核对 PG 当前 pair 与同一归档；PG 已停或尚未就绪时明确拒绝，不自动启动 PG、不等待其就绪。`runtime-upgrade.sh` 在 stage 和重建控制服务之前显式执行这两项门禁，任一失败就停止升级，保留原指针与服务。平台镜像/业务规则变更走明确升级入口，不以普通冷启动替代升级验收；固定 operator JAR 仍不可直接替换。升级新 JAR 时，运营者**必须另用经独立核准的新 JAR 的只读 `verify-archived` 对同一对 signed/announcement 和原根指纹复核**，保留新 JAR 摘要及输出，避免 Go/Java 规则将来不同步；任一超限或拒绝均停止升级，不删历史。
+
+普通 `preflight.sh` 只检查主机、材料与镜像前提，不运行消息历史或 PG 观察器。`start.sh` 先启动核心服务，再尝试已有归档的离线历史检查与消息就绪检查；失败只输出 `message_network=degraded`，核心服务保持可用。消息路径读取、history-check、check、pause/resume 遇续期锁占用立即拒绝，由启动路径保留已有投影并降级消息组件，不等待五分钟；发布和续期事务仍保持原有完整互斥锁。Compose 仍保留消息服务定义供 stop/down 使用，配置导出另传轮换快照可用性，缺少已核快照时仅拒绝消息消费者的 up，不阻止核心配置、核心启动或停止操作。PG 观察器不会因为启动检查而自动创建/启动数据库。首次无轮换归档的安装继续走原始签发/消息启动门禁。
+
+覆盖不足 48h 的小时任务告警会附当前或下一个可准备时段的准确 UTC 起止：UTC 00:00–06:00、12:00–18:00（北京时间 08:00–14:00、20:00–次日02:00，截止点可用）。正在窗口内则立即准备，错过后不能调钟或缩短离线窗口。
 
 Windows 输出目录的父目录也必须是运营者专用私有目录，不得授予其他用户 DELETE/FILE_DELETE_CHILD；子目录 DACL 不能防止非属主从父目录整体替换它。合并前检查清单必须包含下述 Windows 生产 jar 集成测试；Linux CI 不能替代其 ACL 验证。
 

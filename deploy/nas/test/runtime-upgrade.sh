@@ -55,3 +55,23 @@ if sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/d
 else [ "$?" = 65 ]; fi
 [ ! -s "$temp/actions" ] && [ ! -s "$temp/compose.log" ]
 echo 'PASS runtime_upgrade_precheck_precedes_staging_and_service_changes'
+
+mkdir -p "$temp/data/config/collab-operations"
+printf '#!/bin/sh\nexit 0\n' >"$temp/scripts/preflight.sh"
+cat >"$temp/scripts/rotate-collab-keys.sh" <<'EOF'
+#!/bin/sh
+echo "$1" >>"$TEST_RUNTIME_ROOT/history-actions"
+if [ "$1" = "${TEST_HISTORY_REJECT:-}" ]; then exit 66; fi
+EOF
+for rejected in history-check history-check-pg; do
+  : >"$temp/actions"; : >"$temp/compose.log"; : >"$temp/history-actions"
+  if TEST_HISTORY_REJECT=$rejected sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture; then
+    echo 'upgrade accepted failed history gate' >&2; exit 1
+  else [ "$?" = 66 ]; fi
+  [ ! -s "$temp/actions" ] && [ ! -s "$temp/compose.log" ]
+done
+: >"$temp/history-actions"
+sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture
+printf 'history-check\nhistory-check-pg\n' >"$temp/expected-history"
+cmp "$temp/expected-history" "$temp/history-actions"
+echo 'PASS explicit_upgrade_requires_offline_history_and_running_pg_before_stage'

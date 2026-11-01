@@ -24,10 +24,6 @@ func nasRotationHistoryLifetime(p nasRotationPayload) error {
 }
 
 func (r *nasRotation) historyCheck(rows []nasRotationRelease, stdout io.Writer) error {
-	status, err := r.status(rows) // production PG compares the exact archived pair
-	if err != nil {
-		return err
-	}
 	signedPath, annPath, _ := r.latest(rows)
 	signed, err := nasRotationRead(signedPath, 0)
 	if err != nil {
@@ -41,9 +37,6 @@ func (r *nasRotation) historyCheck(rows []nasRotationRelease, stdout io.Writer) 
 	if err != nil {
 		return err
 	}
-	if p.Version != status.Version {
-		return fmt.Errorf("history precheck: PG publication differs from archive")
-	}
 	if _, err = r.authenticateQueuePair(signed, ann, p); err != nil {
 		return err
 	}
@@ -51,6 +44,28 @@ func (r *nasRotation) historyCheck(rows []nasRotationRelease, stdout io.Writer) 
 		return err
 	}
 	return json.NewEncoder(stdout).Encode(map[string]any{"status": "history_lifetime_checked", "version": p.Version, "keysChecked": len(p.Keys), "maximumLifetimeDays": 8, "signedSha256": nasRotationHash(signed)})
+}
+
+// Optional online cross-check for an explicit upgrade, after PostgreSQL is up.
+// The observer never starts or waits for a stopped/unready database.
+func (r *nasRotation) historyCheckPG(rows []nasRotationRelease, stdout io.Writer) error {
+	status, err := r.status(rows)
+	if err != nil {
+		return err
+	}
+	signed, _, _ := r.latest(rows)
+	raw, err := nasRotationRead(signed, 0)
+	if err != nil {
+		return err
+	}
+	p, err := nasRotationParsePayload(raw)
+	if err != nil {
+		return err
+	}
+	if p.Version != status.Version {
+		return fmt.Errorf("history precheck: PG publication differs from archive")
+	}
+	return r.historyCheck(rows, stdout)
 }
 
 func nasQueueRenewalWarning(until, now time.Time) string {

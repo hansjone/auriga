@@ -187,8 +187,8 @@ second-line'; do
   else bad observability_query_touched_docker; fi
 done
 
-# The real upgrade preflight must stop before image/service changes if current
-# PG history cannot satisfy the new verifier's lifetime policy.
+# Ordinary host prerequisites must not acquire a renewal lock or require PG.
+# The real bootstrap/Engine cold-start coverage is in cold_start_linux_test.go.
 mkdir -p "$AURIGA_DATA_ROOT/config/collab-operations"
 cat >"$NAS_ROOT/scripts/rotate-collab-keys.sh" <<'EOF'
 #!/bin/sh
@@ -196,9 +196,7 @@ cat >"$NAS_ROOT/scripts/rotate-collab-keys.sh" <<'EOF'
 printf '%s\n' "history-check" >>"$NAS_READY_LOG"
 if [ "${NAS_HISTORY_REJECT:-0}" = 1 ]; then echo 'history lifetime precheck refused'; exit 65; fi
 EOF
-check_preflight history_precheck_automatic pass ''
-if ! grep -qx history-check "$NAS_READY_LOG"; then bad history_precheck_not_called; fi
 NAS_HISTORY_REJECT=1; export NAS_HISTORY_REJECT
-check_preflight history_precheck_blocks_upgrade fail 'history lifetime precheck refused'
-if grep -q '^image inspect ' "$NAS_READY_LOG"; then bad history_precheck_did_not_stop; fi
+check_preflight generic_preflight_has_no_pg_or_renewal_dependency pass ''
+if grep -qx history-check "$NAS_READY_LOG"; then bad generic_preflight_called_message_observer; fi
 [ "$fail" = 0 ]
