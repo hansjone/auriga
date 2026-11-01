@@ -49,7 +49,29 @@ class NetworkSourceJavaHostPostgresTest {
       var source = frames.register();
       assertEquals("registered", source.path("result").asString(), source.toString());
       assertEquals(1, host.sourceCount());
+      var anonymous =
+          assertThrows(
+              auriga.common.error.AurigaException.class,
+              () ->
+                  TenantContext.run(
+                      host.tenant, () -> host.org.deleteRoleBinding(device.binding())));
+      assertEquals("org.not_found", anonymous.errorCode().code());
       host.revoke(device);
+      assertTrue(auriga.common.context.RequestContext.currentPrincipal().isEmpty());
+      assertEquals(
+          host.revocationActor.toString(),
+          host.org
+              .store()
+              .tenant(
+                  host.tenant,
+                  () ->
+                      host.org
+                          .store()
+                          .jdbc()
+                          .queryForObject(
+                              "SELECT envelope::jsonb->'data'->>'actorId' FROM org.outbox_event WHERE tenant_id=? AND event_type='user.permissions_changed' ORDER BY seq DESC LIMIT 1",
+                              String.class,
+                              host.tenant)));
       assertFalse(
           host.permissions
               .resolve(host.tenant, device.account().toString(), "device")

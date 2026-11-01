@@ -166,7 +166,7 @@ paths:
       operationId: disableMember
       x-admin-only: true
       x-permission: org.members.write
-      description: 发 user.disabled。不能停用自己，不能停用最后一个超管（409 org.last_owner）。
+      description: 发 user.disabled。操作者须覆盖目标的有效权限（含组继承），否则 403 org.grant_exceeds_own。不能停用自己，不能停用最后一个超管（409 org.last_owner）。
       requestBody:
         content:
           application/json:
@@ -177,6 +177,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
   /admin/members/{accountId}/enable:
     parameters:
@@ -186,12 +187,14 @@ paths:
       operationId: enableMember
       x-admin-only: true
       x-permission: org.members.write
+      description: 操作者须覆盖目标停用期间保留的有效权限（含组继承），否则 403 org.grant_exceeds_own。
       responses:
         '200':
           description: 已启用（发 user.enabled）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
   /admin/members/{accountId}/offboard:
     parameters:
       - $ref: '#/components/parameters/AccountId'
@@ -200,7 +203,7 @@ paths:
       operationId: offboardMember
       x-admin-only: true
       x-permission: org.members.offboard
-      description: 离职。发 user.offboarded，后续的导出、归档、转交由各服务按事件处理。
+      description: 离职。操作者须覆盖目标的有效权限（含组继承），否则 403 org.grant_exceeds_own。发 user.offboarded，后续的导出、归档、转交由各服务按事件处理。
       requestBody:
         required: true
         content:
@@ -216,6 +219,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
   /admin/members/{accountId}/role-bindings:
     parameters:
@@ -482,6 +486,7 @@ paths:
       operationId: createRoleBinding
       x-admin-only: true
       x-permission: org.roles.grant
+      description: 只能授予本人权限覆盖的角色（403 org.grant_exceeds_own）；成员主体须在职且启用（非 active 返回 409 org.conflict）。
       requestBody:
         required: true
         content:
@@ -499,13 +504,14 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RoleBinding' }
         '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
   /admin/role-bindings/{bindingId}:
     delete:
       tags: [roles]
       operationId: deleteRoleBinding
       x-admin-only: true
       x-permission: org.roles.grant
-      description: 不能撤销最后一个超管（409 org.last_owner）。
+      description: 只能撤销本人权限覆盖的角色（403 org.grant_exceeds_own）；不能撤销最后一个超管（409 org.last_owner）。
       parameters:
         - name: bindingId
           in: path
@@ -513,6 +519,7 @@ paths:
           schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
       responses:
         '204': { description: 已撤销 }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
 
   # ---------------- 策略 ----------------
