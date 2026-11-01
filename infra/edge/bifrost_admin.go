@@ -107,6 +107,9 @@ func (g *Gateway) proxyRelayAdmin(w http.ResponseWriter, r *http.Request, audien
 		}
 		return
 	}
+	// Introspection carries current authority, but deliberately has no CSRF
+	// material. Keep only the matching browserSession projection's binding.
+	fresh.CSRFHash = original.CSRFHash
 	permission := "ai.providers.write"
 	if r.Method == http.MethodGet {
 		permission = "ai.providers.read"
