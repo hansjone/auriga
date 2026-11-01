@@ -1,12 +1,12 @@
 # Auriga HTTP service with only the maintained Bifrost core/providers.
-FROM golang:1.27.3 AS build
+FROM golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS build
 WORKDIR /src/infra
 COPY infra/ ./
 COPY third_party/bifrost/core /src/third_party/bifrost/core
 WORKDIR /src/infra/ai-gateway
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /bifrost ./cmd/relay-backend
 
-FROM alpine:3.22
+FROM alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
 RUN apk add --no-cache ca-certificates
 COPY --from=build /bifrost /usr/local/bin/bifrost
 COPY third_party/bifrost/LICENSE third_party/bifrost/THIRD_PARTY_NOTICES.md /usr/share/licenses/bifrost/
