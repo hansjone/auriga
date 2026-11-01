@@ -69,7 +69,7 @@ func TestMaterialsUpgradeLegacyFixture(t *testing.T) {
 	}
 }
 
-func TestMaterialsUpgradeLinuxLifecycle(t *testing.T) {
+func testNASMaterialsUpgradeLifecycle(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires Linux root and fixed installer uid")
 	}

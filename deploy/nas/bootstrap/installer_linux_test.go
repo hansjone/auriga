@@ -18,6 +18,7 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 	}
 	t.Run("executable-boundary", testNASFixedInstallerExecutableBoundary)
 	t.Run("runtime-upgrade", testNASRuntimeUpgradeLifecycle)
+	t.Run("materials-upgrade", testNASMaterialsUpgradeLifecycle)
 	root, err := os.MkdirTemp("", "auriga-nas-installer-")
 	if err != nil {
 		t.Fatal(err)
