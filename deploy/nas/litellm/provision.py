@@ -13,7 +13,7 @@ def database_connection():
                            connect_timeout=10)
 
 
-def claim_service_key(fingerprint):
+def claim_service_key(fingerprint, service_name="auriga-team"):
     # Serialize the first DDL/claim. Commit the claim BEFORE any key API call:
     # interrupted provisioning requires operator recovery, never an automatic retry.
     with database_connection() as connection:
@@ -26,7 +26,7 @@ def claim_service_key(fingerprint):
                 state text NOT NULL CHECK (state IN ('claimed', 'ready')),
                 created_at timestamptz NOT NULL DEFAULT now())''')
             cursor.execute('''SELECT key_hash,state FROM auriga_provisioning.service_key_state
-                              WHERE service_name=%s FOR UPDATE''', ('auriga-team',))
+                              WHERE service_name=%s FOR UPDATE''', (service_name,))
             row = cursor.fetchone()
             if row is not None:
                 if row != (fingerprint, 'ready'):
@@ -34,16 +34,16 @@ def claim_service_key(fingerprint):
                 return False
             cursor.execute('''INSERT INTO auriga_provisioning.service_key_state
                               (service_name,key_hash,state) VALUES (%s,%s,'claimed')''',
-                           ('auriga-team', fingerprint))
+                           (service_name, fingerprint))
     return True
 
 
-def complete_service_key(fingerprint):
+def complete_service_key(fingerprint, service_name="auriga-team"):
     with database_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute('''UPDATE auriga_provisioning.service_key_state SET state='ready'
                               WHERE service_name=%s AND key_hash=%s AND state='claimed' ''',
-                           ('auriga-team', fingerprint))
+                           (service_name, fingerprint))
             if cursor.rowcount != 1:
                 raise RuntimeError('service key claim changed')
 
@@ -51,33 +51,42 @@ def complete_service_key(fingerprint):
 def provision():
     master = Path('/run/secrets/litellm_master').read_text().strip()
     team = Path('/run/secrets/litellm_team').read_text().strip()
-    fingerprint = hashlib.sha256(team.encode()).hexdigest()
-    if not claim_service_key(fingerprint):
-        return
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    # Query only the hash, never put the raw key in a URL or logs.
-    req = urllib.request.Request('http://litellm:4000/key/info?key=' + fingerprint,
-                                 headers={'Authorization': 'Bearer ' + master})
-    try:
-        with opener.open(req, timeout=10) as response:
-            exists = response.status == 200
-    except urllib.error.HTTPError as error:
-        status = error.code
-        error.close()
-        if status not in (400, 404):
-            raise RuntimeError('cannot inspect service key') from None
-        exists = False
-    if not exists:
-        body = json.dumps({'key': team, 'key_alias': 'auriga-team',
-                           'models': ['all-proxy-models'], 'key_type': 'llm_api',
-                           'metadata': {'owner': 'auriga-ai-gateway'}}).encode()
-        req = urllib.request.Request('http://litellm:4000/key/generate', data=body,
-                                     headers={'Authorization': 'Bearer ' + master,
-                                              'Content-Type': 'application/json'})
+
+    def request(path, body=None):
+        req = urllib.request.Request('http://litellm:4000' + path,
+            data=None if body is None else json.dumps(body).encode(),
+            headers={'Authorization': 'Bearer ' + master, 'Content-Type': 'application/json'})
         with opener.open(req, timeout=30) as response:
             if response.status != 200:
                 raise RuntimeError('cannot provision service key')
-    complete_service_key(fingerprint)
+
+    def ensure(key, service_name, body, user=None):
+        fingerprint = hashlib.sha256(key.encode()).hexdigest()
+        if not claim_service_key(fingerprint, service_name):
+            return
+        try:
+            # Query only the hash, never put raw keys in URLs or logs.
+            request('/key/info?key=' + fingerprint)
+            exists = True
+        except urllib.error.HTTPError as error:
+            status = error.code
+            error.close()
+            if status not in (400, 404):
+                raise RuntimeError('cannot inspect service key') from None
+            exists = False
+        if not exists:
+            if user:
+                request('/user/new', user)
+            request('/key/generate', {'key': key, 'key_alias': service_name, **body})
+        complete_service_key(fingerprint, service_name)
+
+    ensure(team, 'auriga-team', {'models': ['all-proxy-models'], 'key_type': 'llm_api',
+                               'metadata': {'owner': 'auriga-ai-gateway'}})
+    reader = Path('/run/secrets/litellm_ui_reader').read_text().strip()
+    ensure(reader, 'auriga-edge-reader',
+           {'user_id': 'auriga-edge-reader', 'key_type': 'read_only', 'allowed_routes': ['/key/info']},
+           {'user_id': 'auriga-edge-reader', 'user_role': 'proxy_admin_viewer', 'auto_create_key': False})
 
 
 if __name__ == '__main__':

@@ -30,7 +30,7 @@ class ProvisionTest(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         (self.root / 'state').mkdir()
-        for name in ['litellm_master', 'litellm_team', 'litellm_pg_password']:
+        for name in ['litellm_master', 'litellm_team', 'litellm_pg_password', 'litellm_ui_reader']:
             (self.root / name).write_text('sk-' + secrets.token_hex(32))
         self.generated = 0
 
@@ -44,6 +44,10 @@ class ProvisionTest(unittest.TestCase):
         def open_request(request, **kwargs):
             if '/key/info?' in request.full_url:
                 raise urllib.error.HTTPError(request.full_url, 404, 'revoked key', None, None)
+            if request.full_url.endswith('/user/new'):
+                self.assertEqual(json.loads(request.data)['user_role'], 'proxy_admin_viewer')
+                self.assertFalse(json.loads(request.data)['auto_create_key'])
+                return Response()
             self.assertEqual(request.full_url, 'http://litellm:4000/key/generate')
             self.assertIn('key', json.loads(request.data))
             self.generated += 1
@@ -66,8 +70,8 @@ class ProvisionTest(unittest.TestCase):
     def test_fresh_claim_is_completed_after_one_key_creation(self):
         with patch.object(provision, 'claim_service_key', return_value=True, create=True), patch.object(provision, 'complete_service_key', create=True) as complete:
             provision.provision()
-        self.assertEqual(self.generated, 1)
-        complete.assert_called_once()
+        self.assertEqual(self.generated, 2)
+        self.assertEqual(complete.call_count, 2)
         self.assertFalse((self.root / 'state/team-provisioned').exists())
 
 

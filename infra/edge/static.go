@@ -18,24 +18,29 @@ type spaFileServer struct {
 	root       http.Dir
 	fs         http.Handler
 	accessMode string
+	gzipCache  *staticGzipCache
 }
 
-func newAccessSPAFileServer(root, mode string) http.Handler {
-	h := newSPAFileServer(root)
+func newAccessSPAFileServer(root, mode string, caches ...*staticGzipCache) http.Handler {
+	h := newSPAFileServer(root, caches...)
 	if s, ok := h.(*spaFileServer); ok {
 		s.accessMode = mode
 	}
 	return h
 }
 
-func newSPAFileServer(root string) http.Handler {
+func newSPAFileServer(root string, caches ...*staticGzipCache) http.Handler {
 	if root == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, problem(http.StatusNotFound, "edge.static_unconfigured", "Not Found", "static root not configured", requestID(r)))
 		})
 	}
 	d := http.Dir(root)
-	return &spaFileServer{root: d, fs: http.FileServer(d)}
+	cache := &staticGzipCache{}
+	if len(caches) == 1 {
+		cache = caches[0]
+	}
+	return &spaFileServer{root: d, fs: http.FileServer(d), gzipCache: cache}
 }
 
 func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +49,8 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upath := path.Clean("/" + r.URL.Path)
+	r = r.Clone(r.Context())
+	r.URL.Path, r.URL.RawPath = upath, ""
 	if blockedStaticPath(upath) {
 		writeProblem(w, problem(http.StatusNotFound, "edge.not_found", "Not Found", "", requestID(r)))
 		return
@@ -55,7 +62,7 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.serveAccessIndex(w, r, full)
 			return
 		}
-		if serveGzipStaticFile(w, r, full, fi) {
+		if s.gzipCache.serveFile(w, r, full, fi) {
 			return
 		}
 		s.fs.ServeHTTP(w, r)

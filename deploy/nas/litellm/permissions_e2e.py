@@ -49,6 +49,21 @@ def verify(mode, endpoint):
             for name in NAMES:
                 metadata = (source / name).stat()
                 assert (metadata.st_uid, metadata.st_mode & 0o777) == (10001, 0o600)
+        parent = root / 'ui-parent'
+        parent.mkdir(mode=0o755)
+        os.chown(parent, 0, 0)
+        ui = parent / 'litellm-ui'
+        # A Docker-authorized operator cannot create children under this parent
+        # or cd into root's 0700 secret directory on the second invocation.
+        socket_gid = Path(endpoint.removeprefix('unix://')).stat().st_gid
+        # Reuse the fixture's already required PostgreSQL image as a minimal
+        # shell/OpenSSL installer. Production supplies its approved installer.
+        installer = os.environ.get('AURIGA_INSTALLER_IMAGE') or command(
+            ['docker', '--host', endpoint, 'image', 'inspect', 'postgres:17', '--format', '{{.Id}}'])
+        for _ in range(2):
+            subprocess.run(['setpriv', '--reuid=1001', '--regid=1001', '--groups='+str(socket_gid),
+                            'sh', str(DEPLOY / 'nas/litellm/prepare-ui.sh'), str(ui)],
+                           env={**os.environ, 'AURIGA_INSTALLER_IMAGE': installer}, check=True)
         docker = ['docker', '--host', endpoint]
         # Compose itself resolves YAML anchors, service settings and bind paths.
         definition = json.loads(command(docker + ['compose', '-f',
@@ -73,6 +88,7 @@ def verify(mode, endpoint):
         config = {'services': services, 'secrets': {
             'litellm_' + n: {'file': str(runtime / n)} for n in NAMES},
             'networks': {'default': {}}}
+        config['secrets'].update({'litellm_ui_password': {'file': str(ui / 'password')}, 'litellm_ui_reader': {'file': str(ui / 'reader')}})
         config_path = root / 'compose.json'
         config_path.write_text(json.dumps(config))
         config_path.chmod(0o600)

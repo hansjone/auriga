@@ -90,7 +90,7 @@ func liteLLMPathAllowed(r *http.Request) bool {
 		}
 		for _, c := range directory {
 			switch {
-			case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-', c == '_':
+			case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
 			default:
 				return false
 			}
@@ -212,7 +212,12 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			fail(403, "common.forbidden")
 			return
 		}
-		raw, valid := singleCookie(r, cookieName(entry.scheme == "https", "auriga_litellm_session"))
+		presentation := g.liteLLMPresentationOrigin(r)
+		if presentation == "" {
+			fail(403, "common.forbidden")
+			return
+		}
+		raw, valid := singleCookie(r, cookieName(strings.HasPrefix(presentation, "https://"), "auriga_litellm_session"))
 		if !valid {
 			fail(401, "common.unauthenticated")
 			return
@@ -221,8 +226,7 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			fail(status, code)
 			return
 		}
-		// LiteLLM UI owns its own login token. Requiring exact Origin for writes
-		// protects the additional platform-session gate without injecting a master key.
+		// Every native LiteLLM token is gated by the live platform session.
 		if isWriteMethod(r.Method) && !strictOrigin(r, entry) {
 			fail(403, "common.forbidden")
 			return
@@ -231,7 +235,13 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 	if r.Body != nil && r.Body != http.NoBody {
 		r.Body = http.MaxBytesReader(w, r.Body, maxAPIBodyBytes)
 	}
-	proxy := newReverseProxy(g.litellmURL, liteLLMTransport, false)
+	if data {
+		if status, code := g.checkLiteLLMExternalKey(r); status != 0 {
+			fail(status, code)
+			return
+		}
+	}
+	proxy := newReverseProxy(g.litellmURL, staticIdleTransport{base: liteLLMTransport, timeout: staticBodyTimeout}, false)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
@@ -259,6 +269,12 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			pr.Out.Header.Set("traceparent", ensureTraceparent(r))
 		} else {
 			pr.Out.Header.Set("Cookie", liteLLMCookies(pr.In.Header.Get("Cookie")))
+			if pr.In.URL.Path == liteLLMUIConfigPath {
+				pr.Out.Header.Set("Accept-Encoding", "identity")
+			}
+			if staticAssetPath(pr.In) && pr.In.Method == http.MethodHead && pr.In.Header.Get("Range") == "" && acceptsStaticGzip(pr.In) {
+				pr.Out.Method = http.MethodGet
+			}
 		}
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
@@ -275,7 +291,7 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			for _, cookie := range cookies {
 				if liteLLMCookieAllowed(cookie.Name) {
 					cookie.Domain, cookie.Path = "", "/ai"
-					cookie.Secure = entry.scheme == "https"
+					cookie.Secure = strings.HasPrefix(g.liteLLMPresentationOrigin(r), "https://")
 					cookie.SameSite = http.SameSiteStrictMode
 					resp.Header.Add("Set-Cookie", cookie.String())
 				}
@@ -293,10 +309,8 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 				return errors.New("invalid LiteLLM redirect")
 			}
 			if location.IsAbs() {
-				if location.Scheme+"://"+location.Host == g.Cfg.liteLLMUIURL() {
-					return nil
-				}
-				if location.Scheme != g.litellmURL.Scheme || location.Host != g.litellmURL.Host {
+				origin := location.Scheme + "://" + location.Host
+				if origin != g.Cfg.liteLLMUIURL() && origin != g.liteLLMPresentationOrigin(r) && (location.Scheme != g.litellmURL.Scheme || location.Host != g.litellmURL.Host) {
 					return errors.New("external LiteLLM redirect rejected")
 				}
 				location.Scheme, location.Host = "", ""
@@ -310,7 +324,18 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			resp.Header.Set("Location", location.String())
 		}
 		if !data {
-			return gzipStaticResponse(resp)
+			if r.Method == http.MethodGet && r.URL.Path == liteLLMUIConfigPath {
+				return rewriteLiteLLMUIConfig(resp, g.liteLLMPresentationOrigin(r))
+			}
+			if err := gzipStaticResponseCached(resp, g.litellmStaticCache); err != nil {
+				return err
+			}
+			if r.Method == http.MethodHead {
+				if err := resp.Body.Close(); err != nil {
+					return err
+				}
+				resp.Body = http.NoBody
+			}
 		}
 		return nil
 	}

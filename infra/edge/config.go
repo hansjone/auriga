@@ -50,9 +50,10 @@ type Config struct {
 }
 
 type StaticConfig struct {
-	PortalRoot string `json:"portalRoot"`
-	AdminRoot  string `json:"adminRoot"`
-	PanelRoot  string `json:"panelRoot"`
+	PortalRoot     string `json:"portalRoot"`
+	AdminRoot      string `json:"adminRoot"`
+	PanelRoot      string `json:"panelRoot"`
+	GzipCacheBytes int    `json:"gzipCacheBytes,omitempty"`
 }
 
 type TLSConfig struct {
@@ -102,6 +103,33 @@ func loadConfigWithAccess(path, accessPath string) (Config, error) {
 		}
 	}
 	applyEnv(&cfg)
+	if raw := os.Getenv("AURIGA_EDGE_STATIC_GZIP_CACHE_BYTES"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 {
+			return Config{}, fmt.Errorf("invalid static gzip cache size")
+		}
+		cfg.Static.GzipCacheBytes = limit
+	}
+	if raw := os.Getenv("AURIGA_EDGE_LITELLM_UI_EXTERNAL_ORIGINS"); raw != "" {
+		if cfg.LiteLLMUI == nil || json.Unmarshal([]byte(raw), &cfg.LiteLLMUI.ExternalOrigins) != nil {
+			return Config{}, fmt.Errorf("invalid LiteLLM UI external origins JSON")
+		}
+	}
+	if file := os.Getenv("AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE"); file != "" {
+		if cfg.LiteLLMUI == nil {
+			return Config{}, fmt.Errorf("LiteLLM UI login requires UI configuration")
+		}
+		if cfg.LiteLLMUI.Login == nil {
+			cfg.LiteLLMUI.Login = &LiteLLMUILogin{}
+		}
+		cfg.LiteLLMUI.Login.PasswordFile = file
+	}
+	if file := os.Getenv("AURIGA_EDGE_LITELLM_KEY_INFO_FILE"); file != "" {
+		if cfg.LiteLLMUI == nil || cfg.LiteLLMUI.Login == nil {
+			return Config{}, fmt.Errorf("LiteLLM key reader requires UI configuration")
+		}
+		cfg.LiteLLMUI.Login.KeyInfoKeyFile = file
+	}
 	if accessPath != "" {
 		cfg.AccessConfigFile = accessPath
 	}

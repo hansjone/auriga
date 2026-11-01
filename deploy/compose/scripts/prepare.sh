@@ -160,5 +160,6 @@ sh "$COMPOSE/scripts/renew-panel.sh" --install || echo "warning: panel automatic
 sh "$COMPOSE/scripts/renew-panel.sh" || echo "warning: panel startup check failed; stack startup remains available" >&2
 
 sh "$COMPOSE/scripts/litellm-permissions.sh" "$VAR"
+sh "$COMPOSE/../nas/litellm/prepare-ui.sh" "$VAR/litellm-ui"
 
 echo "prepare done; env file: $VAR/compose.env"
