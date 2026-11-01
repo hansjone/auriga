@@ -38,8 +38,8 @@ class ComposePermissionsTest(unittest.TestCase):
                       (DEPLOY / 'compose/scripts/prepare.sh').read_text())
         self.assertIn('install_litellm_materials',
                       (DEPLOY / 'nas/scripts/render.sh').read_text())
-        self.assertIn('litellm/prepare-ui.sh', (DEPLOY / 'nas/scripts/installer.sh').read_text())
-        self.assertIn('NAS_INSTALLER_ACTIVE', (DEPLOY / 'nas/scripts/render.sh').read_text())
+        self.assertNotIn('litellm/prepare-ui.sh', (DEPLOY / 'nas/scripts/installer.sh').read_text())
+        self.assertIn('litellm/prepare-ui.sh', (DEPLOY / 'nas/scripts/render.sh').read_text())
         raw = (DEPLOY / 'nas/docker-compose.yml').read_text().split('\nsecrets:\n')[1]
         for name in GROUPS:
             self.assertIn('/config/litellm/' + name, raw)

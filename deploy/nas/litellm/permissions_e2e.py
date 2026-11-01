@@ -56,9 +56,14 @@ def verify(mode, endpoint):
         # A Docker-authorized operator cannot create children under this parent
         # or cd into root's 0700 secret directory on the second invocation.
         socket_gid = Path(endpoint.removeprefix('unix://')).stat().st_gid
+        # Reuse the fixture's already required PostgreSQL image as a minimal
+        # shell/OpenSSL installer. Production supplies its approved installer.
+        installer = os.environ.get('AURIGA_INSTALLER_IMAGE') or command(
+            ['docker', '--host', endpoint, 'image', 'inspect', 'postgres:17', '--format', '{{.Id}}'])
         for _ in range(2):
             subprocess.run(['setpriv', '--reuid=1001', '--regid=1001', '--groups='+str(socket_gid),
-                            'sh', str(DEPLOY / 'nas/litellm/prepare-ui.sh'), str(ui)], check=True)
+                            'sh', str(DEPLOY / 'nas/litellm/prepare-ui.sh'), str(ui)],
+                           env={**os.environ, 'AURIGA_INSTALLER_IMAGE': installer}, check=True)
         docker = ['docker', '--host', endpoint]
         # Compose itself resolves YAML anchors, service settings and bind paths.
         definition = json.loads(command(docker + ['compose', '-f',

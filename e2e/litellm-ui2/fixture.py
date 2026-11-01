@@ -44,7 +44,7 @@ def main():
         data = {'project': 'auriga-ui2-' + secrets.token_hex(6), 'root': str(root)}
         record.write_text(json.dumps(data))
         (root / 'ui').mkdir()
-        subprocess.run(['python3', str(REPO / 'deploy/nas/litellm/prepare-ui.py'), str(root / 'ui')], check=True)
+        subprocess.run(['sh', str(REPO / 'deploy/nas/litellm/prepare-ui.sh'), str(root / 'ui')], check=True)
         (STATE / 'password').write_text((root / 'ui/password').read_text())
         (STATE / 'reader').write_text((root / 'ui/reader').read_text())
         (STATE / 'reader').chmod(0o600)

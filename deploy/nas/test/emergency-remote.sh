@@ -5,6 +5,8 @@ ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf -- "$TMP"' EXIT INT TERM
 mkdir -p "$TMP/package/scripts" "$TMP/package/postgres" "$TMP/package/nats"
+mkdir "$TMP/package/litellm"
+cp "$ROOT/litellm/prepare-ui.sh" "$TMP/package/litellm/"
 cp "$ROOT/scripts/render.sh" "$TMP/package/scripts/"
 cp "$ROOT/postgres/init.sql.tmpl" "$TMP/package/postgres/"
 cp "$ROOT/nats/nats.conf.tmpl" "$TMP/package/nats/"
