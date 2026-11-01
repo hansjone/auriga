@@ -5,6 +5,7 @@ Build the operator jar first (deploy/nas/bin/collab-key-operator.jar), or set
 AURIGA_TEST_OPERATOR_JAR. A requested Windows integration run fails if it is absent.
 """
 from datetime import datetime, timezone
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -43,15 +44,35 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         first = ((now + 21600 + 43199) // 43200) * 43200
         entries = []
         self.count = 14 if self._testMethodName == 'test_week_with_distinct_nas_binding' else 2
+        base_keys = [{"kid": "fixture-business", "alg": "Ed25519", "purpose": "business_delivery", "state": "active",
+            "public_key_spki": spki, "not_before": stamp(now), "not_after": stamp(now + 7 * 86400)}]
+        current_keys = deepcopy(base_keys)
+        if self.count == 14:
+            generated = subprocess.run(["java", str(Path(__file__).with_name("QueueSigningFixture.java")),
+                str(self.base), "public-keys"], capture_output=True, text=True, check=True)
+            public_keys = generated.stdout.strip().splitlines()
+            purposes = ["business_delivery", "protocol_response", "management_state"]
+            base_keys = [{"kid": "old-" + purpose, "alg": "Ed25519", "purpose": purpose, "state": "active",
+                "public_key_spki": public_keys[i], "not_before": stamp(first - 5 * 86400),
+                "not_after": stamp(first + 36 * 3600)} for i, purpose in enumerate(purposes)]
+            current_keys = deepcopy(base_keys)
         for i in range(self.count):
+            if self.count == 14:
+                if i in (0, 11):
+                    for j, purpose in enumerate(purposes):
+                        current_keys.append({"kid": "nas-" + purpose.replace("_", "-") + "-" + ("a" if i == 0 else "b") * 24,
+                            "alg": "Ed25519", "purpose": purpose, "state": "next",
+                            "public_key_spki": public_keys[(3 if i == 0 else 6) + j],
+                            "not_before": stamp(first + i * 43200), "not_after": stamp(first + i * 43200 + 7 * 86400)})
+                if i == 3:
+                    for key in current_keys:
+                        key["state"] = "retired" if key["state"] == "active" else "active"
             version = str(i + 2)
             dest = source / version
             dest.mkdir()
             issued, until = stamp(first + i * 43200), stamp(first + i * 43200 + 86400)
             files = {"payload.json": {"schema_version": 1, "realm": "1", "keyset_version": version,
-                "issued_at": issued, "valid_until": until, "keys": [{"kid": "fixture-business",
-                "alg": "Ed25519", "purpose": "business_delivery", "state": "active",
-                "public_key_spki": spki, "not_before": stamp(now), "not_after": stamp(now + (8 if self.count == 14 else 7) * 86400)}]},
+                "issued_at": issued, "valid_until": until, "keys": deepcopy(current_keys)},
                 "trust.json": {"rootKid": "fixture-root", "rootFingerprint": self.fingerprint,
                     "operatorJarSha256": self.nas_jar_hash, "publicationMode": "regular", "realm": "1"},
                 "input.json": {"privateFiles": {}}}
@@ -65,6 +86,7 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         base.mkdir()
         payload = json.loads((source / "2/payload.json").read_text())
         payload.update(keyset_version="1", issued_at=stamp(now), valid_until=stamp(now+86400))
+        payload["keys"] = base_keys
         (base / "payload.json").write_text(json.dumps(payload))
         (base / "root.der").write_bytes((self.base / "public.der").read_bytes())
         loader = self.base / "empty-loader.properties"
@@ -78,6 +100,7 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         base_files={name:hashlib.sha256((base/name).read_bytes()).hexdigest() for name in ("signed.json","announcement.json","root.der")}
         (source / "batch.json").write_text(json.dumps({"baseVersion": "1", "baseSignedSha256":base_files["signed.json"],"baseFiles":base_files,"entries": entries}))
         self.command = [sys.executable, "-I", "-X", "utf8", str(self.repo / "deploy/nas/scripts/sign-collab-queue.py"),
+            "--review-state", str(self.base / "local-review"),
             "--request", str(source), "--output", str(self.base / "output"), "--jar", str(self.jar),
             "--jar-sha256", jar_hash, "--expected-nas-jar-sha256", self.nas_jar_hash,
             "--root-kid", "fixture-root", "--root-fingerprint", self.fingerprint,
@@ -85,6 +108,8 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
             "--confirm-batch-sha256",hashlib.sha256((source / "batch.json").read_bytes()).hexdigest()]
 
     def test_real_signer_and_verifier_and_no_overwrite(self):
+        reviewed = subprocess.run(self.command + ["--review-only"], capture_output=True, text=True)
+        self.assertEqual(reviewed.returncode, 0, reviewed.stderr)
         signed = subprocess.run(self.command, capture_output=True, text=True)
         self.assertEqual(signed.returncode, 0, signed.stderr)
         self.assertEqual(json.loads(signed.stdout.splitlines()[-1])["count"], 2)
@@ -150,6 +175,8 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
 
     def test_exposed_root_is_still_rejected(self):
+        reviewed = subprocess.run(self.command + ["--review-only"], capture_output=True, text=True)
+        self.assertEqual(reviewed.returncode, 0, reviewed.stderr)
         expose = subprocess.run(["icacls", str(self.base / "private.der"), "/grant", "*S-1-1-0:(R)"],
             capture_output=True, text=True)
         self.assertEqual(expose.returncode, 0, expose.stderr)
@@ -159,6 +186,8 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         self.assertFalse((self.base / "output/3/signed.json").exists())
 
     def test_tampered_base_and_unconfirmed_plan_never_sign(self):
+        reviewed = subprocess.run(self.command + ["--review-only"], capture_output=True, text=True)
+        self.assertEqual(reviewed.returncode, 0, reviewed.stderr)
         wrong = self.command[:-1]+["0"*64]
         signed = subprocess.run(wrong,capture_output=True,text=True)
         self.assertNotEqual(signed.returncode,0)

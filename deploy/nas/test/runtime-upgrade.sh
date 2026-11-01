@@ -46,3 +46,12 @@ cmp "$temp/actions" "$temp/expected"
 [ "$(wc -l <"$temp/compose.log")" = 2 ]
 grep -q -- '--wait --wait-timeout 120 --no-build --pull never platform agent' "$temp/compose.log"
 echo 'PASS runtime_upgrade_rolls_back_and_recovers_previous_consumers'
+
+: >"$temp/actions"
+: >"$temp/compose.log"
+printf '#!/bin/sh\nexit 65\n' >"$temp/scripts/preflight.sh"
+if sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture; then
+  echo 'failed historical precheck accepted' >&2; exit 1
+else [ "$?" = 65 ]; fi
+[ ! -s "$temp/actions" ] && [ ! -s "$temp/compose.log" ]
+echo 'PASS runtime_upgrade_precheck_precedes_staging_and_service_changes'

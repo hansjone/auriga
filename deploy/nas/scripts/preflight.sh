@@ -20,6 +20,13 @@ require_cmd docker awk df uname
 MIN_MEMORY_KB=${AURIGA_TEST_MIN_MEMORY_KB:-4194304}
 MIN_DISK_KB=${AURIGA_TEST_MIN_DISK_KB:-20971520}
 
+# Check the complete current PG history before any upgraded consumer starts.
+# No operations archive exists before the first key operation; there is then
+# no historical runtime binding to upgrade.
+if [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
+  sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" history-check
+fi
+
 case "$(uname -m)" in
   x86_64|amd64) ;;
   *) die "expected Linux amd64; select matching images before deploying" ;;

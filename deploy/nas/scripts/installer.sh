@@ -3,7 +3,7 @@
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
-  init|render|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume) operation=$1 ;;
+  init|render|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
@@ -74,7 +74,7 @@ if [ -n "$rotation_input" ]; then
   esac
 fi
 case "$operation" in
-  collab-publish|collab-install|collab-status|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume)
+  collab-publish|collab-install|collab-status|collab-history-check|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume)
     set -- "$@" --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
       --label auriga.nas.rotation.controller=true ;;
 esac

@@ -504,7 +504,13 @@ func (r *nasRotation) queueTickAt(rows []nasRotationRelease, stdout io.Writer, n
 	coverageUntil := ""
 	defer func() {
 		if failure != nil {
-			_ = json.NewEncoder(stdout).Encode(map[string]string{"status": "queue_renewal_failed", "coverageUntil": coverageUntil, "warning": failure.Error(), "operatorAction": "inspect current PG and approved queue; restore missing approved files or prepare/export/sign/import a fresh batch"})
+			warning := failure.Error()
+			if until, err := time.Parse(time.RFC3339, coverageUntil); err == nil {
+				if renewal := nasQueueRenewalWarning(until, now); renewal != "" {
+					warning += "; " + renewal
+				}
+			}
+			_ = json.NewEncoder(stdout).Encode(map[string]string{"status": "queue_renewal_failed", "coverageUntil": coverageUntil, "warning": warning, "operatorAction": "inspect current PG and approved queue; restore missing approved files or prepare/export/sign/import a fresh batch"})
 		}
 	}()
 	if _, e := os.Lstat(filepath.Join(r.root, "scheduler-paused.json")); !os.IsNotExist(e) {
@@ -603,10 +609,7 @@ func (r *nasRotation) queueTickAt(rows []nasRotationRelease, stdout io.Writer, n
 	if e != nil {
 		return e
 	}
-	warning := ""
-	if until.Sub(now) <= 48*time.Hour {
-		warning = "预签队列即将用完；48小时内完成下一周离线签名"
-	}
+	warning := nasQueueRenewalWarning(until, now)
 	if len(warnings) > 0 {
 		warning = strings.Join(warnings, "; ") + "; " + warning
 	}

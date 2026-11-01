@@ -565,7 +565,7 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		return fmt.Errorf("unexpected NAS rotation arguments")
 	}
 	switch action {
-	case "publish", "install", "status", "path", "check", "stop", "prepare", "renew", "prepare-recovery", "recover-expired", "queue-prepare", "queue-import", "queue-export", "recover-pending", "pause", "resume":
+	case "publish", "install", "status", "history-check", "path", "check", "stop", "prepare", "renew", "prepare-recovery", "recover-expired", "queue-prepare", "queue-import", "queue-export", "recover-pending", "pause", "resume":
 	default:
 		return fmt.Errorf("unsupported NAS rotation action")
 	}
@@ -612,7 +612,7 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		}
 		return fmt.Errorf("NAS rotation not initialized")
 	}
-	r.inspectOnly = action == "path" || action == "status"
+	r.inspectOnly = action == "path" || action == "status" || action == "history-check"
 	r.allowPending = r.inspectOnly || action == "check" || action == "recover-pending" || action == "pause" || action == "resume" || action == "stop"
 	r.recovery = action == "recover-expired" || action == "prepare-recovery"
 	if r.recovery && r.binding.Jar == "" {
@@ -657,6 +657,8 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 				return err
 			}
 			return json.NewEncoder(stdout).Encode(s)
+		case "history-check":
+			return r.historyCheck(rows, stdout)
 		case "pause", "resume":
 			return r.schedulerControl(action)
 		case "queue-export":

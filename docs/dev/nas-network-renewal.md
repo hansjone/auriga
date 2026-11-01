@@ -84,6 +84,7 @@ sh deploy-nas/scripts/rotate-collab-keys.sh queue-export > /private/public-queue
 ```sh
 python3 deploy-nas/scripts/sign-collab-queue.py \
   --request /private/public-queue --output /private/approved-week \
+  --review-state /private/local-weekly-review \
   --jar /private/platform-exec.jar --jar-sha256 APPROVED_SHA256 \
   --expected-nas-jar-sha256 HISTORICALLY_APPROVED_NAS_SHA256 \
   --root-kid original-root-kid --root-fingerprint sha256:PINNED_ROOT_SHA256 \
@@ -94,9 +95,11 @@ python3 deploy-nas/scripts/sign-collab-queue.py \
 
 签名机 `--jar-sha256` 与 `--expected-nas-jar-sha256` 分别独立核准，允许不同。前者核本机发布版 jar 字节，用于历史验签与新签名；后者核每份 trust 中 NAS 历史固定的 jar，只作 NAS 运行时绑定核对。审阅输出展示两个摘要，审批 reason 记录二者。选择拆开校验是因为根签格式不变，NAS 旧生产 jar 仍可验签/发布；不迁移或重写旧 binding，不上传签名机新 jar。NAS 的 8 天纵深检查仍需另行升级才能生效。
 
-全部核对通过后打印新增 kid、SPKI 指纹、生效区间和 batch SHA256。**必须先执行同一命令加 `--review-only`，逐项审阅完整输出，再以其 batch SHA256 执行 `--confirm-batch-sha256 REVIEWED_SHA256`**；不能只对 batch 文件计算摘要就视作审阅。交互确认也必须先完成只审阅流程。没有通用跳过确认开关。旧签名 jar 不支持公开历史验签会拒绝，应在签名机使用经验证的新发布 jar，不能直接替换 NAS 历史 binding 中固定的 jar。
+全部核对通过后打印新增 kid、SPKI 指纹、生效区间和 batch SHA256。**必须先执行同一命令加 `--review-only`，逐项审阅完整输出，再以其 batch SHA256 执行 `--confirm-batch-sha256 REVIEWED_SHA256`**；不能只对 batch 文件计算摘要就视作审阅。脚本将最近一次完整审阅写入 `--review-state` 的 `latest.json`，该运营者专用目录必须位于本机，独立于请求与输出目录，不随批次传输。签名时强制核对机器/用户、批次、新钥摘要、请求与输出位置、两个 JAR pin、原根及批准人，审阅超过一小时、未来时间或任一不符均拒绝，要求重新只审阅；交互确认同样不能绕过。该记录约束操作顺序，不抵御能改写签名机文件的同用户攻击者。没有通用跳过确认开关。旧签名 jar 不支持公开历史验签会拒绝，应在签名机使用经验证的新发布 jar，不能直接替换 NAS 历史 binding 中固定的 jar。
 
-升级含 8 天限制的 operator/collab 镜像之前，须对当前 PG 完整历史逐把核 `not_after - not_before ≤ 8 天`（包括 retired/revoked、三种用途），并用新 jar 的只读 `verify-archived` 通过原根验签；任一超限则停止升级，交由运营者处理，不删除历史。覆盖不足 48h 的告警应同时注明下一个可准备时段：UTC 00:00–06:00、12:00–18:00（北京时间 08:00–14:00、20:00–次日02:00）。当前落在 UTC 06:00–12:00 时，告警附当日 UTC 12:00；落在 UTC 18:00–24:00 时附次日 UTC 00:00，正在窗口内则立即准备。错过后不能调钟或缩短离线窗口。
+签名 JAR 的核准摘要只从独立核准的 Auriga 发布构建（CI 构建记录或本机完整验证的发行构建）取得，保留源码 commit、构建日志及制品 SHA256 对照；不得从 NAS 导出文件取签名 JAR 的信任 pin。审批 reason 中的精确 JAR 摘要用于关联这些发行证据，不把 NAS 的 trust.json 当来源证明。
+
+升级含 8 天限制的 operator/collab 镜像之前，执行公开只读命令 `sh deploy-nas/scripts/rotate-collab-keys.sh history-check`。它通过生产 status 核对 PG 当前清单与不可变发布归档，独立核原根双签名，再对清单全部历史逐把核 `0 < not_after - not_before ≤ 8 天`（包括 retired/revoked、三种用途），输出版本、已检查钥数及清单摘要。`preflight.sh` 在已有 collab-operations 时自动调用，start 与 runtime-upgrade 均覆盖；runtime-upgrade 在 stage 和重建控制服务之前完成预检。首次尚无操作归档的安装仍走原始签发/启动门禁。任一失败则停止升级，交由运营者处理，不删除历史、不替换旧绑定 JAR。升级新 JAR 前也可用其只读 `verify-archived` 复核同一对材料。覆盖不足 48h 的小时任务告警会附当前或下一个可准备时段的准确 UTC 起止：UTC 00:00–06:00、12:00–18:00（北京时间 08:00–14:00、20:00–次日02:00，截止点可用）。正在窗口内则立即准备，错过后不能调钟或缩短离线窗口。
 
 Windows 输出目录的父目录也必须是运营者专用私有目录，不得授予其他用户 DELETE/FILE_DELETE_CHILD；子目录 DACL 不能防止非属主从父目录整体替换它。合并前检查清单必须包含下述 Windows 生产 jar 集成测试；Linux CI 不能替代其 ACL 验证。
 

@@ -60,10 +60,47 @@ class QueueSignerTests(unittest.TestCase):
             "baseFiles":{name:signer.digest(raw) for name,raw in base_files.items()},"entries": entries}))
         (self.source / "batch.json").chmod(0o600)
         self.args = argparse.Namespace(request=str(self.source), output=str(self.base / "output"), jar=str(self.jar),
+            review_state=str(self.base / "local-review"),
             jar_sha256=signer.digest(self.jar.read_bytes()), expected_nas_jar_sha256=signer.digest(b"old-nas-jar"),
             root_kid="fixture-root", root_fingerprint="sha256:"+signer.digest(b"fixture-public-root"),
             root_private=str(self.base / "private.der"), approved_by="alice", java="java",
             confirm_batch_sha256=signer.digest((self.source/"batch.json").read_bytes()))
+
+    def test_direct_confirmation_without_local_review_never_signs(self):
+        with patch.object(signer.subprocess, "run", return_value=argparse.Namespace(returncode=0)) as run:
+            with self.assertRaisesRegex(ValueError, "review-only"):
+                signer.sign(self.args)
+            self.assertFalse(any("sign" in c.args[0] for c in run.call_args_list))
+            self.assertFalse(Path(self.args.output).exists())
+
+    def review(self, args=None):
+        args = argparse.Namespace(**vars(args or self.args))
+        args.review_only = True
+        signer.sign(args)
+
+    def test_review_must_be_recent_local_and_exact_latest_plan(self):
+        with patch.object(signer.subprocess, "run", return_value=argparse.Namespace(returncode=0)) as run:
+            self.review()
+            receipt = Path(self.args.review_state) / "latest.json"
+            original = receipt.read_bytes()
+            for case in ("stale", "future", "machine", "batch", "jar", "nas-jar", "root", "newKeys"):
+                with self.subTest(case=case):
+                    value = json.loads(original)
+                    if case == "stale": value["reviewedAt"] -= 3601
+                    elif case == "future": value["reviewedAt"] += 60
+                    else:
+                        field = {"machine":"machine", "batch":"batchSha256", "jar":"signingJarSha256",
+                                 "nas-jar":"nasJarSha256", "root":"rootFingerprint", "newKeys":"newKeys"}[case]
+                        value["review"][field] = "changed"
+                    receipt.write_text(json.dumps(value))
+                    with self.assertRaisesRegex(ValueError, "review-only"): signer.sign(self.args)
+                    self.assertFalse(Path(self.args.output).exists())
+            receipt.write_bytes(original)
+            other = argparse.Namespace(**vars(self.args))
+            other.approved_by = "bob"
+            self.review(other)
+            with self.assertRaisesRegex(ValueError, "review-only"): signer.sign(self.args)
+            self.assertFalse(any("sign" in c.args[0] for c in run.call_args_list))
 
     def test_scheduled_future_and_audit_and_no_overwrite(self):
         calls = []
@@ -78,6 +115,7 @@ class QueueSignerTests(unittest.TestCase):
             Path(argv[-1]).chmod(0o600)
             return argparse.Namespace(returncode=0)
         with patch.object(signer.subprocess, "run", run):
+            self.review()
             signer.sign(self.args)
             with self.assertRaises(FileExistsError):
                 signer.sign(self.args)
@@ -99,6 +137,7 @@ class QueueSignerTests(unittest.TestCase):
                 if option=="base-pin": args.root_fingerprint="sha256:wrong"
                 if option=="nas-jar": args.expected_nas_jar_sha256="0"*64
                 with patch.object(signer.subprocess,"run",return_value=argparse.Namespace(returncode=1 if option=="base-signature" else 0)) as run:
+                    if option == "confirmation": self.review(args)
                     with self.assertRaises(ValueError): signer.sign(args)
                     self.assertFalse(any("sign" in c.args[0] for c in run.call_args_list))
                     self.assertFalse(Path(args.output).exists())

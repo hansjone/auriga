@@ -15,6 +15,14 @@ import java.util.List;
 class QueueSigningFixture {
   public static void main(String[] args) throws Exception {
     var directory = Path.of(args[0]);
+    if (args.length == 2 && "public-keys".equals(args[1])) {
+      for (int i = 0; i < 9; i++) {
+        var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        System.out.println(Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(pair.getPublic().getEncoded()));
+      }
+      return;
+    }
     if (args.length == 2) {
       try (var paths = Files.walk(directory)) {
         for (var path : paths.toList()) {

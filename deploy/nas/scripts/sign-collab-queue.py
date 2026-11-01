@@ -7,6 +7,8 @@ from decimal import Decimal
 import hashlib
 import json
 import os
+import platform
+import getpass
 import re
 from pathlib import Path
 import stat
@@ -249,8 +251,46 @@ def sign(args):
                       "signingJarSha256": args.jar_sha256, "nasJarSha256": args.expected_nas_jar_sha256,
                       "instruction": "Run --review-only and review this exact plan before confirming its digest.",
                       "newKeys": changes}, ensure_ascii=False), flush=True)
+    review = {"version": 1, "batchSha256": batch_hash, "newKeys": changes,
+              "request": str(source), "output": str(Path(args.output).absolute()),
+              "signingJarSha256": args.jar_sha256, "nasJarSha256": args.expected_nas_jar_sha256,
+              "rootKid": args.root_kid, "rootFingerprint": args.root_fingerprint,
+              "approvedBy": args.approved_by,
+              "machine": digest((platform.node() + "\0" + getpass.getuser()).encode())}
+    state = Path(args.review_state).absolute()
+    # Keep the local review checkpoint out of both transferred trees.
+    for tree in (source, Path(args.output).absolute()):
+        if state == tree or state.is_relative_to(tree) or tree.is_relative_to(state):
+            raise ValueError("review-only state must be separate from request and output")
+    receipt = state / "latest.json"
+    if state.exists() and (state.resolve() != state or not state.is_dir()
+            or (os.name != "nt" and (state.stat().st_mode & 0o077 or state.stat().st_uid != os.getuid()))):
+        raise ValueError("review-only local state must be an owner-only directory")
     if getattr(args, "review_only", False):
+        if not state.exists():
+            private_directory(state)
+        if state.is_symlink() or not state.is_dir():
+            raise ValueError("review-only local state directory refused")
+        checkpoint = {"review": review, "reviewedAt": time.time()}
+        # Same-directory replacement records only the latest complete review.
+        fd, temp = tempfile.mkstemp(prefix=".review-", dir=state)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(checkpoint, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp, receipt)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
         return
+    try:
+        checkpoint = decode_json(read(receipt))
+        age = time.time() - checkpoint["reviewedAt"]
+        if checkpoint["review"] != review or not 0 <= age <= 3600:
+            raise ValueError("review differs or is older than one hour")
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        raise ValueError("run --review-only on this machine for this exact plan and pins before signing") from error
     confirmation = getattr(args, "confirm_batch_sha256", None)
     if confirmation is None:
         confirmation = input("Review the new keys above. Enter the exact batch SHA256 to authorize signing: ").strip()
@@ -290,7 +330,7 @@ def sign(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("request", "jar", "jar-sha256", "expected-nas-jar-sha256", "root-kid", "root-fingerprint", "root-private", "approved-by", "output"):
+    for name in ("request", "jar", "jar-sha256", "expected-nas-jar-sha256", "root-kid", "root-fingerprint", "root-private", "approved-by", "output", "review-state"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--java", default="java")
     parser.add_argument("--review-only", action="store_true")
