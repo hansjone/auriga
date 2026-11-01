@@ -77,7 +77,9 @@ sh deploy-nas/scripts/rotate-collab-keys.sh queue-prepare
 sh deploy-nas/scripts/rotate-collab-keys.sh queue-export > /private/public-queue.tar
 ```
 
-默认 14 份，每份 24h、签发时间相隔 12h，连续覆盖约 7.5 天。先核对导出 tar 只有 `batch.json` 与各版本的 payload/trust/input 三个公开 JSON，再在离线运营者专用目录解包。导出不含 install-input 或 keys，不取回 NAS 业务私钥。第一份签发时间与签名机相差必须 ≤5 分钟，未来份只允许计划内的固定间隔；如准备后耽搁，重新 queue-prepare 取更高版本。独立核 tenant/realm/base/source 与原根 kid/指纹，然后执行：
+默认 14 份，每份 24h、签发时间相隔 12h，连续覆盖约 7.5 天。首份对齐 UTC 00:00/12:00，准备时必须留出 6–12h。固定 12h 网格并非每天所有时刻都有 6–12h 后的点，因此每周固定在 UTC 00:00–06:00 或 12:00–18:00 准备；其余时刻明确拒绝并给出下一次准备时间，不缩短窗口。首份的前驱由当前 PG 的精确 signed 摘要出发，沿已经批准的队列推到接管前最后一份，期间不发布或改写历史。
+
+导出只含 `batch.json`、`base/{signed.json,announcement.json,root.der}`（已签前驱及公开根），与各版本的 payload/trust/input 三个公开 JSON。导出不含 install-input 或 keys，不取回 NAS 业务私钥。在离线运营者专用目录解包，独立核 tenant/realm/base/source、原根 kid/指纹与新生产 operator jar 的摘要。签名机要求首份位于真实时间前 5 分钟至后 24h 内且对齐网格，超过窗口重新准备更高版本。
 
 ```sh
 python3 deploy-nas/scripts/sign-collab-queue.py \
@@ -87,7 +89,11 @@ python3 deploy-nas/scripts/sign-collab-queue.py \
   --root-private /offline/root-private.der --approved-by alice
 ```
 
-脚本调用固定的生产 OfflineKeySigning；原根私钥路径仅交给本机 Java，不复制、不回显。输出必须全新目录，失败保留部分产物，不覆盖已签同版本。未来 issued_at 仅用于预签；生产 Java 仍拒绝提前发布。把整个 approved-week 目录交回 NAS 外部 root 0700/文件 0600 的批准输入目录（不含任何私钥），导入前核摘要：
+脚本先用固定生产 `OfflineKeySigning verify-archived` 核验前驱的双根签与独立根指纹，不读根私钥、不安装状态。再逐份比较：旧 kid/材料/用途/期限不变，不遗漏历史；仅允许同状态、next→active、active→retired 或→revoked；新增只能是 Ed25519 next、符合 nas-purpose-hex 命名，每用途最多一把，原 active 剩余不超过 48h 且没有现有 next，寿命不超过 7 天。Java 在签名及当前/历史验签时另设 8 天业务钥上限，生产 PG 仍强制真实首发成熟期。
+
+全部核对通过后打印新增 kid、SPKI 指纹、生效区间和 batch SHA256，运营者逐项审阅后输入精确批次摘要才会签名。可先加 `--review-only` 只审阅，再以 `--confirm-batch-sha256 REVIEWED_SHA256` 显式批准同一批次；没有通用跳过确认开关。旧 operator jar 不支持公开历史验签会拒绝，需先构建并独立核准新 jar；不能直接替换 NAS 历史 binding 中固定的 jar。
+
+原根私钥路径仅交给本机 Java，不复制、不回显。输出必须全新目录，失败保留部分产物，不覆盖已签同版本。未来 issued_at 仅用于预签；生产 Java 仍拒绝提前发布。把整个 approved-week 目录交回 NAS 外部 root 0700/文件 0600 的批准输入目录（不含任何私钥），导入前核摘要：
 
 Windows 上，批签工具用系统安全描述符在创建输出目录的同时设置当前用户专属、禁止继承的 DACL，子文件只继承该用户权限。不能用先创建再放宽/修补 ACL 的方式签名，也不改变原根文件或生产 Java 的私密性校验。Python 3.13+ 的 `mkdir(mode=0700)` 会生成 Java 无法按具体属主识别的 `OWNER RIGHTS` ACE，因此不能替代这里的显式 DACL。构建上述生产 operator jar 后，执行 `python deploy/nas/test/collab_queue_windows_integration_test.py -v`，测试会临时生成独立测试根，真实调用生产 Java 签名和验签，并检查暴露根拒绝与禁止覆盖；缺 jar 在 Windows 上算失败。
 
@@ -97,9 +103,13 @@ sh deploy-nas/scripts/rotate-collab-keys.sh renew
 sh deploy-nas/scripts/schedule-collab-renewal.sh
 ```
 
-导入先验证全部根签、announcement、审批、原始请求与计划摘要，再追加同字节材料。重复导入只允许逐字节相同。小时任务只用最高批次，未到签发时刻不发布；剩余覆盖 ≤48h 时日志明确告警“预签队列即将用完”。运营者每周在固定时间准备并签下一批；告警后最迟在队列耗尽前完成。首次导入后执行 renew 可立即发布第一份，此后由小时任务推进。
+导入先验证全部根签、announcement、审批、原始请求、前驱快照和计划摘要，再核新批次的前驱是否仍等于当前 PG 或沿有效旧队列可达的接管前驱。旧队列在离线签名期间推进后，如果新前驱已经脱节，明确拒绝，要求重新 prepare/export/sign/import，保留旧队列。验证全部通过才追加同字节材料；重复导入只允许逐字节相同且仍可衔接。
+
+小时任务优先使用可衔接的最新批次，未来前驱未发布时由旧队列继续推进，未到签发时刻不发布。新批次元数据、前驱或材料失效时退回仍有效的旧队列，并输出 `queue_invalidated_fallback`、真实 coverageUntil 和重新准备/审批的动作；无可用旧队列则输出 `queue_renewal_failed`，不回滚 PG。剩余覆盖 ≤48h 继续明确告警“预签队列即将用完”。首次导入后执行 renew 只核验等待状态，到点由小时任务发布。
 
 紧急吊销使用现有人工签发流程：版本必须 **高于全部已排队版本**，保留完整历史，根签并 publish/install/start。PG 或本地最新发布一旦跳出队列的 base/成员版本，旧队列全部拒绝使用，不回退、不补发。必须根据紧急批次的新真实 PG 状态重新 queue-prepare 并离线审批。不要更改系统时钟来加速预签验收。
+
+本地 receipt 链只防误改，不能抵御 NAS root 重写；同宿主 PG/JVM 时钟差检查也不能抵御宿主调钟。调快时钟最多提前消耗已获原根批准的队列，不能签出新材料，但可能使真实时间下的客户端拒收或提前到期。请求私钥与 activation 备份只追加，保留策略和 sidecar docker.sock 权限收敛另行评估，不自动删除现场历史。
 
 ## 中断恢复与审计
 

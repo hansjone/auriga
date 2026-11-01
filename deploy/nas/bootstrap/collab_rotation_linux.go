@@ -806,6 +806,9 @@ func nasRotationGateway(raw []byte, version string, key nasRotationKey) ([]byte,
 }
 
 func (r *nasRotation) install() error {
+	return r.installAt(time.Now())
+}
+func (r *nasRotation) installAt(now time.Time) error {
 	in, signed, ann, p, e := r.loadInput("install-input.json")
 	if e != nil {
 		return e
@@ -818,7 +821,7 @@ func (r *nasRotation) install() error {
 	if last.Version != p.Version || last.Files["signed.json"] != nasRotationHash(signed) || last.Files["announcement.json"] != nasRotationHash(ann) || last.Approval != in.Approval || last.Mode != in.Mode {
 		return fmt.Errorf("rotation installation differs from latest publication")
 	}
-	active, e := nasRotationActive(p, time.Now())
+	active, e := nasRotationActive(p, now)
 	if e != nil {
 		return e
 	}

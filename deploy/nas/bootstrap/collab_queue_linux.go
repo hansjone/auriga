@@ -53,6 +53,15 @@ func (r *nasRotation) queueExport(w io.Writer) error {
 	if e = put("batch.json", raw); e != nil {
 		return e
 	}
+	for _, name := range []string{"signed.json", "announcement.json", "root.der"} {
+		b, err := nasRotationRead(filepath.Join(parent, jsonNumber(max), "base", name), 0)
+		if err != nil || nasRotationHash(b) != q.BaseFiles[name] {
+			return fmt.Errorf("batch authenticated base changed")
+		}
+		if err = put("base/"+name, b); err != nil {
+			return err
+		}
+	}
 	for _, en := range q.Entries {
 		if !nasRotationVersion(en.Version) {
 			return fmt.Errorf("batch version refused")
@@ -80,6 +89,7 @@ type nasQueue struct {
 	Binding     nasRotationBinding `json:"binding"`
 	BaseVersion string             `json:"baseVersion"`
 	BaseSigned  string             `json:"baseSignedSha256"`
+	BaseFiles   map[string]string  `json:"baseFiles,omitempty"`
 	Entries     []nasQueueEntry    `json:"entries"`
 }
 
@@ -127,25 +137,23 @@ func nasQueuePlan(old nasRotationPayload, actual map[string]string, start time.T
 	return result, secrets, nil
 }
 
-func nasQueueNext(entries []nasQueueEntry, current string) (int, error) {
-	for i, e := range entries {
-		if e.Version == current {
-			return i + 1, nil
-		}
-	}
-	return 0, fmt.Errorf("pre-signed queue invalidated by an external version; never replay queued releases")
-}
 func (r *nasRotation) queuePrepare(rows []nasRotationRelease, count int, stdout io.Writer) error {
+	return r.queuePrepareAt(rows, count, stdout, time.Now())
+}
+func (r *nasRotation) queuePrepareAt(rows []nasRotationRelease, count int, stdout io.Writer, now time.Time) error {
+	start, e := nasQueueStart(now)
+	if e != nil {
+		return e
+	}
 	status, e := r.status(rows)
 	if e != nil {
 		return e
 	}
-	signed, _, _ := r.latest(rows)
-	raw, e := nasRotationRead(signed, 0)
+	signed, ann, old, first, e := r.queuePredecessor(rows, status.First, start)
 	if e != nil {
 		return e
 	}
-	old, e := nasRotationParsePayload(raw)
+	raw, e := nasRotationRead(signed, 0)
 	if e != nil {
 		return e
 	}
@@ -162,7 +170,7 @@ func (r *nasRotation) queuePrepare(rows []nasRotationRelease, count int, stdout 
 			max = n
 		}
 	}
-	ps, private, e := nasQueuePlan(old, status.First, time.Now(), count, max)
+	ps, private, e := nasQueuePlan(old, first, start, count, max)
 	if e != nil {
 		return e
 	}
@@ -171,7 +179,7 @@ func (r *nasRotation) queuePrepare(rows []nasRotationRelease, count int, stdout 
 			clear(b)
 		}
 	}()
-	batch := nasQueue{Binding: r.binding, BaseVersion: old.Version, BaseSigned: nasRotationHash(raw)}
+	batch := nasQueue{Binding: r.binding, BaseVersion: old.Version, BaseSigned: nasRotationHash(raw), BaseFiles: map[string]string{}}
 	for _, p := range ps {
 		if e = r.saveRequest(rows, p, private); e != nil {
 			return e
@@ -197,6 +205,19 @@ func (r *nasRotation) queuePrepare(rows []nasRotationRelease, count int, stdout 
 	dir := filepath.Join(parent, ps[0].Version)
 	if e = os.Mkdir(dir, 0700); e != nil {
 		return e
+	}
+	if e = os.Mkdir(filepath.Join(dir, "base"), 0700); e != nil {
+		return e
+	}
+	for name, path := range map[string]string{"signed.json": signed, "announcement.json": ann, "root.der": filepath.Join(r.source, "collab-installation/root.der")} {
+		b, err := nasRotationRead(path, 0)
+		if err != nil {
+			return err
+		}
+		batch.BaseFiles[name] = nasRotationHash(b)
+		if err = nasRotationWrite(filepath.Join(dir, "base", name), b); err != nil {
+			return err
+		}
 	}
 	if e = nasRotationWriteJSON(filepath.Join(dir, "batch.json"), batch); e != nil {
 		return e
@@ -260,6 +281,10 @@ func (r *nasRotation) queuePair(dir string) (nasRotationPayload, error) {
 	if in.Mode != "regular" || len(in.Private) != 0 {
 		return p, fmt.Errorf("queue accepts regular public approvals only")
 	}
+	return r.authenticateQueuePair(signed, ann, p)
+}
+
+func (r *nasRotation) authenticateQueuePair(signed, ann []byte, p nasRotationPayload) (nasRotationPayload, error) {
 	rootDER, e := nasRotationRead(filepath.Join(r.source, "collab-installation/root.der"), 0)
 	if e != nil {
 		return p, e
@@ -346,6 +371,36 @@ func (r *nasRotation) queueImport(stdout io.Writer) error {
 	originalBatch, err := nasRotationRead(filepath.Join(r.root, "batches", q.Entries[0].Version, "batch.json"), 0)
 	if err != nil || !bytes.Equal(originalBatch, b) {
 		return fmt.Errorf("queue differs from immutable prepared batch")
+	}
+	if len(q.BaseFiles) != 3 {
+		return fmt.Errorf("queue authenticated base snapshot missing; prepare/export a fresh batch")
+	}
+	for _, name := range []string{"signed.json", "announcement.json", "root.der"} {
+		original, err := nasRotationRead(filepath.Join(r.root, "batches", q.Entries[0].Version, "base", name), 0)
+		incoming, e2 := nasRotationRead(filepath.Join(r.inputDir, "base", name), 0)
+		if err != nil || e2 != nil || nasRotationHash(original) != q.BaseFiles[name] || !bytes.Equal(original, incoming) {
+			return fmt.Errorf("queue base snapshot differs")
+		}
+	}
+	rows, err := r.releases()
+	if err != nil {
+		return err
+	}
+	status, err := r.status(rows)
+	if err != nil {
+		return err
+	}
+	start, err := time.Parse(time.RFC3339, q.Entries[0].Issued)
+	if err != nil {
+		return err
+	}
+	baseSigned, _, base, _, err := r.queuePredecessor(rows, status.First, start)
+	if err != nil {
+		return err
+	}
+	baseRaw, err := nasRotationRead(baseSigned, 0)
+	if err != nil || base.Version != q.BaseVersion || nasRotationHash(baseRaw) != q.BaseSigned {
+		return fmt.Errorf("queue predecessor no longer connects to current PG or approved queue; prepare/export/sign a fresh batch")
 	}
 	var previous time.Time
 	var version int64
@@ -443,6 +498,15 @@ func (r *nasRotation) queueImport(stdout io.Writer) error {
 }
 
 func (r *nasRotation) queueTick(rows []nasRotationRelease, stdout io.Writer) error {
+	return r.queueTickAt(rows, stdout, time.Now())
+}
+func (r *nasRotation) queueTickAt(rows []nasRotationRelease, stdout io.Writer, now time.Time) (failure error) {
+	coverageUntil := ""
+	defer func() {
+		if failure != nil {
+			_ = json.NewEncoder(stdout).Encode(map[string]string{"status": "queue_renewal_failed", "coverageUntil": coverageUntil, "warning": failure.Error(), "operatorAction": "inspect current PG and approved queue; restore missing approved files or prepare/export/sign/import a fresh batch"})
+		}
+	}()
 	if _, e := os.Lstat(filepath.Join(r.root, "scheduler-paused.json")); !os.IsNotExist(e) {
 		return json.NewEncoder(stdout).Encode(map[string]string{"status": "scheduler_paused_by_operator"})
 	}
@@ -454,26 +518,9 @@ func (r *nasRotation) queueTick(rows []nasRotationRelease, stdout io.Writer) err
 	if e != nil {
 		return e
 	}
-	var q nasQueue
-	max := int64(0)
-	for _, file := range files {
-		v := strings.TrimSuffix(file.Name(), ".json")
-		if !nasRotationVersion(v) || file.Name() != v+".json" {
-			return fmt.Errorf("queue archive path refused")
-		}
-		if n := mustNASRotationVersion(v); n > max {
-			max = n
-			b, err := nasRotationRead(filepath.Join(parent, file.Name()), 0)
-			if err != nil {
-				return err
-			}
-			if nasRotationDecode(b, &q) != nil {
-				return fmt.Errorf("queue record refused")
-			}
-		}
-	}
-	if q.Binding != r.binding || len(q.Entries) == 0 {
-		return fmt.Errorf("queue binding changed")
+	queues, warnings, e := r.approvedQueues()
+	if e != nil {
+		return e
 	}
 	// Production status validates the exact PG pair against the immutable receipt.
 	// An emergency jump therefore blocks this queue even before version selection.
@@ -481,23 +528,70 @@ func (r *nasRotation) queueTick(rows []nasRotationRelease, stdout io.Writer) err
 	if e != nil {
 		return fmt.Errorf("queue stopped: PG differs or unavailable; inspect emergency publication: %w", e)
 	}
-	index := 0
-	if status.Version == q.BaseVersion {
-		signed, _, _ := r.latest(rows)
-		b, err := nasRotationRead(signed, 0)
-		if err != nil || nasRotationHash(b) != q.BaseSigned {
-			return fmt.Errorf("queue base publication changed")
+	signed, _, _ := r.latest(rows)
+	current, err := nasRotationRead(signed, 0)
+	if err != nil {
+		return err
+	}
+	currentPayload, err := nasRotationParsePayload(current)
+	if err != nil {
+		return err
+	}
+	coverageUntil = currentPayload.Until
+	if currentPayload.Version != status.Version {
+		return fmt.Errorf("queue stopped: current PG differs from immutable publication; inspect emergency publication")
+	}
+	var q nasQueue
+	index := -1
+	for _, candidate := range queues {
+		i, err := nasQueuePosition(candidate, status.Version, nasRotationHash(current))
+		if err != nil {
+			start, _ := time.Parse(time.RFC3339, candidate.Entries[0].Issued)
+			basePath, _, base, _, err := r.queuePredecessor(rows, status.First, start)
+			if err == nil && base.Version == candidate.BaseVersion {
+				b, err := nasRotationRead(basePath, 0)
+				if err == nil && nasRotationHash(b) == candidate.BaseSigned {
+					continue
+				}
+			}
+			warnings = append(warnings, "queue_invalidated: "+candidate.Entries[0].Version+" predecessor changed; prepare/export/sign/import a fresh batch")
+			continue
 		}
-	} else {
-		index, e = nasQueueNext(q.Entries, status.Version)
-		if e != nil {
-			return e
+		if i < len(candidate.Entries) {
+			if _, err = r.queueMaterial(candidate.Entries[i]); err != nil {
+				warnings = append(warnings, "queue_invalidated: "+candidate.Entries[0].Version+" "+err.Error())
+				continue
+			}
+			until, _ := time.Parse(time.RFC3339, candidate.Entries[i].Until)
+			if until.Sub(now) < 12*time.Hour {
+				warnings = append(warnings, "queue_invalidated: "+candidate.Entries[0].Version+" next publication missed its 12h safety margin; prepare/export/sign/import a fresh batch")
+				continue
+			}
+			issued, _ := time.Parse(time.RFC3339, candidate.Entries[i].Issued)
+			if !now.Before(issued) {
+				if err = r.queuePreflight(rows, candidate.Entries[i]); err != nil {
+					warnings = append(warnings, "queue_invalidated: "+candidate.Entries[0].Version+" production preflight rejected; inspect approval/PG and prepare a fresh batch")
+					continue
+				}
+			}
+		} else if index >= 0 {
+			continue
 		}
+		if index < 0 || i < len(candidate.Entries) {
+			q = candidate
+			index = i
+		}
+		if i < len(candidate.Entries) {
+			break
+		}
+	}
+	if index < 0 {
+		return fmt.Errorf("queue_invalidated: no approved continuation; %s", strings.Join(warnings, "; "))
 	}
 	if index > 0 {
 		r.inputDir = filepath.Join(r.root, "requests", q.Entries[index-1].Version)
 		if _, _, err := r.installed(rows, true); err != nil {
-			if err = r.install(); err != nil {
+			if err = r.installAt(now); err != nil {
 				return err
 			}
 		}
@@ -510,10 +604,17 @@ func (r *nasRotation) queueTick(rows []nasRotationRelease, stdout io.Writer) err
 		return e
 	}
 	warning := ""
-	if time.Until(until) <= 48*time.Hour {
+	if until.Sub(now) <= 48*time.Hour {
 		warning = "预签队列即将用完；48小时内完成下一周离线签名"
 	}
+	if len(warnings) > 0 {
+		warning = strings.Join(warnings, "; ") + "; " + warning
+	}
 	result := map[string]any{"status": "waiting_for_scheduled_publication", "coverageUntil": until.Format(time.RFC3339), "warning": warning, "activationRequired": false}
+	if len(warnings) > 0 {
+		result["queueStatus"] = "queue_invalidated_fallback"
+		result["operatorAction"] = "using an older approved queue; prepare/export/sign/import a fresh batch before coverageUntil"
+	}
 	if index >= len(q.Entries) {
 		result["status"] = "queue_exhausted"
 		return json.NewEncoder(stdout).Encode(result)
@@ -523,27 +624,18 @@ func (r *nasRotation) queueTick(rows []nasRotationRelease, stdout io.Writer) err
 	if e != nil {
 		return e
 	}
-	if time.Now().Before(issued) {
+	if now.Before(issued) {
 		return json.NewEncoder(stdout).Encode(result)
 	}
 	dir := filepath.Join(r.root, "requests", en.Version)
-	for name, hash := range en.Files {
-		if name != "payload.json" && name != "trust.json" && name != "input.json" && name != "signed.json" && name != "announcement.json" && name != "approval.json" {
-			return fmt.Errorf("queue unexpected file")
-		}
-		b, err := nasRotationRead(filepath.Join(dir, name), 0)
-		if err != nil || nasRotationHash(b) != hash {
-			return fmt.Errorf("queue material changed")
-		}
-	}
-	if _, e = r.queuePair(dir); e != nil {
+	if _, e = r.queueMaterial(en); e != nil {
 		return e
 	}
 	r.inputDir = dir
 	if e = r.publish(); e != nil {
 		return e
 	}
-	if e = r.install(); e != nil {
+	if e = r.installAt(now); e != nil {
 		return e
 	}
 	if e = r.engine.activate(r); e != nil {

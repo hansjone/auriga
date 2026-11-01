@@ -40,6 +40,8 @@ if sh "$ROOT/test/collab-rotation-routing.sh"; then pass collab_rotation_public_
 else fail_msg collab_rotation_public_routing 'fixed NAS key operations routing failed'; fi
 if python3 "$ROOT/test/collab_queue_test.py"; then pass collab_weekly_offline_signer
 else fail_msg collab_weekly_offline_signer 'weekly offline approval boundary failed'; fi
+if python3 "$ROOT/test/collab_queue_semantics_test.py"; then pass collab_weekly_key_semantics
+else fail_msg collab_weekly_key_semantics 'weekly key transition review failed'; fi
 
 if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
 else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi

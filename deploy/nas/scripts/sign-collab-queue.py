@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Offline weekly signer. No NAS connection and no private key copying."""
 import argparse
+import base64
+import calendar
+from decimal import Decimal
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import subprocess
+import tempfile
 import time
 
 
@@ -29,7 +34,86 @@ def read(path):
 
 def timestamp(value):
     from datetime import datetime
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    if not isinstance(value, str):
+        raise ValueError("UTC timestamp required")
+    match = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z", value)
+    if not match:
+        raise ValueError("UTC timestamp required")
+    whole = calendar.timegm(datetime.fromisoformat(match[1]).timetuple())
+    # Do not truncate nanos through datetime/float: seven days plus 1ns is
+    # still over the offline signing limit, just as it is in Java Instant.
+    return Decimal(whole) + Decimal("0." + (match[2] or "0"))
+
+
+def decode_json(raw):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON field refused")
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=unique)
+
+
+def review_transition(old, new):
+    """Review NAS proposals without granting them authority over the offline root."""
+    fields = {"kid", "alg", "purpose", "state", "public_key_spki", "not_before", "not_after"}
+    purposes = {"business_delivery", "protocol_response", "management_state"}
+    if (set(new) != {"schema_version", "realm", "keyset_version", "issued_at", "valid_until", "keys"}
+            or type(new["schema_version"]) is not int or new["schema_version"] != 1 or new["realm"] != old["realm"]
+            or int(new["keyset_version"]) <= int(old["keyset_version"])
+            or timestamp(new["issued_at"]) <= timestamp(old["issued_at"])):
+        raise ValueError("keyset transition refused")
+    previous = {k["kid"]: k for k in old["keys"]}
+    if len(previous) != len(old["keys"]) or not 1 <= len(new["keys"]) <= 128:
+        raise ValueError("key history refused")
+    entries, material, active = {}, set(), set()
+    changes, added = [], set()
+    issued = timestamp(new["issued_at"])
+    for key in new["keys"]:
+        if (set(key) != fields or any(not isinstance(v, str) for v in key.values())
+                or key["kid"] in entries or key["alg"] != "Ed25519"
+                or key["purpose"] not in purposes or key["state"] not in {"active", "next", "retired", "revoked"}):
+            raise ValueError("key shape/algorithm refused")
+        raw = base64.urlsafe_b64decode(key["public_key_spki"] + "=")
+        if (len(raw) != 44 or raw[:12] != bytes.fromhex("302a300506032b6570032100")
+                or base64.urlsafe_b64encode(raw).decode().rstrip("=") != key["public_key_spki"]
+                or key["public_key_spki"] in material):
+            raise ValueError("key material refused")
+        material.add(key["public_key_spki"])
+        entries[key["kid"]] = key
+        before, after = timestamp(key["not_before"]), timestamp(key["not_after"])
+        if after <= before:
+            raise ValueError("key interval refused")
+        if key["state"] == "active":
+            if key["purpose"] in active or not before <= issued < after:
+                raise ValueError("active key refused")
+            active.add(key["purpose"])
+        prior = previous.get(key["kid"])
+        if prior:
+            if any(key[f] != prior[f] for f in fields - {"state"}):
+                raise ValueError("old key changed")
+            if (key["state"] != prior["state"] and key["state"] != "revoked"
+                    and (prior["state"], key["state"]) not in {("next", "active"), ("active", "retired")}):
+                raise ValueError("key state transition refused")
+            continue
+        purpose = key["purpose"]
+        old_active = [k for k in old["keys"] if k["purpose"] == purpose and k["state"] == "active"]
+        if (purpose in added or key["state"] != "next"
+                or not re.fullmatch("nas-" + purpose.replace("_", "-") + "-[0-9a-f]{24}", key["kid"])
+                or before != issued or after - before > 7 * 86400 or after > issued + 7 * 86400
+                or len(old_active) != 1 or timestamp(old_active[0]["not_after"]) - issued > 48 * 3600
+                or any(k["purpose"] == purpose and k["state"] == "next" for k in old["keys"])):
+            raise ValueError("new key policy refused")
+        added.add(purpose)
+        changes.append({"kid": key["kid"], "purpose": purpose, "spkiFingerprint": "sha256:" + digest(raw),
+                        "notBefore": key["not_before"], "notAfter": key["not_after"]})
+    if not previous.keys() <= entries.keys():
+        raise ValueError("old key missing")
+    if active != {k["purpose"] for k in old["keys"] if k["state"] == "active"}:
+        raise ValueError("active purpose missing")
+    return changes
 
 
 def private_directory(path):
@@ -99,16 +183,42 @@ def sign(args):
     os.umask(0o077)
     source = Path(args.request).absolute()
     batch_raw = read(source / "batch.json")
-    batch = json.loads(batch_raw)
+    batch = decode_json(batch_raw)
     entries = batch["entries"]
     if not 1 <= len(entries) <= 28 or digest(read(args.jar)) != args.jar_sha256:
         raise ValueError("queue count or independently approved jar digest refused")
     first = timestamp(entries[0]["issuedAt"])
-    if abs(time.time() - first) > 300:
-        raise ValueError("first scheduled issue must be within five minutes; prepare a fresh batch")
+    if first % 43200 or not time.time() - 300 <= first <= time.time() + 86400:
+        raise ValueError("first issue outside offline signing window; prepare a fresh batch")
+    base_files = {name: read(source / "base" / name) for name in ("signed.json", "announcement.json", "root.der")}
+    if (batch["baseFiles"] != {name: digest(raw) for name, raw in base_files.items()}
+            or "sha256:" + digest(base_files["root.der"]) != args.root_fingerprint
+            or digest(base_files["signed.json"]) != batch["baseSignedSha256"]):
+        raise ValueError("independent base root pin or digest refused")
+    base = decode_json(base_files["signed.json"])["keyset"]
+    if base["keyset_version"] != batch["baseVersion"]:
+        raise ValueError("base version differs")
+    # Public verification only: production Java authenticates the archived base,
+    # including both signatures and the independent root pin. No private root read.
+    with tempfile.TemporaryDirectory(prefix="auriga-weekly-public-") as temp:
+        verified = Path(temp) / "verified"
+        private_directory(verified)
+        for name, raw in base_files.items():
+            (verified / name).write_bytes(raw)
+        loader = verified / "empty-loader.properties"
+        loader.write_bytes(b"")
+        verify = [args.java, "-Dloader.main=auriga.collab.network.keys.OfflineKeySigning",
+                  "-Dloader.config.location=" + loader.as_uri(),
+                  "-cp", str(Path(args.jar).absolute()), "org.springframework.boot.loader.launch.PropertiesLauncher",
+                  "verify-archived", str(verified / "signed.json"), str(verified / "announcement.json"),
+                  args.root_kid, str(verified / "root.der"), args.root_fingerprint]
+        result = subprocess.run(verify, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if result.returncode:
+        raise ValueError("production archived base verification refused")
     # Validate the complete exported plan before touching the offline root.
     material = []
     previous = 0
+    changes = []
     for i, entry in enumerate(entries):
         version = entry["version"]
         if str(int(version)) != version or int(version) <= int(batch["baseVersion"]) or (i and int(version) != previous + 1):
@@ -120,17 +230,34 @@ def sign(args):
         files = {name: read(source / version / name) for name in ("payload.json", "trust.json", "input.json")}
         if any(digest(raw) != entry["files"][name] for name, raw in files.items()):
             raise ValueError("request digest differs")
-        trust = json.loads(files["trust.json"])
-        payload = json.loads(files["payload.json"])
+        trust = decode_json(files["trust.json"])
+        payload = decode_json(files["payload.json"])
         if (trust["rootKid"] != args.root_kid or trust["rootFingerprint"] != args.root_fingerprint
                 or trust["operatorJarSha256"] != args.jar_sha256 or trust["publicationMode"] != "regular"
                 or payload["keyset_version"] != version or payload["issued_at"] != entry["issuedAt"]
                 or payload["valid_until"] != entry["validUntil"] or payload["realm"] != trust["realm"]):
             raise ValueError("independent root pin or payload binding differs")
+        changes.extend({"version": version, **c} for c in review_transition(base, payload))
+        root_spki = base64.urlsafe_b64encode(base_files["root.der"]).decode().rstrip("=")
+        if any(k["public_key_spki"] == root_spki for k in payload["keys"]):
+            raise ValueError("root reused as business key")
+        base = payload
         material.append((version, files))
+    batch_hash = digest(batch_raw)
+    print(json.dumps({"status": "review_required", "batchSha256": batch_hash, "newKeys": changes}, ensure_ascii=False), flush=True)
+    if getattr(args, "review_only", False):
+        return
+    confirmation = getattr(args, "confirm_batch_sha256", None)
+    if confirmation is None:
+        confirmation = input("Review the new keys above. Enter the exact batch SHA256 to authorize signing: ").strip()
+    if confirmation != batch_hash:
+        raise ValueError("operator did not confirm this exact batch")
     out = Path(args.output).absolute()
     private_directory(out)  # CREATE_NEW: never re-sign a distributed version.
     (out / "batch.json").write_bytes(batch_raw)
+    private_directory(out / "base")
+    for name, raw in base_files.items():
+        (out / "base" / name).write_bytes(raw)
     loader = out / "empty-loader.properties"
     loader.write_bytes(b"")
     for version, files in material:
@@ -160,7 +287,9 @@ if __name__ == "__main__":
     for name in ("request", "jar", "jar-sha256", "root-kid", "root-fingerprint", "root-private", "approved-by", "output"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--java", default="java")
+    parser.add_argument("--review-only", action="store_true")
+    parser.add_argument("--confirm-batch-sha256", help="Explicit approval of the SHA256 printed by --review-only")
     try:
         sign(parser.parse_args())
-    except (ValueError, OSError, KeyError, TypeError):
-        parser.exit(1, "weekly signing refused; verify pins/metadata; if older than five minutes, run queue-prepare again; preserve partial output\n")
+    except (ValueError, OSError, KeyError, TypeError, EOFError) as error:
+        parser.exit(1, "weekly signing refused: " + str(error) + "; verify the public plan and pins; preserve partial output\n")

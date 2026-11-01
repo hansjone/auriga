@@ -15,11 +15,12 @@ import (
 func TestNASQueueExportImportScheduleAndPause(t *testing.T) {
 	f := nasRotationTestFixture(t, "ip")
 	r := f.r
+	f.payload.Until = time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
 	for i := range f.payload.Keys {
 		f.payload.Keys[i].After = time.Now().UTC().Add(7 * 24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
 	}
 	f.sign(t, filepath.Join(r.source, "collab-installation"), f.payload, false)
-	if e := r.queuePrepare(nil, 14, io.Discard); e != nil {
+	if e := r.queuePrepareAt(nil, 14, io.Discard, time.Now().UTC().Truncate(12*time.Hour)); e != nil {
 		t.Fatal(e)
 	}
 	var archive bytes.Buffer
@@ -39,7 +40,7 @@ func TestNASQueueExportImportScheduleAndPause(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if filepath.Base(h.Name) == "keys" || filepath.Ext(h.Name) != ".json" {
+		if filepath.Base(h.Name) == "keys" || (filepath.Ext(h.Name) != ".json" && h.Name != "base/root.der") {
 			t.Fatal("private export")
 		}
 		b, e := io.ReadAll(tr)
@@ -215,10 +216,11 @@ func TestNASQueueWeeklyPlanAndEmergencyFence(t *testing.T) {
 			}
 		}
 	}
-	if _, e = nasQueueNext([]nasQueueEntry{{Version: "11"}, {Version: "12"}}, "99"); e == nil {
+	queue := nasQueue{Entries: []nasQueueEntry{{Version: "11", Files: map[string]string{"signed.json": "approved"}}, {Version: "12"}}}
+	if _, e = nasQueuePosition(queue, "99", "approved"); e == nil {
 		t.Fatal("emergency jump did not invalidate queue")
 	}
-	if n, e := nasQueueNext([]nasQueueEntry{{Version: "11"}, {Version: "12"}}, "11"); e != nil || n != 1 {
+	if n, e := nasQueuePosition(queue, "11", "approved"); e != nil || n != 1 {
 		t.Fatal(n, e)
 	}
 }
@@ -242,11 +244,12 @@ func TestNASQueueImportAuthenticatesFuturePairAndAudit(t *testing.T) {
 func TestNASQueueDuePublicationThenFutureWait(t *testing.T) {
 	f := nasRotationTestFixture(t, "ip")
 	r := f.r
+	f.payload.Until = time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
 	for i := range f.payload.Keys {
 		f.payload.Keys[i].After = time.Now().UTC().Add(7 * 24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
 	}
 	f.sign(t, filepath.Join(r.source, "collab-installation"), f.payload, false)
-	if e := r.queuePrepare(nil, 2, io.Discard); e != nil {
+	if e := r.queuePrepareAt(nil, 2, io.Discard, time.Now().UTC().Truncate(12*time.Hour)); e != nil {
 		t.Fatal(e)
 	}
 	batch, err := nasRotationRead(filepath.Join(r.root, "batches/8/batch.json"), 0)
@@ -262,6 +265,13 @@ func TestNASQueueDuePublicationThenFutureWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	nasRotationTestWrite(t, filepath.Join(approved, "batch.json"), batch)
+	for _, name := range []string{"signed.json", "announcement.json", "root.der"} {
+		b, err := nasRotationRead(filepath.Join(r.root, "batches/8/base", name), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nasRotationTestWrite(t, filepath.Join(approved, "base", name), b)
+	}
 	for _, en := range q.Entries {
 		local := filepath.Join(r.root, "requests", en.Version)
 		dest := filepath.Join(approved, en.Version)
@@ -283,7 +293,8 @@ func TestNASQueueDuePublicationThenFutureWait(t *testing.T) {
 	}
 	x := nasEnableActivationFixture(t, f)
 	var first bytes.Buffer
-	if err = r.queueTick(nil, &first); err != nil {
+	due := timeMustParse(t, q.Entries[0].Issued)
+	if err = r.queueTickAt(nil, &first, due); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(first.Bytes(), []byte("scheduled_publication_installed")) || f.status.Version != "8" || x.created != 2 {
@@ -294,7 +305,7 @@ func TestNASQueueDuePublicationThenFutureWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	var second bytes.Buffer
-	if err = r.queueTick(rows, &second); err != nil {
+	if err = r.queueTickAt(rows, &second, due.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(second.Bytes(), []byte("waiting_for_scheduled_publication")) || f.status.Version != "8" || x.created != 2 {

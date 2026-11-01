@@ -41,7 +41,7 @@ func (x *nasActivationTransport) RoundTrip(q *http.Request) (*http.Response, err
 		if host["ReadonlyRootfs"] != true || body["Image"] != f.r.binding.Image {
 			x.t.Fatal("activation changed image/read-only policy")
 		}
-		c := nasRotationContainer{ID: strings.Repeat(fmt.Sprint(6+x.created), 64), Image: f.r.binding.Image}
+		c := nasRotationContainer{ID: fmt.Sprintf("%064x", 6+x.created), Image: f.r.binding.Image}
 		raw, _ := json.Marshal(body)
 		_ = json.Unmarshal(raw, &c.Config)
 		var mounts []map[string]any
