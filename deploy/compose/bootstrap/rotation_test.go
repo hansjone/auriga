@@ -19,7 +19,7 @@ func TestRotationStrictInputAndNoAlternateCommand(t *testing.T) {
 			t.Fatalf("ambiguous/unknown input accepted: %s", raw)
 		}
 	}
-	for _, args := range [][]string{{}, {"shell"}, {"publish", "a", "extra"}, {"lifecycle", "exec", "collab", "sh"}} {
+	for _, args := range [][]string{{}, {"shell"}, {"publish", "a", "extra"}, {"lifecycle", "exec", "collab", "sh"}, {"lifecycle", "run", "postgres", "sh"}, {"lifecycle", "upgrade-bifrost", "edge"}, {"lifecycle", "upgrade-bifrost", "--file=foreign.yml"}} {
 		if err := keyRotationCLI(args); err == nil {
 			t.Fatalf("unbounded CLI accepted: %v", args)
 		}
@@ -705,7 +705,7 @@ esac
 		return string(output), string(recorded), err
 	}
 	before := originalBase(t, f.out)
-	for _, action := range []string{"config", "activation-stop", "activation-running"} {
+	for _, action := range []string{"config", "activation-stop", "activation-running", "upgrade-bifrost"} {
 		t.Run("clean-"+action, func(t *testing.T) {
 			output, recorded, err := run("", false, action)
 			if err != nil || !strings.Contains(recorded, "OPS|project=|file=|profiles=|disable=|args=key-rotation lifecycle "+action) || strings.Contains(recorded, "DOCKER") {

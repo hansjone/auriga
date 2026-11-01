@@ -440,3 +440,5 @@ AURIGA_MOUNT_TEST_IMAGE=sha256:<platform-image-id> \
 不依赖 postgres entrypoint 的首次初始化。先核验安装材料中五份 Bifrost 秘密和审核镜像，确认原 PostgreSQL 健康，然后运行 `sh scripts/upgrade-bifrost.sh`（在 NAS 发布包根目录）。它以一次性 helper 连接原库，幂等创建角色/库/schema，保留既有数据与密码，并撤销运行账号对迁移历史表的写权限。错误 owner 或特权角色立即失败，不能通过清卷绕过。再按原部署流程更新服务。原测试中转库、角色、秘密和旧发布材料不自动删除，由主控按保留证据另行批准清理。
 
 安装材料边界：此数据库脚本不迁移已封存的安装收据。旧配方的 bootstrap.receipt 与新配方/文件集合不一致时，render 会拒绝自动轮换。须由主控准备经过审核的材料升级或独立测试部署切换，保留原 IAM/网络身份及现场证据；不能删除收据、重建 CA 或覆盖旧身份材料来绕过。该条件满足前，不应把建库成功视为整套 NAS 升级成功。
+
+本机 Compose 对应入口是 `sh deploy/compose/scripts/upgrade-bifrost.sh`。它通过 Bash 调用固定的 `upgrade-bifrost` 生命周期操作，不接受额外参数，也不开放通用 `run`。原安装和密钥轮换安装均沿用封存项目、配方及状态门禁；轮换安装还须通过历史、安装收据和权威状态检查。先确认原 PostgreSQL 正常运行，升级 helper 不会自动启动或重建数据库。

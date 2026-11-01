@@ -638,11 +638,11 @@ func rotationLifecycle(compose string, args []string) error {
 	if len(args) == 0 || len(args) > 6 {
 		return fmt.Errorf("rotation lifecycle arguments refused")
 	}
-	bounded := args[0] == "activation-stop" || args[0] == "activation-running"
+	bounded := args[0] == "activation-stop" || args[0] == "activation-running" || args[0] == "upgrade-bifrost"
 	if bounded && len(args) != 1 {
 		return fmt.Errorf("rotation bounded stop/status takes no options")
 	}
-	allowed := map[string]bool{"up": true, "start": true, "stop": true, "restart": true, "down": true, "ps": true, "config": true, "activation-stop": true, "activation-running": true}
+	allowed := map[string]bool{"up": true, "start": true, "stop": true, "restart": true, "down": true, "ps": true, "config": true, "activation-stop": true, "activation-running": true, "upgrade-bifrost": true}
 	if !allowed[args[0]] {
 		return fmt.Errorf("rotation lifecycle action refused")
 	}
@@ -735,6 +735,9 @@ func (r *rotation) lifecycle(args []string) error {
 		if _, err := rotationActive(keys, time.Now()); err != nil {
 			return err
 		}
+	}
+	if args[0] == "upgrade-bifrost" {
+		args = []string{"run", "--rm", "--no-deps", "--pull", "never", "--user", "999:999", "-e", "PGHOST=postgres", "--entrypoint", "sh", "postgres", "/docker-entrypoint-initdb.d/03-bifrost.sh"}
 	}
 	output, err := r.run("/usr/bin/docker", append(r.composeArgs(), args...)...)
 	if err == nil {

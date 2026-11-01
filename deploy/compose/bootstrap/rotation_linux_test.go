@@ -309,6 +309,34 @@ func (x *rotationLinuxRecoveryFixture) round(t *testing.T, version string) {
 	}
 }
 
+func TestRotationLinuxBifrostUpgradeUsesSealedRecipeAndStatusGate(t *testing.T) {
+	if !rotationSupported() {
+		t.Skip("Linux installer-root fixture; no deployment")
+	}
+	x := rotationLinuxRecovery(t)
+	version, _, _ := rotationPayload(x.initial)
+	number, _ := strconv.Atoi(version)
+	x.round(t, strconv.Itoa(number+1))
+	original := x.r.run
+	helper := "run --rm --no-deps --pull never --user 999:999 -e PGHOST=postgres --entrypoint sh postgres /docker-entrypoint-initdb.d/03-bifrost.sh"
+	calls := 0
+	x.r.run = func(program string, args ...string) ([]byte, error) {
+		recipe := x.r.composeArgs()
+		if program == "/usr/bin/docker" && strings.Join(args, " ") == strings.Join(recipe, " ")+" "+helper {
+			calls++
+			return nil, nil
+		}
+		return original(program, args...)
+	}
+	if err := x.r.lifecycle([]string{"upgrade-bifrost"}); err != nil || calls != 1 {
+		t.Fatalf("fixed sealed helper: %v calls=%d", err, calls)
+	}
+	x.statusError = fmt.Errorf("fixture authority unavailable")
+	if err := x.r.lifecycle([]string{"upgrade-bifrost"}); err == nil || calls != 1 {
+		t.Fatalf("helper bypassed status gate: %v calls=%d", err, calls)
+	}
+}
+
 func TestRotationLinuxConsecutiveRoundsKeepUnchangedPlatform(t *testing.T) {
 	if !rotationSupported() {
 		t.Skip("Linux installer-root fixture; no deployment")
