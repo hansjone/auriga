@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/identifiers"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	ai "github.com/hansjone/auriga/infra/gen/auriga/ai/v1"
 	"google.golang.org/protobuf/proto"
@@ -12,7 +13,6 @@ import (
 )
 
 var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
-var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 // Use arbitrary precision intermediate arithmetic; only persisted bounded
@@ -58,10 +58,10 @@ func (l *Ledger) snapshot(s TrustedSnapshot, now time.Time) (*ai.BudgetAdmission
 		return nil, failure("ai.budget_unavailable")
 	}
 	a := proto.Clone(s.Admission).(*ai.BudgetAdmission)
-	if !uuidPattern.MatchString(a.TenantId) || !uuidPattern.MatchString(a.AccountId) || !uuidPattern.MatchString(a.ProviderId) || !uuidPattern.MatchString(a.CredentialId) || !modelPattern.MatchString(a.ModelId) || a.Currency != l.currency || a.Currency != s.Price.Currency || a.PriceVersion != s.Price.Version || len(s.Price.Version) < 1 || len(s.Price.Version) > 128 || s.Price.EffectiveAt.IsZero() || s.Price.EffectiveAt.After(now) || !s.ValidUntil.After(now) || a.TokenExpiresAt == nil || a.TokenExpiresAt.CheckValid() != nil || !a.TokenExpiresAt.AsTime().After(now) || a.InputTokenUpperBound <= 0 || a.MaxOutputTokens <= 0 {
+	if !identifiers.ValidUUID(a.TenantId) || !identifiers.ValidUUID(a.AccountId) || !identifiers.ValidUUID(a.ProviderId) || !identifiers.ValidUUID(a.CredentialId) || !modelPattern.MatchString(a.ModelId) || a.Currency != l.currency || a.Currency != s.Price.Currency || a.PriceVersion != s.Price.Version || len(s.Price.Version) < 1 || len(s.Price.Version) > 128 || s.Price.EffectiveAt.IsZero() || s.Price.EffectiveAt.After(now) || !s.ValidUntil.After(now) || a.TokenExpiresAt == nil || a.TokenExpiresAt.CheckValid() != nil || !a.TokenExpiresAt.AsTime().After(now) || a.InputTokenUpperBound <= 0 || a.MaxOutputTokens <= 0 {
 		return nil, failure("ai.budget_unavailable")
 	}
-	if (a.GetInstanceId() == "") == (a.GetDeviceId() == "") || !uuidPattern.MatchString(a.GetInstanceId()+a.GetDeviceId()) {
+	if (a.GetInstanceId() == "") == (a.GetDeviceId() == "") || !identifiers.ValidUUID(a.GetInstanceId()+a.GetDeviceId()) {
 		return nil, failure("ai.budget_unavailable")
 	}
 	var err error

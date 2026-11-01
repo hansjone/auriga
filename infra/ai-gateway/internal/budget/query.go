@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/identifiers"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	ai "github.com/hansjone/auriga/infra/gen/auriga/ai/v1"
 	"github.com/jackc/pgx/v5"
@@ -41,7 +42,7 @@ func (l *Ledger) GetReservation(ctx context.Context, ref Ref) (*Reservation, err
 // usage permission and derive tenant/owner from verified identity, never params.
 // Cursor is a stable (recorded_at,request_id) key, bound to tenant and owner.
 func (l *Ledger) ListUsage(ctx context.Context, tenant, owner string, limit int, cursor string) (*api.UsagePage, error) {
-	if !uuidPattern.MatchString(tenant) || !uuidPattern.MatchString(owner) || limit < 1 || limit > 200 || len(cursor) > 512 {
+	if !identifiers.ValidUUID(tenant) || !identifiers.ValidUUID(owner) || limit < 1 || limit > 200 || len(cursor) > 512 {
 		return nil, failure("common.validation_failed")
 	}
 	start := time.Unix(0, 0).UTC()
@@ -49,7 +50,7 @@ func (l *Ledger) ListUsage(ctx context.Context, tenant, owner string, limit int,
 	if cursor != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(cursor)
 		parts := strings.Split(string(raw), "|")
-		if err != nil || len(parts) != 4 || parts[0] != tenant || parts[1] != owner || !uuidPattern.MatchString(parts[3]) {
+		if err != nil || len(parts) != 4 || parts[0] != tenant || parts[1] != owner || !identifiers.ValidUUID(parts[3]) {
 			return nil, failure("common.validation_failed")
 		}
 		start, err = time.Parse(time.RFC3339Nano, parts[2])

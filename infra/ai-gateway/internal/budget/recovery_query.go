@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/identifiers"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -33,14 +34,14 @@ const recoveryScope = "recovery-v1"
 // Each page is a fresh RLS transaction, not an atomic snapshot across pages;
 // concurrent admissions/state changes may require a new cycle from the start.
 func (l *Ledger) ListRecoveryCandidates(ctx context.Context, tenant string, limit int, cursor string) (*RecoveryPage, error) {
-	if !uuidPattern.MatchString(tenant) || limit < 1 || limit > 200 || len(cursor) > 512 {
+	if !identifiers.ValidUUID(tenant) || limit < 1 || limit > 200 || len(cursor) > 512 {
 		return nil, failure("common.validation_failed")
 	}
 	var requestID, owner string
 	if cursor != "" {
 		raw, err := base64.RawURLEncoding.Strict().DecodeString(cursor)
 		parts := strings.Split(string(raw), "|")
-		if err != nil || base64.RawURLEncoding.EncodeToString(raw) != cursor || len(parts) != 4 || parts[0] != recoveryScope || parts[1] != tenant || !uuidPattern.MatchString(parts[2]) || !uuidPattern.MatchString(parts[3]) {
+		if err != nil || base64.RawURLEncoding.EncodeToString(raw) != cursor || len(parts) != 4 || parts[0] != recoveryScope || parts[1] != tenant || !identifiers.ValidUUID(parts[2]) || !identifiers.ValidUUID(parts[3]) {
 			return nil, failure("common.validation_failed")
 		}
 		requestID, owner = parts[2], parts[3]

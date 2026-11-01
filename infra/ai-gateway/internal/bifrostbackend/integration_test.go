@@ -17,6 +17,16 @@ import (
 )
 
 func TestPostgresMemberKeyBudgetsRPMRevocationAndUsage(t *testing.T) {
+	for _, tenant := range []string{"", "00000000-0000-0000-0000-000000000001"} {
+		name := tenant
+		if name == "" {
+			name = "generated"
+		}
+		t.Run(name, func(t *testing.T) { testPostgresMemberKeyBudgetsRPMRevocationAndUsage(t, tenant) })
+	}
+}
+
+func testPostgresMemberKeyBudgetsRPMRevocationAndUsage(t *testing.T, tenant string) {
 	db := testpg.Open(t)
 	master := make([]byte, 32)
 	if _, e := rand.Read(master); e != nil {
@@ -28,7 +38,9 @@ func TestPostgresMemberKeyBudgetsRPMRevocationAndUsage(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	tenant, _ := newID()
+	if tenant == "" {
+		tenant, _ = newID()
+	}
 	member, _ := newID()
 	other, _ := newID()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

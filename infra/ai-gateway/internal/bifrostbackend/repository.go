@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/budget"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/identifiers"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	"github.com/jackc/pgx/v5"
@@ -81,8 +82,7 @@ func New(db *store.Store, masterHex, password, memberPassword string, allowPriva
 }
 
 func validUUID(s string) bool {
-	u, e := uuid.Parse(s)
-	return e == nil && u.String() == s && u != uuid.Nil
+	return identifiers.ValidUUID(s)
 }
 func newID() (string, error) { u, e := uuid.NewV7(); return u.String(), e }
 func (b *Backend) token(tenant, id string) string {

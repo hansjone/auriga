@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/identifiers"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	"github.com/jackc/pgx/v5"
 )
@@ -15,7 +16,7 @@ import (
 // estimated spend, freeing in-flight capacity without permitting overspend.
 // A reserved CAS is cancelled with zero spend and fences any late dispatcher.
 func (l *Ledger) ReconcileExpiredSubject(ctx context.Context, tenant, owner string) error {
-	if !uuidPattern.MatchString(tenant) || !uuidPattern.MatchString(owner) {
+	if !identifiers.ValidUUID(tenant) || !identifiers.ValidUUID(owner) {
 		return failure("common.validation_failed")
 	}
 	type candidate struct {
