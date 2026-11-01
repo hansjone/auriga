@@ -1,4 +1,5 @@
 """Real LiteLLM checks, run only in the isolated test-compose project."""
+import hashlib
 import json
 from pathlib import Path
 import secrets
@@ -44,10 +45,15 @@ if __name__ == '__main__':
         status, result = call('/key/generate', master, {'models': ['test-pool'], 'key_alias': 'external-fixture'})
         expect(status == 200 and 'key' in result, 'external virtual key created')
         key = result['key']
+        reader = Path('/run/secrets/litellm_ui_reader').read_text().strip()
+        expect(reader != master and Path('/run/secrets/litellm_ui_password').read_text().strip() != master, 'independent UI credentials')
+        expect(call('/key/info?key=' + hashlib.sha256(key.encode()).hexdigest(), reader)[0] == 200, 'reader inspects arbitrary key hash')
+        expect(call('/key/generate', reader, {'models': ['test-pool']})[0] in (401,403), 'reader cannot create keys')
         expect(call('/v1/models', key)[0] == 200, 'virtual key models')
         request = {'model': 'test-pool', 'messages': [{'role': 'user', 'content': 'local only'}],
                    'user': 'tenant-fixture:member-fixture',
                    'metadata': {'tenant_id': 'tenant-fixture', 'account_id': 'member-fixture'}}
+        expect(call('/v1/chat/completions', reader, request)[0] in (401,403), 'reader cannot run inference')
         expect(call('/v1/chat/completions', key, request)[0] == 200, 'virtual key chat through local upstream')
         stream_request = urllib.request.Request('http://litellm:4000/v1/chat/completions',
                                                 data=json.dumps({**request, 'stream': True}).encode(),

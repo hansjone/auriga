@@ -52,6 +52,8 @@ if sh "$ROOT/test/panel-renew-nonroot.sh"; then pass panel_renewal_nonroot_regre
 else fail_msg panel_renewal_nonroot_regressions "container-mode non-root startup failed"; fi
 if python3 "$ROOT/litellm/permissions_test.py"; then pass litellm_permissions
 else fail_msg litellm_permissions "LiteLLM group permissions regression failed"; fi
+if python3 "$ROOT/litellm/prepare_ui_test.py"; then pass litellm_ui_preparation
+else fail_msg litellm_ui_preparation "image-independent atomic UI credential preparation failed"; fi
 
 if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
 else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi

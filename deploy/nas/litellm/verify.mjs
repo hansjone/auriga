@@ -66,6 +66,8 @@ try {
   );
   if (permissions.error || permissions.status !== 0)
     throw new Error('LiteLLM fixture permissions preparation failed');
+  const ui = spawnSync('sh', [path.join(here, 'prepare-ui.sh'), path.join(secretRoot, 'ui')], {env, stdio:'inherit', windowsHide:true});
+  if (ui.error || ui.status !== 0) throw new Error('UI fixture credential preparation failed');
   run([
     'up',
     '-d',

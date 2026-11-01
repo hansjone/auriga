@@ -36,15 +36,16 @@ type Gateway struct {
 	IAMTransport  http.RoundTripper
 	APITransports map[*url.URL]http.RoundTripper
 
-	iamURL          *url.URL
-	orgURL          *url.URL
-	workspaceURL    *url.URL
-	teamURL         *url.URL
-	collabURL       *url.URL
-	resourceURL     *url.URL
-	deviceURL       *url.URL
-	litellmURL      *url.URL
-	litellmHandoffs liteLLMHandoffs
+	iamURL             *url.URL
+	orgURL             *url.URL
+	workspaceURL       *url.URL
+	teamURL            *url.URL
+	collabURL          *url.URL
+	resourceURL        *url.URL
+	deviceURL          *url.URL
+	litellmURL         *url.URL
+	litellmHandoffs    liteLLMHandoffs
+	litellmStaticCache *staticGzipCache
 
 	networkSubmitURL *url.URL
 
@@ -56,6 +57,14 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	limit := cfg.Static.GzipCacheBytes
+	if limit == 0 {
+		limit = defaultStaticCacheBytes
+	}
+	if limit < 0 || limit > 32<<20 {
+		return nil, errors.New("static gzip cache must be between 1 and 33554432 bytes")
+	}
+	staticCache := &staticGzipCache{maxBytes: limit}
 	if err := cfg.validateLinkOrigins(); err != nil {
 		return nil, err
 	}
@@ -130,31 +139,32 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		return nil, err
 	}
 	g := &Gateway{
-		Cfg:          cfg,
-		Log:          log,
-		Trusted:      trusted,
-		Sessions:     sessions,
-		Routes:       routes,
-		Owners:       RouteOwnerChecker{Routes: routes},
-		Tickets:      tickets,
-		Signer:       signer,
-		Limiter:      NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, cfg.RateLimit.PathPrefix),
-		Conns:        hub,
-		Activity:     activity,
-		Now:          time.Now,
-		Ingress:      ingress,
-		iamURL:       iamURL,
-		orgURL:       orgURL,
-		workspaceURL: wsURL,
-		teamURL:      teamURL,
-		collabURL:    collabURL,
-		resourceURL:  resourceURL,
-		deviceURL:    deviceURL,
-		litellmURL:   litellmURL,
-		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
-		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
-		panelStatic:  newPanelFileServer(cfg.Static.PanelRoot),
-		networkWSS:   networkWSS,
+		Cfg:                cfg,
+		Log:                log,
+		Trusted:            trusted,
+		Sessions:           sessions,
+		Routes:             routes,
+		Owners:             RouteOwnerChecker{Routes: routes},
+		Tickets:            tickets,
+		Signer:             signer,
+		Limiter:            NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, cfg.RateLimit.PathPrefix),
+		Conns:              hub,
+		Activity:           activity,
+		Now:                time.Now,
+		Ingress:            ingress,
+		iamURL:             iamURL,
+		orgURL:             orgURL,
+		workspaceURL:       wsURL,
+		teamURL:            teamURL,
+		collabURL:          collabURL,
+		resourceURL:        resourceURL,
+		deviceURL:          deviceURL,
+		litellmURL:         litellmURL,
+		portalStatic:       newSPAFileServer(cfg.Static.PortalRoot, staticCache),
+		adminStatic:        newSPAFileServer(cfg.Static.AdminRoot, staticCache),
+		litellmStaticCache: staticCache,
+		panelStatic:        newPanelFileServer(cfg.Static.PanelRoot),
+		networkWSS:         networkWSS,
 
 		networkSubmitURL: networkSubmitURL,
 	}
@@ -215,8 +225,8 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 				g.APITransports[target] = transport
 			}
 		}
-		g.portalStatic = newAccessSPAFileServer(cfg.Static.PortalRoot, cfg.Access.Mode())
-		g.adminStatic = newAccessSPAFileServer(cfg.Static.AdminRoot, cfg.Access.Mode())
+		g.portalStatic = newAccessSPAFileServer(cfg.Static.PortalRoot, cfg.Access.Mode(), staticCache)
+		g.adminStatic = newAccessSPAFileServer(cfg.Static.AdminRoot, cfg.Access.Mode(), staticCache)
 	}
 	return g, nil
 }

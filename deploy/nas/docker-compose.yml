@@ -155,7 +155,7 @@ services:
     image: ${AURIGA_IMAGE_LITELLM:-ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06}
     <<: *cap_drop_all
     # Read only the group-readable runtime copies prepared by render.
-    group_add: ['10003', '999']
+    group_add: ['10003', '999', '10004']
     entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
     env_file:
       - path: ${AURIGA_DATA_ROOT}/config/materials/litellm-public.env
@@ -165,7 +165,8 @@ services:
       LITELLM_LOG: ERROR
       NO_DOCS: 'true'
       STORE_MODEL_IN_DB: 'True'
-    secrets: [litellm_master, litellm_salt, litellm_pg_password]
+      LITELLM_UI_SESSION_DURATION: '8h'
+    secrets: [litellm_master, litellm_salt, litellm_pg_password, litellm_ui_password]
     volumes:
       - ./litellm/config.yaml:/etc/litellm/config.yaml:ro
       - ./litellm/entrypoint.sh:/etc/litellm/entrypoint.sh:ro
@@ -189,9 +190,9 @@ services:
   litellm-init:
     image: ${AURIGA_IMAGE_LITELLM:-ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06}
     <<: *cap_drop_all
-    group_add: ['10003', '999', '10001']
+    group_add: ['10003', '999', '10001', '10004']
     entrypoint: ['python', '/etc/litellm/provision.py']
-    secrets: [litellm_master, litellm_team, litellm_pg_password]
+    secrets: [litellm_master, litellm_team, litellm_pg_password, litellm_ui_reader]
     volumes:
       - ./litellm/provision.py:/etc/litellm/provision.py:ro
     depends_on:
@@ -381,6 +382,8 @@ services:
       network:
         condition: service_healthy
     command: ['-config', '/etc/auriga/edge.config.json']
+    secrets: [litellm_ui_password, litellm_ui_reader]
+    group_add: ['10004']
     env_file:
       - path: ${AURIGA_DATA_ROOT}/config/edge.env
         required: true
@@ -391,6 +394,10 @@ services:
       AURIGA_EDGE_MANAGED_KEY_FILE: /etc/auriga/managed/server.key
       AURIGA_EDGE_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
       AURIGA_EDGE_LINKS_TRUSTED_PROXIES: ${AURIGA_LINKS_TRUSTED_PROXIES:-}
+      AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE: /run/secrets/litellm_ui_password
+      AURIGA_EDGE_LITELLM_KEY_INFO_FILE: /run/secrets/litellm_ui_reader
+      AURIGA_EDGE_STATIC_GZIP_CACHE_BYTES: ${AURIGA_STATIC_GZIP_CACHE_BYTES:-12582912}
+      AURIGA_EDGE_LITELLM_UI_EXTERNAL_ORIGINS: ${AURIGA_LITELLM_UI_EXTERNAL_ORIGINS:-}
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/edge.config.json:/etc/auriga/edge.config.json:ro
       - ${AURIGA_DATA_ROOT}/config/panel:/srv/auriga/panel:ro
@@ -542,6 +549,10 @@ volumes:
   alloydata:
 
 secrets:
+  litellm_ui_password:
+    file: ${AURIGA_DATA_ROOT}/config/litellm-ui/password
+  litellm_ui_reader:
+    file: ${AURIGA_DATA_ROOT}/config/litellm-ui/reader
   litellm_master:
     file: ${AURIGA_DATA_ROOT}/config/litellm/master
   litellm_salt:
