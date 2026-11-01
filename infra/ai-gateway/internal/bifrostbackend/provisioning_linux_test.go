@@ -79,6 +79,9 @@ func TestReviewExistingDatabaseProvisioningIsIdempotent(t *testing.T) {
 		cmd.Stdout = &output
 		cmd.Stderr = &output
 		e = cmd.Run()
+		if bytes.Contains(output.Bytes(), []byte(runtimePassword)) || bytes.Contains(output.Bytes(), []byte(ownerPassword)) {
+			t.Fatal("upgrade exposed a password")
+		}
 		if len(wantError) > 0 {
 			if e == nil {
 				t.Fatal("unsafe existing role was accepted")
@@ -87,9 +90,6 @@ func TestReviewExistingDatabaseProvisioningIsIdempotent(t *testing.T) {
 		}
 		if e != nil {
 			t.Fatalf("database upgrade helper failed: %v: %s", e, strings.ReplaceAll(strings.ReplaceAll(output.String(), runtimePassword, "[redacted]"), ownerPassword, "[redacted]"))
-		}
-		if bytes.Contains(output.Bytes(), []byte(runtimePassword)) || bytes.Contains(output.Bytes(), []byte(ownerPassword)) {
-			t.Fatal("upgrade exposed a password")
 		}
 	}
 	run()
@@ -136,6 +136,13 @@ func TestReviewExistingDatabaseProvisioningIsIdempotent(t *testing.T) {
 	}
 	run(true)
 	if _, e = admin.Exec(ctx, "ALTER ROLE auriga_bifrost NOCREATEDB"); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = admin.Exec(ctx, "ALTER DATABASE bifrost OWNER TO postgres"); e != nil {
+		t.Fatal(e)
+	}
+	run(true)
+	if _, e = admin.Exec(ctx, "ALTER DATABASE bifrost OWNER TO auriga_bifrost_owner"); e != nil {
 		t.Fatal(e)
 	}
 
