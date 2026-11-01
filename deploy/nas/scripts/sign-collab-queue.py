@@ -32,6 +32,69 @@ def timestamp(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
+def private_directory(path):
+    """CREATE_NEW with an owner-only inheritable DACL, from the first instant.
+
+    Python 3.13+ mkdir(0700) on Windows grants OWNER RIGHTS instead of the
+    concrete owner principal. The production Java checker deliberately requires
+    concrete trusted principals. Do not alter its protection rules or the root.
+    """
+    if os.name != "nt":
+        path.mkdir(mode=0o700)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                          wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    advapi.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [("length", wintypes.DWORD), ("descriptor", ctypes.c_void_p),
+                    ("inherit_handle", wintypes.BOOL)]
+
+    kernel.CreateDirectoryW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(SecurityAttributes)]
+    token = wintypes.HANDLE()
+    sid_string = wintypes.LPWSTR()
+    descriptor = ctypes.c_void_p()
+    try:
+        if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        size = wintypes.DWORD()
+        advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))  # TokenUser
+        if ctypes.get_last_error() != 122:  # ERROR_INSUFFICIENT_BUFFER
+            raise ctypes.WinError(ctypes.get_last_error())
+        info = ctypes.create_string_buffer(size.value)
+        if not advapi.GetTokenInformation(token, 1, info, size, ctypes.byref(size)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        sid = ctypes.cast(info, ctypes.POINTER(ctypes.c_void_p))[0]
+        if not advapi.ConvertSidToStringSidW(sid, ctypes.byref(sid_string)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        # Protected DACL: no inherited grants, including OWNER RIGHTS/Users.
+        sddl = f"O:{sid_string.value}D:P(A;OICI;FA;;;{sid_string.value})"
+        if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl, 1, ctypes.byref(descriptor), None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+        if not kernel.CreateDirectoryW(str(path), ctypes.byref(attributes)):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        if descriptor:
+            kernel.LocalFree(descriptor)
+        if sid_string:
+            kernel.LocalFree(ctypes.cast(sid_string, ctypes.c_void_p))
+        if token:
+            kernel.CloseHandle(token)
+
+
 def sign(args):
     os.umask(0o077)
     source = Path(args.request).absolute()
@@ -66,13 +129,13 @@ def sign(args):
             raise ValueError("independent root pin or payload binding differs")
         material.append((version, files))
     out = Path(args.output).absolute()
-    out.mkdir(mode=0o700)  # CREATE_NEW throughout: never re-sign a distributed version.
+    private_directory(out)  # CREATE_NEW: never re-sign a distributed version.
     (out / "batch.json").write_bytes(batch_raw)
     loader = out / "empty-loader.properties"
     loader.write_bytes(b"")
     for version, files in material:
         dest = out / version
-        dest.mkdir(mode=0o700)
+        private_directory(dest)
         for name, raw in files.items():
             (dest / name).write_bytes(raw)
         cmd = [args.java, "-Dloader.main=auriga.collab.network.keys.OfflineKeySigning",

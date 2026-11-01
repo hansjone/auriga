@@ -89,6 +89,8 @@ python3 deploy-nas/scripts/sign-collab-queue.py \
 
 脚本调用固定的生产 OfflineKeySigning；原根私钥路径仅交给本机 Java，不复制、不回显。输出必须全新目录，失败保留部分产物，不覆盖已签同版本。未来 issued_at 仅用于预签；生产 Java 仍拒绝提前发布。把整个 approved-week 目录交回 NAS 外部 root 0700/文件 0600 的批准输入目录（不含任何私钥），导入前核摘要：
 
+Windows 上，批签工具用系统安全描述符在创建输出目录的同时设置当前用户专属、禁止继承的 DACL，子文件只继承该用户权限。不能用先创建再放宽/修补 ACL 的方式签名，也不改变原根文件或生产 Java 的私密性校验。Python 3.13+ 的 `mkdir(mode=0700)` 会生成 Java 无法按具体属主识别的 `OWNER RIGHTS` ACE，因此不能替代这里的显式 DACL。构建上述生产 operator jar 后，执行 `python deploy/nas/test/collab_queue_windows_integration_test.py -v`，测试会临时生成独立测试根，真实调用生产 Java 签名和验签，并检查暴露根拒绝与禁止覆盖；缺 jar 在 Windows 上算失败。
+
 ```sh
 sh deploy-nas/scripts/rotate-collab-keys.sh queue-import /private/approved-week
 sh deploy-nas/scripts/rotate-collab-keys.sh renew
