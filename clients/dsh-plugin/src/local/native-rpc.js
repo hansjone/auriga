@@ -1,9 +1,12 @@
 import { PlatformError } from './platform.js';
+import { localFailureDiagnostic } from './diagnostic.js';
+import { logEvent } from '../observability/index.js';
 
 export const NATIVE_LOGIN_CHANNEL = '/auriga-native';
 export const NATIVE_LOGIN_METHODS = new Set([
   'aurigaAuth/status',
   'aurigaAuth/login',
+  'aurigaAuth/cancel',
   'aurigaAuth/logout',
 ]);
 
@@ -50,9 +53,16 @@ export function installNativeLoginRPC(ctx, getRuntime) {
       /** @type {AbortSignal} */ signal,
       /** @type {any} */ peer,
     ) => {
-      const fail = (/** @type {string} */ code) => ({
+      const fail = (
+        /** @type {string} */ code,
+        /** @type {object|undefined} */ diagnostic = undefined,
+      ) => ({
         ok: false,
-        error: { code, message: 'Local platform login request failed' },
+        error: {
+          code,
+          message: 'Local platform login request failed',
+          ...(diagnostic ? { diagnostic } : {}),
+        },
       });
       if (peer?.principal?.kind !== 'owner') return fail('common.forbidden');
       if (!NATIVE_LOGIN_METHODS.has(method)) return fail('common.not_found');
@@ -71,10 +81,6 @@ export function installNativeLoginRPC(ctx, getRuntime) {
       const runtime = getRuntime();
       if (!runtime) return fail('common.unavailable');
       const request = runtime.nativeRequest(peer);
-      const cancel = () => {
-        void runtime.cancelAttempt(request).catch(() => {});
-      };
-      signal.addEventListener('abort', cancel, { once: true });
       try {
         signal.throwIfAborted();
         let value;
@@ -82,11 +88,22 @@ export function installNativeLoginRPC(ctx, getRuntime) {
           value = runtime.prepare(request).body;
         else if (method === 'aurigaAuth/login')
           value = { step: (await runtime.login(request, args.input)).step };
-        else value = (await runtime.logout(request)).body;
+        else if (method === 'aurigaAuth/cancel') {
+          await runtime.cancelAttempt(request);
+          value = { cancelled: true };
+        } else value = (await runtime.logout(request)).body;
         const safe = { ...value };
         delete safe.csrf;
         return { ok: true, value: safe };
       } catch (error) {
+        const diagnostic = {
+          operation: method.slice('aurigaAuth/'.length),
+          ...localFailureDiagnostic(error),
+        };
+        logEvent('WARN', 'Native login failed', diagnostic);
+        console.warn(
+          '[auriga-dsh] native login failure ' + JSON.stringify(diagnostic),
+        );
         if (
           error instanceof PlatformError &&
           [
@@ -96,10 +113,11 @@ export function installNativeLoginRPC(ctx, getRuntime) {
             'common.unauthenticated',
           ].includes(error.code ?? '')
         )
-          return fail(error.code ?? 'common.unauthenticated');
-        return fail('common.unavailable');
-      } finally {
-        signal.removeEventListener('abort', cancel);
+          return fail(
+            error.code ?? 'common.unauthenticated',
+            localFailureDiagnostic(error),
+          );
+        return fail('common.unavailable', localFailureDiagnostic(error));
       }
     },
   );

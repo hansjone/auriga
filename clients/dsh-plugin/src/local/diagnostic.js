@@ -8,6 +8,8 @@ const tlsCodes = new Set([
   'CERT_HAS_EXPIRED',
   'ERR_TLS_CERT_ALTNAME_INVALID',
   'ERR_TLS_HANDSHAKE_TIMEOUT',
+  'ERR_SSL_WRONG_VERSION_NUMBER',
+  'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE',
 ]);
 const networkCodes = new Set([
   'ECONNREFUSED',
@@ -43,8 +45,29 @@ const nativeMessages = new Map([
 
 // Whitelist classifications only. Error message/stack, URL, headers, request
 // body and arbitrary upstream codes may contain credentials and never leave.
-/** @param {unknown} error */
-export function localFailureDiagnostic(error) {
+/** @param {unknown} error @param {number} [level]
+ * @returns {{category:string,code?:string,status?:number}} */
+export function localFailureDiagnostic(error, level = 0) {
+  if (level > 8) return { category: 'unexpected' };
+  if (error instanceof AggregateError) {
+    if (!error.errors.length || error.errors.length > 16)
+      return { category: 'unexpected' };
+    const diagnoses = error.errors.map((value) =>
+      localFailureDiagnostic(value, level + 1),
+    );
+    return diagnoses.every((value) =>
+      ['dns', 'connection', 'tls', 'timeout'].includes(value.category),
+    )
+      ? diagnoses[0]
+      : { category: 'unexpected' };
+  }
+  if (error instanceof Error && error.message === 'login attempt busy')
+    return { category: 'busy', code: 'attempt_busy' };
+  if (
+    error instanceof Error &&
+    error.message === 'team account login unavailable'
+  )
+    return { category: 'configuration', code: 'team_provider_unavailable' };
   if (error instanceof PlatformError)
     return {
       category: 'platform_http',
@@ -59,13 +82,26 @@ export function localFailureDiagnostic(error) {
     };
   let current = error;
   for (let depth = 0; depth < 4 && current instanceof Error; depth++) {
+    if (current instanceof AggregateError)
+      return localFailureDiagnostic(current, level + depth + 1);
     const value = /** @type {Error & {code?:string,cause?:unknown}} */ (
       current
     );
     if (typeof value.code === 'string' && tlsCodes.has(value.code))
       return { category: 'tls', code: value.code };
     if (typeof value.code === 'string' && networkCodes.has(value.code))
-      return { category: 'network', code: value.code };
+      return {
+        category: ['ENOTFOUND', 'EAI_AGAIN'].includes(value.code)
+          ? 'dns'
+          : [
+                'ETIMEDOUT',
+                'UND_ERR_CONNECT_TIMEOUT',
+                'UND_ERR_HEADERS_TIMEOUT',
+              ].includes(value.code)
+            ? 'timeout'
+            : 'connection',
+        code: value.code,
+      };
     if (value.name === 'TimeoutError') return { category: 'timeout' };
     if (value.name === 'AbortError') return { category: 'cancelled' };
     current = value.cause;

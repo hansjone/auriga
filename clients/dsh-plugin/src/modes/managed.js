@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { MANAGED_MODEL_STATUS } from '../ai/installation.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedNetwork } from '../network/managed-device.js';
@@ -386,6 +387,11 @@ export async function createManaged(options = {}) {
                   res.end(
                     JSON.stringify({
                       authenticated: true,
+                      mode: 'managed',
+                      loggedIn: true,
+                      connected: network?.status?.connected === true,
+                      account: { subject: ownerId },
+                      models: MANAGED_MODEL_STATUS,
                       network: network?.status ?? {
                         connected: false,
                         state: 'unavailable',

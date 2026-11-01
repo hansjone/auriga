@@ -31,6 +31,7 @@ export async function runtimePeer(t, options = {}) {
     iat: Math.floor(Date.now() / 1000),
     exp:
       Math.floor(Date.now() / 1000) + (options.accessLifetimeSeconds ?? 3600),
+    ...options.claims,
   };
   const unsigned = [{ alg: 'ES256', kid: 'test-key', typ: 'at+jwt' }, claims]
     .map((v) => Buffer.from(JSON.stringify(v)).toString('base64url'))
@@ -58,7 +59,13 @@ export async function runtimePeer(t, options = {}) {
     if (path === '/api/iam/v1/network/register' && options.networkRegister)
       return options.networkRegister(url, init);
     let data;
-    if (path === '/oauth2/jwks')
+    if (path === '/api/iam/v1/login/providers')
+      data = {
+        items: [
+          { id: 'team', connectorType: 'team-account', primaryStep: 'form' },
+        ],
+      };
+    else if (path === '/oauth2/jwks')
       data = {
         keys: [
           {
@@ -116,9 +123,10 @@ export async function runtimePeer(t, options = {}) {
   await runtime.vault.update((s) => {
     s.credential = credential;
   });
-  const request = { headers: {} };
-  request.headers.cookie = runtime.prepare(request).setCookie.split(';')[0];
-  const result = await runtime.login(request, { action: 'resume' });
+  const request = runtime.nativeRequest({ principal: { kind: 'owner' } });
+  runtime.prepare(request);
+
+  await runtime.login(request, { action: 'resume' });
   if (!options.teamRequest) {
     const deadline = Date.now() + 3000;
     while (!runtime.isReady()) {
@@ -129,7 +137,7 @@ export async function runtimePeer(t, options = {}) {
       if (Date.now() > deadline) throw new Error('Team fixture not ready');
     }
   }
-  request.headers.cookie = result.setCookie[0].split(';')[0];
+
   request.headers['x-auriga-csrf'] = runtime.status(request).csrf;
   return { runtime, request, directory, credential, registered, requests };
 }

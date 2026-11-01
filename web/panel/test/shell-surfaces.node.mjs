@@ -187,14 +187,20 @@ test('independent native slots: settings retains trusted bootstrap and versions 
     const settings = host.mount('settings.section');
     await flush();
     assert.match(settings.root.textContent, /系统托管.*协议版本1/);
-    assert.match(settings.root.textContent, /插件版本0\.2\.3.*界面版本2\.4\.6/);
-    assert.match(settings.root.textContent, /账号与安全/);
+    assert.match(settings.root.textContent, /插件版本0\.2\.3/);
+    assert.match(settings.root.textContent, /账号/);
     assert.equal(
       settings.root.querySelector('form,nav,[role="tab"],[role="dialog"]'),
       null,
     );
-    assert.ok(settings.root.querySelector('input[aria-label="平台地址"]'));
-    assert.ok(settings.root.querySelector('select[aria-label="默认部署位置"]'));
+    assert.equal(
+      settings.root.querySelector('input[aria-label="平台地址"]'),
+      null,
+    );
+    assert.equal(
+      settings.root.querySelector('select[aria-label="默认部署位置"]'),
+      null,
+    );
     assert.equal(host.settingsImports.length, 1);
     assert.equal(host.document.querySelector('script'), null);
     assert.doesNotMatch(
@@ -262,7 +268,7 @@ test('host language and dark/light changes update native settings and panel cont
     await flush();
     assert.match(
       settings.root.textContent,
-      /Headquarters connection.*System managed.*Plugin version0\.2\.3/,
+      /System managed.*Plugin version0\.2\.3/,
     );
     const panel = main.root.querySelector('auriga-team-panel');
     assert.equal(panel.context.locale, 'en');
@@ -270,7 +276,7 @@ test('host language and dark/light changes update native settings and panel cont
     host.locale('zh-CN');
     host.theme('light');
     await flush();
-    assert.match(settings.root.textContent, /总部连接/);
+    assert.match(settings.root.textContent, /系统托管/);
     assert.equal(panel.context.theme, 'light');
     assert.match(
       host.document.querySelector('style').textContent,
@@ -321,6 +327,8 @@ test('retry uses a new request; old completion after settings close cannot updat
     late,
     oldSignal;
   const host = surfaceHost(async (_url, init) => {
+    if (!new URL(_url).pathname.endsWith('/bootstrap'))
+      return response(200, { loggedIn: false, connected: false });
     calls++;
     if (calls === 1)
       throw Object.assign(new Error('private failure'), {
@@ -363,6 +371,8 @@ test('retry uses a new request; old completion after settings close cannot updat
 test('hung bootstrap times out and retry is available; plugin disposal aborts pending requests', async () => {
   let signal;
   const host = surfaceHost(async (_url, init) => {
+    if (!new URL(_url).pathname.endsWith('/bootstrap'))
+      return response(200, { loggedIn: false, connected: false });
     signal = init.signal;
     return new Promise(() => {});
   });
@@ -491,8 +501,8 @@ test('packaged UI shows unconfigured native main/settings without a resource fet
     assert.ok(panel);
     assert.equal(panel.context.mode, 'standalone');
     assert.equal(panel.context.fetch, undefined);
-    assert.match(settings.root.textContent, /尚未配置总部连接/);
-    assert.match(settings.root.textContent, /界面来源插件安装包/);
+    assert.match(settings.root.textContent, /未配置平台/);
+    assert.match(settings.root.textContent, /界面来源package/);
     assert.doesNotMatch(settings.root.textContent, /已读取托管配置/);
     main.close();
     settings.close();

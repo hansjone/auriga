@@ -1,5 +1,5 @@
 import { loginStyles } from './styles.js';
-import { failureReason } from './errors.js';
+import { failureReason, failureStatus } from './errors.js';
 
 /** @typedef {import('../generated/steps.js').ClientStep} ClientStep */
 /** @typedef {import('../generated/steps.js').StepInput} StepInput */
@@ -11,6 +11,7 @@ import { failureReason } from './errors.js';
  * @property {(context: {signal: AbortSignal}) => Promise<ClientStep>} onRestart
  * @property {() => void} onComplete The host owns session verification and navigation.
  * @property {() => Promise<void>} [onCancel] Cancel only this anonymous attempt.
+ * @property {() => void} [onSkip] Leave optional platform login immediately.
  */
 
 let nextId = 0;
@@ -20,6 +21,11 @@ const messages = {
     submit: '继续',
     retry: '重新开始',
     cancel: '取消',
+    skip: '跳过',
+    platformUnreachable: '总部不可达',
+    platform: '平台登录暂不可用',
+    platformConfig: '平台登录配置异常',
+    busy: '另一窗口正在登录',
     waiting: '正在处理…',
     complete: '登录步骤已完成',
     unavailable: '当前登录方式暂不可用，请联系管理员。',
@@ -41,6 +47,11 @@ const messages = {
     submit: 'Continue',
     retry: 'Start again',
     cancel: 'Cancel',
+    skip: 'Skip',
+    platformUnreachable: 'Platform unreachable',
+    platform: 'Platform sign-in unavailable',
+    platformConfig: 'Platform sign-in configuration error',
+    busy: 'Another window is signing in',
     waiting: 'Working…',
     complete: 'Sign-in step completed',
     unavailable:
@@ -78,6 +89,7 @@ export function createLoginView(root, options) {
   let step;
   /** @type {import('./errors.js').LoginFailureReason | undefined} */
   let notice;
+  /** @type {number|undefined} */ let httpStatus;
   let cancelling = false;
   let disposed = false;
   let version = 0;
@@ -177,6 +189,7 @@ export function createLoginView(root, options) {
       if (!disposed && current === version && !controller.signal.aborted) {
         invalidate();
         notice = failureReason(error);
+        httpStatus = failureStatus(error);
         render();
       }
     }
@@ -191,7 +204,10 @@ export function createLoginView(root, options) {
     try {
       await options.onCancel?.();
     } catch (error) {
-      if (!disposed && current === version) notice = failureReason(error);
+      if (!disposed && current === version) {
+        notice = failureReason(error);
+        httpStatus = failureStatus(error);
+      }
     } finally {
       cancelling = false;
       if (!disposed) {
@@ -247,13 +263,27 @@ export function createLoginView(root, options) {
     title.id = `${id}-title`;
     card.setAttribute('aria-labelledby', title.id);
     card.append(title);
+    if (options.onSkip) {
+      const skip = element('button', words().skip, 'secondary');
+      skip.type = 'button';
+      skip.dataset.action = 'skip';
+      skip.addEventListener('click', options.onSkip);
+      card.append(skip);
+    }
     shell.append(style, brand, card);
     if (notice) {
       const text =
-        notice === 'expired' ? words().credentialExpired : words()[notice];
+        notice === 'network' && options.onSkip
+          ? words().platformUnreachable
+          : notice === 'expired'
+            ? words().credentialExpired
+            : words()[notice];
       const status = element(
         'p',
-        text,
+        text +
+          (notice === 'platform' && httpStatus
+            ? ' (HTTP ' + httpStatus + ')'
+            : ''),
         notice === 'cancelled' ? 'muted' : 'error',
       );
       status.setAttribute('role', notice === 'cancelled' ? 'status' : 'alert');

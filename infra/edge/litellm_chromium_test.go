@@ -51,7 +51,7 @@ func TestLiteLLMChromiumHandoff(t *testing.T) {
 			}
 			admin.AccessToken = "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".fixture"
 			store.Put("admin", admin)
-			input, err := json.Marshal(map[string]string{"admin": g.Cfg.Access.AdminURL(), "ui": g.Cfg.liteLLMUIURL()})
+			input, err := json.Marshal(map[string]any{"admin": g.Cfg.Access.AdminURL(), "ui": g.Cfg.liteLLMUIURL(), "live": os.Getenv("AURIGA_LITELLM_UI_TEST_ORIGIN") != ""})
 			if err != nil {
 				t.Fatal(err)
 			}

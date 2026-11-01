@@ -1,3 +1,4 @@
+import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -280,8 +281,8 @@ test('explicit runtime logout queues behind an in-flight real vault write and to
     assert.equal(runtime.vault.snapshot().revocations.length, 1);
     await assert.rejects(runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
     const next = { headers: {} };
-    const prepared = runtime.prepare(next);
-    next.headers.cookie = prepared.setCookie.split(';')[0];
+    const prepared = runtime.prepare(ownerRequest(runtime, next));
+
     assert.equal(prepared.body.resumeAvailable, false);
     await assert.rejects(
       runtime.login(next, { action: 'resume' }),
