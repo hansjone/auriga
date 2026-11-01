@@ -30,6 +30,10 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         fingerprint, spki = generated.stdout.strip().splitlines()
         self.fingerprint = "sha256:" + fingerprint
         jar_hash = hashlib.sha256(self.jar.read_bytes()).hexdigest()
+        # Historical NAS binding remains immutable; a separately approved new
+        # signer provides verify-archived and the stricter signing policy.
+        self.nas_jar_hash = hashlib.sha256(b"historical-nas-operator-jar").hexdigest()
+        self.assertNotEqual(jar_hash, self.nas_jar_hash)
         source = self.base / "request"
         source.mkdir()
         now = int(datetime.now(timezone.utc).timestamp()) - 2
@@ -38,7 +42,8 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         # future UTC grid, exercising archived verification without time travel.
         first = ((now + 21600 + 43199) // 43200) * 43200
         entries = []
-        for i in range(2):
+        self.count = 14 if self._testMethodName == 'test_week_with_distinct_nas_binding' else 2
+        for i in range(self.count):
             version = str(i + 2)
             dest = source / version
             dest.mkdir()
@@ -46,9 +51,9 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
             files = {"payload.json": {"schema_version": 1, "realm": "1", "keyset_version": version,
                 "issued_at": issued, "valid_until": until, "keys": [{"kid": "fixture-business",
                 "alg": "Ed25519", "purpose": "business_delivery", "state": "active",
-                "public_key_spki": spki, "not_before": stamp(now), "not_after": stamp(now + 604800)}]},
+                "public_key_spki": spki, "not_before": stamp(now), "not_after": stamp(now + (8 if self.count == 14 else 7) * 86400)}]},
                 "trust.json": {"rootKid": "fixture-root", "rootFingerprint": self.fingerprint,
-                    "operatorJarSha256": jar_hash, "publicationMode": "regular", "realm": "1"},
+                    "operatorJarSha256": self.nas_jar_hash, "publicationMode": "regular", "realm": "1"},
                 "input.json": {"privateFiles": {}}}
             hashes = {}
             for name, content in files.items():
@@ -74,7 +79,8 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         (source / "batch.json").write_text(json.dumps({"baseVersion": "1", "baseSignedSha256":base_files["signed.json"],"baseFiles":base_files,"entries": entries}))
         self.command = [sys.executable, "-I", "-X", "utf8", str(self.repo / "deploy/nas/scripts/sign-collab-queue.py"),
             "--request", str(source), "--output", str(self.base / "output"), "--jar", str(self.jar),
-            "--jar-sha256", jar_hash, "--root-kid", "fixture-root", "--root-fingerprint", self.fingerprint,
+            "--jar-sha256", jar_hash, "--expected-nas-jar-sha256", self.nas_jar_hash,
+            "--root-kid", "fixture-root", "--root-fingerprint", self.fingerprint,
             "--root-private", str(self.base / "private.der"), "--approved-by", "alice",
             "--confirm-batch-sha256",hashlib.sha256((source / "batch.json").read_bytes()).hexdigest()]
 
@@ -82,6 +88,9 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         signed = subprocess.run(self.command, capture_output=True, text=True)
         self.assertEqual(signed.returncode, 0, signed.stderr)
         self.assertEqual(json.loads(signed.stdout.splitlines()[-1])["count"], 2)
+        review = json.loads(signed.stdout.splitlines()[0])
+        self.assertEqual(review["nasJarSha256"], self.nas_jar_hash)
+        self.assertNotEqual(review["nasJarSha256"], review["signingJarSha256"])
         out = self.base / "output"
         # A genuine production verifier checks both root signatures and writes state.
         loader = self.base / "empty-loader.properties"
@@ -109,6 +118,36 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         inspect = subprocess.run(["java", str(Path(__file__).with_name("QueueSigningFixture.java")),
             str(out), "inspect"], capture_output=True, text=True)
         self.assertEqual(inspect.returncode, 0, inspect.stderr)
+
+    def test_week_with_distinct_nas_binding(self):
+        source = self.base / "request"
+        batch_path = source / "batch.json"
+        batch = json.loads(batch_path.read_text())
+        nas_hash = hashlib.sha256(b"independently approved historical NAS jar").hexdigest()
+        for entry in batch["entries"]:
+            path = source / entry["version"] / "trust.json"
+            trust = json.loads(path.read_text())
+            trust["operatorJarSha256"] = nas_hash
+            path.write_text(json.dumps(trust))
+            entry["files"]["trust.json"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        batch_path.write_text(json.dumps(batch))
+        command = self.command[:-1] + [hashlib.sha256(batch_path.read_bytes()).hexdigest(),
+            "--expected-nas-jar-sha256", nas_hash]
+        review = subprocess.run(command + ["--review-only"], capture_output=True, text=True)
+        self.assertEqual(review.returncode, 0, review.stderr)
+        self.assertFalse((self.base / "output").exists())
+        signed = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(signed.returncode, 0, signed.stderr)
+        self.assertEqual(json.loads(signed.stdout.splitlines()[-1])["count"], 14)
+        for entry in batch["entries"]:
+            dest = self.base / "output" / entry["version"]
+            verified = subprocess.run(self.launch + ["verify-archived", str(dest / "signed.json"),
+                str(dest / "announcement.json"), "fixture-root", str(self.base / "public.der"),
+                self.fingerprint], capture_output=True, text=True)
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+        wrong = command[:-1] + ["0" * 64, "--review-only"]
+        refused = subprocess.run(wrong, capture_output=True, text=True)
+        self.assertNotEqual(refused.returncode, 0)
 
     def test_exposed_root_is_still_rejected(self):
         expose = subprocess.run(["icacls", str(self.base / "private.der"), "/grant", "*S-1-1-0:(R)"],

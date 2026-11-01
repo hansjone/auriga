@@ -185,7 +185,8 @@ def sign(args):
     batch_raw = read(source / "batch.json")
     batch = decode_json(batch_raw)
     entries = batch["entries"]
-    if not 1 <= len(entries) <= 28 or digest(read(args.jar)) != args.jar_sha256:
+    if (not 1 <= len(entries) <= 28 or digest(read(args.jar)) != args.jar_sha256
+            or not re.fullmatch(r"[0-9a-f]{64}", args.expected_nas_jar_sha256)):
         raise ValueError("queue count or independently approved jar digest refused")
     first = timestamp(entries[0]["issuedAt"])
     if first % 43200 or not time.time() - 300 <= first <= time.time() + 86400:
@@ -233,7 +234,7 @@ def sign(args):
         trust = decode_json(files["trust.json"])
         payload = decode_json(files["payload.json"])
         if (trust["rootKid"] != args.root_kid or trust["rootFingerprint"] != args.root_fingerprint
-                or trust["operatorJarSha256"] != args.jar_sha256 or trust["publicationMode"] != "regular"
+                or trust["operatorJarSha256"] != args.expected_nas_jar_sha256 or trust["publicationMode"] != "regular"
                 or payload["keyset_version"] != version or payload["issued_at"] != entry["issuedAt"]
                 or payload["valid_until"] != entry["validUntil"] or payload["realm"] != trust["realm"]):
             raise ValueError("independent root pin or payload binding differs")
@@ -244,7 +245,10 @@ def sign(args):
         base = payload
         material.append((version, files))
     batch_hash = digest(batch_raw)
-    print(json.dumps({"status": "review_required", "batchSha256": batch_hash, "newKeys": changes}, ensure_ascii=False), flush=True)
+    print(json.dumps({"status": "review_required", "batchSha256": batch_hash,
+                      "signingJarSha256": args.jar_sha256, "nasJarSha256": args.expected_nas_jar_sha256,
+                      "instruction": "Run --review-only and review this exact plan before confirming its digest.",
+                      "newKeys": changes}, ensure_ascii=False), flush=True)
     if getattr(args, "review_only", False):
         return
     confirmation = getattr(args, "confirm_batch_sha256", None)
@@ -273,7 +277,9 @@ def sign(args):
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
         if result.returncode:
             raise ValueError("production offline signer rejected the operation; preserve partial output")
-        audit = {"approvedBy": args.approved_by, "reason": "weekly pre-signed queue; original root; scheduled publication",
+        audit = {"approvedBy": args.approved_by,
+                 "reason": "weekly pre-signed queue; original root; scheduled publication; signing jar sha256:"
+                           + args.jar_sha256 + "; NAS jar sha256:" + args.expected_nas_jar_sha256,
                  "payloadSha256": digest(files["payload.json"]),
                  "signedSha256": digest(read(dest / "signed.json")),
                  "announcementSha256": digest(read(dest / "announcement.json"))}
@@ -284,7 +290,7 @@ def sign(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("request", "jar", "jar-sha256", "root-kid", "root-fingerprint", "root-private", "approved-by", "output"):
+    for name in ("request", "jar", "jar-sha256", "expected-nas-jar-sha256", "root-kid", "root-fingerprint", "root-private", "approved-by", "output"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--java", default="java")
     parser.add_argument("--review-only", action="store_true")

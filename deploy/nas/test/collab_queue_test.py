@@ -41,7 +41,7 @@ class QueueSignerTests(unittest.TestCase):
                             "public_key_spki":base64.urlsafe_b64encode(bytes.fromhex("302a300506032b6570032100")+bytes(32)).decode().rstrip("="),
                             "not_before":timestamp(now-43200),"not_after":timestamp(now+6*86400)}]},
                      "trust.json": {"rootKid": "fixture-root", "rootFingerprint": "sha256:"+signer.digest(b"fixture-public-root"),
-                                    "operatorJarSha256": signer.digest(self.jar.read_bytes()), "publicationMode": "regular", "realm": "1"},
+                                    "operatorJarSha256": signer.digest(b"old-nas-jar"), "publicationMode": "regular", "realm": "1"},
                      "input.json": {"privateFiles": {}}}
             hashes = {}
             for name, content in files.items():
@@ -60,7 +60,8 @@ class QueueSignerTests(unittest.TestCase):
             "baseFiles":{name:signer.digest(raw) for name,raw in base_files.items()},"entries": entries}))
         (self.source / "batch.json").chmod(0o600)
         self.args = argparse.Namespace(request=str(self.source), output=str(self.base / "output"), jar=str(self.jar),
-            jar_sha256=signer.digest(self.jar.read_bytes()), root_kid="fixture-root", root_fingerprint="sha256:"+signer.digest(b"fixture-public-root"),
+            jar_sha256=signer.digest(self.jar.read_bytes()), expected_nas_jar_sha256=signer.digest(b"old-nas-jar"),
+            root_kid="fixture-root", root_fingerprint="sha256:"+signer.digest(b"fixture-public-root"),
             root_private=str(self.base / "private.der"), approved_by="alice", java="java",
             confirm_batch_sha256=signer.digest((self.source/"batch.json").read_bytes()))
 
@@ -85,14 +86,18 @@ class QueueSignerTests(unittest.TestCase):
             audit = json.loads((Path(self.args.output) / v / "approval.json").read_text())
             self.assertEqual(audit["approvedBy"], "alice")
             self.assertEqual(audit["signedSha256"], signer.digest(b"signed fixture"))
+            self.assertIn(self.args.expected_nas_jar_sha256, audit["reason"])
+            self.assertIn(self.args.jar_sha256, audit["reason"])
+            self.assertNotEqual(self.args.expected_nas_jar_sha256, self.args.jar_sha256)
         self.assertFalse((Path(self.args.output) / "private.der").exists())
 
     def test_exact_batch_confirmation_and_public_base_required_before_sign(self):
-        for option in ("confirmation", "base-signature", "base-pin"):
+        for option in ("confirmation", "base-signature", "base-pin", "nas-jar"):
             with self.subTest(option=option):
                 args=argparse.Namespace(**vars(self.args))
                 if option=="confirmation": args.confirm_batch_sha256="0"*64
                 if option=="base-pin": args.root_fingerprint="sha256:wrong"
+                if option=="nas-jar": args.expected_nas_jar_sha256="0"*64
                 with patch.object(signer.subprocess,"run",return_value=argparse.Namespace(returncode=1 if option=="base-signature" else 0)) as run:
                     with self.assertRaises(ValueError): signer.sign(args)
                     self.assertFalse(any("sign" in c.args[0] for c in run.call_args_list))

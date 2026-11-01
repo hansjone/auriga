@@ -85,13 +85,20 @@ sh deploy-nas/scripts/rotate-collab-keys.sh queue-export > /private/public-queue
 python3 deploy-nas/scripts/sign-collab-queue.py \
   --request /private/public-queue --output /private/approved-week \
   --jar /private/platform-exec.jar --jar-sha256 APPROVED_SHA256 \
+  --expected-nas-jar-sha256 HISTORICALLY_APPROVED_NAS_SHA256 \
   --root-kid original-root-kid --root-fingerprint sha256:PINNED_ROOT_SHA256 \
   --root-private /offline/root-private.der --approved-by alice
 ```
 
 脚本先用固定生产 `OfflineKeySigning verify-archived` 核验前驱的双根签与独立根指纹，不读根私钥、不安装状态。再逐份比较：旧 kid/材料/用途/期限不变，不遗漏历史；仅允许同状态、next→active、active→retired 或→revoked；新增只能是 Ed25519 next、符合 nas-purpose-hex 命名，每用途最多一把，原 active 剩余不超过 48h 且没有现有 next，寿命不超过 7 天。Java 在签名及当前/历史验签时另设 8 天业务钥上限，生产 PG 仍强制真实首发成熟期。
 
-全部核对通过后打印新增 kid、SPKI 指纹、生效区间和 batch SHA256，运营者逐项审阅后输入精确批次摘要才会签名。可先加 `--review-only` 只审阅，再以 `--confirm-batch-sha256 REVIEWED_SHA256` 显式批准同一批次；没有通用跳过确认开关。旧 operator jar 不支持公开历史验签会拒绝，需先构建并独立核准新 jar；不能直接替换 NAS 历史 binding 中固定的 jar。
+签名机 `--jar-sha256` 与 `--expected-nas-jar-sha256` 分别独立核准，允许不同。前者核本机发布版 jar 字节，用于历史验签与新签名；后者核每份 trust 中 NAS 历史固定的 jar，只作 NAS 运行时绑定核对。审阅输出展示两个摘要，审批 reason 记录二者。选择拆开校验是因为根签格式不变，NAS 旧生产 jar 仍可验签/发布；不迁移或重写旧 binding，不上传签名机新 jar。NAS 的 8 天纵深检查仍需另行升级才能生效。
+
+全部核对通过后打印新增 kid、SPKI 指纹、生效区间和 batch SHA256。**必须先执行同一命令加 `--review-only`，逐项审阅完整输出，再以其 batch SHA256 执行 `--confirm-batch-sha256 REVIEWED_SHA256`**；不能只对 batch 文件计算摘要就视作审阅。交互确认也必须先完成只审阅流程。没有通用跳过确认开关。旧签名 jar 不支持公开历史验签会拒绝，应在签名机使用经验证的新发布 jar，不能直接替换 NAS 历史 binding 中固定的 jar。
+
+升级含 8 天限制的 operator/collab 镜像之前，须对当前 PG 完整历史逐把核 `not_after - not_before ≤ 8 天`（包括 retired/revoked、三种用途），并用新 jar 的只读 `verify-archived` 通过原根验签；任一超限则停止升级，交由运营者处理，不删除历史。覆盖不足 48h 的告警应同时注明下一个可准备时段：UTC 00:00–06:00、12:00–18:00（北京时间 08:00–14:00、20:00–次日02:00）。当前落在 UTC 06:00–12:00 时，告警附当日 UTC 12:00；落在 UTC 18:00–24:00 时附次日 UTC 00:00，正在窗口内则立即准备。错过后不能调钟或缩短离线窗口。
+
+Windows 输出目录的父目录也必须是运营者专用私有目录，不得授予其他用户 DELETE/FILE_DELETE_CHILD；子目录 DACL 不能防止非属主从父目录整体替换它。合并前检查清单必须包含下述 Windows 生产 jar 集成测试；Linux CI 不能替代其 ACL 验证。
 
 原根私钥路径仅交给本机 Java，不复制、不回显。输出必须全新目录，失败保留部分产物，不覆盖已签同版本。未来 issued_at 仅用于预签；生产 Java 仍拒绝提前发布。把整个 approved-week 目录交回 NAS 外部 root 0700/文件 0600 的批准输入目录（不含任何私钥），导入前核摘要：
 
