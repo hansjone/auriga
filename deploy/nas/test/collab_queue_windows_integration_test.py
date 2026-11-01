@@ -72,7 +72,7 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
         self.assertEqual(made.returncode,0,made.stderr)
         base_files={name:hashlib.sha256((base/name).read_bytes()).hexdigest() for name in ("signed.json","announcement.json","root.der")}
         (source / "batch.json").write_text(json.dumps({"baseVersion": "1", "baseSignedSha256":base_files["signed.json"],"baseFiles":base_files,"entries": entries}))
-        self.command = [sys.executable, "-I", str(self.repo / "deploy/nas/scripts/sign-collab-queue.py"),
+        self.command = [sys.executable, "-I", "-X", "utf8", str(self.repo / "deploy/nas/scripts/sign-collab-queue.py"),
             "--request", str(source), "--output", str(self.base / "output"), "--jar", str(self.jar),
             "--jar-sha256", jar_hash, "--root-kid", "fixture-root", "--root-fingerprint", self.fingerprint,
             "--root-private", str(self.base / "private.der"), "--approved-by", "alice",
@@ -100,6 +100,7 @@ class WindowsQueueIntegrationTests(unittest.TestCase):
             self.assertEqual(verified.returncode,0,verified.stderr)
         original = (out / "2/signed.json").read_bytes()
         repeated = subprocess.run(self.command, capture_output=True, text=True)
+        self.assertIsInstance(repeated.stderr, str, "CLI diagnostics must be decoded without reader-thread errors")
         self.assertNotEqual(repeated.returncode, 0)
         self.assertEqual((out / "2/signed.json").read_bytes(), original)
         self.assertEqual(len(list(out.rglob("approval.json"))), 2)
