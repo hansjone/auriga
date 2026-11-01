@@ -32,6 +32,7 @@ func freePort(t *testing.T) int {
 }
 
 func TestCredentialsAndPaths(t *testing.T) {
+	t.Setenv("AURIGA_PG_CACHE_DIR", "")
 	dir := t.TempDir()
 	first, err := credentials(dir)
 	if err != nil {
@@ -87,6 +88,28 @@ func startForTest(t *testing.T, o devOptions) devConnections {
 }
 
 func fmtPort(port int) string { return fmt.Sprintf("%d", port) }
+
+func TestDevCacheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	shared := t.TempDir()
+	t.Setenv("AURIGA_PG_CACHE_DIR", shared)
+	o := devOptions{DataDir: dir, PGPort: 15433, NATSPort: 14222}
+	normalized, err := o.normalized()
+	if err != nil || normalized.CacheDir != shared {
+		t.Fatalf("shared archive cache not used: %+v, %v", normalized, err)
+	}
+	o.CacheDir = t.TempDir()
+	normalized, err = o.normalized()
+	if err != nil || normalized.CacheDir != o.CacheDir {
+		t.Fatalf("explicit cache did not take precedence: %+v, %v", normalized, err)
+	}
+	o.CacheDir = ""
+	t.Setenv("AURIGA_PG_CACHE_DIR", "")
+	normalized, err = o.normalized()
+	if err != nil || normalized.CacheDir != filepath.Join(dir, "cache") {
+		t.Fatalf("default cache changed: %+v, %v", normalized, err)
+	}
+}
 
 func TestDevLifecycle(t *testing.T) {
 	dir := t.TempDir()

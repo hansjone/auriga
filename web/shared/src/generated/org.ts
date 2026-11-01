@@ -108,7 +108,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description 发 user.disabled。不能停用自己，不能停用最后一个超管（409 org.last_owner）。 */
+    /** @description 发 user.disabled。操作者须覆盖目标的有效权限（含组继承），否则 403 org.grant_exceeds_own。不能停用自己，不能停用最后一个超管（409 org.last_owner）。 */
     post: operations['disableMember'];
     delete?: never;
     options?: never;
@@ -127,6 +127,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
+    /** @description 操作者须覆盖目标停用期间保留的有效权限（含组继承），否则 403 org.grant_exceeds_own。 */
     post: operations['enableMember'];
     delete?: never;
     options?: never;
@@ -145,7 +146,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description 离职。发 user.offboarded，后续的导出、归档、转交由各服务按事件处理。 */
+    /** @description 离职。操作者须覆盖目标的有效权限（含组继承），否则 403 org.grant_exceeds_own。发 user.offboarded，后续的导出、归档、转交由各服务按事件处理。 */
     post: operations['offboardMember'];
     delete?: never;
     options?: never;
@@ -304,6 +305,7 @@ export interface paths {
     };
     get: operations['listRoleBindings'];
     put?: never;
+    /** @description 只能授予本人权限覆盖的角色（403 org.grant_exceeds_own）；成员主体须在职且启用（非 active 返回 409 org.conflict）。 */
     post: operations['createRoleBinding'];
     delete?: never;
     options?: never;
@@ -321,7 +323,7 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** @description 不能撤销最后一个超管（409 org.last_owner）。 */
+    /** @description 只能撤销本人权限覆盖的角色（403 org.grant_exceeds_own）；不能撤销最后一个超管（409 org.last_owner）。 */
     delete: operations['deleteRoleBinding'];
     options?: never;
     head?: never;
@@ -738,8 +740,8 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 状态冲突（common.conflict 等）。 */
-    Conflict: {
+    /** @description 没有权限（common.forbidden 或更具体的码）。 */
+    Forbidden: {
       headers: {
         [name: string]: unknown;
       };
@@ -747,8 +749,8 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 没有权限（common.forbidden 或更具体的码）。 */
-    Forbidden: {
+    /** @description 状态冲突（common.conflict 等）。 */
+    Conflict: {
       headers: {
         [name: string]: unknown;
       };
@@ -1006,6 +1008,7 @@ export interface operations {
           'application/json': components['schemas']['Member'];
         };
       };
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
     };
   };
@@ -1029,6 +1032,7 @@ export interface operations {
           'application/json': components['schemas']['Member'];
         };
       };
+      403: components['responses']['Forbidden'];
     };
   };
   offboardMember: {
@@ -1058,6 +1062,7 @@ export interface operations {
           'application/json': components['schemas']['Member'];
         };
       };
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
     };
   };
@@ -1478,6 +1483,7 @@ export interface operations {
         };
       };
       403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
     };
   };
   deleteRoleBinding: {
@@ -1498,6 +1504,7 @@ export interface operations {
         };
         content?: never;
       };
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
     };
   };

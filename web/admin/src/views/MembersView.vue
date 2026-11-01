@@ -163,6 +163,7 @@ function setStatus(action: 'enable' | 'disable') {
         :key="selected.id"
         :member-id="selected.id"
         :member-name="selected.displayName"
+        :member-status="selected.status"
         :disabled="locked"
         @locked="roleLocked = $event"
         @updated="rolesUpdated"

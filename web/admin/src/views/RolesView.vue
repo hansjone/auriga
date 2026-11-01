@@ -32,6 +32,7 @@ import {
   type BindingSubject,
 } from '../admin/rolesApi';
 import { useOrgActions, orgError } from '../admin/useOrgActions';
+import { hasPermission } from '../admin/permissions';
 import { useCursorList } from '../admin/useCursorList';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
@@ -42,7 +43,7 @@ const access = useOrgActions('org.roles.read', 'org.roles.write', t);
 const { permissions, canRead, canWrite, busy, locked, pending, error, notice } =
   access;
 const canGrant = computed(
-  () => canRead.value && permissions.value.includes('org.roles.grant'),
+  () => canRead.value && hasPermission(permissions.value, 'org.roles.grant'),
 );
 const roles = shallowRef<Role[]>([]);
 const catalog = shallowRef<Permission[]>([]);
@@ -103,7 +104,8 @@ const {
   nextCursor: bindingNext,
 } = bindings;
 const candidateRead = computed(() =>
-  permissions.value.includes(
+  hasPermission(
+    permissions.value,
     subjectType.value === 'member' ? 'org.members.read' : 'org.groups.read',
   ),
 );
@@ -120,15 +122,18 @@ const candidates = useCursorList<{ id: string; label: string }>(
       };
     const result = await orgApi.listMembers({
       q: query.value.trim() || undefined,
+      status: 'active',
       limit: 50,
       cursor,
     });
     return {
       ...result,
-      items: result.items.map((member) => ({
-        id: member.id,
-        label: `${member.displayName} (${member.email || member.id})`,
-      })),
+      items: result.items
+        .filter((member) => member.status === 'active')
+        .map((member) => ({
+          id: member.id,
+          label: `${member.displayName} (${member.email || member.id})`,
+        })),
     };
   },
   failure,
@@ -452,7 +457,8 @@ function grant() {
     }),
     async () => {
       if (
-        !permissions.value.includes(
+        !hasPermission(
+          permissions.value,
           type === 'member' ? 'org.members.read' : 'org.groups.read',
         )
       )
@@ -468,8 +474,15 @@ function grant() {
           code: 'common.conflict',
           title: t('conflict'),
         });
-      if (type === 'member') await adminApi.member(candidate.id);
-      else await orgAdminApi.group(candidate.id);
+      if (type === 'member') {
+        const member = await adminApi.member(candidate.id);
+        if (member.status !== 'active')
+          throw new ApiError({
+            status: 409,
+            code: 'org.conflict',
+            title: t('activeMemberRequired'),
+          });
+      } else await orgAdminApi.group(candidate.id);
       if (!access.isAlive()) return;
       await rolesApi.grant({
         roleId: role.id,
@@ -515,6 +528,18 @@ async function retryBindings() {
   if (disabled.value || bindingLoading.value) return;
   error.value = '';
   await bindings.refresh();
+}
+async function confirm() {
+  const bindingWrite = pending.value?.permission === 'org.roles.grant';
+  const roleId = selected.value?.id;
+  await access.confirm();
+  if (!bindingWrite || !access.isAlive() || !error.value) return;
+  const rejection = error.value;
+  await afterWrite(roleId);
+  if (access.isAlive())
+    error.value = error.value
+      ? `${rejection}; ${t('rolesReloadFailed', { error: error.value })}`
+      : rejection;
 }
 </script>
 <template>
@@ -776,7 +801,7 @@ async function retryBindings() {
               :key="permission"
               :value="permission"
               :disabled="
-                !permissions.includes(permission) &&
+                !hasPermission(permissions, permission) &&
                 !editPermissions.includes(permission)
               "
               >{{ permission }}
@@ -794,7 +819,7 @@ async function retryBindings() {
     <ActionConfirm
       :message="pending?.message"
       :busy="busy"
-      @confirm="access.confirm"
+      @confirm="confirm"
       @cancel="!busy && (pending = undefined)"
     />
   </div>

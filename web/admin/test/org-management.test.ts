@@ -350,8 +350,20 @@ describe('invitation management', () => {
     await render(InvitationsView);
     await click('创建成员邀请');
     expect(rolesApi.list).not.toHaveBeenCalled();
+    expect(wrapper!.text()).toContain(
+      '创建邀请需要角色查看权限（org.roles.read）',
+    );
     await wrapper!.findAll('form').at(-1)!.trigger('submit');
     await flushPromises();
+    expect(writes()).toHaveLength(0);
+  });
+  it('does not expand wildcard invitation permissions', async () => {
+    permissions = ['*'];
+    await render(InvitationsView);
+    expect(rolesApi.list).not.toHaveBeenCalled();
+    expect(
+      wrapper!.findAll('button').some((b) => b.text() === '创建成员邀请'),
+    ).toBe(false);
     expect(writes()).toHaveLength(0);
   });
   it.each([
