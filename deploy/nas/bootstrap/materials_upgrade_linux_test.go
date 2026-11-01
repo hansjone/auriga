@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/hansjone/auriga/deploy/bootstrap/collab/testfixture"
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -144,6 +146,57 @@ func testNASMaterialsUpgradeLifecycle(t *testing.T) {
 				t.Fatal("failed approval left partial materials")
 			}
 			collab := filepath.Join(root, "collab-source")
+			// Upgrade first, then activate collab through the real public CLI.
+			// Neither staged nor committed Bifrost receipts may pin its absence.
+			run("stage", true)
+			run("commit", true)
+			receiptBefore, err := os.ReadFile(filepath.Join(out, bifrostGeneration, "upgrade.receipt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			accessRaw, err := os.ReadFile(filepath.Join(base, "access.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := deploymentconfig.Load(accessRaw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := testfixture.Write(t, cfg.TenantID())
+			activate := exec.Command(binary, "collab", "-base", base, "-out", collab, "-input", input, "-public-origin", "https://network.example.com", "-stopped-confirmed")
+			activate.Env = append(os.Environ(), "AURIGA_LINKS_ALLOWED_ORIGINS=https://network.example.com")
+			if b, err := activate.CombinedOutput(); err != nil {
+				t.Fatalf("late collab activation: %v %s", err, b)
+			}
+			run("check", true)
+			// Re-serialization also changes the receipt hash without changing its
+			// independently sealed collab source or original Bifrost generation.
+			collabReceipt := filepath.Join(collab, "activation.receipt")
+			collabRaw, err := os.ReadFile(collabReceipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(collabReceipt, append(collabRaw, '\n'), 0600); err != nil {
+				t.Fatal(err)
+			}
+			checkCollab := exec.Command(binary, "collab", "-base", base, "-out", collab, "-public-origin", "https://network.example.com", "-check")
+			checkCollab.Env = activate.Env
+			if b, err := checkCollab.CombinedOutput(); err != nil {
+				t.Fatalf("rewritten collab receipt: %v %s", err, b)
+			}
+			run("check", true)
+			receiptAfter, err := os.ReadFile(filepath.Join(out, bifrostGeneration, "upgrade.receipt"))
+			if err != nil || string(receiptBefore) != string(receiptAfter) {
+				t.Fatal("collab activation rewrote Bifrost receipt")
+			}
+			// Keep the lifecycle/rollback tests below independent of committed state.
+			// This is disposable fixture cleanup, never an installation upgrade path.
+			if err := os.RemoveAll(out); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(collab); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.Mkdir(collab, 0700); err != nil {
 				t.Fatal(err)
 			}

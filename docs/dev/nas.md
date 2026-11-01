@@ -454,7 +454,7 @@ sh scripts/start.sh
 sh scripts/materials-upgrade.sh commit ORIGINAL_RECEIPT_SHA256
 ```
 
-`config/materials` 的原 identity、TLS、runtime 根、模板、IAM及collab封存内容不改写。新材料位于独立的 `config/materials-upgrades/v-00000000000000000001`，升级收据绑定原收据、collab收据与五份秘密/运行配置摘要。激活事件只追加，校验哈希链、版本和状态；已提交后禁止回退。domain、IP直连和trusted proxy均使用原访问配置与证书。渲染时先校验原封存与升级链，再将 Bifrost 代理配置合并到已核验的当前 collab edge 投影；不覆盖原 edge 配置。
+`config/materials` 的原 identity、TLS、runtime 根、模板、IAM及collab封存内容不改写。新材料位于独立的 `config/materials-upgrades/v-00000000000000000001`，升级收据绑定原收据与五份秘密/运行配置摘要；其中 collab 哈希只记录 stage 当时的历史快照，不固定后续激活状态。当前 collab 收据及源材料仍由 collab 自己的封存校验负责，因此可先升级 Bifrost、后激活 collab，而不重写升级收据。激活事件只追加，校验哈希链、版本和状态；已提交后禁止回退。domain、IP直连和trusted proxy均使用原访问配置与证书。渲染时先校验原封存与升级链，再将 Bifrost 代理配置合并到已核验的当前 collab edge 投影；不覆盖原 edge 配置。
 
 stage 普通失败会清理新建的待发布目录，原材料保持不变。切换或验收失败时，在 commit 前执行 `sh scripts/materials-upgrade.sh rollback ORIGINAL_RECEIPT_SHA256`，并从保留的旧 bundle/原 stack.env 恢复服务；不要使用新配方重新生成原身份。失败的升级收据和秘密保留供核查，后续 stage 复用同一批秘密并追加恢复事件。进程异常留下的未知待发布目录会失败关闭，需保留证据后人工核查，不自动清除。新建的空隔离数据库可保留，不能清卷或删除旧库、角色与秘密来“回滚”。模型主密钥不因此轮换；此命令只支持首次从旧配方增加 Bifrost，不是通用密钥轮换或网络参数修改命令。
 

@@ -22,7 +22,7 @@ var bifrostLeaves = []string{"bifrost/admin_password", "bifrost/member_password"
 type materialsUpgradeReceipt struct {
 	Version int    `json:"version"`
 	Base    string `json:"base"`
-	Collab  string `json:"collab"`
+	Collab  string `json:"collab"` // Historical staging snapshot, not an activation invariant.
 	Files   string `json:"files"`
 }
 
@@ -155,8 +155,10 @@ func nasMaterialsUpgrade(args []string, stdout io.Writer) error {
 		return err
 	}
 	files, err := bifrostSourceDigest(generation)
-	collabHash, collabErr := materialsCollabDigest(*base)
-	if err != nil || collabErr != nil || receipt.Version != 1 || receipt.Base != baseHash || receipt.Files != files || receipt.Collab != collabHash {
+	// Collab may be activated after Bifrost. Its current source is independently
+	// sealed and checked by render-collab; do not freeze its earlier receipt here.
+	_, collabErr := materialsCollabDigest(*base)
+	if err != nil || collabErr != nil || receipt.Version != 1 || receipt.Base != baseHash || receipt.Files != files {
 		return fmt.Errorf("materials generation or original binding changed")
 	}
 	genHash := fmt.Sprintf("%x", sha256.Sum256(receiptRaw))
