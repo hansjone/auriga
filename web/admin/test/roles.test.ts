@@ -467,6 +467,84 @@ describe('role definition workflows', () => {
 });
 
 describe('binding workflows and permission separation', () => {
+  it('labels a failed binding reload while preserving the original rejection', async () => {
+    bindings = [binding()];
+    await render();
+    await click('详情');
+    await click('撤销授权');
+    fail = {
+      path: `${base}/role-bindings/${bindingId}`,
+      method: 'DELETE',
+      status: 409,
+      code: 'org.last_owner',
+    };
+    intercept = (path) =>
+      path === `${base}/roles`
+        ? Promise.resolve(problem(503, 'common.unavailable'))
+        : undefined;
+    await confirm();
+    expect(wrapper!.text()).toContain('org.last_owner');
+    expect(wrapper!.text()).toContain('重新读取角色及绑定失败：');
+    expect(wrapper!.text()).not.toContain('授权绑定已撤销');
+  });
+  it.each(['disabled', 'offboarded'] as const)(
+    'does not offer a %s member for grants',
+    async (status) => {
+      intercept = (path) =>
+        path === `${base}/members?status=active&limit=50`
+          ? Promise.resolve(json({ items: [{ ...member, status }] }))
+          : undefined;
+      await render();
+      await click('详情');
+      await click('读取授权候选');
+      const select = wrapper!
+        .findAllComponents({ name: 'ElSelect' })
+        .find((item) => item.props('ariaLabel') === '选择授权主体')!;
+      expect(select.props('options')).toEqual([]);
+      expect(writes()).toHaveLength(0);
+    },
+  );
+  it.each(['disabled', 'offboarded'] as const)(
+    'rejects a member changed to %s before confirmation',
+    async (status) => {
+      await render();
+      await prepareGrant();
+      intercept = (path) =>
+        path === `${base}/members/${memberId}`
+          ? Promise.resolve(json({ ...member, status }))
+          : undefined;
+      await confirm();
+      expect(writes()).toHaveLength(0);
+      expect(wrapper!.text()).toContain('org.conflict');
+    },
+  );
+  it.each(['POST', 'DELETE'])(
+    'rereads roles and bindings after a failed %s binding write',
+    async (method) => {
+      bindings = [binding()];
+      await render();
+      if (method === 'POST') await prepareGrant();
+      else {
+        await click('详情');
+        await click('撤销授权');
+      }
+      const before = calls.length;
+      fail = {
+        path: `${base}/role-bindings${method === 'DELETE' ? `/${bindingId}` : ''}`,
+        method,
+        status: 403,
+        code: 'org.grant_exceeds_own',
+      };
+      await confirm();
+      const reads = calls.slice(before).filter((call) => call.method === 'GET');
+      expect(reads.some((call) => call.path === `${base}/roles`)).toBe(true);
+      expect(
+        reads.some((call) => call.path.startsWith(`${base}/role-bindings?`)),
+      ).toBe(true);
+      expect(wrapper!.text()).toContain('org.grant_exceeds_own');
+      expect(writes()).toHaveLength(1);
+    },
+  );
   it('grants a role with grant-only permission and no role-write permission', async () => {
     permissions = all.filter((key) => key !== 'org.roles.write');
     await render();
@@ -616,7 +694,7 @@ describe('binding workflows and permission separation', () => {
   });
   it('paginates and searches member candidates without inventing UUIDs', async () => {
     intercept = (path) =>
-      path === `${base}/members?limit=50`
+      path === `${base}/members?status=active&limit=50`
         ? Promise.resolve(
             json({ items: [member], nextCursor: 'candidate+/cursor' }),
           )
@@ -639,7 +717,9 @@ describe('binding workflows and permission separation', () => {
     ).toBe(true);
     await wrapper!.get('input[aria-label="搜索候选成员"]').setValue('alice');
     await click('读取授权候选');
-    expect(calls.at(-1)!.path).toBe(`${base}/members?q=alice&limit=50`);
+    expect(calls.at(-1)!.path).toBe(
+      `${base}/members?q=alice&status=active&limit=50`,
+    );
   });
 });
 
@@ -701,7 +781,7 @@ describe('role page state boundaries', () => {
   it('rejects stale member candidates after switching subject type', async () => {
     let resolve!: (response: Response) => void;
     intercept = (path) =>
-      path === `${base}/members?limit=50`
+      path === `${base}/members?status=active&limit=50`
         ? new Promise((done) => {
             resolve = done;
           })

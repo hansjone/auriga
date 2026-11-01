@@ -44,7 +44,10 @@ func (o devOptions) normalized() (devOptions, error) {
 		return o, err
 	}
 	if o.CacheDir == "" {
-		o.CacheDir = filepath.Join(o.DataDir, "cache")
+		o.CacheDir = os.Getenv("AURIGA_PG_CACHE_DIR")
+		if o.CacheDir == "" {
+			o.CacheDir = filepath.Join(o.DataDir, "cache")
+		}
 	}
 	if o.RuntimeDir == "" {
 		o.RuntimeDir = filepath.Join(o.DataDir, "runtime", "pg")

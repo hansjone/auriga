@@ -21,15 +21,16 @@ final class NetworkSourceJavaProcess {
             System.getProperty("java.home"),
             "bin",
             System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java");
-    var child =
+    var builder =
         new ProcessBuilder(
                 executable.toString(),
                 "-Djava.io.tmpdir=" + System.getProperty("java.io.tmpdir"),
                 "-cp",
                 System.getProperty("java.class.path"),
                 NetworkSourceJavaHost.class.getName())
-            .redirectErrorStream(true)
-            .start();
+            .redirectErrorStream(true);
+    builder.environment().put("AURIGA_SOURCE_FAULTS", "1");
+    var child = builder.start();
     var lines = new LinkedBlockingQueue<String>();
     var captured = new StringBuffer();
     var reader =
@@ -96,6 +97,14 @@ final class NetworkSourceJavaProcess {
       credentials.add(collabNext);
       collect(credentials, memberNext);
       collect(credentials, externalNext);
+      input.write("revoke-member\n");
+      input.flush();
+      stage(lines, "member-revoked");
+      input.write("fault {\"id\":\"revocation-regression\",\"op\":\"revoke-external\"}\n");
+      input.flush();
+      var revoked = stage(lines, "fault-control");
+      assertEquals("revocation-regression", revoked.path("id").asString());
+      assertTrue(revoked.path("revoked").asBoolean());
       child.descendants().forEach(p -> p.info().startInstant().ifPresent(t -> owned.put(p, t)));
       if (eof) input.close();
       else {

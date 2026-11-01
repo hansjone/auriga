@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue';
 import { ApiError, isApiError } from '@auriga/shared';
 import { adminApi } from './api';
+import { hasPermission } from './permissions';
 
 type Translate = (key: string, params?: Record<string, string>) => string;
 export function orgError(error: unknown, t: Translate) {
@@ -28,9 +29,9 @@ export function useOrgActions(read: string, write: string, t: Translate) {
     run: () => Promise<void>;
     permission: string;
   }>();
-  const canRead = computed(() => permissions.value.includes(read));
+  const canRead = computed(() => hasPermission(permissions.value, read));
   const canWrite = computed(
-    () => canRead.value && permissions.value.includes(write),
+    () => canRead.value && hasPermission(permissions.value, write),
   );
   const locked = computed(() => busy.value || !!pending.value);
   let alive = true;
@@ -69,7 +70,7 @@ export function useOrgActions(read: string, write: string, t: Translate) {
     if (
       locked.value ||
       !canRead.value ||
-      !permissions.value.includes(permission)
+      !hasPermission(permissions.value, permission)
     )
       return;
     error.value = '';
@@ -82,7 +83,7 @@ export function useOrgActions(read: string, write: string, t: Translate) {
     busy.value = true;
     try {
       if (!(await authorize())) return;
-      if (!permissions.value.includes(action.permission))
+      if (!hasPermission(permissions.value, action.permission))
         throw new ApiError({
           status: 403,
           code: 'common.forbidden',

@@ -1,0 +1,7 @@
+{
+  "version": "17.5.0",
+  "sha256": {
+    "windows-amd64": "06ced3b3267c569ffb3f85544aac0075926dd81bf78bd5247abb1aa9fe994d6b",
+    "linux-amd64": "646f3269075d1a23904127374e3cdbcef96beb32979fedee25d835877400fcbe"
+  }
+}

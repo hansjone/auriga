@@ -1,7 +1,7 @@
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ElementPlus from 'element-plus';
-import { ApiError, createAurigaI18n } from '@auriga/shared';
+import { ApiError, createAurigaI18n, type Member } from '@auriga/shared';
 import MemberRoles from '../src/admin/MemberRoles.vue';
 import { adminApi } from '../src/admin/api';
 import { rolesApi, type Role, type RoleBinding } from '../src/admin/rolesApi';
@@ -75,6 +75,9 @@ beforeEach(() => {
   });
   vi.spyOn(rolesApi, 'grant').mockResolvedValue(direct);
   vi.spyOn(rolesApi, 'revoke').mockResolvedValue(undefined);
+  vi.spyOn(adminApi, 'member').mockResolvedValue({
+    status: 'active',
+  } as Member);
 });
 afterEach(() => {
   wrapper?.unmount();
@@ -83,7 +86,12 @@ afterEach(() => {
 });
 async function render() {
   wrapper = mount(MemberRoles, {
-    props: { memberId: 'alice', memberName: 'Alice', disabled: false },
+    props: {
+      memberId: 'alice',
+      memberName: 'Alice',
+      memberStatus: 'active',
+      disabled: false,
+    },
     global: { plugins: [createAurigaI18n('zh-CN'), ElementPlus] },
   });
   await flushPromises();
@@ -176,7 +184,12 @@ it('uses the group ID as source without requiring group-read permission', async 
 });
 it('loads after the parent finishes rereading a member following a role change', async () => {
   wrapper = mount(MemberRoles, {
-    props: { memberId: 'alice', memberName: 'Alice', disabled: true },
+    props: {
+      memberId: 'alice',
+      memberName: 'Alice',
+      memberStatus: 'active',
+      disabled: true,
+    },
     global: { plugins: [createAurigaI18n('zh-CN'), ElementPlus] },
   });
   await flushPromises();
@@ -185,4 +198,81 @@ it('loads after the parent finishes rereading a member following a role change',
   await flushPromises();
   expect(rolesApi.memberBindings).toHaveBeenCalledWith('alice');
   expect(wrapper.text()).toContain('直接绑定');
+});
+
+it.each(['disabled', 'offboarded'] as const)(
+  'blocks grants to %s members but keeps bindings readable',
+  async (status) => {
+    await render();
+    await wrapper!.setProps({ memberStatus: status });
+    expect(wrapper!.text()).toContain('仅可向在职且启用的成员授予角色');
+    expect(wrapper!.findComponent({ name: 'ElSelect' }).exists()).toBe(false);
+    expect(wrapper!.text()).toContain('直接绑定');
+    expect(rolesApi.grant).not.toHaveBeenCalled();
+  },
+);
+
+it('rechecks member status before granting after confirmation', async () => {
+  await render();
+  wrapper!
+    .findComponent({ name: 'ElSelect' })
+    .vm.$emit('update:modelValue', 'custom-role');
+  await flushPromises();
+  await click('授予角色');
+  vi.mocked(adminApi.member).mockResolvedValue({
+    status: 'disabled',
+  } as Member);
+  await confirm();
+  expect(rolesApi.grant).not.toHaveBeenCalled();
+  expect(wrapper!.text()).toContain('org.conflict');
+  expect(rolesApi.memberBindings).toHaveBeenCalledTimes(2);
+});
+
+it.each(['grant', 'revoke'] as const)(
+  'rereads bindings and roles after failed %s while preserving the rejection',
+  async (operation) => {
+    vi.mocked(rolesApi[operation]).mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: 'org.grant_exceeds_own',
+        title: 'Rejected',
+      }),
+    );
+    await render();
+    if (operation === 'grant') {
+      wrapper!
+        .findComponent({ name: 'ElSelect' })
+        .vm.$emit('update:modelValue', 'custom-role');
+      await flushPromises();
+    }
+    await click(operation === 'grant' ? '授予角色' : '撤销授权');
+    await confirm();
+    expect(rolesApi.list).toHaveBeenCalledTimes(2);
+    expect(rolesApi.memberBindings).toHaveBeenCalledTimes(2);
+    expect(wrapper!.text()).toContain('org.grant_exceeds_own');
+    expect(wrapper!.emitted('updated')).toBeUndefined();
+  },
+);
+
+it.each(['*', 'org.*', 'org.roles.*'])(
+  'does not expand wildcard read/grant strings from %s',
+  async (permission) => {
+    permissions = [permission, 'system.*'];
+    await render();
+    expect(rolesApi.list).not.toHaveBeenCalled();
+    expect(wrapper!.findComponent({ name: 'ElSelect' }).exists()).toBe(false);
+  },
+);
+
+it('labels a readback failure separately from the rejected write', async () => {
+  await render();
+  vi.mocked(rolesApi.revoke).mockRejectedValue(
+    new ApiError({ status: 409, code: 'org.last_owner', title: 'Rejected' }),
+  );
+  vi.mocked(rolesApi.list).mockRejectedValue(new Error('unavailable'));
+  await click('撤销授权');
+  await confirm();
+  expect(wrapper!.text()).toContain('org.last_owner');
+  expect(wrapper!.text()).toContain('重新读取角色及绑定失败：');
+  expect(wrapper!.emitted('updated')).toBeUndefined();
 });
