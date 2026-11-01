@@ -44,6 +44,7 @@ case "${1:-}" in
     bootstrap_nas_materials
     exec sh "$NAS_ROOT/scripts/render-collab.sh" --stopped ;;
   render) exec sh "$NAS_ROOT/scripts/render.sh" ;;
+  render-core) exec sh "$NAS_ROOT/scripts/render.sh" --core-only ;;
   render-collab) exec sh "$NAS_ROOT/scripts/render-collab.sh" ;;
   prepare-socket) prepare_socket_parent ;;
   check)
@@ -58,13 +59,21 @@ case "${1:-}" in
     _rotation=
     _rotation_available=1
     _source="$AURIGA_DATA_ROOT/config/collab-source"
-    if [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
-      "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
-        -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2
-      _collab=1
-      if ! _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"); then
+    # Core Compose export must survive any message material/check failure.
+    # Consumers still require available=1; failed material never enables an overlay.
+    if [ "${NAS_COLLAB_CONFIG_DEGRADED:-0}" = 1 ]; then
+      _rotation_available=0
+    elif [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
+      if "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
+        -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2; then
+        _collab=1
+        if ! _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"); then
+          _rotation_available=0
+          printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; core/stop configuration remains available' >&2
+        fi
+      else
         _rotation_available=0
-        printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; core/stop configuration remains available' >&2
+        printf '%s\n' 'message_network=degraded source_check_failed; core configuration remains available' >&2
       fi
     fi
     _export=$(mktemp -d)

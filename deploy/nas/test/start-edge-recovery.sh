@@ -25,7 +25,7 @@ run_compose() {
   [ ! -f "$NAS_ROOT/fail" ] || return 73
 }
 EOF
-for script in preflight network-preflight render emergency rotate-collab-keys; do
+for script in preflight network-preflight render render-collab emergency rotate-collab-keys; do
   printf '#!/bin/sh\nexit 0\n' >"$temp/scripts/$script.sh"
 done
 sh "$temp/scripts/start.sh"

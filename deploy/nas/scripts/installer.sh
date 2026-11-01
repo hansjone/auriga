@@ -3,7 +3,7 @@
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
-  init|render|render-collab|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume) operation=$1 ;;
+  init|render|render-core|render-collab|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
@@ -52,7 +52,9 @@ set -- --mount "type=bind,src=$AURIGA_DATA_ROOT,dst=$AURIGA_DATA_ROOT" \
   --mount "type=bind,src=$NAS_ROOT,dst=$NAS_ROOT,readonly" \
   --mount "type=bind,src=$AURIGA_ACCESS_FILE,dst=$AURIGA_ACCESS_FILE,readonly"
 case "$_boot" in "$NAS_ROOT/"*) ;; *) set -- "$@" --mount "type=bind,src=$_boot,dst=$_boot,readonly" ;; esac
-for _input in "${AURIGA_RUNTIME_BUNDLE:-}" "${AURIGA_RUNTIME_ROOT:-}" "${AURIGA_HTTPS_CERT_FILE:-}" "${AURIGA_HTTPS_KEY_FILE:-}" "${AURIGA_COLLAB_INPUT_DIR:-}"; do
+_collab_input=
+case "$operation" in init|render|render-collab|activate-collab) _collab_input=${AURIGA_COLLAB_INPUT_DIR:-} ;; esac
+for _input in "${AURIGA_RUNTIME_BUNDLE:-}" "${AURIGA_RUNTIME_ROOT:-}" "${AURIGA_HTTPS_CERT_FILE:-}" "${AURIGA_HTTPS_KEY_FILE:-}" "$_collab_input"; do
   [ -n "$_input" ] || continue
   validate_input_path "$_input"
   set -- "$@" --mount "type=bind,src=$_input,dst=$_input,readonly"
@@ -105,5 +107,6 @@ esac
     --env "AURIGA_NAS_BOOTSTRAP_BINARY=$_boot" --env NAS_INSTALLER_ACTIVE=1 \
     --env "NAS_RUNTIME_UPGRADE_BUNDLE=$upgrade_bundle" --env "NAS_RUNTIME_UPGRADE_IMAGE=$upgrade_image" \
     --env "NAS_COLLAB_ROTATION_INPUT=$rotation_input" \
+    --env "NAS_COLLAB_CONFIG_DEGRADED=${NAS_COLLAB_CONFIG_DEGRADED:-0}" \
     --entrypoint /bin/sh "$_image" "$NAS_ROOT/scripts/installer-entry.sh" "$operation"
 )

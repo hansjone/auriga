@@ -4,8 +4,10 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 [ "$#" = 0 ] || die 'Usage: sh start-collab-network.sh'
 load_stack_env
+# This command retries message checks independently of an earlier core render.
+unset NAS_COLLAB_CONFIG_DEGRADED
 require_cmd docker
-[ -d "$AURIGA_DATA_ROOT/config/collab-source" ] || exit 0
+[ -e "$AURIGA_DATA_ROOT/config/collab-source" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-source" ] || [ -e "$AURIGA_DATA_ROOT/config/collab-source.pending" ] || exit 0
 degraded() {
   printf '%s\n' "message_network=degraded $1; core services remain available" >&2
   _recovery_data=$(printf '%s' "$AURIGA_DATA_ROOT" | sed "s/'/'\"'\"'/g")

@@ -354,7 +354,9 @@ run_compose() (
   write_runtime_override "$_runtime" >"$_runtime_private/runtime.yml"
   _rotation=
   _collab_available=1
-  if [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
+  if [ "${NAS_COLLAB_CONFIG_DEGRADED:-0}" = 1 ]; then
+    _collab_available=0
+  elif [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
     if ! _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"); then
       _collab_available=0
       printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; core Compose remains available' >&2
@@ -367,8 +369,15 @@ run_compose() (
   write_collab_rotation_override "$_rotation" >"$_runtime_private/rotation.yml"
   if [ -s "$_runtime_private/rotation.yml" ]; then set -- -f "$_runtime_private/rotation.yml" "$@"; fi
   if [ -s "$_runtime_private/runtime.yml" ]; then set -- -f "$_runtime_private/runtime.yml" "$@"; fi
-  if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
-  case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in true) set -- --profile collab-renew "$@" ;; false) ;; *) die 'invalid collab renewal flag' ;; esac
+  if [ "${NAS_COLLAB_CONFIG_DEGRADED:-0}" != 1 ]; then
+    if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
+    case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in
+      true) set -- --profile collab-renew "$@" ;;
+      false) ;;
+      *) printf '%s\n' 'message_network=degraded invalid collab renewal flag' >&2
+         if collab_snapshot_required "$@"; then return 1; fi ;;
+    esac
+  fi
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
     COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" \
@@ -417,12 +426,24 @@ EOF
   if [ -s "$_private/rotation.yml" ]; then set -- -f "$_private/rotation.yml" "$@"; fi
   write_runtime_override "$_runtime" >"$_private/runtime.yml"
   if [ -s "$_private/runtime.yml" ]; then set -- -f "$_private/runtime.yml" "$@"; fi
-  case "$(cat "$_private/collab.enabled")" in
+  _collab=$(cat "$_private/collab.enabled")
+  case "$_collab" in
     1) set -- -f "$NAS_ROOT/collab-compose.yml" "$@" ;;
-    0) ;;
+    0) # Rejected projections never enter core up, but fixed service names
+       # must remain available for shutdown even when the source check failed.
+       for _arg do
+         case "$_arg" in stop|down) _collab=1; set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; break ;; esac
+       done ;;
     *) die 'invalid privileged collab Compose decision' ;;
   esac
-  case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in true) set -- --profile collab-renew "$@" ;; false) ;; *) die 'invalid collab renewal flag' ;; esac
+  if [ "$_collab" = 1 ]; then
+    case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in
+      true) set -- --profile collab-renew "$@" ;;
+      false) ;;
+      *) printf '%s\n' 'message_network=degraded invalid collab renewal flag' >&2
+         if collab_snapshot_required "$@"; then return 1; fi ;;
+    esac
+  fi
   # Only the fixed main file and generated env_file override have authority.
   # shellcheck disable=SC2086
   env COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" $_cc \

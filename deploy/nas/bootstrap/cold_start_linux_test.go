@@ -171,16 +171,37 @@ esac
 	if err = os.WriteFile(filepath.Join(bin, "ss"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"stop-start", "pg-stopped", "pg-slow", "renew-lock", "lock-clears"} {
+	for _, scenario := range []string{"stop-start", "pg-stopped", "pg-slow", "renew-lock", "lock-clears", "lock-clears-no-policy", "source-check-fails", "budget-fails", "token-check-fails", "renew-flag-fails"} {
 		t.Run(scenario, func(t *testing.T) {
-			positive := scenario == "stop-start" || scenario == "pg-slow" || scenario == "lock-clears"
-			if scenario == "renew-lock" || scenario == "lock-clears" {
-				if err := os.RemoveAll(filepath.Join(data, "config/network-policy")); err != nil {
+			clears := strings.HasPrefix(scenario, "lock-clears")
+			locked := scenario == "renew-lock" || clears
+			injected := strings.HasSuffix(scenario, "-fails")
+			positive := scenario == "stop-start" || scenario == "pg-slow" || clears
+			// An existing installation keeps its last checked projections during
+			// renewal. Removing them here would hide input == output regressions.
+			policy := filepath.Join(data, "config/network-policy/runtime.json")
+			previousPolicy, err := os.ReadFile(policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "lock-clears-no-policy" {
+				if err := os.RemoveAll(filepath.Dir(policy)); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.RemoveAll(filepath.Join(data, "collab-tokens")); err != nil {
 					t.Fatal(err)
 				}
+			}
+			// Inject failures in real message checks, not replacement scripts.
+			if scenario == "source-check-fails" || scenario == "token-check-fails" {
+				target, mode := filepath.Join(data, "config/collab-source/activation.receipt"), os.FileMode(0600)
+				if scenario == "token-check-fails" {
+					target, mode = filepath.Join(data, "collab-tokens"), 0750
+				}
+				if err := os.Chmod(target, 0777); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(target, mode) })
 			}
 			coreUp := filepath.Join(root, scenario+".core-up")
 			messageUp := filepath.Join(root, scenario+".message-up")
@@ -193,6 +214,7 @@ esac
 			var earlyReads atomic.Int32
 			var healthReads atomic.Int32
 			var statusCalls atomic.Int32
+			var recovering atomic.Bool
 			var helperOutput atomic.Value
 			helperOutput.Store([]byte("{}"))
 			helperID := strings.Repeat("f", 64)
@@ -215,15 +237,16 @@ esac
 					if _, err := os.Stat(coreUp); err != nil {
 						earlyReads.Add(1)
 					}
-					if !positive && scenario != "pg-stopped" {
+					if !positive && !recovering.Load() && !injected && scenario != "pg-stopped" {
 						_, _ = w.Write([]byte("[]"))
 					} else {
 						_ = json.NewEncoder(w).Encode([]map[string]string{{"Id": pg.ID}})
 					}
 				case path == "/containers/"+pg.ID+"/json":
 					current := pg
+					current.State.Running = positive || injected || recovering.Load()
 					inspections := healthReads.Add(1)
-					if positive && (scenario != "pg-slow" || inspections >= 4) {
+					if (current.State.Running) && (scenario != "pg-slow" || inspections >= 4) {
 						current.State.Health.Status = "healthy"
 					}
 					_ = json.NewEncoder(w).Encode(current)
@@ -288,8 +311,9 @@ esac
 			})}
 			go func() { _ = server.Serve(listener) }()
 			t.Cleanup(func() { _ = server.Close() })
-			if scenario == "renew-lock" || scenario == "lock-clears" {
-				lock, e := os.OpenFile(filepath.Join(operations, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+			var lock *os.File
+			if locked {
+				lock, e = os.OpenFile(filepath.Join(operations, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -297,7 +321,7 @@ esac
 					t.Fatal(e)
 				}
 				t.Cleanup(func() { _ = lock.Close() })
-				if scenario == "lock-clears" {
+				if clears {
 					releaseCtx, releaseCancel := context.WithCancel(context.Background())
 					t.Cleanup(releaseCancel)
 					go func() {
@@ -331,6 +355,12 @@ esac
 			cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 			cmd.WaitDelay = time.Second
 			cmd.Env = append(os.Environ(), "NAS_ROOT="+recipe, "AURIGA_DATA_ROOT="+data, "AURIGA_NAS_BOOTSTRAP_BINARY="+binary, "PATH="+bin+":"+os.Getenv("PATH"), "COLD_CLI_LOG="+logPath, "COLD_CORE_UP="+coreUp, "COLD_MESSAGE_UP="+messageUp, "AURIGA_TEST_MIN_MEMORY_KB=0", "AURIGA_TEST_MIN_DISK_KB=0")
+			if scenario == "budget-fails" {
+				cmd.Env = append(cmd.Env, "AURIGA_NETWORK_OPERATION_TIMEOUT_MS=invalid")
+			}
+			if scenario == "renew-flag-fails" {
+				cmd.Env = append(cmd.Env, "AURIGA_COLLAB_RENEW_ENABLED=invalid")
+			}
 			began := time.Now()
 			output, e := cmd.CombinedOutput()
 			if e != nil {
@@ -341,7 +371,7 @@ esac
 			}
 			if positive {
 				_, messageErr := os.Stat(messageUp)
-				if messageErr != nil || !strings.Contains(string(output), "message_network=READY") || (scenario != "lock-clears" && strings.Contains(string(output), "message_network=degraded")) {
+				if messageErr != nil || !strings.Contains(string(output), "message_network=READY") || (!clears && strings.Contains(string(output), "message_network=degraded")) {
 					t.Fatalf("message network did not become READY: %s", output)
 				}
 				if statusCalls.Load() == 0 {
@@ -353,11 +383,60 @@ esac
 			} else if !strings.Contains(string(output), "message_network=degraded") {
 				t.Fatalf("missing isolated message degradation: %s", output)
 			}
-			if scenario != "renew-lock" && pgReads.Load() == 0 {
+			if !injected && scenario != "renew-lock" && pgReads.Load() == 0 {
 				t.Fatalf("production PG observer was bypassed: %s", output)
 			}
 			if earlyReads.Load() != 0 {
 				t.Fatal("PG was observed before core startup")
+			}
+			cliLog, err := os.ReadFile(logPath)
+			if err != nil || !strings.Contains(string(cliLog), " restart --no-deps agent") {
+				t.Fatalf("core agent recovery was skipped: %v: %s", err, cliLog)
+			}
+			if injected {
+				for _, line := range strings.Split(string(cliLog), "\n") {
+					if scenario != "renew-flag-fails" && strings.Contains(line, " up ") && !strings.Contains(line, " collab network") && strings.Contains(line, "collab-compose.yml") {
+						t.Fatal("failed message projections were still mounted into core services")
+					}
+				}
+				if !strings.Contains(string(output), "message_network_recovery:") {
+					t.Fatalf("missing recovery instruction: %s", output)
+				}
+				if scenario != "renew-flag-fails" {
+					// The real privileged container export must also omit rejected
+					// projections. Source failure is checked independently here;
+					// other render failures use start's explicit degraded decision.
+					export := exec.Command("sh", filepath.Join(recipe, "scripts/installer-entry.sh"), "export-env")
+					export.Env = append(cmd.Env, "NAS_INSTALLER_ACTIVE=1")
+					if scenario != "source-check-fails" {
+						export.Env = append(export.Env, "NAS_COLLAB_CONFIG_DEGRADED=1")
+					}
+					raw, err := export.Output()
+					if err != nil {
+						t.Fatalf("message check blocked core export: %v", err)
+					}
+					archive := tar.NewReader(bytes.NewReader(raw))
+					decisions := map[string]string{}
+					for {
+						entry, err := archive.Next()
+						if err == io.EOF {
+							break
+						}
+						if err != nil {
+							t.Fatal(err)
+						}
+						if entry.Name == "collab.enabled" || entry.Name == "collab.rotation.available" {
+							value, err := io.ReadAll(archive)
+							if err != nil {
+								t.Fatal(err)
+							}
+							decisions[entry.Name] = strings.TrimSpace(string(value))
+						}
+					}
+					if decisions["collab.enabled"] != "0" || decisions["collab.rotation.available"] != "0" {
+						t.Fatalf("failed message material enabled container overlay: %v", decisions)
+					}
+				}
 			}
 			for _, generated := range []string{"config/network-policy/runtime.json", "config/network-policy/broker.conf", "collab-tokens"} {
 				if _, err := os.Stat(filepath.Join(data, generated)); err != nil {
@@ -365,6 +444,10 @@ esac
 				}
 			}
 			if scenario == "renew-lock" {
+				retained, err := os.ReadFile(policy)
+				if err != nil || !bytes.Equal(previousPolicy, retained) {
+					t.Fatal("busy startup changed the existing network policy")
+				}
 				// Container installation uses the same real privileged export,
 				cliLog, err := os.ReadFile(logPath)
 				if err != nil {
@@ -407,6 +490,32 @@ esac
 				}
 				if !found {
 					t.Fatal("missing privileged message availability decision")
+				}
+				// Execute the exact printed recovery command after releasing the
+				// real lock; the same production observer must then allow READY.
+				var recovery string
+				for _, line := range strings.Split(string(output), "\n") {
+					if strings.HasPrefix(line, "message_network_recovery: ") {
+						recovery = strings.TrimPrefix(line, "message_network_recovery: ")
+					}
+				}
+				if recovery == "" {
+					t.Fatal("missing executable recovery command")
+				}
+				if err := unix.Flock(int(lock.Fd()), unix.LOCK_UN); err != nil {
+					t.Fatal(err)
+				}
+				recovering.Store(true)
+				recoverCtx, recoverCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer recoverCancel()
+				retry := exec.CommandContext(recoverCtx, "unshare", "-m", "--", "sh", "-ec", program, "sh", socket, recovery)
+				retry.Env = cmd.Env
+				retry.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+				retry.Cancel = func() error { return syscall.Kill(-retry.Process.Pid, syscall.SIGKILL) }
+				retry.WaitDelay = time.Second
+				recovered, err := retry.CombinedOutput()
+				if err != nil || !strings.Contains(string(recovered), "message_network=READY") {
+					t.Fatalf("printed message recovery failed: %v: %s", err, recovered)
 				}
 			}
 			t.Logf("real public startup completed in %s; PG observer reads=%d", time.Since(began), pgReads.Load())

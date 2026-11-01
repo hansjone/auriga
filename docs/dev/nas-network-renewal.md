@@ -111,6 +111,12 @@ AURIGA_DATA_ROOT='/share/Container/auriga-test' sh '/absolute/deploy-nas/scripts
 
 该命令重新执行同一有界门禁、刷新投影并启动消息组件，无须再跑整站 `start.sh`；核心和 PG 须已运行。采用明确恢复命令方案，小时控制器不增加 Docker Compose CLI 或重建服务权限。运营者主动 pause 时不提示恢复；`AURIGA_MESSAGE_NETWORK_OFFLINE=1` 仍保持消息离线。
 
+`start.sh` 的核心配置生成不运行消息投影；消息配置在单独的非致命边界内生成，任一步骤失败都记录降级，核心启动省略失败的消息挂载。拿不到轮换快照且已有网络策略时，跳过网络预算投影，原文件保持不变；没有策略时才使用封存初始材料生成。消息启动仍须通过原有门禁，不能以核心启动成功代替消息 READY。
+
+当前 `status.sh` 不主动验证消息网络 READY，也不会推送消息降级告警。运维须查看 start/恢复命令的 `message_network` 输出，以及 `collab-renew` 的小时 JSON 日志和消息容器健康状态；出现降级时按日志给出的命令恢复，不能只凭核心服务正常判断消息可用。此限制仍待后续独立改进。
+
+普通 `start.sh` 和消息恢复命令在非离线模式下会恢复续期调度，清除此前手动设置的 pause；单独 pause 不会跨下一次普通 start 保持。需要持续离线维护时使用 `sh deploy-nas/scripts/start.sh --network-offline`，并在需要跨后续调用保持离线时设置 `AURIGA_MESSAGE_NETWORK_OFFLINE=1`，恢复前明确清除该开关。
+
 覆盖不足 48h 的小时任务告警会附当前或下一个可准备时段的准确 UTC 起止：UTC 00:00–06:00、12:00–18:00（北京时间 08:00–14:00、20:00–次日02:00，截止点可用）。正在窗口内则立即准备，错过后不能调钟或缩短离线窗口。
 
 Windows 输出目录的父目录也必须是运营者专用私有目录，不得授予其他用户 DELETE/FILE_DELETE_CHILD；子目录 DACL 不能防止非属主从父目录整体替换它。合并前检查清单必须包含下述 Windows 生产 jar 集成测试；Linux CI 不能替代其 ACL 验证。

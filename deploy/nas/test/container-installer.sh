@@ -96,6 +96,13 @@ check busy_rotation_core_config_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh";
 check busy_rotation_stop_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose stop collab network'
 check busy_rotation_message_start_refused 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose --profile collab-network up -d collab network'
 printf '1\n' >"$TMP/export/collab.rotation.available"
+printf '0\n' >"$TMP/export/collab.enabled"
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path collab.rotation.available runtime.path
+check rejected_message_config_core_up 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
+if grep -q -- "$NAS_ROOT/collab-compose.yml" "$INSTALL_LOG"; then printf 'FAIL rejected_message_config_mounted_into_core\n'; fail=1; fi
+check rejected_message_config_stop 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose stop collab network network-broker'
+if grep -q -- "$NAS_ROOT/collab-compose.yml" "$INSTALL_LOG"; then printf 'PASS rejected_message_config_retains_stop_definitions\n'
+else printf 'FAIL rejected_message_config_lost_stop_definitions\n'; fail=1; fi
 printf 'invalid\n' >"$TMP/export/collab.enabled"
 tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path collab.rotation.available runtime.path
 check reject_invalid_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
@@ -117,6 +124,14 @@ done
 for leaf in ../outside 03 3/other 0; do
   check reject_noncanonical_private_request 1 sh "$NAS_ROOT/scripts/installer.sh" collab-install "$AURIGA_DATA_ROOT/config/collab-operations/requests/$leaf"
 done
+# Message approval inputs cannot block core-only checks/render/export. The
+# explicit message renderer must still validate and reject the same bad path.
+printf 'AURIGA_COLLAB_INPUT_DIR=%s\n' "$TMP/missing-message-approval" >>"$AURIGA_DATA_ROOT/stack.env"
+for operation in check render-core prepare-socket export-env; do
+  check "core_ignores_message_approval_$operation" 0 sh "$NAS_ROOT/scripts/installer.sh" "$operation"
+done
+check message_render_rejects_missing_approval 1 sh "$NAS_ROOT/scripts/installer.sh" render-collab
+printf 'AURIGA_COLLAB_INPUT_DIR=\n' >>"$AURIGA_DATA_ROOT/stack.env"
 chmod 0777 "$TMP/container"
 check reject_unsafe_temporary_parent 1 sh "$NAS_ROOT/scripts/installer.sh" init
 chmod 0755 "$TMP/container"

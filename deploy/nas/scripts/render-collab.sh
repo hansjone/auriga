@@ -33,10 +33,12 @@ else
 fi
 if [ "${_rotation_unavailable:-0}" = 1 ]; then
   sh "$NAS_ROOT/scripts/collab-materials.sh" "$_source" "$AURIGA_DATA_ROOT/config/collab-runtime" --rotated
-  # Preserve an existing protocol signer selection; the message-only retry
-  # refreshes it after the checked rotation snapshot becomes available.
-  _gateway="$AURIGA_DATA_ROOT/config/network-policy/runtime.json"
-  if [ ! -f "$_gateway" ]; then _gateway="$_source/network/runtime.json"; fi
+  # Existing checked policy is immutable during an unavailable snapshot.
+  # Never feed an output back as network-budget's input (it rejects aliasing).
+  if [ -f "$AURIGA_DATA_ROOT/config/network-policy/runtime.json" ]; then
+    _skip_budget=1
+  fi
+  _gateway="$_source/network/runtime.json"
 elif [ -n "$_rotation" ]; then
   sh "$NAS_ROOT/scripts/collab-materials.sh" "$_source" "$AURIGA_DATA_ROOT/config/collab-runtime" --rotated
   _gateway="$_rotation/network/runtime.json"
@@ -51,7 +53,9 @@ if [ -e "$_policy" ] || [ -L "$_policy" ]; then
 else
   mkdir "$_policy"; chown 0:0 "$_policy"; chmod 0755 "$_policy"
 fi
-"$_boot" network-budget -runtime "$_gateway" -broker "$AURIGA_DATA_ROOT/config/materials/network/broker.conf" -out-runtime "$_policy/runtime.json" -out-broker "$_policy/broker.conf" -operation-ms "${AURIGA_NETWORK_OPERATION_TIMEOUT_MS:-30000}"
+if [ "${_skip_budget:-0}" != 1 ]; then
+  "$_boot" network-budget -runtime "$_gateway" -broker "$AURIGA_DATA_ROOT/config/materials/network/broker.conf" -out-runtime "$_policy/runtime.json" -out-broker "$_policy/broker.conf" -operation-ms "${AURIGA_NETWORK_OPERATION_TIMEOUT_MS:-30000}"
+fi
 
 if [ -e "$AURIGA_DATA_ROOT/collab-tokens" ] || [ -L "$AURIGA_DATA_ROOT/collab-tokens" ]; then
   [ -d "$AURIGA_DATA_ROOT/collab-tokens" ] && [ ! -L "$AURIGA_DATA_ROOT/collab-tokens" ] \
