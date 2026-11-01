@@ -568,7 +568,7 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		return fmt.Errorf("unexpected NAS rotation arguments")
 	}
 	switch action {
-	case "publish", "install", "status", "history-check", "history-check-pg", "path", "check", "stop", "prepare", "renew", "prepare-recovery", "recover-expired", "queue-prepare", "queue-import", "queue-export", "recover-pending", "pause", "resume":
+	case "publish", "install", "status", "history-check", "history-check-pg", "startup-check", "path", "check", "stop", "prepare", "renew", "prepare-recovery", "recover-expired", "queue-prepare", "queue-import", "queue-export", "recover-pending", "pause", "resume":
 	default:
 		return fmt.Errorf("unsupported NAS rotation action")
 	}
@@ -614,6 +614,13 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 		return err
 	}
 	if _, err = os.Lstat(r.root); os.IsNotExist(err) {
+		if action == "startup-check" {
+			if err = r.historyCheck(nil, io.Discard); err != nil {
+				return err
+			}
+			_, err = engine.database(r)
+			return err
+		}
 		if action == "path" || action == "check" {
 			return nil
 		}
@@ -621,6 +628,9 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 	}
 	r.inspectOnly = action == "path" || action == "status" || action == "history-check" || action == "history-check-pg"
 	r.readyOnly = action == "check" || action == "history-check-pg"
+	if action == "startup-check" {
+		r.lockWait = 30 * time.Second
+	}
 	if action == "path" || action == "check" || action == "history-check" || action == "pause" || action == "resume" {
 		r.lockWait = time.Nanosecond // optional message operations must not hold up core startup
 	}
@@ -691,6 +701,18 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 				return err
 			}
 			_, err = r.status(rows)
+			return err
+		case "startup-check":
+			if err = r.historyCheck(rows, io.Discard); err != nil {
+				return err
+			}
+			if err = r.schedulerControl("resume"); err != nil {
+				return err
+			}
+			if err = r.available(rows, time.Now()); err != nil {
+				return err
+			}
+			_, err = r.status(rows) // waits only for a PG that is already running
 			return err
 		case "path":
 			dir, err := r.runtimePath(rows)

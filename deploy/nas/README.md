@@ -118,6 +118,10 @@ sh deploy-nas/scripts/runtime-upgrade.sh /absolute/approved/release-bundle \
 只重建 platform/agent，等待两者就绪后提交；失败自动恢复前指针及服务，记录的 sequence
 高水位仍保留。原模板预算、公开身份、旧实例所需证明和精确镜像允许列表继续保留。
 `render.sh/start.sh`、容器模式 Compose 和挂载探针均读取经校验的活动投影。
+此命令更新实例 DSH runtime，不启动新 collab 镜像；无关消息历史检查失败或 PG 未就绪
+不会作为 runtime stage 的额外门禁。新 collab 镜像在 `start.sh` 消息段或
+`start-collab-network.sh` 的 Compose up 时生效，先强制核历史与 PG 当前 pair。
+消息启动的有界等待、降级与独立恢复命令见 [续期手册](../../docs/dev/nas-network-renewal.md)。
 
 中断留下 pending 激活时，重新执行同候选命令即可继续。若需明确撤回尚未提交的激活，
 container 模式执行 `installer.sh runtime-rollback /absolute/approved/release-bundle <same-image>`，

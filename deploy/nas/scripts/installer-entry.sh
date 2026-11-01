@@ -16,7 +16,7 @@ if [ -e "$(marker_path)" ] || [ "${1:-}" != init ]; then
   done
 fi
 case "${1:-}" in
-  collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume)
+  collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume)
     _action=${1#collab-}
     set -- "$_action" -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"
     [ "$_action" = path ] || set -- "$@" -image "${AURIGA_IMAGE_PLATFORM:?}"
@@ -44,6 +44,7 @@ case "${1:-}" in
     bootstrap_nas_materials
     exec sh "$NAS_ROOT/scripts/render-collab.sh" --stopped ;;
   render) exec sh "$NAS_ROOT/scripts/render.sh" ;;
+  render-collab) exec sh "$NAS_ROOT/scripts/render-collab.sh" ;;
   prepare-socket) prepare_socket_parent ;;
   check)
     [ -f "$(marker_path)" ] || die 'not initialized'

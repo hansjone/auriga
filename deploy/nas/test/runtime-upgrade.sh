@@ -63,15 +63,10 @@ cat >"$temp/scripts/rotate-collab-keys.sh" <<'EOF'
 echo "$1" >>"$TEST_RUNTIME_ROOT/history-actions"
 if [ "$1" = "${TEST_HISTORY_REJECT:-}" ]; then exit 66; fi
 EOF
-for rejected in history-check history-check-pg; do
-  : >"$temp/actions"; : >"$temp/compose.log"; : >"$temp/history-actions"
-  if TEST_HISTORY_REJECT=$rejected sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture; then
-    echo 'upgrade accepted failed history gate' >&2; exit 1
-  else [ "$?" = 66 ]; fi
-  [ ! -s "$temp/actions" ] && [ ! -s "$temp/compose.log" ]
-done
+: >"$temp/actions"; : >"$temp/compose.log"
 : >"$temp/history-actions"
-sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture
-printf 'history-check\nhistory-check-pg\n' >"$temp/expected-history"
-cmp "$temp/expected-history" "$temp/history-actions"
-echo 'PASS explicit_upgrade_requires_offline_history_and_running_pg_before_stage'
+TEST_HISTORY_REJECT=history-check-pg sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture
+[ ! -s "$temp/history-actions" ]
+printf 'stage\ncommit\n' >"$temp/expected"
+cmp "$temp/actions" "$temp/expected"
+echo 'PASS instance_runtime_upgrade_is_independent_of_message_history_and_pg_checks'

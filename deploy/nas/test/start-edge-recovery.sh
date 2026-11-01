@@ -5,7 +5,7 @@ root=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 temp=$(mktemp -d)
 trap 'rm -rf -- "$temp"' EXIT HUP INT TERM
 mkdir -p "$temp/scripts" "$temp/data"
-cp "$root/scripts/start.sh" "$temp/scripts/"
+cp "$root/scripts/start.sh" "$root/scripts/start-collab-network.sh" "$temp/scripts/"
 touch "$temp/data/marker" "$temp/data/stack.env"
 export TEST_START_ROOT="$temp"
 cat >"$temp/scripts/lib.sh" <<'EOF'

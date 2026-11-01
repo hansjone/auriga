@@ -498,7 +498,36 @@ func (r *nasRotation) queueImport(stdout io.Writer) error {
 }
 
 func (r *nasRotation) queueTick(rows []nasRotationRelease, stdout io.Writer) error {
-	return r.queueTickAt(rows, stdout, time.Now())
+	var output bytes.Buffer
+	failure := r.queueTickAt(rows, &output, time.Now())
+	var result map[string]any
+	if json.Unmarshal(output.Bytes(), &result) != nil {
+		_, writeErr := stdout.Write(output.Bytes())
+		if failure != nil {
+			return failure
+		}
+		return writeErr
+	}
+	if result["status"] != "scheduler_paused_by_operator" {
+		availability := failure
+		if availability == nil && r.engine != nil {
+			availability = r.engine.messageAvailability(r)
+		}
+		if availability != nil {
+			command := r.messageRecoveryCommand()
+			result["messageRecoveryCommand"] = command
+			warning, _ := result["warning"].(string)
+			if warning != "" {
+				warning += "; "
+			}
+			result["warning"] = warning + "message_network=degraded: " + availability.Error() + "; after repairing conditions run " + command
+		}
+	}
+	writeErr := json.NewEncoder(stdout).Encode(result)
+	if failure != nil {
+		return failure
+	}
+	return writeErr
 }
 func (r *nasRotation) queueTickAt(rows []nasRotationRelease, stdout io.Writer, now time.Time) (failure error) {
 	coverageUntil := ""

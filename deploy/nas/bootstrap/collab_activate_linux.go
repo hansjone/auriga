@@ -12,7 +12,7 @@ import (
 
 // Recreate only the two already approved signer services, preserving their
 // complete existing configuration. Never starts PG, platform, edge or agent.
-// Public start remains the recovery entry point if recreation is interrupted.
+// The public message-only start is the recovery entry point if interrupted.
 func (e *nasRotationEngine) activate(r *nasRotation) error {
 	if _, err := e.database(r); err != nil {
 		return err
@@ -53,7 +53,7 @@ func (e *nasRotationEngine) activate(r *nasRotation) error {
 		}
 	}
 	if !platformRunning || len(services) != 2 {
-		return fmt.Errorf("activation requires existing healthy platform and signer containers; run public start")
+		return fmt.Errorf("activation requires existing healthy platform and signer containers; recover with %s", r.messageRecoveryCommand())
 	}
 	for _, s := range []string{"collab", "network"} {
 		c := services[s]

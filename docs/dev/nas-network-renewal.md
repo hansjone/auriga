@@ -99,9 +99,17 @@ python3 deploy-nas/scripts/sign-collab-queue.py \
 
 签名 JAR 的核准摘要只从独立核准的 Auriga 发布构建（CI 构建记录或本机完整验证的发行构建）取得，保留源码 commit、构建日志及制品 SHA256 对照；不得从 NAS 导出文件取签名 JAR 的信任 pin。审批 reason 中的精确 JAR 摘要用于关联这些发行证据，不把 NAS 的 trust.json 当来源证明。
 
-升级含 8 天限制的 operator/collab 镜像之前，执行公开只读命令 `sh deploy-nas/scripts/rotate-collab-keys.sh history-check`。它离线核不可变归档的原根双签名，再对清单全部历史逐把核 `0 < not_after - not_before ≤ 8 天`（包括 retired/revoked、三种用途），输出版本、已检查钥数及清单摘要；bootstrap 本身不调用 Engine 或 PG，容器安装模式仍通过已有 Docker 启动无网络 helper。PG 已运行且就绪后，再执行 `history-check-pg`，通过生产 status 核对 PG 当前 pair 与同一归档；PG 已停或尚未就绪时明确拒绝，不自动启动 PG、不等待其就绪。`runtime-upgrade.sh` 在 stage 和重建控制服务之前显式执行这两项门禁，任一失败就停止升级，保留原指针与服务。平台镜像/业务规则变更走明确升级入口，不以普通冷启动替代升级验收；固定 operator JAR 仍不可直接替换。升级新 JAR 时，运营者**必须另用经独立核准的新 JAR 的只读 `verify-archived` 对同一对 signed/announcement 和原根指纹复核**，保留新 JAR 摘要及输出，避免 Go/Java 规则将来不同步；任一超限或拒绝均停止升级，不删历史。
+升级含 8 天限制的 operator/collab 镜像之前，执行公开只读命令 `sh deploy-nas/scripts/rotate-collab-keys.sh history-check`。它离线核不可变归档的原根双签名，再对清单全部历史逐把核 `0 < not_after - not_before ≤ 8 天`（包括 retired/revoked、三种用途），输出版本、已检查钥数及清单摘要；bootstrap 本身不调用 Engine 或 PG，容器安装模式仍通过已有 Docker 启动无网络 helper。PG 已运行且就绪后，可用 `history-check-pg` 通过生产 status 核对 PG 当前 pair 与同一归档；该只读命令对已停或尚未就绪 PG 明确拒绝，不启动或等待 PG。新 collab 镜像在 `start.sh` 的消息启动段（或下述消息恢复命令）执行 Compose up 时生效，该处强制执行离线历史与 PG 当前 pair 门禁。`runtime-upgrade.sh` 负责实例 DSH runtime 发行，不启动新 collab 镜像，不再因无关消息历史检查失败或 PG 未就绪而拒绝 stage；其原有签名、序列、服务就绪和回滚要求仍有效。固定 operator JAR 仍不可直接替换。升级新 JAR 时，运营者**必须另用经独立核准的新 JAR 的只读 `verify-archived` 对同一对 signed/announcement 和原根指纹复核**，保留新 JAR 摘要及输出，避免 Go/Java 规则将来不同步；任一超限或拒绝均停止该消息规则升级，不删历史。
 
-普通 `preflight.sh` 只检查主机、材料与镜像前提，不运行消息历史或 PG 观察器。`start.sh` 先启动核心服务，再尝试已有归档的离线历史检查与消息就绪检查；失败只输出 `message_network=degraded`，核心服务保持可用。消息路径读取、history-check、check、pause/resume 遇续期锁占用立即拒绝，由启动路径保留已有投影并降级消息组件，不等待五分钟；发布和续期事务仍保持原有完整互斥锁。Compose 仍保留消息服务定义供 stop/down 使用，配置导出另传轮换快照可用性，缺少已核快照时仅拒绝消息消费者的 up，不阻止核心配置、核心启动或停止操作。PG 观察器不会因为启动检查而自动创建/启动数据库。首次无轮换归档的安装继续走原始签发/消息启动门禁。
+普通 `preflight.sh` 只检查主机、材料与镜像前提，不运行消息历史或 PG 观察器。`start.sh` 先启动核心服务，再调用 `start-collab-network.sh`。消息段 `startup-check` 对续期锁最多等待 30 秒，对本次核心启动已拉起且正在运行的 PG 最多等待 120 秒健康，再核当前 pair；观察器始终不创建或启动已停的 PG。失败输出 `message_network=degraded` 和恢复命令，仅停止消息组件，核心服务保持可用。消息路径读取、history-check、check、pause/resume 仍遇锁立即拒绝；发布和续期事务保持原有完整互斥锁。生成配置拿不到轮换快照时，保留已有动态签名投影并继续生成静态配置、网络预算与令牌目录；消息检查成功后重新生成完整投影。Compose 保留消息服务定义供 stop/down 使用，缺少已核快照时仅拒绝消息消费者的 up，不阻止核心配置、核心启动或停止操作。首次无轮换归档的安装仍通过原始材料验签与已运行 PG 健康检查，再启动消息组件。
+
+小时任务发现消息消费者缺失、已停、不健康或续期失败时，会在 JSON `warning` 和 `messageRecoveryCommand` 中给出带实际数据根、配方路径的可执行命令。修复 PG、历史或锁条件后执行，例如：
+
+```sh
+AURIGA_DATA_ROOT='/share/Container/auriga-test' sh '/absolute/deploy-nas/scripts/start-collab-network.sh'
+```
+
+该命令重新执行同一有界门禁、刷新投影并启动消息组件，无须再跑整站 `start.sh`；核心和 PG 须已运行。采用明确恢复命令方案，小时控制器不增加 Docker Compose CLI 或重建服务权限。运营者主动 pause 时不提示恢复；`AURIGA_MESSAGE_NETWORK_OFFLINE=1` 仍保持消息离线。
 
 覆盖不足 48h 的小时任务告警会附当前或下一个可准备时段的准确 UTC 起止：UTC 00:00–06:00、12:00–18:00（北京时间 08:00–14:00、20:00–次日02:00，截止点可用）。正在窗口内则立即准备，错过后不能调钟或缩短离线窗口。
 

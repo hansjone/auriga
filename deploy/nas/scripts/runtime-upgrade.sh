@@ -19,11 +19,6 @@ runtime_action() {
   fi
 }
 sh "$NAS_ROOT/scripts/preflight.sh"
-if [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
-  # Upgrade gates belong here, never in the cold-start prerequisite path.
-  sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" history-check
-  sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" history-check-pg
-fi
 runtime_action stage
 rollback() {
   _exit=$?

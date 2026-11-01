@@ -5,7 +5,7 @@ set -eu
 load_stack_env
 case "${1:-}" in
   publish|install|recover-expired|queue-import) [ "$#" = 2 ] || die 'expected action and approved directory' ;;
-  status|history-check|history-check-pg|check|prepare|renew|stop|prepare-recovery|queue-prepare|queue-export|recover-pending|pause|resume) [ "$#" = 1 ] || die 'expected one fixed collab action' ;;
+  status|history-check|history-check-pg|startup-check|check|prepare|renew|stop|prepare-recovery|queue-prepare|queue-export|recover-pending|pause|resume) [ "$#" = 1 ] || die 'expected one fixed collab action' ;;
   *) die 'expected publish|install|status|check|prepare|renew|stop' ;;
 esac
 if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then

@@ -18,7 +18,7 @@ cat >"$TMP/nas/scripts/installer.sh" <<'EOF'
 printf '%s\n' "$@" >"$TEST_ROTATION_DATA/argv"
 EOF
 export TEST_ROTATION_NAS="$TMP/nas" TEST_ROTATION_DATA="$TMP/data"
-for action in status check prepare prepare-recovery renew stop queue-prepare queue-export recover-pending pause resume; do
+for action in status check startup-check prepare prepare-recovery renew stop queue-prepare queue-export recover-pending pause resume; do
  sh "$TMP/nas/scripts/rotate-collab-keys.sh" "$action"
  [ "$(cat "$TMP/data/argv")" = "collab-$action" ]
 done

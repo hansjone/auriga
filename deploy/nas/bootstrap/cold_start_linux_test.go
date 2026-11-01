@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	encodingbinary "encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -155,7 +156,12 @@ printf '%s\n' "$*" >>"$COLD_CLI_LOG"
 case "$1 ${2:-}" in
   'image inspect') printf 'linux/amd64\n' ;;
   'compose version'|'info '|'ps -q') exit 0 ;;
-  'compose -f') case " $* " in *' up '*) touch "$COLD_CORE_UP" ;; esac ;;
+  'compose -f') case " $* " in
+    *' up '*) case " $* " in
+      *' collab network '*) touch "$COLD_MESSAGE_UP" ;;
+      *) touch "$COLD_CORE_UP" ;;
+    esac ;;
+  esac ;;
   *) echo 'unexpected fixture CLI operation' >&2; exit 91 ;;
 esac
 `
@@ -165,9 +171,19 @@ esac
 	if err = os.WriteFile(filepath.Join(bin, "ss"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"stop-start", "pg-stopped", "pg-unready", "renew-lock"} {
+	for _, scenario := range []string{"stop-start", "pg-stopped", "pg-slow", "renew-lock", "lock-clears"} {
 		t.Run(scenario, func(t *testing.T) {
+			positive := scenario == "stop-start" || scenario == "pg-slow" || scenario == "lock-clears"
+			if scenario == "renew-lock" || scenario == "lock-clears" {
+				if err := os.RemoveAll(filepath.Join(data, "config/network-policy")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.RemoveAll(filepath.Join(data, "collab-tokens")); err != nil {
+					t.Fatal(err)
+				}
+			}
 			coreUp := filepath.Join(root, scenario+".core-up")
+			messageUp := filepath.Join(root, scenario+".message-up")
 			socket := filepath.Join(root, scenario+".sock")
 			listener, e := net.Listen("unix", socket)
 			if e != nil {
@@ -175,9 +191,15 @@ esac
 			}
 			var pgReads atomic.Int32
 			var earlyReads atomic.Int32
+			var healthReads atomic.Int32
+			var statusCalls atomic.Int32
+			var helperOutput atomic.Value
+			helperOutput.Store([]byte("{}"))
+			helperID := strings.Repeat("f", 64)
+			networkID := strings.Repeat("c", 64)
 			pg := nasRotationContainer{ID: strings.Repeat("b", 64), Image: image}
 			pg.Config.Labels = map[string]string{"com.docker.compose.project": nasRotationProject, "com.docker.compose.service": "postgres", "com.docker.compose.project.working_dir": recipe, "com.docker.compose.project.config_files": filepath.Join(recipe, "docker-compose.yml")}
-			pg.State.Running = scenario == "pg-unready"
+			pg.State.Running = positive
 			pg.State.Health.Status = "starting"
 			pg.Mounts = append(pg.Mounts, struct {
 				Source, Destination string
@@ -193,20 +215,80 @@ esac
 					if _, err := os.Stat(coreUp); err != nil {
 						earlyReads.Add(1)
 					}
-					if scenario == "stop-start" || scenario == "renew-lock" {
+					if !positive && scenario != "pg-stopped" {
 						_, _ = w.Write([]byte("[]"))
 					} else {
 						_ = json.NewEncoder(w).Encode([]map[string]string{{"Id": pg.ID}})
 					}
 				case path == "/containers/"+pg.ID+"/json":
-					_ = json.NewEncoder(w).Encode(pg)
+					current := pg
+					inspections := healthReads.Add(1)
+					if positive && (scenario != "pg-slow" || inspections >= 4) {
+						current.State.Health.Status = "healthy"
+					}
+					_ = json.NewEncoder(w).Encode(current)
+				case path == "/networks/"+nasRotationProject+"_internal":
+					_ = json.NewEncoder(w).Encode(map[string]any{"Id": networkID, "Name": nasRotationProject + "_internal", "Driver": "bridge", "Internal": true, "Labels": map[string]string{"com.docker.compose.project": nasRotationProject, "com.docker.compose.network": "internal"}})
+				case path == "/containers/create" && request.Method == "POST":
+					var body struct {
+						Cmd        []string
+						HostConfig struct {
+							NetworkMode    string
+							ReadonlyRootfs bool
+						}
+					}
+					if json.NewDecoder(request.Body).Decode(&body) != nil || len(body.Cmd) != 7 || body.Cmd[5] != "status" || body.HostConfig.NetworkMode != networkID || !body.HostConfig.ReadonlyRootfs {
+						http.Error(w, "only a read-only production status helper is allowed", 500)
+						return
+					}
+					planRaw, err := os.ReadFile(body.Cmd[6])
+					var plan nasRotationPlan
+					if err != nil || json.Unmarshal(planRaw, &plan) != nil {
+						http.Error(w, "missing real observer plan", 500)
+						return
+					}
+					pair, err := os.ReadFile(plan.Expected)
+					if err != nil {
+						http.Error(w, "missing expected pair", 500)
+						return
+					}
+					payload, err := nasRotationParsePayload(pair)
+					if err != nil {
+						http.Error(w, "invalid expected pair", 500)
+						return
+					}
+					first := map[string]string{}
+					for _, key := range payload.Keys {
+						first[key.Kid] = payload.Issued
+					}
+					reply, err := json.Marshal(nasRotationStatus{Version: payload.Version, Time: time.Now().UTC().Format(time.RFC3339Nano), First: first})
+					if err != nil {
+						http.Error(w, "status encoding", 500)
+						return
+					}
+					helperOutput.Store(reply)
+					statusCalls.Add(1)
+					_ = json.NewEncoder(w).Encode(map[string]string{"Id": helperID})
+				case path == "/containers/"+helperID+"/start":
+					w.WriteHeader(204)
+				case path == "/containers/"+helperID+"/wait":
+					_ = json.NewEncoder(w).Encode(map[string]int{"StatusCode": 0})
+				case path == "/containers/"+helperID+"/logs":
+					data := helperOutput.Load().([]byte)
+					frame := make([]byte, 8+len(data))
+					frame[0] = 1
+					encodingbinary.BigEndian.PutUint32(frame[4:8], uint32(len(data)))
+					copy(frame[8:], data)
+					_, _ = w.Write(frame)
+				case path == "/containers/"+helperID && request.Method == "DELETE":
+					w.WriteHeader(204)
 				default:
 					http.Error(w, "fixture refuses unexpected Engine operation", 500)
 				}
 			})}
 			go func() { _ = server.Serve(listener) }()
 			t.Cleanup(func() { _ = server.Close() })
-			if scenario == "renew-lock" {
+			if scenario == "renew-lock" || scenario == "lock-clears" {
 				lock, e := os.OpenFile(filepath.Join(operations, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 				if e != nil {
 					t.Fatal(e)
@@ -215,6 +297,26 @@ esac
 					t.Fatal(e)
 				}
 				t.Cleanup(func() { _ = lock.Close() })
+				if scenario == "lock-clears" {
+					releaseCtx, releaseCancel := context.WithCancel(context.Background())
+					t.Cleanup(releaseCancel)
+					go func() {
+						for releaseCtx.Err() == nil {
+							if _, err := os.Stat(coreUp); err == nil {
+								break
+							}
+							time.Sleep(10 * time.Millisecond)
+						}
+						timer := time.NewTimer(500 * time.Millisecond)
+						defer timer.Stop()
+						select {
+						case <-releaseCtx.Done():
+							return
+						case <-timer.C:
+							_ = unix.Flock(int(lock.Fd()), unix.LOCK_UN)
+						}
+					}()
+				}
 			}
 			logPath := filepath.Join(root, scenario+".cli")
 			program := `mount --make-rprivate /; mount -t tmpfs tmpfs /run; touch /run/docker.sock; mount --bind "$1" /run/docker.sock; shift; exec sh -ec "$1"`
@@ -222,13 +324,13 @@ esac
 			if scenario == "stop-start" {
 				actions = `sh "$NAS_ROOT/scripts/stop.sh"; ` + actions
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, "unshare", "-m", "--", "sh", "-ec", program, "sh", socket, actions)
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 			cmd.WaitDelay = time.Second
-			cmd.Env = append(os.Environ(), "NAS_ROOT="+recipe, "AURIGA_DATA_ROOT="+data, "AURIGA_NAS_BOOTSTRAP_BINARY="+binary, "PATH="+bin+":"+os.Getenv("PATH"), "COLD_CLI_LOG="+logPath, "COLD_CORE_UP="+coreUp, "AURIGA_TEST_MIN_MEMORY_KB=0", "AURIGA_TEST_MIN_DISK_KB=0")
+			cmd.Env = append(os.Environ(), "NAS_ROOT="+recipe, "AURIGA_DATA_ROOT="+data, "AURIGA_NAS_BOOTSTRAP_BINARY="+binary, "PATH="+bin+":"+os.Getenv("PATH"), "COLD_CLI_LOG="+logPath, "COLD_CORE_UP="+coreUp, "COLD_MESSAGE_UP="+messageUp, "AURIGA_TEST_MIN_MEMORY_KB=0", "AURIGA_TEST_MIN_DISK_KB=0")
 			began := time.Now()
 			output, e := cmd.CombinedOutput()
 			if e != nil {
@@ -237,7 +339,18 @@ esac
 			if _, e = os.Stat(coreUp); e != nil {
 				t.Fatalf("core up was not reached: %s", output)
 			}
-			if !strings.Contains(string(output), "message_network=degraded") {
+			if positive {
+				_, messageErr := os.Stat(messageUp)
+				if messageErr != nil || !strings.Contains(string(output), "message_network=READY") || (scenario != "lock-clears" && strings.Contains(string(output), "message_network=degraded")) {
+					t.Fatalf("message network did not become READY: %s", output)
+				}
+				if statusCalls.Load() == 0 {
+					t.Fatal("production PG observer status helper was bypassed")
+				}
+				if scenario == "pg-slow" && healthReads.Load() < 4 {
+					t.Fatal("PG health wait was bypassed")
+				}
+			} else if !strings.Contains(string(output), "message_network=degraded") {
 				t.Fatalf("missing isolated message degradation: %s", output)
 			}
 			if scenario != "renew-lock" && pgReads.Load() == 0 {
@@ -245,6 +358,11 @@ esac
 			}
 			if earlyReads.Load() != 0 {
 				t.Fatal("PG was observed before core startup")
+			}
+			for _, generated := range []string{"config/network-policy/runtime.json", "config/network-policy/broker.conf", "collab-tokens"} {
+				if _, err := os.Stat(filepath.Join(data, generated)); err != nil {
+					t.Fatalf("static projection skipped: %s: %v", generated, err)
+				}
 			}
 			if scenario == "renew-lock" {
 				// Container installation uses the same real privileged export,

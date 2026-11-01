@@ -2,6 +2,9 @@
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 load_stack_env
+if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+  exec sh "$NAS_ROOT/scripts/installer.sh" render-collab
+fi
 case "${1:-}" in ''|--initialize|--stopped) ;; *) die 'invalid collab render operation' ;; esac
 _source="$AURIGA_DATA_ROOT/config/collab-source"
 _boot=$(bootstrap_binary)
@@ -14,8 +17,8 @@ fi
 if [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
   "$_boot" collab -base "$AURIGA_DATA_ROOT/config/materials" -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check
   if ! _rotation=$("$_boot" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"); then
-    printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; retaining existing projections for core startup' >&2
-    exit 0
+    printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; continuing static projections for core startup' >&2
+    _rotation_unavailable=1
   fi
   if [ -z "$_rotation" ] && [ -n "$_input" ] && [ ! -d "$AURIGA_DATA_ROOT/config/collab-operations" ]; then "$_boot" collab -base "$AURIGA_DATA_ROOT/config/materials" -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -input "$_input/input.json"; fi
 elif [ -n "$_input" ]; then
@@ -28,7 +31,13 @@ elif [ -n "$_input" ]; then
 else
   exit 0
 fi
-if [ -n "$_rotation" ]; then
+if [ "${_rotation_unavailable:-0}" = 1 ]; then
+  sh "$NAS_ROOT/scripts/collab-materials.sh" "$_source" "$AURIGA_DATA_ROOT/config/collab-runtime" --rotated
+  # Preserve an existing protocol signer selection; the message-only retry
+  # refreshes it after the checked rotation snapshot becomes available.
+  _gateway="$AURIGA_DATA_ROOT/config/network-policy/runtime.json"
+  if [ ! -f "$_gateway" ]; then _gateway="$_source/network/runtime.json"; fi
+elif [ -n "$_rotation" ]; then
   sh "$NAS_ROOT/scripts/collab-materials.sh" "$_source" "$AURIGA_DATA_ROOT/config/collab-runtime" --rotated
   _gateway="$_rotation/network/runtime.json"
 else
