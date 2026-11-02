@@ -18,9 +18,9 @@ const { Context } = await import(
 const connectionApi = await import(
   pathToFileURL(hostRequire.resolve('@deepseek-ai/dsh-client-connection'))
 );
-const { WebSocketServer, WebSocket } = await import(
-  pathToFileURL(hostRequire.resolve('ws'))
-);
+// ws is CommonJS in the pinned host. Its require entry exposes the constructors
+// even when dynamic import only supplies the default export.
+const { WebSocketServer, WebSocket } = hostRequire('ws');
 assert.equal(
   hostRequire('@deepseek-ai/dsh-client-connection/package.json').version,
   '0.2.1-rc.3',
