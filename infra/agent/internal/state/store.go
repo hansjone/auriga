@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
+
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
@@ -18,6 +20,7 @@ var (
 	bucketMeta    = []byte("meta")
 	bucketDesired = []byte("desired")
 	bucketActual  = []byte("actual")
+	bucketStartup = []byte("startup-observation")
 	keyNodeMeta   = []byte("node")
 )
 
@@ -45,7 +48,7 @@ func Open(agentDir string) (*Store, error) {
 		return nil, err
 	}
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bucketMeta, bucketDesired, bucketActual} {
+		for _, name := range [][]byte{bucketMeta, bucketDesired, bucketActual, bucketStartup} {
 			if _, e := tx.CreateBucketIfNotExists(name); e != nil {
 				return e
 			}
@@ -127,6 +130,12 @@ func (s *Store) GetNodeMeta() (NodeMeta, error) {
 
 // PutDesired stores the desired InstanceSpec for an instance.
 func (s *Store) PutDesired(spec *nodev1.InstanceSpec) error {
+	return s.PutDesiredWithTrace(spec, "")
+}
+
+// PutDesiredWithTrace commits the spec and its optional startup cause atomically.
+// A replay cannot resurrect a completed operation or replace its cause.
+func (s *Store) PutDesiredWithTrace(spec *nodev1.InstanceSpec, parent string) error {
 	if spec == nil || spec.InstanceId == "" {
 		return fmt.Errorf("spec requires instance_id")
 	}
@@ -135,8 +144,88 @@ func (s *Store) PutDesired(spec *nodev1.InstanceSpec) error {
 		return err
 	}
 	return s.db.Update(func(tx *bbolt.Tx) error {
+		var previous startupObservation
+		_ = json.Unmarshal(tx.Bucket(bucketStartup).Get([]byte(spec.InstanceId)), &previous)
+		if previous.Complete && previous.Generation > previous.CompletedGeneration {
+			previous.CompletedGeneration = previous.Generation
+		}
+		if !telemetry.Valid(parent) {
+			parent = ""
+		}
+		changed := previous.Generation != spec.Generation
+		if changed {
+			previous = startupObservation{Generation: spec.Generation, Parent: parent, CompletedGeneration: previous.CompletedGeneration, Complete: spec.Generation <= previous.CompletedGeneration}
+		} else if !previous.Complete && parent != "" && (!telemetry.Valid(previous.Parent) || previous.Parent[3:35] == parent[3:35]) {
+			// A redelivery is a new dispatch span of the SAME operation. A different
+			// trace cannot rebind a generation or resurrect a completed startup.
+			previous.Parent = parent
+			changed = true
+		}
+		if changed {
+			observation, encodeErr := json.Marshal(previous)
+			if encodeErr != nil {
+				return encodeErr
+			}
+			if putErr := tx.Bucket(bucketStartup).Put([]byte(spec.InstanceId), observation); putErr != nil {
+				return putErr
+			}
+		}
 		return tx.Bucket(bucketDesired).Put([]byte(spec.InstanceId), raw)
 	})
+}
+
+type startupObservation struct {
+	Generation          int64  `json:"generation"`
+	Parent              string `json:"parent,omitempty"`
+	Complete            bool   `json:"complete,omitempty"`
+	CompletedGeneration int64  `json:"completed_generation,omitempty"`
+}
+
+func (s *Store) StartupParent(instanceID string, generation int64) string {
+	var observation startupObservation
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		return json.Unmarshal(tx.Bucket(bucketStartup).Get([]byte(instanceID)), &observation)
+	})
+	if observation.Generation == generation && !observation.Complete && generation > observation.CompletedGeneration && telemetry.Valid(observation.Parent) {
+		return observation.Parent
+	}
+	return ""
+}
+
+func (s *Store) StartupComplete(instanceID string, generation int64) bool {
+	var observation startupObservation
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		return json.Unmarshal(tx.Bucket(bucketStartup).Get([]byte(instanceID)), &observation)
+	})
+	return generation > 0 && (generation <= observation.CompletedGeneration || observation.Generation == generation && observation.Complete)
+}
+
+func (s *Store) completeStartup(tx *bbolt.Tx, status *nodev1.InstanceStatus) error {
+	if status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_STOPPED {
+		var desired nodev1.InstanceSpec
+		if proto.Unmarshal(tx.Bucket(bucketDesired).Get([]byte(status.InstanceId)), &desired) == nil && desired.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING {
+			return nil // An authorized restart's stopped checkpoint is not a terminal startup.
+		}
+	}
+	terminal := status.Ready && status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_RUNNING || status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_STOPPED || status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED && status.GetError().GetAttempts() >= 5
+	if !terminal {
+		return nil
+	}
+	var observation startupObservation
+	if err := json.Unmarshal(tx.Bucket(bucketStartup).Get([]byte(status.InstanceId)), &observation); err != nil || status.ObservedGeneration < 1 || status.ObservedGeneration > observation.Generation {
+		return nil
+	}
+	if status.ObservedGeneration > observation.CompletedGeneration {
+		observation.CompletedGeneration = status.ObservedGeneration
+	}
+	if observation.Generation == status.ObservedGeneration {
+		observation.Complete = true
+	}
+	raw, err := json.Marshal(observation)
+	if err != nil {
+		return err
+	}
+	return tx.Bucket(bucketStartup).Put([]byte(status.InstanceId), raw)
 }
 
 // GetDesired loads a desired spec.
@@ -158,6 +247,7 @@ func (s *Store) DeleteDesired(instanceID string) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		_ = tx.Bucket(bucketDesired).Delete([]byte(instanceID))
 		_ = tx.Bucket(bucketActual).Delete([]byte(instanceID))
+		_ = tx.Bucket(bucketStartup).Delete([]byte(instanceID))
 		return nil
 	})
 }
@@ -190,6 +280,9 @@ func (s *Store) PutActual(rec ActualRecord) error {
 		return err
 	}
 	return s.db.Update(func(tx *bbolt.Tx) error {
+		if err := s.completeStartup(tx, rec.Status); err != nil {
+			return err
+		}
 		return tx.Bucket(bucketActual).Put([]byte(rec.Status.InstanceId), raw)
 	})
 }
