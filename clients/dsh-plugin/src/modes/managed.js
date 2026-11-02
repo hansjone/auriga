@@ -326,6 +326,7 @@ export async function createManaged(options = {}) {
       });
       registerHealthRoute(ctx, {
         pluginVersion,
+        instanceId,
         ready: () => network?.sessionAvailable === true,
       });
 

@@ -242,6 +242,12 @@ public final class WorkspaceService {
               time(clock.instant()),
               time(clock.instant()));
           var row = store.instance(id);
+          store.jdbc.update(
+              "UPDATE instance SET startup_traceparent=? WHERE tenant_id=? AND id=?",
+              WorkspaceStartupTrace.begin(),
+              tenant,
+              id);
+          row = store.instance(id);
           schedule(row);
           row = store.instance(id);
           saveSpec(row, spec(row));
@@ -384,7 +390,21 @@ public final class WorkspaceService {
   }
 
   public void saveSpec(Map<String, Object> row, InstanceSpec next) {
+    saveSpec(row, next, false);
+  }
+
+  void saveStartupSpec(Map<String, Object> row, InstanceSpec next) {
+    saveSpec(row, next, true);
+  }
+
+  private void saveSpec(Map<String, Object> row, InstanceSpec next, boolean startupDerivative) {
     var previous = spec(row);
+    String startupTrace = null;
+    if (next.getDesired() == DesiredState.DESIRED_STATE_RUNNING) {
+      if (previous.getDesired() != next.getDesired()) startupTrace = WorkspaceStartupTrace.begin();
+      else if (startupDerivative || previous.getGeneration() == next.getGeneration())
+        startupTrace = WorkspaceStartupTrace.parent(row);
+    }
     if (previous.getDesired() != next.getDesired()) rotateManagedCredential(row);
     boolean restart =
         (boolean) row.get("restart_pending")
@@ -440,12 +460,13 @@ public final class WorkspaceService {
       next = next.toBuilder().setSecrets(secrets).build();
     }
     store.jdbc.update(
-        "UPDATE instance SET spec=?,ready=CASE WHEN generation<>? THEN false ELSE ready END,generation=?,restart_pending=?,updated_at=? WHERE tenant_id=? AND id=?",
+        "UPDATE instance SET spec=?,ready=CASE WHEN generation<>? THEN false ELSE ready END,generation=?,restart_pending=?,updated_at=?,startup_traceparent=? WHERE tenant_id=? AND id=?",
         next.toByteArray(),
         next.getGeneration(),
         next.getGeneration(),
         restart,
         time(clock.instant()),
+        startupTrace == null || startupTrace.isEmpty() ? null : startupTrace,
         store.tenant(),
         row.get("id"));
     store.jdbc.update(
@@ -740,6 +761,15 @@ public final class WorkspaceService {
               time(clock.instant()),
               store.tenant(),
               id);
+          if (status.getObservedGeneration() == generation
+              && (ready
+                  || phase.equals("stopped")
+                      && spec(row).getDesired() == DesiredState.DESIRED_STATE_STOPPED
+                  || phase.equals("failed") && status.getError().getAttempts() >= 5))
+            store.jdbc.update(
+                "UPDATE instance SET startup_traceparent=NULL WHERE tenant_id=? AND id=?",
+                store.tenant(),
+                id);
           // NodeSessions fences status/inventory with the authenticated control-session lease.
           // A fresh current-generation report can undo an outage, never an explicit migration,
           // drain or revocation. Hello/usage alone must not revive a stale instance observation.

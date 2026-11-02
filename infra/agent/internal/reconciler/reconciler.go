@@ -10,6 +10,7 @@ import (
 
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -46,6 +47,7 @@ type workItem struct {
 	del     *nodev1.DeleteInstance
 	command *nodev1.Command
 	result  chan *nodev1.CommandResult
+	parent  string
 }
 
 // New creates a reconciler. maxConcurrentPrepare defaults to 4.
@@ -88,20 +90,24 @@ func (r *Reconciler) Close() {
 }
 
 // ApplySpec persists desired and queues reconcile (Session / tests).
-func (r *Reconciler) ApplySpec(_ context.Context, spec *nodev1.InstanceSpec) error {
-	return r.Apply(spec)
+func (r *Reconciler) ApplySpec(ctx context.Context, spec *nodev1.InstanceSpec) error {
+	return r.apply(spec, telemetry.Current(ctx).Value)
 }
 
 // Apply queues an ApplySpec (persists desired first).
 func (r *Reconciler) Apply(spec *nodev1.InstanceSpec) error {
+	return r.apply(spec, "")
+}
+
+func (r *Reconciler) apply(spec *nodev1.InstanceSpec, parent string) error {
 	if spec == nil || spec.InstanceId == "" {
 		return fmt.Errorf("missing instance_id")
 	}
 	spec = proto.Clone(spec).(*nodev1.InstanceSpec)
-	if err := r.Store.PutDesired(spec); err != nil {
+	if err := r.Store.PutDesiredWithTrace(spec, parent); err != nil {
 		return err
 	}
-	r.enqueue(spec.InstanceId, workItem{kind: "apply", spec: spec})
+	r.enqueue(spec.InstanceId, workItem{kind: "apply", spec: spec, parent: r.Store.StartupParent(spec.InstanceId, spec.Generation)})
 	return nil
 }
 
@@ -135,7 +141,7 @@ func (r *Reconciler) ReconcileAll(_ context.Context) error {
 			return err
 		}
 		if spec != nil {
-			r.enqueue(id, workItem{kind: "apply", spec: spec})
+			r.enqueue(id, workItem{kind: "apply", spec: spec, parent: r.Store.StartupParent(id, spec.Generation)})
 		}
 	}
 	return nil
@@ -206,6 +212,21 @@ func (r *Reconciler) loop(id string, ch chan workItem) {
 	defer r.wg.Done()
 	for item := range ch {
 		ctx := context.Background()
+		generation := int64(0)
+		if item.spec != nil {
+			generation = item.spec.Generation
+		}
+		if generation == 0 && item.command != nil {
+			if spec, err := r.Store.GetDesired(id); err == nil && spec != nil {
+				generation = spec.Generation
+				item.parent = r.Store.StartupParent(id, generation)
+			}
+		}
+		// A same-generation queued replay must not reopen a completed startup.
+		if r.Store.StartupComplete(id, generation) {
+			item.parent = ""
+		}
+		ctx = telemetry.Start(ctx, item.parent, id, generation, r.Log)
 		switch item.kind {
 		case "restart":
 			item.result <- r.handleRestart(ctx, item.command)
@@ -233,6 +254,9 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		}
 	}
 	spec = proto.Clone(spec).(*nodev1.InstanceSpec)
+	if telemetry.Current(ctx).Generation != spec.Generation || telemetry.Current(ctx).Instance != id {
+		ctx = telemetry.Start(ctx, r.Store.StartupParent(id, spec.Generation), id, spec.Generation, r.Log)
+	}
 	rec, actualErr := r.Store.GetActual(id)
 	if actualErr != nil {
 		r.fail(id, spec.Generation, 0, "agent.ensure_failed", actualErr.Error(), false)
@@ -275,7 +299,7 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		}
 		if err != nil {
 			cancel()
-			r.failRecovery(rec, "runtime inspection failed")
+			r.failRecovery(ctx, rec, "runtime inspection failed")
 			return
 		}
 		if spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING && (st.Running || r.Activation != nil) {
@@ -320,7 +344,7 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		}
 		switch {
 		case err != nil || !actual.Running:
-			r.failRecovery(pending, "pending runtime inspection failed")
+			r.failRecovery(ctx, pending, "pending runtime inspection failed")
 		case !actual.Ready || r.Activation != nil:
 			r.recoverRunning(ctx, pending, actual.Ready && pending.Status.Ready)
 		default:
@@ -354,7 +378,7 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 	}
 	code := "agent.ensure_failed"
 	run := func(activationCtx context.Context) error {
-		r.Log.Info("preparing instance", "instance_id", id, "generation", spec.Generation)
+		telemetry.Log(activationCtx, slog.LevelInfo, "preparing instance")
 		prepCtx, cancelPrep := context.WithTimeout(activationCtx, r.PrepareTimeout)
 		err := r.Driver.Ensure(prepCtx, drvSpec, &runtime.Rendered{})
 		cancelPrep()
@@ -389,13 +413,13 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		err = run(ctx)
 	}
 	if err != nil {
-		r.Log.Warn("runtime activation failed", "instance_id", id, "error", err)
+		telemetry.Log(ctx, slog.LevelWarn, "runtime activation failed", "error", telemetry.Mask(err.Error()))
 		r.fail(id, spec.Generation, rec.Attempts, code, err.Error(), true)
 		return
 	}
 	switch spec.Desired {
 	case nodev1.DesiredState_DESIRED_STATE_RUNNING:
-		r.Log.Info("instance started", "instance_id", id, "generation", spec.Generation)
+		telemetry.Log(ctx, slog.LevelInfo, "instance started")
 		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_RUNNING
 		st.Ready = true
 		st.ObservedGeneration = spec.Generation
@@ -422,7 +446,7 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 	case r.sem <- struct{}{}:
 		defer func() { <-r.sem }()
 	case <-ctx.Done():
-		r.failRecovery(rec, "runtime health recovery timed out")
+		r.failRecovery(ctx, rec, "runtime health recovery timed out")
 		return
 	}
 	st := cloneStatus(previous)
@@ -447,7 +471,7 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 		err = run(ctx)
 	}
 	if err != nil {
-		r.failRecovery(rec, "runtime health recovery failed")
+		r.failRecovery(ctx, rec, "runtime health recovery failed")
 		return
 	}
 	st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_RUNNING
@@ -460,7 +484,8 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 	_ = r.persist(st, 0)
 }
 
-func (r *Reconciler) failRecovery(rec state.ActualRecord, message string) {
+func (r *Reconciler) failRecovery(ctx context.Context, rec state.ActualRecord, message string) {
+	telemetry.Log(ctx, slog.LevelWarn, "runtime health recovery failed", "error", telemetry.Mask(message))
 	attempts := rec.Attempts + 1
 	st := cloneStatus(rec.Status)
 	st.Phase, st.Ready = nodev1.InstancePhase_INSTANCE_PHASE_FAILED, false
