@@ -50,8 +50,10 @@ func RunCLI(args []string, out, logs io.Writer) error {
 		return runJoin(args[1:], logs)
 	case "run":
 		return runAgent(args[1:], logs)
+	case "recover-runtime":
+		return recoverRuntime(args[1:], out, logs)
 	default:
-		return fmt.Errorf("unknown command %q (want join|run|--version)", args[0])
+		return fmt.Errorf("unknown command %q (want join|run|recover-runtime|--version)", args[0])
 	}
 }
 

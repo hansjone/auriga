@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
-import { logEvent } from '../observability/index.js';
+import { logEvent, validTraceparent } from '../observability/index.js';
 
 // This is a logging protocol, not a new status/observer surface. Never serialize
 // an exception, request, identity or caller-supplied diagnostic object.
@@ -411,6 +411,41 @@ export function installNetworkDiagnosticSink(ctx) {
   }
 }
 
+/** Own health observations reuse the existing public Cordis exporter and bounded
+ * isolated writer. Never export arbitrary host logs or response/request objects.
+ * @param {any} ctx @param {{parent:string,span:string,instance:string,generation:number,ready:boolean,elapsed:number}} event */
+export function emitHealthObservation(ctx, event) {
+  try {
+    if (!validTraceparent(event.parent) || !validTraceparent(event.span))
+      return;
+    const fields = {
+      trace_id: event.span.slice(3, 35),
+      span_id: event.span.slice(36, 52),
+      parent_span_id: event.parent.slice(36, 52),
+      instance_id: /^[0-9a-f-]{36}$/.test(event.instance) ? event.instance : '',
+      generation:
+        Number.isSafeInteger(event.generation) && event.generation > 0
+          ? event.generation
+          : 0,
+      ready: event.ready === true,
+      http_status: 200,
+      elapsed_ms: integer(event.elapsed),
+    };
+    logEvent(event.ready ? 'INFO' : 'WARN', 'Managed health response', fields);
+    const line = JSON.stringify({
+      '@timestamp': new Date().toISOString(),
+      service: 'dsh-plugin',
+      level: event.ready ? 'INFO' : 'WARN',
+      message: 'Managed health response',
+      ...fields,
+    });
+    if (Buffer.byteLength(line) <= 2048)
+      sinks.get(ctx?.[SINK])?.send(line, ctx);
+  } catch {
+    /* Observation must not change the health response or authentication. */
+  }
+}
+
 /** One gate per login generation. Repeated identical failures are silent; up to
  * 24 distinct failure signatures and two milestones, regardless of retry count.
  * @param {any} ctx @param {number} generation */
@@ -462,9 +497,21 @@ export function createDiagnosticLog(ctx, generation = 0) {
   };
 }
 
-/** @param {{emit:ReturnType<typeof createDiagnosticLog>,valid:()=>boolean,attempt?:number,signal?:AbortSignal}} options */
-export function createAttemptDiagnostics({ emit, valid, attempt = 0, signal }) {
+/** @param {{emit:ReturnType<typeof createDiagnosticLog>,valid:()=>boolean,attempt?:number,generation?:number,signal?:AbortSignal}} options */
+export function createAttemptDiagnostics({
+  emit,
+  valid,
+  attempt = 0,
+  generation = 0,
+  signal,
+}) {
   let failed = false;
+  let lastHttp = { trace_id: '', last_http_status: 0, endpoint: 'none' };
+  const context = () => ({
+    plugin_generation: generation,
+    attempt,
+    ...lastHttp,
+  });
   /** @type {boolean|null} */ let created = null;
   /** @param {string} phase @param {number} [budget] @param {()=>boolean} [current] */
   function scope(phase, budget = 0, current = () => true) {
@@ -473,7 +520,12 @@ export function createAttemptDiagnostics({ emit, valid, attempt = 0, signal }) {
     function fail(error) {
       if (failed || !valid() || !current()) return;
       failed = true;
-      logEvent('ERROR', 'Network attempt failed', { phase, attempt }, error);
+      logEvent(
+        'ERROR',
+        'Network attempt failed',
+        { ...context(), phase },
+        error,
+      );
       const status = field(error, 'status'),
         rawCode = field(error, 'code');
       const httpStatus =
@@ -543,6 +595,25 @@ export function createAttemptDiagnostics({ emit, valid, attempt = 0, signal }) {
   }
   return {
     scope,
+    context,
+    /** Existing response metadata only; never used by authorization/control flow.
+     * @param {{endpoint:string,traceId:string,status:number}} input */
+    observedHttp(input) {
+      if (!valid()) return;
+      lastHttp = {
+        trace_id: /^[a-f0-9]{32}$/.test(input.traceId) ? input.traceId : '',
+        last_http_status: Number.isInteger(input.status) ? input.status : 0,
+        endpoint: [
+          'register',
+          'keys_announcement',
+          'keys',
+          'tickets',
+          'submit',
+        ].includes(input.endpoint)
+          ? input.endpoint
+          : 'unknown',
+      };
+    },
     /** Only a successfully validated register result may set this flag.
      * @param {boolean} value */
     registered(value) {

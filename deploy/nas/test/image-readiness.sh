@@ -166,4 +166,17 @@ second-line'; do
   elif [ ! -s "$NAS_READY_LOG" ]; then pass observability_query_rejected_before_docker
   else bad observability_query_touched_docker; fi
 done
+
+# Ordinary host prerequisites must not acquire a renewal lock or require PG.
+# The real bootstrap/Engine cold-start coverage is in cold_start_linux_test.go.
+mkdir -p "$AURIGA_DATA_ROOT/config/collab-operations"
+cat >"$NAS_ROOT/scripts/rotate-collab-keys.sh" <<'EOF'
+#!/bin/sh
+[ "$1" = history-check ] || exit 90
+printf '%s\n' "history-check" >>"$NAS_READY_LOG"
+if [ "${NAS_HISTORY_REJECT:-0}" = 1 ]; then echo 'history lifetime precheck refused'; exit 65; fi
+EOF
+NAS_HISTORY_REJECT=1; export NAS_HISTORY_REJECT
+check_preflight generic_preflight_has_no_pg_or_renewal_dependency pass ''
+if grep -qx history-check "$NAS_READY_LOG"; then bad generic_preflight_called_message_observer; fi
 [ "$fail" = 0 ]

@@ -109,7 +109,7 @@ func TestCordisPatchIsLoaderPatchList(t *testing.T) {
 		t.Fatalf("mcp row: %#v", mcp)
 	}
 	web := rows[1]["config"].(map[string]any)
-	if rows[1]["id"] != "webserver" || web["host"] != "0.0.0.0" || web["port"] != 7861 {
+	if rows[1]["id"] != "webserver" || !strings.Contains(fmt.Sprint(web["host"]), "networkInterfaces()") || web["port"] != 7861 {
 		t.Fatalf("webserver row: %#v", rows[1])
 	}
 	rt := rows[2]["config"].(map[string]any)
@@ -205,7 +205,11 @@ func TestCordisPackageRootPreservesManagedConfigAndMcpTokens(t *testing.T) {
 					t.Fatalf("token_ref/header changed: %#v", cfg["headers"])
 				}
 			}
-			if strings.Count(raw, "!!js") != 2 || strings.Contains(raw, "tok-secret") {
+			wantExpressions := 2 // Two lazy MCP token-file reads.
+			if tc.runtime == nodev1.RuntimeKind_RUNTIME_KIND_DOCKER {
+				wantExpressions++ // Container-local listener address.
+			}
+			if strings.Count(raw, "!!js") != wantExpressions || strings.Contains(raw, "tok-secret") {
 				t.Fatal("token file expressions must remain renderer-owned and never inline secrets")
 			}
 		})

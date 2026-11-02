@@ -254,6 +254,9 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		labelGeneration: strconv.FormatInt(s.Generation, 10),
 		labelManaged:    "true",
 	}
+	if d.EdgeContainer != "" {
+		labels["auriga.observability.edge"] = d.EdgeContainer
+	}
 	for k, v := range s.Labels {
 		labels["auriga.label."+k] = v
 	}

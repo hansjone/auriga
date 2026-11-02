@@ -105,10 +105,12 @@ public final class RootKeyPublication {
     var material = new HashSet<String>();
     var active = new HashSet<String>();
     for (var key : payload.path("keys")) {
+      Instant before = Instant.parse(key.path("not_before").asString());
+      Instant after = Instant.parse(key.path("not_after").asString());
       if (!kids.add(key.path("kid").asString())
           || !material.add(key.path("public_key_spki").asString())
-          || !Instant.parse(key.path("not_after").asString())
-              .isAfter(Instant.parse(key.path("not_before").asString()))) throw invalid();
+          || !after.isAfter(before)
+          || after.isAfter(before.plusSeconds(8 * 86400))) throw invalid();
       publicKey(key.path("public_key_spki").asString());
       if ("active".equals(key.path("state").asString())
           && !active.add(key.path("purpose").asString())) throw invalid();

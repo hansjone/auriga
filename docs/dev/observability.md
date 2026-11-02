@@ -5,6 +5,38 @@ Auriga 使用现有 W3C `traceparent`，日志字段为 `trace_id`、`service`�
 模型网关的 ULID、幂等键、消息 ID 均不被 trace 替代。trace 只帮助查日志，不能授权。
 启动及无请求背景事件的 `trace_id` 为空，不虚构与之前请求的因果关系。
 
+### 实例启动的异步因果
+
+新建或由 stopped 改为 running 时，workspace 把有效 W3C 上下文与当前 generation
+同事务写入 `instance.startup_traceparent`；它不属于 InstanceSpec、身份、渲染摘要或环境。
+同一次尚未完成启动的托管材料衍生 generation 显式继承。dispatch 在独立线程建立
+子 span，以 ApplySpec 的可选 `traceparent` 下发；agent 把 spec 与观测数据原子存入
+独立 bbolt bucket，队列/重连/重启不继承已结束 HTTP 的取消或截止。
+执行、健康等待、每次探测 HTTP 与插件健康入站逐层建立子 span，日志记录
+`trace_id`、子/父 span 和 instance/generation；Java 沿用 `spanId`、`mdc_context`，
+Go/插件使用 `span_id/parent_span_id`。探测的
+`Auriga-Observation-Generation` 仅是未经授权信任的诊断值，不参与身份和 ready 判定。
+
+达到 ready、停止或终端失败后关闭该启动因果；restart 的中间 stopped 检查点不关闭。
+同代数重发不会复活已完成因果，无变更 open 不重新绑定；独立恢复使用新 trace。
+旧 agent 可忽略新增字段，旧状态无历史因果；非法或重复 HTTP trace 安全重建，不拒绝业务。
+健康失败记录分类、HTTP 状态、尝试/耗时、脱敏运输异常，以及健康契约四个公开字段的
+诊断投影；任意响应正文、头、身份材料不写日志，不能从 ready=false 推断凭据原因。
+
+托管插件的真实健康事件经已有公开 Cordis logger exporter 和有界独立 stderr writer
+进入实例容器日志；同 trace/generation/ready 状态去重，背压或卸载可能丢记录。
+完整插件异常仍保留在原有限本地日志文件，NAS/compose 提供只读
+`AURIGA_PLUGIN_LOG_DIR` 导入点，只挂脱敏后的插件日志目录，不挂实例家目录或 DSH journal。
+NAS 使用 profile 前创建默认 `deploy/nas/var/plugin-logs` 或指定已有绝对目录。
+
+Alloy 对动态容器另设 discovery：`auriga.managed=true` 且
+`auriga.observability.edge=<当前 Compose project>-edge`，service 标签为 `dsh-instance`。
+该归属标签仅来自 agent 的受信 edge 配置；不伪造 `com.docker.compose.*`，不改变
+生命周期 owned 校验，也不增加 Docker socket 或 root 权限。既有无新标签容器不会
+自动扩采，只能在正常授权的业务生命周期重建后获得标签；不能为观测强制重建。
+可用 `{job=~"auriga-nas|auriga-plugin"} | json | trace_id="<32位ID>"` 一次查询平台、agent、
+托管健康段及已导入的插件文件，并核各源到达与缺源。局测不是 NAS 真实集中链验收。
+
 ## 已接线的边界
 
 - 插件登录/平台、设备控制、AI、托管心跳/面板出站 HTTP 各起一个 trace。

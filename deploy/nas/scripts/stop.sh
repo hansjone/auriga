@@ -23,6 +23,10 @@ require_cmd docker
 [ "$COMPOSE_PROJECT_NAME" = "$AURIGA_NAS_PROJECT" ] \
   || die "refusing stop: COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME != $AURIGA_NAS_PROJECT"
 
+if [ -d "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
+  sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" pause || printf '%s\n' 'scheduler pause failed; inspect renewal controller' >&2
+fi
+
 info "stopping compose project=$AURIGA_NAS_PROJECT (volumes retained; no orphans sweep)"
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" stop || true
 # No --remove-orphans (M1): only containers defined by this compose file.

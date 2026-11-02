@@ -118,6 +118,16 @@ sh deploy-nas/scripts/runtime-upgrade.sh /absolute/approved/release-bundle \
 只重建 platform/agent，等待两者就绪后提交；失败自动恢复前指针及服务，记录的 sequence
 高水位仍保留。原模板预算、公开身份、旧实例所需证明和精确镜像允许列表继续保留。
 `render.sh/start.sh`、容器模式 Compose 和挂载探针均读取经校验的活动投影。
+此命令更新实例 DSH runtime，不启动新 collab 镜像；无关消息历史检查失败或 PG 未就绪
+不会作为 runtime stage 的额外门禁。新 collab 镜像在 `start.sh` 消息段或
+`start-collab-network.sh` 的 Compose up 时生效，先强制核历史与 PG 当前 pair。
+消息启动的有界等待、降级与独立恢复命令见 [续期手册](../../docs/dev/nas-network-renewal.md)。
+
+自动周队列激活及中断恢复会从经收据核验的安装生成网关预算配置，保留现有操作预算，
+写入 `config/collab-operations/gateway/<version>/<sha256>.json`；该目录仍在原控制器写入范围内。
+重建 network 时，配置与同版 `installs/<version>/network/protocol.key` 一起只读绑定，
+不等待人工 start/render 来刷新签名 kid、版本和有效窗。旧收据、安装及预算源不会被覆盖；
+已存在投影的字节或权限不符时拒绝使用。公开 start 后的旧预算绑定通过原归属检查和仅停签名服务的门禁迁移。
 
 中断留下 pending 激活时，重新执行同候选命令即可继续。若需明确撤回尚未提交的激活，
 container 模式执行 `installer.sh runtime-rollback /absolute/approved/release-bundle <same-image>`，
@@ -193,6 +203,10 @@ sh deploy-nas/scripts/status.sh
 `render.sh` / `start.sh` 重复执行只校验和补齐缺少的运行副本，不轮换密钥或覆盖漂移文件。
 已激活后清空输入变量不会禁用 collab；已有数据库回退/密钥续签需要专门的运维批次，不能删收据重做。
 
+清单最多有效 24 小时；一次性测试签发工具也把初始业务钥设为 24 小时。
+NAS 首次激活入口不接受带历史的 next/retired 输入；轮换使用独立的公开 key-rotation 入口，保留原审批源。
+版本化回执、expired-old 恢复及小时巡检/人工根签流程见 [NAS network 续期说明](../../docs/dev/nas-network-renewal.md)。
+
 Compose 自动选入 `collab-compose.yml`。独立 collab 使用同一 platform 镜像、uid10002，
 容器安装模式由离线 helper 校验私有激活收据，并在既有受保护 env 导出流中附带启用标记；
 普通宿主用户不需要遍历 root 私有收据目录，缺失或无效标记拒绝执行 Compose。
@@ -210,6 +224,19 @@ NATS、registry、Bifrost、operator 镜像与签名 DSH runtime 包。edge/agen
 验收分别记录：`/api/collab/v1/network/keys` 经实际门户返回 200 且根签正确；云端插件严格
 READY；桌面正常登录、入网并严格 READY；最后云↔桌各请求和回复均有真实收件证据。
 health、keys 200 或托管实例 READY 均不能代替插件 READY/互发。
+公开消息恢复会重新应用 edge 的 collab 配置；只有容器发生替换时才请求 agent 恢复实例桥接，
+不重启 DSH 或更换设备。`AURIGA_NETWORK_ANNOUNCEMENT_CHECK` 可指定受安装操作人控制、
+不可由其他人写入的绝对可执行验收脚本。脚本及从 `/` 起的每级父目录须归 root 或本次
+安装操作人所有，且不可组写/其他人写；路径必须规范且无符号链接。即使末级脚本为 root/0700，
+也不接受位于 `/tmp` 等共享可写父目录的路径，避免另一 UID 在检查与执行间替换目录项。
+它须用已获授权的短期成员/设备票，通过实际 edge
+读取 `/api/collab/v1/network/keys/announcement`，核 HTTP200、安装根签名与有效窗后才返回0；
+票只由脚本私下读取，不写参数、环境变量或输出。不允许用内部服务票代替成员身份。
+未配置该钩子时消息服务保留运行，恢复返回2并显示 `SERVICES_READY`/公告待验证；不会报完整
+`READY`。钩子拒绝/失败保持降级。修复入口不恢复任何缺失的原设备 ledger；仍须单独授权的恢复流程。
+  `test/announcement-hook-security.sh` 仅在短命私有 mount namespace/16MiB tmpfs 中验证真实属主、
+  权限及 uid65534 替换竞态，Compose/公告为编排替身；不能代替真实授权验收。
+  消息恢复夹具复用该隔离环境；缺 Linux root/namespace/不同 UID 能力时具名 SKIP。
 `deploy/nas/test/collab.sh` 覆盖 domain/ip/proxy 的实际 init/render、权限与篡改负例；
 可选 `AURIGA_NAS_COLLAB_LIVE_IMAGE` 启用 `collab-live.sh`，仅启动单 collab 服务和临时 PG
 验证真实签名发布，不宣称已验证 IAM 入网、插件 READY 或整栈云↔桌。

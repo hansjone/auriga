@@ -1,5 +1,51 @@
 # Selected only after the separate activation receipt and runtime checks pass.
 services:
+  collab-renew:
+    profiles: [collab-renew]
+    image: ${AURIGA_INSTALLER_IMAGE:-${AURIGA_IMAGE_PLATFORM}}
+    user: '0:0'
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE, CHOWN, FOWNER, SETUID, SETGID]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    network_mode: none
+    restart: unless-stopped
+    labels:
+      auriga.nas.rotation.controller: 'true'
+    entrypoint: ['/bin/sh', '${NAS_ROOT}/scripts/renew-collab-loop.sh']
+    environment:
+      NAS_ROOT: ${NAS_ROOT}
+      AURIGA_DATA_ROOT: ${AURIGA_DATA_ROOT}
+      AURIGA_NAS_BOOTSTRAP_BINARY: ${AURIGA_NAS_BOOTSTRAP_BINARY:-${NAS_ROOT}/bin/auriga-nas-bootstrap}
+    volumes:
+      - type: bind
+        source: ${NAS_ROOT}
+        target: ${NAS_ROOT}
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${AURIGA_DATA_ROOT}
+        target: ${AURIGA_DATA_ROOT}
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${AURIGA_DATA_ROOT}/config/collab-operations
+        target: ${AURIGA_DATA_ROOT}/config/collab-operations
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${AURIGA_NAS_BOOTSTRAP_BINARY:-${NAS_ROOT}/bin/auriga-nas-bootstrap}
+        target: ${AURIGA_NAS_BOOTSTRAP_BINARY:-${NAS_ROOT}/bin/auriga-nas-bootstrap}
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${AURIGA_DATA_ROOT}/config/collab-runtime/state
+        target: ${AURIGA_DATA_ROOT}/config/collab-runtime/state
+        bind: { create_host_path: false }
+      - /var/run/docker.sock:/var/run/docker.sock
+    tmpfs: ['/tmp:mode=1777,size=16m']
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
   platform:
     group_add: ['65534']
     environment:
@@ -8,6 +54,7 @@ services:
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/platform:/etc/auriga/network:ro
       - ${AURIGA_DATA_ROOT}/collab-tokens:/run/auriga-collab-token
   collab-db:
+    profiles: [collab-network]
     image: ${AURIGA_IMAGE_POSTGRES}
     user: '0:0'
     cap_drop: [ALL]
@@ -20,17 +67,21 @@ services:
       PGDATABASE: auriga
     secrets: [pg_bootstrap_password]
     entrypoint: ['/bin/sh', '-ec']
-    command: ['export PGPASSWORD="$$(cat /run/secrets/pg_bootstrap_password)"; exec psql -v ON_ERROR_STOP=1 -f /etc/auriga/roles.sql']
+    command:
+      [
+        'export PGPASSWORD="$$(cat /run/secrets/pg_bootstrap_password)"; exec psql -v ON_ERROR_STOP=1 -f /etc/auriga/roles.sql',
+      ]
     volumes:
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/db/roles.sql:/etc/auriga/roles.sql:ro
     depends_on:
-      postgres: {condition: service_healthy}
+      postgres: { condition: service_healthy }
     networks: [internal]
     restart: 'no'
     mem_limit: 64m
     cpus: 0.25
     pids_limit: 32
   collab:
+    profiles: [collab-network]
     image: ${AURIGA_IMAGE_PLATFORM}
     user: '10002:10002'
     group_add: ['65534']
@@ -48,12 +99,28 @@ services:
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/state:/var/lib/auriga/collab
       - ${AURIGA_DATA_ROOT}/collab-tokens:/run/auriga-collab-token:ro
     depends_on:
-      platform: {condition: service_healthy}
-      collab-db: {condition: service_completed_successfully}
+      platform: { condition: service_healthy }
+      collab-db: { condition: service_completed_successfully }
     networks: [internal]
     restart: unless-stopped
     healthcheck:
-      test: ['CMD', 'curl', '--fail', '--silent', '--show-error', '--noproxy', '*', '--cacert', '/etc/auriga/collab/ca.crt', '--cert', '/etc/auriga/collab/client.crt', '--key', '/etc/auriga/collab/client.key', 'https://127.0.0.1:8085/actuator/health']
+      test:
+        [
+          'CMD',
+          'curl',
+          '--fail',
+          '--silent',
+          '--show-error',
+          '--noproxy',
+          '*',
+          '--cacert',
+          '/etc/auriga/collab/ca.crt',
+          '--cert',
+          '/etc/auriga/collab/client.crt',
+          '--key',
+          '/etc/auriga/collab/client.key',
+          'https://127.0.0.1:8085/actuator/health',
+        ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -62,17 +129,20 @@ services:
     cpus: 1
     pids_limit: 256
   edge:
-    depends_on:
-      collab: {condition: service_healthy}
+    depends_on: !override
+      platform: { condition: service_healthy }
+      nats: { condition: service_healthy }
     volumes:
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/edge/edge.config.json:/etc/auriga/edge.config.json:ro
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/edge:/etc/auriga/collab-edge:ro
   network-broker:
+    profiles: [collab-network]
     volumes:
       - ${AURIGA_DATA_ROOT}/config/network-policy/broker.conf:/etc/auriga/network/broker.conf:ro
   network:
+    profiles: [collab-network]
     depends_on:
-      collab: {condition: service_healthy}
+      collab: { condition: service_healthy }
     volumes:
       - ${AURIGA_DATA_ROOT}/config/network-policy/broker.conf:/etc/auriga/network/broker.conf:ro
       - ${AURIGA_DATA_ROOT}/config/network-policy/runtime.json:/etc/auriga/network/runtime.json:ro

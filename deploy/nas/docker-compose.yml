@@ -72,6 +72,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./observability/config.alloy:/etc/alloy/config.alloy:ro
       - ./observability/health.sh:/etc/alloy/health.sh:ro
+      # Public, sanitized plugin-log import only; never mount instance homes or journals.
+      - ${AURIGA_PLUGIN_LOG_DIR:-./var/plugin-logs}:/var/log/auriga-plugin:ro
       - alloydata:/var/lib/alloy
     depends_on:
       alloy-prepare:

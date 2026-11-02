@@ -225,6 +225,10 @@ message Welcome {
 // 创建或更新实例。节点代理按本地策略校验，不通过就拒绝并上报 FAILED（code `agent.policy_denied`）。
 message ApplySpec {
   InstanceSpec spec = 1;
+  // Optional W3C context of the dispatch span for this startup operation.
+  // Observability only: never affects identity, generation, rendering or readiness.
+  // Absent/invalid values must not reject a spec. Session metadata is not per-instance context.
+  string traceparent = 2;
 }
 
 message DeleteInstance {

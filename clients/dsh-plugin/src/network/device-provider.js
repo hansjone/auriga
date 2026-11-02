@@ -139,6 +139,25 @@ export function createDeviceProvider({
           );
         });
         active.throwIfAborted();
+        try {
+          const endpoint =
+            path === '/api/iam/v1/network/register'
+              ? 'register'
+              : path.endsWith('/keys/announcement')
+                ? 'keys_announcement'
+                : path.endsWith('/keys')
+                  ? 'keys'
+                  : path.endsWith('/tickets')
+                    ? 'tickets'
+                    : 'submit';
+          diagnostics?.observedHttp?.({
+            endpoint,
+            traceId: response.headers.get('X-Trace-Id') ?? '',
+            status: response.status,
+          });
+        } catch {
+          // Reading diagnostic response metadata cannot affect the request.
+        }
         const parts = [];
         let size = 0;
         if (response.body) {

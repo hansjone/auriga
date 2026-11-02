@@ -16,7 +16,6 @@ import {
 } from './local/routes.js';
 import { join } from 'node:path';
 import { installSettings } from './settings/host.js';
-import { MANAGED_MODEL_STATUS } from './ai/installation.js';
 import { installNetworkDiagnosticSink } from './network/diagnostics.js';
 import { installObservability, logEvent } from './observability/index.js';
 
@@ -296,7 +295,7 @@ export async function apply(ctx, config) {
     config: config ?? {},
     startHeartbeat: false,
   });
-  logEvent('INFO', 'AI installation', { state: MANAGED_MODEL_STATUS.state });
+  logEvent('INFO', 'AI installation', { state: runtime.modelStatus.state });
   let dispose;
   try {
     dispose = runtime.apply(ctx);

@@ -15,25 +15,7 @@ import (
 // Derive an unsigned runtime projection after the sealed sources were verified.
 // Never write the source receipt, keys, identities or approval material.
 func projectNetworkBudget(raw, broker []byte, ms int) ([]byte, []byte, error) {
-	if ms < 10000 || ms > 120000 {
-		return nil, nil, fmt.Errorf("network operation budget must be in [10000,120000] ms")
-	}
-	var value map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if decoder.Decode(&value) != nil || decoder.Decode(new(any)) != io.EOF || value == nil {
-		return nil, nil, fmt.Errorf("invalid network source")
-	}
-	for _, key := range []string{"redeemTimeoutMillis", "requestTimeoutMillis", "activeIntervalMillis"} {
-		if _, ok := value[key]; !ok {
-			return nil, nil, fmt.Errorf("missing network timing source")
-		}
-	}
-	value["operationTimeoutMillis"] = ms
-	value["redeemTimeoutMillis"] = ms/3 - 2000
-	value["requestTimeoutMillis"] = ms / 6
-	value["activeIntervalMillis"] = 1000
-	out, err := json.MarshalIndent(value, "", "  ")
+	out, err := projectNetworkRuntimeBudget(raw, ms)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -45,7 +27,33 @@ func projectNetworkBudget(raw, broker []byte, ms int) ([]byte, []byte, error) {
 	authSeconds := strconv.Itoa(ms / 3000)
 	broker = authorization.ReplaceAll(broker, []byte("authorization {timeout: "+authSeconds))
 	broker = tls.ReplaceAll(broker, []byte("${1}"+authSeconds))
-	return append(out, '\n'), broker, nil
+	return out, broker, nil
+}
+
+func projectNetworkRuntimeBudget(raw []byte, ms int) ([]byte, error) {
+	if ms < 10000 || ms > 120000 {
+		return nil, fmt.Errorf("network operation budget must be in [10000,120000] ms")
+	}
+	var value map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&value) != nil || decoder.Decode(new(any)) != io.EOF || value == nil {
+		return nil, fmt.Errorf("invalid network source")
+	}
+	for _, key := range []string{"redeemTimeoutMillis", "requestTimeoutMillis", "activeIntervalMillis"} {
+		if _, ok := value[key]; !ok {
+			return nil, fmt.Errorf("missing network timing source")
+		}
+	}
+	value["operationTimeoutMillis"] = ms
+	value["redeemTimeoutMillis"] = ms/3 - 2000
+	value["requestTimeoutMillis"] = ms / 6
+	value["activeIntervalMillis"] = 1000
+	out, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(out, '\n'), nil
 }
 
 func readBudgetSource(path string) ([]byte, error) {

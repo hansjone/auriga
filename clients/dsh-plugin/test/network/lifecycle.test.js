@@ -7,6 +7,39 @@ import { platformConfig } from '../../src/local/platform.js';
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
+test('R2 consent capability requires a live authenticated runtime and disappears on logout', async () => {
+  const lifecycle = createNetworkLifecycle({
+    directory: 'unused',
+    ctx: {},
+    getAccess: async () => 'native',
+    authorizeLocal: async () => false,
+    defaultProvider: {
+      async prepare() {
+        return {};
+      },
+    },
+    async open() {
+      return {
+        consentAvailable: true,
+        status: { connected: true },
+        async start() {},
+        async close() {},
+        consentUI() {},
+      };
+    },
+  });
+  try {
+    assert.equal(lifecycle.consentAvailable, false);
+    lifecycle.login();
+    await until(() => lifecycle.status.connected);
+    assert.equal(lifecycle.consentAvailable, true);
+    lifecycle.logout();
+    assert.equal(lifecycle.consentAvailable, false);
+  } finally {
+    await lifecycle.close();
+  }
+});
+
 test('network-only forbidden reason remains diagnostic after a running runtime closes', async () => {
   let input,
     revoked = 0;

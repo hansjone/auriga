@@ -46,3 +46,27 @@ cmp "$temp/actions" "$temp/expected"
 [ "$(wc -l <"$temp/compose.log")" = 2 ]
 grep -q -- '--wait --wait-timeout 120 --no-build --pull never platform agent' "$temp/compose.log"
 echo 'PASS runtime_upgrade_rolls_back_and_recovers_previous_consumers'
+
+: >"$temp/actions"
+: >"$temp/compose.log"
+printf '#!/bin/sh\nexit 65\n' >"$temp/scripts/preflight.sh"
+if sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture; then
+  echo 'failed historical precheck accepted' >&2; exit 1
+else [ "$?" = 65 ]; fi
+[ ! -s "$temp/actions" ] && [ ! -s "$temp/compose.log" ]
+echo 'PASS runtime_upgrade_precheck_precedes_staging_and_service_changes'
+
+mkdir -p "$temp/data/config/collab-operations"
+printf '#!/bin/sh\nexit 0\n' >"$temp/scripts/preflight.sh"
+cat >"$temp/scripts/rotate-collab-keys.sh" <<'EOF'
+#!/bin/sh
+echo "$1" >>"$TEST_RUNTIME_ROOT/history-actions"
+if [ "$1" = "${TEST_HISTORY_REJECT:-}" ]; then exit 66; fi
+EOF
+: >"$temp/actions"; : >"$temp/compose.log"
+: >"$temp/history-actions"
+TEST_HISTORY_REJECT=history-check-pg sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture
+[ ! -s "$temp/history-actions" ]
+printf 'stage\ncommit\n' >"$temp/expected"
+cmp "$temp/actions" "$temp/expected"
+echo 'PASS instance_runtime_upgrade_is_independent_of_message_history_and_pg_checks'

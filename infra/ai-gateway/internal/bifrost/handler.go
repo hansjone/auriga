@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -61,6 +62,21 @@ func reject(w http.ResponseWriter, status int, code string) {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r, finishTrace := observability.Begin(w, r)
 	defer finishTrace()
+	observed := &statusWriter{ResponseWriter: w}
+	w = observed
+	started := time.Now()
+	endpoint := "unknown"
+	if r.URL.Path == "/ai/v1/models" {
+		endpoint = "models"
+	}
+	if r.URL.Path == "/ai/v1/chat/completions" {
+		endpoint = "chat_completions"
+	}
+	defer func() {
+		slog.InfoContext(r.Context(), "Managed model HTTP completed", "endpoint", endpoint,
+			"http_status", observed.finalStatus(), "elapsed_ms", time.Since(started).Milliseconds())
+	}()
+
 	method := ""
 	switch r.URL.Path {
 	case "/ai/v1/models":
@@ -204,7 +220,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		},
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) { reject(w, 502, "common.unavailable") },
+		ErrorHandler: func(w http.ResponseWriter, request *http.Request, failure error) {
+			slog.WarnContext(request.Context(), "Managed model upstream failed", "error", failure)
+			reject(w, 502, "common.unavailable")
+		},
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+// Preserve controller-based flush/deadline access on the streaming proxy.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *statusWriter) WriteHeader(code int) {
+	if code >= 200 && w.status == 0 {
+		w.status = code
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+func (w *statusWriter) FlushError() error {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+func (w *statusWriter) finalStatus() int {
+	// Zero means no final headers were written; never manufacture HTTP200.
+	return w.status
 }

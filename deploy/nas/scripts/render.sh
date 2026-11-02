@@ -6,11 +6,17 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
 load_stack_env
+case "$*" in
+  '') _core_only=0 ;;
+  --core-only) _core_only=1 ;;
+  *) die 'Usage: render.sh [--core-only]' ;;
+esac
 case "${AURIGA_IAM_EMERGENCY_REMOTE_ENABLED:-true}" in
   true|false) ;;
   *) die 'AURIGA_IAM_EMERGENCY_REMOTE_ENABLED must be true or false' ;;
 esac
 if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+  [ "$_core_only" != 1 ] || exec sh "$NAS_ROOT/scripts/installer.sh" render-core
   exec sh "$NAS_ROOT/scripts/installer.sh" render
 fi
 require_cmd sed awk tr cmp stat
@@ -20,7 +26,9 @@ SECRETS="$AURIGA_DATA_ROOT/secrets"
 CONFIG="$AURIGA_DATA_ROOT/config"
 [ -d "$SECRETS" ] || die "secrets directory missing; run init.sh first"
 bootstrap_nas_materials
-sh "$NAS_ROOT/scripts/render-collab.sh"
+# start owns a separate, non-fatal message configuration boundary. Direct
+# render/init/activation retain their strict material checks.
+if [ "$_core_only" != 1 ]; then sh "$NAS_ROOT/scripts/render-collab.sh"; fi
 sh "$NAS_ROOT/scripts/render-managed.sh"
 if [ -e "$CONFIG/panel" ] || [ -L "$CONFIG/panel" ]; then
   [ -d "$CONFIG/panel" ] && [ ! -L "$CONFIG/panel" ] || die "invalid panel output directory"

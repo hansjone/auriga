@@ -1,8 +1,10 @@
 // @ts-nocheck
-import { MANAGED_MODEL_STATUS } from '../ai/installation.js';
+import { createManagedModelStatus } from '../ai/managed-status.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedNetwork } from '../network/managed-device.js';
+import { installManagedSessionGuard } from '../managed/session.js';
+import { installManagedSettingsOwnership } from '../managed/settings.js';
 import { createConsentRoutes } from '../local/consent-routes.js';
 import { createMessagingRoutes } from '../local/messaging-routes.js';
 import {
@@ -243,7 +245,7 @@ export async function createManaged(options = {}) {
   const sdk = createAurigaSdk({
     getIdentity: () => ({
       uid: ownerId,
-      displayName: ownerId,
+      displayName: network?.account?.displayName ?? ownerId,
       role: 'owner',
     }),
   });
@@ -253,10 +255,17 @@ export async function createManaged(options = {}) {
   let disposeHostAuth;
   let disposeDoor;
   let disposeHttpGuard;
+  let disposeSession;
+  let disposeSettingsOwnership;
   let network;
+  let llm;
+  const models = createManagedModelStatus({ tenantId, ownerId, instanceId });
 
   return {
     mode: /** @type {const} */ ('managed'),
+    get modelStatus() {
+      return models.status;
+    },
     protocol: PROTOCOL_VERSION,
     protocolInfo: protocolInfo(),
     instanceId,
@@ -293,6 +302,16 @@ export async function createManaged(options = {}) {
       }
 
       host.ctx = ctx;
+      ctx.inject?.(['llm'], (modelCtx) => {
+        const service = modelCtx.llm;
+        llm = service;
+        modelCtx.effect(
+          () => () => {
+            if (llm === service) llm = undefined;
+          },
+          'auriga-dsh: managed model status',
+        );
+      });
       disposeHostAuth = installHostAuthentication(ctx.connection, door, {
         browserOrigin,
       });
@@ -301,11 +320,15 @@ export async function createManaged(options = {}) {
       provideAurigaSdk(ctx, {
         getIdentity: () => ({
           uid: ownerId,
-          displayName: ownerId,
+          displayName: network?.account?.displayName ?? ownerId,
           role: 'owner',
         }),
       });
-      registerHealthRoute(ctx, { pluginVersion });
+      registerHealthRoute(ctx, {
+        pluginVersion,
+        instanceId,
+        ready: () => network?.sessionAvailable === true,
+      });
 
       // Same public host services, provider and network lifecycle as connect mode.
       // Profile storage is only durable partitioning; it is not an isolation claim.
@@ -352,6 +375,9 @@ export async function createManaged(options = {}) {
         const authorized = (req) =>
           door.isAuthenticated(req) && browserFenceOk(req, browserOrigin);
         const facade = {
+          get consentAvailable() {
+            return network?.consentAvailable === true;
+          },
           resolve: authorized,
           checkCsrf: (req) =>
             authorized(req) && typeof req.headers.origin === 'string',
@@ -365,7 +391,7 @@ export async function createManaged(options = {}) {
             ctx.webServer.register({
               kind: 'prefix',
               path: '/auriga/local-login',
-              handler(req, res) {
+              async handler(req, res) {
                 if (!authorized(req)) {
                   res.writeHead(401, { 'cache-control': 'no-store' });
                   res.end();
@@ -380,6 +406,7 @@ export async function createManaged(options = {}) {
                   req.method === 'GET' &&
                   path === '/auriga/local-login/status'
                 ) {
+                  await models.refresh(llm);
                   res.writeHead(200, {
                     'content-type': 'application/json',
                     'cache-control': 'no-store',
@@ -389,9 +416,15 @@ export async function createManaged(options = {}) {
                       authenticated: true,
                       mode: 'managed',
                       loggedIn: true,
+                      session: {
+                        available: network?.sessionAvailable === true,
+                      },
                       connected: network?.status?.connected === true,
-                      account: { subject: ownerId },
-                      models: MANAGED_MODEL_STATUS,
+                      account: network?.account ?? { subject: ownerId },
+                      models: models.status,
+                      capabilities: {
+                        consent: network?.consentAvailable === true,
+                      },
                       network: network?.status ?? {
                         connected: false,
                         state: 'unavailable',
@@ -459,15 +492,23 @@ export async function createManaged(options = {}) {
 
       // Door is outermost: even forbidden native writes must authenticate first.
       disposeHttpGuard = installNativePluginHttpGuard(server);
+      disposeSession = installManagedSessionGuard(
+        server,
+        () => network?.sessionAvailable === true,
+      );
       disposeDoor = door.install(server);
+      disposeSettingsOwnership = installManagedSettingsOwnership(ctx);
 
       if (options.startHeartbeat !== false) heartbeat.start();
 
       return () => {
+        models.close();
         void network?.close();
         heartbeat.stop();
         disposeActivity?.();
         disposeDoor?.();
+        disposeSettingsOwnership?.();
+        disposeSession?.();
         disposeHttpGuard?.();
         disposeHostAuth?.();
         server.off('upgrade', onUpgrade);
@@ -483,6 +524,9 @@ export async function createManaged(options = {}) {
       guardWorkspaceRegistry(registry, workspaceRoot),
     getManifest,
     close() {
+      disposeSettingsOwnership?.();
+      disposeSession?.();
+      models.close();
       void network?.close();
       heartbeat.stop();
       disposeActivity?.();

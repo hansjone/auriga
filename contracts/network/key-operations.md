@@ -90,3 +90,19 @@ retired/revoked 不加载私钥。协议响应公钥（含网关 ERROR 使用的
 J7 需配置公开固定 HTTPS 路由、只读 roots/清单挂载、独立私钥 secret、可写受保护 state
 及 PG 持久卷/外部防回退检查点。单签名器使用既有文件独占锁；多副本/配置分发 HA
 仍需部署设计与真实故障验收。未接 J2/J3/J7 不等于真实 N1 网络已闭环。
+
+## 独立离线过期恢复
+
+普通发布的 next/24h 规则不变。运营者可明确审批一次独立离线恢复，使用原根签名的新完整清单；
+不得通过在线 HTTP 开关、修改时钟或伪造首次公布时间实施。`NetworkKeyOperator` 的
+`preflight-recovery`（事务回滚）及 `recover-expired`（提交）复用固定计划、原 state 绑定和 PG 独占门禁。
+
+恢复要求 PG 已有完整历史；旧清单及每把旧钥均已过期至少 360 秒，PG/应用时钟误差不超过 60 秒。
+新清单版本严格增加，issued_at 不早于全部旧截止加 360 秒。保留全部旧 kid 和原材料、用途、期限，
+原 revoked 不能复活，所有旧钥仅为 retired/revoked；新增恰好三个用途各一把独立 active，
+not_before 等于新 issued_at 且不晚于当前时刻，not_after 在当前之后且寿命最多 7 天。
+新 kid 的 firstPublished 记录真实提交时钟，不回填 24 小时历史。
+
+部署适配器须保留批准人、原因、准确 payload/signed/announcement 摘要和客户端重新获取完整 keyset 的明确确认，
+追加恢复 receipt，再安装同版 state/私钥并重启。客户端继续沿原受信根、版本和不可变历史校验；
+不删除账本、不重置信任、不放宽过期检查。未刷新客户端保持拒绝，真实刷新及签发验收由运营者安排。

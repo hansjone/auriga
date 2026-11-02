@@ -20,6 +20,8 @@ export function createConsentRoutes(runtime) {
     };
     if (!runtime.resolve(req))
       return send(401, { code: 'common.unauthenticated' });
+    if (runtime.consentAvailable !== true)
+      return send(404, { code: 'common.not_found' });
     try {
       if (req.method === 'GET' && action === 'snapshot')
         return send(200, await runtime.consentUI(req).snapshot());

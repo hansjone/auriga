@@ -15,6 +15,19 @@ class NetworkRootPublicationTest {
   final Clock clock = Clock.fixed(KeyTestMaterial.NOW, ZoneOffset.UTC);
 
   @Test
+  void businessKeyLifetimeIsBoundedEvenForArchivedPublications() {
+    var payload = m.payload(1, KeyTestMaterial.NOW);
+    var key = (ObjectNode) payload.path("keys").get(0);
+    var before = java.time.Instant.parse(key.path("not_before").asString());
+    key.put("not_after", before.plusSeconds(8 * 86400).toString());
+    var accepted = m.release(payload);
+    assertNotNull(
+        m.verifier(clock).verifyArchived(accepted.signedKeyset(), accepted.announcement()));
+    key.put("not_after", before.plusSeconds(8 * 86400 + 1).toString());
+    assertThrows(IllegalArgumentException.class, () -> m.release(payload));
+  }
+
+  @Test
   void offlineRootSignsExistingContractAndIndependentAnnouncement() throws Exception {
     var release = m.release(m.payload(5, KeyTestMaterial.NOW));
     var verified = m.verifier(clock).verify(release.signedKeyset(), release.announcement());

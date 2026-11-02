@@ -8,8 +8,11 @@
 
 Node 运行时创建真实 consent 服务和认证 HTTP 桥。浏览器固定请求
 `/auriga/local-login/consent/{snapshot,decide,default,revoke}`，不读取
-`ctx.get('aurigaConsentUI')` 或其他浏览器插件提供的服务。缺少真实生产
-provider 时显示不可用，不显示模拟请求；生产接线缺口见 `../network/README.zh.md`。
+`ctx.get('aurigaConsentUI')` 或其他浏览器插件提供的服务。认证状态通过
+`capabilities.consent` 声明当前能力；仅完整运行时实际接入 consent 时为 true。
+device-connection 第一阶段没有此能力，首联设置整段隐藏，浏览器不请求快照，
+认证后的直接首联请求返回404；原有未认证401、CSRF检查及授权判定不变。
+能力存在时仍展示真实请求和失败状态，不用空快照掩盖故障；生产接线缺口见 `../network/README.zh.md`。
 服务端适配方法为：
 
 - `snapshot()`：使用 `createConsentUIAdapter(...).snapshot()` 的投影。

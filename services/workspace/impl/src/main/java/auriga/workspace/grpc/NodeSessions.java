@@ -349,7 +349,7 @@ public final class NodeSessions implements AutoCloseable {
                     if (!Objects.equals(sent.get(id), spec.getGeneration())) {
                       frames.add(
                           SessionResponse.newBuilder()
-                              .setApply(ApplySpec.newBuilder().setSpec(spec))
+                              .setApply(WorkspaceStartupTrace.dispatch(row, spec))
                               .build());
                       sent.put(id, spec.getGeneration());
                     }

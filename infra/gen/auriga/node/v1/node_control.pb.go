@@ -1558,8 +1558,12 @@ func (x *Welcome) GetHeartbeatInterval() *durationpb.Duration {
 
 // 创建或更新实例。节点代理按本地策略校验，不通过就拒绝并上报 FAILED（code `agent.policy_denied`）。
 type ApplySpec struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Spec          *InstanceSpec          `protobuf:"bytes,1,opt,name=spec,proto3" json:"spec,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Spec  *InstanceSpec          `protobuf:"bytes,1,opt,name=spec,proto3" json:"spec,omitempty"`
+	// Optional W3C context of the dispatch span for this startup operation.
+	// Observability only: never affects identity, generation, rendering or readiness.
+	// Absent/invalid values must not reject a spec. Session metadata is not per-instance context.
+	Traceparent   string `protobuf:"bytes,2,opt,name=traceparent,proto3" json:"traceparent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1599,6 +1603,13 @@ func (x *ApplySpec) GetSpec() *InstanceSpec {
 		return x.Spec
 	}
 	return nil
+}
+
+func (x *ApplySpec) GetTraceparent() string {
+	if x != nil {
+		return x.Traceparent
+	}
+	return ""
 }
 
 type DeleteInstance struct {
@@ -2460,9 +2471,10 @@ const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"\vserver_time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"serverTime\x12)\n" +
 	"\x10protocol_version\x18\x03 \x01(\rR\x0fprotocolVersion\x12H\n" +
-	"\x12heartbeat_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x11heartbeatInterval\"=\n" +
+	"\x12heartbeat_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x11heartbeatInterval\"_\n" +
 	"\tApplySpec\x120\n" +
-	"\x04spec\x18\x01 \x01(\v2\x1c.auriga.node.v1.InstanceSpecR\x04spec\"p\n" +
+	"\x04spec\x18\x01 \x01(\v2\x1c.auriga.node.v1.InstanceSpecR\x04spec\x12 \n" +
+	"\vtraceparent\x18\x02 \x01(\tR\vtraceparent\"p\n" +
 	"\x0eDeleteInstance\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x12\x1e\n" +

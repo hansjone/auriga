@@ -17,7 +17,7 @@ export function realImageDigest(metadata) {
     /^127\.0\.0\.1:5000\/auriga\/real-dsh@sha256:[a-f0-9]{64}$/,
     'real image must be the exact immutable fixture repository reference',
   );
-  assert.equal(metadata.dshVersion, '0.2.0-rc.2');
+  assert.equal(metadata.dshVersion, '0.2.1-rc.3');
   assert.equal(metadata.nodeVersion, '22.19.0');
   assert.equal(metadata.target, 'linux/amd64');
   return imageParts(metadata.image).digest;

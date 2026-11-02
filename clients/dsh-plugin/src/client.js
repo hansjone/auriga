@@ -592,7 +592,7 @@ window.__ModuleLoader__.load({
         const consentRequest = async (action, input) => {
           const write = input !== undefined;
           let csrf;
-          if (write) {
+          {
             const status = await fetch(localURL('auriga/local-login/status'), {
               credentials: 'same-origin',
               cache: 'no-store',
@@ -600,7 +600,14 @@ window.__ModuleLoader__.load({
             });
             if (!status.ok) throw failure();
             const state = await status.json();
-            if (!state.loggedIn || (state.mode !== 'managed' && !state.csrf))
+            if (state.capabilities?.consent !== true) {
+              if (!write) return null;
+              throw failure('auth');
+            }
+            if (
+              write &&
+              (!state.loggedIn || (state.mode !== 'managed' && !state.csrf))
+            )
               throw failure('auth');
             csrf = state.csrf;
           }
@@ -641,6 +648,7 @@ window.__ModuleLoader__.load({
           const api = consentBridge;
           const readSnapshot = async () => {
             const snapshot = await api.snapshot();
+            if (snapshot === null) return null;
             if (
               !snapshot ||
               !Array.isArray(snapshot.pending) ||
@@ -664,7 +672,7 @@ window.__ModuleLoader__.load({
             return snapshot;
           };
           const [view, setView] = React.useState(null);
-          const [status, setStatus] = React.useState('loading');
+          const [status, setStatus] = React.useState('checking');
           const [revision, reload] = React.useReducer((n) => n + 1, 0);
           const [scopes, setScopes] = React.useState({});
           const active = React.useRef(false);
@@ -675,7 +683,7 @@ window.__ModuleLoader__.load({
             active.current = true;
             let current = true;
             setView(null);
-            setStatus('loading');
+            setStatus('checking');
             if (api) {
               Promise.resolve()
                 .then(() => readSnapshot())
@@ -683,7 +691,7 @@ window.__ModuleLoader__.load({
                   (snapshot) => {
                     if (current) {
                       setView(snapshot);
-                      setStatus('ready');
+                      setStatus(snapshot === null ? 'unsupported' : 'ready');
                     }
                   },
                   () => {
@@ -710,7 +718,7 @@ window.__ModuleLoader__.load({
               const snapshot = await readSnapshot();
               if (current()) {
                 setView(snapshot);
-                setStatus('ready');
+                setStatus(snapshot === null ? 'unsupported' : 'ready');
               }
             } catch (error) {
               // A rejected or uncertain write is never replayed automatically.
@@ -934,6 +942,7 @@ window.__ModuleLoader__.load({
                       );
                     }),
                   );
+          if (status === 'checking' || status === 'unsupported') return null;
           return h(
             'section',
             {

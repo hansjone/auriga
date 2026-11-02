@@ -35,6 +35,19 @@ else fail_msg internal_dynamic_pool_excludes_edge 'dynamic allocation must not c
 
 if sh "$ROOT/test/join-node.sh"; then pass join_node_boundary
 else fail_msg join_node_boundary 'private join token import failed'; fi
+if sh "$ROOT/test/message-edge-recovery.sh"; then pass message_edge_recovery_fixture
+else fail_msg message_edge_recovery_fixture 'edge/consumer recovery fixture failed'; fi
+if sh "$ROOT/test/announcement-hook-security.sh"; then pass announcement_hook_security_fixture
+else fail_msg announcement_hook_security_fixture 'trusted hook/real UID boundary failed'; fi
+
+if sh "$ROOT/test/start-edge-recovery.sh"; then pass start_edge_recovery
+else fail_msg start_edge_recovery 'public start did not recover instance bridges'; fi
+if sh "$ROOT/test/collab-rotation-routing.sh"; then pass collab_rotation_public_routing
+else fail_msg collab_rotation_public_routing 'fixed NAS key operations routing failed'; fi
+if python3 "$ROOT/test/collab_queue_test.py"; then pass collab_weekly_offline_signer
+else fail_msg collab_weekly_offline_signer 'weekly offline approval boundary failed'; fi
+if python3 "$ROOT/test/collab_queue_semantics_test.py"; then pass collab_weekly_key_semantics
+else fail_msg collab_weekly_key_semantics 'weekly key transition review failed'; fi
 
 if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
 else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi

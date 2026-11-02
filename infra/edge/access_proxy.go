@@ -225,6 +225,14 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	proxy := newReverseProxy(target, transport, true)
 	if target == g.collabURL {
 		proxy.ModifyResponse = func(resp *http.Response) error {
+			if g.Log != nil {
+				endpoint := "keys"
+				if r.URL.Path == "/api/collab/v1/network/keys/announcement" {
+					endpoint = "keys_announcement"
+				}
+				g.Log.InfoContext(r.Context(), "Network keys upstream completed", "endpoint", endpoint,
+					"collab_configured", true, "http_status", resp.StatusCode)
+			}
 			if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != http.StatusNotModified {
 				return errString("collab redirect rejected")
 			}

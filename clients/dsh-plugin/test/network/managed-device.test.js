@@ -51,6 +51,10 @@ async function fixture(t, change = (x) => x) {
     createPlatform() {
       return {
         async request(path, options) {
+          if (path.startsWith('/api/iam/v1/network/systems'))
+            return {
+              items: [{ ownerUserId: ids.ownerId, ownerDisplayName: 'Alice' }],
+            };
           calls.push({ path, options });
           await requestHook?.();
           if (invalid)
@@ -122,6 +126,55 @@ test('managed credential uses the common device provider and lifecycle, never in
   assert.equal(exchange.options.token, undefined);
   f.network.attach({ prepare() {} });
   assert.ok(f.calls.includes('attach'));
+});
+
+test('R7 instance admission requires a live verified managed credential, not message readiness', async (t) => {
+  const f = await fixture(t);
+  assert.equal(f.network.sessionAvailable, false);
+  await f.network.refresh();
+  assert.equal(f.network.sessionAvailable, true);
+  f.revoke();
+  await f.network.refresh(true);
+  assert.equal(f.network.sessionAvailable, false);
+});
+
+test('R7 an unrenewed device token cannot authorize the instance after expiry', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
+  const f = await fixture(t);
+  await f.network.refresh();
+  assert.equal(f.network.sessionAvailable, true);
+  t.mock.timers.tick(300001);
+  assert.equal(f.network.sessionAvailable, false);
+});
+
+test('R7 credential-file expiry and network revocation also fence the whole instance', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
+  const f = await fixture(t, (value) => ({
+    ...value,
+    expiresAt: new Date(Date.now() + 10000).toISOString(),
+  }));
+  await f.network.refresh();
+  assert.equal(f.network.sessionAvailable, true);
+  t.mock.timers.tick(10001);
+  assert.equal(f.network.sessionAvailable, false);
+  const other = await fixture(t);
+  await other.network.refresh();
+  assert.equal(other.network.sessionAvailable, true);
+  other.input.onRevoked();
+  assert.equal(other.network.sessionAvailable, false);
+});
+
+test('R7 a transient IAM outage keeps only the already verified token lifetime', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
+  const f = await fixture(t);
+  await f.network.refresh();
+  f.intercept(() => {
+    throw Object.assign(new Error('offline'), { status: 503 });
+  });
+  await f.network.refresh(true);
+  assert.equal(f.network.sessionAvailable, true);
+  t.mock.timers.tick(300001);
+  assert.equal(f.network.sessionAvailable, false);
 });
 
 test('file rotation closes old tools before admitting the new device; revocation closes tools', async (t) => {

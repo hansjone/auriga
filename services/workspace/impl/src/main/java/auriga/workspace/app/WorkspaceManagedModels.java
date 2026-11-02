@@ -1,5 +1,6 @@
 package auriga.workspace.app;
 
+import auriga.common.context.RequestContext;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.contracts.iam.v1.IssueManagedDeviceResponse;
@@ -63,6 +64,14 @@ public final class WorkspaceManagedModels {
 
   public void reconcile(Map<String, Object> row, IssueManagedDeviceResponse response) {
     boolean hasCredential = enabled && !response.getModelCredential().isEmpty();
+    if (enabled && !hasCredential) {
+      org.slf4j.LoggerFactory.getLogger(getClass())
+          .info(
+              "Managed model capability instance={} managedCredentialVersion={} generation={} stage=credential reason=model_credential_not_issued",
+              row.get("id"),
+              row.get("managed_credential_version"),
+              row.get("generation"));
+    }
     if (!hasCredential && row.get("managed_model_credential") == null) return;
     if (hasCredential && row.get("managed_model_credential") != null) return;
     UUID id = (UUID) row.get("id");
@@ -94,7 +103,7 @@ public final class WorkspaceManagedModels {
               id);
           current = store.instance(id);
           var spec = WorkspaceService.spec(current);
-          service.saveSpec(
+          service.saveStartupSpec(
               current, spec.toBuilder().setGeneration(spec.getGeneration() + 1).build());
           if ("running".equals(current.get("phase"))) service.queueManagedMaterialRestart(id);
           return null;
@@ -102,6 +111,10 @@ public final class WorkspaceManagedModels {
   }
 
   private ObjectNode catalog(IssueManagedDeviceResponse response, Map<String, Object> row) {
+    long started = System.nanoTime();
+    String stage = "connect", reason = "transport";
+    int httpStatus = 0;
+    String upstreamTrace = "";
     try {
       var builder =
           HttpClient.newBuilder()
@@ -109,20 +122,34 @@ public final class WorkspaceManagedModels {
               .followRedirects(HttpClient.Redirect.NEVER);
       if (tls != null) builder.sslContext(tls);
       try (var client = builder.build()) {
-        var request =
+        var requestBuilder =
             HttpRequest.newBuilder(URI.create(baseUrl + "/models"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Authorization", "Bearer " + response.getModelCredential())
-                .GET()
-                .build();
+                .GET();
+        RequestContext.current()
+            .ifPresent(
+                c -> requestBuilder.header("traceparent", c.trace().child().toTraceparent()));
+        var request = requestBuilder.build();
+        stage = "http";
         var reply =
             client.send(
                 request,
                 HttpResponse.BodyHandlers.limiting(
                     HttpResponse.BodyHandlers.ofByteArray(), 1 << 20));
+        httpStatus = reply.statusCode();
+        String observedTrace = reply.headers().firstValue("X-Trace-Id").orElse("");
+        if (observedTrace.matches("[a-f0-9]{32}")) upstreamTrace = observedTrace;
         byte[] raw = reply.body();
+        reason = "http_status";
         if (reply.statusCode() != 200) throw new IllegalArgumentException();
+        stage = "catalog";
+        reason = "invalid_json";
         var data = WorkspaceService.JSON.readTree(raw).path("data");
+        reason =
+            !data.isArray()
+                ? "invalid_catalog"
+                : data.isEmpty() ? "empty_catalog" : "catalog_too_large";
         if (!data.isArray() || data.isEmpty() || data.size() > 256)
           throw new IllegalArgumentException();
         var file = WorkspaceService.JSON.createObjectNode();
@@ -136,18 +163,39 @@ public final class WorkspaceManagedModels {
         Set<String> seen = new HashSet<>();
         for (var model : data) {
           String name = model.path("id").asString();
+          reason = "invalid_model_id";
           if (name.isBlank()
               || name.length() > 200
-              || name.chars().anyMatch(Character::isISOControl)
-              || !seen.add(name)) throw new IllegalArgumentException();
+              || name.chars().anyMatch(Character::isISOControl))
+            throw new IllegalArgumentException();
+          reason = "duplicate_model_id";
+          if (!seen.add(name)) throw new IllegalArgumentException();
           models.addObject().put("id", name);
         }
         return file;
       }
     } catch (InterruptedException interrupted) {
+      ManagedModelDiagnostic.failure(
+          row,
+          stage,
+          "interrupted",
+          httpStatus,
+          started,
+          interrupted,
+          response.getModelCredential(),
+          upstreamTrace);
       Thread.currentThread().interrupt();
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     } catch (Exception unavailable) {
+      ManagedModelDiagnostic.failure(
+          row,
+          stage,
+          reason,
+          httpStatus,
+          started,
+          unavailable,
+          response.getModelCredential(),
+          upstreamTrace);
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     }
   }

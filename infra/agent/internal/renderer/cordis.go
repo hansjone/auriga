@@ -82,9 +82,12 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options, model *managedMode
 	}
 	// Containers are reached over their isolated network; native runtimes only
 	// through the agent's loopback ingress.
-	host := "127.0.0.1"
+	var host any = "127.0.0.1"
 	if spec.GetRuntime() == nodev1.RuntimeKind_RUNTIME_KIND_DOCKER {
-		host = "0.0.0.0"
+		// DSH requires a concrete local address. Resolve inside the container,
+		// after Docker assigns its isolated IPv4 network, rather than binding
+		// every interface or baking an ephemeral address into the spec digest.
+		host = jsExpr(`(() => { const net = process.getBuiltinModule('node:net'); const addresses = [...new Set(Object.values(process.getBuiltinModule('node:os').networkInterfaces()).flatMap(entries => (entries ?? []).filter(entry => entry.internal === false && entry.family === 'IPv4' && net.isIPv4(entry.address) && entry.address !== '0.0.0.0' && !entry.address.startsWith('127.')).map(entry => entry.address)))]; if (addresses.length !== 1) throw new Error('Auriga Docker runtime requires exactly one non-loopback local IPv4 address'); return addresses[0]; })()`)
 	}
 
 	pluginCfg := map[string]any{"browserOrigin": browser}

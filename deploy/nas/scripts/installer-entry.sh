@@ -21,6 +21,13 @@ case "${1:-}" in
     set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/materials-upgrades" -access-file "$AURIGA_ACCESS_FILE"
     [ -z "${NAS_MATERIALS_EXPECTED_BASE:-}" ] || set -- "$@" -expected-base-sha256 "$NAS_MATERIALS_EXPECTED_BASE"
     exec "$(bootstrap_binary)" materials-upgrade "$@" ;;
+  collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume)
+    _action=${1#collab-}
+    set -- "$_action" -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"
+    [ "$_action" = path ] || set -- "$@" -image "${AURIGA_IMAGE_PLATFORM:?}"
+    [ "$_action" = path ] || set -- "$@" -operator-jar-sha256 "${AURIGA_COLLAB_OPERATOR_JAR_SHA256:-}"
+    [ -z "${NAS_COLLAB_ROTATION_INPUT:-}" ] || set -- "$@" -input "$NAS_COLLAB_ROTATION_INPUT"
+    exec "$(bootstrap_binary)" collab-rotation "$@" ;;
   runtime-path|runtime-stage|runtime-commit|runtime-rollback)
     _action=${1#runtime-}
     set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source"
@@ -42,6 +49,8 @@ case "${1:-}" in
     bootstrap_nas_materials
     exec sh "$NAS_ROOT/scripts/render-collab.sh" --stopped ;;
   render) exec sh "$NAS_ROOT/scripts/render.sh" ;;
+  render-core) exec sh "$NAS_ROOT/scripts/render.sh" --core-only ;;
+  render-collab) exec sh "$NAS_ROOT/scripts/render-collab.sh" ;;
   prepare-socket) prepare_socket_parent ;;
   check)
     [ -f "$(marker_path)" ] || die 'not initialized'
@@ -52,15 +61,32 @@ case "${1:-}" in
     # The host operator cannot traverse root's private collab source. Export a
     # checked decision alongside the already protected env stream, never keys.
     _collab=0
+    _managed_identity=0
+    _rotation=
+    _rotation_available=1
     _source="$AURIGA_DATA_ROOT/config/collab-source"
-    if [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
-      "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
-        -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2
-      _collab=1
+    # Core Compose export must survive any message material/check failure.
+    # Consumers still require available=1; failed material never enables an overlay.
+    if [ "${NAS_COLLAB_CONFIG_DEGRADED:-0}" = 1 ]; then
+      _rotation_available=0
+      if managed_identity_available; then _managed_identity=1; fi
+    elif [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
+      if "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
+        -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2; then
+        _collab=1
+        if ! _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"); then
+          _rotation_available=0
+          printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; core/stop configuration remains available' >&2
+        fi
+      else
+        _rotation_available=0
+        printf '%s\n' 'message_network=degraded source_check_failed; core configuration remains available' >&2
+      fi
     fi
     _export=$(mktemp -d)
     trap 'rm -rf -- "$_export"' EXIT
     printf '%s\n' "$_collab" >"$_export/collab.enabled"
+    printf '%s\n' "$_managed_identity" >"$_export/managed.identity.enabled"
     runtime_directory >"$_export/runtime.path"
     _bifrost=0
     if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
@@ -69,7 +95,11 @@ case "${1:-}" in
     fi
     printf '%s\n' "$_bifrost" >"$_export/bifrost.enabled"
     chmod 0600 "$_export/collab.enabled"
+    chmod 0600 "$_export/managed.identity.enabled"
+    printf '%s' "$_rotation" >"$_export/collab.rotation.path"
+    printf '%s' "$_rotation_available" >"$_export/collab.rotation.available"
+    chmod 0600 "$_export/collab.rotation.path" "$_export/collab.rotation.available"
     tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env \
-      -C "$_export" collab.enabled runtime.path bifrost.enabled ;;
+      -C "$_export" collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled ;;
   *) die 'unsupported installer operation' ;;
 esac

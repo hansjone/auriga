@@ -49,7 +49,7 @@ function harness(fetcher, locale = 'zh') {
   return {
     render() {
       cursor = 0;
-      const tree = View({ locale });
+      const tree = View({ locale, consent: 'consent-capability-marker' });
       effects.splice(0).forEach((fn) => fn());
       return tree;
     },
@@ -91,6 +91,105 @@ const signedIn = {
   network: { connected: true, state: 'ready' },
   models: { available: false },
 };
+for (const phase of ['signed-out', 'unavailable', 'pending'])
+  test(
+    'R7 managed identity never falls back to signed out: ' + phase,
+    async () => {
+      const fixture = harness(async (url) =>
+        Response.json(
+          url.endsWith('/status')
+            ? {
+                loggedIn: phase !== 'signed-out',
+                session: { available: false },
+                account: { subject: 'member-id' },
+              }
+            : { ...settings, mode: 'managed' },
+        ),
+      );
+      try {
+        fixture.render();
+        await setImmediate();
+        const content = fixture
+          .render()
+          .children.filter((n) => n?.type !== 'details')
+          .map(text)
+          .join(' ');
+        assert.doesNotMatch(content, /未登录|未提供/);
+        assert.match(content, /系统托管/);
+        assert.match(content, /实例会话已失效，请从门户重新进入/);
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );
+for (const consent of [false, true, undefined])
+  test(
+    'R2 settings only mount first-contact controls for an advertised capability: ' +
+      consent,
+    async () => {
+      const fixture = harness(async (url) =>
+        Response.json(
+          url.endsWith('/status')
+            ? { ...signedIn, capabilities: { consent } }
+            : settings,
+        ),
+      );
+      try {
+        fixture.render();
+        await setImmediate();
+        assert.equal(
+          text(fixture.render()).includes('consent-capability-marker'),
+          consent === true,
+        );
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );
+for (const managed of [false, true])
+  test(
+    'status fix: missing names and optional facts never produce UUID or empty rows: ' +
+      managed,
+    async () => {
+      const fixture = harness(async (url) =>
+        Response.json(
+          url.endsWith('/status')
+            ? {
+                ...signedIn,
+                account: { subject: '00000000-0000-4000-8000-000000000002' },
+                deviceName: null,
+                loginTime: null,
+                connection: null,
+              }
+            : {
+                ...settings,
+                deviceName: null,
+                mode: managed ? 'managed' : 'connect',
+              },
+        ),
+      );
+      try {
+        fixture.render();
+        await setImmediate();
+        const tree = fixture.render();
+        const content = tree.children
+          .filter((n) => n?.type !== 'details')
+          .map(text)
+          .join(' ');
+        assert.match(
+          text(nodes(tree).find((n) => n.type === 'details')),
+          /00000000/,
+        );
+        assert.doesNotMatch(
+          content,
+          /00000000|设备名|登录时间|本机端点|未提供姓名|当前凭据未提供/,
+        );
+        assert.match(content, /成员/);
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );
 for (const locale of ['zh', 'en'])
   test(
     'R4 saved device offline is recovering, not signed out: ' + locale,

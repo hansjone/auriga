@@ -51,6 +51,10 @@ public final class WorkspaceManagedNetwork {
   }
 
   public void reconcile(Map<String, Object> row) {
+    WorkspaceStartupTrace.reconcile(row, () -> reconcileStartup(row));
+  }
+
+  private void reconcileStartup(Map<String, Object> row) {
     var store = service.store;
     UUID id = (UUID) row.get("id");
     long version = ((Number) row.get("managed_credential_version")).longValue();
@@ -77,11 +81,18 @@ public final class WorkspaceManagedNetwork {
                   .setOwnerId(row.get("owner_id").toString())
                   .setCredentialVersion(version)
                   .build());
+      long modelStarted = System.nanoTime();
       try {
         models.reconcile(row, response);
       } catch (RuntimeException unavailable) {
-        org.slf4j.LoggerFactory.getLogger(getClass())
-            .warn("Managed model provisioning deferred instance={}", id);
+        ManagedModelDiagnostic.failure(
+            row,
+            "reconcile",
+            "model_reconcile_failed",
+            0,
+            modelStarted,
+            unavailable,
+            response.getModelCredential());
       }
       if (Objects.equals(row.get("managed_synced_version"), row.get("managed_credential_version"))
           && row.get("managed_credential") != null) {
@@ -192,7 +203,7 @@ public final class WorkspaceManagedNetwork {
           if (!(boolean) current.get("deleted")) {
             current = store.instance(id);
             var spec = WorkspaceService.spec(current);
-            service.saveSpec(
+            service.saveStartupSpec(
                 current, spec.toBuilder().setGeneration(spec.getGeneration() + 1).build());
             if (refresh) service.queueManagedMaterialRestart(id);
           }

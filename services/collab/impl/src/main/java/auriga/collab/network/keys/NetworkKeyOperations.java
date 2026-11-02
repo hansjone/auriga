@@ -49,6 +49,15 @@ public final class NetworkKeyOperations {
   }
 
   public void publish(RootKeyPublication.Release release) {
+    publish(release, false);
+  }
+
+  /** Offline operator only: an exhausted installation, never normal key publication. */
+  void recoverExpired(RootKeyPublication.Release release) {
+    publish(release, true);
+  }
+
+  private void publish(RootKeyPublication.Release release, boolean expiredRecovery) {
     var next = trust.verify(release.signedKeyset(), release.announcement());
     var p = next.payload();
     var version = new BigInteger(p.path("keyset_version").asString());
@@ -62,17 +71,20 @@ public final class NetworkKeyOperations {
               Object.class,
               tenant + ":network-keys:" + realm);
           Stored old = stored();
+          if (expiredRecovery && old == null) throw RootKeyPublication.invalid();
           ObjectNode history = JsonMapper.builder().build().createObjectNode();
           if (old != null) {
             var previous = archived(old);
             int order = version.compareTo(old.version());
             if (order < 0) throw RootKeyPublication.invalid();
             if (order == 0) {
+              if (expiredRecovery) throw RootKeyPublication.invalid();
               if (!old.release().equals(next.release())) throw RootKeyPublication.invalid();
               return null;
             }
             history = (ObjectNode) NetworkJson.parse(old.history());
-            transition(previous.payload(), p, history);
+            if (expiredRecovery) expiredRecovery(previous.payload(), p);
+            else transition(previous.payload(), p, history);
           }
           for (var key : p.path("keys")) {
             if (!history.has(key.path("kid").asString()))
@@ -208,6 +220,55 @@ public final class NetworkKeyOperations {
       if (!history.has(key.path("kid").asString()) && !"next".equals(key.path("state").asString()))
         throw RootKeyPublication.invalid();
     }
+  }
+
+  private void expiredRecovery(JsonNode old, JsonNode next) {
+    Instant now = clock.instant();
+    var db = jdbc.queryForObject("SELECT clock_timestamp()", java.sql.Timestamp.class);
+    if (db == null
+        || java.time.Duration.between(db.toInstant(), now)
+                .abs()
+                .compareTo(java.time.Duration.ofSeconds(60))
+            > 0) throw RootKeyPublication.invalid();
+    Instant issued = Instant.parse(next.path("issued_at").asString());
+    Instant cutoff = now.minusSeconds(360);
+    Instant last = Instant.parse(old.path("valid_until").asString());
+    if (last.isAfter(cutoff)) throw RootKeyPublication.invalid();
+    Map<String, JsonNode> entries = new HashMap<>();
+    for (var key : next.path("keys")) entries.put(key.path("kid").asString(), key);
+    var previousKids = new java.util.HashSet<String>();
+    for (var key : old.path("keys")) {
+      String kid = key.path("kid").asString();
+      previousKids.add(kid);
+      Instant after = Instant.parse(key.path("not_after").asString());
+      if (after.isAfter(cutoff)) throw RootKeyPublication.invalid();
+      if (after.isAfter(last)) last = after;
+      var replacement = entries.get(kid);
+      if (replacement == null) throw RootKeyPublication.invalid();
+      for (String field :
+          new String[] {"kid", "alg", "purpose", "public_key_spki", "not_before", "not_after"})
+        if (!key.path(field).equals(replacement.path(field))) throw RootKeyPublication.invalid();
+      String state = replacement.path("state").asString();
+      if ((!state.equals("retired") && !state.equals("revoked"))
+          || (key.path("state").asString().equals("revoked") && !state.equals("revoked")))
+        throw RootKeyPublication.invalid();
+    }
+    if (issued.isBefore(last.plusSeconds(360))) throw RootKeyPublication.invalid();
+    var purposes = new java.util.HashSet<String>();
+    for (var key : next.path("keys")) {
+      if (previousKids.contains(key.path("kid").asString())) continue;
+      Instant before = Instant.parse(key.path("not_before").asString());
+      Instant after = Instant.parse(key.path("not_after").asString());
+      if (!key.path("state").asString().equals("active")
+          || !before.equals(issued)
+          || before.isAfter(now)
+          || !after.isAfter(now)
+          || after.isAfter(before.plusSeconds(7 * 86400))
+          || !purposes.add(key.path("purpose").asString())) throw RootKeyPublication.invalid();
+    }
+    if (!purposes.equals(
+        java.util.Set.of("business_delivery", "protocol_response", "management_state")))
+      throw RootKeyPublication.invalid();
   }
 
   private Stored stored() {
