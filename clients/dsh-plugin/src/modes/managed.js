@@ -305,7 +305,7 @@ export async function createManaged(options = {}) {
           role: 'owner',
         }),
       });
-      registerHealthRoute(ctx, { pluginVersion });
+      registerHealthRoute(ctx, { pluginVersion, instanceId });
 
       // Same public host services, provider and network lifecycle as connect mode.
       // Profile storage is only durable partitioning; it is not an isolation claim.

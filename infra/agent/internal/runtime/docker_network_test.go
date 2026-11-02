@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -132,6 +133,27 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 					}
 					base.ServeHTTP(w, r)
 				case r.URL.Path == "/containers/create":
+					raw, readErr := io.ReadAll(r.Body)
+					if readErr != nil {
+						t.Error(readErr)
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					var body struct{ Labels map[string]string }
+					if err := json.Unmarshal(raw, &body); err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					if body.Labels["auriga.observability.edge"] != "test-edge" || body.Labels["auriga.managed"] != "true" {
+						t.Error("missing observation-only deployment owner")
+					}
+					for label := range body.Labels {
+						if strings.HasPrefix(label, "com.docker.compose.") {
+							t.Error("runtime instance claims Compose membership")
+						}
+					}
+					r.Body = io.NopCloser(strings.NewReader(string(raw)))
 					if !connected {
 						t.Error("instance created before trusted edge became reachable")
 					}

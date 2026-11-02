@@ -1,5 +1,6 @@
 package auriga.workspace.app;
 
+import auriga.common.context.RequestContext;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.contracts.iam.v1.IssueManagedDeviceResponse;
@@ -94,7 +95,7 @@ public final class WorkspaceManagedModels {
               id);
           current = store.instance(id);
           var spec = WorkspaceService.spec(current);
-          service.saveSpec(
+          service.saveStartupSpec(
               current, spec.toBuilder().setGeneration(spec.getGeneration() + 1).build());
           if ("running".equals(current.get("phase"))) service.queueManagedMaterialRestart(id);
           return null;
@@ -109,12 +110,15 @@ public final class WorkspaceManagedModels {
               .followRedirects(HttpClient.Redirect.NEVER);
       if (tls != null) builder.sslContext(tls);
       try (var client = builder.build()) {
-        var request =
+        var requestBuilder =
             HttpRequest.newBuilder(URI.create(baseUrl + "/models"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Authorization", "Bearer " + response.getModelCredential())
-                .GET()
-                .build();
+                .GET();
+        RequestContext.current()
+            .ifPresent(
+                c -> requestBuilder.header("traceparent", c.trace().child().toTraceparent()));
+        var request = requestBuilder.build();
         var reply =
             client.send(
                 request,
