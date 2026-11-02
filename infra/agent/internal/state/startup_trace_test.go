@@ -80,3 +80,46 @@ func TestStartupCauseReloadReplayAndTerminalBoundary(t *testing.T) {
 		t.Fatal("delete retained cause")
 	}
 }
+
+func TestStartupCompletionAdvancesWithoutDiscardingNewerCause(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	const parent = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"
+	spec := &nodev1.InstanceSpec{InstanceId: "completion-ahead", Generation: 10, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING}
+	if err := store.PutDesiredWithTrace(spec, parent); err != nil {
+		t.Fatal(err)
+	}
+	complete := func(generation int64) {
+		t.Helper()
+		if err := store.PutActual(ActualRecord{Status: &nodev1.InstanceStatus{InstanceId: spec.InstanceId, ObservedGeneration: generation, Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, Ready: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	complete(9)
+	if !store.StartupComplete(spec.InstanceId, 9) || store.StartupParent(spec.InstanceId, 10) != parent {
+		t.Fatal("older completion discarded current cause")
+	}
+	complete(11)
+	if !store.StartupComplete(spec.InstanceId, 11) || store.StartupParent(spec.InstanceId, 10) != "" {
+		t.Fatal("completion ahead of observation was lost")
+	}
+	if err := store.PutDesiredWithTrace(spec, parent); err != nil {
+		t.Fatal(err)
+	}
+	if store.StartupParent(spec.InstanceId, 10) != "" || !store.StartupComplete(spec.InstanceId, 11) {
+		t.Fatal("late desired resurrected completed observation")
+	}
+	current, err := store.GetDesired(spec.InstanceId)
+	if err != nil || !proto.Equal(current, spec) {
+		t.Fatal("observation changed business desired", err)
+	}
+	if err := store.PutActual(ActualRecord{Status: &nodev1.InstanceStatus{InstanceId: "legacy-complete", ObservedGeneration: 8, Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, Ready: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if !store.StartupComplete("legacy-complete", 8) {
+		t.Fatal("completion without old observation dropped its watermark")
+	}
+}

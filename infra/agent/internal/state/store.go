@@ -152,10 +152,12 @@ func (s *Store) PutDesiredWithTrace(spec *nodev1.InstanceSpec, parent string) er
 		if !telemetry.Valid(parent) {
 			parent = ""
 		}
-		changed := previous.Generation != spec.Generation
+		// The desired write below retains its existing business semantics. Only
+		// this independent observation record is monotonic across receiver overlap.
+		changed := spec.Generation > previous.Generation
 		if changed {
 			previous = startupObservation{Generation: spec.Generation, Parent: parent, CompletedGeneration: previous.CompletedGeneration, Complete: spec.Generation <= previous.CompletedGeneration}
-		} else if !previous.Complete && parent != "" && (!telemetry.Valid(previous.Parent) || previous.Parent[3:35] == parent[3:35]) {
+		} else if spec.Generation == previous.Generation && !previous.Complete && parent != "" && (!telemetry.Valid(previous.Parent) || previous.Parent[3:35] == parent[3:35]) {
 			// A redelivery is a new dispatch span of the SAME operation. A different
 			// trace cannot rebind a generation or resurrect a completed startup.
 			previous.Parent = parent
@@ -212,8 +214,15 @@ func (s *Store) completeStartup(tx *bbolt.Tx, status *nodev1.InstanceStatus) err
 		return nil
 	}
 	var observation startupObservation
-	if err := json.Unmarshal(tx.Bucket(bucketStartup).Get([]byte(status.InstanceId)), &observation); err != nil || status.ObservedGeneration < 1 || status.ObservedGeneration > observation.Generation {
+	rawObservation := tx.Bucket(bucketStartup).Get([]byte(status.InstanceId))
+	if len(rawObservation) > 0 && json.Unmarshal(rawObservation, &observation) != nil || status.ObservedGeneration < 1 {
 		return nil
+	}
+	// Completion is itself an observed high-water mark, even if the corresponding
+	// desired observation was absent (for example an older on-disk record).
+	if status.ObservedGeneration > observation.Generation {
+		observation.Generation = status.ObservedGeneration
+		observation.Parent = ""
 	}
 	if status.ObservedGeneration > observation.CompletedGeneration {
 		observation.CompletedGeneration = status.ObservedGeneration

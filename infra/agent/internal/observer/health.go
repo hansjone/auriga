@@ -119,6 +119,7 @@ func ProbeHealth(ctx context.Context, client *http.Client, t InstanceTarget) Hea
 		return res
 	}
 	// These are the existing unauthenticated public fields, still size-bounded and masked.
+	health.PluginVersion = telemetry.MaskDiagnosticValue(health.PluginVersion)
 	projection, _ := json.Marshal(health)
 	res.Response = telemetry.Mask(string(projection))
 	if !health.Ready {
