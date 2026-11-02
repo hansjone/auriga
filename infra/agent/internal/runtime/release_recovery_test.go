@@ -45,7 +45,7 @@ func TestInterruptedRuntimeRecoveryChecksEngineAndSignedEvidence(t *testing.T) {
 					if mode == "wrong-mount" {
 						mount = filepath.Join(dataRoot, "other")
 					}
-					json.NewEncoder(w).Encode(map[string]any{"Id": agent, "State": s, "Config": map[string]any{"Labels": map[string]any{"com.docker.compose.service": "agent"}}, "Mounts": []any{map[string]any{"Type": "bind", "Source": mount, "Destination": mount}}})
+					writeRecoveryJSON(t, w, map[string]any{"Id": agent, "State": s, "Config": map[string]any{"Labels": map[string]any{"com.docker.compose.service": "agent"}}, "Mounts": []any{map[string]any{"Type": "bind", "Source": mount, "Destination": mount}}})
 					return
 				}
 				if r.URL.Path == "/containers/json" {
@@ -58,11 +58,11 @@ func TestInterruptedRuntimeRecoveryChecksEngineAndSignedEvidence(t *testing.T) {
 					if mode == "older-stopped-execution" {
 						items = append(items, map[string]any{"Id": strings.Repeat("d", 64), "Labels": map[string]any{"auriga.managed": "true", "auriga.instance": "old-stopped", "auriga.generation": "1"}})
 					}
-					json.NewEncoder(w).Encode(items)
+					writeRecoveryJSON(t, w, items)
 					return
 				}
 				if mode == "older-stopped-execution" && r.URL.Path == "/containers/"+strings.Repeat("d", 64)+"/json" {
-					json.NewEncoder(w).Encode(map[string]any{"Id": strings.Repeat("d", 64), "Image": fixtureConfigID, "State": stopped(), "Config": map[string]any{"Labels": map[string]any{"auriga.managed": "true", "auriga.instance": "old-stopped", "auriga.generation": "1"}}})
+					writeRecoveryJSON(t, w, map[string]any{"Id": strings.Repeat("d", 64), "Image": fixtureConfigID, "State": stopped(), "Config": map[string]any{"Labels": map[string]any{"auriga.managed": "true", "auriga.instance": "old-stopped", "auriga.generation": "1"}}})
 					return
 				}
 				if r.URL.Path == "/containers/"+fixtureContainerID+"/json" {
@@ -81,7 +81,7 @@ func TestInterruptedRuntimeRecoveryChecksEngineAndSignedEvidence(t *testing.T) {
 					if mode == "wrong-image" {
 						image = "sha256:" + strings.Repeat("d", 64)
 					}
-					json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": image, "State": s, "Config": map[string]any{"Labels": map[string]any{"auriga.managed": "true", "auriga.instance": target, "auriga.generation": "1"}}})
+					writeRecoveryJSON(t, w, map[string]any{"Id": fixtureContainerID, "Image": image, "State": s, "Config": map[string]any{"Labels": map[string]any{"auriga.managed": "true", "auriga.instance": target, "auriga.generation": "1"}}})
 					return
 				}
 				http.NotFound(w, r)
@@ -145,7 +145,11 @@ func TestInterruptedRuntimeRecoveryChecksEngineAndSignedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer offline.Close()
+			t.Cleanup(func() {
+				if err := offline.Close(); err != nil {
+					t.Error(err)
+				}
+			})
 			d.Activation.Store = offline
 			snapshot, err := d.RecoverInterruptedRuntime(context.Background(), offline, target, agent, "")
 			success := mode == "success" || mode == "older-stopped-execution"
@@ -189,5 +193,12 @@ func TestInterruptedRuntimeRecoveryChecksEngineAndSignedEvidence(t *testing.T) {
 				t.Fatal("recovery mutated Engine")
 			}
 		})
+	}
+}
+
+func writeRecoveryJSON(t *testing.T, w http.ResponseWriter, value any) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Errorf("write recovery Engine fixture: %v", err)
 	}
 }

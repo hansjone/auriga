@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,7 +17,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/state"
 )
 
-func recoverRuntime(args []string, out, logs io.Writer) error {
+func recoverRuntime(args []string, out, logs io.Writer) (err error) {
 	fs := flag.NewFlagSet("recover-runtime", flag.ContinueOnError)
 	fs.SetOutput(logs)
 	data := fs.String("data-root", "", "original agent data root (required)")
@@ -35,7 +36,7 @@ func recoverRuntime(args []string, out, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() { err = errors.Join(err, store.Close()) }()
 	policyPath := os.Getenv("AURIGA_AGENT_POLICY_FILE")
 	if policyPath == "" {
 		policyPath = filepath.Join(cfg.DataRoot, "agent-policy.yaml")
