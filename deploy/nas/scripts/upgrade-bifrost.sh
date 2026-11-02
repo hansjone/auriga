@@ -7,5 +7,7 @@ load_stack_env
 [ -f "$(marker_path)" ] || die 'not initialized'
 # A one-off instance of the verified postgres image runs only psql. The existing
 # database process remains running; no initdb, role password reset or data delete.
-run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" run --rm --no-deps --pull never \
+# NAS Compose 2.29 has no run --pull option. The postgres service pins
+# pull_policy: never, including for this one-off helper.
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" run --rm --no-deps \
  --user 999:999 -e PGHOST=postgres --entrypoint sh postgres /docker-entrypoint-initdb.d/03-bifrost.sh

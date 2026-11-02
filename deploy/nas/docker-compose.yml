@@ -125,6 +125,7 @@ services:
 
   postgres:
     image: ${AURIGA_IMAGE_POSTGRES}
+    pull_policy: never
     <<: *cap_drop_all
     # Official image needs these caps for initdb / role setup; entrypoint drops to postgres.
     cap_add: [CHOWN, SETUID, SETGID, FOWNER, DAC_OVERRIDE]
