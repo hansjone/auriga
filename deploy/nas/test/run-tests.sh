@@ -35,6 +35,8 @@ if sh "$ROOT/test/join-node.sh"; then pass join_node_boundary
 else fail_msg join_node_boundary 'private join token import failed'; fi
 if sh "$ROOT/test/message-edge-recovery.sh"; then pass message_edge_recovery_fixture
 else fail_msg message_edge_recovery_fixture 'edge/consumer recovery fixture failed'; fi
+if sh "$ROOT/test/announcement-hook-security.sh"; then pass announcement_hook_security_fixture
+else fail_msg announcement_hook_security_fixture 'trusted hook/real UID boundary failed'; fi
 
 if sh "$ROOT/test/start-edge-recovery.sh"; then pass start_edge_recovery
 else fail_msg start_edge_recovery 'public start did not recover instance bridges'; fi

@@ -226,11 +226,17 @@ READY；桌面正常登录、入网并严格 READY；最后云↔桌各请求和
 health、keys 200 或托管实例 READY 均不能代替插件 READY/互发。
 公开消息恢复会重新应用 edge 的 collab 配置；只有容器发生替换时才请求 agent 恢复实例桥接，
 不重启 DSH 或更换设备。`AURIGA_NETWORK_ANNOUNCEMENT_CHECK` 可指定受安装操作人控制、
-不可由其他人写入的绝对可执行验收脚本。它须用已获授权的短期成员/设备票，通过实际 edge
+不可由其他人写入的绝对可执行验收脚本。脚本及从 `/` 起的每级父目录须归 root 或本次
+安装操作人所有，且不可组写/其他人写；路径必须规范且无符号链接。即使末级脚本为 root/0700，
+也不接受位于 `/tmp` 等共享可写父目录的路径，避免另一 UID 在检查与执行间替换目录项。
+它须用已获授权的短期成员/设备票，通过实际 edge
 读取 `/api/collab/v1/network/keys/announcement`，核 HTTP200、安装根签名与有效窗后才返回0；
 票只由脚本私下读取，不写参数、环境变量或输出。不允许用内部服务票代替成员身份。
 未配置该钩子时消息服务保留运行，恢复返回2并显示 `SERVICES_READY`/公告待验证；不会报完整
 `READY`。钩子拒绝/失败保持降级。修复入口不恢复任何缺失的原设备 ledger；仍须单独授权的恢复流程。
+  `test/announcement-hook-security.sh` 仅在短命私有 mount namespace/16MiB tmpfs 中验证真实属主、
+  权限及 uid65534 替换竞态，Compose/公告为编排替身；不能代替真实授权验收。
+  消息恢复夹具复用该隔离环境；缺 Linux root/namespace/不同 UID 能力时具名 SKIP。
 `deploy/nas/test/collab.sh` 覆盖 domain/ip/proxy 的实际 init/render、权限与篡改负例；
 可选 `AURIGA_NAS_COLLAB_LIVE_IMAGE` 启用 `collab-live.sh`，仅启动单 collab 服务和临时 PG
 验证真实签名发布，不宣称已验证 IAM 入网、插件 READY 或整栈云↔桌。

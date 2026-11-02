@@ -366,7 +366,14 @@ esac
 				}
 			}
 			logPath := filepath.Join(root, scenario+".cli")
-			program := `mount --make-rprivate /; mount -t tmpfs tmpfs /run; touch /run/docker.sock; mount --bind "$1" /run/docker.sock; shift; exec sh -ec "$1"`
+			// The acceptance fixture needs trusted ancestors too. Use the child's
+			// existing private /run mount, never chmod the host's shared /tmp.
+			program := `mount --make-rprivate /
+mount -t tmpfs -o mode=0755 tmpfs /run
+cp "$AURIGA_NETWORK_ANNOUNCEMENT_CHECK" /run/approved-announcement-consumer
+chmod 0700 /run/approved-announcement-consumer
+export AURIGA_NETWORK_ANNOUNCEMENT_CHECK=/run/approved-announcement-consumer
+touch /run/docker.sock; mount --bind "$1" /run/docker.sock; shift; exec sh -ec "$1"`
 			actions := `sh "$NAS_ROOT/scripts/start.sh"`
 			if scenario == "stop-start" {
 				actions = `sh "$NAS_ROOT/scripts/stop.sh"; ` + actions

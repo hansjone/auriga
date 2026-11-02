@@ -44,8 +44,42 @@ test('actual managed status failures retain phase/status/cause through final pri
       listModels() {
         throw Object.assign(
           new Error(
-            'native failed password=sentinel-password ticket=sentinel-ticket AURIGA_TEST_TOKEN=sentinel-env',
-            { cause: new Error('connection reset Bearer sentinel-bearer') },
+            'native failed C:\\native\\node.js password=sentinel-password ticket=sentinel-ticket AURIGA_TEST_TOKEN=sentinel-env ' +
+              JSON.stringify({
+                credential: 'sentinel-opaque-credential',
+                detail: JSON.stringify({
+                  ticket: 'sentinel-encoded-ticket',
+                  message: 'upstream declined',
+                  status: 429,
+                }),
+                note: 'native diagnostics retained',
+                response: [
+                  { credentials: ['sentinel-credential-array'] },
+                  {
+                    accessToken: 'sentinel-camel-token',
+                    code: 'upstream.busy',
+                  },
+                ],
+              }) +
+              ' unicode-key={"cred\\u0065ntial":"sentinel-unicode-key","note":"unicode note retained"}' +
+              ' escaped=' +
+              JSON.stringify({
+                sessionTicket: 'sentinel-ticket-with-"quote\\slash\nnewline',
+                note: 'escaped note retained',
+              }).replaceAll('"', '\\"'),
+            {
+              cause: new Error(
+                'connection reset Bearer sentinel-bearer ' +
+                  JSON.stringify(
+                    JSON.stringify({
+                      clientSecret: 'sentinel-client-secret',
+                      refresh_token: 'sentinel-refresh-token',
+                      device_credential: { raw: 'sentinel-nested-value' },
+                      message: 'retry refused',
+                    }),
+                  ),
+              ),
+            },
           ),
           { code: 'native.list_failed' },
         );
@@ -79,12 +113,49 @@ test('actual managed status failures retain phase/status/cause through final pri
     assert.equal(records[0].phase, 'native');
     assert.equal(records[0].error_code, 'native.list_failed');
     assert.match(records[0].cause, /connection reset/);
+    assert.match(records[0].cause, /retry refused/);
     assert.match(records[0].exception, /at /);
+    assert.match(records[0].exception, /native diagnostics retained/);
+    assert.match(records[0].exception, /upstream declined/);
+    assert.match(records[0].exception, /429/);
+    assert.match(records[0].exception, /upstream.busy/);
+    assert.match(records[0].exception, /unicode note retained/);
+    assert.match(records[0].exception, /escaped note retained/);
+    assert.ok(records[0].exception.includes('C:\\native\\node.js'));
     assert.equal(records[1].phase, 'catalog');
     assert.equal(records[1].http_status, 403);
     assert.equal(records[1].credential_version, 7);
     assert.equal(records[1].instance_id, binding.instanceId);
     assert.doesNotMatch(text, /sentinel-|amc\.|private-directory-model/);
+    t.diagnostic(
+      `F4 final JSON parsed: ${records.length} failure records; native encoded secrets masked; message/code/status/stack/cause/instance/version retained`,
+    );
+    // The real async file sink fails to open under a regular-file ancestor.
+    // Diagnostic failure still cannot escape the native refresh or alter status.
+    const blocked = join(dir, 'blocked');
+    await writeFile(blocked, 'not a directory');
+    process.env.LOCALAPPDATA = blocked;
+    process.env.XDG_STATE_HOME = blocked;
+    const brokenCleanup = [];
+    installObservability({
+      effect(setup) {
+        brokenCleanup.push(setup());
+      },
+    });
+    const broken = createManagedModelStatus(binding);
+    try {
+      await assert.doesNotReject(
+        broken.refresh({
+          listModels() {
+            throw new Error('native failure');
+          },
+        }),
+      );
+      assert.equal(broken.status.state, 'managed_model_unavailable');
+    } finally {
+      broken.close();
+      await Promise.all(brokenCleanup.map((close) => close()));
+    }
   } finally {
     await Promise.all(cleanup.map((close) => close()));
     if (original.local === undefined) delete process.env.LOCALAPPDATA;

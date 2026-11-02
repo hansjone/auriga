@@ -2,6 +2,13 @@
 # Shell orchestration fixture, not a real Docker/Compose/NAS acceptance.
 set -eu
 root=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
+# The positive hook must not live under the host's shared /tmp. Reuse the
+# short-lived, private test namespace, without changing any host permissions.
+if [ "${HOOK_TEST_PRIVATE_TMP:-0}" != 1 ]; then
+  HOOK_SECURITY_CASE=message-orchestration HOOK_SECURITY_START_SCRIPT="${R20_START_SCRIPT:-$root/scripts/start-collab-network.sh}" \
+    sh "$root/test/announcement-hook-security.sh"
+  exit "$?"
+fi
 temp=$(mktemp -d)
 trap 'rm -rf -- "$temp"' EXIT HUP INT TERM
 mkdir -p "$temp/scripts" "$temp/data/config/collab-source"

@@ -47,11 +47,36 @@ if [ -z "$_announcement_check" ]; then
   exit 2
 fi
 case "$_announcement_check" in /*) ;; *) degraded announcement_check_path_invalid ;; esac
+# Establish trust from / downward BEFORE following any child component. Once a
+# directory passes, another UID cannot replace its entries between subsequent
+# checks and exec. Sticky/world-writable ancestors (including /tmp) are rejected;
+# only root and the invoking installation operator belong to this trust boundary.
+_check_uid=$(id -u)
+check_announcement_metadata() {
+  _check_owner=$(stat -c '%u' "$1") || degraded announcement_check_metadata_failed
+  _check_mode=$(stat -c '%a' "$1") || degraded announcement_check_metadata_failed
+  [ "$_check_owner" = 0 ] || [ "$_check_owner" = "$_check_uid" ] || degraded announcement_check_owner_invalid
+  [ "$((0$_check_mode & 022))" = 0 ] || degraded announcement_check_permissions_invalid
+}
+check_announcement_metadata /
+_check_parent=
+_check_remaining=${_announcement_check#/}
+while :; do
+  _check_component=${_check_remaining%%/*}
+  case "$_check_component" in ''|.|..) degraded announcement_check_path_invalid ;; esac
+  _check_parent=$_check_parent/$_check_component
+  [ ! -L "$_check_parent" ] || degraded announcement_check_path_invalid
+  case "$_check_remaining" in
+    */*)
+      [ -d "$_check_parent" ] || degraded announcement_check_path_invalid
+      check_announcement_metadata "$_check_parent"
+      _check_remaining=${_check_remaining#*/}
+      ;;
+    *) break ;;
+  esac
+done
 [ -f "$_announcement_check" ] && [ ! -L "$_announcement_check" ] && [ -x "$_announcement_check" ] \
   && [ "$(readlink -f -- "$_announcement_check")" = "$_announcement_check" ] || degraded announcement_check_path_invalid
-_check_owner=$(stat -c '%u' "$_announcement_check")
-_check_mode=$(stat -c '%a' "$_announcement_check")
-[ "$_check_owner" = 0 ] || [ "$_check_owner" = "$(id -u)" ] || degraded announcement_check_owner_invalid
-[ "$((0$_check_mode & 022))" = 0 ] || degraded announcement_check_permissions_invalid
+check_announcement_metadata "$_announcement_check"
 "$_announcement_check" || degraded announcement_verification_failed
 printf '%s\n' 'message_network=READY'
