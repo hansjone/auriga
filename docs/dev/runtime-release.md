@@ -12,6 +12,10 @@ NAS 通过[公开安装配方](nas.md#消费独立审核的正式运行时)复�
 
 ## 本地 registry 构建与原始 proof
 
+公开 DSH 配方使用仓库既定的 `0.2.1-rc.3` 公共兼容包及完整锁文件，保持已固定的 Node22.19.0 基础镜像。构建与启动前都核对真实安装包组、插件宿主要求及公开 CLI；制品检查还加载公开连接准入 API 与平台原生模块，不启动 DSH 会话。`DSH_VERSION` 从已验证的实际安装版本生成，不能靠环境变量覆盖旧包。
+
+仅准备本机候选时，可给下述构建命令增加 `--local-only`：不 push、不需要 registry，仍执行隔离非 root/无网络的制品检查；元数据中的 `image` 此时是本机 Engine ID、`localOnly=true`，不能用作正式发行 locator 或签名输入。正式发行仍走默认 push/RepoDigest 与独立批准流程。
+
 在受控本机环境准备已独立审核并固定于 `deploy/compose/real-dsh/versions.json` 的 `NODE_IMAGE`。
 从仓库根目录运行下列命令；本地 registry 须先由 operator 准备，命令会真实 build/push，
 然后从本次**精确仓库**的唯一合法 RepoDigest 写元数据。无 `--image-tag` 时仍使用
