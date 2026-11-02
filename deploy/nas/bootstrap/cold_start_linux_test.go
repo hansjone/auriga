@@ -232,6 +232,11 @@ esac
 			networkID := strings.Repeat("c", 64)
 			pg := nasRotationContainer{ID: strings.Repeat("b", 64), Image: image}
 			pg.Config.Labels = map[string]string{"com.docker.compose.project": nasRotationProject, "com.docker.compose.service": "postgres", "com.docker.compose.project.working_dir": recipe, "com.docker.compose.project.config_files": filepath.Join(recipe, "docker-compose.yml")}
+			if scenario == "pg-slow" {
+				// A prior degraded public start created PG with this checked overlay.
+				// The production startup-check must still accept its ownership.
+				pg.Config.Labels["com.docker.compose.project.config_files"] += "," + filepath.Join(recipe, "managed-identity-compose.yml")
+			}
 			pg.State.Running = positive
 			pg.State.Health.Status = "starting"
 			pg.Mounts = append(pg.Mounts, struct {

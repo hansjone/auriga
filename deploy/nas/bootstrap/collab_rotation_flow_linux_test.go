@@ -105,7 +105,25 @@ func nasRotationTestFixture(t *testing.T, mode string) *nasRotationFixture {
 			t.Fatal(e)
 		}
 	}
-	nasRotationTestWrite(t, filepath.Join(r.source, "network/runtime.json"), []byte(`{"qos":{"limit":9007199254740993},"collab":{"Target":"collab:9092"},"protocolSigning":{}}`))
+	runtime := []byte(`{"qos":{"limit":9007199254740993},"collab":{"Target":"collab:9092"},"redeemTimeoutMillis":1000,"requestTimeoutMillis":250,"activeIntervalMillis":250,"protocolSigning":{}}`)
+	nasRotationTestWrite(t, filepath.Join(r.source, "network/runtime.json"), runtime)
+	active, e := nasRotationActive(f.payload, now)
+	if e != nil {
+		t.Fatal(e)
+	}
+	baseline, e := nasRotationGateway(runtime, f.payload.Version, active["protocol_response"])
+	if e != nil {
+		t.Fatal(e)
+	}
+	baseline, _, e = projectNetworkBudget(baseline, []byte("tls {timeout: 2}\nauthorization {timeout: 2}\n"), 60000)
+	if e != nil {
+		t.Fatal(e)
+	}
+	policy := filepath.Join(r.data, "config/network-policy/runtime.json")
+	nasRotationTestWrite(t, policy, baseline)
+	if e = os.Chown(policy, 10001, 10001); e != nil {
+		t.Fatal(e)
+	}
 	f.status = nasRotationStatus{Version: "7", Time: now.Format(time.RFC3339Nano), First: map[string]string{}, Pending: true, Digest: "sha256:" + strings.Repeat("d", 64)}
 	for _, k := range f.payload.Keys {
 		f.status.First[k.Kid] = now.Add(-48 * time.Hour).Format(time.RFC3339Nano)

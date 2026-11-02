@@ -109,6 +109,8 @@ else printf 'FAIL independent_identity_overlay_selected\n'; fail=1; fi
 printf 'invalid\n' >"$TMP/export/managed.identity.enabled"
 tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path
 check reject_invalid_identity_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled collab.rotation.path collab.rotation.available runtime.path
+check reject_missing_identity_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
 printf '0\n' >"$TMP/export/managed.identity.enabled"
 tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path
 check rejected_message_config_stop 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose stop collab network network-broker'

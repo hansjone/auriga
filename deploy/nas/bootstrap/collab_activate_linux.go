@@ -55,6 +55,34 @@ func (e *nasRotationEngine) activate(r *nasRotation) error {
 	if !platformRunning || len(services) != 2 {
 		return fmt.Errorf("activation requires existing healthy platform and signer containers; recover with %s", r.messageRecoveryCommand())
 	}
+	runtimePath, err := r.gatewayRuntime(dir)
+	if err != nil {
+		return err
+	}
+	// A public Compose start may have used the legacy budget bind. Migrate only
+	// through the same existing service/mount checks and signer-only stop gate.
+	for _, c := range services {
+		if c.Config.Labels["com.docker.compose.service"] != "network" || !c.State.Running {
+			continue
+		}
+		matched := false
+		for _, m := range c.Mounts {
+			if m.Destination == "/etc/auriga/network/runtime.json" && m.Source == runtimePath && !m.RW {
+				matched = true
+			}
+		}
+		if !matched {
+			if err = e.stop(r); err != nil {
+				return err
+			}
+			for s, previous := range services {
+				services[s], err = e.inspect(previous.ID)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
 	for _, s := range []string{"collab", "network"} {
 		c := services[s]
 		targets := map[string]string{}
@@ -62,6 +90,7 @@ func (e *nasRotationEngine) activate(r *nasRotation) error {
 			targets["/etc/auriga/collab"] = filepath.Join(dir, "config")
 		} else {
 			targets["/etc/auriga/network/protocol.key"] = filepath.Join(dir, "network/protocol.key")
+			targets["/etc/auriga/network/runtime.json"] = runtimePath
 		}
 		ready := c.State.Running
 		for target, source := range targets {

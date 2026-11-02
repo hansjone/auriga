@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,11 +15,103 @@ import (
 	"testing"
 )
 
+func nasAssertGatewayPair(t *testing.T, f *nasRotationFixture) (string, string) {
+	t.Helper()
+	runtimePath, privatePath := "", ""
+	for _, c := range f.containers {
+		if c.Config.Labels["com.docker.compose.service"] != "network" {
+			continue
+		}
+		for _, m := range c.Mounts {
+			if m.Destination == "/etc/auriga/network/runtime.json" {
+				runtimePath = m.Source
+			}
+			if m.Destination == "/etc/auriga/network/protocol.key" {
+				privatePath = m.Source
+			}
+			if (m.Destination == "/etc/auriga/network/runtime.json" || m.Destination == "/etc/auriga/network/protocol.key") && m.RW {
+				t.Fatal("writable gateway signing material")
+			}
+		}
+	}
+	raw, e := os.ReadFile(runtimePath)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var cfg struct {
+		Operation int `json:"operationTimeoutMillis"`
+		Signing   struct {
+			Kid     string `json:"keyId"`
+			Version string `json:"keysetVersion"`
+			Before  string `json:"notBefore"`
+			After   string `json:"notAfter"`
+		} `json:"protocolSigning"`
+	}
+	if e = json.Unmarshal(raw, &cfg); e != nil {
+		t.Fatal(e)
+	}
+	if cfg.Signing.Version != f.status.Version {
+		t.Fatalf("consumer runtime version=%s, installed=%s", cfg.Signing.Version, f.status.Version)
+	}
+	if cfg.Operation != 60000 {
+		t.Fatal("activation lost the installed operation budget")
+	}
+	keyRaw, e := os.ReadFile(privatePath)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer clear(keyRaw)
+	block, _ := pem.Decode(keyRaw)
+	if block == nil {
+		t.Fatal("protocol PEM missing")
+	}
+	key, e := x509.ParsePKCS8PrivateKey(block.Bytes)
+	clear(block.Bytes)
+	if e != nil {
+		t.Fatal(e)
+	}
+	private := key.(ed25519.PrivateKey)
+	defer clear(private)
+	for _, k := range f.payload.Keys {
+		if k.Kid != cfg.Signing.Kid {
+			continue
+		}
+		pub, e := base64.RawURLEncoding.DecodeString(k.Public)
+		if e != nil {
+			t.Fatal(e)
+		}
+		actual, e := x509.MarshalPKIXPublicKey(private.Public())
+		if e != nil || string(pub) != string(actual) || k.State != "active" || k.Before != cfg.Signing.Before || k.After != cfg.Signing.After {
+			t.Fatal("consumer private key and signed active metadata differ")
+		}
+		return runtimePath, privatePath
+	}
+	t.Fatal("consumer kid is absent from approved manifest")
+	return "", ""
+}
+
+func TestNASActivatedGatewayConsumesSameVersionPair(t *testing.T) {
+	f := nasRotationTestFixture(t, "ip")
+	f.request(t)
+	if e := f.r.publish(); e != nil {
+		t.Fatal(e)
+	}
+	if e := f.r.install(); e != nil {
+		t.Fatal(e)
+	}
+	nasEnableActivationFixture(t, f)
+	if e := f.r.engine.activate(f.r); e != nil {
+		t.Fatal(e)
+	}
+	nasAssertGatewayPair(t, f)
+}
+
 type nasActivationTransport struct {
 	base             http.RoundTripper
 	fixture          *nasRotationFixture
 	t                *testing.T
 	created, removed int
+	failNetworkStart bool
 }
 
 func (x *nasActivationTransport) RoundTrip(q *http.Request) (*http.Response, error) {
@@ -66,6 +162,10 @@ func (x *nasActivationTransport) RoundTrip(q *http.Request) (*http.Response, err
 			return reply(nil)
 		}
 		if path == "/containers/"+id+"/start" {
+			if c.Config.Labels["com.docker.compose.service"] == "network" && x.failNetworkStart {
+				x.failNetworkStart = false
+				return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader("injected crash before network start")), Header: make(http.Header)}, nil
+			}
 			c.State.Running = true
 			c.State.Pid = 123
 			f.containers[id] = c

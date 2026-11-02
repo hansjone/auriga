@@ -123,6 +123,12 @@ sh deploy-nas/scripts/runtime-upgrade.sh /absolute/approved/release-bundle \
 `start-collab-network.sh` 的 Compose up 时生效，先强制核历史与 PG 当前 pair。
 消息启动的有界等待、降级与独立恢复命令见 [续期手册](../../docs/dev/nas-network-renewal.md)。
 
+自动周队列激活及中断恢复会从经收据核验的安装生成网关预算配置，保留现有操作预算，
+写入 `config/collab-operations/gateway/<version>/<sha256>.json`；该目录仍在原控制器写入范围内。
+重建 network 时，配置与同版 `installs/<version>/network/protocol.key` 一起只读绑定，
+不等待人工 start/render 来刷新签名 kid、版本和有效窗。旧收据、安装及预算源不会被覆盖；
+已存在投影的字节或权限不符时拒绝使用。公开 start 后的旧预算绑定通过原归属检查和仅停签名服务的门禁迁移。
+
 中断留下 pending 激活时，重新执行同候选命令即可继续。若需明确撤回尚未提交的激活，
 container 模式执行 `installer.sh runtime-rollback /absolute/approved/release-bundle <same-image>`，
 host root 执行 `auriga-nas-bootstrap runtime-upgrade -action rollback -base <data>/config/materials

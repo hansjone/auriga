@@ -12,6 +12,30 @@ import (
 	"time"
 )
 
+func TestNASManagedIdentityOverlayOwnershipClosesRecoveryLoop(t *testing.T) {
+	f := nasRotationTestFixture(t, "ip")
+	nasEnableActivationFixture(t, f)
+	for id, c := range f.containers {
+		c.Config.Labels["com.docker.compose.project.config_files"] += "," + filepath.Join(f.r.recipe, "managed-identity-compose.yml")
+		f.containers[id] = c
+	}
+	if _, e := f.r.engine.database(f.r); e != nil {
+		t.Fatalf("public recovery rejected its own PG: %v", e)
+	}
+	if e := f.r.engine.stop(f.r); e != nil {
+		t.Fatalf("renewal rejected its own core containers: %v", e)
+	}
+	for _, bad := range []string{"/other/managed-identity-compose.yml", f.r.recipe + "/../managed-identity-compose.yml", f.r.recipe + "/../recipe/managed-identity-compose.yml", f.r.recipe + "/managed-identity-compose.yml.evil"} {
+		for _, c := range f.containers {
+			c.Config.Labels = map[string]string{"com.docker.compose.project": nasRotationProject, "com.docker.compose.project.working_dir": f.r.recipe, "com.docker.compose.service": "postgres", "com.docker.compose.project.config_files": filepath.Join(f.r.recipe, "docker-compose.yml") + "," + bad}
+			if e := f.r.engine.owned(f.r, c); e == nil {
+				t.Fatalf("foreign overlay accepted: %s", bad)
+			}
+			break
+		}
+	}
+}
+
 func TestNASRotationDockerOperatorScopeAndCleanup(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("protected helper plans require Linux root")

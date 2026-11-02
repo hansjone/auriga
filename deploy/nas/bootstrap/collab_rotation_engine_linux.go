@@ -121,7 +121,7 @@ func (e *nasRotationEngine) owned(r *nasRotation, c nasRotationContainer) error 
 			main = true
 			continue
 		}
-		if f == filepath.Join(r.recipe, "collab-compose.yml") {
+		if f == filepath.Join(r.recipe, "collab-compose.yml") || f == filepath.Join(r.recipe, "managed-identity-compose.yml") {
 			continue
 		}
 		parent := filepath.Dir(r.data)
@@ -167,6 +167,7 @@ func (e *nasRotationEngine) stop(r *nasRotation) error {
 		expectedMounts := map[string]string{}
 		config := filepath.Join(r.data, "config/collab-runtime/collab")
 		protocol := filepath.Join(r.data, "config/collab-runtime/network/protocol.key")
+		installedDir := ""
 		if _, err := os.Lstat(filepath.Join(r.root, "current.json")); err == nil && !r.stopOnly {
 			rows, err := r.releases()
 			if err != nil {
@@ -178,6 +179,7 @@ func (e *nasRotationEngine) stop(r *nasRotation) error {
 			}
 			config = filepath.Join(dir, "config")
 			protocol = filepath.Join(dir, "network/protocol.key")
+			installedDir = dir
 		}
 		switch s {
 		case "collab":
@@ -195,6 +197,16 @@ func (e *nasRotationEngine) stop(r *nasRotation) error {
 			for _, m := range c.Mounts {
 				if m.Destination == target {
 					found = m.Source == source && !m.RW
+					if !m.RW && target == "/etc/auriga/network/runtime.json" && m.Source != source {
+						if r.stopOnly {
+							found = r.gatewayProjectionVersion(m.Source) != ""
+						} else if installedDir != "" {
+							if err := r.checkGatewayRuntime(m.Source, installedDir); err != nil {
+								return fmt.Errorf("NAS rotation gateway projection refused: %w", err)
+							}
+							found = true
+						}
+					}
 					if r.stopOnly && !m.RW && (target == "/etc/auriga/collab" || target == "/etc/auriga/network/protocol.key") {
 						rel, e := filepath.Rel(filepath.Join(r.root, "installs"), m.Source)
 						parts := strings.Split(filepath.ToSlash(rel), "/")
