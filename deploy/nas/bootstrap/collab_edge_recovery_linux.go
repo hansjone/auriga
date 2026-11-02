@@ -28,7 +28,16 @@ func (e *nasRotationEngine) checkRecoveryEdge(r *nasRotation) error {
 		config := false
 		for _, m := range c.Mounts {
 			if m.Destination == "/etc/auriga/edge.config.json" {
-				if config || m.RW || (m.Source != filepath.Join(r.data, "config/materials/edge.config.json") && m.Source != filepath.Join(r.data, "config/collab-runtime/edge/edge.config.json")) {
+				if config || m.RW {
+					return fmt.Errorf("NAS recovery edge config mount refused")
+				}
+				switch m.Source {
+				case filepath.Join(r.data, "config/materials/edge.config.json"), filepath.Join(r.data, "config/collab-runtime/edge/edge.config.json"):
+				case filepath.Join(r.data, "config/bifrost/edge.config.json"):
+					if err := checkNASBifrostEdge(filepath.Join(r.data, "config"), true); err != nil {
+						return fmt.Errorf("NAS recovery Bifrost edge projection refused: %w", err)
+					}
+				default:
 					return fmt.Errorf("NAS recovery edge config mount refused")
 				}
 				config = true

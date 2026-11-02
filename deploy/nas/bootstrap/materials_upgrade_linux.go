@@ -98,7 +98,13 @@ func nasMaterialsUpgrade(args []string, stdout io.Writer) error {
 	if err := materialsPrivateDirectory(*out); err != nil {
 		return err
 	}
-	fd, err := unix.Open(filepath.Join(*out, ".lock"), unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+	// Controllers mount original materials read-only. Observers never create or
+	// repair a lock; the shared lock still excludes every activation/projection.
+	flags, lock := unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, unix.LOCK_SH
+	if *action != "status" && *action != "path" && *action != "check" {
+		flags, lock = unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC, unix.LOCK_EX
+	}
+	fd, err := unix.Open(filepath.Join(*out, ".lock"), flags, 0600)
 	if err != nil {
 		return err
 	}
@@ -107,7 +113,7 @@ func nasMaterialsUpgrade(args []string, stdout io.Writer) error {
 	if unix.Fstat(fd, &st) != nil || st.Uid != 0 || st.Gid != 0 || st.Mode&07777 != 0600 || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 {
 		return fmt.Errorf("unsafe materials lock")
 	}
-	if err := unix.Flock(fd, unix.LOCK_EX); err != nil {
+	if err := unix.Flock(fd, lock); err != nil {
 		return err
 	}
 	defer func() { _ = unix.Flock(fd, unix.LOCK_UN) }()
@@ -416,29 +422,7 @@ func projectBifrostEdge(base, generation string, coreOnly bool) error {
 		}
 	}
 	// render-collab verifies its sealed source and projections before this step.
-	f, err := os.OpenFile(source, os.O_RDONLY|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
-	closed := f.Close()
-	if err != nil {
-		return err
-	}
-	if closed != nil {
-		return closed
-	}
-	if len(raw) > 1<<20 {
-		return fmt.Errorf("edge projection too large")
-	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
-		return fmt.Errorf("invalid edge projection")
-	}
-	delete(doc, "litellmOrigin")
-	delete(doc, "litellmUI")
-	doc["relay"] = json.RawMessage(`{"origin":"http://bifrost:8080","adminPasswordFile":"/run/secrets/bifrost_admin_password"}`)
-	raw, err = json.Marshal(doc)
+	raw, err := bifrostEdgeProjection(source)
 	if err != nil {
 		return err
 	}
@@ -459,6 +443,33 @@ func projectBifrostEdge(base, generation string, coreOnly bool) error {
 		}
 	}
 	return nil
+}
+
+// The renderer and read-only controller verification derive identical bytes.
+func bifrostEdgeProjection(source string) ([]byte, error) {
+	f, err := os.OpenFile(source, os.O_RDONLY|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	closed := f.Close()
+	if err != nil {
+		return nil, err
+	}
+	if closed != nil {
+		return nil, closed
+	}
+	if len(raw) > 1<<20 {
+		return nil, fmt.Errorf("edge projection too large")
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
+		return nil, fmt.Errorf("invalid edge projection")
+	}
+	delete(doc, "litellmOrigin")
+	delete(doc, "litellmUI")
+	doc["relay"] = json.RawMessage(`{"origin":"http://bifrost:8080","adminPasswordFile":"/run/secrets/bifrost_admin_password"}`)
+	return json.Marshal(doc)
 }
 
 func materialsProject(out, leaf string, raw []byte) error {

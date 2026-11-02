@@ -125,6 +125,12 @@ func (e *nasRotationEngine) owned(r *nasRotation, c nasRotationContainer) error 
 		if f == filepath.Join(r.recipe, "collab-compose.yml") || f == filepath.Join(r.recipe, "managed-identity-compose.yml") {
 			continue
 		}
+		if nasBifrostComposeOverlay(r.data, f) {
+			if err := checkNASBifrostActivation(filepath.Join(r.data, "config")); err != nil {
+				return fmt.Errorf("NAS rotation Bifrost activation refused: %w", err)
+			}
+			continue
+		}
 		parent := filepath.Dir(r.data)
 		if (strings.HasPrefix(f, parent+"/.auriga-compose.") || strings.HasPrefix(f, parent+"/.auriga-runtime-compose.")) && (filepath.Base(f) == "override.yml" || filepath.Base(f) == "runtime.yml" || filepath.Base(f) == "rotation.yml") {
 			continue
@@ -198,6 +204,12 @@ func (e *nasRotationEngine) stop(r *nasRotation) error {
 			for _, m := range c.Mounts {
 				if m.Destination == target {
 					found = m.Source == source && !m.RW
+					if !m.RW && target == "/etc/auriga/edge.config.json" && m.Source == filepath.Join(r.data, "config/bifrost/edge.config.json") {
+						if err := checkNASBifrostEdge(filepath.Join(r.data, "config"), r.stopOnly); err != nil {
+							return fmt.Errorf("NAS rotation Bifrost edge projection refused: %w", err)
+						}
+						found = true
+					}
 					if !m.RW && target == "/etc/auriga/network/runtime.json" && m.Source != source {
 						if r.stopOnly {
 							found = r.gatewayProjectionVersion(m.Source) != ""

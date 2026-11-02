@@ -89,8 +89,8 @@ func testNASMaterialsUpgradeLifecycle(t *testing.T) {
 	}
 	for _, mode := range []string{"domain", "ip", "proxy"} {
 		t.Run(mode, func(t *testing.T) {
-			root := filepath.Join(parent, mode)
-			if err := os.Mkdir(root, 0755); err != nil {
+			root := filepath.Join(parent, mode, "config")
+			if err := os.MkdirAll(root, 0755); err != nil {
 				t.Fatal(err)
 			}
 			base := filepath.Join(root, "materials")
@@ -180,6 +180,7 @@ func testNASMaterialsUpgradeLifecycle(t *testing.T) {
 				t.Fatalf("rebuild message projections: %v %s", err, b)
 			}
 			run("project", true)
+			testNASBifrostRotationControlScope(t, root)
 			// Optional receipt damage must be rejected by its own authority check,
 			// while core check/path/project keep validating only base/generation.
 			optionalReceipt := filepath.Join(collab, "activation.receipt")
@@ -295,6 +296,9 @@ func testNASMaterialsUpgradeLifecycle(t *testing.T) {
 				t.Fatal("wrong edge projection")
 			}
 			run("rollback", true)
+			if err := checkNASBifrostActivation(root); err == nil {
+				t.Fatal("rotation accepted rolled-back Bifrost activation")
+			}
 			run("path", false)
 			run("stage", true)
 			if run("path", true) != active {
