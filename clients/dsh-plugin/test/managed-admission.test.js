@@ -19,7 +19,7 @@ test('rc.3 direct HTTP and socket admission share the live managed owner Peer', 
     ownerId: OWNER_ID,
     getPublicKey: () => keys.publicKey,
   });
-  const lifetime = new AbortController();
+  const lifetime = new globalThis.AbortController();
   const peer = { principal: { kind: 'owner' }, signal: lifetime.signal };
   let nativeCalls = 0;
   const connection = {
@@ -151,7 +151,7 @@ test('Cordis original service receives the patch; missing and non-owner Peers fa
       origin: 'https://instance.i.example.com',
     },
   };
-  const lifetime = new AbortController();
+  const lifetime = new globalThis.AbortController();
   const original = () => ({ rejection: 401 });
   const target = {
     admit: original,
