@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"io"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 )
 
 const diagnosticSecretNames = `[a-z0-9_-]*(?:password|passwd|pwd|secret|credential|token|ticket|claim|private[_-]?key|api[_-]?key|cookie|totp)|authorization`
+
+const maxDiagnosticValueOutput = 8 * 1024
 
 var diagnosticSecretKey = regexp.MustCompile(`(?i)^(?:` + diagnosticSecretNames + `)$`)
 var diagnosticCredentialText = regexp.MustCompile(`(?i)\b(?:` + diagnosticSecretNames + `)\s*[:=]`)
@@ -16,7 +20,13 @@ var diagnosticCredentialText = regexp.MustCompile(`(?i)\b(?:` + diagnosticSecret
 // JSON encoded inside that string is decoded with a depth bound, so escaping
 // cannot hide credential keys. It is not used to discard whole messages/errors.
 func MaskDiagnosticValue(value string) string {
-	return maskDiagnosticText(value, 0)
+	masked := maskDiagnosticText(value, 0)
+	// Key renaming/depth markers can expand an otherwise small health string.
+	// Bound only this diagnostic leaf, preserving the surrounding public fields.
+	if len(masked) > maxDiagnosticValueOutput {
+		return "[diagnostic omitted: size limit]"
+	}
+	return masked
 }
 
 func maskDiagnosticText(value string, depth int) string {
@@ -54,13 +64,31 @@ func maskDiagnosticNode(value any, depth int) any {
 	}
 	switch typed := value.(type) {
 	case map[string]any:
-		for key, field := range typed {
-			if diagnosticSecretKey.MatchString(key) {
-				typed[key] = "****"
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		masked := make(map[string]any, len(typed))
+		collision := 0
+		for _, key := range keys {
+			field := typed[key]
+			safeKey := maskDiagnosticText(key, depth+1)
+			candidate := safeKey
+			for {
+				if _, exists := masked[candidate]; !exists {
+					break
+				}
+				collision++
+				candidate = safeKey + " [redacted key " + strconv.Itoa(collision) + "]"
+			}
+			if isDiagnosticSecretKey(key, depth+1) {
+				masked[candidate] = "****"
 			} else {
-				typed[key] = maskDiagnosticNode(field, depth+1)
+				masked[candidate] = maskDiagnosticNode(field, depth+1)
 			}
 		}
+		return masked
 	case []any:
 		for index, field := range typed {
 			typed[index] = maskDiagnosticNode(field, depth+1)
@@ -69,4 +97,21 @@ func maskDiagnosticNode(value any, depth int) any {
 		return maskDiagnosticText(typed, depth)
 	}
 	return value
+}
+
+// A JSON string used as a key can encode a credential NAME as well as contain
+// an encoded object. Keep the same depth budget when classifying those names.
+func isDiagnosticSecretKey(key string, depth int) bool {
+	for depth < 6 {
+		if diagnosticSecretKey.MatchString(key) {
+			return true
+		}
+		var decoded string
+		if json.Unmarshal([]byte(key), &decoded) != nil {
+			return false
+		}
+		key = decoded
+		depth++
+	}
+	return true // Ambiguous encoded names at the limit cannot expose their values.
 }
