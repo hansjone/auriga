@@ -111,7 +111,7 @@ func TestNASColdStartWithRealBootstrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, service := range []string{"PLATFORM", "EDGE", "AGENT", "POSTGRES", "NATS", "REGISTRY", "LITELLM"} {
+	for _, service := range []string{"PLATFORM", "EDGE", "AGENT", "POSTGRES", "NATS", "REGISTRY", "BIFROST", "OPERATOR"} {
 		if _, err = fmt.Fprintf(f, "AURIGA_IMAGE_%s=%s\n", service, image); err != nil {
 			t.Fatal(err)
 		}
