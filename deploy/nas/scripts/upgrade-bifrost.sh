@@ -9,5 +9,7 @@ load_stack_env
 # database process remains running; no initdb, role password reset or data delete.
 # NAS Compose 2.29 has no run --pull option. The postgres service pins
 # pull_policy: never, including for this one-off helper.
+# The bootstrap password is root/0600; group 999 reads the separate relay
+# passwords. This client uses those existing mounts without changing owners.
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" run --rm --no-deps \
- --user 999:999 -e PGHOST=postgres --entrypoint sh postgres /docker-entrypoint-initdb.d/03-bifrost.sh
+ --user 0:999 -e PGHOST=postgres --entrypoint sh postgres /docker-entrypoint-initdb.d/03-bifrost.sh
