@@ -124,29 +124,52 @@ export function browserFenceOk(req, browserOrigin) {
 export function installHostAuthentication(connection, door, opts) {
   const browserOrigin = validateBrowserOrigin(opts?.browserOrigin);
   if (!connection) return () => {};
+  // Cordis binds methods through a caller-scoped proxy. Patch the service so
+  // its own /api handler and admitConnection() see the same admission policy.
+  const target = connection[Symbol.for('cordis.original')] ?? connection;
   const restores = [];
   const wrap = (name, wrapped) => {
-    if (typeof connection[name] !== 'function') return;
-    const original = connection[name];
+    if (typeof target[name] !== 'function') return;
+    const original = target[name];
     const fn = function (req, ...args) {
       return wrapped.call(this, original, req, ...args);
     };
-    connection[name] = fn;
+    target[name] = fn;
     restores.push(() => {
-      if (connection[name] === fn) connection[name] = original;
+      if (target[name] === fn) target[name] = original;
     });
   };
+  const managedAdmission = (req) => {
+    if (!browserFenceOk(req, browserOrigin)) return { rejection: 403 };
+    // rc.3 exposes one shared owner Peer. Its public signal owns the lifetime;
+    // never manufacture a Peer or revive a disposed/missing host capability.
+    const peer = target.browserPeer;
+    if (peer?.principal?.kind !== 'owner' || peer.signal?.aborted !== false)
+      return { rejection: 401 };
+    return { peer };
+  };
+  const hasAdmission = typeof target.admit === 'function';
+  wrap('admit', function (original, req, ...args) {
+    if (!door.isAuthenticated(req)) return original.call(this, req, ...args);
+    return managedAdmission(req);
+  });
   wrap('requestRejection', function (original, req, ...args) {
     if (!door.isAuthenticated(req)) return original.call(this, req, ...args);
+    if (hasAdmission) return managedAdmission(req).rejection;
     return browserFenceOk(req, browserOrigin) ? undefined : 403;
   });
   wrap('authorizeIndex', function (original, req, res, ...args) {
     if (!door.isAuthenticated(req))
       return original.call(this, req, res, ...args);
-    if (browserFenceOk(req, browserOrigin)) return true;
+    const rejection = hasAdmission
+      ? managedAdmission(req).rejection
+      : browserFenceOk(req, browserOrigin)
+        ? undefined
+        : 403;
+    if (rejection === undefined) return true;
     try {
-      res.writeHead(403, { 'cache-control': 'no-store' });
-      res.end('forbidden');
+      res.writeHead(rejection, { 'cache-control': 'no-store' });
+      res.end(rejection === 401 ? 'unauthorized' : 'forbidden');
     } catch {
       /* ignore */
     }
