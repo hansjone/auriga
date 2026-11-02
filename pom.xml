@@ -14,7 +14,7 @@
     <protobuf.version>4.36.2</protobuf.version>
     <postgres-binaries.version>17.11.0</postgres-binaries.version>
     <embedded-postgres.version>2.2.2</embedded-postgres.version>
-    <mybatis-plus.version>3.5.17</mybatis-plus.version>
+    <mybatis-plus.version>3.5.18.1</mybatis-plus.version>
     <jnats.version>2.26.4</jnats.version>
     <json-schema-validator.version>3.0.8</json-schema-validator.version>
     <icu4j.version>78.3</icu4j.version>
