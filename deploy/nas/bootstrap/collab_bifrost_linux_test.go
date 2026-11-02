@@ -14,6 +14,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// The real base verifier deliberately copies its running executable and drops
+// to the fixed installer UID. In these in-process Engine tests that executable
+// is the test binary, so preserve the production subcommand dispatch as well.
+func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "collab-base" {
+		if err := nasCollabCommand(os.Args[1:]); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
 // Called by the real fixed-UID installer/CLI lifecycle after an actual sealed
 // legacy upgrade and collab activation. Only the Docker Engine is a fake.
 func testNASBifrostRotationControlScope(t *testing.T, config string) {
