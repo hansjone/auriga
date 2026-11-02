@@ -23,6 +23,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -565,7 +566,7 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 		if body.Apply == nil || body.Apply.GetSpec() == nil {
 			return nil
 		}
-		return s.cfg.Reconciler.ApplySpec(ctx, body.Apply.GetSpec())
+		return s.cfg.Reconciler.ApplySpec(telemetry.WithParent(ctx, body.Apply.GetTraceparent()), body.Apply.GetSpec())
 	case *nodev1.SessionResponse_Delete:
 		d := body.Delete
 		if d == nil {

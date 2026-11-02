@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
-import { logEvent } from '../observability/index.js';
+import { logEvent, validTraceparent } from '../observability/index.js';
 
 // This is a logging protocol, not a new status/observer surface. Never serialize
 // an exception, request, identity or caller-supplied diagnostic object.
@@ -408,6 +408,41 @@ export function installNetworkDiagnosticSink(ctx) {
     } catch {
       /* No fallback to raw logs. */
     }
+  }
+}
+
+/** Own health observations reuse the existing public Cordis exporter and bounded
+ * isolated writer. Never export arbitrary host logs or response/request objects.
+ * @param {any} ctx @param {{parent:string,span:string,instance:string,generation:number,ready:boolean,elapsed:number}} event */
+export function emitHealthObservation(ctx, event) {
+  try {
+    if (!validTraceparent(event.parent) || !validTraceparent(event.span))
+      return;
+    const fields = {
+      trace_id: event.span.slice(3, 35),
+      span_id: event.span.slice(36, 52),
+      parent_span_id: event.parent.slice(36, 52),
+      instance_id: /^[0-9a-f-]{36}$/.test(event.instance) ? event.instance : '',
+      generation:
+        Number.isSafeInteger(event.generation) && event.generation > 0
+          ? event.generation
+          : 0,
+      ready: event.ready === true,
+      http_status: 200,
+      elapsed_ms: integer(event.elapsed),
+    };
+    logEvent(event.ready ? 'INFO' : 'WARN', 'Managed health response', fields);
+    const line = JSON.stringify({
+      '@timestamp': new Date().toISOString(),
+      service: 'dsh-plugin',
+      level: event.ready ? 'INFO' : 'WARN',
+      message: 'Managed health response',
+      ...fields,
+    });
+    if (Buffer.byteLength(line) <= 2048)
+      sinks.get(ctx?.[SINK])?.send(line, ctx);
+  } catch {
+    /* Observation must not change the health response or authentication. */
   }
 }
 

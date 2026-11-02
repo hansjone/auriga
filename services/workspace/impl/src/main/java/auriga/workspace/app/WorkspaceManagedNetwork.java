@@ -51,6 +51,10 @@ public final class WorkspaceManagedNetwork {
   }
 
   public void reconcile(Map<String, Object> row) {
+    WorkspaceStartupTrace.reconcile(row, () -> reconcileStartup(row));
+  }
+
+  private void reconcileStartup(Map<String, Object> row) {
     var store = service.store;
     UUID id = (UUID) row.get("id");
     long version = ((Number) row.get("managed_credential_version")).longValue();
@@ -192,7 +196,7 @@ public final class WorkspaceManagedNetwork {
           if (!(boolean) current.get("deleted")) {
             current = store.instance(id);
             var spec = WorkspaceService.spec(current);
-            service.saveSpec(
+            service.saveStartupSpec(
                 current, spec.toBuilder().setGeneration(spec.getGeneration() + 1).build());
             if (refresh) service.queueManagedMaterialRestart(id);
           }

@@ -165,6 +165,125 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void startupTraceSurvivesConcurrentOpenDispatchReconnectAndMaterialGeneration() throws Exception {
+    policy.maxConcurrentStarts(10);
+    var control = new RecoveryControl(tenant);
+    String first = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    String second = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
+    UUID other = UuidV7.next();
+    UUID id;
+    UUID otherId;
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var a =
+          executor.submit(
+              () ->
+                  auriga.common.context.RequestContext.start("startup-a", first)
+                      .call(
+                          () ->
+                              TenantContext.call(
+                                  tenant, () -> (UUID) service.open(owner).instance().get("id"))));
+      var b =
+          executor.submit(
+              () ->
+                  auriga.common.context.RequestContext.start("startup-b", second)
+                      .call(
+                          () ->
+                              TenantContext.call(
+                                  tenant, () -> (UUID) service.open(other).instance().get("id"))));
+      id = a.get(10, TimeUnit.SECONDS);
+      otherId = b.get(10, TimeUnit.SECONDS);
+    }
+    assertTrue(auriga.common.context.RequestContext.current().isEmpty());
+    // Open has completed before Inventory allows the independent dispatch worker to send.
+    control.stream.onNext(
+        SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+    Map<String, ApplySpec> deliveries = new HashMap<>();
+    for (int i = 0; i < 2; i++) {
+      var delivery = control.fake.next().getApply();
+      deliveries.put(delivery.getSpec().getInstanceId(), delivery);
+    }
+    assertEquals(
+        first.substring(3, 35), deliveries.get(id.toString()).getTraceparent().substring(3, 35));
+    assertEquals(
+        second.substring(3, 35),
+        deliveries.get(otherId.toString()).getTraceparent().substring(3, 35));
+    assertNotEquals(
+        first.substring(36, 52), deliveries.get(id.toString()).getTraceparent().substring(36, 52));
+    var devices = org.mockito.Mockito.mock(auriga.iam.api.ManagedDeviceCredentials.class);
+    org.mockito.Mockito.when(devices.issue(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            call -> {
+              assertEquals(
+                  first.substring(3, 35),
+                  auriga.common.context.RequestContext.current().orElseThrow().trace().traceId());
+              return auriga.contracts.iam.v1.IssueManagedDeviceResponse.newBuilder()
+                  .setDeviceId(UuidV7.next().toString())
+                  .setCredential("a".repeat(43))
+                  .setExpiresAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(3600)))
+                  .build();
+            });
+    var network =
+        new WorkspaceManagedNetwork(
+            service, managedCrypto, devices, WorkspaceService.JSON.createObjectNode());
+    TenantContext.run(tenant, () -> network.reconcile(store.tx(() -> store.instance(id))));
+    control.reconnect();
+    control.stream.onNext(
+        SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+    deliveries.clear();
+    for (int i = 0; i < 2; i++) {
+      var delivery = control.fake.next().getApply();
+      deliveries.put(delivery.getSpec().getInstanceId(), delivery);
+    }
+    var derived = deliveries.get(id.toString());
+    assertTrue(derived.getSpec().getGeneration() > 1);
+    assertEquals(first.substring(3, 35), derived.getTraceparent().substring(3, 35));
+    TenantContext.run(
+        tenant,
+        () -> {
+          clock.now = clock.now.plusSeconds(1);
+          service.status(
+              control.node,
+              InstanceStatus.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setObservedGeneration(derived.getSpec().getGeneration())
+                  .setPhase(InstancePhase.INSTANCE_PHASE_STOPPED)
+                  .setUpdatedAt(NodeEnrollment.timestamp(clock.instant()))
+                  .build());
+          assertFalse(
+              WorkspaceStartupTrace.parent(store.tx(() -> store.instance(id))).isEmpty(),
+              "restart checkpoint must retain cause");
+          clock.now = clock.now.plusSeconds(1);
+          service.status(
+              control.node,
+              InstanceStatus.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setObservedGeneration(derived.getSpec().getGeneration())
+                  .setReady(true)
+                  .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING)
+                  .setUpdatedAt(NodeEnrollment.timestamp(clock.instant()))
+                  .build());
+          assertEquals("", WorkspaceStartupTrace.parent(store.tx(() -> store.instance(id))));
+          auriga.common.context.RequestContext.start("no-change-open", second)
+              .run(() -> service.open(owner));
+          var row = store.tx(() -> store.instance(id));
+          assertEquals("", WorkspaceStartupTrace.parent(row));
+          assertEquals(
+              derived.getSpec().getGeneration(), WorkspaceService.spec(row).getGeneration());
+          assertEquals(
+              WorkspaceService.spec(row),
+              WorkspaceStartupTrace.dispatch(row, WorkspaceService.spec(row)).getSpec());
+        });
+    control.reconnect();
+    control.stream.onNext(
+        SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+    for (int i = 0; i < 2; i++) {
+      var delivery = control.fake.next().getApply();
+      if (delivery.getSpec().getInstanceId().equals(id.toString()))
+        assertTrue(delivery.getTraceparent().isEmpty());
+    }
+  }
+
+  @Test
   void managedCredentialLifecycleIsFencedAndMaterialIsSealed() throws Exception {
     service.requireManagedNetworkCredentials();
     var join = joinRequest(token().token(), TestPki.key());
@@ -362,12 +481,14 @@ class WorkspaceIntegrationTest {
     var server =
         com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
     var calls = new java.util.concurrent.atomic.AtomicInteger();
+    var observedTrace = new java.util.concurrent.atomic.AtomicReference<String>();
     server.createContext(
         "/ai/v1/models",
         exchange -> {
           assertEquals(
               "Bearer " + credential, exchange.getRequestHeaders().getFirst("Authorization"));
           calls.incrementAndGet();
+          observedTrace.set(exchange.getRequestHeaders().getFirst("traceparent"));
           byte[] body =
               "{\"data\":[{\"id\":\"pool-a\"},{\"id\":\"pool-b\"}]}"
                   .getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -388,7 +509,13 @@ class WorkspaceIntegrationTest {
           tenant,
           () -> {
             var row = store.tx(() -> store.instance(id));
-            models.reconcile(row, response);
+            var initial = row;
+            String parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+            auriga.common.context.RequestContext.start("model-catalogue", parent)
+                .run(() -> models.reconcile(initial, response));
+            var trace = auriga.common.context.TraceContext.parse(observedTrace.get()).orElseThrow();
+            assertEquals(parent.substring(3, 35), trace.traceId());
+            assertNotEquals(parent.substring(36, 52), trace.spanId());
             row = store.tx(() -> store.instance(id));
             assertNotNull(row.get("managed_model_credential"));
             assertTrue(WorkspaceService.spec(row).getSecrets().hasModelCredential());
