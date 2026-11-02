@@ -169,6 +169,53 @@ func testNASMaterialsUpgradeLifecycle(t *testing.T) {
 				t.Fatalf("late collab activation: %v %s", err, b)
 			}
 			run("check", true)
+			// A sealed optional message source may outlive its disposable edge
+			// projection. Core Bifrost projection must not read that missing leaf.
+			if err := os.Mkdir(filepath.Join(root, "bifrost"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			run("project-core", true)
+			run("project", false) // strict message projection still refuses absence
+			if b, err := exec.Command("sh", "../scripts/collab-materials.sh", collab, filepath.Join(root, "collab-runtime")).CombinedOutput(); err != nil {
+				t.Fatalf("rebuild message projections: %v %s", err, b)
+			}
+			run("project", true)
+			// Optional receipt damage must be rejected by its own authority check,
+			// while core check/path/project keep validating only base/generation.
+			optionalReceipt := filepath.Join(collab, "activation.receipt")
+			originalOptional, err := os.ReadFile(optionalReceipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, damage := range []string{"metadata", "content"} {
+				if damage == "metadata" {
+					if err := os.Chmod(optionalReceipt, 0644); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.WriteFile(optionalReceipt, []byte("damaged optional receipt"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				run("check", true)
+				run("path", true)
+				run("project-core", true)
+				check := exec.Command(binary, "collab", "-base", base, "-out", collab, "-public-origin", "https://network.example.com", "-check")
+				check.Env = activate.Env
+				if b, err := check.CombinedOutput(); err == nil {
+					t.Fatalf("damaged message %s accepted: %s", damage, b)
+				}
+				if err := os.WriteFile(optionalReceipt, originalOptional, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(optionalReceipt, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.RemoveAll(filepath.Join(root, "bifrost")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(filepath.Join(root, "collab-runtime")); err != nil {
+				t.Fatal(err)
+			}
 			// Re-serialization also changes the receipt hash without changing its
 			// independently sealed collab source or original Bifrost generation.
 			collabReceipt := filepath.Join(collab, "activation.receipt")
@@ -266,6 +313,7 @@ func testNASMaterialsUpgradeLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				run("check", false)
+				run("project-core", false)
 				if err := os.WriteFile(leaf, raw, 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -273,6 +321,7 @@ func testNASMaterialsUpgradeLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				run("check", false)
+				run("project-core", false)
 				if err := os.Chmod(leaf, 0600); err != nil {
 					t.Fatal(err)
 				}

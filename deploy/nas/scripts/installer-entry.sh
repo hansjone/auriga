@@ -16,7 +16,7 @@ if [ -e "$(marker_path)" ] || [ "${1:-}" != init ]; then
   done
 fi
 case "${1:-}" in
-  materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project)
+  materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core)
     _action=${1#materials-}
     set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/materials-upgrades" -access-file "$AURIGA_ACCESS_FILE"
     [ -z "${NAS_MATERIALS_EXPECTED_BASE:-}" ] || set -- "$@" -expected-base-sha256 "$NAS_MATERIALS_EXPECTED_BASE"

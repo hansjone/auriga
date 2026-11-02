@@ -38,7 +38,7 @@ func nasMaterialsUpgrade(args []string, stdout io.Writer) error {
 	f := flag.NewFlagSet("materials-upgrade", flag.ContinueOnError)
 	base := f.String("base", "", "original sealed NAS source")
 	out := f.String("out", "", "separate materials-upgrades directory")
-	action := f.String("action", "status", "stage, commit, rollback, check, path or project")
+	action := f.String("action", "status", "stage, commit, rollback, check, path, project or project-core")
 	expected := f.String("expected-base-sha256", "", "independently checked original receipt digest")
 	access := f.String("access-file", "", "unchanged deployment access input")
 	version := f.Uint64("version", 1, "approved schema version (1)")
@@ -49,7 +49,7 @@ func nasMaterialsUpgrade(args []string, stdout io.Writer) error {
 		return fmt.Errorf("materials upgrade requires root, canonical sibling paths and version 1")
 	}
 	mutating := *action == "stage" || *action == "commit" || *action == "rollback"
-	if !mutating && *action != "status" && *action != "path" && *action != "check" && *action != "project" {
+	if !mutating && *action != "status" && *action != "path" && *action != "check" && *action != "project" && *action != "project-core" {
 		return fmt.Errorf("unsupported materials operation")
 	}
 	baseHash, err := verifyNASCollabBase(*base)
@@ -157,8 +157,8 @@ func nasMaterialsUpgrade(args []string, stdout io.Writer) error {
 	files, err := bifrostSourceDigest(generation)
 	// Collab may be activated after Bifrost. Its current source is independently
 	// sealed and checked by render-collab; do not freeze its earlier receipt here.
-	_, collabErr := materialsCollabDigest(*base)
-	if err != nil || collabErr != nil || receipt.Version != 1 || receipt.Base != baseHash || receipt.Files != files {
+	// Its optional receipt metadata must not couple message failure to core checks.
+	if err != nil || receipt.Version != 1 || receipt.Base != baseHash || receipt.Files != files {
 		return fmt.Errorf("materials generation or original binding changed")
 	}
 	genHash := fmt.Sprintf("%x", sha256.Sum256(receiptRaw))
@@ -187,7 +187,7 @@ func nasMaterialsUpgrade(args []string, stdout io.Writer) error {
 		_, err = fmt.Fprintf(stdout, "base=%s state=%s version=1 records=%d\n", baseHash, state, len(events)+1)
 		return err
 	}
-	if *action == "check" || *action == "path" || *action == "project" {
+	if *action == "check" || *action == "path" || *action == "project" || *action == "project-core" {
 		if state == "rolled-back" {
 			return fmt.Errorf("materials activation rolled back; explicit stage required")
 		}
@@ -195,8 +195,8 @@ func nasMaterialsUpgrade(args []string, stdout io.Writer) error {
 			_, err = fmt.Fprint(stdout, generation)
 			return err
 		}
-		if *action == "project" {
-			return projectBifrostEdge(*base, generation)
+		if *action == "project" || *action == "project-core" {
+			return projectBifrostEdge(*base, generation, *action == "project-core")
 		}
 		return nil
 	}
@@ -403,13 +403,17 @@ func bifrostSourceDigest(dir string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func projectBifrostEdge(base, generation string) error {
+func projectBifrostEdge(base, generation string, coreOnly bool) error {
 	config := filepath.Dir(base)
 	source := filepath.Join(base, "edge.config.json")
-	if _, err := os.Lstat(filepath.Join(config, "collab-source")); err == nil {
-		source = filepath.Join(config, "collab-runtime", "edge", "edge.config.json")
-	} else if !os.IsNotExist(err) {
-		return err
+	// Core render uses only the verified installation base. Message render calls
+	// strict project only after independently checking/rebuilding its projection.
+	if !coreOnly {
+		if _, err := os.Lstat(filepath.Join(config, "collab-source")); err == nil {
+			source = filepath.Join(config, "collab-runtime", "edge", "edge.config.json")
+		} else if !os.IsNotExist(err) {
+			return err
+		}
 	}
 	// render-collab verifies its sealed source and projections before this step.
 	f, err := os.OpenFile(source, os.O_RDONLY|unix.O_NOFOLLOW, 0)

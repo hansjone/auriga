@@ -63,3 +63,11 @@ if [ -e "$AURIGA_DATA_ROOT/collab-tokens" ] || [ -L "$AURIGA_DATA_ROOT/collab-to
 else
   mkdir "$AURIGA_DATA_ROOT/collab-tokens"; chown 10001:65534 "$AURIGA_DATA_ROOT/collab-tokens"; chmod 0750 "$AURIGA_DATA_ROOT/collab-tokens"
 fi
+
+# A staged Bifrost override must follow the newly checked message edge as well.
+# Core-only render has already selected the sealed base; failed message render
+# leaves that core projection in place for the independent degraded startup.
+if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
+  install_bifrost_materials
+  materials_upgrade project
+fi

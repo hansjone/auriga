@@ -40,6 +40,9 @@ else fail_msg message_edge_recovery_fixture 'edge/consumer recovery fixture fail
 if sh "$ROOT/test/announcement-hook-security.sh"; then pass announcement_hook_security_fixture
 else fail_msg announcement_hook_security_fixture 'trusted hook/real UID boundary failed'; fi
 
+if sh "$ROOT/test/bifrost-core-render.sh"; then pass bifrost_core_message_render
+else fail_msg bifrost_core_message_render "staged Bifrost coupled core to message projections"; fi
+
 if sh "$ROOT/test/start-edge-recovery.sh"; then pass start_edge_recovery
 else fail_msg start_edge_recovery 'public start did not recover instance bridges'; fi
 if sh "$ROOT/test/collab-rotation-routing.sh"; then pass collab_rotation_public_routing

@@ -40,7 +40,8 @@ fi
 load_nas_access_env "$CONFIG/materials/access.env"
 install_bifrost_materials
 if [ -e "$CONFIG/materials-upgrades" ] || [ -L "$CONFIG/materials-upgrades" ]; then
-  materials_upgrade project
+  if [ "$_core_only" = 1 ]; then materials_upgrade project-core
+  else materials_upgrade project; fi
 fi
 
 for _name in ca.crt edge.crt edge-iam.crt proxy-ca.crt proxy-edge.crt; do
