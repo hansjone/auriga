@@ -56,6 +56,7 @@ case "${1:-}" in
     # The host operator cannot traverse root's private collab source. Export a
     # checked decision alongside the already protected env stream, never keys.
     _collab=0
+    _managed_identity=0
     _rotation=
     _rotation_available=1
     _source="$AURIGA_DATA_ROOT/config/collab-source"
@@ -63,6 +64,7 @@ case "${1:-}" in
     # Consumers still require available=1; failed material never enables an overlay.
     if [ "${NAS_COLLAB_CONFIG_DEGRADED:-0}" = 1 ]; then
       _rotation_available=0
+      if managed_identity_available; then _managed_identity=1; fi
     elif [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
       if "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
         -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2; then
@@ -79,12 +81,14 @@ case "${1:-}" in
     _export=$(mktemp -d)
     trap 'rm -rf -- "$_export"' EXIT
     printf '%s\n' "$_collab" >"$_export/collab.enabled"
+    printf '%s\n' "$_managed_identity" >"$_export/managed.identity.enabled"
     runtime_directory >"$_export/runtime.path"
     chmod 0600 "$_export/collab.enabled"
+    chmod 0600 "$_export/managed.identity.enabled"
     printf '%s' "$_rotation" >"$_export/collab.rotation.path"
     printf '%s' "$_rotation_available" >"$_export/collab.rotation.available"
     chmod 0600 "$_export/collab.rotation.path" "$_export/collab.rotation.available"
     tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env \
-      -C "$_export" collab.enabled collab.rotation.path collab.rotation.available runtime.path ;;
+      -C "$_export" collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path ;;
   *) die 'unsupported installer operation' ;;
 esac

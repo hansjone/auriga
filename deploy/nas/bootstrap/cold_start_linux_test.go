@@ -171,7 +171,7 @@ esac
 	if err = os.WriteFile(filepath.Join(bin, "ss"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"stop-start", "pg-stopped", "pg-slow", "renew-lock", "lock-clears", "lock-clears-no-policy", "source-check-fails", "budget-fails", "token-check-fails", "renew-flag-fails"} {
+	for _, scenario := range []string{"stop-start", "pg-stopped", "pg-slow", "renew-lock", "lock-clears", "lock-clears-no-policy", "source-check-fails", "budget-fails", "token-check-fails", "identity-projection-fails", "renew-flag-fails"} {
 		t.Run(scenario, func(t *testing.T) {
 			clears := strings.HasPrefix(scenario, "lock-clears")
 			locked := scenario == "renew-lock" || clears
@@ -193,6 +193,17 @@ esac
 				}
 			}
 			// Inject failures in real message checks, not replacement scripts.
+			if scenario == "identity-projection-fails" {
+				file := filepath.Join(data, "config/collab-runtime/platform/managed-network.json")
+				original, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(file, []byte("{}\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.WriteFile(file, original, 0600) })
+			}
 			if scenario == "source-check-fails" || scenario == "token-check-fails" {
 				target, mode := filepath.Join(data, "config/collab-source/activation.receipt"), os.FileMode(0600)
 				if scenario == "token-check-fails" {
@@ -394,6 +405,10 @@ esac
 				t.Fatalf("core agent recovery was skipped: %v: %s", err, cliLog)
 			}
 			if injected {
+				identityExpected := scenario == "budget-fails" || scenario == "token-check-fails"
+				if strings.Contains(string(cliLog), "managed-identity-compose.yml") != identityExpected {
+					t.Fatal("core must retain independently checked identity installation, and reject changed identity material")
+				}
 				for _, line := range strings.Split(string(cliLog), "\n") {
 					if scenario != "renew-flag-fails" && strings.Contains(line, " up ") && !strings.Contains(line, " collab network") && strings.Contains(line, "collab-compose.yml") {
 						t.Fatal("failed message projections were still mounted into core services")
@@ -425,7 +440,7 @@ esac
 						if err != nil {
 							t.Fatal(err)
 						}
-						if entry.Name == "collab.enabled" || entry.Name == "collab.rotation.available" {
+						if entry.Name == "collab.enabled" || entry.Name == "collab.rotation.available" || entry.Name == "managed.identity.enabled" {
 							value, err := io.ReadAll(archive)
 							if err != nil {
 								t.Fatal(err)
@@ -435,6 +450,13 @@ esac
 					}
 					if decisions["collab.enabled"] != "0" || decisions["collab.rotation.available"] != "0" {
 						t.Fatalf("failed message material enabled container overlay: %v", decisions)
+					}
+					wantIdentity := "0"
+					if identityExpected {
+						wantIdentity = "1"
+					}
+					if decisions["managed.identity.enabled"] != wantIdentity {
+						t.Fatalf("privileged identity decision lost its independent validation: %v", decisions)
 					}
 				}
 			}

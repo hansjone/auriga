@@ -342,6 +342,26 @@ collab_snapshot_required() {
   [ "$_snapshot_up" = 1 ] && [ "$_snapshot_message" = 1 ]
 }
 
+# Identity provisioning is a core dependency even when message rendering fails.
+# Reuse only the byte-exact static installation bound by the activation receipt;
+# never admit a rejected projection or turn message readiness into authentication.
+managed_identity_available() (
+  _identity_source="$AURIGA_DATA_ROOT/config/collab-source"
+  _identity_runtime="$AURIGA_DATA_ROOT/config/collab-runtime"
+  [ -f "$_identity_source/activation.receipt" ] || return 1
+  "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
+    -out "$_identity_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2 || return 1
+  for _identity_dir in "$_identity_runtime" "$_identity_runtime/platform"; do
+    [ -d "$_identity_dir" ] && [ ! -L "$_identity_dir" ] || return 1
+  done
+  [ "$(stat -c '%u:%g:%a' "$_identity_runtime")" = 0:0:700 ] || return 1
+  [ "$(stat -c '%u:%g:%a' "$_identity_runtime/platform")" = 10001:10001:700 ] || return 1
+  _identity_file="$_identity_runtime/platform/managed-network.json"
+  [ -f "$_identity_file" ] && [ ! -L "$_identity_file" ] \
+    && [ "$(stat -c '%u:%g:%a:%h' "$_identity_file")" = 10001:10001:600:1 ] || return 1
+  cmp -s "$_identity_source/network-platform/managed-network.json" "$_identity_file"
+)
+
 run_compose() (
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
     container_compose "$@"
@@ -377,6 +397,8 @@ run_compose() (
       *) printf '%s\n' 'message_network=degraded invalid collab renewal flag' >&2
          if collab_snapshot_required "$@"; then return 1; fi ;;
     esac
+  elif managed_identity_available; then
+    set -- -f "$NAS_ROOT/managed-identity-compose.yml" "$@"
   fi
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
@@ -435,6 +457,11 @@ EOF
          case "$_arg" in stop|down) _collab=1; set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; break ;; esac
        done ;;
     *) die 'invalid privileged collab Compose decision' ;;
+  esac
+  case "$(cat "$_private/managed.identity.enabled")" in
+    1) if [ "$_collab" = 0 ]; then set -- -f "$NAS_ROOT/managed-identity-compose.yml" "$@"; fi ;;
+    0) ;;
+    *) die 'invalid privileged managed identity decision' ;;
   esac
   if [ "$_collab" = 1 ]; then
     case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in

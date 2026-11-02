@@ -33,6 +33,12 @@
 所有变更持同一个 NAS 文件锁，竞争时最多等 5 分钟，超时明确失败。PG 发布后未安装、清单/业务钥过期或轮换半提交只使消息网络降级；公开 start 仍启动登录、管理、中转站、模型和 agent，并输出 `message_network=degraded`。版本回退、同版本改字节、缺历史或材料篡改仍拒绝签名。`.pending` 与首失证据保留，不能删除后盲重试。只读 status/path 允许存在 pending，status 使用真实受保护 state 摘要查询 PG；stop 不依赖最新发布已经安装。
 `rotate-collab-keys.sh stop` 是固定项目的停签逃生入口，不修 state、不改 PG 或 selector。
 
+消息配置渲染失败时，核心 Compose 单独保留 `managed-identity-compose.yml`：只有初装
+activation receipt 校验通过、静态 `managed-network.json` 的属主/权限及源文件字节均匹配时，
+才继续启用原托管身份/模型凭据签发流程；这不挂载失败的消息配置或启动消息消费者。
+消息连接失败不影响持有效托管凭据的实例就绪和普通模型请求；凭据过期、撤销或验签失败仍
+使整个实例不可用。独立安装投影缺失或改变时拒绝使用，不能拿门户/心跳 200 代替实例认证。
+
 普通安装/render helper 不挂 Docker socket。只有显式轮换命令和受信续期任务接入本机 socket；
 Java helper 仅使用批准镜像、固定主类与固定计划，数据根只读，写范围限本次暂存及必要的原 state 目录。
 PG 操作先核现有数据库容器、数据挂载和内部网桥；数据库缺失不创建空库，已停的 postgres 不由巡检或轮换命令拉起。
