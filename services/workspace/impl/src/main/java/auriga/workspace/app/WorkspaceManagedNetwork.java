@@ -77,11 +77,18 @@ public final class WorkspaceManagedNetwork {
                   .setOwnerId(row.get("owner_id").toString())
                   .setCredentialVersion(version)
                   .build());
+      long modelStarted = System.nanoTime();
       try {
         models.reconcile(row, response);
       } catch (RuntimeException unavailable) {
-        org.slf4j.LoggerFactory.getLogger(getClass())
-            .warn("Managed model provisioning deferred instance={}", id);
+        ManagedModelDiagnostic.failure(
+            row,
+            "reconcile",
+            "model_reconcile_failed",
+            0,
+            modelStarted,
+            unavailable,
+            response.getModelCredential());
       }
       if (Objects.equals(row.get("managed_synced_version"), row.get("managed_credential_version"))
           && row.get("managed_credential") != null) {

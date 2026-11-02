@@ -92,13 +92,14 @@ func newHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-const secretKeys = `password|passwd|pwd|secret|(?:access|refresh|session|id)[_-]?token|token|client[_-]?secret|credential|totp|private[_-]?key|api[_-]?key|[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?|authorization|cookie|set-cookie`
+const secretKeys = `ticket|password|passwd|pwd|secret|(?:access|refresh|session|id)[_-]?token|token|client[_-]?secret|credential|totp|private[_-]?key|api[_-]?key|[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?|authorization|cookie|set-cookie`
 
 var secretKey = regexp.MustCompile(`(?i)^(?:` + secretKeys + `)$`)
 var cookieHeader = regexp.MustCompile(`(?i)(\b(?:set-)?cookie\s*[:=]\s*)[^\r\n]+`)
 var bearer = regexp.MustCompile(`(?i)\b(Bearer|Basic)\s+[a-z0-9._~+/=-]+`)
+var managedCredential = regexp.MustCompile(`\bamc\.[A-Za-z0-9_.-]+`)
 var jwt = regexp.MustCompile(`\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]*`)
-var privateKeyPattern = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`)
+var privateKeyPattern = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)`)
 var userinfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@]*):[^/\s@]+@`)
 
 const maxLogLength = 65536
@@ -160,6 +161,7 @@ func Mask(s string) string {
 	s = userinfo.ReplaceAllString(s, "$1:****@")
 	s = bearer.ReplaceAllString(s, "$1 ****")
 	s = jwt.ReplaceAllString(s, "****")
+	s = managedCredential.ReplaceAllString(s, "****")
 	s = maskLogFields(s)
 	return cookieHeader.ReplaceAllString(s, "$1****")
 }

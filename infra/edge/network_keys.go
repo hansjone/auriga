@@ -50,6 +50,17 @@ func (c Config) parseCollabUpstream() (*url.URL, error) {
 
 func (g *Gateway) proxyNetworkKeys(w http.ResponseWriter, r *http.Request, audience, clientIP, rid string) {
 	fail := func(status int, code string) {
+		if g.Log != nil {
+			endpoint := "unknown"
+			if r.URL.Path == "/api/collab/v1/network/keys/announcement" {
+				endpoint = "keys_announcement"
+			}
+			if r.URL.Path == "/api/collab/v1/network/keys" {
+				endpoint = "keys"
+			}
+			g.Log.WarnContext(r.Context(), "Network keys request rejected", "endpoint", endpoint,
+				"collab_configured", g.collabURL != nil, "http_status", status, "code", code)
+		}
 		writeProblem(w, problem(status, code, http.StatusText(status), "network keys request rejected", rid))
 	}
 	path := r.URL.Path

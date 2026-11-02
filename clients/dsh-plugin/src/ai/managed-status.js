@@ -2,6 +2,8 @@ import { open, constants } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { createPlatform } from '../local/platform.js';
 import { parseStrictJson } from '../network/trust/jcs.js';
+import { logEvent } from '../observability/index.js';
+import { performance } from 'node:perf_hooks';
 import { operation } from './transport.js';
 /* global AbortSignal */
 
@@ -83,10 +85,16 @@ export function createManagedModelStatus(binding) {
         AbortSignal.any([lifetime.signal, AbortSignal.timeout(4000)]),
       );
       pending = (async () => {
+        const started = performance.now();
+        let phase = 'native',
+          version = null;
         try {
           if (typeof llm?.listModels !== 'function')
             throw new Error('provider unavailable');
+          phase = 'material';
           const { value, origin } = await probe.wait(material());
+          version = value.credentialVersion;
+          phase = 'native';
           const native = await probe.wait(
             Promise.resolve().then(() => llm.listModels('auriga-managed')),
           );
@@ -101,6 +109,7 @@ export function createManagedModelStatus(binding) {
             clientId: 'auriga-managed-network',
             providerId: 'managed',
           });
+          phase = 'catalog';
           const catalog = await probe.wait(
             platform.request('/ai/v1/models', {
               token: value.credential,
@@ -124,7 +133,24 @@ export function createManagedModelStatus(binding) {
               authorized: true,
               state: 'model_ready',
             };
-        } catch {
+          logEvent('INFO', 'Managed model status', {
+            instance_id: binding.instanceId,
+            phase: 'ready',
+            credential_version: version,
+            elapsed_ms: Math.floor(performance.now() - started),
+          });
+        } catch (error) {
+          logEvent(
+            'WARN',
+            'Managed model status failed',
+            {
+              instance_id: binding.instanceId,
+              phase,
+              credential_version: version,
+              elapsed_ms: Math.floor(performance.now() - started),
+            },
+            error,
+          );
           if (!closed) status = unavailable('managed_model_unavailable');
         }
       })().finally(() => {

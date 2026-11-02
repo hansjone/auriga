@@ -1,4 +1,8 @@
 /* global Headers */
+import {
+  installObservability,
+  logDirectory,
+} from '../../src/observability/index.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sign, generateKeyPairSync } from 'node:crypto';
@@ -2712,4 +2716,68 @@ test('plugin actual entry resumes verified native device into official factory, 
   }, 'logout releases host writer');
   assert.equal(ticketCount, 2);
   assert.equal(hostCalls, 0);
+});
+
+test('initial commit diagnostics use the real final JSON sink and distinguish lifecycle generation', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-registration-diagnostic-'));
+  const oldLocal = process.env.LOCALAPPDATA,
+    oldState = process.env.XDG_STATE_HOME;
+  process.env.LOCALAPPDATA = dir;
+  process.env.XDG_STATE_HOME = dir;
+  const cleanup = [];
+  installObservability({
+    effect(setup) {
+      cleanup.push(setup());
+    },
+  });
+  try {
+    const first = await fixture(t);
+    await first.runtime.start();
+    await first.runtime.close();
+    const next = await fixture(t, {
+      ledger: first.ledger,
+      registration: { created: false },
+    });
+    await next.runtime.start();
+    await next.runtime.close();
+    const directory = logDirectory();
+    await Promise.all(cleanup.map((close) => close()));
+    const names = await nodeFs.readdir(directory);
+    const content = (
+      await Promise.all(
+        names
+          .filter((n) => n.endsWith('.jsonl'))
+          .map((n) => readFile(join(directory, n), 'utf8')),
+      )
+    ).join('');
+    const events = content.trim().split('\n').map(JSON.parse);
+    const registered = events.filter(
+      (e) => e.message === 'Network registration accepted',
+    );
+    assert.equal(registered.length, 2);
+    assert.equal(registered[0].created, true);
+    assert.equal(registered[1].created, false);
+    assert.equal(registered[0].device_id, 'device-fixture');
+    assert.equal(registered[0].node, '64');
+    assert.equal(registered[0].realm, '2');
+    assert.equal(registered[0].workspace_generation, null);
+    assert.equal(registered[0].plugin_generation, 0);
+    assert.equal(
+      events.filter((e) => e.message === 'Network initial commit completed')
+        .length,
+      1,
+    );
+    assert.equal(
+      events.filter((e) => e.message === 'Network initial commit started')
+        .length,
+      1,
+    );
+  } finally {
+    await Promise.all(cleanup.map((close) => close()));
+    if (oldLocal === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = oldLocal;
+    if (oldState === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = oldState;
+    await nodeFs.rm(dir, { recursive: true, force: true });
+  }
 });

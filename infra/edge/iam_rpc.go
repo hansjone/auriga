@@ -141,12 +141,15 @@ func (c *iamRPC) IntrospectSession(ctx context.Context, cookie, audience, tenant
 }
 
 func (c *iamRPC) TouchSession(ctx context.Context, cookie, audience, tenant string) (*iamv1.TouchSessionResponse, error) {
+	parent := ctx
 	ctx, cancel, err := c.sessionContext(ctx, tenant)
 	if err != nil {
+		captureTouchRPC(parent, "service_credential", err)
 		return nil, err
 	}
 	defer cancel()
 	response, err := c.client.TouchSession(ctx, &iamv1.TouchSessionRequest{SessionToken: cookie, Audience: sessionAudience(audience)})
+	captureTouchRPC(ctx, "rpc", err)
 	if err != nil {
 		return nil, errIAMUnavailable
 	}

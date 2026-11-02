@@ -224,6 +224,13 @@ NATS、registry、LiteLLM 镜像与签名 DSH runtime 包。edge/agent 没有本
 验收分别记录：`/api/collab/v1/network/keys` 经实际门户返回 200 且根签正确；云端插件严格
 READY；桌面正常登录、入网并严格 READY；最后云↔桌各请求和回复均有真实收件证据。
 health、keys 200 或托管实例 READY 均不能代替插件 READY/互发。
+公开消息恢复会重新应用 edge 的 collab 配置；只有容器发生替换时才请求 agent 恢复实例桥接，
+不重启 DSH 或更换设备。`AURIGA_NETWORK_ANNOUNCEMENT_CHECK` 可指定受安装操作人控制、
+不可由其他人写入的绝对可执行验收脚本。它须用已获授权的短期成员/设备票，通过实际 edge
+读取 `/api/collab/v1/network/keys/announcement`，核 HTTP200、安装根签名与有效窗后才返回0；
+票只由脚本私下读取，不写参数、环境变量或输出。不允许用内部服务票代替成员身份。
+未配置该钩子时消息服务保留运行，恢复返回2并显示 `SERVICES_READY`/公告待验证；不会报完整
+`READY`。钩子拒绝/失败保持降级。修复入口不恢复任何缺失的原设备 ledger；仍须单独授权的恢复流程。
 `deploy/nas/test/collab.sh` 覆盖 domain/ip/proxy 的实际 init/render、权限与篡改负例；
 可选 `AURIGA_NAS_COLLAB_LIVE_IMAGE` 启用 `collab-live.sh`，仅启动单 collab 服务和临时 PG
 验证真实签名发布，不宣称已验证 IAM 入网、插件 READY 或整栈云↔桌。

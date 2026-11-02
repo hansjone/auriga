@@ -61,6 +61,7 @@ export function createNetworkLifecycle(options) {
           emit,
           valid,
           attempt,
+          generation: expected,
           signal: abort.signal,
         });
         let failure = diagnostics.scope('identity_prepare');

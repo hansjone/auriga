@@ -462,9 +462,21 @@ export function createDiagnosticLog(ctx, generation = 0) {
   };
 }
 
-/** @param {{emit:ReturnType<typeof createDiagnosticLog>,valid:()=>boolean,attempt?:number,signal?:AbortSignal}} options */
-export function createAttemptDiagnostics({ emit, valid, attempt = 0, signal }) {
+/** @param {{emit:ReturnType<typeof createDiagnosticLog>,valid:()=>boolean,attempt?:number,generation?:number,signal?:AbortSignal}} options */
+export function createAttemptDiagnostics({
+  emit,
+  valid,
+  attempt = 0,
+  generation = 0,
+  signal,
+}) {
   let failed = false;
+  let lastHttp = { trace_id: '', last_http_status: 0, endpoint: 'none' };
+  const context = () => ({
+    plugin_generation: generation,
+    attempt,
+    ...lastHttp,
+  });
   /** @type {boolean|null} */ let created = null;
   /** @param {string} phase @param {number} [budget] @param {()=>boolean} [current] */
   function scope(phase, budget = 0, current = () => true) {
@@ -473,7 +485,12 @@ export function createAttemptDiagnostics({ emit, valid, attempt = 0, signal }) {
     function fail(error) {
       if (failed || !valid() || !current()) return;
       failed = true;
-      logEvent('ERROR', 'Network attempt failed', { phase, attempt }, error);
+      logEvent(
+        'ERROR',
+        'Network attempt failed',
+        { ...context(), phase },
+        error,
+      );
       const status = field(error, 'status'),
         rawCode = field(error, 'code');
       const httpStatus =
@@ -543,6 +560,25 @@ export function createAttemptDiagnostics({ emit, valid, attempt = 0, signal }) {
   }
   return {
     scope,
+    context,
+    /** Existing response metadata only; never used by authorization/control flow.
+     * @param {{endpoint:string,traceId:string,status:number}} input */
+    observedHttp(input) {
+      if (!valid()) return;
+      lastHttp = {
+        trace_id: /^[a-f0-9]{32}$/.test(input.traceId) ? input.traceId : '',
+        last_http_status: Number.isInteger(input.status) ? input.status : 0,
+        endpoint: [
+          'register',
+          'keys_announcement',
+          'keys',
+          'tickets',
+          'submit',
+        ].includes(input.endpoint)
+          ? input.endpoint
+          : 'unknown',
+      };
+    },
     /** Only a successfully validated register result may set this flag.
      * @param {boolean} value */
     registered(value) {

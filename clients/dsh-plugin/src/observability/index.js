@@ -93,6 +93,7 @@ export function mask(text) {
   if (text.length > maxLogLength) return '[log omitted: size limit]';
   return maskFields(
     maskJWTs(maskPrivateKeys(text))
+      .replace(/\bamc\.[A-Za-z0-9_.-]+/g, '****')
       .replace(
         /\b([a-z][a-z0-9+.-]{0,31}:\/\/[^/\s:@]*):[^/\s@]+@/gi,
         '$1:****@',
@@ -255,6 +256,14 @@ export function logEvent(level, message, fields = {}, error) {
         ? {
             exception: error.stack,
             cause: causes(error),
+            error_type: error.name,
+            error_code:
+              typeof (/** @type {any} */ (error).code) === 'string'
+                ? /** @type {any} */ (error).code
+                : undefined,
+            http_status: Number.isInteger(/** @type {any} */ (error).status)
+              ? /** @type {any} */ (error).status
+              : 0,
           }
         : {}),
     });

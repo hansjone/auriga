@@ -96,6 +96,9 @@ func (s *browserRPCServer) TouchSession(_ context.Context, request *iamv1.TouchS
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.touches++
+	if s.mode == "touch-error" {
+		return nil, status.Error(codes.Unavailable, "connection reset cookie=touch-cookie password=sentinel-password ticket=sentinel-ticket")
+	}
 	if s.inactiveTouch {
 		return &iamv1.TouchSessionResponse{}, nil
 	}

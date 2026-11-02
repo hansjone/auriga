@@ -157,6 +157,7 @@ case "$1 ${2:-}" in
   'image inspect') printf 'linux/amd64\n' ;;
   'compose version'|'info '|'ps -q') exit 0 ;;
   'compose -f') case " $* " in
+    *' ps -q edge '*) printf 'fixture-edge-id\n' ;;
     *' up '*) case " $* " in
       *' collab network '*) touch "$COLD_MESSAGE_UP" ;;
       *) touch "$COLD_CORE_UP" ;;
@@ -168,6 +169,12 @@ esac
 	if err = os.WriteFile(filepath.Join(bin, "docker"), []byte(cli), 0755); err != nil {
 		t.Fatal(err)
 	}
+	// Explicit acceptance-hook fixture only; no real member/Compose acceptance.
+	hook := filepath.Join(bin, "approved-announcement-consumer")
+	if err = os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AURIGA_NETWORK_ANNOUNCEMENT_CHECK", hook)
 	if err = os.WriteFile(filepath.Join(bin, "ss"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}

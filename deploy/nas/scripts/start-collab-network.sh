@@ -25,7 +25,33 @@ fi
 # One lock budget (30s), then only an already running PG may be awaited (120s).
 sh "$NAS_ROOT/scripts/rotate-collab-keys.sh" startup-check || degraded readiness_failed
 sh "$NAS_ROOT/scripts/render-collab.sh" || degraded render_failed
-if ! run_compose --profile collab-network --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never collab network; then
+_edge_before=$(run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" ps -q edge) || degraded edge_inspection_failed
+# A degraded core start uses the base edge configuration. Recover its actual
+# consumer as well as the message producers; Compose leaves an unchanged edge alone.
+if ! run_compose --profile collab-network --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never collab network edge; then
   degraded startup_failed
 fi
+_edge_after=$(run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" ps -q edge) || degraded edge_inspection_failed
+[ -n "$_edge_after" ] || degraded edge_missing
+if [ "$_edge_before" != "$_edge_after" ]; then
+  # Edge replacement removes its instance bridges. Reuse the public agent
+  # bridge recovery; do not restart any DSH instance or rotate its credentials.
+  run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" restart --no-deps agent || degraded instance_bridge_recovery_failed
+fi
+# An internal service JWT cannot impersonate a member/device for this check.
+# The named acceptance hook owns its existing short-lived user authorization;
+# it must check the actual edge announcement HTTP200 and installation root.
+_announcement_check=${AURIGA_NETWORK_ANNOUNCEMENT_CHECK:-}
+if [ -z "$_announcement_check" ]; then
+  printf '%s\n' 'message_network=SERVICES_READY announcement_verification=pending; configure AURIGA_NETWORK_ANNOUNCEMENT_CHECK with an authorized read-only consumer check'
+  exit 2
+fi
+case "$_announcement_check" in /*) ;; *) degraded announcement_check_path_invalid ;; esac
+[ -f "$_announcement_check" ] && [ ! -L "$_announcement_check" ] && [ -x "$_announcement_check" ] \
+  && [ "$(readlink -f -- "$_announcement_check")" = "$_announcement_check" ] || degraded announcement_check_path_invalid
+_check_owner=$(stat -c '%u' "$_announcement_check")
+_check_mode=$(stat -c '%a' "$_announcement_check")
+[ "$_check_owner" = 0 ] || [ "$_check_owner" = "$(id -u)" ] || degraded announcement_check_owner_invalid
+[ "$((0$_check_mode & 022))" = 0 ] || degraded announcement_check_permissions_invalid
+"$_announcement_check" || degraded announcement_verification_failed
 printf '%s\n' 'message_network=READY'

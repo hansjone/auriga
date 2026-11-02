@@ -29,6 +29,7 @@ type nasRotationEngine struct {
 }
 type nasRotationContainer struct {
 	ID     string `json:"Id"`
+	Name   string
 	Image  string
 	Config struct {
 		Image      string
@@ -624,6 +625,11 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 	r, err := nasRotationOpen(*data, *recipe, openImage, *jar, create)
 	if err != nil {
 		return err
+	}
+	if action == "startup-check" {
+		if err = engine.checkRecoveryEdge(r); err != nil {
+			return err
+		}
 	}
 	if _, err = os.Lstat(r.root); os.IsNotExist(err) {
 		if action == "startup-check" {
