@@ -194,3 +194,33 @@ operator 审核的初始根通过既有 **CA SPKI pin + TLS 校验的首次 Join
 部署装配须将公开 M/C 按 [agent 文档](agent.md)的目录约定交付，向生产控制流程传递已签 `DshRuntime`；
 激活仍经过现有生产 S 的当前 key 检查、持久高水位、防回滚、intent 及真实 Engine 身份/启动闭窗。
 本工具的 sign/verify 成功不更新这些状态，也不承诺部署就绪或现场可用。
+
+## 已提交运行时中断后的离线恢复
+
+如果 agent 在启动或 Recover 过程中中断，持久 intent 会阻止后续启动并报
+`runtime release has unresolved execution; protected recovery required`。
+正常启动不会自动清除此记录。对于**原实际执行与 intent、已提交高水位完全相同**的候选，
+可以显式使用 `auriga-agent recover-runtime`；其它候选、缺失原执行记录或无法证明的现场仍拒绝恢复。
+
+先通过正式管理操作将实例停止，确认观测到 stopped；停止原 agent，并确认该运行时分区的实例容器均已停止。
+保留原 state、实例目录、身份、签名根和 OCI proofs。恢复进程必须持有原 state.db 的独占锁，
+并能只读查询原 Docker Engine。使用原 agent 的 `DOCKER_HOST`、`AURIGA_AGENT_POLICY_FILE`、
+`AURIGA_AGENT_RUNTIME_PROOFS_DIR`，把原 agent data root 按**原绝对路径**挂载；不创建新空目录替代原库。
+
+```sh
+# 先检查；只输出公开候选和 expectation 摘要，不输出 intent token 或账本正文。
+auriga-agent recover-runtime --data-root /original/agent-data \
+  --instance INSTANCE_ID --stopped-agent ORIGINAL_AGENT_FULL_CONTAINER_ID
+
+# 核对上一步输出后，以同一个摘要显式执行；不使用 force。
+auriga-agent recover-runtime --data-root /original/agent-data \
+  --instance INSTANCE_ID --stopped-agent ORIGINAL_AGENT_FULL_CONTAINER_ID \
+  --expect sha256:EXPECTATION_FROM_INSPECT
+```
+
+命令重新验证原执行签名、当前信任与 OCI proof，检查原 compose agent 已停且绑定该 data root，
+逐一核对实际容器不可变身份和停止状态，并拒绝未登记或变化的 managed 容器清单。
+同分区其它已停旧版本只核原实际身份，不要求升级为目标候选，也不会修改它。
+执行时重新核对相同摘要和 Engine 证明，只原子移除该分区的这一个未完成 intent；
+高水位、执行记录、其它分区、身份和 home 都保持。命令不创建、启动或删除 Docker 对象。
+之后正常启动 agent，再通过正常实例启动流程重新 Ensure；恢复命令成功本身不等于实例 READY。
