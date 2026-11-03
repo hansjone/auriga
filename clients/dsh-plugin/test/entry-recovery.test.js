@@ -49,7 +49,8 @@ async function fixture(t, http = async () => lost(), options = {}) {
     timers = new Map();
   let timerId = 0;
   let now = 0;
-  const logs = [];
+  const logs = [],
+    consoleEntries = [];
   const schedule = (fn, ms) => {
     const id = ++timerId;
     timers.set(id, { fn, ms, at: now + ms });
@@ -95,7 +96,18 @@ async function fixture(t, http = async () => lost(), options = {}) {
       AbortController,
       console: {
         ...console,
-        info: (tag, fields) => logs.push({ tag, ...fields }),
+        info: (...args) => {
+          consoleEntries.push(args);
+          const [tag, fields] = args;
+          logs.push(
+            args.length === 1 && tag.startsWith('auriga.entry_recovery ')
+              ? {
+                  tag: 'auriga.entry_recovery',
+                  ...JSON.parse(tag.slice('auriga.entry_recovery '.length)),
+                }
+              : { tag, ...fields },
+          );
+        },
       },
       setTimeout: schedule,
       clearTimeout: cancelTimer,
@@ -158,6 +170,7 @@ async function fixture(t, http = async () => lost(), options = {}) {
   return {
     calls,
     logs,
+    consoleEntries,
     navigations,
     storage,
     timers,
@@ -371,20 +384,20 @@ test('availability keeps the original absolute thirty-second deadline across hid
   assert.deepEqual(g.navigations, []);
 });
 
-test('stale short-window and retry callbacks cannot replace an availability-phase timer after hiding', async (t) => {
+test('stale cycle and retry callbacks cannot replace the original deadline after hiding', async (t) => {
   const f = await fixture(t, async () => new Response('', { status: 503 }));
   f.lose();
   await settle();
-  const shortExpiry = [...f.timers.values()].find((v) => v.ms === 6000).fn;
+  const oldExpiry = [...f.timers.values()].find((v) => v.ms === 30000).fn;
   await f.advance(4000);
   const oldRetry = [...f.timers.values()].find((v) => v.ms === 10000).fn;
-  shortExpiry();
   assert.equal(f.calls.length, 3);
   await f.advance(1000);
   f.hidden(true);
   await f.advance(1000);
   f.hidden(false);
   const active = [...f.timers.keys()];
+  oldExpiry();
   oldRetry();
   assert.deepEqual([...f.timers.keys()], active);
   await f.advance(8000);
@@ -427,6 +440,15 @@ test('entry recovery diagnostics expose only safe events and never response bodi
   ])
     assert.ok(f.logs.some((row) => row.event === event));
   assert.ok(f.logs.every((row) => row.tag === 'auriga.entry_recovery'));
+  assert.ok(
+    f.consoleEntries.every(
+      (args) =>
+        args.length === 1 &&
+        typeof args[0] === 'string' &&
+        args[0].startsWith('auriga.entry_recovery {'),
+    ),
+    'a text-only browser collector must retain the safe fields, without an Object placeholder',
+  );
   assert.ok(!JSON.stringify(f.logs).includes(canary));
   assert.ok(!JSON.stringify(f.logs).includes('portal.example.com'));
 });
@@ -442,7 +464,7 @@ test('transient unavailable then precise entry 401 recovers within the bounded c
   assert.deepEqual(f.navigations, [base]);
 });
 
-test('same loss deadline survives a hidden document long after the original six-second window', async (t) => {
+test('same loss deadline survives a hidden document beyond the absolute thirty-second window', async (t) => {
   let reads = 0;
   const f = await fixture(t, async () =>
     ++reads === 1 ? new Response('', { status: 503 }) : lost(),
@@ -451,7 +473,7 @@ test('same loss deadline survives a hidden document long after the original six-
   await settle();
   await f.advance(1000);
   f.hidden(true);
-  await f.advance(19000);
+  await f.advance(30000);
   f.hidden(false);
   f.event('focus');
   f.event('online');
@@ -522,7 +544,7 @@ test('loss first observed while hidden still expires without granting a late vis
   const f = await fixture(t);
   f.hidden(true);
   f.lose();
-  await f.advance(20000);
+  await f.advance(31000);
   f.hidden(false);
   await settle();
   assert.equal(f.calls.length, 0);
@@ -540,7 +562,7 @@ test('an exact entry reply after the deadline stays inert even if browser timers
   );
   f.lose();
   await settle();
-  f.jump(6000);
+  f.jump(30000);
   finish(lost());
   await settle();
   assert.deepEqual(f.navigations, []);
@@ -665,21 +687,66 @@ test('hidden document cancels a late result and bounded probe timeout remains ca
   await settle();
   assert.deepEqual(f.navigations, []);
   assert.equal(f.calls[0].init.signal.aborted, true);
-  const g = await fixture(t, () => new Promise(() => {}));
+  let late;
+  const g = await fixture(
+    t,
+    () =>
+      new Promise((resolve) => {
+        late = resolve;
+      }),
+  );
   g.lose();
   await settle();
-  const timeout = [...g.timers].find(([, v]) => v.ms === 6000);
-  assert.ok(timeout);
-  timeout[1].fn();
-  await settle();
+  await g.advance(5999);
+  assert.equal(g.calls[0].init.signal.aborted, false);
+  await g.advance(1);
   assert.equal(g.calls[0].init.signal.aborted, true);
   assert.equal(
     g.timers.size,
     0,
-    'the six-second cycle deadline does not restart the probe budget',
+    'the six-second read timeout does not restart or qualify the probe budget',
   );
+  g.event('focus');
+  g.event('online');
+  late(lost());
+  await g.advance(30000);
+  assert.equal(g.calls.length, 1);
+  assert.deepEqual(g.navigations, []);
+  assert.ok(!g.logs.some((row) => row.event === 'availability_wait'));
   g.dispose();
   assert.equal(g.timers.size, 0);
+});
+
+test('slow completed reads and a pending availability read share the original thirty-second cap', async (t) => {
+  let late;
+  const delays = [5000, 5000, 3999];
+  const f = await fixture(t, async () => {
+    const delay = delays[f.calls.length - 1];
+    if (delay !== undefined) {
+      await new Promise((resolve) => f.schedule(resolve, delay));
+      return new Response('', { status: 503 });
+    }
+    return new Promise((resolve) => {
+      late = resolve;
+    });
+  });
+  f.lose();
+  await settle();
+  await f.advance(29999);
+  assert.deepEqual(
+    f.calls.map((call) => call.at),
+    [0, 7000, 14000, 27999],
+  );
+  assert.equal(f.calls[3].init.signal.aborted, false);
+  await f.advance(1);
+  assert.equal(f.calls[3].init.signal.aborted, true);
+  assert.equal(f.timers.size, 0);
+  late(lost());
+  f.event('focus');
+  f.event('online');
+  await f.advance(30000);
+  assert.equal(f.calls.length, 4);
+  assert.deepEqual(f.navigations, []);
 });
 
 test(
@@ -755,8 +822,12 @@ test(
   'locked Connection plus the default edge recreation interval recovers without a fabricated second state event',
   { skip: !process.env.AURIGA_ENTRY_CONNECTION_BUNDLE },
   async (t) => {
-    for (const lossAt of [0, 10000])
-      await t.test(`native loss observed at ${lossAt}ms`, async (t) => {
+    for (const { lossAt, latencies = [] } of [
+      { lossAt: 0 },
+      { lossAt: 10000 },
+      { lossAt: 0, latencies: [74, 3025] },
+    ])
+      await t.test(`loss ${lossAt}, lag ${latencies}`, async (t) => {
         let f, nativeModule;
         const random = Object.create(Math);
         random.random = () => 0.5;
@@ -795,8 +866,12 @@ test(
         );
         f = await fixture(
           t,
-          async () =>
-            f.now() < 11846 ? new Response('', { status: 503 }) : lost(),
+          async () => {
+            const latency = latencies[f.calls.length - 1] ?? 0;
+            if (latency)
+              await new Promise((resolve) => f.schedule(resolve, latency));
+            return f.now() < 11846 ? new Response('', { status: 503 }) : lost();
+          },
           { connection },
         );
         let drop;
@@ -837,13 +912,31 @@ test(
           JSON.stringify({
             lossAt,
             readyAt: 11846,
+            latencies,
             probes: f.calls.map((call) => call.at),
+            completions: f.logs
+              .filter((row) => row.event === 'probe_completed')
+              .map(({ elapsedMs, reason, status }) => ({
+                elapsedMs,
+                reason,
+                status,
+              })),
             attempts,
             states,
             navigations: f.navigations.length,
           }),
         );
         assert.deepEqual(f.navigations, [base]);
+        if (latencies.length)
+          assert.deepEqual(
+            f.calls.map((call) => call.at),
+            [0, 2074, 7099, 17099],
+          );
+        assert.equal(
+          states.filter(({ state }) => state === 'connecting').length,
+          1,
+          'slow responses cannot rely on a fabricated second connecting event',
+        );
       });
   },
 );

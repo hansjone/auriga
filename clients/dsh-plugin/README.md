@@ -184,11 +184,15 @@ stopped instance or change session lifetime, Origin or CSRF checks.
 
 The browser client observes the public Connection state/generation API. On loss,
 it reads only the current same-origin health route and follows only an exact
-edge entry rejection. The first three probes are two seconds apart, within six
-seconds. If all three complete with network errors or HTTP 502/503, two further
-availability reads may run ten seconds apart, with an absolute thirty-second
-limit from the original connection loss. This covers edge replacement without
-treating an unavailable edge as an authentication decision. HTTP 200/403 and
+edge entry rejection. The first phase permits at most three read starts, with at
+least two seconds after each completed read before the next. Every read has a
+six-second timeout; all phases share one absolute thirty-second limit from the
+original connection loss. Slow replies do not consume a separate short window.
+If all three complete with network errors or HTTP 502/503, at most two further
+availability reads may run at least ten seconds apart. Locally cancelled or
+timed-out reads consume a start without qualifying for the availability phase;
+HTTP 504 does not qualify and stops that phase. This covers edge replacement
+without treating an unavailable edge as an authentication decision. HTTP 200/403 and
 other 401 responses stop the check; visibility and wake events cannot reset its
 deadline or consume a pending retry early.
 
@@ -198,5 +202,6 @@ finish. A tab marker prevents automatic re-entry loops; the recovery page retain
 a manual portal link. API calls, writes and WebSocket failures keep their existing
 error responses. Missing public Connection capabilities disable this feature with
 a diagnostic instead of patching DSH. Browser diagnostics tagged
-`auriga.entry_recovery` contain only event/reason enums, state, attempt number,
+`auriga.entry_recovery` use one string containing the tag and JSON, readable by
+text-only collectors. They contain only event/reason enums, state, attempt number,
 relative time and HTTP status; they omit URLs, credentials and response bodies.

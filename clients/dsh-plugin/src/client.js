@@ -375,10 +375,13 @@ window.__ModuleLoader__.load({
         ) ||
         !window.location.pathname.startsWith(base.pathname)
       ) {
-        console.info('auriga.entry_recovery', {
-          event: 'scope_skipped',
-          reason: 'unsupported_location',
-        });
+        console.info(
+          'auriga.entry_recovery ' +
+            JSON.stringify({
+              event: 'scope_skipped',
+              reason: 'unsupported_location',
+            }),
+        );
         return () => {};
       }
       const key = 'auriga.entry-recovery:' + base.pathname;
@@ -398,22 +401,27 @@ window.__ModuleLoader__.load({
       const trace = (event, reason, status) => {
         try {
           const state = connection.state.getSnapshot();
-          console.info('auriga.entry_recovery', {
-            event,
-            reason,
-            attempt: attempts,
-            phase: availability ? 'availability' : 'short',
-            state: ['connected', 'connecting', 'disconnected'].includes(state)
-              ? state
-              : 'initial',
-            elapsedMs:
-              lossStartedAt === undefined
-                ? 0
-                : Math.max(0, Math.round(now() - lossStartedAt)),
-            ...(Number.isInteger(status) && status >= 100 && status < 600
-              ? { status }
-              : {}),
-          });
+          console.info(
+            'auriga.entry_recovery ' +
+              JSON.stringify({
+                event,
+                reason,
+                attempt: attempts,
+                phase: availability ? 'availability' : 'short',
+                state: ['connected', 'connecting', 'disconnected'].includes(
+                  state,
+                )
+                  ? state
+                  : 'initial',
+                elapsedMs:
+                  lossStartedAt === undefined
+                    ? 0
+                    : Math.max(0, Math.round(now() - lossStartedAt)),
+                ...(Number.isInteger(status) && status >= 100 && status < 600
+                  ? { status }
+                  : {}),
+              }),
+          );
         } catch {
           /* diagnostics cannot change recovery or authorization */
         }
@@ -503,6 +511,14 @@ window.__ModuleLoader__.load({
           abort = () => reject(new Error('entry probe cancelled'));
           controller.signal.addEventListener('abort', abort, { once: true });
         });
+        const readTimer = setTimeout(
+          () => {
+            if (request !== controller) return;
+            trace('probe_timed_out', 'read_deadline');
+            controller.abort();
+          },
+          Math.min(6000, deadline - now()),
+        );
         let outcome = 'stop';
         let status;
         try {
@@ -551,6 +567,7 @@ window.__ModuleLoader__.load({
               ? 'stop'
               : 'retry';
         } finally {
+          clearTimeout(readTimer);
           controller.signal.removeEventListener('abort', abort);
           if (request === controller) request = undefined;
         }
@@ -575,9 +592,6 @@ window.__ModuleLoader__.load({
           // Their absolute cap remains anchored to the original connection loss.
           if (!availability && attempts === 3 && qualifiedShortReads === 3) {
             availability = true;
-            deadline = lossStartedAt + 30000;
-            clearTimeout(cycleTimer);
-            cycleTimer = undefined;
             trace('availability_wait', 'edge_unavailable', status);
           }
           if (attempts < (availability ? 5 : 3)) {
@@ -629,7 +643,7 @@ window.__ModuleLoader__.load({
         } else if (!pending()) cancel();
         else {
           lossStartedAt ??= now();
-          deadline ??= lossStartedAt + 6000;
+          deadline ??= lossStartedAt + 30000;
           if (document.hidden) cancel();
           else void probe();
         }
