@@ -107,6 +107,52 @@ describe('model import limits and identity', () => {
       },
     };
     expect(samePool(pool, structuredClone(pool))).toBe(true);
+    const canonical = {
+      ...pool,
+      price: { ...pool.price, effectiveAt: '2026-01-01T00:00:00.120Z' },
+    };
+    expect(
+      samePool(canonical, {
+        ...canonical,
+        price: { ...canonical.price, effectiveAt: '2026-01-01T00:00:00.12Z' },
+      }),
+    ).toBe(true);
+    expect(
+      samePool(canonical, {
+        ...canonical,
+        price: {
+          ...canonical.price,
+          effectiveAt: '2026-01-01T09:00:00.120000000+09:00',
+        },
+      }),
+    ).toBe(true);
+    expect(
+      samePool(canonical, {
+        ...canonical,
+        price: {
+          ...canonical.price,
+          effectiveAt: '2026-01-01T00:00:00.120000001Z',
+        },
+      }),
+    ).toBe(false);
+    expect(
+      samePool(canonical, {
+        ...canonical,
+        price: { ...canonical.price, effectiveAt: '2026-01-01T00:00:00.121Z' },
+      }),
+    ).toBe(false);
+    expect(
+      samePool(canonical, {
+        ...canonical,
+        price: { ...canonical.price, effectiveAt: 'invalid' },
+      }),
+    ).toBe(false);
+    expect(
+      samePool(canonical, {
+        ...canonical,
+        price: { ...canonical.price, inputMicrosPerMillionTokens: 1 },
+      }),
+    ).toBe(false);
     expect(samePool(pool, { ...pool, enabled: false })).toBe(false);
     expect(
       samePool(pool, {
