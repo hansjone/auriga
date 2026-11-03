@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -148,7 +149,7 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 	if input.Stream == nil || !*input.Stream {
 		response, failure := client.ChatCompletionRequest(bc, req)
 		if failure != nil {
-			err := providerFailure(failure)
+			err := loggedProviderFailure(ctx, failure)
 			result.NoCharge = err.Definitive
 			return result, err
 		}
@@ -157,7 +158,7 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 	}
 	stream, failure := client.ChatCompletionStreamRequest(bc, req)
 	if failure != nil {
-		err := providerFailure(failure)
+		err := loggedProviderFailure(ctx, failure)
 		result.NoCharge = err.Definitive
 		return result, err
 	}
@@ -167,7 +168,7 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 			continue
 		}
 		if chunk.BifrostError != nil {
-			streamErr = providerFailure(chunk.BifrostError)
+			streamErr = loggedProviderFailure(ctx, chunk.BifrostError)
 			cancel()
 			continue
 		}
@@ -198,11 +199,18 @@ type ProviderFailure struct {
 	Status     int
 	Code       string
 	Definitive bool
+	Reason     string
+	Parameter  string
 }
 
 func (e *ProviderFailure) Error() string { return e.Code }
+func loggedProviderFailure(ctx context.Context, failure *schemas.BifrostError) *ProviderFailure {
+	err := providerFailure(failure)
+	slog.WarnContext(ctx, "relay.provider_failure", "status", err.Status, "code", err.Code, "reason", err.Reason, "parameter", err.Parameter)
+	return err
+}
 func providerFailure(f *schemas.BifrostError) *ProviderFailure {
-	out := &ProviderFailure{Status: 502, Code: "provider_unavailable"}
+	out := &ProviderFailure{Status: 502, Code: "provider_unavailable", Reason: "other", Parameter: "other"}
 	if f == nil {
 		return out
 	}
@@ -221,6 +229,12 @@ func providerFailure(f *schemas.BifrostError) *ProviderFailure {
 		}
 	}
 	if f.Error != nil {
+		if p, ok := f.Error.Param.(string); ok {
+			switch p {
+			case "model", "messages", "max_tokens", "max_completion_tokens", "temperature", "top_p", "reasoning_effort", "tools", "tool_choice", "response_format", "stream", "stream_options", "service_tier":
+				out.Parameter = p
+			}
+		}
 		var dial *net.OpError
 		if errors.As(f.Error.Error, &dial) && dial.Op == "dial" {
 			out.Definitive = true
@@ -231,6 +245,10 @@ func providerFailure(f *schemas.BifrostError) *ProviderFailure {
 			out.Definitive = false
 		}
 		if f.Error.Code != nil {
+			switch *f.Error.Code {
+			case "context_length_exceeded", "invalid_request_error", "rate_limit_exceeded", "unsupported_parameter", "unsupported_value", "model_not_found", "invalid_api_key", "insufficient_quota", "permission_denied", "api_unsupported":
+				out.Reason = *f.Error.Code
+			}
 			switch *f.Error.Code {
 			case "context_length_exceeded", "invalid_request_error", "rate_limit_exceeded":
 				out.Code = *f.Error.Code

@@ -90,7 +90,7 @@ async function prepare(w: ReturnType<typeof make>) {
   await w.get('[name="importOutputPrice"]').setValue('1000000');
   await w.get('[name="importConfirmed"]').setValue(true);
 }
-it('previews independent public aliases, inherits known limits and requires explicit unknown suggestions and positive pricing', async () => {
+it('previews independent public aliases, inherits known capabilities and leaves unknown values uncapped with positive pricing', async () => {
   const w = make();
   await flushPromises();
   await w.get('input[value="a"]').setValue(true);
@@ -123,7 +123,8 @@ it('previews independent public aliases, inherits known limits and requires expl
   await flushPromises();
   expect(saved.map((v) => v.id)).toEqual(['public-a', 'b']);
   expect(saved[0].routes).toEqual([{ providerId: 'p', model: 'a', weight: 1 }]);
-  expect(saved[1].contextWindow).toBe(32768);
+  expect(saved[1].contextWindow).toBe(0);
+  expect(saved[1].maxOutputTokens).toBe(0);
   expect(w.text()).toContain('已保存 2 / 2');
   w.unmount();
 });

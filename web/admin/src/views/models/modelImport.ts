@@ -20,21 +20,17 @@ export function capabilityLimits(model: CatalogModel) {
     input = positive(model.maxInputTokens),
     output = positive(model.maxOutputTokens);
   const contexts = [context, input].filter((v): v is number => v !== undefined);
-  const effectiveContext = contexts.length
-    ? Math.min(1048576, ...contexts)
-    : undefined;
+  const effectiveContext = contexts.length ? Math.min(...contexts) : undefined;
   return {
     context: effectiveContext,
-    output: output === undefined ? undefined : Math.min(32768, output),
+    output,
     inputOnly: context === undefined && input !== undefined,
-    limited:
-      contexts.some((v) => v > 1048576) ||
-      (output !== undefined && output > 32768),
+    limited: false,
   };
 }
 export function applyKnownLimits(
-  context: number,
-  output: number,
+  _context: number,
+  _output: number,
   models: CatalogModel[],
 ) {
   const limits = models.map(capabilityLimits);
@@ -44,8 +40,8 @@ export function applyKnownLimits(
   )
     return;
   return {
-    context: Math.min(context, ...limits.map((v) => v.context!)),
-    output: Math.min(output, ...limits.map((v) => v.output!)),
+    context: Math.min(...limits.map((v) => v.context!)),
+    output: Math.min(...limits.map((v) => v.output!)),
   };
 }
 export const suggestPublicId = (id: string) =>
@@ -63,16 +59,16 @@ export function rowError(
   if (rows.filter((v) => v.id === row.id).length > 1) return 'importDuplicate';
   if (existing.has(row.id) && row.status !== 'saved' && !row.body)
     return 'importExists';
-  if (row.context === undefined || row.output === undefined)
-    return 'importMissingLimits';
+  const context = row.context ?? 0,
+    output = row.output ?? 0;
   if (
-    !Number.isSafeInteger(row.context) ||
-    !Number.isSafeInteger(row.output) ||
-    row.context < 2 ||
-    row.context > 1048576 ||
-    row.output < 1 ||
-    row.output > 32768 ||
-    row.output >= row.context
+    !Number.isSafeInteger(context) ||
+    !Number.isSafeInteger(output) ||
+    context < 0 ||
+    output < 0 ||
+    context > Number.MAX_SAFE_INTEGER ||
+    output > Number.MAX_SAFE_INTEGER ||
+    (context > 0 && output >= context)
   )
     return 'importInvalidLimits';
 }

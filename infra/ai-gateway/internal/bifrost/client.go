@@ -23,6 +23,7 @@ type MemberPolicy struct {
 	RequestsPerMinute   int64 `json:"requestsPerMinute"`
 	MaxConcurrency      int64 `json:"maxConcurrency"`
 	MaxInFlightTokens   int64 `json:"maxInFlightTokens"`
+	MeteringOnly        *bool `json:"meteringOnly,omitempty"`
 }
 type Client struct {
 	target       *url.URL
@@ -33,17 +34,18 @@ type Client struct {
 }
 
 func NewClient(origin, passwordFile string, policy MemberPolicy) (*Client, error) {
-	if policy.MaxConcurrency == 0 {
-		policy.MaxConcurrency = 16
+	if policy.MeteringOnly == nil {
+		enabled := true
+		policy.MeteringOnly = &enabled
+	} else {
+		enabled := *policy.MeteringOnly
+		policy.MeteringOnly = &enabled
 	}
-	if policy.MaxInFlightTokens == 0 {
-		policy.MaxInFlightTokens = 64 << 20
-	}
-	if policy.MaxConcurrency < 1 || policy.MaxConcurrency > 100 || policy.MaxInFlightTokens < 1 || policy.MaxInFlightTokens > 1<<30 {
+	if policy.MaxConcurrency < 0 || policy.MaxConcurrency > 100 || policy.MaxInFlightTokens < 0 || policy.MaxInFlightTokens > 1<<30 {
 		return nil, errors.New("invalid relay member limits")
 	}
 	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || strings.Contains(origin, "#") || passwordFile == "" || policy.MonthlyBudgetMicros < 0 || policy.MonthlyBudgetMicros > 9007199254740991 || policy.RequestsPerMinute < 1 || policy.RequestsPerMinute > 1000000 {
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || strings.Contains(origin, "#") || passwordFile == "" || policy.MonthlyBudgetMicros < 0 || policy.MonthlyBudgetMicros > 9007199254740991 || policy.RequestsPerMinute < 0 || policy.RequestsPerMinute > 1000000 {
 		return nil, errors.New("invalid Bifrost bridge configuration")
 	}
 	if u.Scheme != "https" {
@@ -82,7 +84,7 @@ func (c *Client) MemberKey(ctx context.Context, tenant, account string) (api.Rel
 	if tenant == "" || account == "" {
 		return out, errors.New("common.unauthenticated")
 	}
-	raw, e := json.Marshal(api.RelayMemberEnsure{TenantId: tenant, AccountId: account, MaxConcurrency: &c.policy.MaxConcurrency, MaxInFlightTokens: &c.policy.MaxInFlightTokens, MonthlyBudgetMicros: c.policy.MonthlyBudgetMicros, RequestsPerMinute: c.policy.RequestsPerMinute})
+	raw, e := json.Marshal(api.RelayMemberEnsure{TenantId: tenant, AccountId: account, MaxConcurrency: &c.policy.MaxConcurrency, MaxInFlightTokens: &c.policy.MaxInFlightTokens, MonthlyBudgetMicros: c.policy.MonthlyBudgetMicros, RequestsPerMinute: c.policy.RequestsPerMinute, MeteringOnly: c.policy.MeteringOnly})
 	if e != nil {
 		return out, e
 	}

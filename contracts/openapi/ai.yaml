@@ -5464,9 +5464,10 @@
           "maxActiveRequestsPerSubject": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 100,
-            "default": 2
+            "default": 2,
+            "description": "并发上限，0表示不限制。"
           },
           "maxInFlightPercent": {
             "type": "integer",
@@ -5577,14 +5578,16 @@
           "contextWindow": {
             "type": "integer",
             "format": "int64",
-            "minimum": 2,
-            "maximum": 1048576
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。"
           },
           "maxOutputTokens": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
-            "maximum": 32768
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。"
           },
           "price": {
             "$ref": "#/components/schemas/Price"
@@ -5619,8 +5622,9 @@
           "requestsPerMinute": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
-            "maximum": 1000000
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "显式流量限制，0或未指定表示不限制。"
           },
           "models": {
             "type": "array",
@@ -5633,16 +5637,20 @@
           "maxConcurrency": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 100,
-            "description": "每个Key同时执行的请求上限。成员默认16，对外Key默认32。"
+            "description": "显式流量限制，0或未指定表示不限制。"
           },
           "maxInFlightTokens": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 1073741824,
-            "description": "每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。"
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "meteringOnly": {
+            "type": "boolean",
+            "description": "仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。"
           }
         },
         "additionalProperties": false
@@ -5690,7 +5698,8 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "maximum": 9007199254740991
+            "maximum": 9007199254740991,
+            "description": "显式流量限制，0或未指定表示不限制。"
           },
           "models": {
             "type": "array",
@@ -5701,16 +5710,29 @@
           "maxConcurrency": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 100,
-            "description": "每个Key同时执行的请求上限。成员默认16，对外Key默认32。"
+            "description": "显式流量限制，0或未指定表示不限制。"
           },
           "maxInFlightTokens": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 1073741824,
-            "description": "每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。"
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "meteringOnly": {
+            "type": "boolean",
+            "description": "仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。"
+          },
+          "policyOrigin": {
+            "type": "string",
+            "enum": [
+              "default",
+              "administrator",
+              "legacy"
+            ],
+            "description": "治理来源。ensure只更新default；旧无来源保留为legacy，管理员保存标administrator。"
           }
         },
         "additionalProperties": false
@@ -5759,22 +5781,27 @@
           "requestsPerMinute": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
-            "maximum": 1000000
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "显式流量限制，0或未指定表示不限制。"
           },
           "maxConcurrency": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 100,
-            "description": "每个Key同时执行的请求上限。成员默认16，对外Key默认32。"
+            "description": "显式流量限制，0或未指定表示不限制。"
           },
           "maxInFlightTokens": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 1073741824,
-            "description": "每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。"
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "meteringOnly": {
+            "type": "boolean",
+            "description": "仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。"
           }
         },
         "additionalProperties": false

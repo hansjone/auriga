@@ -178,8 +178,8 @@ function prepare() {
 function suggestUnknown() {
   for (const row of rows.value) {
     if (row.body) continue;
-    row.context ??= 32768;
-    row.output ??= Math.min(4096, row.context - 1);
+    row.context ??= 0;
+    row.output ??= 0;
   }
   confirmed.value = false;
 }
@@ -234,8 +234,8 @@ async function run() {
         row.body ??= {
           id: row.id,
           enabled: true,
-          contextWindow: row.context!,
-          maxOutputTokens: row.output!,
+          contextWindow: row.context ?? 0,
+          maxOutputTokens: row.output ?? 0,
           routes: [
             { providerId: providerId.value, model: row.model.id, weight: 1 },
           ],
@@ -431,8 +431,8 @@ async function run() {
                   v-model.number="row.context"
                   :name="'importContext' + index"
                   type="number"
-                  min="2"
-                  max="1048576"
+                  min="0"
+                  max="9007199254740991"
                   :aria-label="t('context') + ' ' + row.model.id"
                   :disabled="running || !!row.body"
                 />
@@ -442,8 +442,8 @@ async function run() {
                   v-model.number="row.output"
                   :name="'importOutput' + index"
                   type="number"
-                  min="1"
-                  max="32768"
+                  min="0"
+                  max="9007199254740991"
                   :aria-label="t('output') + ' ' + row.model.id"
                   :disabled="running || !!row.body"
                 />

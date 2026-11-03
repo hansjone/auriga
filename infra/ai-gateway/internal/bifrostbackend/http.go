@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/budget"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/relaylimits"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	ai "github.com/hansjone/auriga/infra/gen/auriga/ai/v1"
 	"github.com/jackc/pgx/v5"
@@ -56,7 +57,11 @@ func reject(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "code": code, "title": http.StatusText(status)})
 }
 func decode(w http.ResponseWriter, r *http.Request, value any) error {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	limit := int64(1 << 20)
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/chat/completions" {
+		limit = relaylimits.ChatBodyBytes
+	}
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	d.DisallowUnknownFields()
 	if d.Decode(value) != nil || d.Decode(new(any)) != io.EOF {
 		return invalid
@@ -407,7 +412,7 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	var model string
 	var stream bool
 	var messages []json.RawMessage
-	if json.Unmarshal(fields["model"], &model) != nil || !modelID.MatchString(model) || json.Unmarshal(fields["messages"], &messages) != nil || len(messages) < 1 || len(messages) > 1000 {
+	if json.Unmarshal(fields["model"], &model) != nil || !modelID.MatchString(model) || json.Unmarshal(fields["messages"], &messages) != nil || len(messages) < 1 {
 		reject(w, invalid)
 		return
 	}
@@ -445,9 +450,11 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		reject(w, e)
 		return
 	}
+	if !key.GetMeteringOnly() && maxTokens == 0 {
+		rejectOutputTokenLimit(w, "/max_tokens", 0)
+		return
+	}
 	delete(fields, "metadata")
-	delete(fields, "max_completion_tokens")
-	fields["max_tokens"], _ = json.Marshal(maxTokens)
 	fields["user"], _ = json.Marshal(b.pseudonym(tenant, key.Id))
 	if stream {
 		fields["stream_options"] = json.RawMessage(`{"include_usage":true}`)
@@ -462,7 +469,27 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	if key.Source == "member" && validUUID(r.Header.Get("X-Auriga-Device")) {
 		device = r.Header.Get("X-Auriga-Device")
 	}
-	snapshot := budget.TrustedSnapshot{Admission: &ai.BudgetAdmission{TenantId: tenant, AccountId: key.Id, ModelId: pool.Id, ProviderId: routes[0].ID, CredentialId: routes[0].ID, Currency: "USD", PriceVersion: pool.Price.Version, InputTokenUpperBound: pool.ContextWindow - maxTokens, MaxOutputTokens: maxTokens, MonthlyBudgetMicros: &key.MonthlyBudgetMicros, Origin: &ai.BudgetAdmission_DeviceId{DeviceId: device}, TokenExpiresAt: timestamppb.New(expiry)}, Price: pool.Price, ValidUntil: expiry}
+	inputEstimate := int64(len(raw))*2 + 64
+	// Metadata is a client capability hint, never a relay context ceiling.
+	// Text bytes give a conservative tokenizer-independent estimate; media uses
+	// the known capacity when it is larger. Only the provider confirms usage.
+	inputBound := inputEstimate
+	for _, marker := range []string{"image_url", "input_audio", "video_url", "input_file", "file_data"} {
+		if bytes.Contains(raw, []byte(marker)) {
+			inputBound = max(inputBound, pool.ContextWindow)
+			break
+		}
+	}
+	outputEstimate := maxTokens
+	if outputEstimate == 0 {
+		outputEstimate = max(int64(1), pool.MaxOutputTokens)
+	}
+	admission := &ai.BudgetAdmission{TenantId: tenant, AccountId: key.Id, ModelId: pool.Id, ProviderId: routes[0].ID, CredentialId: routes[0].ID, Currency: "USD", PriceVersion: pool.Price.Version, InputTokenUpperBound: inputBound, MaxOutputTokens: outputEstimate, MonthlyBudgetMicros: &key.MonthlyBudgetMicros, Origin: &ai.BudgetAdmission_DeviceId{DeviceId: device}, TokenExpiresAt: timestamppb.New(expiry)}
+	if key.Source == "member" && key.GetMeteringOnly() {
+		admission.MeteringOnly = true
+		admission.MonthlyBudgetMicros = nil
+	}
+	snapshot := budget.TrustedSnapshot{Admission: admission, Price: pool.Price, ValidUntil: expiry}
 	reservation, e := b.admit(r.Context(), key, snapshot, budget.Request{Method: "POST", Path: "/ai/v1/chat/completions", Key: r.Header.Get("Idempotency-Key"), Fingerprint: sha256.Sum256(raw)})
 	if e != nil {
 		reject(w, e)
@@ -493,18 +520,24 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	finish := budget.Finish{Outcome: "failed", ExecutionStopped: true, Usage: &budget.FinalUsage{Price: pool.Price}}
 	if !result.NoCharge {
 		finish.Estimated = true
-		finish.Usage.InputTokens = min(pool.ContextWindow-maxTokens, int64(len(raw))*2+64)
+		finish.Usage.InputTokens = inputEstimate
 		// Remote media cannot be bounded by the bytes of its URL. Preserve the
 		// admitted input ceiling when no provider usage is available.
 		for _, marker := range []string{"image_url", "input_audio", "video_url", "input_file", "file_data"} {
 			if bytes.Contains(raw, []byte(marker)) {
-				finish.Usage.InputTokens = pool.ContextWindow - maxTokens
+				finish.Usage.InputTokens = inputBound
 				break
 			}
 		}
-		finish.Usage.OutputTokens = min(maxTokens, result.ObservedBytes)
+		finish.Usage.OutputTokens = min(outputEstimate, result.ObservedBytes)
+		if admission.MeteringOnly {
+			finish.Usage.OutputTokens = result.ObservedBytes
+		}
 		if result.ObservedBytes == 0 {
-			finish.Usage.OutputTokens = maxTokens
+			finish.Usage.OutputTokens = outputEstimate
+		}
+		if admission.MeteringOnly && result.ObservedBytes == 0 {
+			finish.Usage.OutputTokens = 0
 		}
 		if runErr == nil {
 			finish.Outcome = "completed"

@@ -33,7 +33,7 @@ func cost(input, output int64, p api.Price) (int64, error) {
 }
 
 func flightCap(quota *int64, percent int64, absolute *int64) (int64, error) {
-	if !positiveOptional(absolute) || percent < 1 || percent > 100 || (quota != nil && (*quota < 0 || *quota > maxInteger)) || (quota == nil && absolute == nil) {
+	if !positiveOptional(absolute) || percent < 1 || percent > 100 || (quota != nil && (*quota < 0 || *quota > maxInteger)) {
 		return 0, failure("ai.budget_unavailable")
 	}
 	n := maxInteger
@@ -58,6 +58,9 @@ func (l *Ledger) snapshot(s TrustedSnapshot, now time.Time) (*ai.BudgetAdmission
 		return nil, failure("ai.budget_unavailable")
 	}
 	a := proto.Clone(s.Admission).(*ai.BudgetAdmission)
+	if a.MeteringOnly && (a.MonthlyBudgetMicros != nil || a.DailyTokens != nil) {
+		return nil, failure("ai.budget_unavailable")
+	}
 	if !identifiers.ValidUUID(a.TenantId) || !identifiers.ValidUUID(a.AccountId) || !identifiers.ValidUUID(a.ProviderId) || !identifiers.ValidUUID(a.CredentialId) || !modelPattern.MatchString(a.ModelId) || a.Currency != l.currency || a.Currency != s.Price.Currency || a.PriceVersion != s.Price.Version || len(s.Price.Version) < 1 || len(s.Price.Version) > 128 || s.Price.EffectiveAt.IsZero() || s.Price.EffectiveAt.After(now) || !s.ValidUntil.After(now) || a.TokenExpiresAt == nil || a.TokenExpiresAt.CheckValid() != nil || !a.TokenExpiresAt.AsTime().After(now) || a.InputTokenUpperBound <= 0 || a.MaxOutputTokens <= 0 {
 		return nil, failure("ai.budget_unavailable")
 	}
@@ -65,13 +68,19 @@ func (l *Ledger) snapshot(s TrustedSnapshot, now time.Time) (*ai.BudgetAdmission
 		return nil, failure("ai.budget_unavailable")
 	}
 	var err error
-	a.ReservedTokens, err = add(a.InputTokenUpperBound, a.MaxOutputTokens)
-	if err != nil {
+	if _, err = cost(0, 0, s.Price); err != nil {
 		return nil, err
 	}
-	a.ReservedMicros, err = cost(a.InputTokenUpperBound, a.MaxOutputTokens, s.Price)
-	if err != nil {
-		return nil, err
+	a.ReservedTokens, a.ReservedMicros = 0, 0
+	if !a.MeteringOnly {
+		a.ReservedTokens, err = add(a.InputTokenUpperBound, a.MaxOutputTokens)
+		if err != nil {
+			return nil, err
+		}
+		a.ReservedMicros, err = cost(a.InputTokenUpperBound, a.MaxOutputTokens, s.Price)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if _, err = flightCap(a.DailyTokens, l.policy.MaxInFlightPercent, l.policy.MaxInFlightTokens); err != nil {
 		return nil, err

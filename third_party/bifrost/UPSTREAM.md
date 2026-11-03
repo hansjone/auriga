@@ -10,6 +10,7 @@
 删除所有 plugins/framework：governance 经 configstore 引入 vectorstore/objectstore，logging 又关联 MCP/jobaccounting 等；无法满足最小引入目标。因此按任务备选方案复原 Auriga PR #265 删除前的 budget/store（`6938b4d^`），复用预算、预占、结算和用量记录，没有另造计费引擎。
 
 本地修改：
+- Chat Completions 不再把调用方小于16的最大输出值上调到16；缺省值仍留给上游，参数名按协议适配。真实Run回归覆盖缺省、1及65536，Responses路径未改。
 - 所有保留 Go 源文件与 go.mod 都有显著的 Auriga 修改头声明；go.sum 的修改声明在相邻 go.sum.NOTICE。哈希清单在修改后重新生成。
 - MiniMax/DeepSeek 原生适配补上 custom provider alias，保证供应商 UUID 与选 Key 的回调一致；默认禁止回环目的地址，仅显式私网测试配置允许。
 - core Provider 接口仅保留配置和 chat/list 所需方法；provider factory 仅保留上述五类。

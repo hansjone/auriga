@@ -45,6 +45,34 @@
 .relay-route-title {
   flex-basis: 100%;
 }
+.relay-providers > form .relay-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(100px, 0.4fr);
+  gap: 12px 16px;
+}
+.relay-route-title,
+.relay-route-actions,
+.relay-route > p {
+  grid-column: 1 / -1;
+}
+.relay-route-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.relay-route-actions p {
+  margin-left: auto;
+  overflow-wrap: anywhere;
+}
+.relay-route-hint {
+  font-size: 12px;
+}
+@media (max-width: 800px) {
+  .relay-providers > form .relay-route {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .relay-toolbar p {
   flex-basis: 100%;
 }

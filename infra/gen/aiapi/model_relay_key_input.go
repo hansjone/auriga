@@ -21,15 +21,18 @@ var _ MappedNullable = &RelayKeyInput{}
 
 // RelayKeyInput struct for RelayKeyInput
 type RelayKeyInput struct {
-	Name                string   `json:"name"`
-	Active              bool     `json:"active"`
-	MonthlyBudgetMicros int64    `json:"monthlyBudgetMicros"`
-	RequestsPerMinute   int64    `json:"requestsPerMinute"`
-	Models              []string `json:"models"`
-	// 每个Key同时执行的请求上限。成员默认16，对外Key默认32。
+	Name                string `json:"name"`
+	Active              bool   `json:"active"`
+	MonthlyBudgetMicros int64  `json:"monthlyBudgetMicros"`
+	// 显式流量限制，0或未指定表示不限制。
+	RequestsPerMinute int64    `json:"requestsPerMinute"`
+	Models            []string `json:"models"`
+	// 显式流量限制，0或未指定表示不限制。
 	MaxConcurrency *int64 `json:"maxConcurrency,omitempty"`
-	// 每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。
+	// 显式流量限制，0或未指定表示不限制。
 	MaxInFlightTokens *int64 `json:"maxInFlightTokens,omitempty"`
+	// 仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。
+	MeteringOnly *bool `json:"meteringOnly,omitempty"`
 }
 
 type _RelayKeyInput RelayKeyInput
@@ -240,6 +243,38 @@ func (o *RelayKeyInput) SetMaxInFlightTokens(v int64) {
 	o.MaxInFlightTokens = &v
 }
 
+// GetMeteringOnly returns the MeteringOnly field value if set, zero value otherwise.
+func (o *RelayKeyInput) GetMeteringOnly() bool {
+	if o == nil || IsNil(o.MeteringOnly) {
+		var ret bool
+		return ret
+	}
+	return *o.MeteringOnly
+}
+
+// GetMeteringOnlyOk returns a tuple with the MeteringOnly field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayKeyInput) GetMeteringOnlyOk() (*bool, bool) {
+	if o == nil || IsNil(o.MeteringOnly) {
+		return nil, false
+	}
+	return o.MeteringOnly, true
+}
+
+// HasMeteringOnly returns a boolean if a field has been set.
+func (o *RelayKeyInput) HasMeteringOnly() bool {
+	if o != nil && !IsNil(o.MeteringOnly) {
+		return true
+	}
+
+	return false
+}
+
+// SetMeteringOnly gets a reference to the given bool and assigns it to the MeteringOnly field.
+func (o *RelayKeyInput) SetMeteringOnly(v bool) {
+	o.MeteringOnly = &v
+}
+
 func (o RelayKeyInput) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -260,6 +295,9 @@ func (o RelayKeyInput) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.MaxInFlightTokens) {
 		toSerialize["maxInFlightTokens"] = o.MaxInFlightTokens
+	}
+	if !IsNil(o.MeteringOnly) {
+		toSerialize["meteringOnly"] = o.MeteringOnly
 	}
 	return toSerialize, nil
 }

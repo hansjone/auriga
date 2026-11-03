@@ -22,8 +22,8 @@ func TestCostAndPolicy(t *testing.T) {
 	if n, err := flightCap(&limit, 25, &abs); err != nil || n != 20 {
 		t.Fatalf("minimum cap: %d %v", n, err)
 	}
-	if _, err := flightCap(nil, 25, nil); err == nil {
-		t.Fatal("unbounded unlimited quota")
+	if n, err := flightCap(nil, 25, nil); err != nil || n != maxInteger {
+		t.Fatal("unset traffic limit must stay unlimited")
 	}
 	limit = 0
 	if n, err := flightCap(&limit, 25, &abs); err != nil || n != 0 {

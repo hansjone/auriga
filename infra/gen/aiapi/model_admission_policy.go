@@ -20,6 +20,7 @@ var _ MappedNullable = &AdmissionPolicy{}
 
 // AdmissionPolicy 部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。周期不限时对应正数绝对上限必填；unknown预占继续占用；0配额禁止。
 type AdmissionPolicy struct {
+	// 并发上限，0表示不限制。
 	MaxActiveRequestsPerSubject int64  `json:"maxActiveRequestsPerSubject"`
 	MaxInFlightPercent          int64  `json:"maxInFlightPercent"`
 	MaxInFlightMicros           *int64 `json:"maxInFlightMicros,omitempty"`
