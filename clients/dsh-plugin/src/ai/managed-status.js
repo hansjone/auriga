@@ -41,7 +41,17 @@ export async function loadManagedModelMaterial(binding) {
       !value.models.length ||
       value.models.length > 256 ||
       value.models.some(
-        (m) => typeof m.id !== 'string' || !m.id.trim() || m.id.length > 200,
+        (m) =>
+          typeof m.id !== 'string' ||
+          !m.id.trim() ||
+          m.id.length > 200 ||
+          !Number.isSafeInteger(m.contextWindow) ||
+          m.contextWindow < 2 ||
+          m.contextWindow > 1048576 ||
+          !Number.isSafeInteger(m.maxOutputTokens) ||
+          m.maxOutputTokens < 1 ||
+          m.maxOutputTokens > 32768 ||
+          m.maxOutputTokens >= m.contextWindow,
       )
     )
       throw new Error('invalid model binding');

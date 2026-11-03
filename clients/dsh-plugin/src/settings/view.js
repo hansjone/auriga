@@ -34,6 +34,7 @@ const messages = {
     model: '模型',
     modelReady: '中转站可用',
     modelMissing: '中转站未就绪',
+    modelManual: '在原生模型设置中获取并保存目录',
     refresh: '刷新状态',
     diagnostics: '诊断',
     protocol: '协议版本',
@@ -98,6 +99,7 @@ const messages = {
     joining: 'Connecting',
     model: 'Models',
     modelReady: 'Relay available',
+    modelManual: 'Fetch and save the catalog in native Models settings',
     modelMissing: 'Relay not ready',
     refresh: 'Refresh status',
     diagnostics: 'Diagnostics',
@@ -403,9 +405,11 @@ export function createSettingsView(
     const networkText = ready
       ? t.networkReady
       : t.networkPending + ' · ' + reason;
-    const modelText = account?.models?.available
-      ? t.modelReady
-      : t.modelMissing;
+    const modelText = managed
+      ? t.modelManual
+      : account?.models?.available
+        ? t.modelReady
+        : t.modelMissing;
     const summary =
       (managed && (managedFailure || statusError || !account)
         ? t.managed +

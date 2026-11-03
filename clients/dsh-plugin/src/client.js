@@ -19,12 +19,6 @@ window.__ModuleLoader__.load({
       failed: '加载失败',
       retry: '重试',
       refresh: '刷新状态',
-      refreshModels: '重新获取平台模型',
-      modelsReady: '平台模型已更新；运行中约每30秒重新获取。',
-      modelsStale: '暂时无法更新，保留上次目录；模型调用仍由平台核验权限。',
-      modelsForbidden: '平台模型授权已失效，请联系管理员。',
-      modelsEmpty: '当前没有可用的平台模型，请管理员检查发布与授权。',
-      modelsUnavailable: '平台模型当前不可用，请稍后重试。',
       authRequired: '需要重新登录平台',
       dismiss: '关闭',
       connection: '总部连接',
@@ -105,16 +99,6 @@ window.__ModuleLoader__.load({
       failed: 'Failed to load',
       retry: 'Retry',
       refresh: 'Refresh status',
-      refreshModels: 'Refresh platform models',
-      modelsReady:
-        'Platform models are current; refreshed about every 30 seconds while running.',
-      modelsStale:
-        'Refresh unavailable; showing the last catalog. Calls still require platform authorization.',
-      modelsForbidden:
-        'Platform model authorization is unavailable. Contact your administrator.',
-      modelsEmpty:
-        'No platform models are available. Ask your administrator to check publication and authorization.',
-      modelsUnavailable: 'Platform models are unavailable. Please retry.',
       authRequired: 'Platform sign-in required',
       dismiss: 'Dismiss',
       connection: 'Headquarters connection',
@@ -354,6 +338,246 @@ window.__ModuleLoader__.load({
         });
       };
     }
+    // Uses only the public rc.3 Connection observables. Entry recovery never
+    // replaces the native transport or replays a lifecycle/API write.
+    function installEntryRecovery(ctx) {
+      const connection = ctx.connection;
+      if (
+        !['state', 'generation'].every(
+          (name) =>
+            typeof connection?.[name]?.getSnapshot === 'function' &&
+            typeof connection?.[name]?.subscribe === 'function',
+        )
+      ) {
+        console.warn(
+          'Auriga entry recovery unavailable: Connection observables missing',
+        );
+        return () => {};
+      }
+      let base;
+      try {
+        base = new URL(document.baseURI);
+      } catch {
+        return () => {};
+      }
+      if (
+        window.top !== window ||
+        !['http:', 'https:'].includes(base.protocol) ||
+        base.origin !== window.location.origin ||
+        base.username ||
+        base.password ||
+        base.search ||
+        base.hash ||
+        !(
+          /^\/i\/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/$/.test(
+            base.pathname,
+          ) || base.pathname === '/'
+        ) ||
+        !window.location.pathname.startsWith(base.pathname)
+      )
+        return () => {};
+      const key = 'auriga.entry-recovery:' + base.pathname;
+      let closed = false,
+        navigated = false,
+        epoch = 0,
+        attempts = 0,
+        settled = false;
+      let generation = connection.generation.getSnapshot();
+      // Timers are cancellable resources; deadlines are facts about this loss
+      // cycle and must survive document visibility and browser wake events.
+      let request, retryTimer, cycleTimer, deadline;
+      let nextProbeAt = 0;
+      const now = () => window.performance.now();
+      const cleanups = [];
+      const cancel = () => {
+        epoch++;
+        if (request) nextProbeAt = Math.max(nextProbeAt, now() + 2000);
+        request?.abort();
+        request = undefined;
+        clearTimeout(retryTimer);
+        retryTimer = undefined;
+        clearTimeout(cycleTimer);
+        cycleTimer = undefined;
+      };
+      const blocked = () => {
+        try {
+          return window.sessionStorage.getItem(key) !== null;
+        } catch {
+          return true;
+        } // no automatic navigation without the loop fence
+      };
+      const pending = () =>
+        ['connecting', 'disconnected'].includes(
+          connection.state.getSnapshot(),
+        ) && connection.generation.getSnapshot() === undefined;
+      const current = (version) =>
+        !closed &&
+        !navigated &&
+        epoch === version &&
+        pending() &&
+        deadline !== undefined &&
+        now() < deadline &&
+        !document.hidden;
+      async function probe() {
+        if (
+          closed ||
+          navigated ||
+          request ||
+          retryTimer ||
+          settled ||
+          attempts >= 3 ||
+          blocked() ||
+          !pending() ||
+          document.hidden
+        )
+          return;
+        if (deadline === undefined || now() >= deadline) {
+          settled = true;
+          cancel();
+          return;
+        }
+        if (now() < nextProbeAt) {
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined;
+            void probe();
+          }, nextProbeAt - now());
+          return;
+        }
+        const version = epoch,
+          controller = new AbortController();
+        if (cycleTimer === undefined)
+          cycleTimer = setTimeout(() => {
+            settled = true;
+            cancel();
+          }, deadline - now());
+        request = controller;
+        attempts++;
+        let abort;
+        const cancelled = new Promise((_, reject) => {
+          abort = () => reject(new Error('entry probe cancelled'));
+          controller.signal.addEventListener('abort', abort, { once: true });
+        });
+        let outcome = 'stop';
+        try {
+          outcome = await Promise.race([
+            (async () => {
+              // The existing exact health route bypasses interaction activity;
+              // probing the native document would incorrectly touch idle time.
+              const response = await fetch(
+                new URL('_auriga/health', base).href,
+                {
+                  method: 'GET',
+                  credentials: 'same-origin',
+                  redirect: 'error',
+                  cache: 'no-store',
+                  headers: { Accept: 'application/problem+json' },
+                  signal: controller.signal,
+                },
+              );
+              if ([502, 503, 504].includes(response.status)) return 'retry';
+              if (
+                response.status !== 401 ||
+                response.headers.get('X-Auriga-Instance-Entry') !==
+                  'required' ||
+                !response.headers
+                  .get('Content-Type')
+                  ?.startsWith('application/problem+json')
+              )
+                return 'stop';
+              const problem = await response.json().catch(() => null);
+              return problem?.code === 'edge.unauthorized' &&
+                problem.status === 401 &&
+                problem.detail === 'instance cookie required'
+                ? 'recover'
+                : 'stop';
+            })(),
+            cancelled,
+          ]);
+        } catch {
+          outcome = 'retry';
+        } finally {
+          controller.signal.removeEventListener('abort', abort);
+          if (request === controller) request = undefined;
+        }
+        if (!current(version)) return;
+        if (outcome === 'recover' && !controller.signal.aborted && !blocked()) {
+          navigated = true;
+          cancel();
+          // The top-level GET receives edge's fixed normal-open recovery page.
+          // That page owns the tab marker and trusted cross-origin portal hop.
+          window.location.replace(base.href);
+        } else if (outcome === 'retry' && attempts < 3) {
+          nextProbeAt = now() + 2000;
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined;
+            void probe();
+          }, 2000);
+        } else {
+          settled = true;
+          clearTimeout(cycleTimer);
+          cycleTimer = undefined;
+        }
+      }
+      const changed = () => {
+        if (closed) return;
+        const next = connection.generation.getSnapshot();
+        if (next !== generation) {
+          cancel();
+          generation = next;
+          attempts = 0;
+          settled = false;
+          deadline = undefined;
+          nextProbeAt = 0;
+        }
+        if (connection.state.getSnapshot() === 'connected' && next) {
+          cancel();
+          attempts = 0;
+          settled = false;
+          deadline = undefined;
+          nextProbeAt = 0;
+          try {
+            window.sessionStorage.removeItem(key);
+          } catch {
+            /* retain fail-closed loop fence */
+          }
+        } else if (!pending()) cancel();
+        else {
+          deadline ??= now() + 6000;
+          if (document.hidden) cancel();
+          else void probe();
+        }
+      };
+      const resume = () => {
+        if (!closed && !request) {
+          changed();
+        }
+      };
+      const stop = () => {
+        if (closed) return;
+        closed = true;
+        cancel();
+        cleanups
+          .splice(0)
+          .reverse()
+          .forEach((cleanup) => cleanup());
+      };
+      cleanups.push(
+        connection.state.subscribe(changed),
+        connection.generation.subscribe(changed),
+      );
+      for (const event of ['focus', 'online']) {
+        window.addEventListener(event, resume);
+        cleanups.push(() => window.removeEventListener(event, resume));
+      }
+      document.addEventListener('visibilitychange', changed);
+      cleanups.push(() =>
+        document.removeEventListener('visibilitychange', changed),
+      );
+      window.addEventListener('pagehide', stop);
+      cleanups.push(() => window.removeEventListener('pagehide', stop));
+      changed();
+      return stop;
+    }
     return {
       inject: ['slots', 'locale', 'theme'],
       apply(ctx) {
@@ -376,6 +600,16 @@ window.__ModuleLoader__.load({
           const cleanup = own(install());
           ctx.effect?.(() => cleanup, label);
         };
+        effect(
+          () =>
+            ctx.inject?.(['connection'], (scope) => {
+              scope.effect(
+                () => installEntryRecovery(scope),
+                'auriga-shell: entry recovery',
+              );
+            }),
+          'auriga-shell: entry connection',
+        );
         effect(
           () => ctx.locale.register(NS, { zh, en }),
           'auriga-shell: dictionaries',
@@ -1175,112 +1409,6 @@ window.__ModuleLoader__.load({
               ),
             ),
           'auriga-shell: main',
-        );
-        function ManagedModelsStatus({ provider }) {
-          const [modelState, setModelState] = React.useState({ busy: true });
-          const [attempt, setAttempt] = React.useState(0);
-          React.useEffect(() => {
-            if (provider.provider !== 'auriga-managed') return;
-            let alive = true;
-            let active, poll;
-            const run = async () => {
-              if (!alive || disposed || active) return;
-              clearTimer(poll);
-              const controller = new AbortController();
-              active = controller;
-              controllers.add(controller);
-              const timeout = later(() => controller.abort(), 12000);
-              setModelState((old) => ({ ...old, busy: true }));
-              try {
-                const data = await Promise.race([
-                  (async () => {
-                    const reply = await fetch(
-                      localURL('auriga/local-login/status'),
-                      {
-                        credentials: 'same-origin',
-                        redirect: 'error',
-                        cache: 'no-store',
-                        signal: controller.signal,
-                      },
-                    );
-                    if (!reply.ok) throw failure();
-                    return reply.json();
-                  })(),
-                  new Promise((_, reject) =>
-                    controller.signal.addEventListener(
-                      'abort',
-                      () => reject(failure()),
-                      { once: true },
-                    ),
-                  ),
-                ]);
-                if (alive && !disposed)
-                  setModelState({ busy: false, ...data.models });
-              } catch {
-                if (alive && !disposed)
-                  setModelState({ busy: false, stale: true });
-              } finally {
-                clearTimer(timeout);
-                controllers.delete(controller);
-                controller.abort();
-                active = undefined;
-                if (alive && !disposed) poll = later(run, 30000);
-              }
-            };
-            void run();
-            window.addEventListener('online', run);
-            return () => {
-              alive = false;
-              clearTimer(poll);
-              active?.abort();
-              window.removeEventListener('online', run);
-            };
-          }, [provider.provider, attempt]);
-          if (provider.provider !== 'auriga-managed') return null;
-          return h(
-            'div',
-            { className: 'auriga-setting-actions' },
-            h(
-              'button',
-              {
-                type: 'button',
-                disabled: modelState.busy,
-                onClick: () => setAttempt((value) => value + 1),
-              },
-              t('refreshModels'),
-            ),
-            h(
-              'span',
-              { role: 'status' },
-              t(
-                modelState.state === 'managed_model_forbidden'
-                  ? 'modelsForbidden'
-                  : modelState.busy
-                    ? 'loading'
-                    : modelState.available
-                      ? 'modelsReady'
-                      : modelState.directoryAvailable && !modelState.authorized
-                        ? 'modelsEmpty'
-                        : modelState.stale
-                          ? 'modelsStale'
-                          : 'modelsUnavailable',
-              ),
-            ),
-          );
-        }
-        effect(
-          () =>
-            ctx.slots.inject('settings.models.provider-card', () =>
-              ctx.slots.register(
-                {
-                  name: 'settings.models.provider-card',
-                  key: 'llm-pi-ai',
-                  locale: NS,
-                },
-                ManagedModelsStatus,
-              ),
-            ),
-          'auriga-shell: native model catalog',
         );
         effect(
           () =>

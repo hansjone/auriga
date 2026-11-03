@@ -258,14 +258,10 @@ export async function createManaged(options = {}) {
   let disposeSession;
   let disposeSettingsOwnership;
   let network;
-  let llm;
-  const models = createManagedModelStatus({ tenantId, ownerId, instanceId });
+  let detachModels;
 
   return {
     mode: /** @type {const} */ ('managed'),
-    get modelStatus() {
-      return models.status;
-    },
     protocol: PROTOCOL_VERSION,
     protocolInfo: protocolInfo(),
     instanceId,
@@ -302,17 +298,33 @@ export async function createManaged(options = {}) {
       }
 
       host.ctx = ctx;
-      ctx.inject?.(['llm', 'settings'], (modelCtx) => {
-        const service = modelCtx.llm;
-        llm = service;
-        modelCtx.effect(() => {
-          const detach = models.attach(service, modelCtx.settings);
-          return () => {
-            detach();
-            if (llm === service) llm = undefined;
-          };
-        }, 'auriga-dsh: managed model catalog');
-      });
+      ctx.inject?.(
+        ['llm', 'settings', 'configEditor', 'credentials'],
+        (modelCtx) => {
+          modelCtx.effect(() => {
+            const models = createManagedModelStatus({
+              tenantId,
+              ownerId,
+              instanceId,
+            });
+            const detach = models.attach(
+              modelCtx.llm,
+              modelCtx.settings,
+              modelCtx.configEditor,
+              modelCtx.credentials,
+            );
+            const release = () => {
+              detach();
+              models.close();
+            };
+            detachModels = release;
+            return () => {
+              release();
+              if (detachModels === release) detachModels = undefined;
+            };
+          }, 'auriga-dsh: managed model catalog');
+        },
+      );
       disposeHostAuth = installHostAuthentication(ctx.connection, door, {
         browserOrigin,
       });
@@ -407,7 +419,6 @@ export async function createManaged(options = {}) {
                   req.method === 'GET' &&
                   path === '/auriga/local-login/status'
                 ) {
-                  await models.refresh(llm);
                   res.writeHead(200, {
                     'content-type': 'application/json',
                     'cache-control': 'no-store',
@@ -422,7 +433,6 @@ export async function createManaged(options = {}) {
                       },
                       connected: network?.status?.connected === true,
                       account: network?.account ?? { subject: ownerId },
-                      models: models.status,
                       capabilities: {
                         consent: network?.consentAvailable === true,
                       },
@@ -503,7 +513,7 @@ export async function createManaged(options = {}) {
       if (options.startHeartbeat !== false) heartbeat.start();
 
       return () => {
-        models.close();
+        detachModels?.();
         void network?.close();
         heartbeat.stop();
         disposeActivity?.();
@@ -527,7 +537,7 @@ export async function createManaged(options = {}) {
     close() {
       disposeSettingsOwnership?.();
       disposeSession?.();
-      models.close();
+      detachModels?.();
       void network?.close();
       heartbeat.stop();
       disposeActivity?.();
