@@ -1,6 +1,7 @@
 package bifrostbackend
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -31,14 +32,14 @@ func TestRunnerUsesBifrostFallbackAndStreaming(t *testing.T) {
 		}
 		if req.Stream {
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = w.Write([]byte("data: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"你好\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\ndata: [DONE]\n\n"))
+			_, _ = w.Write([]byte("data: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"mention upstream-model unchanged\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"upstream-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\ndata: [DONE]\n\n"))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"reply","object":"chat.completion","created":1,"model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":"你好"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"id":"reply","object":"chat.completion","created":1,"model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":"mention upstream-model unchanged"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
 	}))
 	t.Cleanup(second.Close)
-	routes := []Route{{ID: "first", Kind: "openai", URL: first.URL, Secret: "fixture-provider", Model: "upstream-model", Weight: 1}, {ID: "second", Kind: "openai", URL: second.URL, Secret: "fixture-provider", Model: "upstream-model", Weight: 0}}
+	routes := []Route{{ID: "first", Kind: "openai", URL: first.URL, Secret: "fixture-provider", Model: "primary-private-model", Weight: 1}, {ID: "second", Kind: "openai", URL: second.URL, Secret: "fixture-provider", Model: "upstream-model", Weight: 0}}
 	for _, stream := range []bool{false, true} {
 		body, _ := json.Marshal(map[string]any{"model": "pool", "messages": []map[string]string{{"role": "user", "content": "你好"}}, "stream": stream, "max_tokens": 16, "stream_options": map[string]bool{"include_usage": true}})
 		chunks := 0
@@ -47,6 +48,13 @@ func TestRunnerUsesBifrostFallbackAndStreaming(t *testing.T) {
 			var fields map[string]json.RawMessage
 			if json.Unmarshal(raw, &fields) != nil || fields["extra_fields"] != nil {
 				t.Error("private fields leaked")
+			}
+			if (!stream || chunks == 1) && !bytes.Contains(raw, []byte("mention upstream-model unchanged")) {
+				t.Error("renaming the model must not rewrite message content")
+			}
+			var model string
+			if json.Unmarshal(fields["model"], &model) != nil || model != "pool" {
+				t.Error("reply must retain the public alias on every JSON/SSE chunk")
 			}
 			return nil
 		})

@@ -22,15 +22,34 @@ func TestManagedModelMaterialRejectsForeignBindingsAndUnsafeConfiguration(t *tes
 		{"url-userinfo", func(m map[string]any) { m["baseUrl"] = "https://user:password@example.com/ai/v1" }},
 		{"url-query", func(m map[string]any) { m["baseUrl"] = "https://example.com/ai/v1?key=x" }},
 		{"url-path", func(m map[string]any) { m["baseUrl"] = "https://example.com/admin" }},
+		{"legacy-id-only", func(m map[string]any) { m["models"] = []any{map[string]any{"id": "a"}} }},
+		{"zero-limit", func(m map[string]any) {
+			m["models"] = []any{map[string]any{"id": "a", "contextWindow": 32768, "maxOutputTokens": 0}}
+		}},
+		{"inconsistent-limit", func(m map[string]any) {
+			m["models"] = []any{map[string]any{"id": "a", "contextWindow": 4096, "maxOutputTokens": 4096}}
+		}},
+		{"oversized-limit", func(m map[string]any) {
+			m["models"] = []any{map[string]any{"id": "a", "contextWindow": 1048577, "maxOutputTokens": 4096}}
+		}},
+		{"fractional-limit", func(m map[string]any) {
+			m["models"] = []any{map[string]any{"id": "a", "contextWindow": 32768, "maxOutputTokens": 1.5}}
+		}},
 		{"empty-pool", func(m map[string]any) { m["models"] = []any{} }},
-		{"duplicate-model", func(m map[string]any) { m["models"] = []any{map[string]any{"id": "a"}, map[string]any{"id": "a"}} }},
-		{"executable-object", func(m map[string]any) { m["models"] = []any{map[string]any{"id": "a", "__jsExpr": "process.exit()"}} }},
-		{"control-character", func(m map[string]any) { m["models"] = []any{map[string]any{"id": "a\nb"}} }},
+		{"duplicate-model", func(m map[string]any) {
+			m["models"] = []any{map[string]any{"id": "a", "contextWindow": 32768, "maxOutputTokens": 4096}, map[string]any{"id": "a", "contextWindow": 32768, "maxOutputTokens": 4096}}
+		}},
+		{"executable-object", func(m map[string]any) {
+			m["models"] = []any{map[string]any{"id": "a", "contextWindow": 32768, "maxOutputTokens": 4096, "__jsExpr": "process.exit()"}}
+		}},
+		{"control-character", func(m map[string]any) {
+			m["models"] = []any{map[string]any{"id": "a\nb", "contextWindow": 32768, "maxOutputTokens": 4096}}
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := map[string]any{"tenantId": "tenant", "ownerId": "owner", "instanceId": "instance", "credentialVersion": 1,
-				"credential": "amc.tenant.owner.instance.01900000-0000-7000-8000-000000000003." + strings.Repeat("a", 43), "baseUrl": "https://example.com/ai/v1", "models": []any{map[string]any{"id": "a"}}}
+				"credential": "amc.tenant.owner.instance.01900000-0000-7000-8000-000000000003." + strings.Repeat("a", 43), "baseUrl": "https://example.com/ai/v1", "models": []any{map[string]any{"id": "a", "contextWindow": 32768, "maxOutputTokens": 4096}}}
 			raw, err := json.Marshal(m)
 			if err != nil {
 				t.Fatal(err)

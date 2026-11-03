@@ -158,7 +158,7 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				reject(w, invalid)
 				return
 			}
-			data := []map[string]string{}
+			data := []map[string]any{}
 			page := listPage{Limit: 200}
 			for {
 				pools, e := b.ListPools(r.Context(), tenant, page)
@@ -168,7 +168,7 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				for _, p := range pools.Items {
 					if p.Enabled && (slices.Contains(k.Models, "*") || slices.Contains(k.Models, p.Id)) {
-						data = append(data, map[string]string{"id": p.Id, "object": "model", "owned_by": "auriga"})
+						data = append(data, publicModel(p))
 					}
 					page.After = p.Id
 				}
@@ -405,20 +405,10 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		reject(w, e)
 		return
 	}
-	maxTokens := pool.MaxOutputTokens
-	for _, name := range []string{"max_tokens", "max_completion_tokens"} {
-		if v := fields[name]; v != nil {
-			var n int64
-			if json.Unmarshal(v, &n) != nil || n < 1 || n > pool.MaxOutputTokens {
-				reject(w, invalid)
-				return
-			}
-			if maxTokens != pool.MaxOutputTokens && maxTokens != n {
-				reject(w, invalid)
-				return
-			}
-			maxTokens = n
-		}
+	maxTokens, field, limitErr := outputTokenLimit(fields, pool.MaxOutputTokens)
+	if limitErr != nil {
+		rejectOutputTokenLimit(w, field, pool.MaxOutputTokens)
+		return
 	}
 	if v := fields["n"]; v != nil {
 		var n int

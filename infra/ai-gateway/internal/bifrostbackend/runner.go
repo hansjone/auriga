@@ -103,6 +103,7 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 	if json.Unmarshal(raw, &input) != nil {
 		return Result{NoCharge: true}, errors.New("invalid chat request")
 	}
+	publicModel := input.Model
 	input.Model = ordered[0].Model
 	req := input.ToBifrostChatRequest(bc)
 	req.Provider = schemas.ModelProvider(ordered[0].ID)
@@ -127,6 +128,9 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 			return errors.New("invalid provider response")
 		}
 		delete(fields, "extra_fields")
+		// The route's real model belongs to the provider hop. Both ordinary and
+		// streaming replies retain the model ID the caller is authorized to use.
+		fields["model"], _ = json.Marshal(publicModel)
 		b, e = json.Marshal(fields)
 		if e != nil {
 			return e

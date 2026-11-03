@@ -22,9 +22,19 @@ export interface ManagedModelCredential {
   models: [
     {
       id: string;
+      contextWindow: number;
+      /**
+       * Must be smaller than contextWindow; verified by the producer and renderer.
+       */
+      maxOutputTokens: number;
     },
     ...{
       id: string;
+      contextWindow: number;
+      /**
+       * Must be smaller than contextWindow; verified by the producer and renderer.
+       */
+      maxOutputTokens: number;
     }[],
   ];
 }
