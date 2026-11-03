@@ -240,6 +240,8 @@ it('fetches searchable upstream IDs, retains manual input and saves a public ali
   expect(w.get('[data-testid="model-mapping"]').text()).toBe(
     'manually-entered-real → deepseek-public',
   );
+  await w.get('[name="inputPrice"]').setValue('1000000');
+  await w.get('[name="outputPrice"]').setValue('1000000');
   await w.get('[data-testid="pool-form"]').trigger('submit');
   await w.get('[data-testid="confirm-action"]').trigger('click');
   await flushPromises();
@@ -297,5 +299,138 @@ it('retains manual input on catalog failure and discards late results after clos
   expect(
     (w.get('[name="routeModel0"]').element as HTMLInputElement).value,
   ).toBe('manual-still-works');
+  w.unmount();
+});
+
+const publicPool = (id: string, enabled = true) => ({
+  id,
+  enabled,
+  contextWindow: 64000,
+  maxOutputTokens: 8192,
+  routes: [{ providerId: p.id, model: 'real', weight: 1 }],
+  price: {
+    currency: 'USD' as const,
+    inputMicrosPerMillionTokens: 1,
+    outputMicrosPerMillionTokens: 1,
+    version: 'v',
+    effectiveAt: '2026-01-01T00:00:00Z',
+  },
+});
+it('selects external key models with visible checkboxes and keeps current selection distinct from future wildcard access', async () => {
+  vi.mocked(relayApi.pools).mockResolvedValue({
+    items: [
+      publicPool('alpha'),
+      publicPool('beta'),
+      publicPool('disabled', false),
+    ],
+  });
+  vi.mocked(relayApi.createKey).mockResolvedValue({
+    secret: 'test-fixture-key',
+    key: {
+      id: 'key',
+      name: 'test',
+      source: 'external',
+      accountId: '',
+      active: true,
+      models: ['alpha', 'beta'],
+      monthlyBudgetMicros: 100,
+      requestsPerMinute: 60,
+    },
+  });
+  const w = mount(KeysView, { global });
+  await flushPromises();
+  await w.get('[data-testid="new-key"]').trigger('click');
+  expect(w.text()).toContain('预算为0，将禁止调用');
+  await w.get('[name="keyModelSearch"]').setValue('alp');
+  await w.get('[data-testid="key-select-visible"]').trigger('click');
+  await w.get('[name="keyModelSearch"]').setValue('beta');
+  await w.get('[name="keyModels"][value="beta"]').setValue(true);
+  expect(w.find('input[value="disabled"]').exists()).toBe(false);
+  await w.get('[name="keyName"]').setValue('test');
+  await w.get('[name="keyBudget"]').setValue('100');
+  await w.get('[data-testid="key-form"]').trigger('submit');
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.createKey).toHaveBeenCalledWith(
+    expect.objectContaining({ models: ['alpha', 'beta'] }),
+    expect.any(String),
+    expect.any(AbortSignal),
+  );
+  w.unmount();
+});
+it('preserves historical key grants until explicitly removed and clears wildcard when switching to explicit model selection', async () => {
+  const key = {
+    id: 'key',
+    name: 'test',
+    source: 'external' as const,
+    accountId: '',
+    active: true,
+    models: ['old-model'],
+    monthlyBudgetMicros: 100,
+    requestsPerMinute: 60,
+  };
+  vi.mocked(relayApi.keys).mockResolvedValue({ items: [key] });
+  vi.mocked(relayApi.pools).mockResolvedValue({ items: [publicPool('alpha')] });
+  vi.mocked(relayApi.updateKey).mockResolvedValue(key);
+  const w = mount(KeysView, { global });
+  await flushPromises();
+  await w.get('[data-testid="edit-key"]').trigger('click');
+  expect(w.text()).toContain('历史授权');
+  await w.get('[data-testid="key-form"]').trigger('submit');
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.updateKey).toHaveBeenCalledWith(
+    'key',
+    expect.objectContaining({ models: ['old-model'] }),
+    expect.any(AbortSignal),
+  );
+  w.unmount();
+  vi.mocked(relayApi.keys).mockResolvedValue({
+    items: [{ ...key, models: ['*'] }],
+  });
+  const wildcard = mount(KeysView, { global });
+  await flushPromises();
+  await wildcard.get('[data-testid="edit-key"]').trigger('click');
+  await wildcard.get('[name="allModels"]').setValue(false);
+  await wildcard.get('[name="keyModels"][value="alpha"]').setValue(true);
+  await wildcard.get('[data-testid="key-form"]').trigger('submit');
+  await wildcard.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(vi.mocked(relayApi.updateKey).mock.calls.at(-1)?.[1].models).toEqual([
+    'alpha',
+  ]);
+  wildcard.unmount();
+});
+it('applies known upstream limits explicitly, retains smaller manual choices, and rejects zero prices before confirmation', async () => {
+  vi.mocked(relayApi.providerModels).mockResolvedValue({
+    items: [{ id: 'real', contextWindow: 128000, maxOutputTokens: 8192 }],
+  });
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="add-pool"]').trigger('click');
+  await w
+    .findAll('button')
+    .find((v) => v.text() === '添加池路由')!
+    .trigger('click');
+  await w.get('[name="routeProvider0"]').setValue(p.id);
+  await w.get('[name="routeModel0"]').setValue('real');
+  await w.get('[data-testid="fetch-provider-models-0"]').trigger('click');
+  await flushPromises();
+  await w.get('[data-testid="apply-capabilities"]').trigger('click');
+  expect(
+    (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
+  ).toBe('128000');
+  await w.get('[name="contextWindow"]').setValue('16000');
+  await w.get('[name="maxOutputTokens"]').setValue('1024');
+  await w.get('[data-testid="apply-capabilities"]').trigger('click');
+  expect(
+    (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
+  ).toBe('16000');
+  expect(
+    (w.get('[name="maxOutputTokens"]').element as HTMLInputElement).value,
+  ).toBe('1024');
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
+  expect(relayApi.savePool).not.toHaveBeenCalled();
   w.unmount();
 });

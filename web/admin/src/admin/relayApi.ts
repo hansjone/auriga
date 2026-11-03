@@ -82,6 +82,11 @@ export function createRelayApi(client: ApiClient) {
       ),
     savePool: (input: RelayPool, key: string, signal?: AbortSignal) =>
       post<RelayPool>('/pools', input, key, signal),
+    createPool: (input: RelayPool, key: string, signal?: AbortSignal) =>
+      client.post<RelayPool>(base + '/pools', input, {
+        signal,
+        headers: { 'Idempotency-Key': key, 'If-None-Match': '*' },
+      }),
     createKey: (input: RelayKeyInput, key: string, signal?: AbortSignal) =>
       post<S['RelayKeyIssued']>('/virtual-keys', input, key, signal),
     updateKey: (keyId: string, input: RelayKeyInput, signal?: AbortSignal) =>

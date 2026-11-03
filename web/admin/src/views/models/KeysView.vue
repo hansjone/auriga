@@ -1,5 +1,12 @@
 ﻿<script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 import {
   relayApi,
   type RelayKey,
@@ -10,6 +17,7 @@ import ActionConfirm from '../../admin/ActionConfirm.vue';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
 import './modelUsage.css';
+import './relayManagement.css';
 const requestKey = ref('');
 const { t } = useRelayI18n();
 const ui = useRelayUi(t);
@@ -28,7 +36,37 @@ const draft = ref<RelayKeyInput>({
     models: [],
   }),
   allModels = ref(false);
-const issued = ref('');
+const issued = ref(''),
+  modelSearch = ref('');
+const publishedPools = computed(() => pools.value.filter((p) => p.enabled));
+const visibleModels = computed(() =>
+  publishedPools.value.filter((p) =>
+    p.id.toLowerCase().includes(modelSearch.value.toLowerCase()),
+  ),
+);
+const historicalModels = computed(() =>
+  draft.value.models.filter(
+    (id) => id !== '*' && !publishedPools.value.some((p) => p.id === id),
+  ),
+);
+const selectedModels = computed(() =>
+  draft.value.models.filter((id) => id !== '*'),
+);
+function selectVisibleModels() {
+  draft.value.models = [
+    ...new Set([
+      ...selectedModels.value,
+      ...visibleModels.value.map((p) => p.id),
+    ]),
+  ];
+}
+function removeModel(id: string) {
+  draft.value.models = draft.value.models.filter((v) => v !== id);
+}
+watch(allModels, (allowed) => {
+  if (!allowed)
+    draft.value.models = draft.value.models.filter((v) => v !== '*');
+});
 const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
 function hide() {
   issued.value = '';
@@ -67,6 +105,7 @@ async function load(preserve = false) {
 }
 onMounted(() => load());
 function edit(row?: RelayKey) {
+  modelSearch.value = '';
   requestKey.value = globalThis.crypto.randomUUID();
   hide();
   selected.value = row;
@@ -189,7 +228,7 @@ async function confirm() {
 }
 </script>
 <template>
-  <section class="model-usage">
+  <section class="model-usage relay-keys">
     <header>
       <h1>{{ t('keys') }}</h1>
       <button :disabled="loading || busy || !!pending" @click="load()">
@@ -268,6 +307,7 @@ async function confirm() {
         </tbody>
       </table>
     </div>
+    <p>{{ t('externalKeyNote') }}</p>
     <form v-if="editing" data-testid="key-form" @submit.prevent="ask">
       <fieldset :disabled="busy || !!pending">
         <legend>{{ t(selected ? 'edit' : 'createKey') }}</legend>
@@ -294,6 +334,13 @@ async function confirm() {
             required
         /></label>
         <p>{{ t('budgetNote') }}</p>
+        <p
+          v-if="draft.monthlyBudgetMicros === 0"
+          class="relay-hint relay-wide"
+          role="note"
+        >
+          {{ t('keyZeroBudget') }}
+        </p>
         <label
           >{{ t('rpm')
           }}<input
@@ -323,18 +370,84 @@ async function confirm() {
             max="1073741824"
             required
         /></label>
-        <label
-          ><input v-model="allModels" name="allModels" type="checkbox" />{{
-            t('allModels')
-          }}</label
-        ><label v-if="!allModels"
-          >{{ t('models')
-          }}<select v-model="draft.models" name="keyModels" multiple required>
-            <option v-for="pool in pools" :key="pool.id" :value="pool.id">
-              {{ pool.id }}
-            </option>
-          </select></label
-        ><button type="submit">{{ t('save') }}</button
+        <div class="relay-model-picker relay-wide">
+          <label class="relay-check"
+            ><input v-model="allModels" name="allModels" type="checkbox" />{{
+              t('keyAllFuture')
+            }}</label
+          >
+          <p>{{ t('keyAllFutureNote') }}</p>
+          <template v-if="!allModels">
+            <div class="relay-toolbar">
+              <label class="relay-search"
+                >{{ t('keySearch')
+                }}<input
+                  v-model="modelSearch"
+                  name="keyModelSearch"
+                  type="search" /></label
+              ><button
+                type="button"
+                data-testid="key-select-visible"
+                @click="selectVisibleModels"
+              >
+                {{ t('keySelectVisible') }}</button
+              ><button
+                type="button"
+                data-testid="key-clear-models"
+                @click="draft.models = []"
+              >
+                {{ t('keyClear') }}
+              </button>
+            </div>
+            <div
+              class="relay-model-chips"
+              :aria-label="t('keySelection', { count: selectedModels.length })"
+            >
+              <span>{{
+                t('keySelection', { count: selectedModels.length })
+              }}</span
+              ><button
+                v-for="id in selectedModels"
+                :key="id"
+                type="button"
+                :aria-label="t('remove') + ' ' + id"
+                @click="removeModel(id)"
+              >
+                {{ id }} ×
+              </button>
+            </div>
+            <div
+              class="relay-model-options"
+              role="group"
+              :aria-label="t('models')"
+            >
+              <label
+                v-for="pool in visibleModels"
+                :key="pool.id"
+                class="relay-check"
+                ><input
+                  v-model="draft.models"
+                  name="keyModels"
+                  type="checkbox"
+                  :value="pool.id"
+                />{{ pool.id }}</label
+              >
+              <p v-if="!visibleModels.length">{{ t('empty') }}</p>
+            </div>
+            <div v-if="historicalModels.length" class="relay-hint">
+              <p>{{ t('keyHistorical') }}</p>
+              <label
+                v-for="id in historicalModels"
+                :key="id"
+                class="relay-check"
+                ><input v-model="draft.models" type="checkbox" :value="id" />{{
+                  id
+                }}</label
+              >
+            </div>
+          </template>
+        </div>
+        <button type="submit">{{ t('save') }}</button
         ><button type="button" @click="editing = false">
           {{ t('close') }}
         </button>

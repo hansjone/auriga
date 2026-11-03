@@ -1,5 +1,72 @@
 ﻿import { useI18n } from 'vue-i18n';
 const zh = {
+  importExistingAlias: '同名模型已发布；可选中后在预览修改公开别名',
+  importTitle: '批量导入模型',
+  importIntro:
+    '选择上游模型，分别发布为独立公开模型。多供应商故障切换仍在单个模型池中配置。',
+  importCatalogOnly:
+    '模型目录不等于聊天可用性验证；当前中转支持文本与工具消息，导入后请实际测试。',
+  importSearch: '搜索上游模型',
+  importSelectVisible: '全选搜索结果',
+  importClearVisible: '取消搜索结果',
+  importSelected: '已选 {count} 个',
+  importPreview: '预览 {count} 个模型',
+  importBack: '返回选择',
+  importSuggest: '为缺失参数填入建议值',
+  importSuggestNote:
+    '建议值为上下文 32768 / 输出 4096，并非供应商承诺。请核实后确认，也可逐项修改。',
+  importUnknown: '部分参数未知',
+  importFromProvider: '上游目录提供',
+  importInputOnly: '仅输入限制，保守用作上下文；不是总容量',
+  importPlatformLimit: '已受平台上限限制',
+  importExists: '公开 ID 已存在，跳过以保护原配置',
+  importDuplicate: '本批公开 ID 重复，请修改别名',
+  importInvalidId:
+    'ID 需以字母或数字开头，仅含字母、数字、点、横线和下划线，最多128字符',
+  importMissingLimits: '请填写缺失参数或明确采用建议值',
+  importInvalidLimits: '上下文须为 2–1048576，输出须为 1–32768 且小于上下文',
+  importWriteUnknown: '未确认保存结果；重试将先读回核对，不会覆盖已有模型',
+  importStatus_pending: '待导入',
+  importStatus_saving: '保存中',
+  importStatus_saved: '已保存',
+  importStatus_failed: '待重试',
+  importStatus_conflict: '已跳过',
+  importPriceNote:
+    '本批共用对外计价，须为正整数微 USD；1000000 微 USD = 1 USD / 百万 Token。上游采购价未知，不能从目录推断。',
+  importConfirm: '确认发布剩余 {count} 个模型；已核实参数与对外计价。',
+  importRun: '确认并导入',
+  importRetry: '重试未完成项',
+  importStop: '停止后续导入',
+  importProgress: '已保存 {saved} / {total}',
+  importSavedNote:
+    '外部新请求采用已保存模型。运行中的 DSH 使用配置快照，请按正常流程重启实例后使用新模型。',
+  applyCapabilities: '从上游应用能力',
+  capabilityNote:
+    '只在所有路由参数已知时应用最小值，保留已设的更小限制；刷新目录不会自动修改配置。',
+  capabilityUnknown: '部分路由参数未知，请先获取各供应商目录或手动确认。',
+  capabilityApplied: '已按全部路由的已知能力收紧参数，保留较小手工限制。',
+  publicSearch: '搜索公开 ID、供应商或真实模型',
+  capabilityColumn: '上下文 / 最大输出',
+  providersIntro:
+    '供应商保存接入地址和密钥；公开模型绑定真实模型与对外别名，供成员及外部 Key 使用。',
+  providerSection: '供应商',
+  importModels: '导入模型',
+  modelEmpty: '还没有公开模型。可从供应商批量导入，也可手动创建模型池。',
+  priceNote:
+    '对外计价必须大于0；1000000微 USD = 1 USD / 百万 Token，上游采购价不会自动继承。',
+  advanced: '高级配置',
+  keySearch: '搜索已发布的公开模型',
+  keySelectVisible: '全选当前结果',
+  keyClear: '清除选择',
+  keySelection: '已选 {count} 个公开模型',
+  keyAllFuture: '允许所有模型（含未来新增）',
+  keyAllFutureNote:
+    '此授权范围会随新模型扩展；“全选当前结果”只授权当前明确选中的 ID。',
+  keyHistorical: '历史授权（当前未发布，保留原 ID；可显式取消）',
+  keyZeroBudget: '当前预算为0，将禁止调用；请填写明确的可用预算。',
+  externalKeyNote:
+    '这里管理对外调用 Key；供应商密钥在“模型与供应商”中单独配置。',
+
   relay: '中转站',
   fetchModels: '获取供应商模型',
   catalogHint: '获取后可在输入框搜索并选择，也可手动填写上游模型 ID。',
@@ -106,6 +173,81 @@ const zh = {
     '填写 HTTPS 根地址，不附加 /v1；修改地址或种类会清除原密钥，须重新录入。',
 };
 const en: Record<keyof typeof zh, string> = {
+  importExistingAlias:
+    'A public ID already exists. Select it and change the alias in preview.',
+  importTitle: 'Import models in bulk',
+  importIntro:
+    'Publish each selected upstream model as its own public model. Configure provider fallback within a single pool.',
+  importCatalogOnly:
+    'A catalog entry is not a successful chat test. This relay supports text and tool messages; test models after import.',
+  importSearch: 'Search upstream models',
+  importSelectVisible: 'Select search results',
+  importClearVisible: 'Clear search results',
+  importSelected: '{count} selected',
+  importPreview: 'Preview {count} models',
+  importBack: 'Back to selection',
+  importSuggest: 'Fill missing limits with suggestions',
+  importSuggestNote:
+    'Suggested context 32768 / output 4096 are not provider guarantees. Verify before confirming, or edit each row.',
+  importUnknown: 'Some limits unknown',
+  importFromProvider: 'From provider catalog',
+  importInputOnly: 'Input limit used conservatively; not total context',
+  importPlatformLimit: 'Limited by platform ceilings',
+  importExists: 'Public ID exists; skipped to protect its configuration',
+  importDuplicate: 'Duplicate public ID in this batch; change the alias',
+  importInvalidId:
+    'Use 1–128 letters, digits, dots, dashes or underscores, starting with a letter or digit',
+  importMissingLimits: 'Enter missing limits or explicitly apply suggestions',
+  importInvalidLimits:
+    'Context must be 2–1048576; output 1–32768 and below context',
+  importWriteUnknown:
+    'Save result is unconfirmed. Retry checks persisted configuration before writing.',
+  importStatus_pending: 'Pending',
+  importStatus_saving: 'Saving',
+  importStatus_saved: 'Saved',
+  importStatus_failed: 'Retry needed',
+  importStatus_conflict: 'Skipped',
+  importPriceNote:
+    'Shared public pricing must be positive integer USD micros. 1000000 micros = USD 1 per million tokens. Upstream cost is unknown and is not inferred from the catalog.',
+  importConfirm:
+    'Publish the remaining {count} models. Limits and public prices have been verified.',
+  importRun: 'Confirm and import',
+  importRetry: 'Retry incomplete models',
+  importStop: 'Stop subsequent imports',
+  importProgress: 'Saved {saved} / {total}',
+  importSavedNote:
+    'External requests use saved models. Running DSH instances use a configuration snapshot; restart normally to use new models.',
+  applyCapabilities: 'Apply upstream limits',
+  capabilityNote:
+    'Apply the minimum only when every route has known limits. Smaller manual limits are retained. Catalog refresh never edits saved configuration.',
+  capabilityUnknown:
+    'Some route limits are unknown. Fetch each catalog or confirm limits manually.',
+  capabilityApplied:
+    'Applied known limits across all routes, retaining smaller manual limits.',
+  publicSearch: 'Search public ID, provider or upstream model',
+  capabilityColumn: 'Context / maximum output',
+  providersIntro:
+    'Providers store connection settings and credentials. Public models bind upstream models to aliases used by members and external keys.',
+  providerSection: 'Providers',
+  importModels: 'Import models',
+  modelEmpty:
+    'No public models yet. Import from a provider or create a pool manually.',
+  priceNote:
+    'Public prices must be positive. 1000000 USD micros = USD 1 per million tokens. Upstream purchase prices are not inherited.',
+  advanced: 'Advanced settings',
+  keySearch: 'Search published public models',
+  keySelectVisible: 'Select current results',
+  keyClear: 'Clear selection',
+  keySelection: '{count} public models selected',
+  keyAllFuture: 'Allow all models, including future additions',
+  keyAllFutureNote:
+    'This expands as models are added. Selecting current results grants only the explicitly selected IDs.',
+  keyHistorical:
+    'Historical grants (not currently published; preserved unless explicitly removed)',
+  keyZeroBudget: 'A zero budget blocks calls. Set an explicit usable budget.',
+  externalKeyNote:
+    'These keys authorize external callers. Provider credentials are managed separately under Models and providers.',
+
   relay: 'Relay',
   fetchModels: 'Fetch provider models',
   catalogHint:
