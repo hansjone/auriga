@@ -392,7 +392,7 @@ window.__ModuleLoader__.load({
       // cycle and must survive document visibility and browser wake events.
       let request, retryTimer, cycleTimer, deadline, lossStartedAt;
       let availability = false,
-        canAwaitEdge = true;
+        qualifiedShortReads = 0;
       let nextProbeAt = 0;
       const now = () => window.performance.now();
       const trace = (event, reason, status) => {
@@ -522,7 +522,11 @@ window.__ModuleLoader__.load({
                 },
               );
               status = response.status;
-              if ([502, 503, 504].includes(response.status)) return 'retry';
+              if (
+                [502, 503].includes(response.status) ||
+                (!availability && response.status === 504)
+              )
+                return 'retry';
               if (
                 response.status !== 401 ||
                 response.headers.get('X-Auriga-Instance-Entry') !==
@@ -541,8 +545,11 @@ window.__ModuleLoader__.load({
             })(),
             cancelled,
           ]);
-        } catch {
-          outcome = 'retry';
+        } catch (error) {
+          outcome =
+            controller.signal.aborted || error?.name === 'AbortError'
+              ? 'stop'
+              : 'retry';
         } finally {
           controller.signal.removeEventListener('abort', abort);
           if (request === controller) request = undefined;
@@ -557,11 +564,16 @@ window.__ModuleLoader__.load({
           // That page owns the tab marker and trusted cross-origin portal hop.
           window.location.replace(base.href);
         } else if (outcome === 'retry') {
-          canAwaitEdge &&= status === undefined || [502, 503].includes(status);
+          if (
+            !availability &&
+            !controller.signal.aborted &&
+            (status === undefined || [502, 503].includes(status))
+          )
+            qualifiedShortReads++;
           // A missing edge is not an authentication verdict. Only three
           // completed availability failures admit the two low-frequency reads.
           // Their absolute cap remains anchored to the original connection loss.
-          if (!availability && attempts === 3 && canAwaitEdge) {
+          if (!availability && attempts === 3 && qualifiedShortReads === 3) {
             availability = true;
             deadline = lossStartedAt + 30000;
             clearTimeout(cycleTimer);
@@ -597,7 +609,7 @@ window.__ModuleLoader__.load({
           deadline = undefined;
           lossStartedAt = undefined;
           availability = false;
-          canAwaitEdge = true;
+          qualifiedShortReads = 0;
           nextProbeAt = 0;
         }
         if (connection.state.getSnapshot() === 'connected' && next) {
@@ -607,7 +619,7 @@ window.__ModuleLoader__.load({
           deadline = undefined;
           lossStartedAt = undefined;
           availability = false;
-          canAwaitEdge = true;
+          qualifiedShortReads = 0;
           nextProbeAt = 0;
           try {
             window.sessionStorage.removeItem(key);
