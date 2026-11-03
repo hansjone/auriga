@@ -30,6 +30,7 @@ func (r *Reconciler) Command(ctx context.Context, command *nodev1.Command) *node
 		r.mu.Unlock()
 		return commandFailure(command, "common.unavailable", true)
 	}
+	r.cancelHealthLocked(command.InstanceId)
 	ch, ok := r.workers[command.InstanceId]
 	if !ok {
 		ch = make(chan workItem, 8)

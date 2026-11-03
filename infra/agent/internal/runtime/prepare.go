@@ -445,6 +445,12 @@ func (p *Preparing) Remove(ctx context.Context, id string) error {
 func (p *Preparing) Inspect(ctx context.Context, id string) (Status, error) {
 	return p.Inner.Inspect(ctx, id)
 }
+func (p *Preparing) CheckHealth(ctx context.Context, id string) (Status, error) {
+	if checker, ok := p.Inner.(HealthChecker); ok {
+		return checker.CheckHealth(ctx, id)
+	}
+	return p.Inner.Inspect(ctx, id)
+}
 func (p *Preparing) Stats(ctx context.Context, id string) (Usage, error) {
 	return p.Inner.Stats(ctx, id)
 }

@@ -117,51 +117,15 @@ func (d *Docker) edgeHasAliases(insp map[string]any, n *engineNetwork) bool {
 }
 
 func (d *Docker) ensureEdgeNetwork(ctx context.Context, id string) error {
-	n, err := d.ownedNetwork(ctx, id)
-	if err != nil {
-		return err
-	}
-	if n == nil {
-		return fmt.Errorf("docker: instance network disappeared")
-	}
-	edgeID, insp, err := d.trustedEdge(ctx, true)
-	if err != nil {
-		return err
-	}
-	// Only the matching managed instance and the trusted edge may share this
-	// network. Never attach the edge to a name-collision or contaminated network.
-	instanceRef := containerName(id)
 	var record *state.ExecutionRecord
-	if scope, ok := ctx.Value(activationKey{}).(*activationScope); ok && scope.record != nil {
+	if scope, ok := ctx.Value(activationKey{}).(*activationScope); ok {
 		record = scope.record
-		instanceRef = record.ContainerID
 	}
-	instance, err := d.Client.ContainerInspect(ctx, instanceRef)
+	n, edgeID, _, err := d.inspectEdgeNetwork(ctx, id, record)
 	if err != nil {
 		return err
-	}
-	instanceID, _ := instance["Id"].(string)
-	if instance != nil {
-		if record != nil {
-			if _, err := d.verifyContainer(ctx, record); err != nil {
-				return err
-			}
-		}
-		cfg, _ := instance["Config"].(map[string]any)
-		labels, _ := cfg["Labels"].(map[string]any)
-		if instanceID == "" || labels[labelManaged] != "true" || labels[labelInstance] != id {
-			return fmt.Errorf("docker: existing instance container ownership mismatch")
-		}
-	}
-	for member := range n.Containers {
-		if member != edgeID && member != instanceID {
-			return fmt.Errorf("docker: unexpected instance network member")
-		}
 	}
 	if _, exists := n.Containers[edgeID]; exists {
-		if !d.edgeHasAliases(insp, n) {
-			return fmt.Errorf("docker: existing edge endpoint has wrong platform alias")
-		}
 		return nil
 	}
 	_, _, err = d.Client.doJSON(ctx, http.MethodPost, "/networks/"+url.PathEscape(n.ID)+"/connect", map[string]any{
@@ -179,6 +143,56 @@ func (d *Docker) ensureEdgeNetwork(ctx context.Context, id string) error {
 		return fmt.Errorf("docker: edge platform alias was not applied")
 	}
 	return nil
+}
+
+// The same ownership/isolation checks protect both read-only maintenance and
+// coordinated repair. A missing trusted edge is repairable; contamination is not.
+func (d *Docker) inspectEdgeNetwork(ctx context.Context, id string, record *state.ExecutionRecord) (*engineNetwork, string, map[string]any, error) {
+	n, err := d.ownedNetwork(ctx, id)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if n == nil {
+		return nil, "", nil, fmt.Errorf("docker: instance network disappeared")
+	}
+	edgeID, insp, err := d.trustedEdge(ctx, true)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	// Only the matching managed instance and the trusted edge may share this
+	// network. Never attach the edge to a name-collision or contaminated network.
+	instanceRef := containerName(id)
+	if record != nil {
+		instanceRef = record.ContainerID
+	}
+	instance, err := d.Client.ContainerInspect(ctx, instanceRef)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	instanceID, _ := instance["Id"].(string)
+	if record != nil {
+		if _, err := d.verifyContainer(ctx, record); err != nil {
+			return nil, "", nil, err
+		}
+	}
+	if instance != nil {
+		cfg, _ := instance["Config"].(map[string]any)
+		labels, _ := cfg["Labels"].(map[string]any)
+		if instanceID == "" || labels[labelManaged] != "true" || labels[labelInstance] != id {
+			return nil, "", nil, fmt.Errorf("docker: existing instance container ownership mismatch")
+		}
+	}
+	for member := range n.Containers {
+		if member != edgeID && member != instanceID {
+			return nil, "", nil, fmt.Errorf("docker: unexpected instance network member")
+		}
+	}
+	if _, exists := n.Containers[edgeID]; exists {
+		if !d.edgeHasAliases(insp, n) {
+			return nil, "", nil, fmt.Errorf("docker: existing edge endpoint has wrong platform alias")
+		}
+	}
+	return n, edgeID, insp, nil
 }
 
 func (d *Docker) detachEdge(ctx context.Context, n *engineNetwork) error {

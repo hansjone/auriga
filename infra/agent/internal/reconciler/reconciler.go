@@ -33,21 +33,31 @@ type Reconciler struct {
 	PrepareTimeout time.Duration
 	StartTimeout   time.Duration
 
-	mu      sync.Mutex
-	workers map[string]chan workItem
-	sem     chan struct{}
-	maxPrep int
-	wg      sync.WaitGroup
-	closed  bool
+	mu             sync.Mutex
+	workers        map[string]chan workItem
+	sem            chan struct{}
+	maxPrep        int
+	wg             sync.WaitGroup
+	closed         bool
+	healthPending  map[string]bool
+	healthEpochs   map[string]uint64
+	healthCancels  map[string]context.CancelFunc
+	healthRetries  map[string]healthRetry
+	healthContext  context.Context
+	healthInterval time.Duration
+	healthStarted  bool
+	done           chan struct{}
 }
 
 type workItem struct {
-	kind    string // apply | delete | tick
-	spec    *nodev1.InstanceSpec
-	del     *nodev1.DeleteInstance
-	command *nodev1.Command
-	result  chan *nodev1.CommandResult
-	parent  string
+	kind          string // apply | delete | tick
+	spec          *nodev1.InstanceSpec
+	del           *nodev1.DeleteInstance
+	command       *nodev1.Command
+	result        chan *nodev1.CommandResult
+	parent        string
+	healthContext context.Context
+	healthEpoch   uint64
 }
 
 // New creates a reconciler. maxConcurrentPrepare defaults to 4.
@@ -74,13 +84,28 @@ func New(store *state.Store, driver runtime.Driver, log *slog.Logger, maxConcurr
 		maxPrep:        maxConcurrentPrepare,
 		PrepareTimeout: 10 * time.Minute,
 		StartTimeout:   2 * time.Minute,
+		healthPending:  make(map[string]bool),
+		healthEpochs:   make(map[string]uint64),
+		healthCancels:  make(map[string]context.CancelFunc),
+		healthRetries:  make(map[string]healthRetry),
+		healthContext:  context.Background(),
+		healthInterval: 15 * time.Second,
+		done:           make(chan struct{}),
 	}
 }
 
 // Close stops all instance workers.
 func (r *Reconciler) Close() {
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
 	r.closed = true
+	close(r.done)
+	for _, cancel := range r.healthCancels {
+		cancel()
+	}
 	for id, ch := range r.workers {
 		close(ch)
 		delete(r.workers, id)
@@ -104,7 +129,13 @@ func (r *Reconciler) apply(spec *nodev1.InstanceSpec, parent string) error {
 		return fmt.Errorf("missing instance_id")
 	}
 	spec = proto.Clone(spec).(*nodev1.InstanceSpec)
-	if err := r.Store.PutDesiredWithTrace(spec, parent); err != nil {
+	r.mu.Lock()
+	err := r.Store.PutDesiredWithTrace(spec, parent)
+	if err == nil {
+		r.cancelHealthLocked(spec.InstanceId)
+	}
+	r.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	r.enqueue(spec.InstanceId, workItem{kind: "apply", spec: spec, parent: r.Store.StartupParent(spec.InstanceId, spec.Generation)})
@@ -125,6 +156,7 @@ func (r *Reconciler) DeleteInstance(del *nodev1.DeleteInstance) error {
 	if del == nil || del.InstanceId == "" {
 		return fmt.Errorf("missing instance_id")
 	}
+	r.cancelHealth(del.InstanceId)
 	r.enqueue(del.InstanceId, workItem{kind: "delete", del: del})
 	return nil
 }
@@ -193,6 +225,9 @@ func (r *Reconciler) enqueue(id string, item workItem) {
 	if r.closed {
 		return
 	}
+	if item.kind == "apply" || item.kind == "delete" {
+		r.cancelHealthLocked(id)
+	}
 	ch, ok := r.workers[id]
 	if !ok {
 		ch = make(chan workItem, 8)
@@ -228,6 +263,8 @@ func (r *Reconciler) loop(id string, ch chan workItem) {
 		}
 		ctx = telemetry.Start(ctx, item.parent, id, generation, r.Log)
 		switch item.kind {
+		case "health":
+			r.handleHealth(id, item.healthContext, item.healthEpoch)
 		case "restart":
 			item.result <- r.handleRestart(ctx, item.command)
 		case "delete":
