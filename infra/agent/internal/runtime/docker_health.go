@@ -72,18 +72,22 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 	if current.ContainerID != record.ContainerID || current.Generation != record.Generation {
 		return st, fmt.Errorf("docker: execution changed during health check")
 	}
+	var after map[string]any
 	if d.EdgeContainer != "" {
-		n, edgeID, _, networkErr := d.inspectEdgeNetwork(ctx, id, record)
-		if networkErr != nil {
-			return st, networkErr
+		var n *engineNetwork
+		var edgeID string
+		n, edgeID, after, err = d.inspectEdgeNetwork(ctx, id, record)
+		if err != nil {
+			return st, err
 		}
 		if _, connected := n.Containers[edgeID]; !connected {
 			return st, nil
 		}
-	}
-	after, err := d.verifyContainer(ctx, record)
-	if err != nil {
-		return st, err
+	} else {
+		after, err = d.verifyContainer(ctx, record)
+		if err != nil {
+			return st, err
+		}
 	}
 	state, _ := after["State"].(map[string]any)
 	if state["Running"] != true {

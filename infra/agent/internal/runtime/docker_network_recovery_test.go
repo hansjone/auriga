@@ -282,6 +282,186 @@ func TestDockerHealthRejectsUnavailableProcessLifetime(t *testing.T) {
 	}
 }
 
+func newMaintenanceReconciler(t *testing.T, f *edgeRecoveryFixture) (*reconciler.Reconciler, *nodev1.InstanceSpec, chan *nodev1.InstanceStatus) {
+	t.Helper()
+	store := dockerFixture(t, f.driver).store
+	spec := &nodev1.InstanceSpec{InstanceId: "recovery-test", Generation: 7, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING, Dsh: dockerFixture(t, f.driver).dsh}
+	if err := store.PutDesired(spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutActual(state.ActualRecord{Status: &nodev1.InstanceStatus{InstanceId: "recovery-test", ObservedGeneration: 7, Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, Ready: true}}); err != nil {
+		t.Fatal(err)
+	}
+	rec := reconciler.New(store, f.driver, nil, 1)
+	t.Cleanup(rec.Close)
+	statuses := make(chan *nodev1.InstanceStatus, 32)
+	rec.Sink = func(st *nodev1.InstanceStatus) { statuses <- st }
+	return rec, spec, statuses
+}
+
+func TestDockerMaintenanceRejectsControlNetworkLostBeforePublication(t *testing.T) {
+	for _, boundary := range []string{"health", "save"} {
+		t.Run(boundary, func(t *testing.T) {
+			f := newEdgeRecoveryFixture(t, "")
+			if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			rec, _, statuses := newMaintenanceReconciler(t, f)
+			loseEdge := func() { f.mu.Lock(); f.attached = false; f.mu.Unlock() }
+			f.mu.Lock()
+			f.attached = false
+			if boundary == "health" {
+				f.healthHook = loseEdge
+			}
+			f.mu.Unlock()
+			if boundary == "save" {
+				f.driver.Activation.Store = processPublicationStore{ReleaseState: f.driver.Activation.Store, afterSave: loseEdge}
+			}
+			rec.RequestHealth("recovery-test")
+			guard := time.NewTimer(5 * time.Second)
+			defer guard.Stop()
+			for {
+				select {
+				case st := <-statuses:
+					if st.Ready {
+						t.Fatal("automatic recovery emitted READY after losing the trusted edge", st)
+					}
+					if st.Error != nil {
+						if _, err := f.driver.Endpoint("recovery-test"); err == nil || f.starts.Load() != 1 {
+							t.Fatal("lost edge retained endpoint or restarted original process")
+						}
+						return
+					}
+				case <-guard.C:
+					t.Fatal("automatic recovery did not finish final topology verification")
+				}
+			}
+		})
+	}
+}
+
+func TestDockerReadOnlyMaintenanceCancellationDoesNotPoisonQualification(t *testing.T) {
+	for _, operation := range []string{"same-spec", "parent-cancel"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newEdgeRecoveryFixture(t, "")
+			if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			rec, spec, statuses := newMaintenanceReconciler(t, f)
+			record, err := dockerFixture(t, f.driver).store.GetExecution("recovery-test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			rec.StartHealthChecks(ctx, time.Hour)
+			entered := make(chan struct{})
+			var once sync.Once
+			f.mu.Lock()
+			f.healthHook = func() {
+				if f.probes.Load() >= 3 {
+					once.Do(func() { close(entered) })
+				}
+			}
+			f.mu.Unlock()
+			f.unhealthy.Store(true)
+			rec.RequestHealth("recovery-test")
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("read-only maintenance never entered health wait")
+			}
+			if f.connects.Load() != 1 || f.starts.Load() != 1 {
+				t.Fatal("read-only maintenance unexpectedly wrote to Engine")
+			}
+			if operation == "same-spec" {
+				if err := rec.Apply(spec); err != nil {
+					t.Fatal(err)
+				}
+				f.unhealthy.Store(false)
+				guard := time.NewTimer(5 * time.Second)
+				defer guard.Stop()
+			waitReplay:
+				for {
+					select {
+					case st := <-statuses:
+						if st.Ready || st.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
+							break waitReplay
+						}
+					case <-guard.C:
+						t.Fatal("same signed spec replay did not complete")
+					}
+				}
+			} else {
+				cancel()
+				rec.Close()
+			}
+			if err := dockerFixture(t, f.driver).store.CheckReleaseExecution(record.Candidate); err != nil {
+				t.Fatalf("read-only cancellation fabricated unresolved execution: %v (connects=%d starts=%d)", err, f.connects.Load(), f.starts.Load())
+			}
+		})
+	}
+}
+
+func TestDockerQualificationCancellationBeforeExecutionRemainsPrompt(t *testing.T) {
+	for _, operation := range []string{"pre-canceled", "partition-wait"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newEdgeRecoveryFixture(t, "")
+			if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			store := dockerFixture(t, f.driver).store
+			record, err := store.GetExecution("recovery-test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if operation == "partition-wait" {
+				held, release := make(chan struct{}), make(chan struct{})
+				done := make(chan error, 1)
+				go func() {
+					done <- store.WithReleaseActivation(t.Context(), record.Candidate, func(context.Context) error { return nil }, func(context.Context) error {
+						close(held)
+						<-release
+						return nil
+					})
+				}()
+				t.Cleanup(func() {
+					close(release)
+					if err := <-done; err != nil {
+						t.Error(err)
+					}
+				})
+				select {
+				case <-held:
+				case <-time.After(3 * time.Second):
+					t.Fatal("fixture did not hold the release partition")
+				}
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+			defer cancel()
+			if operation == "pre-canceled" {
+				cancel()
+			}
+			var invoked atomic.Bool
+			result := make(chan error, 1)
+			go func() {
+				result <- f.driver.Activation.Recover(ctx, "recovery-test", 7, func(context.Context) error { invoked.Store(true); return nil })
+			}()
+			select {
+			case err := <-result:
+				if err == nil || (!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)) || invoked.Load() {
+					t.Fatalf("canceled qualification ran an execution or lost cancellation: %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("canceled qualification kept waiting for the release lock")
+			}
+			if err := store.CheckReleaseExecution(record.Candidate); err != nil || f.connects.Load() != 1 || f.starts.Load() != 1 {
+				t.Fatalf("canceled preflight wrote or poisoned execution: %v", err)
+			}
+		})
+	}
+}
+
 func TestDockerMaintenanceDetectsEdgeReplacementAndPreservesHealthyBridge(t *testing.T) {
 	f := newEdgeRecoveryFixture(t, "")
 	f.driver.PortalHost = "public.example.com"

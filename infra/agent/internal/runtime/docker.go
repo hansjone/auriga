@@ -430,9 +430,22 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	}
 	// Durable saving may block. Do not publish a proof for a process that was
 	// replaced while that save completed, even inside the same container.
-	published, err := d.verifyContainer(ctx, record)
-	if err != nil {
-		return err
+	var published map[string]any
+	if d.EdgeContainer != "" {
+		var n *engineNetwork
+		var edgeID string
+		n, edgeID, published, err = d.inspectEdgeNetwork(ctx, id, record)
+		if err != nil {
+			return err
+		}
+		if _, connected := n.Containers[edgeID]; !connected {
+			return fmt.Errorf("docker: trusted edge disappeared before endpoint publication")
+		}
+	} else {
+		published, err = d.verifyContainer(ctx, record)
+		if err != nil {
+			return err
+		}
 	}
 	publishedProcess, err := containerProcess(published)
 	if err != nil {
