@@ -3344,6 +3344,31 @@ func (bifrost *Bifrost) dispatchChat(ctx *schemas.BifrostContext, provider schem
 	return chatCompletionResponse, nil
 }
 
+// Responses output indices include reasoning and message items. Compact only
+// tool indices after conversion, with state owned by this one stream attempt.
+func wrapChatToolCallIndices(postHookRunner schemas.PostHookRunner) schemas.PostHookRunner {
+	indices := make(map[uint16]uint16)
+	return func(ctx *schemas.BifrostContext, result *schemas.BifrostResponse, failure *schemas.BifrostError) (*schemas.BifrostResponse, *schemas.BifrostError) {
+		if result != nil && result.ChatResponse != nil {
+			for _, choice := range result.ChatResponse.Choices {
+				if choice.ChatStreamResponseChoice == nil || choice.Delta == nil {
+					continue
+				}
+				for i := range choice.Delta.ToolCalls {
+					call := &choice.Delta.ToolCalls[i]
+					index, exists := indices[call.Index]
+					if !exists {
+						index = uint16(len(indices))
+						indices[call.Index] = index
+					}
+					call.Index = index
+				}
+			}
+		}
+		return postHookRunner(ctx, result, failure)
+	}
+}
+
 func (bifrost *Bifrost) dispatchChatStream(ctx *schemas.BifrostContext, provider schemas.Provider, config *schemas.ProviderConfig, key schemas.Key, chatRequest *schemas.BifrostChatRequest, postHookRunner schemas.PostHookRunner, postHookSpanFinalizer func(context.Context)) (chan *schemas.BifrostStreamChunk, *schemas.BifrostError) {
 	if bifrostError := routeChatReasoningMode(ctx, provider, chatRequest); bifrostError != nil {
 		return nil, bifrostError
@@ -3356,7 +3381,7 @@ func (bifrost *Bifrost) dispatchChatStream(ctx *schemas.BifrostContext, provider
 			if bifrostError != nil {
 				return nil, bifrostError
 			}
-			return provider.ResponsesStream(ctx, wrapConvertedStreamPostHookRunner(postHookRunner, schemas.ResponsesRequest), postHookSpanFinalizer, key, responsesRequest)
+			return provider.ResponsesStream(ctx, wrapConvertedStreamPostHookRunner(wrapChatToolCallIndices(postHookRunner), schemas.ResponsesRequest), postHookSpanFinalizer, key, responsesRequest)
 		}
 	}
 	return provider.ChatCompletionStream(ctx, postHookRunner, postHookSpanFinalizer, key, prepareChatRequest(ctx, config, provider.GetProviderKey(), chatRequest))

@@ -382,6 +382,7 @@ func (cm *ChatMessage) ToResponsesMessages() []ResponsesMessage {
 		}
 	}
 
+	var toolMessages []ResponsesMessage
 	if cm.ChatAssistantMessage != nil && cm.ChatAssistantMessage.ToolCalls != nil && len(cm.ChatAssistantMessage.ToolCalls) > 0 {
 
 		for _, tc := range cm.ChatAssistantMessage.ToolCalls {
@@ -414,9 +415,11 @@ func (cm *ChatMessage) ToResponsesMessages() []ResponsesMessage {
 				},
 			}
 
-			messages = append(messages, rm)
+			toolMessages = append(toolMessages, rm)
 		}
-		return messages
+		if cm.Content == nil || (cm.Content.ContentStr == nil && len(cm.Content.ContentBlocks) == 0) {
+			return append(messages, toolMessages...)
+		}
 	}
 
 	messageType := ResponsesMessageTypeMessage
@@ -615,7 +618,7 @@ func (cm *ChatMessage) ToResponsesMessages() []ResponsesMessage {
 	}
 
 	messages = append(messages, rm)
-	return messages
+	return append(messages, toolMessages...)
 }
 
 func responsesBlocksWithoutToolChanges(blocks []ResponsesMessageContentBlock) []ResponsesMessageContentBlock {
@@ -1435,19 +1438,17 @@ func (responsesResp *BifrostResponsesResponse) ToBifrostChatResponse() *BifrostC
 
 		finishReason := chatFinishReasonFromResponses(responsesResp.Status, responsesResp.IncompleteDetails, responsesResp.StopReason, responsesResp.Output)
 
-		choices := make([]BifrostResponseChoice, 0, len(chatMessages))
-		for i, chatMsg := range chatMessages {
-			choice := BifrostResponseChoice{
-				Index:        i,
+		// Responses output items belong to one generation, not alternative Chat
+		// choices. A normal n=1 caller must see its text and every tool in choice 0.
+		if chatMsg := mergeResponsesOutputMessages(chatMessages); chatMsg != nil {
+			chatResp.Choices = []BifrostResponseChoice{{
+				Index:        0,
 				FinishReason: finishReason,
 				ChatNonStreamResponseChoice: &ChatNonStreamResponseChoice{
-					Message: &chatMsg,
+					Message: chatMsg,
 				},
-			}
-			choices = append(choices, choice)
+			}}
 		}
-
-		chatResp.Choices = choices
 	}
 
 	if responsesResp.Usage != nil {
@@ -1460,6 +1461,69 @@ func (responsesResp *BifrostResponsesResponse) ToBifrostChatResponse() *BifrostC
 	chatResp.ExtraFields.Provider = responsesResp.ExtraFields.Provider
 
 	return chatResp
+}
+
+func mergeResponsesOutputMessages(messages []ChatMessage) *ChatMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+	merged := &ChatMessage{Role: ChatMessageRoleAssistant, ChatAssistantMessage: &ChatAssistantMessage{}}
+	var blocks []ChatContentBlock
+	for _, message := range messages {
+		if content := message.Content; content != nil {
+			if content.ContentStr != nil {
+				blocks = append(blocks, ChatContentBlock{Type: ChatContentBlockTypeText, Text: content.ContentStr})
+			} else {
+				blocks = append(blocks, content.ContentBlocks...)
+			}
+		}
+		if assistant := message.ChatAssistantMessage; assistant != nil {
+			if assistant.Refusal != nil {
+				text := *assistant.Refusal
+				if merged.Refusal != nil {
+					text = *merged.Refusal + text
+				}
+				merged.Refusal = &text
+			}
+			if assistant.Reasoning != nil {
+				text := *assistant.Reasoning
+				if merged.Reasoning != nil {
+					text = *merged.Reasoning + text
+				}
+				merged.Reasoning = &text
+			}
+			for _, detail := range assistant.ReasoningDetails {
+				detail.Index = len(merged.ReasoningDetails)
+				merged.ReasoningDetails = append(merged.ReasoningDetails, detail)
+			}
+			for _, call := range assistant.ToolCalls {
+				call.Index = uint16(len(merged.ToolCalls))
+				merged.ToolCalls = append(merged.ToolCalls, call)
+			}
+			merged.Annotations = append(merged.Annotations, assistant.Annotations...)
+			merged.Images = append(merged.Images, assistant.Images...)
+			if assistant.Audio != nil {
+				merged.Audio = assistant.Audio
+			}
+		}
+	}
+	if len(blocks) > 0 {
+		var text strings.Builder
+		textOnly := true
+		for _, block := range blocks {
+			if block.Type != ChatContentBlockTypeText || block.Text == nil {
+				textOnly = false
+				break
+			}
+			text.WriteString(*block.Text)
+		}
+		if textOnly {
+			merged.Content = &ChatMessageContent{ContentStr: Ptr(text.String())}
+		} else {
+			merged.Content = &ChatMessageContent{ContentBlocks: blocks}
+		}
+	}
+	return merged
 }
 
 func AcquireChatToResponsesStreamState() *ChatToResponsesStreamState {
@@ -2322,8 +2386,8 @@ func (rsr *BifrostResponsesStreamResponse) ToBifrostChatResponse() *BifrostChatR
 			}
 			funcType := "function"
 			var idx uint16
-			if rsr.OutputIndex != nil && *rsr.OutputIndex > 0 {
-				idx = uint16(*rsr.OutputIndex - 1)
+			if rsr.OutputIndex != nil && *rsr.OutputIndex >= 0 {
+				idx = uint16(*rsr.OutputIndex)
 			}
 			resp.Choices = []BifrostResponseChoice{
 				{
@@ -2386,8 +2450,8 @@ func (rsr *BifrostResponsesStreamResponse) ToBifrostChatResponse() *BifrostChatR
 			return resp
 		}
 		var idx uint16
-		if rsr.OutputIndex != nil && *rsr.OutputIndex > 0 {
-			idx = uint16(*rsr.OutputIndex - 1)
+		if rsr.OutputIndex != nil && *rsr.OutputIndex >= 0 {
+			idx = uint16(*rsr.OutputIndex)
 		}
 
 		resp.Choices = []BifrostResponseChoice{

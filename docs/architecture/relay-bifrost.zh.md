@@ -20,6 +20,8 @@
 
 只支持 Chat 的旧 OpenAI 型号可另配 `openai-compatible` 供应商；修改已有供应商种类会清凭据，须按正常流程重新录入。未知型号按所选协议请求，不按名称猜能力，也不在协议失败后盲目重发。SDK 原有 Responses 显式小于16的输出值规范化为16，缺省不注入输出值；legacy `user` 沿 SDK 既有转换约定，`safety_identifier` 和 `prompt_cache_key` 各自保留语义。Run 目前只解析已知参数，未知顶层 JSON 扩展没有提取到 SDK 的 `ExtraParams`；SDK 内部显式 `ExtraParams` 的转换行为保留，不能据此宣称公开入口支持任意字段透传。这批以假上游矩阵验证接线，不代表模型目录中全部型号均已真实付费验证。
 
+预算预占须覆盖上述 SDK 协议下限：显式输出值小于16且任一可达路由为原生 OpenAI 时，保守按16预占，包含零权重故障兜底；只有compatible或其他厂商时仍按原值。它只调整内部预占估计，不改调用方正文、不取目录推荐值作限制；成功后按实际确认用量结算并释放预占。
+
 主密钥经 HKDF 独立派生签名键和加密键；虚拟 Key 使用 HMAC，数据库不存明文。供应商凭据与管理幂等响应使用 AES-GCM，密文带格式版本1，租户/记录 ID 为 AAD。外发 user 使用 HMAC 匿名标识。修改供应商根地址或种类会清除原凭据，必须重新录入。管理 POST 必须 Idempotency-Key，同租户同键不同内容409；崩溃后的未完成声明保持阻塞，避免重复签发。五个独立文件秘密由部署工具首次生成并拒绝隐式旋转。
 
 PostgreSQL 独立 bifrost 数据库，迁移 owner 与运行账号/口令分离，表强制租户 RLS。用量复用原有账本和 outbox，不保存提示词正文。新成员默认 `meteringOnly=true`：保每次在线身份、模型权限与吊销检查，保幂等和派发CAS，按上游确认用量记账；不预占金额、不设RPM/并发/在途Token业务限制。`BudgetAdmission.metering_only`随原持久化protobuf保存，重启不会把估计值误当上限。

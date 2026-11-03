@@ -70,6 +70,20 @@ func (a account) GetKeysForProvider(_ context.Context, id schemas.ModelProvider)
 	return nil, errors.New("unknown configured provider")
 }
 
+// Reserve for the SDK's Responses minimum on every reachable native route,
+// including zero-weight fallbacks. This changes accounting, never the request.
+func protocolOutputEstimate(routes []Route, requested int64) int64 {
+	if requested <= 0 || requested >= int64(openai.MinMaxCompletionTokens) {
+		return requested
+	}
+	for _, route := range routes {
+		if strings.EqualFold(route.Kind, "openai") {
+			return int64(openai.MinMaxCompletionTokens)
+		}
+	}
+	return requested
+}
+
 // Run uses Bifrost's weighted selector, provider workers, retry/fallback and SSE
 // parsers. Every invocation owns an immutable account snapshot and drains its
 // workers before returning, including when the downstream writer disconnects.

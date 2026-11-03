@@ -482,6 +482,7 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	if outputEstimate == 0 {
 		outputEstimate = max(int64(1), pool.MaxOutputTokens)
 	}
+	outputEstimate = protocolOutputEstimate(routes, outputEstimate)
 	admission := &ai.BudgetAdmission{TenantId: tenant, AccountId: key.Id, ModelId: pool.Id, ProviderId: routes[0].ID, CredentialId: routes[0].ID, Currency: "USD", PriceVersion: pool.Price.Version, InputTokenUpperBound: inputEstimate, MaxOutputTokens: outputEstimate, MonthlyBudgetMicros: &key.MonthlyBudgetMicros, Origin: &ai.BudgetAdmission_DeviceId{DeviceId: device}, TokenExpiresAt: timestamppb.New(expiry)}
 	if key.Source == "member" && key.GetMeteringOnly() {
 		admission.MeteringOnly = true
