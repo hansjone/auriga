@@ -284,6 +284,7 @@ function askPool() {
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.id) ||
     ints.some((v) => !Number.isSafeInteger(v) || v < 0) ||
+    body.contextWindow === 1 ||
     (body.contextWindow > 0 && body.maxOutputTokens >= body.contextWindow) ||
     body.price.inputMicrosPerMillionTokens < 1 ||
     body.price.outputMicrosPerMillionTokens < 1 ||

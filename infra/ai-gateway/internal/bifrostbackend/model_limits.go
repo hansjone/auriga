@@ -9,13 +9,17 @@ import (
 
 func publicModel(model api.RelayPool) map[string]any {
 	out := map[string]any{"id": model.Id, "object": "model", "created": 0, "owned_by": "auriga"}
-	if model.ContextWindow > 0 {
+	if model.ContextWindow >= 2 && model.ContextWindow <= maxInteger {
 		out["context_window"] = model.ContextWindow
 	}
 	if model.MaxOutputTokens > 0 {
 		out["max_output_tokens"] = model.MaxOutputTokens
 	}
 	return out
+}
+
+func validPoolCapabilities(context, output int64) bool {
+	return (context == 0 || context >= 2) && context <= maxInteger && output >= 0 && output <= maxInteger && (context == 0 || output < context)
 }
 
 func outputTokenLimit(fields map[string]json.RawMessage, _ int64) (int64, string, error) {

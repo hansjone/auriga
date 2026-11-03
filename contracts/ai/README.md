@@ -5,6 +5,8 @@
 所有部署都适用，包括域名 TLS、显式内网 IP:port HTTP 前台；内部身份通道仍须节点/edge mTLS，
 同机可用经过操作系统身份验证的专有 socket。前台 HTTP 不代表允许未认证的跨主机内部调用。
 
+严格预算的中转请求尚无可信媒体输入Token上界，因此只放行文本内容；媒体、文件引用及未知内容块必须在预算准入/供应商派发前拒绝，使用既有`common.validation_failed`和`params.field=/messages`。URL长度与pool能力提示不是媒体上界，不能据此先消费再隔离超额。仅计量成员不受该严格预算条件限制。模型上下文能力须为0（未知）或至少2，不能发布1。
+
 中转站成员模式可明确启用`RelayMemberEnsure/RelayKey.meteringOnly`，与显式预算治理分开：保在线身份、模型授权、吊销和用量，不设预算或流量业务限额。预算0仍禁止；流量参数0/缺省才表示不设该流量限制。仅计量位由受信端生成、持久在`BudgetAdmission.metering_only`，外部Key不能启用。管理员保存标`policyOrigin=administrator`，ensure仅更新`default`；无来源的旧记录按`legacy`保留，不能猜测是否由管理员配置。
 
 RelayPool容量为给客户端的能力信息，0表示未知，公开目录省略未知值。中转不按该值拒绝或强塞输出参数；明确预算的请求仍须提供输出上界用于预占。协议适配可规范化参数名，不承诺任意上游协议逐字转发。chat JSON保32MiB传输边界，管理写1MiB，输出由调用方参数与上游决定。

@@ -18,7 +18,7 @@ import (
 // checks if the AdmissionPolicy type satisfies the MappedNullable interface at compile time
 var _ MappedNullable = &AdmissionPolicy{}
 
-// AdmissionPolicy 部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。周期不限时对应正数绝对上限必填；unknown预占继续占用；0配额禁止。
+// AdmissionPolicy 部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。未配置周期配额或绝对流量上限时不新增该限制；unknown预占继续占用；0周期配额禁止，并发0表示不限。
 type AdmissionPolicy struct {
 	// 并发上限，0表示不限制。
 	MaxActiveRequestsPerSubject int64  `json:"maxActiveRequestsPerSubject"`

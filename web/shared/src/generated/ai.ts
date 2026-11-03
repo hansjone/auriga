@@ -709,7 +709,7 @@ export interface components {
       /** @enum {string} */
       outcome?: 'completed' | 'failed' | 'cancelled' | 'unknown';
     };
-    /** @description 部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。周期不限时对应正数绝对上限必填；unknown预占继续占用；0配额禁止。 */
+    /** @description 部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。未配置周期配额或绝对流量上限时不新增该限制；unknown预占继续占用；0周期配额禁止，并发0表示不限。 */
     AdmissionPolicy: {
       /**
        * Format: int64
@@ -746,7 +746,7 @@ export interface components {
       routes: components['schemas']['RelayRoute'][];
       /**
        * Format: int64
-       * @description 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
+       * @description 上下文能力为0（未知）或至少2的安全整数，供客户端压缩与请求参数使用，不是中转裁限；可显式从上游目录更新，公开目录省略未知值。
        */
       contextWindow: number;
       /**

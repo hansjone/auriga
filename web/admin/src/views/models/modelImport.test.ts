@@ -59,6 +59,9 @@ describe('model import limits and identity', () => {
   });
   it('does not treat malformed metadata as known', () => {
     expect(
+      capabilityLimits({ id: 'one', contextWindow: 1 }).context,
+    ).toBeUndefined();
+    expect(
       capabilityLimits({ id: 'x', contextWindow: -1, maxOutputTokens: 1.5 })
         .context,
     ).toBeUndefined();
@@ -88,6 +91,9 @@ describe('model import limits and identity', () => {
       rowError({ ...row, context: undefined }, [row], new Set()),
     ).toBeUndefined();
     expect(rowError({ ...row, context: 4096 }, [row], new Set())).toBe(
+      'importInvalidLimits',
+    );
+    expect(rowError({ ...row, context: 1, output: 0 }, [row], new Set())).toBe(
       'importInvalidLimits',
     );
   });

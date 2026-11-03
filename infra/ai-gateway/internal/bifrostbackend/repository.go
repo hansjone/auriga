@@ -432,7 +432,7 @@ func (b *Backend) CreatePool(ctx context.Context, tenant string, p api.RelayPool
 }
 
 func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, createOnly bool) error {
-	if !modelID.MatchString(p.Id) || len(p.Routes) < 1 || len(p.Routes) > 8 || p.ContextWindow < 0 || p.ContextWindow > maxInteger || p.MaxOutputTokens < 0 || p.MaxOutputTokens > maxInteger || p.ContextWindow > 0 && p.MaxOutputTokens >= p.ContextWindow || p.Price.Currency != "USD" || p.Price.Version == "" || p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(time.Now()) || p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.OutputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger || p.Price.OutputMicrosPerMillionTokens > maxInteger {
+	if !modelID.MatchString(p.Id) || len(p.Routes) < 1 || len(p.Routes) > 8 || !validPoolCapabilities(p.ContextWindow, p.MaxOutputTokens) || p.Price.Currency != "USD" || p.Price.Version == "" || p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(time.Now()) || p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.OutputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger || p.Price.OutputMicrosPerMillionTokens > maxInteger {
 		return invalid
 	}
 	providers, err := routeProviders(p.Routes)

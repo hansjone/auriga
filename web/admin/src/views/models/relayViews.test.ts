@@ -58,6 +58,40 @@ beforeEach(() => {
   vi.mocked(relayApi.keys).mockResolvedValue({ items: [] });
 });
 afterEach(() => vi.resetAllMocks());
+it('rejects context one before confirmation while retaining zero as unknown', async () => {
+  const auto = {
+    id: 'auto',
+    enabled: true,
+    contextWindow: 1,
+    maxOutputTokens: 0,
+    routes: [{ providerId: p.id, model: 'real', weight: 1 }],
+    price: {
+      currency: 'USD' as const,
+      inputMicrosPerMillionTokens: 1,
+      outputMicrosPerMillionTokens: 1,
+      version: 'v1',
+      effectiveAt: '2026-01-01T00:00:00Z',
+    },
+  };
+  vi.mocked(relayApi.pools).mockResolvedValue({ items: [auto] });
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
+  expect(relayApi.savePool).not.toHaveBeenCalled();
+  await w.get('[name="contextWindow"]').setValue('0');
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  expect(w.find('[data-testid="confirm-action"]').exists()).toBe(true);
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.savePool).toHaveBeenCalledWith(
+    { ...auto, contextWindow: 0 },
+    expect.any(String),
+    expect.any(AbortSignal),
+  );
+  w.unmount();
+});
 it('makes member metering explicit while external keys start without traffic limits', async () => {
   const member = {
     id: 'member',

@@ -19,7 +19,9 @@ export function capabilityLimits(model: CatalogModel) {
   const context = positive(model.contextWindow),
     input = positive(model.maxInputTokens),
     output = positive(model.maxOutputTokens);
-  const contexts = [context, input].filter((v): v is number => v !== undefined);
+  const contexts = [context, input].filter(
+    (v): v is number => v !== undefined && v >= 2,
+  );
   const effectiveContext = contexts.length ? Math.min(...contexts) : undefined;
   return {
     context: effectiveContext,
@@ -65,6 +67,7 @@ export function rowError(
     !Number.isSafeInteger(context) ||
     !Number.isSafeInteger(output) ||
     context < 0 ||
+    context === 1 ||
     output < 0 ||
     context > Number.MAX_SAFE_INTEGER ||
     output > Number.MAX_SAFE_INTEGER ||

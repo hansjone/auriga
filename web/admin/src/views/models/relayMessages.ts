@@ -32,7 +32,7 @@ const zh = {
     'ID 需以字母或数字开头，仅含字母、数字、点、横线和下划线，最多128字符',
   importMissingLimits: '能力未知可留空或填0',
   importInvalidLimits:
-    '能力须为非负安全整数，0表示未知；同时已知时输出须小于上下文',
+    '能力须为非负安全整数；上下文为0或至少2，0表示未知；同时已知时输出须小于上下文',
   importWriteUnknown: '未确认保存结果；重试将先读回核对，不会覆盖已有模型',
   importStatus_pending: '待导入',
   importStatus_saving: '保存中',
@@ -219,7 +219,7 @@ const en: Record<keyof typeof zh, string> = {
     'Use 1–128 letters, digits, dots, dashes or underscores, starting with a letter or digit',
   importMissingLimits: 'Leave unknown capabilities blank or enter zero',
   importInvalidLimits:
-    'Use nonnegative safe integers; zero means unknown. When both are known, output must be below context.',
+    'Use nonnegative safe integers; context must be zero or at least two. Zero means unknown. When both are known, output must be below context.',
   importWriteUnknown:
     'Save result is unconfirmed. Retry checks persisted configuration before writing.',
   importStatus_pending: 'Pending',
