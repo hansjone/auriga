@@ -61,6 +61,14 @@
 .relay-capability-editor small {
   color: var(--el-text-color-secondary);
 }
+.relay-capability-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.relay-capability-actions p {
+  margin: 0;
+}
 .relay-route-title,
 .relay-route-actions,
 .relay-route > p {
@@ -211,6 +219,7 @@
   .relay-providers > form fieldset,
   .relay-keys > form fieldset,
   .relay-form-grid,
+  .relay-capability-editor,
   .relay-model-options {
     grid-template-columns: minmax(0, 1fr);
   }

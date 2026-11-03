@@ -46,6 +46,38 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.resetAllMocks());
+it('shows the upstream returned values separately from adopted recommendations and manual import overrides', async () => {
+  const w = make();
+  try {
+    await flushPromises();
+    await w.get('input[value="a"]').setValue(true);
+    await w.get('input[value="b"]').setValue(true);
+    await w.get('[data-testid="import-preview"]').trigger('click');
+    await w.get('[name="importRecommendedContext"]').setValue('1000000');
+    await w.get('[name="importRecommendedOutput"]').setValue('64000');
+    expect(w.get('[data-testid="import-context-upstream-0"]').text()).toContain(
+      '64,000',
+    );
+    expect(w.get('[data-testid="import-output-upstream-1"]').text()).toContain(
+      '未提供',
+    );
+    expect(
+      w.get('[data-testid="import-context-effective-1"]').text(),
+    ).toContain('管理员推荐值');
+    await w.get('[name="importContext0"]').setValue('50000');
+    expect(
+      w.get('[data-testid="import-context-effective-0"]').text(),
+    ).toContain('50,000');
+    expect(
+      w.get('[data-testid="import-context-effective-0"]').text(),
+    ).toContain('手动覆盖');
+    expect(w.get('[data-testid="import-context-upstream-0"]').text()).toContain(
+      '64,000',
+    );
+  } finally {
+    w.unmount();
+  }
+});
 it('shows retained recommendations when returning to selection and rebuilding the preview', async () => {
   const w = make();
   await flushPromises();

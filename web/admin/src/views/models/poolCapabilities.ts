@@ -3,6 +3,7 @@ import type { components } from '../../../../shared/src/generated/ai';
 
 export type CatalogModel = components['schemas']['RelayProviderModel'];
 export type CapabilityPolicy = NonNullable<RelayPool['capabilities']>;
+type CapabilityDimension = 'context' | 'output';
 export type CatalogState = {
   items: CatalogModel[];
   loading: boolean;
@@ -72,7 +73,7 @@ export function captureUpstreamCapabilities(
 }
 export function capabilityOrigin(
   pool: RelayPool,
-  dimension: 'context' | 'output',
+  dimension: CapabilityDimension,
 ) {
   const policy = pool.capabilities!;
   const context = dimension === 'context';
@@ -81,18 +82,7 @@ export function capabilityOrigin(
     'manual'
   )
     return 'manual';
-  const snapshot =
-    policy.upstream?.providerId === policy.sourceProviderId &&
-    policy.upstream.model.id === policy.sourceModel
-      ? policy.upstream.model
-      : undefined;
-  if (
-    known(
-      context ? snapshot?.contextWindow : snapshot?.maxOutputTokens,
-      context ? 2 : 1,
-    ) !== undefined
-  )
-    return 'upstream';
+  if (upstreamCapabilityValue(pool, dimension) !== undefined) return 'upstream';
   return known(
     context
       ? policy.recommendedContextWindow
@@ -101,6 +91,51 @@ export function capabilityOrigin(
   ) !== undefined
     ? 'recommended'
     : 'unknown';
+}
+export function upstreamCapabilityValue(
+  pool: RelayPool,
+  dimension: CapabilityDimension,
+) {
+  const policy = pool.capabilities!;
+  const snapshot =
+    policy.upstream?.providerId === policy.sourceProviderId &&
+    policy.upstream.model.id === policy.sourceModel
+      ? policy.upstream.model
+      : undefined;
+  return known(
+    dimension === 'context'
+      ? snapshot?.contextWindow
+      : snapshot?.maxOutputTokens,
+    dimension === 'context' ? 2 : 1,
+  );
+}
+export function setCapabilityMode(
+  pool: RelayPool,
+  dimension: CapabilityDimension,
+  mode: 'inherit' | 'manual',
+) {
+  const policy = pool.capabilities!;
+  const context = dimension === 'context';
+  const modeField = context ? 'contextWindowMode' : 'maxOutputTokensMode';
+  const recommendationField = context
+    ? 'recommendedContextWindow'
+    : 'recommendedMaxOutputTokens';
+  const previousValue = known(
+    context ? pool.contextWindow : pool.maxOutputTokens,
+    context ? 2 : 1,
+  );
+  const preserve =
+    mode === 'inherit' &&
+    policy[modeField] === 'manual' &&
+    upstreamCapabilityValue(pool, dimension) === undefined &&
+    (policy[recommendationField] === undefined ||
+      policy[recommendationField] === 0 ||
+      (policy[recommendationField] as unknown) === '') &&
+    previousValue !== undefined;
+  if (preserve) policy[recommendationField] = previousValue;
+  policy[modeField] = mode;
+  applyCapabilityPolicy(pool);
+  return preserve;
 }
 export function applyCapabilityPolicy(pool: RelayPool) {
   const policy = pool.capabilities;

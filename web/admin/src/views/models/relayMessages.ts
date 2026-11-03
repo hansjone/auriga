@@ -22,7 +22,7 @@ const zh = {
   importSuggest: '将未知能力交给上游',
   importSuggestNote:
     '能力未知时保留0，不虚构32768/4096。已知能力可从上游目录继承，也可手动覆盖；中转不会用这些信息裁限请求。',
-  importUnknown: '部分参数未知',
+  importUnknown: '上游部分字段未提供',
   importFromProvider: '上游目录提供',
   importInputOnly: '仅提供输入上限，不推断总上下文',
   importPlatformLimit: '已受平台上限限制',
@@ -49,7 +49,19 @@ const zh = {
   importProgress: '已保存 {saved} / {total}',
   importSavedNote:
     '外部新请求采用已保存模型。Auriga DSH 可在原生模型设置中编辑 Auriga，获取可用模型、勾选并保存目录；无需重启。',
-  applyCapabilities: '从上游更新能力',
+  applyCapabilities: '刷新上游数据',
+  capabilityAdoptUpstream: '采用上游优先',
+  capabilityActionsNote:
+    '刷新只更新上游数据，不改变手动覆盖。采用上游优先后，上游未提供的字段使用推荐值；保存后发布。',
+  capabilityUpstreamValue: '上游返回：{tokens}',
+  capabilityNotProvided: '未提供',
+  capabilityNotFetched: '尚未获取',
+  capabilityEffectiveValue: '当前采用：{tokens}',
+  capabilityManualActive: '手动覆盖生效，刷新不会替换此值。',
+  capabilityPriorityAdopted:
+    '已采用上游优先；缺失字段使用推荐值，再缺则为未知。保存后发布。',
+  capabilityManualPreserved:
+    '已切换的字段采用上游优先；上游缺失时已将原手动值保为管理员推荐兜底，后续上游提供时优先采用上游。保存后发布。',
   capabilitySourceRoute: '能力来源模型 / 路由',
   capabilityChooseRoute: '先添加真实模型路由',
   capabilityInherit: '继承上游（缺失时用推荐值）',
@@ -65,7 +77,7 @@ const zh = {
   capabilityRefreshFailed: '刷新失败，已保留原上游快照和能力值；请重试。',
   capabilityRefreshPending: '正在读取上游能力，请完成后再保存。',
   capabilityNote:
-    '能力来源默认首条正权重路由，可另选；不会取全部路由或兜底的最小值。继承优先上游，缺失时用推荐值，再缺为未知0。刷新后保存发布，DSH手动同步；这些信息不裁剪或限制中转请求。',
+    '能力来源默认首条正权重路由，可另选，不取全部路由或兜底的最小值。保存后发布到统一模型目录，DSH需手动同步；能力信息不裁剪或限制中转请求。',
   capabilityUnknown: '部分路由参数未知，请先获取各供应商目录或手动确认。',
   capabilityApplied:
     '已刷新所选来源的上游快照；手动覆盖保留。保存后发布给DSH与外部目录，再在DSH手动同步。',
@@ -224,7 +236,7 @@ const en: Record<keyof typeof zh, string> = {
   importSuggest: 'Leave unknown capabilities to upstream',
   importSuggestNote:
     'Keep unknown capabilities at zero instead of inventing 32768/4096. Inherit known upstream metadata or override it explicitly. These values do not cap relay requests.',
-  importUnknown: 'Some limits unknown',
+  importUnknown: 'Upstream omitted some fields',
   importFromProvider: 'From provider catalog',
   importInputOnly: 'Input limit only; total context is not inferred',
   importPlatformLimit: 'Limited by platform ceilings',
@@ -254,7 +266,20 @@ const en: Record<keyof typeof zh, string> = {
   importProgress: 'Saved {saved} / {total}',
   importSavedNote:
     'External requests use saved models. In native Models settings, edit Auriga, fetch available models, select and save without restarting DSH.',
-  applyCapabilities: 'Update capabilities from upstream',
+  applyCapabilities: 'Refresh upstream data',
+  capabilityAdoptUpstream: 'Use upstream first',
+  capabilityActionsNote:
+    'Refreshing updates upstream data without changing manual overrides. Upstream-first uses recommendations for omitted fields. Save to publish.',
+  capabilityUpstreamValue: 'Upstream returned: {tokens}',
+  capabilityNotProvided: 'Not provided',
+  capabilityNotFetched: 'Not fetched yet',
+  capabilityEffectiveValue: 'Currently used: {tokens}',
+  capabilityManualActive:
+    'Manual override is active; refreshing will not replace this value.',
+  capabilityPriorityAdopted:
+    'Using upstream first, then recommendations for omitted fields, otherwise unknown. Save to publish.',
+  capabilityManualPreserved:
+    'Switched fields use upstream first. Previous manual values for omitted fields were retained as administrator recommendations; future upstream values take priority. Save to publish.',
   capabilitySourceRoute: 'Capability source model / route',
   capabilityChooseRoute: 'Add an upstream model route first',
   capabilityInherit: 'Inherit upstream, then recommended values',
@@ -272,7 +297,7 @@ const en: Record<keyof typeof zh, string> = {
   capabilityRefreshPending:
     'Upstream capabilities are loading. Wait for them before saving.',
   capabilityNote:
-    'Defaults to the first positive-weight route; another source can be selected. Fallback routes do not shrink it. Inherit upstream, then configured recommendations, then unknown zero. Save after refreshing, then sync DSH manually. These hints do not cap relay requests.',
+    'Defaults to the first positive-weight route; another source can be selected. Other routes and fallbacks do not shrink it. Save to publish to the shared model catalog, then sync DSH manually. These hints do not cap relay requests.',
   capabilityUnknown:
     'Some route limits are unknown. Fetch each catalog or confirm limits manually.',
   capabilityApplied:
