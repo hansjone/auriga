@@ -719,7 +719,7 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 
 	binding, err := g.lookupInstBinding(r)
 	if err != nil || binding.InstanceID != instanceID {
-		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "instance cookie required", rid))
+		g.instanceEntryRequired(w, r, instanceID, instPath, rid)
 		return
 	}
 	target := g.instanceTarget(r, instanceID)
@@ -821,11 +821,12 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		}
 		rewriteOutboundInstance(pr.Out, clientIP, token, rid, tp)
 	}
-	proxy.ModifyResponse = stripInstanceSetCookie
-	if pathSuffix != "" {
-		proxy.ModifyResponse = func(resp *http.Response) error {
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Del(instanceEntryHeader)
+		if pathSuffix != "" {
 			return mapInstanceResponse(resp, target, identityPath, r.URL.RawQuery, g.requestSecureCookies(r))
 		}
+		return stripInstanceSetCookie(resp)
 	}
 	proxy.ServeHTTP(w, r)
 }
