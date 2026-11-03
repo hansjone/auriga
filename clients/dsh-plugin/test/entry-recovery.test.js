@@ -49,6 +49,13 @@ async function fixture(t, http = async () => lost(), options = {}) {
     timers = new Map();
   let timerId = 0;
   let now = 0;
+  const logs = [];
+  const schedule = (fn, ms) => {
+    const id = ++timerId;
+    timers.set(id, { fn, ms, at: now + ms });
+    return id;
+  };
+  const cancelTimer = (id) => timers.delete(id);
   const win = {
     performance: { now: () => now },
     location: {
@@ -86,17 +93,14 @@ async function fixture(t, http = async () => lost(), options = {}) {
       document: doc,
       URL,
       AbortController,
-      console,
-      setTimeout(fn, ms) {
-        const id = ++timerId;
-        timers.set(id, { fn, ms, at: now + ms });
-        return id;
+      console: {
+        ...console,
+        info: (tag, fields) => logs.push({ tag, ...fields }),
       },
-      clearTimeout(id) {
-        timers.delete(id);
-      },
+      setTimeout: schedule,
+      clearTimeout: cancelTimer,
       fetch: async (url, init) => {
-        calls.push({ url: String(url), init });
+        calls.push({ url: String(url), init, at: now });
         return http(url, init);
       },
     },
@@ -153,9 +157,12 @@ async function fixture(t, http = async () => lost(), options = {}) {
   }
   return {
     calls,
+    logs,
     navigations,
     storage,
     timers,
+    schedule,
+    cancelTimer,
     dispose,
     listeners,
     win,
@@ -207,7 +214,7 @@ test('exact entry gate loss re-enters the same instance once through document na
   assert.equal(f.navigations.length, 1);
 });
 
-test('network/temporary failures retry at most three without fake repeated connecting events', async (t) => {
+test('network/temporary failures allow only two paced availability reads after the three short probes', async (t) => {
   let count = 0;
   const f = await fixture(t, async () => {
     if (++count === 1) throw new TypeError('network');
@@ -218,7 +225,6 @@ test('network/temporary failures retry at most three without fake repeated conne
   await f.retry();
   await f.retry();
   assert.equal(f.calls.length, 3);
-  assert.equal(f.timers.size, 0);
   assert.deepEqual(f.navigations, []);
   f.state('connecting');
   await settle();
@@ -226,6 +232,136 @@ test('network/temporary failures retry at most three without fake repeated conne
   f.event('online');
   await settle();
   assert.equal(f.calls.length, 3);
+  await f.advance(9999);
+  assert.equal(f.calls.length, 3);
+  await f.advance(1);
+  assert.equal(f.calls.length, 4);
+  f.event('focus');
+  f.event('online');
+  await settle();
+  assert.equal(f.calls.length, 4);
+  await f.advance(10000);
+  assert.equal(f.calls.length, 5);
+  assert.deepEqual(
+    f.calls.map((call) => call.at),
+    [0, 2000, 4000, 14000, 24000],
+  );
+  assert.equal(f.timers.size, 0);
+  f.event('focus');
+  f.event('online');
+  await f.advance(20000);
+  assert.equal(f.calls.length, 5);
+});
+
+test('availability eligibility excludes other HTTP failures and stops at the first definitive reply', async (t) => {
+  for (const status of [200, 401, 403, 500, 504]) {
+    const f = await fixture(t, async () => new Response('', { status }));
+    f.lose();
+    await settle();
+    await f.advance(30000);
+    assert.equal(f.calls.length, status === 504 ? 3 : 1);
+    assert.deepEqual(f.navigations, []);
+  }
+  const f = await fixture(
+    t,
+    async () => new Response('', { status: f.calls.length <= 3 ? 503 : 403 }),
+  );
+  f.lose();
+  await settle();
+  await f.advance(30000);
+  assert.equal(f.calls.length, 4);
+  assert.deepEqual(f.navigations, []);
+});
+
+test('availability keeps the original absolute thirty-second deadline across hiding and late replies', async (t) => {
+  let finish;
+  const f = await fixture(t, async () =>
+    f.calls.length <= 3
+      ? new Response('', { status: 503 })
+      : new Promise((resolve) => {
+          finish = resolve;
+        }),
+  );
+  f.lose();
+  await settle();
+  await f.advance(14000);
+  assert.equal(f.calls.length, 4);
+  f.jump(16000);
+  finish(lost());
+  await settle();
+  assert.deepEqual(f.navigations, []);
+  const g = await fixture(t, async () => new Response('', { status: 502 }));
+  g.lose();
+  await settle();
+  await g.advance(5000);
+  g.hidden(true);
+  await g.advance(26000);
+  g.hidden(false);
+  g.event('focus');
+  g.event('online');
+  await settle();
+  assert.equal(g.calls.length, 3);
+  assert.deepEqual(g.navigations, []);
+});
+
+test('stale short-window and retry callbacks cannot replace an availability-phase timer after hiding', async (t) => {
+  const f = await fixture(t, async () => new Response('', { status: 503 }));
+  f.lose();
+  await settle();
+  const shortExpiry = [...f.timers.values()].find((v) => v.ms === 6000).fn;
+  await f.advance(4000);
+  const oldRetry = [...f.timers.values()].find((v) => v.ms === 10000).fn;
+  shortExpiry();
+  assert.equal(f.calls.length, 3);
+  await f.advance(1000);
+  f.hidden(true);
+  await f.advance(1000);
+  f.hidden(false);
+  const active = [...f.timers.keys()];
+  oldRetry();
+  assert.deepEqual([...f.timers.keys()], active);
+  await f.advance(8000);
+  assert.deepEqual(
+    f.calls.map((call) => call.at),
+    [0, 2000, 4000, 14000],
+  );
+});
+
+test('entry recovery diagnostics expose only safe events and never response bodies, URLs or thrown messages', async (t) => {
+  let calls = 0;
+  const canary = 'do-not-log-fixture-private-cookie';
+  const f = await fixture(t, async () => {
+    if (++calls === 1) throw new Error(canary);
+    return new Response(
+      JSON.stringify({
+        code: 'edge.unauthorized',
+        status: 401,
+        detail: 'instance cookie required',
+        extra: canary,
+      }),
+      {
+        status: 401,
+        headers: {
+          'content-type': 'application/problem+json',
+          'x-auriga-instance-entry': 'required',
+        },
+      },
+    );
+  });
+  f.lose();
+  await settle();
+  await f.advance(2000);
+  for (const event of [
+    'installed',
+    'trigger',
+    'probe_started',
+    'probe_completed',
+    'navigation',
+  ])
+    assert.ok(f.logs.some((row) => row.event === event));
+  assert.ok(f.logs.every((row) => row.tag === 'auriga.entry_recovery'));
+  assert.ok(!JSON.stringify(f.logs).includes(canary));
+  assert.ok(!JSON.stringify(f.logs).includes('portal.example.com'));
 });
 
 test('transient unavailable then precise entry 401 recovers within the bounded cycle', async (t) => {
@@ -545,6 +681,103 @@ test(
       1,
       'real repeated connecting states are deduplicated',
     );
+  },
+);
+
+test(
+  'locked Connection plus the default edge recreation interval recovers without a fabricated second state event',
+  { skip: !process.env.AURIGA_ENTRY_CONNECTION_BUNDLE },
+  async (t) => {
+    for (const lossAt of [0, 10000])
+      await t.test(`native loss observed at ${lossAt}ms`, async (t) => {
+        let f, nativeModule;
+        const random = Object.create(Math);
+        random.random = () => 0.5;
+        vm.runInNewContext(
+          await readFile(process.env.AURIGA_ENTRY_CONNECTION_BUNDLE, 'utf8'),
+          {
+            window: {
+              __ModuleLoader__: {
+                load: (m) => {
+                  nativeModule = m;
+                },
+              },
+            },
+            URL,
+            AbortController,
+            console,
+            Math: random,
+            setTimeout: (fn, ms) => f.schedule(fn, ms),
+            clearTimeout: (id) => f.cancelTimer(id),
+          },
+        );
+        const native = nativeModule.factory(() => {
+          throw new Error('unexpected public bundle dependency');
+        });
+        let connection;
+        native.installConnection(
+          {
+            provide: (_name, value) => {
+              connection = value;
+            },
+          },
+          {
+            transport: { rpc: {} },
+            location: { hostname: 'portal.example.com' },
+          },
+        );
+        f = await fixture(
+          t,
+          async () =>
+            f.now() < 11846 ? new Response('', { status: 503 }) : lost(),
+          { connection },
+        );
+        let drop;
+        const attempts = [],
+          states = [];
+        const unregister = connection.registerGenerationSource(
+          async (_signal, ready) => {
+            attempts.push(f.now());
+            if (attempts.length === 1) {
+              ready({ home: 'public-fixture' });
+              await new Promise((_, reject) => {
+                drop = reject;
+              });
+            } else
+              throw new Error(
+                f.now() < 11846
+                  ? 'fixture edge unavailable'
+                  : 'fixture edge entry unauthorized',
+              );
+          },
+        );
+        const loop = connection.start({
+          onStateChange: (state) => states.push({ at: f.now(), state }),
+        });
+        t.after(() => {
+          loop.stop();
+          unregister();
+        });
+        await settle();
+        await settle();
+        assert.equal(connection.state.getSnapshot(), 'connected');
+        await f.advance(lossAt);
+        drop(new Error('fixture old edge stopped'));
+        await settle();
+        await settle();
+        await f.advance(25000 - lossAt);
+        t.diagnostic(
+          JSON.stringify({
+            lossAt,
+            readyAt: 11846,
+            probes: f.calls.map((call) => call.at),
+            attempts,
+            states,
+            navigations: f.navigations.length,
+          }),
+        );
+        assert.deepEqual(f.navigations, [base]);
+      });
   },
 );
 

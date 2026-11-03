@@ -374,8 +374,13 @@ window.__ModuleLoader__.load({
           ) || base.pathname === '/'
         ) ||
         !window.location.pathname.startsWith(base.pathname)
-      )
+      ) {
+        console.info('auriga.entry_recovery', {
+          event: 'scope_skipped',
+          reason: 'unsupported_location',
+        });
         return () => {};
+      }
       const key = 'auriga.entry-recovery:' + base.pathname;
       let closed = false,
         navigated = false,
@@ -385,13 +390,42 @@ window.__ModuleLoader__.load({
       let generation = connection.generation.getSnapshot();
       // Timers are cancellable resources; deadlines are facts about this loss
       // cycle and must survive document visibility and browser wake events.
-      let request, retryTimer, cycleTimer, deadline;
+      let request, retryTimer, cycleTimer, deadline, lossStartedAt;
+      let availability = false,
+        canAwaitEdge = true;
       let nextProbeAt = 0;
       const now = () => window.performance.now();
+      const trace = (event, reason, status) => {
+        try {
+          const state = connection.state.getSnapshot();
+          console.info('auriga.entry_recovery', {
+            event,
+            reason,
+            attempt: attempts,
+            phase: availability ? 'availability' : 'short',
+            state: ['connected', 'connecting', 'disconnected'].includes(state)
+              ? state
+              : 'initial',
+            elapsedMs:
+              lossStartedAt === undefined
+                ? 0
+                : Math.max(0, Math.round(now() - lossStartedAt)),
+            ...(Number.isInteger(status) && status >= 100 && status < 600
+              ? { status }
+              : {}),
+          });
+        } catch {
+          /* diagnostics cannot change recovery or authorization */
+        }
+      };
       const cleanups = [];
       const cancel = () => {
         epoch++;
-        if (request) nextProbeAt = Math.max(nextProbeAt, now() + 2000);
+        if (request)
+          nextProbeAt = Math.max(
+            nextProbeAt,
+            now() + (availability ? 10000 : 2000),
+          );
         request?.abort();
         request = undefined;
         clearTimeout(retryTimer);
@@ -418,6 +452,15 @@ window.__ModuleLoader__.load({
         deadline !== undefined &&
         now() < deadline &&
         !document.hidden;
+      const scheduleProbe = (delay) => {
+        const version = epoch;
+        const timer = setTimeout(() => {
+          if (closed || epoch !== version || retryTimer !== timer) return;
+          retryTimer = undefined;
+          void probe();
+        }, delay);
+        retryTimer = timer;
+      };
       async function probe() {
         if (
           closed ||
@@ -425,39 +468,43 @@ window.__ModuleLoader__.load({
           request ||
           retryTimer ||
           settled ||
-          attempts >= 3 ||
+          attempts >= (availability ? 5 : 3) ||
           blocked() ||
           !pending() ||
           document.hidden
         )
           return;
         if (deadline === undefined || now() >= deadline) {
+          trace('cycle_stopped', 'deadline');
           settled = true;
           cancel();
           return;
         }
         if (now() < nextProbeAt) {
-          retryTimer = setTimeout(() => {
-            retryTimer = undefined;
-            void probe();
-          }, nextProbeAt - now());
+          scheduleProbe(nextProbeAt - now());
           return;
         }
         const version = epoch,
           controller = new AbortController();
-        if (cycleTimer === undefined)
+        if (cycleTimer === undefined) {
+          const until = deadline;
           cycleTimer = setTimeout(() => {
+            if (closed || epoch !== version || deadline !== until) return;
+            trace('cycle_stopped', 'deadline');
             settled = true;
             cancel();
           }, deadline - now());
+        }
         request = controller;
         attempts++;
+        trace('probe_started', 'read_only');
         let abort;
         const cancelled = new Promise((_, reject) => {
           abort = () => reject(new Error('entry probe cancelled'));
           controller.signal.addEventListener('abort', abort, { once: true });
         });
         let outcome = 'stop';
+        let status;
         try {
           outcome = await Promise.race([
             (async () => {
@@ -474,6 +521,7 @@ window.__ModuleLoader__.load({
                   signal: controller.signal,
                 },
               );
+              status = response.status;
               if ([502, 503, 504].includes(response.status)) return 'retry';
               if (
                 response.status !== 401 ||
@@ -499,27 +547,47 @@ window.__ModuleLoader__.load({
           controller.signal.removeEventListener('abort', abort);
           if (request === controller) request = undefined;
         }
+        trace('probe_completed', outcome, status);
         if (!current(version)) return;
         if (outcome === 'recover' && !controller.signal.aborted && !blocked()) {
           navigated = true;
+          trace('navigation', 'edge_entry_required');
           cancel();
           // The top-level GET receives edge's fixed normal-open recovery page.
           // That page owns the tab marker and trusted cross-origin portal hop.
           window.location.replace(base.href);
-        } else if (outcome === 'retry' && attempts < 3) {
-          nextProbeAt = now() + 2000;
-          retryTimer = setTimeout(() => {
-            retryTimer = undefined;
-            void probe();
-          }, 2000);
+        } else if (outcome === 'retry') {
+          canAwaitEdge &&= status === undefined || [502, 503].includes(status);
+          // A missing edge is not an authentication verdict. Only three
+          // completed availability failures admit the two low-frequency reads.
+          // Their absolute cap remains anchored to the original connection loss.
+          if (!availability && attempts === 3 && canAwaitEdge) {
+            availability = true;
+            deadline = lossStartedAt + 30000;
+            clearTimeout(cycleTimer);
+            cycleTimer = undefined;
+            trace('availability_wait', 'edge_unavailable', status);
+          }
+          if (attempts < (availability ? 5 : 3)) {
+            const delay = availability ? 10000 : 2000;
+            nextProbeAt = now() + delay;
+            scheduleProbe(delay);
+          } else {
+            trace('cycle_stopped', 'attempt_limit', status);
+            settled = true;
+            clearTimeout(cycleTimer);
+            cycleTimer = undefined;
+          }
         } else {
+          trace('cycle_stopped', 'non_entry_reply', status);
           settled = true;
           clearTimeout(cycleTimer);
           cycleTimer = undefined;
         }
       }
-      const changed = () => {
+      const changed = (trigger = 'connection') => {
         if (closed) return;
+        trace('trigger', trigger);
         const next = connection.generation.getSnapshot();
         if (next !== generation) {
           cancel();
@@ -527,6 +595,9 @@ window.__ModuleLoader__.load({
           attempts = 0;
           settled = false;
           deadline = undefined;
+          lossStartedAt = undefined;
+          availability = false;
+          canAwaitEdge = true;
           nextProbeAt = 0;
         }
         if (connection.state.getSnapshot() === 'connected' && next) {
@@ -534,6 +605,9 @@ window.__ModuleLoader__.load({
           attempts = 0;
           settled = false;
           deadline = undefined;
+          lossStartedAt = undefined;
+          availability = false;
+          canAwaitEdge = true;
           nextProbeAt = 0;
           try {
             window.sessionStorage.removeItem(key);
@@ -542,19 +616,21 @@ window.__ModuleLoader__.load({
           }
         } else if (!pending()) cancel();
         else {
-          deadline ??= now() + 6000;
+          lossStartedAt ??= now();
+          deadline ??= lossStartedAt + 6000;
           if (document.hidden) cancel();
           else void probe();
         }
       };
-      const resume = () => {
+      const resume = (trigger) => {
         if (!closed && !request) {
-          changed();
+          changed(trigger);
         }
       };
       const stop = () => {
         if (closed) return;
         closed = true;
+        trace('disposed', 'lifecycle');
         cancel();
         cleanups
           .splice(0)
@@ -562,20 +638,23 @@ window.__ModuleLoader__.load({
           .forEach((cleanup) => cleanup());
       };
       cleanups.push(
-        connection.state.subscribe(changed),
-        connection.generation.subscribe(changed),
+        connection.state.subscribe(() => changed('state')),
+        connection.generation.subscribe(() => changed('generation')),
       );
       for (const event of ['focus', 'online']) {
-        window.addEventListener(event, resume);
-        cleanups.push(() => window.removeEventListener(event, resume));
+        const wake = () => resume(event);
+        window.addEventListener(event, wake);
+        cleanups.push(() => window.removeEventListener(event, wake));
       }
-      document.addEventListener('visibilitychange', changed);
+      const visibility = () => changed('visibility');
+      document.addEventListener('visibilitychange', visibility);
       cleanups.push(() =>
-        document.removeEventListener('visibilitychange', changed),
+        document.removeEventListener('visibilitychange', visibility),
       );
       window.addEventListener('pagehide', stop);
       cleanups.push(() => window.removeEventListener('pagehide', stop));
-      changed();
+      trace('installed', 'public_connection');
+      changed('initial');
       return stop;
     }
     return {

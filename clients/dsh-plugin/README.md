@@ -183,12 +183,20 @@ instance document can re-enter through the existing approved portal
 stopped instance or change session lifetime, Origin or CSRF checks.
 
 The browser client observes the public Connection state/generation API. On loss,
-it checks only the current same-origin instance entry and follows only an exact
-edge entry rejection. Network errors and temporary unavailability allow at most
-three read probes, two seconds apart, within six seconds; other responses stop
-the check. A later successful generation permits recovery from a future outage.
-After that bounded window, use a normal page refresh or the portal entry if
-recovery did not finish. A tab marker prevents automatic re-entry loops; the
-recovery page retains a manual portal link. API calls, writes and WebSocket
-failures keep their existing error responses. Missing public Connection
-capabilities disable this feature with a diagnostic instead of patching DSH.
+it reads only the current same-origin health route and follows only an exact
+edge entry rejection. The first three probes are two seconds apart, within six
+seconds. If all three complete with network errors or HTTP 502/503, two further
+availability reads may run ten seconds apart, with an absolute thirty-second
+limit from the original connection loss. This covers edge replacement without
+treating an unavailable edge as an authentication decision. HTTP 200/403 and
+other 401 responses stop the check; visibility and wake events cannot reset its
+deadline or consume a pending retry early.
+
+A later successful generation permits recovery from a future outage. After the
+bounded check, use a normal page refresh or the portal entry if recovery did not
+finish. A tab marker prevents automatic re-entry loops; the recovery page retains
+a manual portal link. API calls, writes and WebSocket failures keep their existing
+error responses. Missing public Connection capabilities disable this feature with
+a diagnostic instead of patching DSH. Browser diagnostics tagged
+`auriga.entry_recovery` contain only event/reason enums, state, attempt number,
+relative time and HTTP status; they omit URLs, credentials and response bodies.
