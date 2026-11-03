@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	goruntime "runtime"
 	"sync"
@@ -115,7 +116,24 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 		scope.engineImageID = record.EngineImageID
 	}
 	defer func() { scope.mu.Lock(); scope.active = false; scope.mu.Unlock() }()
-	return a.Store.WithReleaseExecution(ctx, candidate, func(ctx context.Context) error {
+	// Cancellation while qualifying must still interrupt lock/artifact waits.
+	// Once authorization completes, cancel only the joined operation phase:
+	// WithReleaseExecution can then clear its own intent after definite actions,
+	// while a pending/unknown Engine reply still retains that intent unchanged.
+	parent := ctx
+	qualification, cancelQualification := context.WithCancel(context.WithoutCancel(parent))
+	defer cancelQualification()
+	var gate sync.Mutex
+	authorized := false
+	stopQualification := context.AfterFunc(parent, func() {
+		gate.Lock()
+		defer gate.Unlock()
+		if !authorized {
+			cancelQualification()
+		}
+	})
+	defer stopQualification()
+	return a.Store.WithReleaseExecution(qualification, candidate, func(ctx context.Context) error {
 		if err := scope.recheck(); err != nil {
 			return err
 		}
@@ -127,10 +145,22 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 				return err
 			}
 		}
-		return scope.recheck()
-	}, func(ctx context.Context, e *state.ReleaseExecution) error {
+		if err := scope.recheck(); err != nil {
+			return err
+		}
+		gate.Lock()
+		defer gate.Unlock()
+		if err := parent.Err(); err != nil {
+			return err
+		}
+		authorized = true
+		return nil
+	}, func(_ context.Context, e *state.ReleaseExecution) error {
 		scope.execution = e
-		return run(context.WithValue(ctx, activationKey{}, scope))
+		if err := parent.Err(); err != nil {
+			return err
+		}
+		return errors.Join(run(context.WithValue(parent, activationKey{}, scope)), parent.Err())
 	})
 }
 

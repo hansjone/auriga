@@ -39,6 +39,23 @@ func awaitChecking(t *testing.T, d *healthDriver) {
 	}
 }
 
+func awaitHealthIdle(t *testing.T, r *Reconciler) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		r.mu.Lock()
+		pending := r.healthPending["health-test"]
+		r.mu.Unlock()
+		if !pending {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("health worker did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func (d *healthDriver) CheckHealth(ctx context.Context, id string) (runtime.Status, error) {
 	d.checks.Add(1)
 	if d.block.CompareAndSwap(true, false) {
@@ -148,19 +165,7 @@ func TestHealthHintsCoalesceAndHealthyChecksNeverStart(t *testing.T) {
 		r.RequestHealth("health-test")
 	}
 	d.releaseCheck()
-	deadline := time.Now().Add(time.Second)
-	for {
-		r.mu.Lock()
-		pending := r.healthPending["health-test"]
-		r.mu.Unlock()
-		if !pending {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("coalesced health check did not finish")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	awaitHealthIdle(t, r)
 	if d.checks.Load() != 1 || d.starts.Load() != 0 {
 		t.Fatalf("healthy hints flooded workers or started a process: checks=%d starts=%d", d.checks.Load(), d.starts.Load())
 	}
@@ -206,6 +211,7 @@ func TestHealthCancellationJoinsWorkerAndDoesNotRestartStoppedProcess(t *testing
 	d.running.Store(false)
 	r.RequestHealth("health-test")
 	awaitHealthStatus(t, statuses, func(st *nodev1.InstanceStatus) bool { return st.Error != nil })
+	awaitHealthIdle(t, r)
 	if d.starts.Load() != 0 {
 		t.Fatal("maintenance restarted an unexpectedly stopped process")
 	}

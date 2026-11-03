@@ -239,7 +239,7 @@ func newRecoveryFixtureWithPort(t *testing.T, actualPort string) *recoveryFixtur
 				http.Error(w, "inspection unavailable", http.StatusInternalServerError)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": fixtureConfigID, "State": map[string]any{"Running": true},
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": fixtureConfigID, "State": map[string]any{"Running": true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": 42},
 				"Config":          map[string]any{"Labels": map[string]string{"auriga.generation": "1", "auriga.instance": "recovery-test", "auriga.managed": "true"}},
 				"HostConfig":      map[string]any{"PortBindings": map[string]any{actualPort: []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}},
 				"NetworkSettings": map[string]any{"Ports": map[string]any{actualPort: []any{map[string]string{"HostPort": port}}}}})

@@ -145,7 +145,7 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		if e.mode == "container-id" {
 			actualID = strings.Repeat("f", 64)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Image": image, "State": map[string]any{"Running": body["running"] == true}, "Config": map[string]any{"Labels": body["Labels"]}, "HostConfig": body["HostConfig"], "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": e.port}}}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Image": image, "State": map[string]any{"Running": body["running"] == true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": 42}, "Config": map[string]any{"Labels": body["Labels"]}, "HostConfig": body["HostConfig"], "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": e.port}}}}})
 	case strings.HasSuffix(path, "/start"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/start")
 		body := e.containers[id]
