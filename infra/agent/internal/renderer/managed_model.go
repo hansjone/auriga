@@ -73,14 +73,8 @@ func decodeManagedModel(raw []byte, spec *nodev1.InstanceSpec) (*managedModel, e
 	return &m, nil
 }
 
-func managedModelRow(m *managedModel) any {
-	models := make([]any, 0, len(m.Models))
-	for _, model := range m.Models {
-		models = append(models, map[string]any{"id": model.ID, "contextWindow": model.ContextWindow, "maxTokens": model.MaxOutputTokens})
-	}
-	return map[string]any{"id": "llm-pi-ai", "config": map[string]any{"providers": map[string]any{"auriga-managed": map[string]any{
-		"displayName": "Auriga", "api": "openai-completions", "baseURL": m.BaseURL, "models": models,
-		"compat":  map[string]any{"supportsStore": false},
-		"headers": map[string]any{"Authorization": jsExpr("'Bearer ' + JSON.parse(process.getBuiltinModule('node:fs').readFileSync(" + jsString(ContainerModelCredential) + ", 'utf8')).credential")},
-	}}}}
+func managedModelRow(_ *managedModel) any {
+	// The plugin initializes its provider through the public configuration editor.
+	// A command-line config overlay would veto every subsequent native model save.
+	return map[string]any{"id": "llm-pi-ai"}
 }

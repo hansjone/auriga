@@ -53,8 +53,8 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 		}
 	}
 	patch, err := os.ReadFile(result.CordisPatchFile)
-	if err != nil || !bytes.Contains(patch, []byte("openai-completions")) || !bytes.Contains(patch, []byte("pool-b")) {
-		t.Fatal("native provider missing")
+	if err != nil || !bytes.Contains(patch, []byte("llm-pi-ai")) {
+		t.Fatal("native model entry missing")
 	}
 	oldDigest := result.Digest
 	if _, err = os.Stat(keysPath); !os.IsNotExist(err) {
@@ -84,31 +84,20 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	if err = yaml.Unmarshal(patch, &rows); err != nil {
 		t.Fatal(err)
 	}
-	var provider map[string]any
+	var nativeRow map[string]any
 	for _, row := range rows {
 		if row["id"] == "credentials" {
 			t.Fatal("managed models must not replace the user's credential store")
 		}
 		if row["id"] == "llm-pi-ai" {
-			provider = row["config"].(map[string]any)["providers"].(map[string]any)["auriga-managed"].(map[string]any)
+			nativeRow = row
 		}
 	}
-	if provider == nil {
+	if nativeRow == nil {
 		t.Fatal("native provider row missing")
 	}
-	models := provider["models"].([]any)
-	first := models[0].(map[string]any)
-	second := models[1].(map[string]any)
-	if first["contextWindow"] != 32768 || first["maxTokens"] != 4096 || second["contextWindow"] != 8192 || second["maxTokens"] != 1024 {
-		t.Fatal("native limits must match each authorized pool, not the rc.3 defaults")
-	}
-	compat, ok := provider["compat"].(map[string]any)
-	if !ok || compat["supportsStore"] != false {
-		t.Fatal("store must be disabled for the relay")
-	}
-	headers, ok := provider["headers"].(map[string]any)
-	if provider["apiKeyEnv"] != nil || !ok || !strings.Contains(headers["Authorization"].(string), renderer.ContainerModelCredential) {
-		t.Fatal("managed Authorization must read the sole model file")
+	if nativeRow["config"] != nil {
+		t.Fatal("the native provider must remain editable, without a command-line config override")
 	}
 	credential = strings.TrimSuffix(credential, strings.Repeat("a", 43)) + strings.Repeat("b", 43)
 	material["credential"] = credential

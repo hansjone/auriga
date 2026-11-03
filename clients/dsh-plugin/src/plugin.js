@@ -295,7 +295,6 @@ export async function apply(ctx, config) {
     config: config ?? {},
     startHeartbeat: false,
   });
-  logEvent('INFO', 'AI installation', { state: runtime.modelStatus.state });
   let dispose;
   try {
     dispose = runtime.apply(ctx);

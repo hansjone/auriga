@@ -91,6 +91,41 @@ const signedIn = {
   network: { connected: true, state: 'ready' },
   models: { available: false },
 };
+for (const locale of ['zh', 'en'])
+  test(
+    'managed model status directs native manual synchronization without claiming invocation readiness: ' +
+      locale,
+    async () => {
+      const f = harness(
+        async (url) =>
+          Response.json(
+            url.endsWith('/status')
+              ? {
+                  ...signedIn,
+                  mode: 'managed',
+                  session: { available: true },
+                  models: { state: 'stopped', available: false },
+                }
+              : { ...settings, mode: 'managed' },
+          ),
+        locale,
+      );
+      try {
+        f.render();
+        await setImmediate();
+        const content = text(f.render());
+        assert.match(
+          content,
+          locale === 'zh'
+            ? /原生模型设置中获取并保存目录/
+            : /Fetch and save the catalog in native Models settings/,
+        );
+        assert.doesNotMatch(content, /中转站未就绪|Relay unavailable|stopped/);
+      } finally {
+        f.dispose();
+      }
+    },
+  );
 for (const phase of ['signed-out', 'unavailable', 'pending'])
   test(
     'R7 managed identity never falls back to signed out: ' + phase,

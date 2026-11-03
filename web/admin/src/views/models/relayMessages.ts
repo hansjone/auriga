@@ -39,7 +39,7 @@ const zh = {
   importStop: '停止后续导入',
   importProgress: '已保存 {saved} / {total}',
   importSavedNote:
-    '外部新请求采用已保存模型。已启用目录同步的运行中 Auriga DSH 约30秒获取新目录，也可在原生模型设置中重新获取；无需重启。',
+    '外部新请求采用已保存模型。Auriga DSH 可在原生模型设置中编辑 Auriga，获取可用模型、勾选并保存目录；无需重启。',
   applyCapabilities: '从上游应用能力',
   capabilityNote:
     '只在所有路由参数已知时应用最小值，保留已设的更小限制；刷新目录不会自动修改配置。',
@@ -120,7 +120,7 @@ const zh = {
     '按权重分配请求；供应商不可用时自动尝试池内其他路由。停用的供应商不参与新请求。',
   configureAuto: '配置 Auto 默认路由',
   autoNote:
-    'Auriga 默认模型 ID 固定为 auto；请在现有池表单配置真实路由并保存。运行中的 DSH 约30秒更新目录；已有会话与个人选择保留。',
+    'Auriga 默认模型 ID 固定为 auto；请在现有池表单配置真实路由并保存。仅调整路由不需同步 DSH 目录；新增模型可在原生设置中手动获取并保存。已有会话与个人选择保留。',
   createKey: '签发对外 Key',
   budget: '每月预算（USD 微单位）',
   rpm: '每分钟请求上限',
@@ -219,7 +219,7 @@ const en: Record<keyof typeof zh, string> = {
   importStop: 'Stop subsequent imports',
   importProgress: 'Saved {saved} / {total}',
   importSavedNote:
-    'External requests use saved models. Auriga DSH instances with catalog synchronization refresh about every 30 seconds, or from native model settings, without a restart.',
+    'External requests use saved models. In native Models settings, edit Auriga, fetch available models, select and save without restarting DSH.',
   applyCapabilities: 'Apply upstream limits',
   capabilityNote:
     'Apply the minimum only when every route has known limits. Smaller manual limits are retained. Catalog refresh never edits saved configuration.',
@@ -346,7 +346,7 @@ const en: Record<keyof typeof zh, string> = {
     'Weighted requests fall back to other routes. Disabled providers receive no new requests.',
   configureAuto: 'Configure Auto default routing',
   autoNote:
-    'Auriga uses the stable model ID auto. Configure real routes and save in the existing pool form. Running DSH instances refresh the catalog about every 30 seconds; existing sessions and personal choices are retained.',
+    'Auriga uses the stable model ID auto. Configure real routes and save in the existing pool form. Route changes need no DSH catalog sync; fetch and save newly published models in native settings. Existing sessions and personal choices are retained.',
   revokeNote: 'Revocation immediately blocks new requests using this key.',
   issuedNote:
     'Shown in this page only. Closing, refreshing or leaving clears the secret.',
