@@ -235,6 +235,32 @@ function source(model: CatalogModel) {
     .filter(Boolean)
     .join(' · ');
 }
+function upstreamText(row: ImportRow, dimension: 'context' | 'output') {
+  const limits = capabilityLimits(row.model);
+  return t('capabilityUpstreamValue', {
+    tokens: limits[dimension]?.toLocaleString() ?? t('capabilityNotProvided'),
+  });
+}
+function effectiveText(row: ImportRow, dimension: 'context' | 'output') {
+  const limits = capabilityLimits(row.model);
+  const mode = dimension === 'context' ? row.contextMode : row.outputMode;
+  const value = row[dimension] ?? 0;
+  const origin =
+    mode === 'manual'
+      ? 'manual'
+      : limits[dimension] !== undefined
+        ? 'upstream'
+        : value > 0
+          ? 'recommended'
+          : 'unknown';
+  return (
+    t('capabilityEffectiveValue', {
+      tokens: value > 0 ? value.toLocaleString() : t('unknown'),
+    }) +
+    ' · ' +
+    t('capabilityOrigin_' + origin)
+  );
+}
 async function run() {
   if (!ready.value || !confirmed.value || running.value || !writable.value)
     return;
@@ -502,6 +528,9 @@ async function run() {
                 }}</small>
               </td>
               <td>
+                <small :data-testid="'import-context-upstream-' + index">{{
+                  upstreamText(row, 'context')
+                }}</small>
                 <select
                   v-model="row.contextMode"
                   :name="'importContextMode' + index"
@@ -521,8 +550,14 @@ async function run() {
                   :disabled="running || !!row.body"
                   @input="row.contextMode = 'manual'"
                 />
+                <small :data-testid="'import-context-effective-' + index">{{
+                  effectiveText(row, 'context')
+                }}</small>
               </td>
               <td>
+                <small :data-testid="'import-output-upstream-' + index">{{
+                  upstreamText(row, 'output')
+                }}</small>
                 <select
                   v-model="row.outputMode"
                   :name="'importOutputMode' + index"
@@ -542,6 +577,9 @@ async function run() {
                   :disabled="running || !!row.body"
                   @input="row.outputMode = 'manual'"
                 />
+                <small :data-testid="'import-output-effective-' + index">{{
+                  effectiveText(row, 'output')
+                }}</small>
               </td>
               <td>{{ source(row.model) }}</td>
               <td>

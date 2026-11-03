@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { RelayPool, RelayProvider } from '../../admin/relayApi';
 import { useRelayI18n } from './relayMessages';
 import {
@@ -7,7 +7,9 @@ import {
   capabilityOrigin,
   captureUpstreamCapabilities,
   reconcileCapabilitySource,
+  setCapabilityMode,
   sourceKey,
+  upstreamCapabilityValue,
   type CatalogState,
 } from './poolCapabilities';
 const pool = defineModel<RelayPool>({ required: true });
@@ -18,6 +20,50 @@ const props = defineProps<{
 const emit = defineEmits<{ refresh: [] }>();
 const { t } = useRelayI18n();
 const policy = computed(() => pool.value.capabilities!);
+const adoptionNotice = ref('');
+const contextMode = computed({
+  get: () => policy.value.contextWindowMode,
+  set: (mode) => changeMode('context', mode),
+});
+const outputMode = computed({
+  get: () => policy.value.maxOutputTokensMode,
+  set: (mode) => changeMode('output', mode),
+});
+function changeMode(
+  dimension: 'context' | 'output',
+  mode: 'inherit' | 'manual',
+) {
+  const preserved = setCapabilityMode(pool.value, dimension, mode);
+  adoptionNotice.value = preserved ? t('capabilityManualPreserved') : '';
+}
+function adoptUpstream() {
+  const contextPreserved = setCapabilityMode(pool.value, 'context', 'inherit');
+  const outputPreserved = setCapabilityMode(pool.value, 'output', 'inherit');
+  adoptionNotice.value = t(
+    contextPreserved || outputPreserved
+      ? 'capabilityManualPreserved'
+      : 'capabilityPriorityAdopted',
+  );
+}
+function upstreamText(dimension: 'context' | 'output') {
+  return (
+    upstreamCapabilityValue(pool.value, dimension)?.toLocaleString() ??
+    t(policy.value.upstream ? 'capabilityNotProvided' : 'capabilityNotFetched')
+  );
+}
+function effectiveText(dimension: 'context' | 'output') {
+  const value =
+    dimension === 'context'
+      ? pool.value.contextWindow
+      : pool.value.maxOutputTokens;
+  return (
+    t('capabilityEffectiveValue', {
+      tokens: value > 0 ? value.toLocaleString() : t('unknown'),
+    }) +
+    ' · ' +
+    t('capabilityOrigin_' + capabilityOrigin(pool.value, dimension))
+  );
+}
 const selectedSource = computed({
   get: () => sourceKey(policy.value.sourceProviderId, policy.value.sourceModel),
   set(value: string) {
@@ -25,6 +71,7 @@ const selectedSource = computed({
     policy.value.sourceProviderId = providerId;
     policy.value.sourceModel = model;
     delete policy.value.upstream;
+    adoptionNotice.value = '';
     syncSource();
   },
 });
@@ -41,8 +88,6 @@ watch(() => JSON.stringify(pool.value.routes), syncSource, { immediate: true });
 watch(() => JSON.stringify(props.catalogs), syncSource);
 watch(
   () => [
-    policy.value.contextWindowMode,
-    policy.value.maxOutputTokensMode,
     policy.value.recommendedContextWindow,
     policy.value.recommendedMaxOutputTokens,
   ],
@@ -71,9 +116,47 @@ watch(
         </option>
       </select>
     </label>
-    <label
+    <div class="relay-wide relay-toolbar relay-capability-actions">
+      <button
+        type="button"
+        data-testid="apply-capabilities"
+        :disabled="
+          !policy.sourceProviderId ||
+          !policy.sourceModel ||
+          catalogs[policy.sourceProviderId]?.loading
+        "
+        @click="emit('refresh')"
+      >
+        {{ t('applyCapabilities') }}
+      </button>
+      <button
+        type="button"
+        class="relay-primary"
+        data-testid="adopt-upstream-capabilities"
+        :disabled="
+          !policy.sourceProviderId ||
+          !policy.sourceModel ||
+          catalogs[policy.sourceProviderId]?.loading
+        "
+        @click="adoptUpstream"
+      >
+        {{ t('capabilityAdoptUpstream') }}
+      </button>
+      <p>{{ t('capabilityActionsNote') }}</p>
+      <p
+        v-if="adoptionNotice"
+        role="status"
+        data-testid="capability-adoption-notice"
+      >
+        {{ adoptionNotice }}
+      </p>
+    </div>
+    <label class="relay-capability-field"
       >{{ t('context') }}
-      <select v-model="policy.contextWindowMode" name="contextCapabilityMode">
+      <small data-testid="context-upstream">{{
+        t('capabilityUpstreamValue', { tokens: upstreamText('context') })
+      }}</small>
+      <select v-model="contextMode" name="contextCapabilityMode">
         <option value="inherit">{{ t('capabilityInherit') }}</option>
         <option value="manual">{{ t('capabilityManual') }}</option>
       </select>
@@ -86,13 +169,21 @@ watch(
         :disabled="policy.contextWindowMode === 'inherit'"
         required
       />
-      <small>{{
-        t('capabilityOrigin_' + capabilityOrigin(pool, 'context'))
+      <small data-testid="context-effective">{{
+        effectiveText('context')
       }}</small>
+      <small
+        v-if="contextMode === 'manual'"
+        data-testid="context-manual-note"
+        >{{ t('capabilityManualActive') }}</small
+      >
     </label>
-    <label
+    <label class="relay-capability-field"
       >{{ t('output') }}
-      <select v-model="policy.maxOutputTokensMode" name="outputCapabilityMode">
+      <small data-testid="output-upstream">{{
+        t('capabilityUpstreamValue', { tokens: upstreamText('output') })
+      }}</small>
+      <select v-model="outputMode" name="outputCapabilityMode">
         <option value="inherit">{{ t('capabilityInherit') }}</option>
         <option value="manual">{{ t('capabilityManual') }}</option>
       </select>
@@ -105,8 +196,11 @@ watch(
         :disabled="policy.maxOutputTokensMode === 'inherit'"
         required
       />
-      <small>{{
-        t('capabilityOrigin_' + capabilityOrigin(pool, 'output'))
+      <small data-testid="output-effective">{{
+        effectiveText('output')
+      }}</small>
+      <small v-if="outputMode === 'manual'" data-testid="output-manual-note">{{
+        t('capabilityManualActive')
       }}</small>
     </label>
     <label
@@ -146,18 +240,6 @@ watch(
       }}
     </p>
     <div class="relay-wide relay-limit-help">
-      <button
-        type="button"
-        data-testid="apply-capabilities"
-        :disabled="
-          !policy.sourceProviderId ||
-          !policy.sourceModel ||
-          catalogs[policy.sourceProviderId]?.loading
-        "
-        @click="emit('refresh')"
-      >
-        {{ t('applyCapabilities') }}
-      </button>
       <p>{{ t('capabilityNote') }}</p>
     </div>
   </div>
