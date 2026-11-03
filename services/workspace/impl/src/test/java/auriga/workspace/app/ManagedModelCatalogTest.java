@@ -31,22 +31,44 @@ class ManagedModelCatalogTest {
     assertEquals(3, models.get(0).size());
     assertFalse(models.toString().contains("real-gpt"));
     assertTrue(
-        ManagedModelCatalog.hasLimits(
+        ManagedModelCatalog.hasCatalog(
             WorkspaceService.JSON.createObjectNode().set("models", models)));
   }
 
   @Test
-  void unknownOrInconsistentLimitsFailWithoutInventingDefaults() {
+  void unknownAndLargeCapabilitiesRemainOptionalWithoutInventingDefaults() {
+    var models =
+        ManagedModelCatalog.fromGateway(
+            WorkspaceService.JSON.readTree(
+                """
+      [{"id":"unknown"}, {"id":"context","context_window":2000000},
+       {"id":"output","max_output_tokens":131072},
+       {"id":"large","context_window":2000000,"max_output_tokens":131072}]
+      """));
+    assertEquals(4, models.size());
+    assertEquals(1, models.get(0).size());
+    assertFalse(models.get(1).has("maxOutputTokens"));
+    assertFalse(models.get(2).has("contextWindow"));
+    assertEquals(2000000, models.get(3).path("contextWindow").asLong());
+    assertEquals(131072, models.get(3).path("maxOutputTokens").asLong());
+    assertTrue(
+        ManagedModelCatalog.hasCatalog(
+            WorkspaceService.JSON.createObjectNode().set("models", models)));
+  }
+
+  @Test
+  void invalidProvidedCapabilitiesFailWithoutInventingDefaults() {
     for (String fields :
         List.of(
-            "",
-            ",\"context_window\":32768",
             ",\"context_window\":0,\"max_output_tokens\":1",
+            ",\"context_window\":1",
+            ",\"context_window\":-1",
+            ",\"max_output_tokens\":-1",
             ",\"context_window\":32768,\"max_output_tokens\":0",
             ",\"context_window\":4096,\"max_output_tokens\":4096",
             ",\"context_window\":4096,\"max_output_tokens\":8192",
-            ",\"context_window\":1048577,\"max_output_tokens\":1",
-            ",\"context_window\":1048576,\"max_output_tokens\":32769",
+            ",\"context_window\":9007199254740992",
+            ",\"max_output_tokens\":9007199254740992",
             ",\"context_window\":32768,\"max_output_tokens\":1.5",
             ",\"context_window\":\"32768\",\"max_output_tokens\":4096",
             ",\"context_window\":null,\"max_output_tokens\":4096")) {
@@ -57,13 +79,20 @@ class ManagedModelCatalogTest {
                   WorkspaceService.JSON.readTree("[{\"id\":\"public\"" + fields + "}]")),
           fields);
     }
-    assertFalse(
-        ManagedModelCatalog.hasLimits(
+    assertTrue(
+        ManagedModelCatalog.hasCatalog(
             WorkspaceService.JSON.readTree("{\"models\":[{\"id\":\"legacy\"}]}")));
+    for (String invalid :
+        List.of("[]", "[{\"id\":\"same\"},{\"id\":\"same\",\"context_window\":2000000}]")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> ManagedModelCatalog.fromGateway(WorkspaceService.JSON.readTree(invalid)));
+    }
   }
 
   @Test
-  void existingIdOnlyMaterialRefreshesOnceThroughTheNormalCatalogPath() throws Exception {
+  void invalidExistingMaterialRefreshesOnceButUnknownCapabilitiesDoNotForceRotation()
+      throws Exception {
     var tenant = UUID.randomUUID();
     var instance = UUID.randomUUID();
     var crypto = new WorkspaceCrypto(new byte[32]);
@@ -79,7 +108,7 @@ class ManagedModelCatalogTest {
         exchange -> {
           calls.incrementAndGet();
           byte[] body =
-              "{\"data\":[{\"id\":\"public\",\"context_window\":32768,\"max_output_tokens\":4096}]}"
+              "{\"data\":[{\"id\":\"public\"},{\"id\":\"large\",\"context_window\":2000000,\"max_output_tokens\":131072}]}"
                   .getBytes(StandardCharsets.UTF_8);
           exchange.sendResponseHeaders(200, body.length);
           try (var output = exchange.getResponseBody()) {
@@ -109,7 +138,15 @@ class ManagedModelCatalogTest {
       var credential =
           IssueManagedDeviceResponse.newBuilder().setModelCredential("fixture").build();
       models.reconcile(row, credential);
-      assertEquals(1, calls.get(), "legacy material must not retain the old early return");
+      assertEquals(0, calls.get(), "a valid unknown capability does not require material rotation");
+      row.put(
+          "managed_model_credential",
+          crypto.encrypt(
+              "{\"models\":[{\"id\":\"public\",\"contextWindow\":0}]}"
+                  .getBytes(StandardCharsets.UTF_8),
+              tenant + "/managed-model/" + instance));
+      models.reconcile(row, credential);
+      assertEquals(1, calls.get(), "invalid material refreshes through the normal catalog path");
       verify(store).tx(any());
       row.put(
           "managed_model_credential",

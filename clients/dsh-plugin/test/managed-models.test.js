@@ -295,6 +295,24 @@ test('a fresh native section is seeded from material without replacing personal 
   assert.equal(f.value.providers[ID].headers, undefined);
   assert.equal(f.requests, 0);
 });
+test('fresh native bootstrap preserves unknown and large upstream capabilities without writing undefined values', async (t) => {
+  const f = fixture(t);
+  delete f.value.providers[ID];
+  f.material.value.models = [
+    { id: 'auto' },
+    { id: 'context-only', contextWindow: 2000000 },
+    { id: 'output-only', maxOutputTokens: 131072 },
+    { id: 'large', contextWindow: 2000000, maxOutputTokens: 131072 },
+  ];
+  f.attach();
+  await f.model.ready;
+  assert.deepEqual(f.value.providers[ID].models, [
+    { id: 'auto', name: 'auto' },
+    { id: 'context-only', name: 'context-only', contextWindow: 2000000 },
+    { id: 'output-only', name: 'output-only', maxTokens: 131072 },
+    { id: 'large', name: 'large', contextWindow: 2000000, maxTokens: 131072 },
+  ]);
+});
 test('normal migration only removes the known platform header expression and retains saved preferences', async (t) => {
   const f = fixture(t);
   delete f.value.providers[ID].apiKeyEnv;

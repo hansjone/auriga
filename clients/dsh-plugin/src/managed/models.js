@@ -216,8 +216,12 @@ export function createManagedModels({
                       material.value.models.map((/** @type {any} */ model) => ({
                         id: model.id,
                         name: model.id,
-                        contextWindow: model.contextWindow,
-                        maxTokens: model.maxOutputTokens,
+                        ...(model.contextWindow === undefined
+                          ? {}
+                          : { contextWindow: model.contextWindow }),
+                        ...(model.maxOutputTokens === undefined
+                          ? {}
+                          : { maxTokens: model.maxOutputTokens }),
                       })),
                   },
                 };

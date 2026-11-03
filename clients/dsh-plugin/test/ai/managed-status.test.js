@@ -86,18 +86,6 @@ for (const [name, change] of [
     },
   ],
   [
-    'unknown context',
-    (v) => {
-      delete v.models[0].contextWindow;
-    },
-  ],
-  [
-    'unknown output',
-    (v) => {
-      delete v.models[0].maxOutputTokens;
-    },
-  ],
-  [
     'invalid output',
     (v) => {
       v.models[0].maxOutputTokens = 32768;
@@ -113,6 +101,63 @@ for (const [name, change] of [
       (error) => !/amc\.|unbound-private-key|key=private/.test(error.message),
     );
   });
+
+for (const models of [
+  [{ id: 'unknown' }],
+  [{ id: 'context-only', contextWindow: 2000000 }],
+  [{ id: 'output-only', maxOutputTokens: 131072 }],
+  [
+    { id: 'large', contextWindow: 2000000, maxOutputTokens: 131072 },
+    { id: 'unknown' },
+  ],
+])
+  test(
+    'bootstrap material preserves optional upstream capabilities: ' +
+      JSON.stringify(models),
+    async (t) => {
+      const f = await fixture(t);
+      f.value.models = models;
+      await f.write();
+      const material = await loadManagedModelMaterial({
+        ...binding,
+        file: f.file,
+      });
+      assert.deepEqual(
+        JSON.parse(JSON.stringify(material.value.models)),
+        models,
+      );
+    },
+  );
+
+for (const [field, values] of [
+  [
+    'contextWindow',
+    [0, 1, -1, 1.5, null, '2000000', Number.MAX_SAFE_INTEGER + 1],
+  ],
+  [
+    'maxOutputTokens',
+    [0, -1, 1.5, null, '131072', Number.MAX_SAFE_INTEGER + 1],
+  ],
+])
+  for (const value of values)
+    test(
+      'invalid optional capability is rejected: ' + field + '=' + value,
+      async (t) => {
+        const f = await fixture(t);
+        f.value.models = [{ id: 'invalid', [field]: value }];
+        await f.write();
+        await assert.rejects(
+          loadManagedModelMaterial({ ...binding, file: f.file }),
+        );
+      },
+    );
+
+test('duplicate model IDs remain invalid even when capabilities are unknown', async (t) => {
+  const f = await fixture(t);
+  f.value.models = [{ id: 'same' }, { id: 'same', contextWindow: 2000000 }];
+  await f.write();
+  await assert.rejects(loadManagedModelMaterial({ ...binding, file: f.file }));
+});
 test('oversized private material is refused before parsing', async (t) => {
   const f = await fixture(t);
   await writeFile(f.file, ' '.repeat(1048577));

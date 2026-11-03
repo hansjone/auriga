@@ -26,7 +26,7 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	spec.Secrets = &nodev1.Secrets{}
 	opt := renderer.Options{MetaDir: t.TempDir(), Access: testAccess(t, ""), SealingPrivate: priv}
 	credential := "amc." + spec.TenantId + "." + spec.OwnerId + "." + spec.InstanceId + ".01900000-0000-7000-8000-000000000003." + strings.Repeat("a", 43)
-	material := map[string]any{"tenantId": spec.TenantId, "ownerId": spec.OwnerId, "instanceId": spec.InstanceId, "credentialVersion": 1, "credential": credential, "baseUrl": "https://portal.example.com/ai/v1", "models": []any{map[string]any{"id": "pool-a", "contextWindow": 32768, "maxOutputTokens": 4096}, map[string]any{"id": "pool-b", "contextWindow": 8192, "maxOutputTokens": 1024}}}
+	material := map[string]any{"tenantId": spec.TenantId, "ownerId": spec.OwnerId, "instanceId": spec.InstanceId, "credentialVersion": 1, "credential": credential, "baseUrl": "https://portal.example.com/ai/v1", "models": []any{map[string]any{"id": "pool-a", "contextWindow": 32768, "maxOutputTokens": 4096}, map[string]any{"id": "pool-b", "contextWindow": 8192, "maxOutputTokens": 1024}, map[string]any{"id": "unknown"}, map[string]any{"id": "context-only", "contextWindow": 2000000}, map[string]any{"id": "output-only", "maxOutputTokens": 131072}, map[string]any{"id": "large", "contextWindow": 2000000, "maxOutputTokens": 131072}}}
 	raw, err := json.Marshal(material)
 	if err != nil {
 		t.Fatal(err)
