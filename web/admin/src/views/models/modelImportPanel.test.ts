@@ -46,6 +46,20 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.resetAllMocks());
+it('clears every selected search result including a manually selected existing model', async () => {
+  const w = make();
+  await w.setProps({ pools: [{ id: 'a' } as RelayPool] });
+  await flushPromises();
+  await w.get('input[value="a"]').setValue(true);
+  await w
+    .findAll('button')
+    .find((button) => button.text() === '取消搜索结果')!
+    .trigger('click');
+  expect((w.get('input[value="a"]').element as HTMLInputElement).checked).toBe(
+    false,
+  );
+  w.unmount();
+});
 it('allows an already published upstream model to receive a new alias without overwriting its existing public ID', async () => {
   const w = make();
   await w.setProps({ pools: [{ id: 'a' } as RelayPool] });

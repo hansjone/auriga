@@ -141,7 +141,7 @@ async function fetchModels() {
 onMounted(fetchModels);
 function selectVisible(value: boolean) {
   const ids = visible.value
-    .filter((v) => !existing.value.has(suggestPublicId(v.id)))
+    .filter((v) => !value || !existing.value.has(suggestPublicId(v.id)))
     .map((v) => v.id);
   selected.value = value
     ? [...new Set([...selected.value, ...ids])]
