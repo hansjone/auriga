@@ -83,3 +83,27 @@ func TestPreferResponsesChatAliasIsLocal(t *testing.T) {
 		t.Fatal("SDK zero config changed")
 	}
 }
+
+func TestResponsesOutputKeepsOneChoiceAndAllReasoning(t *testing.T) {
+	var response schemas.BifrostResponsesResponse
+	raw := []byte(`{"status":"completed","output":[{"id":"rs_a","type":"reasoning","summary":[{"type":"summary_text","text":"first"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"one"},{"type":"output_text","text":"two"}]},{"type":"function_call","call_id":"call_a","name":"lookup_a","arguments":"{}"},{"id":"rs_b","type":"reasoning","summary":[{"type":"summary_text","text":"second"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"three"}]},{"type":"function_call","call_id":"call_b","name":"lookup_b","arguments":"{}"}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatal(err)
+	}
+	before, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := response.ToBifrostChatResponse()
+	if len(chat.Choices) != 1 || chat.Choices[0].Index != 0 || chat.Choices[0].Message == nil {
+		t.Fatalf("one generation became choices: %+v", chat.Choices)
+	}
+	message := chat.Choices[0].Message
+	if message.Content == nil || message.Content.ContentStr == nil || *message.Content.ContentStr != "onetwothree" || len(message.ToolCalls) != 2 || len(message.ReasoningDetails) != 2 || *message.ReasoningDetails[0].ID != "rs_a" || *message.ReasoningDetails[1].ID != "rs_b" || message.ReasoningDetails[1].Index != 1 || *chat.Choices[0].FinishReason != "tool_calls" || chat.Usage.TotalTokens != 5 {
+		t.Fatalf("incomplete generation: %+v", message)
+	}
+	after, err := json.Marshal(response)
+	if err != nil || string(before) != string(after) {
+		t.Fatal("conversion mutated provider output")
+	}
+}
