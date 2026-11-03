@@ -167,8 +167,18 @@ func TestLimitsAndPeriods(t *testing.T) {
 		snap := snapshot(t)
 		snap.Admission.DailyTokens = nil
 		snap.Admission.MonthlyBudgetMicros = nil
+		// Unset quota and traffic caps do not create an artificial bound. The
+		// ledger's explicit two-request concurrency policy still applies.
+		first := admit(t, l, snap, "")
+		second := admit(t, l, snap, "")
 		_, err := l.Admit(t.Context(), snap, request(""))
-		wantCode(t, err, "ai.budget_unavailable")
+		wantCode(t, err, "common.rate_limited")
+		finish(t, l, dispatch(t, l, first), snap, 8, 2)
+		finish(t, l, dispatch(t, l, second), snap, 8, 2)
+		owner, usage, outbox := counts(t, s, snap.Admission)
+		if owner != (subject{}) || usage != 2 || outbox != 2 {
+			t.Fatalf("unlimited quota changed strict accounting: %+v %d %d", owner, usage, outbox)
+		}
 		cap := int64(10)
 		bounded := ledger(t, s, &api.AdmissionPolicy{MaxActiveRequestsPerSubject: 2, MaxInFlightPercent: 25, MaxInFlightTokens: &cap, MaxInFlightMicros: &cap})
 		admit(t, bounded, snap, "")

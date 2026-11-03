@@ -27,8 +27,10 @@ func TestReviewUpstreamRecoveryImmediatelyRestoresKey(t *testing.T) {
 	}
 	tenant, _ := newID()
 	var fail atomic.Bool
+	var calls atomic.Int32
 	fail.Store(true)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		if fail.Load() {
 			w.WriteHeader(400)
 			_, _ = w.Write([]byte(`{"error":{"message":"bad request","type":"invalid_request_error"}}`))
@@ -49,12 +51,13 @@ func TestReviewUpstreamRecoveryImmediatelyRestoresKey(t *testing.T) {
 	if e = b.SavePool(t.Context(), tenant, pool); e != nil {
 		t.Fatal(e)
 	}
-	k, e := b.SaveKey(t.Context(), tenant, "", api.RelayKeyInput{Name: "ext", Active: true, MonthlyBudgetMicros: 1000000000, RequestsPerMinute: 1000, Models: []string{"pool"}})
+	concurrency, tokens := int64(1), int64(1<<20)
+	k, e := b.SaveKey(t.Context(), tenant, "", api.RelayKeyInput{Name: "ext", Active: true, MonthlyBudgetMicros: 1000000000, RequestsPerMinute: 1000, MaxConcurrency: &concurrency, MaxInFlightTokens: &tokens, Models: []string{"pool"}})
 	if e != nil {
 		t.Fatal(e)
 	}
 	do := func() (int, string) {
-		r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"pool","messages":[{"role":"user","content":"hi"}]}`))
+		r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"pool","messages":[{"role":"user","content":"hi"}],"max_tokens":64}`))
 		r.Header.Set("Authorization", "Bearer "+k.Secret)
 		w := httptest.NewRecorder()
 		b.ServeHTTP(w, r)
@@ -63,6 +66,13 @@ func TestReviewUpstreamRecoveryImmediatelyRestoresKey(t *testing.T) {
 	for i := 0; i < 9; i++ {
 		c, body := do()
 		t.Logf("fail #%d -> %d %s", i, c, body)
+		if c != 400 || !strings.Contains(body, "provider_rejected_request") {
+			t.Fatalf("expected the provider's rejection, got %d %s", c, body)
+		}
+		if calls.Load() != int32(i+1) {
+			t.Fatalf("request did not reach the provider exactly once: %d", calls.Load())
+		}
+		assertNoHolds(t, b, tenant, k.Key.Id)
 	}
 	fail.Store(false)
 	c, body := do()
@@ -70,4 +80,8 @@ func TestReviewUpstreamRecoveryImmediatelyRestoresKey(t *testing.T) {
 	if c != 200 {
 		t.Fatalf("key remains blocked after upstream recovery: %d %s", c, body)
 	}
+	if calls.Load() != 10 {
+		t.Fatalf("recovery did not reach the provider exactly once: %d", calls.Load())
+	}
+	assertNoHolds(t, b, tenant, k.Key.Id)
 }
