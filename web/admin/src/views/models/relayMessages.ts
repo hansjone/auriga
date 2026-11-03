@@ -34,6 +34,7 @@ const zh = {
   importInvalidLimits:
     '能力须为非负安全整数；上下文为0或至少2，0表示未知；同时已知时输出须小于上下文',
   importWriteUnknown: '未确认保存结果；重试将先读回核对，不会覆盖已有模型',
+  importPreviewChanged: '有效能力已变化，请重新核对预览并确认后导入。',
   importStatus_pending: '待导入',
   importStatus_saving: '保存中',
   importStatus_saved: '已保存',
@@ -62,6 +63,7 @@ const zh = {
   capabilityInputOnly:
     '上游仅提供输入上限 {tokens}，未提供总上下文；两者不混用，也不相加推算。',
   capabilityRefreshFailed: '刷新失败，已保留原上游快照和能力值；请重试。',
+  capabilityRefreshPending: '正在读取上游能力，请完成后再保存。',
   capabilityNote:
     '能力来源默认首条正权重路由，可另选；不会取全部路由或兜底的最小值。继承优先上游，缺失时用推荐值，再缺为未知0。刷新后保存发布，DSH手动同步；这些信息不裁剪或限制中转请求。',
   capabilityUnknown: '部分路由参数未知，请先获取各供应商目录或手动确认。',
@@ -235,6 +237,8 @@ const en: Record<keyof typeof zh, string> = {
     'Use nonnegative safe integers; context must be zero or at least two. Zero means unknown. When both are known, output must be below context.',
   importWriteUnknown:
     'Save result is unconfirmed. Retry checks persisted configuration before writing.',
+  importPreviewChanged:
+    'Effective capabilities changed. Review the preview and confirm before importing.',
   importStatus_pending: 'Pending',
   importStatus_saving: 'Saving',
   importStatus_saved: 'Saved',
@@ -265,6 +269,8 @@ const en: Record<keyof typeof zh, string> = {
     'Upstream reports an input limit of {tokens}, not total context. These values are neither substituted nor added together.',
   capabilityRefreshFailed:
     'Refresh failed. The previous upstream snapshot and values were retained. Retry to update.',
+  capabilityRefreshPending:
+    'Upstream capabilities are loading. Wait for them before saving.',
   capabilityNote:
     'Defaults to the first positive-weight route; another source can be selected. Fallback routes do not shrink it. Inherit upstream, then configured recommendations, then unknown zero. Save after refreshing, then sync DSH manually. These hints do not cap relay requests.',
   capabilityUnknown:

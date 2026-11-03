@@ -77,6 +77,108 @@ beforeEach(() => {
 afterEach(() => vi.resetAllMocks());
 const value = (w: ReturnType<typeof mount>, name: string) =>
   (w.get(`[name="${name}"]`).element as HTMLInputElement).value;
+it('blocks confirmation while a capability refresh is pending, then saves the visible refreshed snapshot', async () => {
+  const pool = legacy();
+  pool.contextWindow = 2000000;
+  pool.maxOutputTokens = 128000;
+  pool.capabilities = {
+    sourceProviderId: providerId,
+    sourceModel: 'large',
+    contextWindowMode: 'inherit',
+    maxOutputTokensMode: 'inherit',
+    upstream: {
+      providerId,
+      model: { id: 'large', contextWindow: 2000000, maxOutputTokens: 128000 },
+    },
+  };
+  persisted = [pool];
+  let finish!: (
+    value: Awaited<ReturnType<typeof relayApi.providerModels>>,
+  ) => void;
+  vi.mocked(relayApi.providerModels).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const w = mount(ProvidersView, { global });
+  try {
+    await flushPromises();
+    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await w.get('[data-testid="apply-capabilities"]').trigger('click');
+    await w.get('[data-testid="pool-form"]').trigger('submit');
+    expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
+    expect(relayApi.savePool).not.toHaveBeenCalled();
+    finish({
+      items: [{ id: 'large', contextWindow: 4000000, maxOutputTokens: 256000 }],
+    });
+    await flushPromises();
+    expect([value(w, 'contextWindow'), value(w, 'maxOutputTokens')]).toEqual([
+      '4000000',
+      '256000',
+    ]);
+    await w.get('[data-testid="pool-form"]').trigger('submit');
+    await w.get('[data-testid="confirm-action"]').trigger('click');
+    await flushPromises();
+    expect(persisted[0]).toMatchObject({
+      contextWindow: 4000000,
+      maxOutputTokens: 256000,
+      capabilities: {
+        upstream: {
+          model: { contextWindow: 4000000, maxOutputTokens: 256000 },
+        },
+      },
+    });
+  } finally {
+    w.unmount();
+    finish?.({ items: [] });
+  }
+});
+it('does not start a refresh after save confirmation has frozen its visible values', async () => {
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  expect(w.find('[data-testid="confirm-action"]').exists()).toBe(true);
+  await w.get('[data-testid="apply-capabilities"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.providerModels).not.toHaveBeenCalled();
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect([persisted[0].contextWindow, persisted[0].maxOutputTokens]).toEqual([
+    1000000, 4096,
+  ]);
+  w.unmount();
+});
+it('ignores a refresh that arrives after closing and opening another pool', async () => {
+  persisted.push({ ...legacy(), id: 'other', contextWindow: 750000 });
+  let finish!: (
+    value: Awaited<ReturnType<typeof relayApi.providerModels>>,
+  ) => void;
+  vi.mocked(relayApi.providerModels).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await w.get('[data-testid="apply-capabilities"]').trigger('click');
+  await w
+    .findAll('button')
+    .find((button) => button.text() === '关闭编辑')!
+    .trigger('click');
+  await w.findAll('[data-testid="edit-pool"]')[1].trigger('click');
+  finish({
+    items: [{ id: 'large', contextWindow: 4000000, maxOutputTokens: 256000 }],
+  });
+  await flushPromises();
+  expect(value(w, 'poolId')).toBe('other');
+  expect(value(w, 'contextWindow')).toBe('750000');
+  expect(w.text()).not.toContain('已刷新所选来源的上游快照');
+  w.unmount();
+});
 it('keeps old explicit values, refreshes only inherited fields and persists them through save and reopen', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();

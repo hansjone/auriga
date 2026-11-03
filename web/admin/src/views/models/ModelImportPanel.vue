@@ -19,6 +19,7 @@ import {
 import {
   captureUpstreamCapabilities,
   createCapabilityPolicy,
+  validCapabilityPolicy,
 } from './poolCapabilities';
 const props = defineProps<{
   providers: RelayProvider[];
@@ -202,6 +203,7 @@ function prepare() {
         message: '',
       };
     });
+  for (const row of rows.value) updateRow(row);
   preview.value = true;
   confirmed.value = false;
 }
@@ -270,8 +272,7 @@ async function run() {
           continue;
         }
         if (!row.body) {
-          updateRow(row);
-          row.body = {
+          const candidate: RelayPool = {
             id: row.id,
             enabled: true,
             contextWindow: row.context ?? 0,
@@ -287,16 +288,39 @@ async function run() {
               effectiveAt: new Date().toISOString(),
             },
           };
-          row.body.capabilities = createCapabilityPolicy(row.body);
-          row.body.capabilities.contextWindowMode =
+          candidate.capabilities = createCapabilityPolicy(candidate);
+          candidate.capabilities.contextWindowMode =
             row.contextMode ?? 'inherit';
-          row.body.capabilities.maxOutputTokensMode =
+          candidate.capabilities.maxOutputTokensMode =
             row.outputMode ?? 'inherit';
-          row.body.capabilities.recommendedContextWindow =
+          candidate.capabilities.recommendedContextWindow =
             recommendedContext.value;
-          row.body.capabilities.recommendedMaxOutputTokens =
+          candidate.capabilities.recommendedMaxOutputTokens =
             recommendedOutput.value;
-          captureUpstreamCapabilities(row.body, row.model);
+          captureUpstreamCapabilities(candidate, row.model);
+          const problem = rowError(
+            {
+              ...row,
+              context: candidate.contextWindow,
+              output: candidate.maxOutputTokens,
+            },
+            rows.value,
+            new Set(current.items.map((pool) => pool.id)),
+          );
+          if (
+            problem ||
+            !validCapabilityPolicy(candidate) ||
+            candidate.contextWindow !== (row.context ?? 0) ||
+            candidate.maxOutputTokens !== (row.output ?? 0)
+          ) {
+            row.context = candidate.contextWindow;
+            row.output = candidate.maxOutputTokens;
+            row.status = 'failed';
+            row.message = t(problem ?? 'importPreviewChanged');
+            confirmed.value = false;
+            break;
+          }
+          row.body = candidate;
         }
         signal.throwIfAborted();
         row.attempted = true;
