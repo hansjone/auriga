@@ -1,15 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
   capabilityLimits,
-  applyKnownLimits,
   suggestPublicId,
   rowError,
   samePool,
   type ImportRow,
-  type CatalogModel,
 } from './modelImport';
 
 describe('model import limits and identity', () => {
+  it('does not collapse total context into a separate input limit', () => {
+    expect(
+      capabilityLimits({
+        id: 'large',
+        contextWindow: 2000000,
+        maxInputTokens: 1000000,
+        maxOutputTokens: 128000,
+      }).context,
+    ).toBe(2000000);
+    expect(
+      capabilityLimits({ id: 'input-only', maxInputTokens: 2000000 }).context,
+    ).toBeUndefined();
+  });
   it('keeps unknown limits unknown and never infers from a model name', () => {
     expect(capabilityLimits({ id: 'gpt-long-1m' })).toEqual({
       context: undefined,
@@ -26,7 +37,7 @@ describe('model import limits and identity', () => {
         maxOutputTokens: 64000,
       }),
     ).toEqual({
-      context: 2000000,
+      context: undefined,
       output: 64000,
       inputOnly: true,
       limited: false,
@@ -38,24 +49,7 @@ describe('model import limits and identity', () => {
         maxInputTokens: 64000,
         maxOutputTokens: 8192,
       }).context,
-    ).toBe(64000);
-  });
-  it('explicitly refreshes capabilities from complete route metadata, including larger values', () => {
-    const models: CatalogModel[] = [
-      { id: 'a', contextWindow: 64000, maxOutputTokens: 8192 },
-      { id: 'b', contextWindow: 32000, maxOutputTokens: 2048 },
-    ];
-    expect(applyKnownLimits(16000, 1024, models)).toEqual({
-      context: 32000,
-      output: 2048,
-    });
-    expect(applyKnownLimits(64000, 8192, models)).toEqual({
-      context: 32000,
-      output: 2048,
-    });
-    expect(
-      applyKnownLimits(64000, 8192, [models[0], { id: 'unknown' }]),
-    ).toBeUndefined();
+    ).toBe(128000);
   });
   it('does not treat malformed metadata as known', () => {
     expect(

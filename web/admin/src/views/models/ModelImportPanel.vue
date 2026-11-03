@@ -16,6 +16,10 @@ import {
   type CatalogModel,
   type ImportRow,
 } from './modelImport';
+import {
+  captureUpstreamCapabilities,
+  createCapabilityPolicy,
+} from './poolCapabilities';
 const props = defineProps<{
   providers: RelayProvider[];
   pools: RelayPool[];
@@ -41,6 +45,8 @@ const loading = ref(false),
   failure = ref('');
 const inputPrice = ref<number | ''>(''),
   outputPrice = ref<number | ''>('');
+const recommendedContext = ref(0),
+  recommendedOutput = ref(0);
 let catalogController: globalThis.AbortController | undefined,
   batchController: globalThis.AbortController | undefined,
   epoch = 0,
@@ -67,10 +73,17 @@ const validPrice = computed(
     Number.isSafeInteger(outputPrice.value) &&
     Number(outputPrice.value) > 0,
 );
+const validRecommendations = computed(
+  () =>
+    [recommendedContext.value, recommendedOutput.value].every(
+      (value) => Number.isSafeInteger(value) && value >= 0,
+    ) && recommendedContext.value !== 1,
+);
 const ready = computed(
   () =>
     !!rows.value.length &&
     validPrice.value &&
+    validRecommendations.value &&
     pendingRows.value.length > 0 &&
     pendingRows.value.every((v) => !rowError(v, rows.value, existing.value)),
 );
@@ -82,12 +95,25 @@ watch(
     JSON.stringify([
       inputPrice.value,
       outputPrice.value,
-      rows.value.map((row) => [row.id, row.context, row.output]),
+      rows.value.map((row) => [
+        row.id,
+        row.context,
+        row.output,
+        row.contextMode,
+        row.outputMode,
+      ]),
     ]),
   () => {
     confirmed.value = false;
   },
 );
+watch([recommendedContext, recommendedOutput], () => {
+  if ((recommendedContext.value as unknown) === '')
+    recommendedContext.value = 0;
+  if ((recommendedOutput.value as unknown) === '') recommendedOutput.value = 0;
+  for (const row of rows.value) updateRow(row);
+  confirmed.value = false;
+});
 function stop() {
   batchController?.abort();
 }
@@ -123,6 +149,8 @@ async function fetchModels() {
   query.value = '';
   inputPrice.value = '';
   outputPrice.value = '';
+  recommendedContext.value = 0;
+  recommendedOutput.value = 0;
   if (!providerId.value || !writable.value) return;
   catalogController = new globalThis.AbortController();
   loading.value = true;
@@ -167,6 +195,8 @@ function prepare() {
         id: suggestPublicId(model.id),
         context: limits.context,
         output: limits.output,
+        contextMode: 'inherit',
+        outputMode: 'inherit',
         key: globalThis.crypto.randomUUID(),
         status: 'pending',
         message: '',
@@ -182,6 +212,14 @@ function suggestUnknown() {
     row.output ??= 0;
   }
   confirmed.value = false;
+}
+function updateRow(row: ImportRow) {
+  if (row.body) return;
+  const limits = capabilityLimits(row.model);
+  if (row.contextMode !== 'manual')
+    row.context = limits.context ?? recommendedContext.value;
+  if (row.outputMode !== 'manual')
+    row.output = limits.output ?? recommendedOutput.value;
 }
 function source(model: CatalogModel) {
   const limits = capabilityLimits(model);
@@ -231,22 +269,35 @@ async function run() {
           row.message = t('importExists');
           continue;
         }
-        row.body ??= {
-          id: row.id,
-          enabled: true,
-          contextWindow: row.context ?? 0,
-          maxOutputTokens: row.output ?? 0,
-          routes: [
-            { providerId: providerId.value, model: row.model.id, weight: 1 },
-          ],
-          price: {
-            currency: 'USD',
-            inputMicrosPerMillionTokens: Number(inputPrice.value),
-            outputMicrosPerMillionTokens: Number(outputPrice.value),
-            version: globalThis.crypto.randomUUID(),
-            effectiveAt: new Date().toISOString(),
-          },
-        };
+        if (!row.body) {
+          updateRow(row);
+          row.body = {
+            id: row.id,
+            enabled: true,
+            contextWindow: row.context ?? 0,
+            maxOutputTokens: row.output ?? 0,
+            routes: [
+              { providerId: providerId.value, model: row.model.id, weight: 1 },
+            ],
+            price: {
+              currency: 'USD',
+              inputMicrosPerMillionTokens: Number(inputPrice.value),
+              outputMicrosPerMillionTokens: Number(outputPrice.value),
+              version: globalThis.crypto.randomUUID(),
+              effectiveAt: new Date().toISOString(),
+            },
+          };
+          row.body.capabilities = createCapabilityPolicy(row.body);
+          row.body.capabilities.contextWindowMode =
+            row.contextMode ?? 'inherit';
+          row.body.capabilities.maxOutputTokensMode =
+            row.outputMode ?? 'inherit';
+          row.body.capabilities.recommendedContextWindow =
+            recommendedContext.value;
+          row.body.capabilities.recommendedMaxOutputTokens =
+            recommendedOutput.value;
+          captureUpstreamCapabilities(row.body, row.model);
+        }
         signal.throwIfAborted();
         row.attempted = true;
         await relayApi.createPool(row.body, row.key, signal);
@@ -427,6 +478,15 @@ async function run() {
                 }}</small>
               </td>
               <td>
+                <select
+                  v-model="row.contextMode"
+                  :name="'importContextMode' + index"
+                  :disabled="running || !!row.body"
+                  @change="updateRow(row)"
+                >
+                  <option value="inherit">{{ t('capabilityInherit') }}</option>
+                  <option value="manual">{{ t('capabilityManual') }}</option>
+                </select>
                 <input
                   v-model.number="row.context"
                   :name="'importContext' + index"
@@ -435,9 +495,19 @@ async function run() {
                   max="9007199254740991"
                   :aria-label="t('context') + ' ' + row.model.id"
                   :disabled="running || !!row.body"
+                  @input="row.contextMode = 'manual'"
                 />
               </td>
               <td>
+                <select
+                  v-model="row.outputMode"
+                  :name="'importOutputMode' + index"
+                  :disabled="running || !!row.body"
+                  @change="updateRow(row)"
+                >
+                  <option value="inherit">{{ t('capabilityInherit') }}</option>
+                  <option value="manual">{{ t('capabilityManual') }}</option>
+                </select>
                 <input
                   v-model.number="row.output"
                   :name="'importOutput' + index"
@@ -446,6 +516,7 @@ async function run() {
                   max="9007199254740991"
                   :aria-label="t('output') + ' ' + row.model.id"
                   :disabled="running || !!row.body"
+                  @input="row.outputMode = 'manual'"
                 />
               </td>
               <td>{{ source(row.model) }}</td>
@@ -460,6 +531,26 @@ async function run() {
         </table>
       </div>
       <div class="relay-form-grid">
+        <label
+          >{{ t('capabilityRecommendedContext')
+          }}<input
+            v-model.number="recommendedContext"
+            name="importRecommendedContext"
+            type="number"
+            min="0"
+            max="9007199254740991"
+            :disabled="running || frozen"
+        /></label>
+        <label
+          >{{ t('capabilityRecommendedOutput')
+          }}<input
+            v-model.number="recommendedOutput"
+            name="importRecommendedOutput"
+            type="number"
+            min="0"
+            max="9007199254740991"
+            :disabled="running || frozen"
+        /></label>
         <label
           >{{ t('priceInput')
           }}<input

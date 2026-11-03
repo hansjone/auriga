@@ -27,8 +27,9 @@ type RelayPool struct {
 	// 上下文能力为0（未知）或至少2的安全整数，供客户端压缩与请求参数使用，不是中转裁限；可显式从上游目录更新，公开目录省略未知值。
 	ContextWindow int64 `json:"contextWindow"`
 	// 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
-	MaxOutputTokens int64 `json:"maxOutputTokens"`
-	Price           Price `json:"price"`
+	MaxOutputTokens int64                  `json:"maxOutputTokens"`
+	Capabilities    *RelayPoolCapabilities `json:"capabilities,omitempty"`
+	Price           Price                  `json:"price"`
 }
 
 type _RelayPool RelayPool
@@ -176,6 +177,38 @@ func (o *RelayPool) SetMaxOutputTokens(v int64) {
 	o.MaxOutputTokens = v
 }
 
+// GetCapabilities returns the Capabilities field value if set, zero value otherwise.
+func (o *RelayPool) GetCapabilities() RelayPoolCapabilities {
+	if o == nil || IsNil(o.Capabilities) {
+		var ret RelayPoolCapabilities
+		return ret
+	}
+	return *o.Capabilities
+}
+
+// GetCapabilitiesOk returns a tuple with the Capabilities field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayPool) GetCapabilitiesOk() (*RelayPoolCapabilities, bool) {
+	if o == nil || IsNil(o.Capabilities) {
+		return nil, false
+	}
+	return o.Capabilities, true
+}
+
+// HasCapabilities returns a boolean if a field has been set.
+func (o *RelayPool) HasCapabilities() bool {
+	if o != nil && !IsNil(o.Capabilities) {
+		return true
+	}
+
+	return false
+}
+
+// SetCapabilities gets a reference to the given RelayPoolCapabilities and assigns it to the Capabilities field.
+func (o *RelayPool) SetCapabilities(v RelayPoolCapabilities) {
+	o.Capabilities = &v
+}
+
 // GetPrice returns the Price field value
 func (o *RelayPool) GetPrice() Price {
 	if o == nil {
@@ -215,6 +248,9 @@ func (o RelayPool) ToMap() (map[string]interface{}, error) {
 	toSerialize["routes"] = o.Routes
 	toSerialize["contextWindow"] = o.ContextWindow
 	toSerialize["maxOutputTokens"] = o.MaxOutputTokens
+	if !IsNil(o.Capabilities) {
+		toSerialize["capabilities"] = o.Capabilities
+	}
 	toSerialize["price"] = o.Price
 	return toSerialize, nil
 }

@@ -34,6 +34,48 @@ func TestPublicModelNeverInventsUnknownCapabilitiesOrClampsKnownValues(t *testin
 	}
 }
 
+func TestPublicModelResolvesInheritedRecommendedAndManualCapabilities(t *testing.T) {
+	const source = `"sourceProviderId":"019a0000-0000-7000-8000-000000000001","sourceModel":"large","contextWindowMode":"inherit","maxOutputTokensMode":"inherit"`
+	const upstream = `"upstream":{"providerId":"019a0000-0000-7000-8000-000000000001","model":{"id":"large","contextWindow":2000000,"maxOutputTokens":128000}}`
+	for _, tc := range []struct {
+		name, configuration string
+		context, output     int64
+	}{
+		{"upstream-with-small-fallback", `"capabilities":{` + source + `,` + upstream + `}`, 2000000, 128000},
+		{"recommended", `"capabilities":{` + source + `,"recommendedContextWindow":1000000,"recommendedMaxOutputTokens":64000}`, 1000000, 64000},
+		{"unknown", `"capabilities":{` + source + `}`, 0, 0},
+		{"manual", `"capabilities":{"sourceProviderId":"019a0000-0000-7000-8000-000000000001","sourceModel":"large","contextWindowMode":"manual","maxOutputTokensMode":"manual",` + upstream + `}`, 1000000, 4096},
+		{"old-explicit-pool", ``, 1000000, 4096},
+		{"stale-other-model", `"capabilities":{` + source + `,"upstream":{"providerId":"019a0000-0000-7000-8000-000000000001","model":{"id":"old","contextWindow":32768,"maxOutputTokens":4096}}}`, 0, 0},
+		{"input-is-not-context", `"capabilities":{` + source + `,"upstream":{"providerId":"019a0000-0000-7000-8000-000000000001","model":{"id":"large","maxInputTokens":2000000,"maxOutputTokens":128000}}}`, 0, 128000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"id":"auto","enabled":true,"contextWindow":1000000,"maxOutputTokens":4096,"price":{"currency":"USD","inputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1,"version":"fixture","effectiveAt":"2026-01-01T00:00:00Z"},"routes":[{"providerId":"019a0000-0000-7000-8000-000000000001","model":"large","weight":1},{"providerId":"019a0000-0000-7000-8000-000000000001","model":"small-fallback","weight":0}]`
+			if tc.configuration != "" {
+				raw += "," + tc.configuration
+			}
+			raw += `}`
+			var pool api.RelayPool
+			if err := json.Unmarshal([]byte(raw), &pool); err != nil {
+				t.Fatal(err)
+			}
+			model := publicModel(pool)
+			for field, want := range map[string]int64{"context_window": tc.context, "max_output_tokens": tc.output} {
+				if want == 0 {
+					if _, exists := model[field]; exists {
+						t.Fatalf("%s invented or retained stale metadata: %v", field, model)
+					}
+				} else if model[field] != want {
+					t.Fatalf("%s=%v want %d", field, model[field], want)
+				}
+			}
+			if len(model) > 6 {
+				t.Fatal("source identity or private configuration escaped the public directory")
+			}
+		})
+	}
+}
+
 func TestPoolCapabilitiesMatchCatalogConsumerLowerBound(t *testing.T) {
 	for _, tc := range []struct {
 		context, output int64

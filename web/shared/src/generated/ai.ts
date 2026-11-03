@@ -754,7 +754,35 @@ export interface components {
        * @description 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
        */
       maxOutputTokens: number;
+      capabilities?: components['schemas']['RelayPoolCapabilities'];
       price: components['schemas']['Price'];
+    };
+    /** @description 管理端能力来源与发布策略，保存在模型池文档中；不参与调用请求裁剪或预算准入。无此配置的历史模型池保持现有显式能力值。新建默认继承首条正权重路由，可明确选择池内其他来源；不取全部路由或兜底的最小值。继承项依次取绑定来源的上游快照、管理员推荐值、未知0；manual使用模型池原字段作为显式覆盖。刷新成功后缺失字段清为未知快照，网络失败保旧；配置保存后发布给DSH与外部目录。 */
+    RelayPoolCapabilities: {
+      /** Format: uuid */
+      sourceProviderId: string;
+      sourceModel: string;
+      /** @enum {string} */
+      contextWindowMode: 'inherit' | 'manual';
+      /** @enum {string} */
+      maxOutputTokensMode: 'inherit' | 'manual';
+      /**
+       * Format: int64
+       * @description 管理员配置的推荐上下文，仅继承模式且上游未提供总上下文字段时使用；0或缺失为未知，不由输入上限推算。
+       */
+      recommendedContextWindow?: number;
+      /**
+       * Format: int64
+       * @description 管理员配置的推荐输出，仅继承模式且上游未提供输出字段时使用；0或缺失为未知。
+       */
+      recommendedMaxOutputTokens?: number;
+      upstream?: components['schemas']['RelayPoolUpstreamCapabilities'];
+    };
+    /** @description 管理员最近一次成功获取的目录快照。供应商及真实模型ID仅用于绑定所选能力来源，绝不发布到公开目录；换来源或来源路由不存在时不能沿用其他模型的旧快照。 */
+    RelayPoolUpstreamCapabilities: {
+      /** Format: uuid */
+      providerId: string;
+      model: components['schemas']['RelayProviderModel'];
     };
     RelayKeyInput: {
       name: string;

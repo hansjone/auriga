@@ -7,6 +7,8 @@ export type ImportRow = {
   id: string;
   context?: number;
   output?: number;
+  contextMode?: 'inherit' | 'manual';
+  outputMode?: 'inherit' | 'manual';
   key: string;
   status: 'pending' | 'saving' | 'saved' | 'failed' | 'conflict';
   message: string;
@@ -19,31 +21,11 @@ export function capabilityLimits(model: CatalogModel) {
   const context = positive(model.contextWindow),
     input = positive(model.maxInputTokens),
     output = positive(model.maxOutputTokens);
-  const contexts = [context, input].filter(
-    (v): v is number => v !== undefined && v >= 2,
-  );
-  const effectiveContext = contexts.length ? Math.min(...contexts) : undefined;
   return {
-    context: effectiveContext,
+    context: context !== undefined && context >= 2 ? context : undefined,
     output,
-    inputOnly: context === undefined && input !== undefined,
+    inputOnly: (context === undefined || context < 2) && input !== undefined,
     limited: false,
-  };
-}
-export function applyKnownLimits(
-  _context: number,
-  _output: number,
-  models: CatalogModel[],
-) {
-  const limits = models.map(capabilityLimits);
-  if (
-    !limits.length ||
-    limits.some((v) => v.context === undefined || v.output === undefined)
-  )
-    return;
-  return {
-    context: Math.min(...limits.map((v) => v.context!)),
-    output: Math.min(...limits.map((v) => v.output!)),
   };
 }
 export const suggestPublicId = (id: string) =>
@@ -94,6 +76,7 @@ export function samePool(a: RelayPool, b: RelayPool) {
     a.enabled === b.enabled &&
     a.contextWindow === b.contextWindow &&
     a.maxOutputTokens === b.maxOutputTokens &&
+    sameCapabilities(a.capabilities, b.capabilities) &&
     a.routes.length === b.routes.length &&
     a.routes.every(
       (r, i) =>
@@ -109,5 +92,25 @@ export function samePool(a: RelayPool, b: RelayPool) {
     a.price.version === b.price.version &&
     effectiveAt !== undefined &&
     effectiveAt === instant(b.price.effectiveAt)
+  );
+}
+function sameCapabilities(
+  a: RelayPool['capabilities'],
+  b: RelayPool['capabilities'],
+) {
+  if (!a || !b) return a === b;
+  return (
+    a.sourceProviderId === b.sourceProviderId &&
+    a.sourceModel === b.sourceModel &&
+    a.contextWindowMode === b.contextWindowMode &&
+    a.maxOutputTokensMode === b.maxOutputTokensMode &&
+    (a.recommendedContextWindow ?? 0) === (b.recommendedContextWindow ?? 0) &&
+    (a.recommendedMaxOutputTokens ?? 0) ===
+      (b.recommendedMaxOutputTokens ?? 0) &&
+    a.upstream?.providerId === b.upstream?.providerId &&
+    a.upstream?.model.id === b.upstream?.model.id &&
+    a.upstream?.model.contextWindow === b.upstream?.model.contextWindow &&
+    a.upstream?.model.maxInputTokens === b.upstream?.model.maxInputTokens &&
+    a.upstream?.model.maxOutputTokens === b.upstream?.model.maxOutputTokens
   );
 }

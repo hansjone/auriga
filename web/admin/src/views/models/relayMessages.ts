@@ -24,7 +24,7 @@ const zh = {
     '能力未知时保留0，不虚构32768/4096。已知能力可从上游目录继承，也可手动覆盖；中转不会用这些信息裁限请求。',
   importUnknown: '部分参数未知',
   importFromProvider: '上游目录提供',
-  importInputOnly: '仅输入限制，保守用作上下文；不是总容量',
+  importInputOnly: '仅提供输入上限，不推断总上下文',
   importPlatformLimit: '已受平台上限限制',
   importExists: '公开 ID 已存在，跳过以保护原配置',
   importDuplicate: '本批公开 ID 重复，请修改别名',
@@ -49,11 +49,24 @@ const zh = {
   importSavedNote:
     '外部新请求采用已保存模型。Auriga DSH 可在原生模型设置中编辑 Auriga，获取可用模型、勾选并保存目录；无需重启。',
   applyCapabilities: '从上游更新能力',
+  capabilitySourceRoute: '能力来源模型 / 路由',
+  capabilityChooseRoute: '先添加真实模型路由',
+  capabilityInherit: '继承上游（缺失时用推荐值）',
+  capabilityManual: '手动覆盖',
+  capabilityRecommendedContext: '推荐上下文（上游缺失时使用）',
+  capabilityRecommendedOutput: '推荐最大输出（上游缺失时使用）',
+  capabilityOrigin_upstream: '当前来源：上游目录',
+  capabilityOrigin_recommended: '当前来源：管理员推荐值',
+  capabilityOrigin_manual: '当前来源：手动覆盖',
+  capabilityOrigin_unknown: '当前来源：未知，可配置推荐值或手动覆盖',
+  capabilityInputOnly:
+    '上游仅提供输入上限 {tokens}，未提供总上下文；两者不混用，也不相加推算。',
+  capabilityRefreshFailed: '刷新失败，已保留原上游快照和能力值；请重试。',
   capabilityNote:
-    '这是提供给DSH的模型能力信息，不是中转限额。0表示未知；点击更新将按全部路由（含兜底）的已知能力更新，可增可减。管理台改动后在DSH手动同步已有模型能力。',
+    '能力来源默认首条正权重路由，可另选；不会取全部路由或兜底的最小值。继承优先上游，缺失时用推荐值，再缺为未知0。刷新后保存发布，DSH手动同步；这些信息不裁剪或限制中转请求。',
   capabilityUnknown: '部分路由参数未知，请先获取各供应商目录或手动确认。',
   capabilityApplied:
-    '已从全部路由（含兜底）更新能力信息；保存后供DSH手动同步。',
+    '已刷新所选来源的上游快照；手动覆盖保留。保存后发布给DSH与外部目录，再在DSH手动同步。',
   publicSearch: '搜索公开 ID、供应商或真实模型',
   capabilityColumn: '上下文 / 最大输出',
   providersIntro:
@@ -211,7 +224,7 @@ const en: Record<keyof typeof zh, string> = {
     'Keep unknown capabilities at zero instead of inventing 32768/4096. Inherit known upstream metadata or override it explicitly. These values do not cap relay requests.',
   importUnknown: 'Some limits unknown',
   importFromProvider: 'From provider catalog',
-  importInputOnly: 'Input limit used conservatively; not total context',
+  importInputOnly: 'Input limit only; total context is not inferred',
   importPlatformLimit: 'Limited by platform ceilings',
   importExists: 'Public ID exists; skipped to protect its configuration',
   importDuplicate: 'Duplicate public ID in this batch; change the alias',
@@ -238,12 +251,26 @@ const en: Record<keyof typeof zh, string> = {
   importSavedNote:
     'External requests use saved models. In native Models settings, edit Auriga, fetch available models, select and save without restarting DSH.',
   applyCapabilities: 'Update capabilities from upstream',
+  capabilitySourceRoute: 'Capability source model / route',
+  capabilityChooseRoute: 'Add an upstream model route first',
+  capabilityInherit: 'Inherit upstream, then recommended values',
+  capabilityManual: 'Manual override',
+  capabilityRecommendedContext: 'Recommended context when upstream omits it',
+  capabilityRecommendedOutput: 'Recommended output when upstream omits it',
+  capabilityOrigin_upstream: 'Current source: upstream catalog',
+  capabilityOrigin_recommended: 'Current source: administrator recommendation',
+  capabilityOrigin_manual: 'Current source: manual override',
+  capabilityOrigin_unknown: 'Unknown; configure a recommendation or override',
+  capabilityInputOnly:
+    'Upstream reports an input limit of {tokens}, not total context. These values are neither substituted nor added together.',
+  capabilityRefreshFailed:
+    'Refresh failed. The previous upstream snapshot and values were retained. Retry to update.',
   capabilityNote:
-    'Model capabilities are client hints, not relay quotas. Zero means unknown. Update from all routes, including fallbacks; values may increase or decrease. Manually sync existing DSH models after saving.',
+    'Defaults to the first positive-weight route; another source can be selected. Fallback routes do not shrink it. Inherit upstream, then configured recommendations, then unknown zero. Save after refreshing, then sync DSH manually. These hints do not cap relay requests.',
   capabilityUnknown:
     'Some route limits are unknown. Fetch each catalog or confirm limits manually.',
   capabilityApplied:
-    'Updated capabilities across all routes, including fallbacks. Save, then manually sync DSH models.',
+    'Refreshed the selected source snapshot; manual overrides were retained. Save to publish to DSH and external catalogs, then sync DSH manually.',
   publicSearch: 'Search public ID, provider or upstream model',
   capabilityColumn: 'Context / maximum output',
   providersIntro:
