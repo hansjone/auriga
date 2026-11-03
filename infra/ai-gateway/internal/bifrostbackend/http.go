@@ -471,7 +471,7 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	}
 	inputEstimate, estimateErr := inputTokenEstimate(raw, key.Source == "member" && key.GetMeteringOnly())
 	if estimateErr != nil {
-		rejectInputAccounting(w)
+		rejectInputAccounting(w, estimateErr)
 		return
 	}
 	outputEstimate := maxTokens
