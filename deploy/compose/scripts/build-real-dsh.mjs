@@ -93,6 +93,7 @@ try {
     'clients/dsh-plugin/package.json',
     'clients/dsh-plugin/package-lock.json',
     'clients/dsh-plugin/LICENSE',
+    'clients/dsh-plugin/cordis.patch.yml',
     'clients/dsh-plugin/src',
   ]) {
     const destination = join(context, path);

@@ -15,6 +15,7 @@ RUN node /opt/fixture/build.mjs plugin-lock
 RUN npm ci --omit=dev --include=optional --ignore-scripts --bin-links=false --no-audit --no-fund --registry=https://registry.npmjs.org
 COPY clients/dsh-plugin/src ./src
 COPY clients/dsh-plugin/LICENSE ./LICENSE
+COPY clients/dsh-plugin/cordis.patch.yml ./cordis.patch.yml
 RUN ln -s /opt/auriga-dsh /opt/dsh/node_modules/auriga-dsh && node /opt/fixture/build.mjs manifest
 
 FROM ${NODE_IMAGE}
