@@ -76,7 +76,20 @@ export function rowError(
   )
     return 'importInvalidLimits';
 }
+function instant(value: string) {
+  const match =
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(
+      value,
+    );
+  if (!match) return;
+  const milliseconds = Date.parse(match[1] + match[3]);
+  if (!Number.isFinite(milliseconds)) return;
+  return (
+    BigInt(milliseconds) * 1000000n + BigInt((match[2] ?? '').padEnd(9, '0'))
+  );
+}
 export function samePool(a: RelayPool, b: RelayPool) {
+  const effectiveAt = instant(a.price.effectiveAt);
   return (
     a.id === b.id &&
     a.enabled === b.enabled &&
@@ -95,6 +108,7 @@ export function samePool(a: RelayPool, b: RelayPool) {
     a.price.outputMicrosPerMillionTokens ===
       b.price.outputMicrosPerMillionTokens &&
     a.price.version === b.price.version &&
-    a.price.effectiveAt === b.price.effectiveAt
+    effectiveAt !== undefined &&
+    effectiveAt === instant(b.price.effectiveAt)
   );
 }

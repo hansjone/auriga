@@ -181,6 +181,94 @@ it('never overwrites an existing or concurrently created public ID', async () =>
   expect(saved).toEqual([]);
   w.unmount();
 });
+it('allows correcting a preflight conflict to a new alias and preserves the original pool', async () => {
+  const original: RelayPool = {
+    id: 'a',
+    enabled: true,
+    contextWindow: 64000,
+    maxOutputTokens: 8192,
+    routes: [{ providerId: 'original', model: 'original-model', weight: 1 }],
+    price: {
+      currency: 'USD',
+      inputMicrosPerMillionTokens: 1,
+      outputMicrosPerMillionTokens: 1,
+      version: 'original',
+      effectiveAt: '2026-01-01T00:00:00Z',
+    },
+  };
+  const before = structuredClone(original);
+  vi.mocked(relayApi.pools).mockResolvedValue({ items: [original] });
+  const w = make();
+  await flushPromises();
+  await w.get('input[value="a"]').setValue(true);
+  await w.get('[data-testid="import-preview"]').trigger('click');
+  await w.get('[name="importInputPrice"]').setValue('1');
+  await w.get('[name="importOutputPrice"]').setValue('1');
+  await w.get('[name="importConfirmed"]').setValue(true);
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.createPool).not.toHaveBeenCalled();
+  expect(w.text()).toContain('已跳过');
+  await w.get('[name="importAlias0"]').setValue('new-public');
+  await w.get('[name="importConfirmed"]').setValue(true);
+  expect(
+    w.get('[data-testid="import-run"]').attributes('disabled'),
+  ).toBeUndefined();
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  expect(vi.mocked(relayApi.createPool).mock.calls[0][0].id).toBe('new-public');
+  expect(original).toEqual(before);
+  expect(w.text()).toContain('已保存 1 / 1');
+  w.unmount();
+});
+it.each([
+  ['2026-01-01T00:00:00.12Z', true],
+  ['2026-01-01T00:00:00.120000001Z', false],
+] as const)(
+  'handles interrupted-save readback timestamp %s without resending',
+  async (effectiveAt, same) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.120Z'));
+    try {
+      vi.mocked(relayApi.createPool).mockImplementation(async (body) => {
+        const persisted = JSON.parse(JSON.stringify(body)) as RelayPool;
+        persisted.price.effectiveAt = effectiveAt;
+        saved.push(persisted);
+        if (body.id === 'b') throw Error('connection lost');
+        return body;
+      });
+      const w = make();
+      await prepare(w);
+      await w.get('[data-testid="import-run"]').trigger('click');
+      await flushPromises();
+      await w.get('[data-testid="import-run"]').trigger('click');
+      await flushPromises();
+      expect(relayApi.createPool).toHaveBeenCalledTimes(2);
+      expect(w.text()).toContain(same ? '已保存 2 / 2' : '已跳过');
+      w.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+it.each([
+  ['iam.step_up_required', '请完成管理员身份验证后重试'],
+  ['common.forbidden', '没有此操作所需权限'],
+])(
+  'shows the actionable response to %s and stops subsequent writes',
+  async (code, message) => {
+    vi.mocked(relayApi.createPool).mockRejectedValue(
+      new ApiError({ status: 403, code, title: 'Forbidden' }),
+    );
+    const w = make();
+    await prepare(w);
+    await w.get('[data-testid="import-run"]').trigger('click');
+    await flushPromises();
+    expect(w.text()).toContain(message);
+    expect(relayApi.createPool).toHaveBeenCalledTimes(1);
+    w.unmount();
+  },
+);
 it('stops subsequent writes when fresh permissions are revoked', async () => {
   vi.mocked(adminApi.membership)
     .mockResolvedValueOnce({ permissions } as Awaited<

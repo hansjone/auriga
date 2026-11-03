@@ -26,6 +26,7 @@ const emit = defineEmits<{
   close: [];
   imported: [];
   access: [permissions: string[]];
+  running: [value: boolean];
 }>();
 const { t } = useRelayI18n();
 const providerId = ref(props.providerId),
@@ -119,6 +120,9 @@ async function fetchModels() {
   preview.value = false;
   confirmed.value = false;
   failure.value = '';
+  query.value = '';
+  inputPrice.value = '';
+  outputPrice.value = '';
   if (!providerId.value || !writable.value) return;
   catalogController = new globalThis.AbortController();
   loading.value = true;
@@ -146,6 +150,12 @@ function selectVisible(value: boolean) {
   selected.value = value
     ? [...new Set([...selected.value, ...ids])]
     : selected.value.filter((v) => !ids.includes(v));
+}
+function aliasChanged(row: ImportRow) {
+  if (row.status === 'conflict' && !row.body) {
+    row.status = 'pending';
+    row.message = '';
+  }
 }
 function prepare() {
   rows.value = models.value
@@ -189,6 +199,7 @@ async function run() {
   if (!ready.value || !confirmed.value || running.value || !writable.value)
     return;
   running.value = true;
+  emit('running', true);
   failure.value = '';
   batchController = new globalThis.AbortController();
   const signal = batchController.signal;
@@ -248,9 +259,11 @@ async function run() {
         row.message =
           row.status === 'conflict'
             ? t('importExists')
-            : isApiError(e) && [401, 403].includes(e.status)
-              ? t('forbidden')
-              : t('importWriteUnknown');
+            : isApiError(e) && e.problem.code === 'iam.step_up_required'
+              ? t('stepup')
+              : isApiError(e) && [401, 403].includes(e.status)
+                ? t('forbidden')
+                : t('importWriteUnknown');
         if (signal.aborted || (isApiError(e) && [401, 403].includes(e.status)))
           break;
       }
@@ -263,6 +276,7 @@ async function run() {
       }
     if (alive) {
       running.value = false;
+      emit('running', false);
       emit('imported');
     }
   }
@@ -407,6 +421,7 @@ async function run() {
                   :name="'importAlias' + index"
                   :disabled="running || !!row.body"
                   maxlength="128"
+                  @input="aliasChanged(row)"
                 /><small v-if="rowError(row, rows, existing)" role="alert">{{
                   t(rowError(row, rows, existing)!)
                 }}</small>

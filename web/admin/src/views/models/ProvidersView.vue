@@ -25,6 +25,8 @@ const requestKey = ref('');
 const importProvider = ref(''),
   poolSearch = ref(''),
   capabilityNotice = ref('');
+const importSession = ref(0),
+  importRunning = ref(false);
 const limitEdited = ref({ context: false, output: false });
 const { t } = useRelayI18n();
 const ui = useRelayUi(t);
@@ -142,6 +144,7 @@ onBeforeUnmount(() => {
 });
 function close() {
   importProvider.value = '';
+  importRunning.value = false;
   capabilityNotice.value = '';
   clearCatalogs();
   editor.value = '';
@@ -290,7 +293,9 @@ const visiblePools = computed(() => {
   );
 });
 function openImport(row: RelayProvider) {
+  if (importRunning.value) return;
   close();
+  importSession.value++;
   importProvider.value = row.id;
 }
 function accessChanged(permissions: string[]) {
@@ -389,6 +394,7 @@ async function confirm() {
                 data-testid="import-provider"
                 :disabled="
                   busy ||
+                  importRunning ||
                   !!pending ||
                   !ui.can('ai.providers.write') ||
                   !row.hasCredential ||
@@ -419,13 +425,15 @@ async function confirm() {
     </div>
     <ModelImportPanel
       v-if="importProvider"
+      :key="importSession"
       :providers="providers"
       :pools="pools"
       :provider-id="importProvider"
       :permissions="ui.permissions.value"
-      @close="importProvider = ''"
+      @close="close"
       @imported="load"
       @access="accessChanged"
+      @running="importRunning = $event"
     />
     <form
       v-if="editor === 'provider'"
