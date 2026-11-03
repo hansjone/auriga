@@ -1,0 +1,20 @@
+# Optional plugin-only update from an operator-verified signed real-dsh image.
+# BASE_RUNTIME_IMAGE must be a complete repository@sha256 digest, never a tag.
+ARG BASE_RUNTIME_IMAGE
+FROM ${BASE_RUNTIME_IMAGE}
+ARG BASE_RUNTIME_IMAGE
+USER 0:0
+COPY deploy/compose/real-dsh/ /tmp/auriga-incremental/recipe/
+COPY clients/dsh-plugin/package*.json /tmp/auriga-incremental/plugin/
+# Refuse changed foundations and verify the existing manifest before deleting src.
+RUN node /tmp/auriga-incremental/recipe/incremental.mjs
+COPY clients/dsh-plugin/src /opt/auriga-dsh/src
+COPY clients/dsh-plugin/LICENSE /opt/auriga-dsh/LICENSE
+COPY clients/dsh-plugin/cordis.patch.yml /opt/auriga-dsh/cordis.patch.yml
+# Preserve original proof generation; skip only already-755 regular-file chmods.
+RUN node --import /tmp/auriga-incremental/recipe/incremental-fs.mjs /opt/fixture/build.mjs manifest && rm -rf /tmp/auriga-incremental
+ENV HOME=/home/dsh DSH_TELEMETRY_DISABLED=1 DSH_TELEMETRY_MODE=DISABLED
+WORKDIR /home/dsh
+USER 200000:200000
+EXPOSE 7860
+ENTRYPOINT ["node", "/opt/fixture/start.mjs"]
