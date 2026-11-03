@@ -409,20 +409,17 @@ func TestReviewStreamingExplicitRejectionsRefund(t *testing.T) {
 func TestReviewKeyLimitDefaultsAndBounds(t *testing.T) {
 	for _, member := range []bool{false, true} {
 		c, n, e := limits(nil, nil, member)
-		wantC, wantN := int64(32), int64(128<<20)
-		if member {
-			wantC, wantN = 16, 64<<20
-		}
+		wantC, wantN := int64(0), int64(0)
 		if e != nil || c != wantC || n != wantN {
 			t.Fatal("wrong source defaults")
 		}
 	}
-	for _, v := range []int64{0, 101} {
+	for _, v := range []int64{-1, 101} {
 		if _, _, e := limits(&v, nil, false); e == nil {
 			t.Fatal("invalid concurrency accepted")
 		}
 	}
-	for _, v := range []int64{0, 1<<30 + 1} {
+	for _, v := range []int64{-1, 1<<30 + 1} {
 		if _, _, e := limits(nil, &v, true); e == nil {
 			t.Fatal("invalid token ceiling accepted")
 		}

@@ -131,7 +131,7 @@ func keyInputValid(k api.RelayKeyInput) bool {
 	if _, _, e := limits(k.MaxConcurrency, k.MaxInFlightTokens, false); e != nil {
 		return false
 	}
-	return strings.TrimSpace(k.Name) == k.Name && len(k.Name) > 0 && len(k.Name) <= 128 && k.MonthlyBudgetMicros >= 0 && k.MonthlyBudgetMicros <= maxInteger && k.RequestsPerMinute > 0 && k.RequestsPerMinute <= 1000000 && modelsValid(k.Models)
+	return strings.TrimSpace(k.Name) == k.Name && len(k.Name) > 0 && len(k.Name) <= 128 && k.MonthlyBudgetMicros >= 0 && k.MonthlyBudgetMicros <= maxInteger && k.RequestsPerMinute >= 0 && k.RequestsPerMinute <= 1000000 && modelsValid(k.Models)
 }
 func modelsValid(models []string) bool {
 	if len(models) < 1 || len(models) > 128 {
@@ -164,10 +164,13 @@ func (b *Backend) readKey(ctx context.Context, tenant, id string, rpm bool) (api
 			return denied
 		}
 		normalizeLimits(&k)
+		if k.GetMeteringOnly() && k.Source != "member" {
+			return denied
+		}
 		if !k.Active {
 			return denied
 		}
-		if !rpm {
+		if !rpm || k.GetMeteringOnly() || k.RequestsPerMinute == 0 {
 			return nil
 		}
 		var now time.Time
@@ -190,7 +193,7 @@ func (b *Backend) EnsureMember(ctx context.Context, m api.RelayMemberEnsure) (ap
 	if b.tenant != "" && m.TenantId != b.tenant {
 		return out, denied
 	}
-	if !validUUID(m.TenantId) || !validUUID(m.AccountId) || m.MonthlyBudgetMicros < 0 || m.MonthlyBudgetMicros > maxInteger || m.RequestsPerMinute < 1 || m.RequestsPerMinute > 1000000 {
+	if !validUUID(m.TenantId) || !validUUID(m.AccountId) || m.MonthlyBudgetMicros < 0 || m.MonthlyBudgetMicros > maxInteger || m.RequestsPerMinute < 0 || m.RequestsPerMinute > 1000000 {
 		return out, invalid
 	}
 	c, n, err := limits(m.MaxConcurrency, m.MaxInFlightTokens, true)
@@ -198,12 +201,15 @@ func (b *Backend) EnsureMember(ctx context.Context, m api.RelayMemberEnsure) (ap
 		return out, err
 	}
 	k := api.RelayKey{MaxConcurrency: &c, MaxInFlightTokens: &n, Id: m.AccountId, Name: memberName(m.TenantId, m.AccountId), Source: "member", AccountId: m.AccountId, Active: true, MonthlyBudgetMicros: m.MonthlyBudgetMicros, RequestsPerMinute: m.RequestsPerMinute, Models: []string{"*"}}
+	origin := "default"
+	k.PolicyOrigin = &origin
+	k.MeteringOnly = m.MeteringOnly
 	raw, e := json.Marshal(k)
 	if e != nil {
 		return out, e
 	}
 	if e = b.db.Transaction(ctx, m.TenantId, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `INSERT INTO ai.relay_key(tenant_id,id,name,document) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id,id) DO NOTHING`, m.TenantId, m.AccountId, k.Name, raw)
+		_, e := tx.Exec(ctx, `INSERT INTO ai.relay_key(tenant_id,id,name,document) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id,id) DO UPDATE SET document=ai.relay_key.document || jsonb_build_object('meteringOnly',EXCLUDED.document->'meteringOnly','monthlyBudgetMicros',EXCLUDED.document->'monthlyBudgetMicros','requestsPerMinute',EXCLUDED.document->'requestsPerMinute','maxConcurrency',EXCLUDED.document->'maxConcurrency','maxInFlightTokens',EXCLUDED.document->'maxInFlightTokens') WHERE ai.relay_key.document->>'policyOrigin'='default'`, m.TenantId, m.AccountId, k.Name, raw)
 		return e
 	}); e != nil {
 		return out, e
@@ -250,6 +256,9 @@ func (b *Backend) SaveKey(ctx context.Context, tenant, id string, input api.Rela
 		if k.Source != "member" && strings.HasPrefix(input.Name, "auriga-member:") {
 			return invalid
 		}
+		if k.Source != "member" && input.GetMeteringOnly() {
+			return invalid
+		}
 		if k.Source == "member" { // Member ownership/name is immutable; only policy/active state changes.
 			input.Name = k.Name
 		}
@@ -258,6 +267,9 @@ func (b *Backend) SaveKey(ctx context.Context, tenant, id string, input api.Rela
 		k.MonthlyBudgetMicros = input.MonthlyBudgetMicros
 		k.RequestsPerMinute = input.RequestsPerMinute
 		k.Models = slices.Clone(input.Models)
+		k.MeteringOnly = input.MeteringOnly
+		origin := "administrator"
+		k.PolicyOrigin = &origin
 		c, n, e := limits(input.MaxConcurrency, input.MaxInFlightTokens, k.Source == "member")
 		if e != nil {
 			return e
@@ -420,7 +432,7 @@ func (b *Backend) CreatePool(ctx context.Context, tenant string, p api.RelayPool
 }
 
 func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, createOnly bool) error {
-	if !modelID.MatchString(p.Id) || len(p.Routes) < 1 || len(p.Routes) > 8 || p.ContextWindow < 2 || p.ContextWindow > 1048576 || p.MaxOutputTokens < 1 || p.MaxOutputTokens > 32768 || p.MaxOutputTokens >= p.ContextWindow || p.Price.Currency != "USD" || p.Price.Version == "" || p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(time.Now()) || p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.OutputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger || p.Price.OutputMicrosPerMillionTokens > maxInteger {
+	if !modelID.MatchString(p.Id) || len(p.Routes) < 1 || len(p.Routes) > 8 || p.ContextWindow < 0 || p.ContextWindow > maxInteger || p.MaxOutputTokens < 0 || p.MaxOutputTokens > maxInteger || p.ContextWindow > 0 && p.MaxOutputTokens >= p.ContextWindow || p.Price.Currency != "USD" || p.Price.Version == "" || p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(time.Now()) || p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.OutputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger || p.Price.OutputMicrosPerMillionTokens > maxInteger {
 		return invalid
 	}
 	providers, err := routeProviders(p.Routes)

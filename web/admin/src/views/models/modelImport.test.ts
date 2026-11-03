@@ -18,7 +18,7 @@ describe('model import limits and identity', () => {
       limited: false,
     });
   });
-  it('distinguishes input-only limits and uses conservative platform ceilings', () => {
+  it('distinguishes input-only metadata without imposing platform ceilings', () => {
     expect(
       capabilityLimits({
         id: 'x',
@@ -26,10 +26,10 @@ describe('model import limits and identity', () => {
         maxOutputTokens: 64000,
       }),
     ).toEqual({
-      context: 1048576,
-      output: 32768,
+      context: 2000000,
+      output: 64000,
       inputOnly: true,
-      limited: true,
+      limited: false,
     });
     expect(
       capabilityLimits({
@@ -40,14 +40,14 @@ describe('model import limits and identity', () => {
       }).context,
     ).toBe(64000);
   });
-  it('applies only complete route metadata and never raises a smaller manual limit', () => {
+  it('explicitly refreshes capabilities from complete route metadata, including larger values', () => {
     const models: CatalogModel[] = [
       { id: 'a', contextWindow: 64000, maxOutputTokens: 8192 },
       { id: 'b', contextWindow: 32000, maxOutputTokens: 2048 },
     ];
     expect(applyKnownLimits(16000, 1024, models)).toEqual({
-      context: 16000,
-      output: 1024,
+      context: 32000,
+      output: 2048,
     });
     expect(applyKnownLimits(64000, 8192, models)).toEqual({
       context: 32000,
@@ -84,9 +84,9 @@ describe('model import limits and identity', () => {
     expect(rowError(row, [row], new Set())).toBeUndefined();
     expect(rowError(row, [row], new Set([row.id]))).toBe('importExists');
     expect(rowError(row, [row, { ...row }], new Set())).toBe('importDuplicate');
-    expect(rowError({ ...row, context: undefined }, [row], new Set())).toBe(
-      'importMissingLimits',
-    );
+    expect(
+      rowError({ ...row, context: undefined }, [row], new Set()),
+    ).toBeUndefined();
     expect(rowError({ ...row, context: 4096 }, [row], new Set())).toBe(
       'importInvalidLimits',
     );

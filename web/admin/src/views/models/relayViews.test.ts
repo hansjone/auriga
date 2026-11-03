@@ -58,6 +58,43 @@ beforeEach(() => {
   vi.mocked(relayApi.keys).mockResolvedValue({ items: [] });
 });
 afterEach(() => vi.resetAllMocks());
+it('makes member metering explicit while external keys start without traffic limits', async () => {
+  const member = {
+    id: 'member',
+    name: 'member',
+    source: 'member' as const,
+    accountId: 'member',
+    active: true,
+    monthlyBudgetMicros: 0,
+    requestsPerMinute: 0,
+    models: ['auto'],
+    maxConcurrency: 0,
+    maxInFlightTokens: 0,
+    meteringOnly: true,
+    policyOrigin: 'default' as const,
+  };
+  vi.mocked(relayApi.keys).mockResolvedValue({ items: [member] });
+  const w = mount(KeysView, { global });
+  await flushPromises();
+  await w
+    .findAll('button')
+    .find((v) => v.text() === '编辑')!
+    .trigger('click');
+  expect(
+    (w.get('[name="memberMeteringOnly"]').element as HTMLInputElement).checked,
+  ).toBe(true);
+  expect(
+    (w.get('[name="keyBudget"]').element as HTMLInputElement).disabled,
+  ).toBe(true);
+  expect(w.text()).toContain('下面的预算与流量数值保留但不生效');
+  await w.get('[data-testid="key-form"]').trigger('submit');
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(vi.mocked(relayApi.updateKey).mock.calls[0][1].meteringOnly).toBe(
+    true,
+  );
+  w.unmount();
+});
 it('saves different models from the same provider in auto and identifies an exact duplicate', async () => {
   const auto = {
     id: 'auto',
@@ -596,7 +633,7 @@ it('preserves historical key grants until explicitly removed and clears wildcard
   ]);
   wildcard.unmount();
 });
-it('applies known upstream limits explicitly, retains smaller manual choices, and rejects zero prices before confirmation', async () => {
+it('explicitly refreshes larger upstream capabilities and rejects zero prices before confirmation', async () => {
   vi.mocked(relayApi.providerModels).mockResolvedValue({
     items: [{ id: 'real', contextWindow: 128000, maxOutputTokens: 8192 }],
   });
@@ -620,10 +657,10 @@ it('applies known upstream limits explicitly, retains smaller manual choices, an
   await w.get('[data-testid="apply-capabilities"]').trigger('click');
   expect(
     (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
-  ).toBe('16000');
+  ).toBe('128000');
   expect(
     (w.get('[name="maxOutputTokens"]').element as HTMLInputElement).value,
-  ).toBe('1024');
+  ).toBe('8192');
   await w.get('[data-testid="pool-form"]').trigger('submit');
   expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
   expect(relayApi.savePool).not.toHaveBeenCalled();

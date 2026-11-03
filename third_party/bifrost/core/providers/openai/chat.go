@@ -67,10 +67,6 @@ func ToOpenAIChatRequest(ctx *schemas.BifrostContext, bifrostReq *schemas.Bifros
 	if bifrostReq.Params != nil {
 		openaiReq.ChatParameters = *bifrostReq.Params
 		openaiReq.ServiceTier = serviceTierForModel(caps, openaiReq.ServiceTier)
-		if openaiReq.ChatParameters.MaxCompletionTokens != nil && *openaiReq.ChatParameters.MaxCompletionTokens < MinMaxCompletionTokens {
-			openaiReq.ChatParameters.MaxCompletionTokens = schemas.Ptr(MinMaxCompletionTokens)
-		}
-
 		openaiReq.ChatParameters.User = SanitizeUserField(openaiReq.ChatParameters.User)
 
 		if openaiReq.ChatParameters.ToolChoice.IsForced() &&

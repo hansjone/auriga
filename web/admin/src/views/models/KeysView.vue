@@ -30,9 +30,9 @@ const draft = ref<RelayKeyInput>({
     name: '',
     active: true,
     monthlyBudgetMicros: 0,
-    requestsPerMinute: 60,
-    maxConcurrency: 32,
-    maxInFlightTokens: 134217728,
+    requestsPerMinute: 0,
+    maxConcurrency: 0,
+    maxInFlightTokens: 0,
     models: [],
   }),
   allModels = ref(false);
@@ -115,20 +115,18 @@ function edit(row?: RelayKey) {
         active: row.active,
         monthlyBudgetMicros: row.monthlyBudgetMicros,
         requestsPerMinute: row.requestsPerMinute,
-        maxConcurrency:
-          row.maxConcurrency ?? (row.source === 'member' ? 16 : 32),
-        maxInFlightTokens:
-          row.maxInFlightTokens ??
-          (row.source === 'member' ? 67108864 : 134217728),
+        maxConcurrency: row.maxConcurrency ?? 0,
+        maxInFlightTokens: row.maxInFlightTokens ?? 0,
+        meteringOnly: row.meteringOnly ?? false,
         models: [...row.models],
       }
     : {
         name: '',
         active: true,
         monthlyBudgetMicros: 0,
-        requestsPerMinute: 60,
-        maxConcurrency: 32,
-        maxInFlightTokens: 134217728,
+        requestsPerMinute: 0,
+        maxConcurrency: 0,
+        maxInFlightTokens: 0,
         models: [],
       };
   allModels.value = row?.models.includes('*') ?? false;
@@ -146,13 +144,13 @@ function input(): RelayKeyInput | undefined {
     body.monthlyBudgetMicros < 0 ||
     body.monthlyBudgetMicros > Number.MAX_SAFE_INTEGER ||
     !Number.isSafeInteger(body.requestsPerMinute) ||
-    body.requestsPerMinute < 1 ||
+    body.requestsPerMinute < 0 ||
     body.requestsPerMinute > 1000000 ||
     !Number.isSafeInteger(body.maxConcurrency) ||
-    (body.maxConcurrency ?? 0) < 1 ||
+    (body.maxConcurrency ?? 0) < 0 ||
     (body.maxConcurrency ?? 0) > 100 ||
     !Number.isSafeInteger(body.maxInFlightTokens) ||
-    (body.maxInFlightTokens ?? 0) < 1 ||
+    (body.maxInFlightTokens ?? 0) < 0 ||
     (body.maxInFlightTokens ?? 0) > 1073741824 ||
     body.models.length < 1
   ) {
@@ -197,9 +195,9 @@ function revoke(row: RelayKey) {
     active: false,
     monthlyBudgetMicros: row.monthlyBudgetMicros,
     requestsPerMinute: row.requestsPerMinute,
-    maxConcurrency: row.maxConcurrency ?? (row.source === 'member' ? 16 : 32),
-    maxInFlightTokens:
-      row.maxInFlightTokens ?? (row.source === 'member' ? 67108864 : 134217728),
+    maxConcurrency: row.maxConcurrency ?? 0,
+    maxInFlightTokens: row.maxInFlightTokens ?? 0,
+    meteringOnly: row.meteringOnly ?? false,
     models: [...row.models],
   };
   pending.value = {
@@ -279,8 +277,18 @@ async function confirm() {
             <td>{{ row.id }}</td>
             <td>{{ t(row.source === 'member' ? 'member' : 'external') }}</td>
             <td>{{ t(row.active ? 'active' : 'inactive') }}</td>
-            <td>{{ row.monthlyBudgetMicros }}</td>
-            <td>{{ row.requestsPerMinute }}</td>
+            <td>
+              {{
+                row.meteringOnly ? t('meteringOnly') : row.monthlyBudgetMicros
+              }}
+            </td>
+            <td>
+              {{
+                row.meteringOnly || !row.requestsPerMinute
+                  ? t('unlimited')
+                  : row.requestsPerMinute
+              }}
+            </td>
             <td>
               {{
                 row.models.includes('*')
@@ -324,6 +332,19 @@ async function confirm() {
             t('enabled')
           }}</label
         ><label
+          v-if="selected?.source === 'member'"
+          class="relay-check relay-wide"
+        >
+          <input
+            v-model="draft.meteringOnly"
+            name="memberMeteringOnly"
+            type="checkbox"
+          />{{ t('meteringOnly') }}
+        </label>
+        <p v-if="selected?.source === 'member'" class="relay-wide">
+          {{ t('meteringOnlyNote') }}
+        </p>
+        <label
           >{{ t('budget')
           }}<input
             v-model.number="draft.monthlyBudgetMicros"
@@ -331,11 +352,12 @@ async function confirm() {
             type="number"
             min="0"
             max="9007199254740991"
+            :disabled="draft.meteringOnly"
             required
         /></label>
         <p>{{ t('budgetNote') }}</p>
         <p
-          v-if="draft.monthlyBudgetMicros === 0"
+          v-if="draft.monthlyBudgetMicros === 0 && !draft.meteringOnly"
           class="relay-hint relay-wide"
           role="note"
         >
@@ -347,8 +369,9 @@ async function confirm() {
             v-model.number="draft.requestsPerMinute"
             name="keyRpm"
             type="number"
-            min="1"
+            min="0"
             max="1000000"
+            :disabled="draft.meteringOnly"
             required /></label
         ><label
           >{{ t('concurrency')
@@ -356,8 +379,9 @@ async function confirm() {
             v-model.number="draft.maxConcurrency"
             name="keyConcurrency"
             type="number"
-            min="1"
+            min="0"
             max="100"
+            :disabled="draft.meteringOnly"
             required
         /></label>
         <label
@@ -366,8 +390,9 @@ async function confirm() {
             v-model.number="draft.maxInFlightTokens"
             name="keyInFlightTokens"
             type="number"
-            min="1"
+            min="0"
             max="1073741824"
+            :disabled="draft.meteringOnly"
             required
         /></label>
         <div class="relay-model-picker relay-wide">

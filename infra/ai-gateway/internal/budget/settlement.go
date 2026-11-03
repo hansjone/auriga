@@ -38,8 +38,8 @@ func (l *Ledger) Settle(ctx context.Context, ref Ref, revision int64, f Finish) 
 			r.state = "unknown"
 		} else {
 			u := f.Usage
-			n, err := cost(u.InputTokens, u.OutputTokens, r.price)
-			if err != nil || u.InputTokens > r.a.InputTokenUpperBound || u.OutputTokens > r.a.MaxOutputTokens || n > r.a.ReservedMicros || !samePrice(u.Price, r.price) {
+			n, _ := cost(u.InputTokens, u.OutputTokens, r.price)
+			if !validFinalUsage(r, u) {
 				r.state = "unknown"
 				reason := "invalid_final_usage"
 				r.reason = &reason
@@ -63,6 +63,14 @@ func (l *Ledger) Settle(ctx context.Context, ref Ref, revision int64, f Finish) 
 		return result, failure("ai.budget_unavailable")
 	}
 	return result, err
+}
+
+func validFinalUsage(r *record, u *FinalUsage) bool {
+	n, err := cost(u.InputTokens, u.OutputTokens, r.price)
+	if err != nil || !samePrice(u.Price, r.price) {
+		return false
+	}
+	return r.a.MeteringOnly || u.InputTokens <= r.a.InputTokenUpperBound && u.OutputTokens <= r.a.MaxOutputTokens && n <= r.a.ReservedMicros
 }
 
 // Recover never uses elapsed time to refund. A reserved CAS can be cancelled

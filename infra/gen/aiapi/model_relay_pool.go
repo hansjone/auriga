@@ -21,12 +21,14 @@ var _ MappedNullable = &RelayPool{}
 
 // RelayPool struct for RelayPool
 type RelayPool struct {
-	Id              string       `json:"id" validate:"regexp=^[A-Za-z0-9][A-Za-z0-9._-]{0\\,127}$"`
-	Enabled         bool         `json:"enabled"`
-	Routes          []RelayRoute `json:"routes"`
-	ContextWindow   int64        `json:"contextWindow"`
-	MaxOutputTokens int64        `json:"maxOutputTokens"`
-	Price           Price        `json:"price"`
+	Id      string       `json:"id" validate:"regexp=^[A-Za-z0-9][A-Za-z0-9._-]{0\\,127}$"`
+	Enabled bool         `json:"enabled"`
+	Routes  []RelayRoute `json:"routes"`
+	// 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
+	ContextWindow int64 `json:"contextWindow"`
+	// 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
+	MaxOutputTokens int64 `json:"maxOutputTokens"`
+	Price           Price `json:"price"`
 }
 
 type _RelayPool RelayPool

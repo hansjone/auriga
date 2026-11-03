@@ -16,17 +16,29 @@ func TestPublicModelSuppliesPoolCapabilitiesWithoutUpstreamIdentity(t *testing.T
 	}
 }
 
-func TestDSHDefaultOutputMustUseAdvertisedLimit(t *testing.T) {
-	// rc.3's unspecified model capability defaults to 32768. The configured
-	// pool remains at 4096; publishing 4096 fixes the client without widening it.
+func TestPublicModelNeverInventsUnknownCapabilitiesOrClampsKnownValues(t *testing.T) {
+	unknown := publicModel(api.RelayPool{Id: "auto"})
+	if _, ok := unknown["context_window"]; ok {
+		t.Fatal("unknown context invented")
+	}
+	if _, ok := unknown["max_output_tokens"]; ok {
+		t.Fatal("unknown output invented")
+	}
+	known := publicModel(api.RelayPool{Id: "auto", ContextWindow: 2000000, MaxOutputTokens: 128000})
+	if known["context_window"] != int64(2000000) || known["max_output_tokens"] != int64(128000) {
+		t.Fatal("known capabilities clamped")
+	}
+}
+
+func TestDSHOutputIsIndependentOfAdvertisedCapability(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, field string
 		want              int64
 	}{
-		{"unconfigured-rc3", `{"max_tokens":32768}`, "/max_tokens", 0},
+		{"larger-than-old-capability", `{"max_tokens":32768}`, "", 32768},
 		{"configured-rc3", `{"max_tokens":4096}`, "", 4096},
 		{"completion-spelling", `{"max_completion_tokens":4096}`, "", 4096},
-		{"absent", `{}`, "", 4096},
+		{"absent-stays-absent", `{}`, "", 0},
 		{"both-agree", `{"max_tokens":4096,"max_completion_tokens":4096}`, "", 4096},
 		{"both-conflict", `{"max_tokens":4096,"max_completion_tokens":64}`, "/max_completion_tokens", 0},
 		{"zero", `{"max_tokens":0}`, "/max_tokens", 0},
@@ -45,8 +57,8 @@ func TestDSHDefaultOutputMustUseAdvertisedLimit(t *testing.T) {
 			if err != nil {
 				w := httptest.NewRecorder()
 				rejectOutputTokenLimit(w, field, 4096)
-				if w.Code != 400 || !strings.Contains(w.Body.String(), `"maximum":4096`) || !strings.Contains(w.Body.String(), field) {
-					t.Fatal("rejection must identify safe field and public maximum")
+				if w.Code != 400 || !strings.Contains(w.Body.String(), `"maximum":9007199254740991`) || !strings.Contains(w.Body.String(), field) {
+					t.Fatal("rejection must identify safe field without a pool capacity ceiling")
 				}
 			}
 		})

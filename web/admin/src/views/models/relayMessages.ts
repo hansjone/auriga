@@ -1,5 +1,9 @@
 ﻿import { useI18n } from 'vue-i18n';
 const zh = {
+  unlimited: '不限制',
+  meteringOnly: '仅计量（不设预算和流量限制）',
+  meteringOnlyNote:
+    '适用于团队成员。开启后仍检查身份、模型权限和吊销，并记录用量；下面的预算与流量数值保留但不生效。关闭后按填写的治理配置执行，预算0仍禁止调用。',
   duplicateRoute:
     '第 {number} 条路由的供应商和模型重复，请选择其他模型或移除该路由。',
   routeNumber: '路由 {number}',
@@ -15,9 +19,9 @@ const zh = {
   importSelected: '已选 {count} 个',
   importPreview: '预览 {count} 个模型',
   importBack: '返回选择',
-  importSuggest: '为缺失参数填入建议值',
+  importSuggest: '将未知能力交给上游',
   importSuggestNote:
-    '建议值为上下文 32768 / 输出 4096，并非供应商承诺。请核实后确认，也可逐项修改。',
+    '能力未知时保留0，不虚构32768/4096。已知能力可从上游目录继承，也可手动覆盖；中转不会用这些信息裁限请求。',
   importUnknown: '部分参数未知',
   importFromProvider: '上游目录提供',
   importInputOnly: '仅输入限制，保守用作上下文；不是总容量',
@@ -26,8 +30,9 @@ const zh = {
   importDuplicate: '本批公开 ID 重复，请修改别名',
   importInvalidId:
     'ID 需以字母或数字开头，仅含字母、数字、点、横线和下划线，最多128字符',
-  importMissingLimits: '请填写缺失参数或明确采用建议值',
-  importInvalidLimits: '上下文须为 2–1048576，输出须为 1–32768 且小于上下文',
+  importMissingLimits: '能力未知可留空或填0',
+  importInvalidLimits:
+    '能力须为非负安全整数，0表示未知；同时已知时输出须小于上下文',
   importWriteUnknown: '未确认保存结果；重试将先读回核对，不会覆盖已有模型',
   importStatus_pending: '待导入',
   importStatus_saving: '保存中',
@@ -43,11 +48,12 @@ const zh = {
   importProgress: '已保存 {saved} / {total}',
   importSavedNote:
     '外部新请求采用已保存模型。Auriga DSH 可在原生模型设置中编辑 Auriga，获取可用模型、勾选并保存目录；无需重启。',
-  applyCapabilities: '从上游应用能力',
+  applyCapabilities: '从上游更新能力',
   capabilityNote:
-    '只在所有路由参数已知时应用最小值，保留已设的更小限制；刷新目录不会自动修改配置。',
+    '这是提供给DSH的模型能力信息，不是中转限额。0表示未知；点击更新将按全部路由（含兜底）的已知能力更新，可增可减。管理台改动后在DSH手动同步已有模型能力。',
   capabilityUnknown: '部分路由参数未知，请先获取各供应商目录或手动确认。',
-  capabilityApplied: '已按全部路由的已知能力收紧参数，保留较小手工限制。',
+  capabilityApplied:
+    '已从全部路由（含兜底）更新能力信息；保存后供DSH手动同步。',
   publicSearch: '搜索公开 ID、供应商或真实模型',
   capabilityColumn: '上下文 / 最大输出',
   providersIntro:
@@ -110,8 +116,8 @@ const zh = {
   addPool: '添加模型池',
   model: '上游真实模型 ID',
   poolId: '对外公开模型 ID / 别名',
-  context: '上下文 Token 上限',
-  output: '输出 Token 上限',
+  context: '上下文能力（Token，0为未知）',
+  output: '最大输出能力（Token，0为未知）',
   weight: '分配权重',
   addRoute: '添加池路由',
   remove: '移除路由',
@@ -173,12 +179,17 @@ const zh = {
   newProviderName: '新供应商',
   newPoolName: '新模型池',
   modelRequired: '至少选择一个模型',
-  limitNote: '列表会读取所有分页；新建成员默认16并发，对外 Key 默认32并发。',
+  limitNote:
+    '流量参数0表示不限制，不自动填入RPM、并发或在途上限。对外Key仍按明确月预算执行；有预算的调用须提供max_tokens或max_completion_tokens。',
   snapshot: '已读取',
   apiRootNote:
     '填写 HTTPS 根地址，不附加 /v1；修改地址或种类会清除原密钥，须重新录入。',
 };
 const en: Record<keyof typeof zh, string> = {
+  unlimited: 'Unlimited',
+  meteringOnly: 'Meter usage only (no budget or traffic limits)',
+  meteringOnlyNote:
+    'For team members. Identity, model grants and revocation remain enforced and usage is recorded. Stored budget and traffic values are inactive in this mode. Disable it to apply those values; a zero budget still blocks calls.',
   duplicateRoute:
     'Route {number} repeats the same provider and model. Choose another model or remove this route.',
   routeNumber: 'Route {number}',
@@ -195,9 +206,9 @@ const en: Record<keyof typeof zh, string> = {
   importSelected: '{count} selected',
   importPreview: 'Preview {count} models',
   importBack: 'Back to selection',
-  importSuggest: 'Fill missing limits with suggestions',
+  importSuggest: 'Leave unknown capabilities to upstream',
   importSuggestNote:
-    'Suggested context 32768 / output 4096 are not provider guarantees. Verify before confirming, or edit each row.',
+    'Keep unknown capabilities at zero instead of inventing 32768/4096. Inherit known upstream metadata or override it explicitly. These values do not cap relay requests.',
   importUnknown: 'Some limits unknown',
   importFromProvider: 'From provider catalog',
   importInputOnly: 'Input limit used conservatively; not total context',
@@ -206,9 +217,9 @@ const en: Record<keyof typeof zh, string> = {
   importDuplicate: 'Duplicate public ID in this batch; change the alias',
   importInvalidId:
     'Use 1–128 letters, digits, dots, dashes or underscores, starting with a letter or digit',
-  importMissingLimits: 'Enter missing limits or explicitly apply suggestions',
+  importMissingLimits: 'Leave unknown capabilities blank or enter zero',
   importInvalidLimits:
-    'Context must be 2–1048576; output 1–32768 and below context',
+    'Use nonnegative safe integers; zero means unknown. When both are known, output must be below context.',
   importWriteUnknown:
     'Save result is unconfirmed. Retry checks persisted configuration before writing.',
   importStatus_pending: 'Pending',
@@ -226,13 +237,13 @@ const en: Record<keyof typeof zh, string> = {
   importProgress: 'Saved {saved} / {total}',
   importSavedNote:
     'External requests use saved models. In native Models settings, edit Auriga, fetch available models, select and save without restarting DSH.',
-  applyCapabilities: 'Apply upstream limits',
+  applyCapabilities: 'Update capabilities from upstream',
   capabilityNote:
-    'Apply the minimum only when every route has known limits. Smaller manual limits are retained. Catalog refresh never edits saved configuration.',
+    'Model capabilities are client hints, not relay quotas. Zero means unknown. Update from all routes, including fallbacks; values may increase or decrease. Manually sync existing DSH models after saving.',
   capabilityUnknown:
     'Some route limits are unknown. Fetch each catalog or confirm limits manually.',
   capabilityApplied:
-    'Applied known limits across all routes, retaining smaller manual limits.',
+    'Updated capabilities across all routes, including fallbacks. Save, then manually sync DSH models.',
   publicSearch: 'Search public ID, provider or upstream model',
   capabilityColumn: 'Context / maximum output',
   providersIntro:
@@ -305,8 +316,8 @@ const en: Record<keyof typeof zh, string> = {
   addPool: 'Add model pool',
   model: 'Upstream model',
   poolId: 'Public model ID',
-  context: 'Context token limit',
-  output: 'Output token limit',
+  context: 'Context capability (tokens; 0 unknown)',
+  output: 'Output capability (tokens; 0 unknown)',
   weight: 'Weight',
   addRoute: 'Add route',
   remove: 'Remove route',
@@ -371,7 +382,7 @@ const en: Record<keyof typeof zh, string> = {
   newPoolName: 'New pool',
   modelRequired: 'Select at least one model',
   limitNote:
-    'All pages are loaded. New members default to 16 concurrent requests; external keys to 32.',
+    'Zero traffic values mean unlimited; no RPM, concurrency or in-flight limits are inserted. External keys retain explicit monthly budgets. Budgeted calls must provide max_tokens or max_completion_tokens.',
   snapshot: 'Loaded',
   apiRootNote:
     'Use an HTTPS origin without /v1. Changing the origin or type clears the saved credential; enter it again.',

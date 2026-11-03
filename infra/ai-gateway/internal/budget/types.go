@@ -112,7 +112,7 @@ func New(s transactionStore, currency string, policy *api.AdmissionPolicy) (*Led
 	if policy != nil {
 		p = *policy
 	}
-	if s == nil || !currencyPattern.MatchString(currency) || len(p.AdditionalProperties) != 0 || p.MaxActiveRequestsPerSubject < 1 || p.MaxActiveRequestsPerSubject > 100 || p.MaxInFlightPercent < 1 || p.MaxInFlightPercent > 100 || !positiveOptional(p.MaxInFlightTokens) || !positiveOptional(p.MaxInFlightMicros) {
+	if s == nil || !currencyPattern.MatchString(currency) || len(p.AdditionalProperties) != 0 || p.MaxActiveRequestsPerSubject < 0 || p.MaxActiveRequestsPerSubject > 100 || p.MaxInFlightPercent < 1 || p.MaxInFlightPercent > 100 || !positiveOptional(p.MaxInFlightTokens) || !positiveOptional(p.MaxInFlightMicros) {
 		return nil, failure("ai.budget_unavailable")
 	}
 	// Detach pointer fields so configuration cannot change beneath admissions.

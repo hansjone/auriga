@@ -27,7 +27,6 @@ const importProvider = ref(''),
   capabilityNotice = ref('');
 const importSession = ref(0),
   importRunning = ref(false);
-const limitEdited = ref({ context: false, output: false });
 const { t } = useRelayI18n();
 const ui = useRelayUi(t);
 const { loading, busy, error, notice } = ui;
@@ -118,8 +117,8 @@ function modelChanged(model: string) {
 const freshPool = (): RelayPool => ({
   id: '',
   enabled: true,
-  contextWindow: 32768,
-  maxOutputTokens: 4096,
+  contextWindow: 0,
+  maxOutputTokens: 0,
   routes: [],
   price: {
     currency: 'USD',
@@ -196,7 +195,6 @@ function editPool(row?: RelayPool) {
   close();
   selected.value = row?.id ?? '';
   draft.value = row ? globalThis.structuredClone(row) : freshPool();
-  limitEdited.value = { context: !!row, output: !!row };
   editor.value = 'pool';
 }
 function editAutoPool() {
@@ -286,10 +284,7 @@ function askPool() {
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.id) ||
     ints.some((v) => !Number.isSafeInteger(v) || v < 0) ||
-    body.contextWindow <= body.maxOutputTokens ||
-    body.contextWindow > 1048576 ||
-    body.maxOutputTokens < 1 ||
-    body.maxOutputTokens > 32768 ||
+    (body.contextWindow > 0 && body.maxOutputTokens >= body.contextWindow) ||
     body.price.inputMicrosPerMillionTokens < 1 ||
     body.price.outputMicrosPerMillionTokens < 1 ||
     body.routes.length < 1 ||
@@ -345,17 +340,15 @@ function accessChanged(permissions: string[]) {
 }
 function applyCapabilities() {
   if (!draft.value) return;
-  const models = draft.value.routes
-    .filter((r) => r.weight > 0)
-    .map(
-      (r) =>
-        catalogs.value[r.providerId]?.items.find((m) => m.id === r.model) ?? {
-          id: r.model,
-        },
-    );
+  const models = draft.value.routes.map(
+    (r) =>
+      catalogs.value[r.providerId]?.items.find((m) => m.id === r.model) ?? {
+        id: r.model,
+      },
+  );
   const limits = applyKnownLimits(
-    limitEdited.value.context ? draft.value.contextWindow : 1048576,
-    limitEdited.value.output ? draft.value.maxOutputTokens : 32768,
+    draft.value.contextWindow,
+    draft.value.maxOutputTokens,
     models,
   );
   if (!limits || limits.output >= limits.context) {
@@ -598,8 +591,17 @@ async function confirm() {
               </div>
             </td>
             <td>
-              {{ pool.contextWindow.toLocaleString() }} /
-              {{ pool.maxOutputTokens.toLocaleString() }}
+              {{
+                pool.contextWindow
+                  ? pool.contextWindow.toLocaleString()
+                  : t('unknown')
+              }}
+              /
+              {{
+                pool.maxOutputTokens
+                  ? pool.maxOutputTokens.toLocaleString()
+                  : t('unknown')
+              }}
             </td>
             <td>
               <button
@@ -647,20 +649,18 @@ async function confirm() {
             v-model.number="draft.contextWindow"
             name="contextWindow"
             type="number"
-            min="2"
-            max="1048576"
-            required
-            @input="limitEdited.context = true" /></label
+            min="0"
+            max="9007199254740991"
+            required /></label
         ><label
           >{{ t('output')
           }}<input
             v-model.number="draft.maxOutputTokens"
             name="maxOutputTokens"
             type="number"
-            min="1"
-            max="32768"
+            min="0"
+            max="9007199254740991"
             required
-            @input="limitEdited.output = true"
         /></label>
         <div class="relay-wide relay-limit-help">
           <button
@@ -676,7 +676,7 @@ async function confirm() {
         <div
           v-for="(route, index) in draft.routes"
           :key="index"
-          class="usage-filters"
+          class="usage-filters relay-route"
         >
           <strong class="relay-route-title">{{
             t('routeNumber', { number: index + 1 })
@@ -712,17 +712,42 @@ async function confirm() {
               />
             </datalist>
           </label>
-          <button
-            type="button"
-            :data-testid="'fetch-provider-models-' + index"
-            :disabled="!route.providerId || catalogs[route.providerId]?.loading"
-            @click="fetchModels(route.providerId)"
-          >
-            {{
-              t(catalogs[route.providerId]?.loading ? 'loading' : 'fetchModels')
-            }}
-          </button>
-          <p>{{ t('catalogHint') }}</p>
+          <label
+            >{{ t('weight')
+            }}<input
+              v-model.number="route.weight"
+              :name="'routeWeight' + index"
+              type="number"
+              min="0"
+              max="1000"
+              step="any"
+              required
+          /></label>
+          <div class="relay-route-actions">
+            <button
+              type="button"
+              :data-testid="'fetch-provider-models-' + index"
+              :disabled="
+                !route.providerId || catalogs[route.providerId]?.loading
+              "
+              @click="fetchModels(route.providerId)"
+            >
+              {{
+                t(
+                  catalogs[route.providerId]?.loading
+                    ? 'loading'
+                    : 'fetchModels',
+                )
+              }}
+            </button>
+            <button type="button" @click="draft.routes.splice(index, 1)">
+              {{ t('remove') }}
+            </button>
+            <p v-if="route.model && draft.id" data-testid="model-mapping">
+              {{ route.model }} → {{ draft.id }}
+            </p>
+          </div>
+          <p class="relay-route-hint">{{ t('catalogHint') }}</p>
           <p v-if="catalogs[route.providerId]?.error" role="alert">
             {{ catalogs[route.providerId]?.error }}
           </p>
@@ -735,21 +760,6 @@ async function confirm() {
           >
             {{ t('catalogEmpty') }}
           </p>
-          <p v-if="route.model && draft.id" data-testid="model-mapping">
-            {{ route.model }} → {{ draft.id }}
-          </p>
-          <label
-            >{{ t('weight')
-            }}<input
-              v-model.number="route.weight"
-              :name="'routeWeight' + index"
-              type="number"
-              min="0"
-              step="any"
-              required /></label
-          ><button type="button" @click="draft.routes.splice(index, 1)">
-            {{ t('remove') }}
-          </button>
         </div>
         <button
           type="button"

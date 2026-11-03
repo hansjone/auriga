@@ -713,6 +713,7 @@ export interface components {
     AdmissionPolicy: {
       /**
        * Format: int64
+       * @description 并发上限，0表示不限制。
        * @default 2
        */
       maxActiveRequestsPerSubject: number;
@@ -743,9 +744,15 @@ export interface components {
       id: string;
       enabled: boolean;
       routes: components['schemas']['RelayRoute'][];
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
+       */
       contextWindow: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
+       */
       maxOutputTokens: number;
       price: components['schemas']['Price'];
     };
@@ -754,19 +761,24 @@ export interface components {
       active: boolean;
       /** Format: int64 */
       monthlyBudgetMicros: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
       requestsPerMinute: number;
       models: string[];
       /**
        * Format: int64
-       * @description 每个Key同时执行的请求上限。成员默认16，对外Key默认32。
+       * @description 显式流量限制，0或未指定表示不限制。
        */
       maxConcurrency?: number;
       /**
        * Format: int64
-       * @description 每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。
+       * @description 显式流量限制，0或未指定表示不限制。
        */
       maxInFlightTokens?: number;
+      /** @description 仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。 */
+      meteringOnly?: boolean;
     };
     RelayKey: {
       /** Format: uuid */
@@ -778,19 +790,29 @@ export interface components {
       active: boolean;
       /** Format: int64 */
       monthlyBudgetMicros: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
       requestsPerMinute: number;
       models: string[];
       /**
        * Format: int64
-       * @description 每个Key同时执行的请求上限。成员默认16，对外Key默认32。
+       * @description 显式流量限制，0或未指定表示不限制。
        */
       maxConcurrency?: number;
       /**
        * Format: int64
-       * @description 每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。
+       * @description 显式流量限制，0或未指定表示不限制。
        */
       maxInFlightTokens?: number;
+      /** @description 仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。 */
+      meteringOnly?: boolean;
+      /**
+       * @description 治理来源。ensure只更新default；旧无来源保留为legacy，管理员保存标administrator。
+       * @enum {string}
+       */
+      policyOrigin?: 'default' | 'administrator' | 'legacy';
     };
     RelayKeyIssued: {
       key: components['schemas']['RelayKey'];
@@ -804,18 +826,23 @@ export interface components {
       accountId: string;
       /** Format: int64 */
       monthlyBudgetMicros: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
       requestsPerMinute: number;
       /**
        * Format: int64
-       * @description 每个Key同时执行的请求上限。成员默认16，对外Key默认32。
+       * @description 显式流量限制，0或未指定表示不限制。
        */
       maxConcurrency?: number;
       /**
        * Format: int64
-       * @description 每个Key同时预占的Token上限。成员默认67108864，对外Key默认134217728。
+       * @description 显式流量限制，0或未指定表示不限制。
        */
       maxInFlightTokens?: number;
+      /** @description 仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。 */
+      meteringOnly?: boolean;
     };
     RelayProvider: {
       /** Format: uuid */

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/relaylimits"
 )
 
 type Principal struct {
@@ -136,7 +137,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.Clone(ctx)
 	if method == http.MethodPost {
 		var fields map[string]json.RawMessage
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, relaylimits.ChatBodyBytes))
 		if decoder.Decode(&fields) != nil || fields == nil || decoder.Decode(new(any)) != io.EOF {
 			reject(w, 400, "common.validation_failed")
 			return
