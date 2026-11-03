@@ -103,6 +103,7 @@ func writeRuntimeMaterials(out string, m *runtimebundle.Material, memory int64) 
 		Runtime:   nodev1.RuntimeKind_RUNTIME_KIND_DOCKER,
 		Resources: &nodev1.Resources{CpuMillis: 500, MemoryMb: memory, DiskGb: 1, Pids: 128},
 		Dsh:       m.Runtime(),
+		Network:   &nodev1.Network{EgressProxy: "http://auriga-egress.internal:3128"},
 		Profile: &nodev1.Profile{ListenPort: 7860, Patches: []*nodev1.ConfigPatch{
 			{Path: "plugins.auriga-dsh.imBots", ValueJson: `"none"`},
 			{Path: "plugins.auriga-dsh.terminalSources", ValueJson: `"browser-only"`},

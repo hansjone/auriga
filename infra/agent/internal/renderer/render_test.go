@@ -61,10 +61,11 @@ func TestRenderDeterministicAndSecretPerms(t *testing.T) {
 	home := filepath.Join(root, "home")
 	_ = os.MkdirAll(home, 0o700)
 	opt := renderer.Options{
-		MetaDir:        meta,
-		HomeDir:        home,
-		Access:         testAccess(t, ""),
-		SealingPrivate: priv,
+		MetaDir:          meta,
+		HomeDir:          home,
+		Access:           testAccess(t, ""),
+		SealingPrivate:   priv,
+		ProxyBypassHosts: []string{"native.example.com", "native.example.com"},
 	}
 	r1, err := renderer.Render(spec, opt)
 	if err != nil {
@@ -88,6 +89,20 @@ func TestRenderDeterministicAndSecretPerms(t *testing.T) {
 	}
 	if !strings.Contains(string(env), "AURIGA_IDENTITY_KEYS_FILE="+renderer.ContainerIdentityKeys) {
 		t.Fatalf("env should use container paths: %s", env)
+	}
+	var bypass string
+	for _, line := range strings.Split(string(env), "\n") {
+		if value, found := strings.CutPrefix(line, "NO_PROXY="); found {
+			bypass = "," + value + ","
+		}
+	}
+	for _, host := range []string{opt.Access.InstanceControl().DnsAlias, opt.Access.PortalOrigin().Host, "native.example.com"} {
+		if !strings.Contains(bypass, ","+host+",") {
+			t.Fatal("trusted control/portal/issuer host missing from NO_PROXY", host)
+		}
+	}
+	if strings.Count(bypass, "native.example.com") != 1 {
+		t.Fatal("duplicate bypass host")
 	}
 	if r1.AIGatewayTokenFile == "" {
 		t.Fatal("expected ai-gateway token")

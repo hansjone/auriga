@@ -8,7 +8,7 @@ import (
 
 func clearSurfaceEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"AURIGA_DEPLOYMENT_ACCESS_FILE", "AURIGA_AGENT_INSTANCE_PLATFORM_URL", "AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "AURIGA_AGENT_DOCKER_EDGE_CONTAINER", "AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN", "AURIGA_AGENT_MANAGED_INSTALLATION_FILE", "AURIGA_LINKS_ALLOWED_ORIGINS"} {
+	for _, key := range []string{"AURIGA_DEPLOYMENT_ACCESS_FILE", "AURIGA_AGENT_INSTANCE_PLATFORM_URL", "AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "AURIGA_AGENT_DOCKER_EDGE_CONTAINER", "AURIGA_AGENT_EGRESS_CONTAINER", "AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN", "AURIGA_AGENT_MANAGED_INSTALLATION_FILE", "AURIGA_LINKS_ALLOWED_ORIGINS"} {
 		t.Setenv(key, "")
 	}
 }
@@ -70,5 +70,25 @@ func TestInstanceSurfaceRejectsUnreadableOrInvalidAccess(t *testing.T) {
 		if _, err := instanceSurfaceFromEnv(); err == nil {
 			t.Fatalf("invalid access accepted: %s", raw)
 		}
+	}
+}
+
+func TestInstanceSurfaceBindsEgressToApprovedProject(t *testing.T) {
+	clearSurfaceEnv(t)
+	path, err := filepath.Abs(filepath.Join("../../../../contracts/deployment/fixtures", "domain-proxy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AURIGA_DEPLOYMENT_ACCESS_FILE", path)
+	for _, name := range []string{"other-egress", "auriga-edge", "../egress"} {
+		t.Setenv("AURIGA_AGENT_EGRESS_CONTAINER", name)
+		if _, err := instanceSurfaceFromEnv(); err == nil {
+			t.Fatal("unapproved egress identity accepted", name)
+		}
+	}
+	t.Setenv("AURIGA_AGENT_EGRESS_CONTAINER", "auriga-egress")
+	got, err := instanceSurfaceFromEnv()
+	if err != nil || got.EgressContainer != "auriga-egress" {
+		t.Fatal(got, err)
 	}
 }

@@ -162,7 +162,14 @@ services:
     group_add: ['10005', '10006', '999']
     read_only: true
     tmpfs: ['/tmp:rw,noexec,nosuid,size=64m']
-    secrets: [bifrost_admin_password, bifrost_member_password, bifrost_encryption_key, bifrost_pg_password, bifrost_pg_migration_password]
+    secrets:
+      [
+        bifrost_admin_password,
+        bifrost_member_password,
+        bifrost_encryption_key,
+        bifrost_pg_password,
+        bifrost_pg_migration_password,
+      ]
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
     depends_on:
@@ -170,7 +177,8 @@ services:
         condition: service_healthy
     networks: [internal, publish]
     healthcheck:
-      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/health']
+      test:
+        ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/health']
       interval: 5s
       timeout: 5s
       retries: 30
@@ -387,7 +395,7 @@ services:
     networks:
       internal:
         ipv4_address: ${AURIGA_INTERNAL_EDGE_IP}
-        aliases: ["${AURIGA_MANAGED_PLATFORM_HOST:-auriga-managed-disabled}"]
+        aliases: ['${AURIGA_MANAGED_PLATFORM_HOST:-auriga-managed-disabled}']
       lan:
         ipv4_address: ${AURIGA_EDGE_LAN_IP}
     expose:
@@ -450,6 +458,33 @@ services:
     cpus: 0.25
     pids_limit: 64
 
+  egress:
+    image: ${AURIGA_IMAGE_EDGE}
+    container_name: auriga-nas-test-egress
+    labels:
+      auriga.role: egress
+      auriga.egress.for-edge: *trusted_edge_container
+    <<: *cap_drop_all
+    user: '65532:65532'
+    restart: unless-stopped
+    read_only: true
+    entrypoint: ['/auriga-egress']
+    command: ['--listen', '0.0.0.0:3128']
+    environment:
+      AURIGA_EGRESS_DNS_SERVER: ${AURIGA_EGRESS_DNS_SERVER:-}
+      AURIGA_EGRESS_DENY_HOSTS: ${AURIGA_NAS_PORTAL_HOST:?sealed portal host required},${AURIGA_NAS_ADMIN_HOST:?sealed admin host required}
+    # The only non-internal attachment is an egress-only bridge, with no host
+    # publishes or access to backend, Docker, credential or other instance data.
+    networks: [egress-out]
+    healthcheck:
+      test: ['CMD', '/auriga-egress', '--check']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 128
+
   agent:
     image: ${AURIGA_IMAGE_AGENT}
     <<: *cap_drop_all
@@ -465,6 +500,8 @@ services:
         condition: service_started
       edge:
         condition: service_started
+      egress:
+        condition: service_healthy
     env_file:
       - path: ${AURIGA_DATA_ROOT}/config/agent.env
         required: true
@@ -473,6 +510,7 @@ services:
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
+      AURIGA_AGENT_EGRESS_CONTAINER: auriga-nas-test-egress
       AURIGA_AGENT_PANEL_KEYS_FILE: /etc/auriga/panel-keys.json
       AURIGA_AGENT_MANAGED_CA_FILE: ${AURIGA_MANAGED_PLATFORM_ORIGIN:+/etc/auriga/managed-ca/ca.crt}
       AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN: ${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
@@ -501,6 +539,10 @@ services:
     pids_limit: 256
 
 networks:
+  egress-out:
+    name: auriga-nas-test_egress-out
+    driver: bridge
+    internal: false
   observability:
     internal: true
   internal:

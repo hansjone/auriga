@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/runtimebundle"
+	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"golang.org/x/sys/unix"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -93,6 +95,14 @@ func testNASRuntimeUpgradeLifecycle(t *testing.T) {
 	active := run("path", "", "", true)
 	if active == base || !strings.HasPrefix(active, out+"/") {
 		t.Fatal(active)
+	}
+	projection, err := os.ReadFile(filepath.Join(active, "templates/real-dsh.pb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projected nodev1.InstanceSpec
+	if err = proto.Unmarshal(projection, &projected); err != nil || projected.GetNetwork().GetEgressProxy() != "http://auriga-egress.internal:3128" {
+		t.Fatal("runtime upgrade omitted trusted egress", err)
 	}
 	if b, err := exec.Command("setpriv", "--reuid=10001", "--regid=10001", "--clear-groups", "cat", filepath.Join(active, "templates/real-dsh.pb")).CombinedOutput(); err != nil {
 		t.Fatalf("runtime uid cannot read new public projection: %v (%d bytes)", err, len(b))

@@ -1627,6 +1627,7 @@ class WorkspaceIntegrationTest {
   void formalDockerReleaseSupportsPinsDefaultsAndRuntimeQueriesWithoutLegacyStatement() {
     var first = service.templates.all().getFirst();
     var second = first.toBuilder();
+    second.setNetwork(Network.newBuilder().setEgressProxy("http://egress.example.com:3128"));
     second.getDshBuilder().setVersion("2.0.0");
     second
         .getDshBuilder()
@@ -1658,6 +1659,7 @@ class WorkspaceIntegrationTest {
               id, WorkspaceService.JSON.createObjectNode().put("dshVersionPin", "2.0.0"), null);
           var pinned = WorkspaceService.spec(store.tx(() -> store.instance(id)));
           assertEquals("2.0.0", pinned.getDsh().getVersion());
+          assertEquals(second.getNetwork(), pinned.getNetwork());
           assertFalse(pinned.getDsh().hasSigned());
           admin.defaultRuntime("1.0.0");
           assertEquals(
@@ -1665,9 +1667,15 @@ class WorkspaceIntegrationTest {
               WorkspaceService.spec(store.tx(() -> store.instance(id))).getDsh().getVersion());
           admin.patch(id, WorkspaceService.JSON.createObjectNode().putNull("dshVersionPin"), null);
           assertEquals(
+              first.getNetwork(),
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getNetwork());
+          assertEquals(
               "1.0.0",
               WorkspaceService.spec(store.tx(() -> store.instance(id))).getDsh().getVersion());
           admin.defaultRuntime("2.0.0");
+          assertEquals(
+              second.getNetwork(),
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getNetwork());
           assertEquals(
               "2.0.0",
               WorkspaceService.spec(store.tx(() -> store.instance(id))).getDsh().getVersion());

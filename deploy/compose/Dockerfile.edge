@@ -40,6 +40,8 @@ RUN CGO_ENABLED=0 go build -o /out/auriga-edge .
 WORKDIR /src/infra/ai-gateway
 RUN CGO_ENABLED=0 go build -o /out/auriga-ai-gateway . \
   && CGO_ENABLED=0 go build -o /out/auriga-network-broker github.com/nats-io/nats-server/v2
+WORKDIR /src/infra/egress
+RUN CGO_ENABLED=0 go build -o /out/auriga-egress .
 WORKDIR /src/deploy/bootstrap
 COPY deploy/bootstrap/ ./
 RUN CGO_ENABLED=0 go build -o /out/auriga-network-probe ./cmd/network-probe
@@ -48,6 +50,7 @@ RUN CGO_ENABLED=0 go build -o /out/auriga-panel ./cmd/panel
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/auriga-edge /auriga-edge
 COPY --from=build /out/auriga-ai-gateway /auriga-ai-gateway
+COPY --from=build /out/auriga-egress /auriga-egress
 COPY --from=build /out/auriga-network-broker /auriga-network-broker
 COPY --from=build /out/auriga-network-probe /auriga-network-probe
 COPY --from=build /out/auriga-panel /auriga-panel

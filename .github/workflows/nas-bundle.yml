@@ -200,6 +200,8 @@ jobs:
             echo "AURIGA_INTERNAL_EDGE_IP=192.0.2.138"
             echo "AURIGA_NAS_PORTAL_TARGET_PORT=8080"
             echo "AURIGA_NAS_ADMIN_TARGET_PORT=8084"
+            echo "AURIGA_NAS_PORTAL_HOST=portal.example.com"
+            echo "AURIGA_NAS_ADMIN_HOST=admin.example.com"
             echo "AURIGA_LAN_NETWORK=auriga-ci-lan-check"
             echo "AURIGA_LAN_SUBNET=192.0.2.0/24"
             echo "AURIGA_EDGE_LAN_IP=192.0.2.10"

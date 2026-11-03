@@ -57,6 +57,7 @@ public final class WorkspaceAdmin {
                     previous.getDsh().getReleaseEnvelope().getOs(),
                     previous.getDsh().getReleaseEnvelope().getArch());
             next.setDsh(template.getDsh());
+            next.setNetwork(template.getNetwork());
             store.jdbc.update(
                 "UPDATE instance SET pinned_version=? WHERE tenant_id=? AND id=?",
                 patch.getDshVersionPin(),
@@ -278,11 +279,13 @@ public final class WorkspaceAdmin {
                     spec.getRuntime(),
                     spec.getDsh().getReleaseEnvelope().getOs(),
                     spec.getDsh().getReleaseEnvelope().getArch());
-            if (!spec.getDsh().equals(template.getDsh()))
+            if (!spec.getDsh().equals(template.getDsh())
+                || !spec.getNetwork().equals(template.getNetwork()))
               service.saveSpec(
                   row,
                   spec.toBuilder()
                       .setDsh(template.getDsh())
+                      .setNetwork(template.getNetwork())
                       .setGeneration(spec.getGeneration() + 1)
                       .build());
           }
