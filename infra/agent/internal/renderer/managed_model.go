@@ -24,9 +24,9 @@ type managedModel struct {
 	Credential string `json:"credential"`
 	BaseURL    string `json:"baseUrl"`
 	Models     []struct {
-		ID              string `json:"id"`
-		ContextWindow   int64  `json:"contextWindow"`
-		MaxOutputTokens int64  `json:"maxOutputTokens"`
+		ID              string          `json:"id"`
+		ContextWindow   json.RawMessage `json:"contextWindow,omitempty"`
+		MaxOutputTokens json.RawMessage `json:"maxOutputTokens,omitempty"`
 	} `json:"models"`
 }
 
@@ -65,12 +65,25 @@ func decodeManagedModel(raw []byte, spec *nodev1.InstanceSpec) (*managedModel, e
 	}
 	seen := map[string]bool{}
 	for _, model := range m.Models {
-		if strings.TrimSpace(model.ID) == "" || len(model.ID) > 200 || strings.ContainsFunc(model.ID, unicode.IsControl) || seen[model.ID] || model.ContextWindow < 2 || model.ContextWindow > 1048576 || model.MaxOutputTokens < 1 || model.MaxOutputTokens > 32768 || model.MaxOutputTokens >= model.ContextWindow {
+		context, validContext := managedCapability(model.ContextWindow, 2)
+		output, validOutput := managedCapability(model.MaxOutputTokens, 1)
+		if strings.TrimSpace(model.ID) == "" || len(model.ID) > 200 || strings.ContainsFunc(model.ID, unicode.IsControl) || seen[model.ID] || !validContext || !validOutput || (context > 0 && output > 0 && output >= context) {
 			return fail()
 		}
 		seen[model.ID] = true
 	}
 	return &m, nil
+}
+
+func managedCapability(raw json.RawMessage, minimum int64) (int64, bool) {
+	if len(raw) == 0 {
+		return 0, true
+	}
+	var value int64
+	if json.Unmarshal(raw, &value) != nil || value < minimum || value > 9007199254740991 {
+		return 0, false
+	}
+	return value, true
 }
 
 func managedModelRow(_ *managedModel) any {

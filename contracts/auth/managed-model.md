@@ -23,18 +23,29 @@ this model-only key. Dependency failures fail closed.
 
 The trusted file is defined by `plugin/managed-model.schema.json`, separately
 HPKE-sealed as `Secrets.model_credential` with current specification generation.
+Its `models` catalog requires unique public IDs. Each `contextWindow` and
+`maxOutputTokens` capability is optional: unknown values are omitted, never zero
+or an invented default. Provided values are positive safe integers at most
+9,007,199,254,740,991 (`contextWindow` is at least 2); when both are known,
+output must be smaller than context. Producers and consumers check this pair.
+These are DSH bootstrap/request metadata, not extra relay invocation limits.
+An unknown or one-sided capability does not invalidate other authorized models
+or require identity rotation. DSH native defaults apply only inside DSH;
+later manual capability synchronization uses the current authorized catalog.
 No credential is placed in Profile, environment, image, public YAML or logs.
-The native pi-ai route uses a Loader file expression for its Authorization
-header, reading the sole `/run/auriga/model-credential.json` (0600) at evaluation.
+The native pi-ai route stores only the reserved credential reference
+`apiKeyEnv: AURIGA_MANAGED_MODEL`. Its service-owned resolver reads the sole
+`/run/auriga/model-credential.json` (0600) for an operation bound to the managed
+provider, target, configuration revision and current owner. An old snapshot
+cannot acquire authority from a later configuration change.
 The obsolete `model-keys.json` copy is removed. The native `credentials` service
 keeps its own writable user store, including personal references and OAuth records.
 This is a platform-only model-provider profile, separate from personal profiles.
 Key replacement uses the existing material restart path; invalid installation
 configuration clears previously delivered model material on reconciliation.
-Known and accepted: only the instance owner can see the evaluated managed
-Authorization through `settings/describe`, within the MANAGED-N1 same-host
-boundary; tracked as B-MM-DESCRIBE. The profile retains the file expression.
-The probe warns only for this exact describe value; every other key exposure
-remains a failure.
+Settings and profile describe only the reference, never the managed key value.
+The browser credential Remote does not expose `resolve`; the native credential
+store and process-global environment do not contain the managed key. The former
+Loader expression and its describe exposure have been removed.
 Gateway lease-ceiling checks permit five seconds of IAM clock skew; actual
 expiry and per-call online authorization remain mandatory.

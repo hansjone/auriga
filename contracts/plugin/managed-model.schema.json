@@ -38,19 +38,20 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "contextWindow", "maxOutputTokens"],
+        "required": ["id"],
         "properties": {
           "id": { "type": "string", "minLength": 1, "maxLength": 200 },
           "contextWindow": {
             "type": "integer",
             "minimum": 2,
-            "maximum": 1048576
+            "maximum": 9007199254740991,
+            "description": "Optional upstream capability metadata; omitted when unknown, never zero or an invocation hard limit."
           },
           "maxOutputTokens": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 32768,
-            "description": "Must be smaller than contextWindow; verified by the producer and renderer."
+            "maximum": 9007199254740991,
+            "description": "Optional upstream capability metadata; omitted when unknown. If both values are known, must be smaller than contextWindow; verified by producer and consumers."
           }
         }
       }

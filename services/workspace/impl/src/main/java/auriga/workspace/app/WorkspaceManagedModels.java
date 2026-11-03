@@ -73,7 +73,7 @@ public final class WorkspaceManagedModels {
               row.get("generation"));
     }
     if (!hasCredential && row.get("managed_model_credential") == null) return;
-    if (hasCredential && hasModelLimits(row)) return;
+    if (hasCredential && hasModelCatalog(row)) return;
     UUID id = (UUID) row.get("id");
     long version = ((Number) row.get("managed_credential_version")).longValue();
     byte[] material =
@@ -96,9 +96,9 @@ public final class WorkspaceManagedModels {
               || WorkspaceService.spec(current).getDesired() != DesiredState.DESIRED_STATE_RUNNING)
             return null;
           if (material == null && current.get("managed_model_credential") == null) return null;
-          // Upgrade legacy id-only material through the normal catalog and seal
-          // path. A racing reconciliation that already installed limits wins.
-          if (material != null && hasModelLimits(current)) return null;
+          // Refresh invalid material through the normal catalog and seal path.
+          // A valid catalog with unknown capabilities does not require rotation.
+          if (material != null && hasModelCatalog(current)) return null;
           store.jdbc.update(
               "UPDATE instance SET managed_model_credential=? WHERE tenant_id=? AND id=?",
               material,
@@ -113,12 +113,12 @@ public final class WorkspaceManagedModels {
         });
   }
 
-  private boolean hasModelLimits(Map<String, Object> row) {
+  private boolean hasModelCatalog(Map<String, Object> row) {
     if (!(row.get("managed_model_credential") instanceof byte[] material)) return false;
     byte[] plaintext =
         crypto.decrypt(material, service.store.tenant() + "/managed-model/" + row.get("id"));
     try {
-      return ManagedModelCatalog.hasLimits(WorkspaceService.JSON.readTree(plaintext));
+      return ManagedModelCatalog.hasCatalog(WorkspaceService.JSON.readTree(plaintext));
     } finally {
       Arrays.fill(plaintext, (byte) 0);
     }

@@ -22,19 +22,25 @@ export interface ManagedModelCredential {
   models: [
     {
       id: string;
-      contextWindow: number;
       /**
-       * Must be smaller than contextWindow; verified by the producer and renderer.
+       * Optional upstream capability metadata; omitted when unknown, never zero or an invocation hard limit.
        */
-      maxOutputTokens: number;
+      contextWindow?: number;
+      /**
+       * Optional upstream capability metadata; omitted when unknown. If both values are known, must be smaller than contextWindow; verified by producer and consumers.
+       */
+      maxOutputTokens?: number;
     },
     ...{
       id: string;
-      contextWindow: number;
       /**
-       * Must be smaller than contextWindow; verified by the producer and renderer.
+       * Optional upstream capability metadata; omitted when unknown, never zero or an invocation hard limit.
        */
-      maxOutputTokens: number;
+      contextWindow?: number;
+      /**
+       * Optional upstream capability metadata; omitted when unknown. If both values are known, must be smaller than contextWindow; verified by producer and consumers.
+       */
+      maxOutputTokens?: number;
     }[],
   ];
 }
