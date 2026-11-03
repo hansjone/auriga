@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 import { isApiError } from '@auriga/shared';
 import {
   relayApi,
@@ -11,7 +18,14 @@ import ActionConfirm from '../../admin/ActionConfirm.vue';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
 import './modelUsage.css';
+import './relayManagement.css';
+import ModelImportPanel from './ModelImportPanel.vue';
+import { applyKnownLimits, type CatalogModel } from './modelImport';
 const requestKey = ref('');
+const importProvider = ref(''),
+  poolSearch = ref(''),
+  capabilityNotice = ref('');
+const limitEdited = ref({ context: false, output: false });
 const { t } = useRelayI18n();
 const ui = useRelayUi(t);
 const { loading, busy, error, notice } = ui;
@@ -29,7 +43,7 @@ const provider = ref<RelayProviderInput>({
 const draft = ref<RelayPool>();
 const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
 const catalogs = ref<
-  Record<string, { items: string[]; loading: boolean; error: string }>
+  Record<string, { items: CatalogModel[]; loading: boolean; error: string }>
 >({});
 const catalogRequests = new Set<globalThis.AbortController>();
 let catalogEpoch = 0;
@@ -54,7 +68,7 @@ async function fetchModels(providerId: string) {
     const result = await relayApi.providerModels(providerId, controller.signal);
     if (epoch !== catalogEpoch) return;
     catalogs.value[providerId] = {
-      items: result.items.map((v) => v.id),
+      items: result.items,
       loading: false,
       error: '',
     };
@@ -127,6 +141,8 @@ onBeforeUnmount(() => {
   pending.value = undefined;
 });
 function close() {
+  importProvider.value = '';
+  capabilityNotice.value = '';
   clearCatalogs();
   editor.value = '';
   secret.value = '';
@@ -166,6 +182,7 @@ function editPool(row?: RelayPool) {
   close();
   selected.value = row?.id ?? '';
   draft.value = row ? globalThis.structuredClone(row) : freshPool();
+  limitEdited.value = { context: !!row, output: !!row };
   editor.value = 'pool';
 }
 function editCredential(row: RelayProvider) {
@@ -227,6 +244,11 @@ function askPool() {
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.id) ||
     ints.some((v) => !Number.isSafeInteger(v) || v < 0) ||
     body.contextWindow <= body.maxOutputTokens ||
+    body.contextWindow > 1048576 ||
+    body.maxOutputTokens < 1 ||
+    body.maxOutputTokens > 32768 ||
+    body.price.inputMicrosPerMillionTokens < 1 ||
+    body.price.outputMicrosPerMillionTokens < 1 ||
     body.routes.length < 1 ||
     body.routes.length > 8 ||
     new Set(body.routes.map((r) => r.providerId)).size !== body.routes.length ||
@@ -254,6 +276,49 @@ function askPool() {
       ),
   };
 }
+const visiblePools = computed(() => {
+  const query = poolSearch.value.toLowerCase();
+  return pools.value.filter((pool) =>
+    [
+      pool.id,
+      ...pool.routes.flatMap((r) => [
+        r.model,
+        providers.value.find((p) => p.id === r.providerId)?.configuration
+          .name ?? '',
+      ]),
+    ].some((value) => value.toLowerCase().includes(query)),
+  );
+});
+function openImport(row: RelayProvider) {
+  close();
+  importProvider.value = row.id;
+}
+function accessChanged(permissions: string[]) {
+  ui.permissions.value = permissions;
+}
+function applyCapabilities() {
+  if (!draft.value) return;
+  const models = draft.value.routes
+    .filter((r) => r.weight > 0)
+    .map(
+      (r) =>
+        catalogs.value[r.providerId]?.items.find((m) => m.id === r.model) ?? {
+          id: r.model,
+        },
+    );
+  const limits = applyKnownLimits(
+    limitEdited.value.context ? draft.value.contextWindow : 1048576,
+    limitEdited.value.output ? draft.value.maxOutputTokens : 32768,
+    models,
+  );
+  if (!limits || limits.output >= limits.context) {
+    capabilityNotice.value = t('capabilityUnknown');
+    return;
+  }
+  draft.value.contextWindow = limits.context;
+  draft.value.maxOutputTokens = limits.output;
+  capabilityNotice.value = t('capabilityApplied');
+}
 async function confirm() {
   const action = pending.value;
   if (!action || busy.value) return;
@@ -265,7 +330,7 @@ async function confirm() {
 }
 </script>
 <template>
-  <section class="model-usage">
+  <section class="model-usage relay-providers">
     <header>
       <h1>{{ t('providers') }}</h1>
       <button :disabled="loading || busy || !!pending" @click="load">
@@ -275,6 +340,7 @@ async function confirm() {
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
+    <p>{{ t('providersIntro') }}</p>
     <div class="usage-filters">
       <button
         data-testid="add-provider"
@@ -294,6 +360,7 @@ async function confirm() {
         {{ t('addPool') }}
       </button>
     </div>
+    <h2>{{ t('providerSection') }}</h2>
     <div class="usage-table">
       <table>
         <thead>
@@ -319,6 +386,19 @@ async function confirm() {
             </td>
             <td>
               <button
+                data-testid="import-provider"
+                :disabled="
+                  busy ||
+                  !!pending ||
+                  !ui.can('ai.providers.write') ||
+                  !row.hasCredential ||
+                  !row.configuration.enabled
+                "
+                @click="openImport(row)"
+              >
+                {{ t('importModels') }}
+              </button>
+              <button
                 data-testid="edit-provider"
                 :disabled="busy || !!pending || !ui.can('ai.providers.write')"
                 @click="editProvider(row)"
@@ -337,6 +417,16 @@ async function confirm() {
         </tbody>
       </table>
     </div>
+    <ModelImportPanel
+      v-if="importProvider"
+      :providers="providers"
+      :pools="pools"
+      :provider-id="importProvider"
+      :permissions="ui.permissions.value"
+      @close="importProvider = ''"
+      @imported="load"
+      @access="accessChanged"
+    />
     <form
       v-if="editor === 'provider'"
       data-testid="save-provider"
@@ -407,6 +497,15 @@ async function confirm() {
     </form>
     <h2>{{ t('pools') }}</h2>
     <p>{{ t('poolNote') }}</p>
+    <label class="relay-search"
+      >{{ t('publicSearch')
+      }}<input
+        v-model="poolSearch"
+        name="poolSearch"
+        type="search"
+        :placeholder="t('publicSearch')"
+    /></label>
+    <p v-if="!pools.length && !loading">{{ t('modelEmpty') }}</p>
     <div class="usage-table">
       <table>
         <thead>
@@ -414,11 +513,12 @@ async function confirm() {
             <th>{{ t('poolId') }}</th>
             <th>{{ t('status') }}</th>
             <th>{{ t('routes') }}</th>
+            <th>{{ t('capabilityColumn') }}</th>
             <th>{{ t('edit') }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="pool in pools" :key="pool.id">
+          <tr v-for="pool in visiblePools" :key="pool.id">
             <td>{{ pool.id }}</td>
             <td>{{ t(pool.enabled ? 'enabled' : 'disabled') }}</td>
             <td>
@@ -429,6 +529,10 @@ async function confirm() {
                 }}
                 / {{ route.model }} · {{ route.weight }}
               </div>
+            </td>
+            <td>
+              {{ pool.contextWindow.toLocaleString() }} /
+              {{ pool.maxOutputTokens.toLocaleString() }}
             </td>
             <td>
               <button
@@ -473,7 +577,8 @@ async function confirm() {
             type="number"
             min="2"
             max="1048576"
-            required /></label
+            required
+            @input="limitEdited.context = true" /></label
         ><label
           >{{ t('output')
           }}<input
@@ -483,7 +588,19 @@ async function confirm() {
             min="1"
             max="32768"
             required
+            @input="limitEdited.output = true"
         /></label>
+        <div class="relay-wide relay-limit-help">
+          <button
+            type="button"
+            data-testid="apply-capabilities"
+            @click="applyCapabilities"
+          >
+            {{ t('applyCapabilities') }}
+          </button>
+          <p>{{ t('capabilityNote') }}</p>
+          <p v-if="capabilityNotice" role="status">{{ capabilityNotice }}</p>
+        </div>
         <div
           v-for="(route, index) in draft.routes"
           :key="index"
@@ -515,8 +632,8 @@ async function confirm() {
             <datalist :id="'route-model-catalog-' + index">
               <option
                 v-for="model in catalogs[route.providerId]?.items ?? []"
-                :key="model"
-                :value="model"
+                :key="model.id"
+                :value="model.id"
               />
             </datalist>
           </label>
@@ -571,7 +688,7 @@ async function confirm() {
             v-model.number="draft.price.inputMicrosPerMillionTokens"
             name="inputPrice"
             type="number"
-            min="0"
+            min="1"
             max="9007199254740991"
             required /></label
         ><label
@@ -580,17 +697,12 @@ async function confirm() {
             v-model.number="draft.price.outputMicrosPerMillionTokens"
             name="outputPrice"
             type="number"
-            min="0"
+            min="1"
             max="9007199254740991"
-            required /></label
-        ><label
-          >{{ t('priceVersion')
-          }}<input
-            v-model="draft.price.version"
-            name="priceVersion"
-            maxlength="128"
-            required /></label
-        ><button type="submit">{{ t('save') }}</button
+            required
+        /></label>
+        <p class="relay-wide">{{ t('priceNote') }}</p>
+        <button type="submit">{{ t('save') }}</button
         ><button type="button" @click="close">{{ t('close') }}</button>
       </fieldset>
     </form>

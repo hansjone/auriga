@@ -3,6 +3,43 @@ import { createApiClient } from '@auriga/shared';
 import { createRelayApi } from './relayApi';
 
 describe('relay management transport', () => {
+  it('uses atomic create-only semantics for import while retaining edit upsert', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response('{}', { headers: { 'Content-Type': 'application/json' } }),
+    );
+    const api = createRelayApi(
+      createApiClient({ fetch, getCookie: () => 'auriga_csrf=csrf' }),
+    );
+    const pool = {
+      id: 'public',
+      enabled: true,
+      contextWindow: 32000,
+      maxOutputTokens: 4096,
+      routes: [{ providerId: 'provider', model: 'upstream', weight: 1 }],
+      price: {
+        currency: 'USD' as const,
+        inputMicrosPerMillionTokens: 1,
+        outputMicrosPerMillionTokens: 1,
+        version: 'v',
+        effectiveAt: '2026-01-01T00:00:00Z',
+      },
+    };
+    await api.createPool(pool, 'stable-import');
+    await api.savePool(pool, 'edit');
+    expect(
+      new Headers(fetch.mock.calls[0][1]?.headers).get('If-None-Match'),
+    ).toBe('*');
+    expect(
+      new Headers(fetch.mock.calls[0][1]?.headers).get('Idempotency-Key'),
+    ).toBe('stable-import');
+    expect(
+      new Headers(fetch.mock.calls[0][1]?.headers).get('X-Auriga-CSRF'),
+    ).toBe('csrf');
+    expect(
+      new Headers(fetch.mock.calls[1][1]?.headers).has('If-None-Match'),
+    ).toBe(false);
+  });
   it('uses same-origin management paths, CSRF and stable POST idempotency', async () => {
     const calls: { path: string; init: RequestInit }[] = [];
     const fetch = vi.fn(
