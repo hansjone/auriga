@@ -263,6 +263,20 @@ function askPool() {
   if (draft.value.id === 'auto' && (!poolsReady.value || loading.value)) return;
   const createOnly = draft.value.id === 'auto' && !selected.value;
   const body = JSON.parse(JSON.stringify(draft.value)) as RelayPool;
+  body.routes.forEach((route) => {
+    route.model = route.model.trim();
+  });
+  const routeIdentities = new Set<string>();
+  const duplicate = body.routes.findIndex((route) => {
+    const identity = JSON.stringify([route.providerId, route.model]);
+    if (routeIdentities.has(identity)) return true;
+    routeIdentities.add(identity);
+    return false;
+  });
+  if (duplicate >= 0) {
+    error.value = t('duplicateRoute', { number: duplicate + 1 });
+    return;
+  }
   const ints = [
     body.contextWindow,
     body.maxOutputTokens,
@@ -280,7 +294,6 @@ function askPool() {
     body.price.outputMicrosPerMillionTokens < 1 ||
     body.routes.length < 1 ||
     body.routes.length > 8 ||
-    new Set(body.routes.map((r) => r.providerId)).size !== body.routes.length ||
     body.routes.some(
       (r) =>
         !r.providerId ||
@@ -573,7 +586,10 @@ async function confirm() {
             <td>{{ pool.id }}</td>
             <td>{{ t(pool.enabled ? 'enabled' : 'disabled') }}</td>
             <td>
-              <div v-for="route in pool.routes" :key="route.providerId">
+              <div
+                v-for="route in pool.routes"
+                :key="JSON.stringify([route.providerId, route.model])"
+              >
                 {{
                   providers.find((p) => p.id === route.providerId)
                     ?.configuration.name ?? route.providerId
@@ -662,6 +678,9 @@ async function confirm() {
           :key="index"
           class="usage-filters"
         >
+          <strong class="relay-route-title">{{
+            t('routeNumber', { number: index + 1 })
+          }}</strong>
           <label
             >{{ t('providers')
             }}<select

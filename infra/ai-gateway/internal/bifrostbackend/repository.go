@@ -423,20 +423,12 @@ func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, 
 	if !modelID.MatchString(p.Id) || len(p.Routes) < 1 || len(p.Routes) > 8 || p.ContextWindow < 2 || p.ContextWindow > 1048576 || p.MaxOutputTokens < 1 || p.MaxOutputTokens > 32768 || p.MaxOutputTokens >= p.ContextWindow || p.Price.Currency != "USD" || p.Price.Version == "" || p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(time.Now()) || p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.OutputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger || p.Price.OutputMicrosPerMillionTokens > maxInteger {
 		return invalid
 	}
-	weight := 0.0
-	seen := map[string]bool{}
-	for _, r := range p.Routes {
-		if !validUUID(r.ProviderId) || seen[r.ProviderId] || len(r.Model) < 1 || len(r.Model) > 256 || strings.ContainsAny(r.Model, "\r\n") || r.Weight < 0 || r.Weight > 1000 || math.IsNaN(r.Weight) || math.IsInf(r.Weight, 0) {
-			return invalid
-		}
-		seen[r.ProviderId] = true
-		weight += r.Weight
-	}
-	if weight <= 0 {
-		return invalid
+	providers, err := routeProviders(p.Routes)
+	if err != nil {
+		return err
 	}
 	return b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
-		for id := range seen {
+		for id := range providers {
 			var exists bool
 			if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai.relay_provider WHERE tenant_id=$1 AND id=$2)`, tenant, id).Scan(&exists); e != nil {
 				return e
@@ -462,6 +454,28 @@ func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, 
 		_, e = tx.Exec(ctx, `INSERT INTO ai.relay_pool(tenant_id,id,document) VALUES($1,$2,$3) ON CONFLICT(tenant_id,id) DO UPDATE SET document=EXCLUDED.document`, tenant, p.Id, raw)
 		return e
 	})
+}
+
+func routeProviders(routes []api.RelayRoute) (map[string]bool, error) {
+	if len(routes) < 1 || len(routes) > 8 {
+		return nil, invalid
+	}
+	weight := 0.0
+	seen := map[[2]string]bool{}
+	providers := map[string]bool{}
+	for _, r := range routes {
+		identity := [2]string{r.ProviderId, r.Model}
+		if !validUUID(r.ProviderId) || seen[identity] || len(r.Model) < 1 || len(r.Model) > 256 || strings.TrimSpace(r.Model) != r.Model || strings.ContainsAny(r.Model, "\r\n") || r.Weight < 0 || r.Weight > 1000 || math.IsNaN(r.Weight) || math.IsInf(r.Weight, 0) {
+			return nil, invalid
+		}
+		seen[identity] = true
+		providers[r.ProviderId] = true
+		weight += r.Weight
+	}
+	if weight <= 0 {
+		return nil, invalid
+	}
+	return providers, nil
 }
 func (b *Backend) ListPools(ctx context.Context, tenant string, pages ...listPage) (api.RelayPoolPage, error) {
 	page := pageFor(pages)
