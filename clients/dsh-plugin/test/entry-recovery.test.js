@@ -273,6 +273,73 @@ test('availability eligibility excludes other HTTP failures and stops at the fir
   assert.deepEqual(f.navigations, []);
 });
 
+test('a locally cancelled short probe cannot qualify two completed failures for availability or add replacement reads', async (t) => {
+  const f = await fixture(t, async () =>
+    f.calls.length === 1
+      ? new Promise(() => {})
+      : f.calls.length <= 3
+        ? new Response('', { status: 503 })
+        : lost(),
+  );
+  f.lose();
+  await settle();
+  await f.advance(500);
+  f.hidden(true);
+  f.hidden(false);
+  await settle();
+  await f.advance(4000);
+  assert.deepEqual(
+    f.calls.map((call) => call.at),
+    [0, 2500, 4500],
+  );
+  assert.equal(f.calls[0].init.signal.aborted, true);
+  await f.advance(25500);
+  f.event('focus');
+  f.event('online');
+  await settle();
+  assert.equal(
+    f.calls.length,
+    3,
+    'three starts with only two completed failures must remain the complete short budget',
+  );
+  assert.ok(!f.logs.some((row) => row.event === 'availability_wait'));
+  assert.deepEqual(f.navigations, []);
+});
+
+test('HTTP 504 in availability ends the cycle instead of reaching the second late probe', async (t) => {
+  const f = await fixture(t, async () =>
+    f.calls.length <= 3
+      ? new Response('', { status: 503 })
+      : f.calls.length === 4
+        ? new Response('', { status: 504 })
+        : lost(),
+  );
+  f.lose();
+  await settle();
+  await f.advance(30000);
+  f.event('focus');
+  f.event('online');
+  await settle();
+  assert.deepEqual(
+    f.calls.map((call) => call.at),
+    [0, 2000, 4000, 14000],
+  );
+  assert.deepEqual(f.navigations, []);
+  assert.equal(f.timers.size, 0);
+});
+
+test('an explicitly aborted fetch is not a completed network-unavailable result', async (t) => {
+  const f = await fixture(t, async () => {
+    throw Object.assign(new Error('cancelled fixture'), { name: 'AbortError' });
+  });
+  f.lose();
+  await settle();
+  await f.advance(30000);
+  assert.equal(f.calls.length, 1);
+  assert.ok(!f.logs.some((row) => row.event === 'availability_wait'));
+  assert.deepEqual(f.navigations, []);
+});
+
 test('availability keeps the original absolute thirty-second deadline across hiding and late replies', async (t) => {
   let finish;
   const f = await fixture(t, async () =>
