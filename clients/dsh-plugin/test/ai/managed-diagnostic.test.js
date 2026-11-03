@@ -56,7 +56,13 @@ test('actual manual discovery retains sanitized transport diagnostics without ex
         { code: 'ECONNRESET' },
       );
     });
-    const llm = { discoverModels() {} };
+    const llm = {
+      discoverModels() {},
+      prepareCall() {},
+      listModels() {},
+      stream() {},
+      ctx: { on: () => () => {} },
+    };
     model.attach(
       llm,
       { describe: () => [{ ns: 'llm-pi-ai', value }] },

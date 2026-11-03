@@ -46,7 +46,10 @@ function fixture(t, options = {}) {
     value: {},
     revision: 1,
   };
-  const entry = { options: { id: NS, config: value } };
+  const entry = {
+    options: { id: NS, config: value },
+    fiber: { config: { providers: { get: () => value.providers } } },
+  };
   let requests = 0,
     writes = 0,
     edits = 0,
@@ -62,6 +65,7 @@ function fixture(t, options = {}) {
     },
   };
   const editor = {
+    entries: () => [entry],
     configuration: () => [{ entry }],
     edit: async (_entry, change) => {
       edits++;
@@ -70,7 +74,31 @@ function fixture(t, options = {}) {
       entry.options.config = value;
     },
   };
-  const llm = { discoverModels: async (...args) => ({ personal: args }) };
+  let streamHook;
+  const llm = {
+    discoverModels: async (...args) => ({ personal: args }),
+    listModels: async () => [],
+    prepareCall: async (config) => ({
+      config,
+      stream: (options) => llm.stream(options),
+    }),
+    ctx: {
+      on(_event, handler) {
+        streamHook = handler;
+        return () => {
+          if (streamHook === handler) streamHook = undefined;
+        };
+      },
+    },
+    stream(options) {
+      const open = () => ({
+        async *[Symbol.asyncIterator]() {
+          yield await credentials.resolve(options.ref ?? MANAGED_MODEL_REF);
+        },
+      });
+      return streamHook ? streamHook(options, open) : open();
+    },
+  };
   const credentials = {
     ctx: { fiber: { entry: { options: { id: NS } } } },
     resolve: async (ref) => ({ value: ref, source: 'personal' }),
@@ -103,6 +131,14 @@ function fixture(t, options = {}) {
     original,
     resolve,
     attach,
+    credential: async (provider = ID, ref = MANAGED_MODEL_REF) => {
+      const iterator = llm.stream({ provider, ref })[Symbol.asyncIterator]();
+      try {
+        return (await iterator.next()).value;
+      } finally {
+        await iterator.return?.();
+      }
+    },
     discover: (patch = {}) =>
       llm.discoverModels(NS, { provider: ID, ...patch }),
     directory: (next) => {
@@ -185,15 +221,9 @@ test('reserved reference resolves per operation in the pi-ai owner and describe 
   const f = fixture(t);
   f.attach();
   await f.model.ready;
-  assert.equal(
-    (await f.credentials.resolve(MANAGED_MODEL_REF)).value,
-    'fake-private-key',
-  );
+  assert.equal((await f.credential()).value, 'fake-private-key');
   f.material.value.credential = 'fake-rotated-key';
-  assert.equal(
-    (await f.credentials.resolve(MANAGED_MODEL_REF)).value,
-    'fake-rotated-key',
-  );
+  assert.equal((await f.credential()).value, 'fake-rotated-key');
   assert.deepEqual(await f.credentials.describe(MANAGED_MODEL_REF), {
     configured: true,
     writable: false,
@@ -354,4 +384,43 @@ test('manual retry recovers a transient initialization failure without reviving 
   assert.equal((await f.discover())[1].id, 'new');
   f.model.close();
   assert.throws(() => f.attach(), { code: 'common.forbidden' });
+});
+test('the pi-ai fiber alone cannot resolve without an owned LLM operation', async (t) => {
+  const f = fixture(t);
+  f.attach();
+  await f.model.ready;
+  await assert.rejects(f.credentials.resolve(MANAGED_MODEL_REF), {
+    code: 'common.forbidden',
+  });
+});
+test('equal restored values do not upgrade an operation from an earlier providers generation', async (t) => {
+  let f,
+    pause = false,
+    entered,
+    resume;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const released = new Promise((resolve) => {
+    resume = resolve;
+  });
+  f = fixture(t, {
+    loadMaterial: async () => {
+      if (pause) {
+        entered();
+        await released;
+      }
+      return f.material;
+    },
+  });
+  f.attach();
+  await f.model.ready;
+  pause = true;
+  const pending = f.credential();
+  await started;
+  f.value.providers = globalThis.structuredClone(f.value.providers);
+  pause = false;
+  resume();
+  await assert.rejects(pending, { code: 'common.forbidden' });
+  assert.equal((await f.credential()).value, 'fake-private-key');
 });

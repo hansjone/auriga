@@ -31,7 +31,7 @@ export async function runNativeModels(
     { default: Editor },
     { default: Settings },
     { default: Credentials },
-    { default: Llm },
+    { default: Llm, markAgentLoopRequest, isAgentLoopRequest },
     Pi,
     { default: SettingsController, CredentialsController },
     { remoteMethods },
@@ -63,10 +63,11 @@ export async function runNativeModels(
   );
   const requests = [];
   let redirect = false;
-  const upstream = createServer(async (request, response) => {
+  const receive = async (request, response) => {
     requests.push({
       path: request.url,
       authorization: request.headers.authorization,
+      origin: 'http://' + request.headers.host,
     });
     if (request.url.endsWith('/models')) {
       if (redirect) {
@@ -99,10 +100,35 @@ export async function runNativeModels(
     response.end(
       'data: {"id":"fake","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}\n\ndata: {"id":"fake","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}\n\ndata: [DONE]\n\n',
     );
-  });
+  };
+  const upstream = createServer(receive),
+    personalUpstream = createServer(receive);
   await new Promise((done) => upstream.listen(0, '127.0.0.1', done));
+  await new Promise((done) => personalUpstream.listen(0, '127.0.0.1', done));
   const origin = 'http://127.0.0.1:' + upstream.address().port;
+  const personalOrigin = 'http://127.0.0.1:' + personalUpstream.address().port;
   material.baseUrl = origin + '/ai/v1';
+  let paused;
+  const loadMaterial = async () => {
+    const gate = paused;
+    if (gate) {
+      gate.enter();
+      await gate.wait;
+    }
+    return { value: material, origin };
+  };
+  const pauseMaterial = () => {
+    let enter, release;
+    const entered = new Promise((resolve) => {
+      enter = resolve;
+    });
+    const wait = new Promise((resolve) => {
+      release = resolve;
+    });
+    const gate = { enter, release, entered, wait };
+    paused = gate;
+    return gate;
+  };
   const legacy =
     "'Bearer ' + JSON.parse(process.getBuiltinModule('node:fs').readFileSync(\"/run/auriga/model-credential.json\", 'utf8')).credential";
   const builtin = process.getBuiltinModule;
@@ -154,7 +180,7 @@ export async function runNativeModels(
     writeFileSync(join(dir, 'cordis.yml'), '[]');
     const personal = {
       api: 'openai-completions',
-      baseURL: origin + '/personal',
+      baseURL: personalOrigin + '/personal',
       apiKeyEnv: 'PERSONAL_KEY',
       models: [{ id: 'personal' }],
     };
@@ -212,6 +238,7 @@ export async function runNativeModels(
     ctx = await start();
     let settings = new SettingsController(ctx),
       credentials = new CredentialsController(ctx);
+    const originalPrepare = ctx.llm.prepareCall;
     const describe = () =>
       settings.describe().namespaces.find((row) => row.ns === 'llm-pi-ai');
     await assert.rejects(
@@ -238,9 +265,7 @@ export async function runNativeModels(
       'manual-model-probe',
     );
     installManagedSettingsPolicy(ctx);
-    binding = createManagedModels({
-      loadMaterial: async () => ({ value: material, origin }),
-    });
+    binding = createManagedModels({ loadMaterial });
     release = binding.attach(
       ctx.llm,
       ctx.settings,
@@ -306,14 +331,17 @@ export async function runNativeModels(
       !JSON.stringify(settings.describe()).includes(material.credential),
     );
     await credentials.set('PERSONAL_KEY', 'fake-personal-key');
-    const stream = async (provider, model) => {
+    const stream = async (provider, model, prepared) => {
       const chunks = [];
-      for await (const chunk of ctx.llm.stream({
+      const options = {
         provider,
         model,
         maxTokens: 4,
         messages: [{ role: 'user', content: [{ type: 'text', text: 'fake' }] }],
-      }))
+      };
+      for await (const chunk of prepared
+        ? prepared.stream(options)
+        : ctx.llm.stream(options))
         chunks.push(chunk);
       return chunks;
     };
@@ -367,6 +395,154 @@ export async function runNativeModels(
     const count = requests.length;
     await stream('personal', 'personal');
     assert.equal(requests.length, count);
+    for (const action of ['repair', 'remove', 'rebind', 'prepared-repair']) {
+      await ctx.configEditor.edit(entry, (current) => ({
+        ...current,
+        providers: {
+          ...current.providers,
+          personal: { ...personal, apiKeyEnv: MANAGED_MODEL_REF },
+        },
+      }));
+      const prepared =
+        action === 'prepared-repair'
+          ? await ctx.llm.prepareCall({
+              provider: 'personal',
+              model: 'personal',
+              maxTokens: 4,
+            })
+          : undefined;
+      const gate = pauseMaterial();
+      const pending = stream('personal', 'personal', prepared);
+      let timeout;
+      await Promise.race([
+        gate.entered,
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () =>
+              reject(
+                new Error('credential read did not enter the controlled pause'),
+              ),
+            4000,
+          );
+        }),
+      ]).finally(() => clearTimeout(timeout));
+      await settings.mutate(
+        'llm-pi-ai',
+        [
+          action === 'remove'
+            ? { op: 'unset', path: ['providers', 'personal'] }
+            : {
+                op: 'set',
+                path: ['providers', 'personal', 'apiKeyEnv'],
+                value: 'PERSONAL_KEY',
+              },
+        ],
+        describe().revision,
+      );
+      if (action === 'rebind') {
+        release();
+        binding.close();
+        binding = createManagedModels({ loadMaterial });
+        release = binding.attach(
+          ctx.llm,
+          ctx.settings,
+          ctx.configEditor,
+          ctx.credentials,
+        );
+      }
+      paused = undefined;
+      gate.release();
+      await pending;
+      await binding.ready;
+      assert.equal(
+        requests.filter(
+          (row) =>
+            row.origin === personalOrigin &&
+            row.authorization === 'Bearer ' + material.credential,
+        ).length,
+        0,
+        'a repaired/deleted/rebound current route cannot authorize a captured personal operation: ' +
+          action,
+      );
+      await ctx.configEditor.edit(entry, (current) => ({
+        ...current,
+        providers: { ...current.providers, personal },
+      }));
+    }
+    // Prepared handles retain the target/configuration at preparation, even if the current route is repaired before dispatch.
+    for (const owned of [true, false]) {
+      await ctx.configEditor.edit(entry, (current) => ({
+        ...current,
+        providers: {
+          ...current.providers,
+          'auriga-managed': {
+            ...current.providers['auriga-managed'],
+            baseURL: personalOrigin + '/personal',
+          },
+        },
+      }));
+      const config = {
+        provider: 'auriga-managed',
+        model: 'added',
+        maxTokens: 4,
+      };
+      const prepared = await (owned
+        ? ctx.llm.prepareCall(config)
+        : originalPrepare.call(ctx.llm, config));
+      await ctx.configEditor.edit(entry, (current) => ({
+        ...current,
+        providers: {
+          ...current.providers,
+          'auriga-managed': {
+            ...current.providers['auriga-managed'],
+            baseURL: material.baseUrl,
+          },
+        },
+      }));
+      const before = requests.length;
+      await stream('auriga-managed', 'added', prepared);
+      assert.equal(
+        requests.length,
+        before,
+        'old or unowned prepared targets never acquire a new grant',
+      );
+    }
+    await Promise.all([
+      stream('auriga-managed', 'added'),
+      stream('personal', 'personal'),
+    ]);
+    const loopRequest = Object.freeze(
+      markAgentLoopRequest({
+        provider: 'auriga-managed',
+        model: 'added',
+        maxTokens: 4,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'fake' }] }],
+      }),
+    );
+    let loopIdentityPreserved = false;
+    const stopLoop = ctx.on('llm/stream', (options, next) => {
+      if (options === loopRequest)
+        loopIdentityPreserved =
+          isAgentLoopRequest(options) && Object.isFrozen(options);
+      return next();
+    });
+    try {
+      for await (const _chunk of ctx.llm.stream(loopRequest)) {
+        /* Drain the fake marked request. */
+      }
+    } finally {
+      stopLoop();
+    }
+    assert.equal(
+      loopIdentityPreserved,
+      true,
+      'native loop request identity must survive the credential scope',
+    );
+    assert.ok(
+      (await ctx.llm.listModels('auriga-managed')).some(
+        (model) => model.id === 'added',
+      ),
+    );
     await ctx.configEditor.edit(entry, (current) => ({
       ...current,
       providers: { ...current.providers, personal },
@@ -395,9 +571,7 @@ export async function runNativeModels(
     settings = new SettingsController(ctx);
     credentials = new CredentialsController(ctx);
     installManagedSettingsPolicy(ctx);
-    binding = createManagedModels({
-      loadMaterial: async () => ({ value: material, origin }),
-    });
+    binding = createManagedModels({ loadMaterial });
     release = binding.attach(
       ctx.llm,
       ctx.settings,
@@ -430,9 +604,7 @@ export async function runNativeModels(
       delete next.providers['auriga-managed'];
       return next;
     });
-    const next = createManagedModels({
-      loadMaterial: async () => ({ value: material, origin }),
-    });
+    const next = createManagedModels({ loadMaterial });
     const oldRelease = release;
     binding = next;
     release = next.attach(
@@ -468,6 +640,13 @@ export async function runNativeModels(
         capacityAndPreferences: true,
         managedAndPersonalWire: true,
         reservedReferenceIsolated: true,
+        capturedReferenceRacesRejected: true,
+        loopRequestIdentityPreserved: true,
+        crossOriginManagedCredentialCount: requests.filter(
+          (row) =>
+            row.origin === personalOrigin &&
+            row.authorization === 'Bearer ' + material.credential,
+        ).length,
         noSecretInSettingsOrStore: true,
         redirectRefused: true,
       }),
@@ -478,5 +657,6 @@ export async function runNativeModels(
     await ctx?.fiber.dispose();
     process.getBuiltinModule = builtin;
     await new Promise((done) => upstream.close(done));
+    await new Promise((done) => personalUpstream.close(done));
   }
 }

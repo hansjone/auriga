@@ -3,6 +3,7 @@ import { modelDirectory } from '../ai/catalog.js';
 import { operation } from '../ai/transport.js';
 import { check } from '../ai/guard.js';
 import { logEvent } from '../observability/index.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /* global AbortSignal */
 export const MANAGED_MODEL_REF = 'AURIGA_MANAGED_MODEL';
@@ -11,6 +12,36 @@ const PROVIDER = 'auriga-managed';
 const LEGACY_AUTH =
   "'Bearer ' + JSON.parse(process.getBuiltinModule('node:fs').readFileSync(\"/run/auriga/model-credential.json\", 'utf8')).credential";
 const owners = new WeakMap();
+/** @type {AsyncLocalStorage<any>} */
+const calls = new AsyncLocalStorage();
+
+/** Keep the public async iterator's construction, iteration and cleanup in its operation scope.
+ * @param {any} call @param {()=>AsyncIterable<any>} open */
+function inCall(call, open) {
+  const stream = calls.run(call, open);
+  return {
+    [Symbol.asyncIterator]() {
+      const iterator = calls.run(call, () => stream[Symbol.asyncIterator]());
+      return {
+        next: (/** @type {any} */ value) =>
+          calls.run(call, () => iterator.next(value)),
+        return: (/** @type {any} */ value) =>
+          calls.run(
+            call,
+            () =>
+              iterator.return?.(value) ??
+              Promise.resolve({ done: true, value }),
+          ),
+        throw: (/** @type {any} */ error) =>
+          calls.run(call, async () => {
+            if (iterator.throw) return iterator.throw(error);
+            await iterator.return?.();
+            throw error;
+          }),
+      };
+    },
+  };
+}
 const raw = (/** @type {any} */ service) =>
   service?.[Symbol.for('cordis.original')] ?? service;
 const forbidden = () =>
@@ -57,6 +88,59 @@ export function createManagedModels({
         settings
           .describe({ redactSecrets: true })
           .find((/** @type {any} */ row) => row.ns === NS);
+      // The public Entry/Fiber and pi-ai Config expose its volatile providers
+      // reference. Its identity also detects change-and-restore updates.
+      const generation = () => {
+        const entry = editor
+          .entries()
+          .find((/** @type {any} */ row) => row.options.id === NS);
+        return {
+          fiber: entry?.fiber,
+          providers: entry?.fiber?.config?.providers?.get(),
+        };
+      };
+      /** Capture before the public adapter preparation can retain a profile.
+       * @param {string} provider @param {any} [options] */
+      const capture = (provider, options) => {
+        alive();
+        const document = descriptor();
+        const profile = document?.value?.providers?.[PROVIDER];
+        const current = generation();
+        return Object.freeze({
+          owner: lifetime,
+          provider,
+          options,
+          revision: document?.revision,
+          fiber: current.fiber,
+          providers: current.providers,
+          baseURL: profile?.baseURL,
+          api: profile?.api,
+          ref: profile?.apiKeyEnv,
+          headersEmpty: Object.keys(profile?.headers ?? {}).length === 0,
+          supportsStore: profile?.compat?.supportsStore,
+        });
+      };
+      /** Current configuration cannot upgrade a previously captured operation.
+       * @param {any} call @param {any} material */
+      const authorizeCall = (call, material) => {
+        const current = generation();
+        if (
+          call?.owner !== lifetime ||
+          call.provider !== PROVIDER ||
+          (call.options && call.options.provider !== call.provider) ||
+          call.revision !== descriptor()?.revision ||
+          !Number.isSafeInteger(call.revision) ||
+          !call.providers ||
+          call.fiber !== current.fiber ||
+          call.providers !== current.providers ||
+          call.ref !== MANAGED_MODEL_REF ||
+          call.api !== 'openai-completions' ||
+          call.baseURL !== material.value.baseUrl ||
+          !call.headersEmpty ||
+          call.supportsStore !== false
+        )
+          throw forbidden();
+      };
       /** @param {any} material */
       const route = (material) => {
         const providers = descriptor()?.value?.providers;
@@ -197,14 +281,62 @@ export function createManagedModels({
         return pending;
       };
       const original = target.discoverModels;
+      const prepareCall = target.prepareCall,
+        listModels = target.listModels,
+        stream = target.stream;
       const resolve = keys.resolve,
         describe = keys.describe;
       check(
         typeof original === 'function' &&
           typeof resolve === 'function' &&
-          typeof describe === 'function',
+          typeof describe === 'function' &&
+          typeof prepareCall === 'function' &&
+          typeof listModels === 'function' &&
+          typeof stream === 'function' &&
+          typeof llm.ctx?.on === 'function',
         'NO_ADAPTER',
       );
+      // This public waterfall also covers a prepared call's registration-bound dispatch.
+      const stopStream = llm.ctx.on(
+        'llm/stream',
+        (/** @type {any} */ options, /** @type {any} */ next) => {
+          const inherited = calls.getStore();
+          // An old prepared handle must not acquire a new operation grant here.
+          const call = inherited?.options === options ? inherited : undefined;
+          return inCall(call, next);
+        },
+      );
+      /** @this {any} @param {any} config @param {AbortSignal} [signal] @param {any} [configure] */
+      async function prepareManaged(config, signal, configure) {
+        const call = capture(config.provider);
+        const prepared = await prepareCall.call(
+          this,
+          config,
+          signal,
+          configure,
+        );
+        return Object.freeze({
+          ...prepared,
+          stream(/** @type {any} */ options) {
+            alive();
+            return inCall(Object.freeze({ ...call, options }), () =>
+              prepared.stream(options),
+            );
+          },
+        });
+      }
+      /** @this {any} @param {string} provider */
+      function listManaged(provider) {
+        return calls.run(capture(provider), () =>
+          listModels.call(this, provider),
+        );
+      }
+      /** @this {any} @param {any} options */
+      function streamManaged(options) {
+        return inCall(capture(options.provider, options), () =>
+          stream.call(this, options),
+        );
+      }
       /** @this {any} @param {string} ns @param {any} request @param {AbortSignal} [signal] */
       async function discover(ns, request, signal) {
         if (ns !== NS || request?.provider !== PROVIDER)
@@ -262,11 +394,13 @@ export function createManagedModels({
       async function resolveManaged(ref) {
         if (ref !== MANAGED_MODEL_REF) return resolve.call(this, ref);
         if (this?.ctx?.fiber?.entry?.options?.id !== NS) throw forbidden();
+        const call = calls.getStore();
         const op = probe();
         try {
           const material = await op.wait(loadMaterial());
           alive();
           route(material);
+          authorizeCall(call, material);
           return { value: material.value.credential, source: 'auriga-managed' };
         } finally {
           op.close();
@@ -292,14 +426,22 @@ export function createManagedModels({
         }
       }
       target.discoverModels = discover;
+      target.prepareCall = prepareManaged;
+      target.listModels = listManaged;
+      target.stream = streamManaged;
       keys.resolve = resolveManaged;
       keys.describe = describeManaged;
       const cleanup = () => {
         if (!active) return;
         active = false;
         lifetime.abort();
+        stopStream();
         if (target.discoverModels === discover)
           target.discoverModels = original;
+        if (target.prepareCall === prepareManaged)
+          target.prepareCall = prepareCall;
+        if (target.listModels === listManaged) target.listModels = listModels;
+        if (target.stream === streamManaged) target.stream = stream;
         if (keys.resolve === resolveManaged) keys.resolve = resolve;
         if (keys.describe === describeManaged) keys.describe = describe;
         if (owners.get(target) === cleanup) owners.delete(target);
