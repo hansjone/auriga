@@ -237,3 +237,48 @@ test('QR expires during a pending restart, aborts transport and ignores late com
   await tick();
   assert.equal(completed(), 0);
 });
+
+test('wrong password reopens a fresh form with the error, and the next submit clears it', async (t) => {
+  let restarted = 0;
+  const { root, view } = mount(t, {
+    onRestart: async () => {
+      restarted++;
+      return recovery;
+    },
+    onSkip: () => {},
+  });
+  view.setStep({ type: 'fail', code: 'iam.invalid_credentials' });
+  await tick();
+  assert.equal(restarted, 1);
+  assert.ok(root.querySelector('form input[name=recoveryCode]'));
+  assert.equal(
+    root.querySelector('form [role=alert]').textContent,
+    '用户名或口令不正确。',
+  );
+  assert.ok(root.querySelector('[data-action=skip]'));
+  root.querySelector('input').value = 'again';
+  root
+    .querySelector('form')
+    .dispatchEvent(
+      new root.ownerDocument.defaultView.Event('submit', { cancelable: true }),
+    );
+  await tick();
+  assert.equal(root.querySelector('form [role=alert]'), null);
+});
+
+test('a non-retryable failure still offers a fresh attempt and skip', async (t) => {
+  let restarted = 0;
+  const { root, view } = mount(t, {
+    onRestart: async () => {
+      restarted++;
+      return recovery;
+    },
+    onSkip: () => {},
+  });
+  view.setStep({ type: 'fail', code: 'iam.admission_denied' });
+  assert.ok(root.querySelector('[data-action=skip]'));
+  root.querySelector('[data-action=restart]').click();
+  await tick();
+  assert.equal(restarted, 1);
+  assert.ok(root.querySelector('form input[name=recoveryCode]'));
+});

@@ -90,6 +90,8 @@ export function createLoginView(root, options) {
   /** @type {import('./errors.js').LoginFailureReason | undefined} */
   let notice;
   /** @type {number|undefined} */ let httpStatus;
+  /** @type {string|undefined} Error kept above the fresh form after an automatic restart. */
+  let flash;
   let cancelling = false;
   let disposed = false;
   let version = 0;
@@ -150,6 +152,15 @@ export function createLoginView(root, options) {
     notice = undefined;
     step = next;
     render();
+    if (next.type === 'fail' && next.code === 'iam.invalid_credentials') {
+      // A rejected password ends the transaction; open a fresh one so the user
+      // can simply type again instead of being stuck on a dead end.
+      flash = next.code;
+      const card = shell.querySelector('.card');
+      if (card instanceof doc.defaultView.HTMLElement)
+        void run((signal) => options.onRestart({ signal }), card);
+      return;
+    }
     if (next.type === 'complete') {
       const current = completionVersion;
       // A synchronous host replacement/disposal must invalidate completion too.
@@ -174,7 +185,7 @@ export function createLoginView(root, options) {
     for (const control of controls) control.setAttribute('disabled', '');
     const status = element('p', words().waiting);
     status.setAttribute('role', 'status');
-    const cancel = element('button', words().cancel);
+    const cancel = element('button', words().cancel, 'ghost');
     cancel.type = 'button';
     cancel.dataset.action = 'cancel';
     listen(cancel, 'click', () => {
@@ -197,6 +208,7 @@ export function createLoginView(root, options) {
   async function cancelAttempt() {
     if (disposed || cancelling) return;
     invalidate();
+    flash = undefined;
     const current = version;
     cancelling = true;
     notice = 'cancelled';
@@ -218,18 +230,19 @@ export function createLoginView(root, options) {
   }
   /** @param {HTMLElement} card */
   function restartButton(card) {
-    const retry = element('button', words().retry);
+    const retry = element('button', words().retry, 'primary');
     retry.type = 'button';
     retry.dataset.action = 'restart';
     retry.disabled = cancelling;
     listen(retry, 'click', () => {
+      flash = undefined;
       void run((signal) => options.onRestart({ signal }), card);
     });
     card.append(retry);
   }
   /** @param {HTMLElement} card */
   function cancelButton(card) {
-    const cancel = element('button', words().cancel);
+    const cancel = element('button', words().cancel, 'ghost');
     cancel.type = 'button';
     cancel.dataset.action = 'cancel';
     cancel.disabled = cancelling;
@@ -263,14 +276,15 @@ export function createLoginView(root, options) {
     title.id = `${id}-title`;
     card.setAttribute('aria-labelledby', title.id);
     card.append(title);
+    shell.append(style, brand, card);
     if (options.onSkip) {
-      const skip = element('button', words().skip, 'secondary');
+      // Platform login is optional; leaving must stay reachable in every state.
+      const skip = element('button', words().skip, 'link');
       skip.type = 'button';
       skip.dataset.action = 'skip';
-      skip.addEventListener('click', options.onSkip);
-      card.append(skip);
+      listen(skip, 'click', options.onSkip);
+      shell.append(skip);
     }
-    shell.append(style, brand, card);
     if (notice) {
       const text =
         notice === 'network' && options.onSkip
@@ -284,7 +298,7 @@ export function createLoginView(root, options) {
           (notice === 'platform' && httpStatus
             ? ' (HTTP ' + httpStatus + ')'
             : ''),
-        notice === 'cancelled' ? 'muted' : 'error',
+        notice === 'cancelled' ? 'muted' : 'error banner',
       );
       status.setAttribute('role', notice === 'cancelled' ? 'status' : 'alert');
       card.append(status);
@@ -297,6 +311,11 @@ export function createLoginView(root, options) {
       if (formStep.description)
         card.append(element('p', localize(formStep.description), 'muted'));
       const form = element('form');
+      if (flash) {
+        const banner = element('p', errorText(flash), 'error banner');
+        banner.setAttribute('role', 'alert');
+        form.append(banner);
+      }
       /** @type {{name: string, control: HTMLInputElement | HTMLSelectElement, checkbox: boolean, hiddenValue?: string | boolean}[]} */
       const fields = [];
       for (const [index, field] of formStep.fields.entries()) {
@@ -377,13 +396,18 @@ export function createLoginView(root, options) {
         form.append(row);
       }
       if (formStep.error) {
-        const error = element('p', errorText(formStep.error.code), 'error');
+        const error = element(
+          'p',
+          errorText(formStep.error.code),
+          'error banner',
+        );
         error.setAttribute('role', 'alert');
         form.append(error);
       }
       const submit = element(
         'button',
         localize(formStep.submitLabel) || words().submit,
+        'primary',
       );
       submit.type = 'submit';
       form.append(submit);
@@ -408,6 +432,7 @@ export function createLoginView(root, options) {
                 : control.value;
         }
         clearSensitive();
+        flash = undefined;
         void run(
           (signal) =>
             options.onSubmit(
@@ -460,11 +485,13 @@ export function createLoginView(root, options) {
           : expired
             ? words().expired
             : words().unavailable,
-        'error',
+        'error banner',
       );
       error.setAttribute('role', 'alert');
       card.append(error);
-      if (!notice && ((step.type === 'fail' && step.retryable) || method)) {
+      // Every dead end offers a fresh attempt: "not retryable" means this
+      // transaction is over, not that the user may never sign in again.
+      if (!notice) {
         restartButton(card);
         if (method) cancelButton(card);
       }
