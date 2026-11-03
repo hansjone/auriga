@@ -9,7 +9,11 @@ import {
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { productionInputs } from './inputs.mjs';
-import { runtimeInputs, runtimeChecks } from './runtime.mjs';
+import {
+  runtimeInputs,
+  runtimeChecks,
+  pluginPackageFiles,
+} from './runtime.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
@@ -50,6 +54,7 @@ if (action === 'check') {
   writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
   writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
 } else if (action === 'manifest') {
+  const pluginFiles = pluginPackageFiles('/opt/auriga-dsh');
   const runtime = await runtimeChecks(
     '/opt/dsh',
     versions,
@@ -81,6 +86,12 @@ if (action === 'check') {
   walk('/opt/dsh');
   walk('/opt/auriga-dsh');
   walk('/opt/fixture');
+  for (const path of pluginFiles) {
+    if (!files.some((file) => file.path === `auriga-dsh/${path}`))
+      throw new Error(
+        `Declared plugin entry is missing from manifest: ${path}`,
+      );
+  }
   writeFileSync(
     '/opt/fixture/manifest.json',
     JSON.stringify(

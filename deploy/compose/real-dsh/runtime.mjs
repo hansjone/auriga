@@ -1,11 +1,46 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+
+// Package metadata is consumed by DSH's native plugin manager even when this
+// recipe activates the plugin through the agent's separate managed overlay.
+export function pluginPackageFiles(directory) {
+  const pkg = json(join(directory, 'package.json'));
+  const patch = pkg.dsh?.bundle?.patch;
+  const patches = Array.isArray(patch) ? patch : [patch];
+  if (!patches.length) throw new Error('Plugin bundle patch is missing');
+  const root = realpathSync(directory);
+  const files = new Set();
+  const outside = (path) =>
+    isAbsolute(path) ||
+    path === '..' ||
+    path.startsWith('../') ||
+    path.startsWith('..\\');
+  for (const entry of [
+    pkg.main,
+    ...Object.values(pkg.exports ?? {}),
+    ...patches,
+  ]) {
+    if (typeof entry !== 'string' || !entry.startsWith('./'))
+      throw new Error('Plugin entry must be a package-relative file path');
+    const file = resolve(root, entry);
+    const rel = relative(root, file);
+    if (outside(rel))
+      throw new Error(`Declared entry is outside the plugin package: ${entry}`);
+    const actual = relative(root, realpathSync(file));
+    if (outside(actual))
+      throw new Error(`Declared entry is outside the plugin package: ${entry}`);
+    if (!statSync(file).isFile())
+      throw new Error(`Declared plugin entry must be a file: ${entry}`);
+    files.add(rel.replaceAll('\\', '/'));
+  }
+  return [...files].sort();
+}
 
 // This recipe pins the already selected public host minimum, not an upstream
 // "latest" range. A changed plugin minimum requires a newly reviewed host lock.
