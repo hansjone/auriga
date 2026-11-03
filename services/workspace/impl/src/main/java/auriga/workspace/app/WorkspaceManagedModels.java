@@ -73,7 +73,7 @@ public final class WorkspaceManagedModels {
               row.get("generation"));
     }
     if (!hasCredential && row.get("managed_model_credential") == null) return;
-    if (hasCredential && row.get("managed_model_credential") != null) return;
+    if (hasCredential && hasModelLimits(row)) return;
     UUID id = (UUID) row.get("id");
     long version = ((Number) row.get("managed_credential_version")).longValue();
     byte[] material =
@@ -95,7 +95,10 @@ public final class WorkspaceManagedModels {
               || (boolean) current.get("deleted")
               || WorkspaceService.spec(current).getDesired() != DesiredState.DESIRED_STATE_RUNNING)
             return null;
-          if ((current.get("managed_model_credential") == null) == (material == null)) return null;
+          if (material == null && current.get("managed_model_credential") == null) return null;
+          // Upgrade legacy id-only material through the normal catalog and seal
+          // path. A racing reconciliation that already installed limits wins.
+          if (material != null && hasModelLimits(current)) return null;
           store.jdbc.update(
               "UPDATE instance SET managed_model_credential=? WHERE tenant_id=? AND id=?",
               material,
@@ -108,6 +111,17 @@ public final class WorkspaceManagedModels {
           if ("running".equals(current.get("phase"))) service.queueManagedMaterialRestart(id);
           return null;
         });
+  }
+
+  private boolean hasModelLimits(Map<String, Object> row) {
+    if (!(row.get("managed_model_credential") instanceof byte[] material)) return false;
+    byte[] plaintext =
+        crypto.decrypt(material, service.store.tenant() + "/managed-model/" + row.get("id"));
+    try {
+      return ManagedModelCatalog.hasLimits(WorkspaceService.JSON.readTree(plaintext));
+    } finally {
+      Arrays.fill(plaintext, (byte) 0);
+    }
   }
 
   private ObjectNode catalog(IssueManagedDeviceResponse response, Map<String, Object> row) {
@@ -159,18 +173,11 @@ public final class WorkspaceManagedModels {
         file.put("credentialVersion", ((Number) row.get("managed_credential_version")).longValue());
         file.put("credential", response.getModelCredential());
         file.put("baseUrl", baseUrl);
-        var models = file.putArray("models");
-        Set<String> seen = new HashSet<>();
-        for (var model : data) {
-          String name = model.path("id").asString();
-          reason = "invalid_model_id";
-          if (name.isBlank()
-              || name.length() > 200
-              || name.chars().anyMatch(Character::isISOControl))
-            throw new IllegalArgumentException();
-          reason = "duplicate_model_id";
-          if (!seen.add(name)) throw new IllegalArgumentException();
-          models.addObject().put("id", name);
+        try {
+          file.set("models", ManagedModelCatalog.fromGateway(data));
+        } catch (IllegalArgumentException invalid) {
+          reason = invalid.getMessage();
+          throw invalid;
         }
         return file;
       }

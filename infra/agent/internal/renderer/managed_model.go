@@ -24,7 +24,9 @@ type managedModel struct {
 	Credential string `json:"credential"`
 	BaseURL    string `json:"baseUrl"`
 	Models     []struct {
-		ID string `json:"id"`
+		ID              string `json:"id"`
+		ContextWindow   int64  `json:"contextWindow"`
+		MaxOutputTokens int64  `json:"maxOutputTokens"`
 	} `json:"models"`
 }
 
@@ -63,7 +65,7 @@ func decodeManagedModel(raw []byte, spec *nodev1.InstanceSpec) (*managedModel, e
 	}
 	seen := map[string]bool{}
 	for _, model := range m.Models {
-		if strings.TrimSpace(model.ID) == "" || len(model.ID) > 200 || strings.ContainsFunc(model.ID, unicode.IsControl) || seen[model.ID] {
+		if strings.TrimSpace(model.ID) == "" || len(model.ID) > 200 || strings.ContainsFunc(model.ID, unicode.IsControl) || seen[model.ID] || model.ContextWindow < 2 || model.ContextWindow > 1048576 || model.MaxOutputTokens < 1 || model.MaxOutputTokens > 32768 || model.MaxOutputTokens >= model.ContextWindow {
 			return fail()
 		}
 		seen[model.ID] = true
@@ -74,7 +76,7 @@ func decodeManagedModel(raw []byte, spec *nodev1.InstanceSpec) (*managedModel, e
 func managedModelRow(m *managedModel) any {
 	models := make([]any, 0, len(m.Models))
 	for _, model := range m.Models {
-		models = append(models, map[string]any{"id": model.ID})
+		models = append(models, map[string]any{"id": model.ID, "contextWindow": model.ContextWindow, "maxTokens": model.MaxOutputTokens})
 	}
 	return map[string]any{"id": "llm-pi-ai", "config": map[string]any{"providers": map[string]any{"auriga-managed": map[string]any{
 		"displayName": "Auriga", "api": "openai-completions", "baseURL": m.BaseURL, "models": models,

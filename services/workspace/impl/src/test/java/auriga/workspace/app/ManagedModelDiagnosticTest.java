@@ -60,9 +60,11 @@ class ManagedModelDiagnosticTest {
                   switch (scenario) {
                     case "empty" -> "{\"data\":[]}";
                     case "invalid" -> "{\"data\":false}";
-                    case "duplicate" -> "{\"data\":[{\"id\":\"pool\"},{\"id\":\"pool\"}]}";
+                    case "duplicate" ->
+                        "{\"data\":[{\"id\":\"pool\",\"context_window\":32768,\"max_output_tokens\":4096},{\"id\":\"pool\",\"context_window\":32768,\"max_output_tokens\":4096}]}";
                     case "json" -> "sentinel-directory-body";
-                    default -> "{\"data\":[{\"id\":\"pool\"}]}";
+                    default ->
+                        "{\"data\":[{\"id\":\"pool\",\"context_window\":32768,\"max_output_tokens\":4096}]}";
                   };
               byte[] raw = body.getBytes(StandardCharsets.UTF_8);
               exchange.getResponseHeaders().set("X-Trace-Id", "1234567890abcdef1234567890abcdef");

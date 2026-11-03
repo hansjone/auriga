@@ -26,7 +26,7 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	spec.Secrets = &nodev1.Secrets{}
 	opt := renderer.Options{MetaDir: t.TempDir(), Access: testAccess(t, ""), SealingPrivate: priv}
 	credential := "amc." + spec.TenantId + "." + spec.OwnerId + "." + spec.InstanceId + ".01900000-0000-7000-8000-000000000003." + strings.Repeat("a", 43)
-	material := map[string]any{"tenantId": spec.TenantId, "ownerId": spec.OwnerId, "instanceId": spec.InstanceId, "credentialVersion": 1, "credential": credential, "baseUrl": "https://portal.example.com/ai/v1", "models": []any{map[string]any{"id": "pool-a"}, map[string]any{"id": "pool-b"}}}
+	material := map[string]any{"tenantId": spec.TenantId, "ownerId": spec.OwnerId, "instanceId": spec.InstanceId, "credentialVersion": 1, "credential": credential, "baseUrl": "https://portal.example.com/ai/v1", "models": []any{map[string]any{"id": "pool-a", "contextWindow": 32768, "maxOutputTokens": 4096}, map[string]any{"id": "pool-b", "contextWindow": 8192, "maxOutputTokens": 1024}}}
 	raw, err := json.Marshal(material)
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +95,12 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	}
 	if provider == nil {
 		t.Fatal("native provider row missing")
+	}
+	models := provider["models"].([]any)
+	first := models[0].(map[string]any)
+	second := models[1].(map[string]any)
+	if first["contextWindow"] != 32768 || first["maxTokens"] != 4096 || second["contextWindow"] != 8192 || second["maxTokens"] != 1024 {
+		t.Fatal("native limits must match each authorized pool, not the rc.3 defaults")
 	}
 	compat, ok := provider["compat"].(map[string]any)
 	if !ok || compat["supportsStore"] != false {
