@@ -372,16 +372,15 @@ export function createManagedModels({
           const directory = modelDirectory(wire);
           check(directory.length <= 256, 'SERVER');
           const models = directory.map((item) => {
-            check(
-              item.context_window !== undefined &&
-                item.max_output_tokens !== undefined,
-              'SERVER',
-            );
             return {
               id: item.id,
               name: item.id,
-              contextWindow: item.context_window,
-              maxTokens: item.max_output_tokens,
+              ...(item.context_window === undefined
+                ? {}
+                : { contextWindow: item.context_window }),
+              ...(item.max_output_tokens === undefined
+                ? {}
+                : { maxTokens: item.max_output_tokens }),
             };
           });
           alive();
