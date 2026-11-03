@@ -58,6 +58,45 @@ beforeEach(() => {
   vi.mocked(relayApi.keys).mockResolvedValue({ items: [] });
 });
 afterEach(() => vi.resetAllMocks());
+it('saves different models from the same provider in auto and identifies an exact duplicate', async () => {
+  const auto = {
+    id: 'auto',
+    enabled: true,
+    contextWindow: 1000000,
+    maxOutputTokens: 4096,
+    routes: [
+      { providerId: p.id, model: 'first', weight: 1 },
+      { providerId: p.id, model: 'second', weight: 1 },
+    ],
+    price: {
+      currency: 'USD' as const,
+      inputMicrosPerMillionTokens: 1,
+      outputMicrosPerMillionTokens: 1,
+      version: 'v1',
+      effectiveAt: '2026-01-01T00:00:00Z',
+    },
+  };
+  vi.mocked(relayApi.pools).mockResolvedValue({ items: [auto] });
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  expect(w.find('[data-testid="confirm-action"]').exists()).toBe(true);
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.savePool).toHaveBeenCalledWith(
+    auto,
+    expect.any(String),
+    expect.any(AbortSignal),
+  );
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await w.get('[name="routeModel1"]').setValue('first');
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  expect(w.text()).toContain('第 2 条路由');
+  expect(w.text()).toContain('供应商和模型重复');
+  expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
+  w.unmount();
+});
 it('opens a fixed auto ID in the existing pool form without publishing a fake pool', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();

@@ -1,5 +1,8 @@
 ﻿import { useI18n } from 'vue-i18n';
 const zh = {
+  duplicateRoute:
+    '第 {number} 条路由的供应商和模型重复，请选择其他模型或移除该路由。',
+  routeNumber: '路由 {number}',
   importExistingAlias: '同名模型已发布；可选中后在预览修改公开别名',
   importTitle: '批量导入模型',
   importIntro:
@@ -176,6 +179,9 @@ const zh = {
     '填写 HTTPS 根地址，不附加 /v1；修改地址或种类会清除原密钥，须重新录入。',
 };
 const en: Record<keyof typeof zh, string> = {
+  duplicateRoute:
+    'Route {number} repeats the same provider and model. Choose another model or remove this route.',
+  routeNumber: 'Route {number}',
   importExistingAlias:
     'A public ID already exists. Select it and change the alias in preview.',
   importTitle: 'Import models in bulk',

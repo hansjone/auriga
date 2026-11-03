@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,9 +37,13 @@ type account struct {
 }
 
 func (a account) GetConfiguredProviders() ([]schemas.ModelProvider, error) {
-	out := make([]schemas.ModelProvider, len(a.routes))
-	for i, r := range a.routes {
-		out[i] = schemas.ModelProvider(r.ID)
+	out := make([]schemas.ModelProvider, 0, len(a.routes))
+	seen := make(map[string]bool)
+	for _, r := range a.routes {
+		if !seen[r.ID] {
+			out = append(out, schemas.ModelProvider(r.ID))
+			seen[r.ID] = true
+		}
 	}
 	return out, nil
 }
@@ -77,20 +82,22 @@ func Run(ctx context.Context, routes []Route, raw []byte, allowPrivate bool, emi
 	defer bc.Cancel()
 	weighted := make([]schemas.Key, len(routes))
 	for i, r := range routes {
-		weighted[i] = schemas.Key{ID: r.ID, Weight: r.Weight}
+		// A pool selects a route, not a provider: one provider can serve several
+		// models with distinct weights. Keep the provider ID for Bifrost config.
+		weighted[i] = schemas.Key{ID: strconv.Itoa(i), Weight: r.Weight}
 	}
 	selected, err := keyselectors.WeightedRandom(bc, weighted, "", "pool")
 	if err != nil {
 		return result, err
 	}
 	ordered := make([]Route, 0, len(routes))
-	for _, r := range routes {
-		if r.ID == selected.ID {
+	for i, r := range routes {
+		if strconv.Itoa(i) == selected.ID {
 			ordered = append(ordered, r)
 		}
 	}
-	for _, r := range routes {
-		if r.ID != selected.ID {
+	for i, r := range routes {
+		if strconv.Itoa(i) != selected.ID {
 			ordered = append(ordered, r)
 		}
 	}

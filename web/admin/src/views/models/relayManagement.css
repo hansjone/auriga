@@ -42,6 +42,9 @@
   align-items: end;
   gap: 12px;
 }
+.relay-route-title {
+  flex-basis: 100%;
+}
 .relay-toolbar p {
   flex-basis: 100%;
 }
