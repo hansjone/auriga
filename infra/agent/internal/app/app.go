@@ -311,11 +311,14 @@ func instanceSurfaceFromEnv() (instanceSurface, error) {
 	if err != nil {
 		return instanceSurface{}, fmt.Errorf("load deployment access: %w", err)
 	}
-	managedHost, err := managedOriginHost(os.Getenv("AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN"), os.Getenv("AURIGA_LINKS_ALLOWED_ORIGINS"))
+	allowedOrigins := os.Getenv("AURIGA_LINKS_ALLOWED_ORIGINS")
+	managedHost, err := managedOriginHost(os.Getenv("AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN"), allowedOrigins)
 	if err != nil {
 		return instanceSurface{}, err
 	}
-	identityHost, err := managedIdentityHost(os.Getenv("AURIGA_AGENT_MANAGED_INSTALLATION_FILE"), os.Getenv("AURIGA_LINKS_ALLOWED_ORIGINS"))
+	// The receipt-checked static identity may use the exact approved access
+	// portal without a duplicate allowlist entry, as the NAS bootstrap does.
+	identityHost, err := managedIdentityHost(os.Getenv("AURIGA_AGENT_MANAGED_INSTALLATION_FILE"), allowedOrigins+","+access.PortalURL())
 	if err != nil {
 		return instanceSurface{}, err
 	}
