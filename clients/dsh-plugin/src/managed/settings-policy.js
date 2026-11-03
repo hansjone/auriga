@@ -64,12 +64,60 @@ function safeValue(value, seen = new Set()) {
 
 /** @param {unknown} value */
 function personalProviders(value) {
+  if (!object(value) || Object.keys(value).some((key) => UNSAFE_KEYS.has(key)))
+    throw refuse();
+  if (Object.hasOwn(value, 'auriga-managed'))
+    managedProvider(value['auriga-managed']);
+}
+
+const MODEL_FIELDS = new Set([
+  'id',
+  'name',
+  'contextWindow',
+  'maxTokens',
+  'input',
+  'reasoningEfforts',
+]);
+/** Only model presentation/capabilities are user editable. Route identity,
+ * credential transport and storage compatibility remain platform supplied.
+ * @param {any} value */
+function managedModel(value) {
   if (
     !object(value) ||
-    Object.keys(value).some(
-      (key) => key === 'auriga-managed' || UNSAFE_KEYS.has(key),
-    )
+    Object.keys(value).some((key) => !MODEL_FIELDS.has(key))
   )
+    throw refuse();
+}
+/** @param {any} value */
+function managedProvider(value) {
+  if (
+    !object(value) ||
+    Object.keys(value).some((key) => !['models', 'displayName'].includes(key))
+  )
+    throw refuse();
+  if (Object.hasOwn(value, 'models')) {
+    if (!Array.isArray(value.models) || value.models.length > 256)
+      throw refuse();
+    value.models.forEach(managedModel);
+  }
+}
+/** @param {any} op */
+function managedOperation(op) {
+  const path = op.path.slice(2);
+  if (path[0] === 'displayName' && path.length === 1) return;
+  if (path[0] !== 'models') throw refuse();
+  if (path.length === 1) {
+    if (op.op === 'set') managedProvider({ models: op.value });
+    return;
+  }
+  if (!/^(0|[1-9][0-9]*)$/.test(path[1]) || Number(path[1]) > 255)
+    throw refuse();
+  if (path.length === 2) {
+    if (op.op === 'set') managedModel(op.value);
+    return;
+  }
+  if (!MODEL_FIELDS.has(path[2])) throw refuse();
+  if (path.length > 3 && !['input', 'reasoningEfforts'].includes(path[2]))
     throw refuse();
 }
 
@@ -108,12 +156,8 @@ function authorize(method, ns, input) {
     )
       throw refuse();
     if (ns === 'llm-pi-ai') {
-      if (
-        op.path.length < 2 ||
-        op.path[0] !== 'providers' ||
-        op.path[1] === 'auriga-managed'
-      )
-        throw refuse();
+      if (op.path.length < 2 || op.path[0] !== 'providers') throw refuse();
+      if (op.path[1] === 'auriga-managed') managedOperation(op);
       if (
         op.op === 'set' &&
         op.path.at(-1) === 'apiKeyEnv' &&

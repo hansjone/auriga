@@ -57,6 +57,48 @@ beforeEach(() => {
   vi.mocked(relayApi.keys).mockResolvedValue({ items: [] });
 });
 afterEach(() => vi.resetAllMocks());
+it('opens a fixed auto ID in the existing pool form without publishing a fake pool', async () => {
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  const id = w.get('[name="poolId"]').element as HTMLInputElement;
+  expect(id.value).toBe('auto');
+  expect(id.disabled).toBe(true);
+  expect(relayApi.savePool).not.toHaveBeenCalled();
+  expect(w.text()).toContain('已有会话与个人选择保留');
+  w.unmount();
+});
+
+it('auto entry edits the current auto routes while retaining legacy pools', async () => {
+  const auto = {
+    id: 'auto',
+    enabled: true,
+    contextWindow: 32000,
+    maxOutputTokens: 2000,
+    routes: [{ providerId: p.id, model: 'actual-model', weight: 2 }],
+    price: {
+      currency: 'USD' as const,
+      inputMicrosPerMillionTokens: 1,
+      outputMicrosPerMillionTokens: 1,
+      version: 'v1',
+      effectiveAt: '2026-01-01T00:00:00Z',
+    },
+  };
+  vi.mocked(relayApi.pools).mockResolvedValue({
+    items: [auto, { ...auto, id: 'legacy' }],
+  });
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  expect(w.text()).toContain('legacy');
+  expect(
+    (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
+  ).toBe('32000');
+  expect(w.findAll('[data-testid="edit-pool"]')).toHaveLength(2);
+  expect(relayApi.savePool).not.toHaveBeenCalled();
+  w.unmount();
+});
+
 it('restores provider editing with confirmation and fresh permission check', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();

@@ -28,6 +28,14 @@ async function fixture(t) {
   t.after(() => status.close());
   return { status, material, write, file };
 }
+const catalogModel = (id) => ({
+  id,
+  object: 'model',
+  created: 0,
+  owned_by: 'auriga',
+  context_window: 32768,
+  max_output_tokens: 4096,
+});
 const llm = {
   listModels: async (provider) => {
     assert.equal(provider, 'auriga-managed');
@@ -45,7 +53,7 @@ test('managed status: native provider plus online authorized catalog makes the r
     );
     assert.equal(init.credentials, 'omit');
     assert.equal(init.redirect, 'error');
-    return Response.json({ object: 'list', data: [{ id: 'pool-a' }] });
+    return Response.json({ object: 'list', data: [catalogModel('pool-a')] });
   });
   await status.refresh(llm);
   assert.equal(status.status.available, true);
@@ -75,7 +83,7 @@ for (const failure of [
         data:
           failure === 'empty'
             ? []
-            : [{ id: failure === 'wrong-model' ? 'other' : 'pool-a' }],
+            : [catalogModel(failure === 'wrong-model' ? 'other' : 'pool-a')],
       });
     });
     if (failure === 'wrong-owner')
@@ -91,7 +99,7 @@ test('managed status: shutdown prevents an in-flight probe from publishing ready
   const { status } = await fixture(t);
   t.mock.method(globalThis, 'fetch', async () => {
     status.close();
-    return Response.json({ object: 'list', data: [{ id: 'pool-a' }] });
+    return Response.json({ object: 'list', data: [catalogModel('pool-a')] });
   });
   await status.refresh(llm);
   assert.equal(status.status.available, false);

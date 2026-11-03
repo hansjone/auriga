@@ -66,7 +66,10 @@ test('R9 managed provider, ancestors, root resets and mixed atomic operations re
   }
   await assert.rejects(
     service.update('llm-pi-ai', {
-      providers: { personal: {}, 'auriga-managed': {} },
+      providers: {
+        personal: {},
+        'auriga-managed': { baseURL: 'https://other.example/v1' },
+      },
     }),
     denied,
   );
@@ -82,6 +85,65 @@ test('R9 managed provider, ancestors, root resets and mixed atomic operations re
     denied,
   );
   assert.equal(calls.length, 0);
+});
+
+test('managed native model rows remain editable while connection and storage fields cannot change', async () => {
+  const { service, calls } = fixture();
+  await service.update('llm-pi-ai', {
+    providers: {
+      'auriga-managed': {
+        models: [
+          {
+            id: 'auto',
+            name: '我的默认',
+            contextWindow: 32768,
+            maxTokens: 4096,
+          },
+        ],
+      },
+    },
+  });
+  await service.mutate(
+    'llm-pi-ai',
+    [
+      {
+        op: 'set',
+        path: ['providers', 'auriga-managed', 'models', '0', 'name'],
+        value: '名字',
+      },
+    ],
+    4,
+  );
+  for (const value of [
+    { api: 'anthropic-messages' },
+    { headers: {} },
+    { apiKeyEnv: 'PERSONAL' },
+    { compat: { supportsStore: true } },
+    { models: [{ id: 'auto', compat: { supportsStore: true } }] },
+  ]) {
+    await assert.rejects(
+      service.update('llm-pi-ai', { providers: { 'auriga-managed': value } }),
+      denied,
+    );
+  }
+  await assert.rejects(
+    service.mutate('llm-pi-ai', [
+      {
+        op: 'set',
+        path: [
+          'providers',
+          'auriga-managed',
+          'models',
+          '0',
+          'compat',
+          'supportsStore',
+        ],
+        value: true,
+      },
+    ]),
+    denied,
+  );
+  assert.equal(calls.length, 2);
 });
 
 test('R9 unknown, Auriga, transport, network and credential settings fail closed', async () => {

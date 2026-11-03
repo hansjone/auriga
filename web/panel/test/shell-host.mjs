@@ -224,6 +224,7 @@ export function surfaceHost(
     ['main', 'keyed'],
     ['sidebar.panellist', 'list'],
     ['settings.section', 'list'],
+    ['settings.models.provider-card', 'keyed'],
   ]);
   const counts = { registered: 0, unregistered: 0, timers: new Map() };
   let dictionary,

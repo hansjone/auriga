@@ -20,7 +20,12 @@ renderer 生成 DSH 公开 `llm-pi-ai` 行的 `auriga-managed` OpenAI Chat Compl
 `llm-pi-ai` 与凭据路径不能通过实例 Profile patch 覆盖；任意 `Profile.model_providers` 仍拒绝。缺材料删除私有模型文件，Key 改变影响渲染摘要并走受管材料重启。
 托管实例使用平台专用的隔离 profile，要求标准基线的 `llm-pi-ai` 行；渲染层管理该行的提供方配置。不将本层补丁应用到用户桌面或已有个人 profile，不承诺合并个人提供方；这不影响云端原生凭据存储的读写。
 **已知并接受**：仅实例主人经 `settings/describe` 可见 `llm-pi-ai` 命名空间的 `value.providers.auriga-managed.headers.Authorization`，属 MANAGED-N1 同机边界，跟踪 backlog **B-MM-DESCRIBE**。探针仅对此精确位置给出警告；其他任何位置出现 Key 仍判失败，profile 仍不得保存 Key 明文。
-成员在 DSH 原生模型选择器选择池中模型；已有会话的模型选择不被改写。池列表在首次下发和实例重启时读取，运行时池变更的调用权限由 Bifrost 实时执行。
+成员在 DSH 原生模型选择器选择池中模型；已有会话的模型选择不被改写。密封材料中的模型列表仅是启动兜底，不是权限 allowlist。
+运行中的插件约每30秒持原模型 Key 重新 GET 在线目录，并通过公开 `settings.mutate` 即时更新 pi-ai 模型配置；不重封材料、不重启、不注销在途 adapter。
+新增模型和容量变化会收敛到原生目录，显示名首批用公开 ID；用户显示名、较小容量覆盖与原生默认选择保留。失联保留旧配置并标记过期，成功空目录不冒授权。
+原生模型页打开或重新获取会主动检查；托管 `discoverModels` 只读取可信平台目标、拒绝草稿地址/协议/密钥覆盖和重定向。个人提供商继续走原生发现。
+平台连接身份、端点、请求头、凭据引用和存储兼容开关保持保护，安全模型字段仍可按原生行编辑。目录可见不代表调用通过；每次调用仍在线核权限、模型限制及预算。
+`auto` 是管理台已有模型池的固定公开 ID；真实创建并启用且在线可见后，只为没有用户层显式默认的新 Agent 设置默认。旧池和已有会话不删除、不强制迁移。
 
 ai-gateway 通过既有受认证 IAM gRPC 每请求验证模型 Key，继续核验当前成员及模型权限，再用独立成员服务口令调 Bifrost。IAM仍只签最多300秒租约，网关上限检查接受5秒跨主机时钟偏差，过期、身份及在线核权检查不变。
 `user=tenantId:accountId` 和可信 metadata 的覆盖规则与桌面一致；调用方提供的 user/metadata 不影响成员用量归属。

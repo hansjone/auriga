@@ -11,7 +11,7 @@ import (
 
 func TestPublicModelSuppliesPoolCapabilitiesWithoutUpstreamIdentity(t *testing.T) {
 	entry := publicModel(api.RelayPool{Id: "public-deepseek", ContextWindow: 32768, MaxOutputTokens: 4096})
-	if entry["id"] != "public-deepseek" || entry["context_window"] != int64(32768) || entry["max_output_tokens"] != int64(4096) || len(entry) != 5 {
+	if entry["id"] != "public-deepseek" || entry["context_window"] != int64(32768) || entry["max_output_tokens"] != int64(4096) || entry["created"] != 0 || len(entry) != 6 {
 		t.Fatalf("public catalog capability projection: %#v", entry)
 	}
 }

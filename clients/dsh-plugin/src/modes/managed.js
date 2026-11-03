@@ -302,15 +302,16 @@ export async function createManaged(options = {}) {
       }
 
       host.ctx = ctx;
-      ctx.inject?.(['llm'], (modelCtx) => {
+      ctx.inject?.(['llm', 'settings'], (modelCtx) => {
         const service = modelCtx.llm;
         llm = service;
-        modelCtx.effect(
-          () => () => {
+        modelCtx.effect(() => {
+          const detach = models.attach(service, modelCtx.settings);
+          return () => {
+            detach();
             if (llm === service) llm = undefined;
-          },
-          'auriga-dsh: managed model status',
-        );
+          };
+        }, 'auriga-dsh: managed model catalog');
       });
       disposeHostAuth = installHostAuthentication(ctx.connection, door, {
         browserOrigin,

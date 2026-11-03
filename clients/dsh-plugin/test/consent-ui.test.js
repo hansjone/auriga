@@ -146,6 +146,14 @@ async function fixture(api, locale = 'zh', http) {
   };
   return {
     render,
+    async renderModels(provider = { provider: 'auriga-managed' }) {
+      const component = slots.get('settings.models.provider-card');
+      let tree = shallow(component, { provider });
+      for (const effect of effects) effect();
+      await new Promise((resolve) => setImmediate(resolve));
+      tree = shallow(component, { provider });
+      return tree;
+    },
     close: () => {
       for (const v of values) v?.cleanup?.();
       dispose();
@@ -159,6 +167,61 @@ function all(tree) {
 }
 const text = (tree) =>
   typeof tree === 'string' ? tree : (tree?.children ?? []).map(text).join(' ');
+
+test('native platform model card refreshes on opening and shows stale authorization without replacing the editor', async () => {
+  let calls = 0;
+  const f = await fixture(undefined, 'zh', async (url, options) => {
+    calls++;
+    assert.match(String(url), /auriga\/local-login\/status$/);
+    assert.equal(options.credentials, 'same-origin');
+    assert.equal(options.redirect, 'error');
+    return {
+      ok: true,
+      json: async () => ({
+        models:
+          calls === 1
+            ? { available: true }
+            : { state: 'managed_model_forbidden', stale: true },
+      }),
+    };
+  });
+  try {
+    let tree = await f.renderModels();
+    assert.match(text(tree), /平台模型已更新/);
+    assert.equal(calls, 1);
+    all(tree)
+      .find((node) => node.type === 'button')
+      .props.onClick();
+    tree = await f.renderModels();
+    assert.match(text(tree), /平台模型授权已失效/);
+    assert.equal(calls, 2);
+    assert.equal(await f.renderModels({ provider: 'personal' }), null);
+    assert.equal(calls, 2);
+  } finally {
+    f.close();
+  }
+});
+
+test('a successful empty native catalog displays no models rather than an offline stale directory', async () => {
+  const f = await fixture(undefined, 'zh', async () => ({
+    ok: true,
+    json: async () => ({
+      models: {
+        directoryAvailable: true,
+        authorized: false,
+        available: false,
+        stale: false,
+      },
+    }),
+  }));
+  try {
+    const tree = await f.renderModels();
+    assert.match(text(tree), /当前没有可用的平台模型/);
+    assert.doesNotMatch(text(tree), /保留上次目录/);
+  } finally {
+    f.close();
+  }
+});
 function data() {
   return {
     policyRevision: 3,

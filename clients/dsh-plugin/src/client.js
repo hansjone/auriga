@@ -19,6 +19,12 @@ window.__ModuleLoader__.load({
       failed: '加载失败',
       retry: '重试',
       refresh: '刷新状态',
+      refreshModels: '重新获取平台模型',
+      modelsReady: '平台模型已更新；运行中约每30秒重新获取。',
+      modelsStale: '暂时无法更新，保留上次目录；模型调用仍由平台核验权限。',
+      modelsForbidden: '平台模型授权已失效，请联系管理员。',
+      modelsEmpty: '当前没有可用的平台模型，请管理员检查发布与授权。',
+      modelsUnavailable: '平台模型当前不可用，请稍后重试。',
       authRequired: '需要重新登录平台',
       dismiss: '关闭',
       connection: '总部连接',
@@ -99,6 +105,16 @@ window.__ModuleLoader__.load({
       failed: 'Failed to load',
       retry: 'Retry',
       refresh: 'Refresh status',
+      refreshModels: 'Refresh platform models',
+      modelsReady:
+        'Platform models are current; refreshed about every 30 seconds while running.',
+      modelsStale:
+        'Refresh unavailable; showing the last catalog. Calls still require platform authorization.',
+      modelsForbidden:
+        'Platform model authorization is unavailable. Contact your administrator.',
+      modelsEmpty:
+        'No platform models are available. Ask your administrator to check publication and authorization.',
+      modelsUnavailable: 'Platform models are unavailable. Please retry.',
       authRequired: 'Platform sign-in required',
       dismiss: 'Dismiss',
       connection: 'Headquarters connection',
@@ -1159,6 +1175,112 @@ window.__ModuleLoader__.load({
               ),
             ),
           'auriga-shell: main',
+        );
+        function ManagedModelsStatus({ provider }) {
+          const [modelState, setModelState] = React.useState({ busy: true });
+          const [attempt, setAttempt] = React.useState(0);
+          React.useEffect(() => {
+            if (provider.provider !== 'auriga-managed') return;
+            let alive = true;
+            let active, poll;
+            const run = async () => {
+              if (!alive || disposed || active) return;
+              clearTimer(poll);
+              const controller = new AbortController();
+              active = controller;
+              controllers.add(controller);
+              const timeout = later(() => controller.abort(), 12000);
+              setModelState((old) => ({ ...old, busy: true }));
+              try {
+                const data = await Promise.race([
+                  (async () => {
+                    const reply = await fetch(
+                      localURL('auriga/local-login/status'),
+                      {
+                        credentials: 'same-origin',
+                        redirect: 'error',
+                        cache: 'no-store',
+                        signal: controller.signal,
+                      },
+                    );
+                    if (!reply.ok) throw failure();
+                    return reply.json();
+                  })(),
+                  new Promise((_, reject) =>
+                    controller.signal.addEventListener(
+                      'abort',
+                      () => reject(failure()),
+                      { once: true },
+                    ),
+                  ),
+                ]);
+                if (alive && !disposed)
+                  setModelState({ busy: false, ...data.models });
+              } catch {
+                if (alive && !disposed)
+                  setModelState({ busy: false, stale: true });
+              } finally {
+                clearTimer(timeout);
+                controllers.delete(controller);
+                controller.abort();
+                active = undefined;
+                if (alive && !disposed) poll = later(run, 30000);
+              }
+            };
+            void run();
+            window.addEventListener('online', run);
+            return () => {
+              alive = false;
+              clearTimer(poll);
+              active?.abort();
+              window.removeEventListener('online', run);
+            };
+          }, [provider.provider, attempt]);
+          if (provider.provider !== 'auriga-managed') return null;
+          return h(
+            'div',
+            { className: 'auriga-setting-actions' },
+            h(
+              'button',
+              {
+                type: 'button',
+                disabled: modelState.busy,
+                onClick: () => setAttempt((value) => value + 1),
+              },
+              t('refreshModels'),
+            ),
+            h(
+              'span',
+              { role: 'status' },
+              t(
+                modelState.state === 'managed_model_forbidden'
+                  ? 'modelsForbidden'
+                  : modelState.busy
+                    ? 'loading'
+                    : modelState.available
+                      ? 'modelsReady'
+                      : modelState.directoryAvailable && !modelState.authorized
+                        ? 'modelsEmpty'
+                        : modelState.stale
+                          ? 'modelsStale'
+                          : 'modelsUnavailable',
+              ),
+            ),
+          );
+        }
+        effect(
+          () =>
+            ctx.slots.inject('settings.models.provider-card', () =>
+              ctx.slots.register(
+                {
+                  name: 'settings.models.provider-card',
+                  key: 'llm-pi-ai',
+                  locale: NS,
+                },
+                ManagedModelsStatus,
+              ),
+            ),
+          'auriga-shell: native model catalog',
         );
         effect(
           () =>

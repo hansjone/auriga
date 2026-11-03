@@ -8,7 +8,7 @@ import (
 )
 
 func publicModel(model api.RelayPool) map[string]any {
-	return map[string]any{"id": model.Id, "object": "model", "owned_by": "auriga", "context_window": model.ContextWindow, "max_output_tokens": model.MaxOutputTokens}
+	return map[string]any{"id": model.Id, "object": "model", "created": 0, "owned_by": "auriga", "context_window": model.ContextWindow, "max_output_tokens": model.MaxOutputTokens}
 }
 
 func outputTokenLimit(fields map[string]json.RawMessage, maximum int64) (int64, string, error) {
