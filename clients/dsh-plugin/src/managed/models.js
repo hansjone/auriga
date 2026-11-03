@@ -8,6 +8,13 @@ import { performance } from 'node:perf_hooks';
 
 const NS = 'llm-pi-ai';
 const PROVIDER = 'auriga-managed';
+const PREFERENCE_FIELDS = [
+  'name',
+  'contextWindow',
+  'maxTokens',
+  'input',
+  'reasoningEfforts',
+];
 const conflict = (/** @type {any} */ error) =>
   ['SETTINGS_CONFLICT', 'settings/conflict'].includes(error?.code);
 const same = (/** @type {any} */ a, /** @type {any} */ b) =>
@@ -39,6 +46,13 @@ export function createManagedModels({
   let lifetime = new AbortController();
   /** @type {Map<string,any>|undefined} */
   let previous;
+  /** Last effective native projection, distinct from requested user preferences.
+   * Platform clamping must never become a new user preference.
+   * @type {Map<string,any>|undefined} */
+  let projected;
+  /** @type {Map<string,any>} */
+  let preferences = new Map();
+  let excluded = new Set();
   let status = {
     registered: false,
     available: false,
@@ -117,31 +131,46 @@ export function createManagedModels({
   /** @param {any[]} remote @param {any[]} current */
   function merge(remote, current) {
     const byId = new Map(current.map((model) => [model.id, model]));
-    return remote
-      .filter((model) => !previous?.has(model.id) || byId.has(model.id))
+    const remoteById = new Map(remote.map((model) => [model.id, model]));
+    const requested = new Map(globalThis.structuredClone([...preferences]));
+    const hidden = new Set(excluded);
+    for (const id of projected?.keys() ?? []) {
+      if (!byId.has(id)) hidden.add(id);
+    }
+    for (const user of current) {
+      hidden.delete(user.id);
+      const baseline = projected?.get(user.id) ??
+        previous?.get(user.id) ??
+        remoteById.get(user.id) ?? { id: user.id, name: user.id };
+      const preference = requested.get(user.id) ?? {};
+      for (const field of PREFERENCE_FIELDS) {
+        if (same(user[field], baseline[field])) continue;
+        if (user[field] === undefined) delete preference[field];
+        else preference[field] = globalThis.structuredClone(user[field]);
+      }
+      if (Object.keys(preference).length) requested.set(user.id, preference);
+      else requested.delete(user.id);
+    }
+    const models = remote
+      .filter((model) => !hidden.has(model.id))
       .map((model) => {
-        const user = byId.get(model.id),
-          old = previous?.get(model.id);
-        const result = { ...user, ...model };
-        if (typeof user?.name === 'string' && user.name !== model.id)
-          result.name = user.name;
+        const preference = requested.get(model.id) ?? {};
+        const result = { ...model, ...preference, id: model.id };
         for (const field of ['contextWindow', 'maxTokens']) {
-          if (
-            old &&
-            Number.isSafeInteger(user?.[field]) &&
-            user[field] > 0 &&
-            user[field] !== old[field]
-          )
-            result[field] = Math.min(user[field], model[field]);
+          result[field] =
+            Number.isSafeInteger(preference[field]) && preference[field] > 0
+              ? Math.min(preference[field], model[field])
+              : model[field];
         }
         result.maxTokens = Math.min(result.maxTokens, result.contextWindow - 1);
         return result;
       });
+    return { models, preferences: requested, excluded: hidden };
   }
 
   /** @param {any} port @param {any[]} models @param {any} material @param {number} generation @param {AbortSignal} signal */
   async function publish(port, models, material, generation, signal) {
-    if (!previous)
+    if (!previous) {
       previous = new Map(
         material.value.models.map((/** @type {any} */ model) => [
           model.id,
@@ -153,6 +182,11 @@ export function createManagedModels({
           },
         ]),
       );
+      projected = new Map(previous);
+    }
+    /** Candidate preference state commits only with the successful CAS projection.
+     * @type {ReturnType<typeof merge>|undefined} */
+    let candidate;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (closed || signal.aborted || generation !== epoch) return;
       const descriptor = port.settings
@@ -160,7 +194,8 @@ export function createManagedModels({
         .find((/** @type {any} */ item) => item.ns === NS);
       const current = descriptor?.value?.providers?.[PROVIDER]?.models;
       check(Array.isArray(current), 'NO_ADAPTER');
-      const next = merge(models, current);
+      candidate = merge(models, current);
+      const next = candidate.models;
       if (same(next, current)) break;
       try {
         await port.settings.mutate(
@@ -174,6 +209,15 @@ export function createManagedModels({
       }
     }
     if (closed || signal.aborted || generation !== epoch) return;
+    if (candidate) {
+      preferences = candidate.preferences;
+      excluded = candidate.excluded;
+      projected = new Map(
+        globalThis
+          .structuredClone(candidate.models)
+          .map((model) => [model.id, model]),
+      );
+    }
     previous = new Map(models.map((model) => [model.id, model]));
     // Never replace a saved personal/global choice, including a legacy pool.
     const descriptors = port.settings.describe({ redactSecrets: true });

@@ -44,6 +44,7 @@ const provider = ref<RelayProviderInput>({
 });
 const draft = ref<RelayPool>();
 const autoEditor = ref(false);
+const poolsReady = ref(false);
 const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
 const catalogs = ref<
   Record<string, { items: CatalogModel[]; loading: boolean; error: string }>
@@ -129,12 +130,18 @@ const freshPool = (): RelayPool => ({
   },
 });
 async function load() {
+  poolsReady.value = false;
+  if (draft.value?.id === 'auto') {
+    close();
+    pending.value = undefined;
+  }
   const result = await ui.read('ai.providers.read', () =>
     Promise.all([relayApi.providers(ui.signal), relayApi.pools(ui.signal)]),
   );
   if (result) {
     providers.value = result[0].items;
     pools.value = result[1].items;
+    poolsReady.value = true;
   }
 }
 onMounted(load);
@@ -157,6 +164,7 @@ watch(
   () => ui.can('ai.providers.read'),
   (allowed) => {
     if (!allowed) {
+      poolsReady.value = false;
       providers.value = [];
       pools.value = [];
       close();
@@ -183,6 +191,7 @@ function editProvider(row?: RelayProvider) {
   editor.value = 'provider';
 }
 function editPool(row?: RelayPool) {
+  if (row?.id === 'auto' && (!poolsReady.value || loading.value)) return;
   requestKey.value = globalThis.crypto.randomUUID();
   close();
   selected.value = row?.id ?? '';
@@ -191,6 +200,14 @@ function editPool(row?: RelayPool) {
   editor.value = 'pool';
 }
 function editAutoPool() {
+  if (
+    !poolsReady.value ||
+    loading.value ||
+    busy.value ||
+    pending.value ||
+    !ui.can('ai.providers.write')
+  )
+    return;
   editPool(pools.value.find((pool) => pool.id === 'auto'));
   autoEditor.value = true;
   draft.value!.id = 'auto';
@@ -243,6 +260,8 @@ function askCredential() {
 }
 function askPool() {
   if (!draft.value) return;
+  if (draft.value.id === 'auto' && (!poolsReady.value || loading.value)) return;
+  const createOnly = draft.value.id === 'auto' && !selected.value;
   const body = JSON.parse(JSON.stringify(draft.value)) as RelayPool;
   const ints = [
     body.contextWindow,
@@ -280,7 +299,10 @@ function askPool() {
     run: () =>
       ui.write(
         'ai.providers.write',
-        () => relayApi.savePool(body, key, ui.signal),
+        () =>
+          createOnly
+            ? relayApi.createPool(body, key, ui.signal)
+            : relayApi.savePool(body, key, ui.signal),
         close,
         load,
       ),
@@ -514,7 +536,13 @@ async function confirm() {
     <p>{{ t('poolNote') }}</p>
     <button
       data-testid="configure-auto"
-      :disabled="busy || !!pending || !ui.can('ai.providers.write')"
+      :disabled="
+        !poolsReady ||
+        loading ||
+        busy ||
+        !!pending ||
+        !ui.can('ai.providers.write')
+      "
       @click="editAutoPool"
     >
       {{ t('configureAuto') }}
@@ -560,7 +588,12 @@ async function confirm() {
             <td>
               <button
                 data-testid="edit-pool"
-                :disabled="busy || !!pending || !ui.can('ai.providers.write')"
+                :disabled="
+                  busy ||
+                  !!pending ||
+                  !ui.can('ai.providers.write') ||
+                  (pool.id === 'auto' && (!poolsReady || loading))
+                "
                 @click="editPool(pool)"
               >
                 {{ t('edit') }}

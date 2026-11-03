@@ -259,3 +259,78 @@ test('a hung catalog is bounded and never writes a partial directory', async (t)
   assert.equal(f.writes, 0);
   assert.equal(f.models.status.available, false);
 });
+
+test('explicit capacity preferences survive equal platform limits and later expansion', async (t) => {
+  const f = fixture(t);
+  f.directory([row('auto', 64000, 8192)]);
+  f.models.attach(f.llm, f.settings);
+  await f.models.refresh();
+  Object.assign(f.value.providers['auriga-managed'].models[0], {
+    name: '我的模型',
+    contextWindow: 32000,
+    maxTokens: 2000,
+  });
+  f.directory([row('auto', 32000, 2000)]);
+  await f.models.refresh();
+  f.directory([row('auto', 64000, 8192)]);
+  await f.models.refresh();
+  assert.deepEqual(f.value.providers['auriga-managed'].models[0], {
+    id: 'auto',
+    name: '我的模型',
+    contextWindow: 32000,
+    maxTokens: 2000,
+  });
+});
+
+test('temporary platform clamping retains the requested capacities and still refreshes uncustomized models', async (t) => {
+  const f = fixture(t);
+  f.directory([row('auto', 64000, 8192), row('unmodified', 64000, 8192)]);
+  f.models.attach(f.llm, f.settings);
+  await f.models.refresh();
+  Object.assign(f.value.providers['auriga-managed'].models[0], {
+    contextWindow: 48000,
+    maxTokens: 4000,
+  });
+  f.directory([row('auto', 32000, 2000), row('unmodified', 32000, 2000)]);
+  await f.models.refresh();
+  assert.equal(
+    f.value.providers['auriga-managed'].models[0].contextWindow,
+    32000,
+  );
+  f.directory([row('auto', 64000, 8192), row('unmodified', 64000, 8192)]);
+  await f.models.refresh();
+  const [custom, unmodified] = f.value.providers['auriga-managed'].models;
+  assert.equal(custom.contextWindow, 48000);
+  assert.equal(custom.maxTokens, 4000);
+  assert.equal(unmodified.contextWindow, 64000);
+  assert.equal(unmodified.maxTokens, 8192);
+});
+
+test('personal names and exclusions survive temporary platform withdrawal, and native readdition remains possible', async (t) => {
+  const f = fixture(t);
+  f.directory([row('auto'), row('hidden')]);
+  f.models.attach(f.llm, f.settings);
+  await f.models.refresh();
+  f.value.providers['auriga-managed'].models = [
+    { ...f.value.providers['auriga-managed'].models[0], name: '保留名称' },
+  ];
+  f.directory([]);
+  await f.models.refresh();
+  f.directory([row('auto'), row('hidden')]);
+  await f.models.refresh();
+  assert.deepEqual(
+    f.value.providers['auriga-managed'].models.map((model) => [
+      model.id,
+      model.name,
+    ]),
+    [['auto', '保留名称']],
+  );
+  f.value.providers['auriga-managed'].models.push({
+    id: 'hidden',
+    name: 'hidden',
+    contextWindow: 32768,
+    maxTokens: 4096,
+  });
+  await f.models.refresh();
+  assert.equal(f.value.providers['auriga-managed'].models.length, 2);
+});
