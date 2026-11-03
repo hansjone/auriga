@@ -48,7 +48,9 @@ async function fixture(t, http = async () => lost(), options = {}) {
     calls = [],
     timers = new Map();
   let timerId = 0;
+  let now = 0;
   const win = {
+    performance: { now: () => now },
     location: {
       href: options.url ?? base,
       origin: new URL(options.url ?? base).origin,
@@ -87,7 +89,7 @@ async function fixture(t, http = async () => lost(), options = {}) {
       console,
       setTimeout(fn, ms) {
         const id = ++timerId;
-        timers.set(id, { fn, ms });
+        timers.set(id, { fn, ms, at: now + ms });
         return id;
       },
       clearTimeout(id) {
@@ -134,6 +136,21 @@ async function fixture(t, http = async () => lost(), options = {}) {
     else generation = next;
     for (const fn of [...listeners[name]]) fn();
   }
+  async function advance(ms) {
+    const until = now + ms;
+    for (;;) {
+      const due = [...timers]
+        .sort((a, b) => a[1].at - b[1].at)
+        .find(([, v]) => v.at <= until);
+      if (!due) break;
+      now = due[1].at;
+      timers.delete(due[0]);
+      due[1].fn();
+      await settle();
+    }
+    now = until;
+    await settle();
+  }
   return {
     calls,
     navigations,
@@ -143,6 +160,11 @@ async function fixture(t, http = async () => lost(), options = {}) {
     listeners,
     win,
     doc,
+    advance,
+    now: () => now,
+    jump: (ms) => {
+      now += ms;
+    },
     lose() {
       emit('generation', undefined);
       emit('state', 'connecting');
@@ -160,9 +182,7 @@ async function fixture(t, http = async () => lost(), options = {}) {
     async retry() {
       const pair = [...timers].find(([, v]) => v.ms === 2000);
       assert.ok(pair, 'bounded read-only retry is scheduled');
-      timers.delete(pair[0]);
-      pair[1].fn();
-      await settle();
+      await advance(pair[1].at - now);
     },
   };
 }
@@ -217,6 +237,110 @@ test('transient unavailable then precise entry 401 recovers within the bounded c
   await settle();
   await f.retry();
   assert.deepEqual(f.navigations, [base]);
+});
+
+test('same loss deadline survives a hidden document long after the original six-second window', async (t) => {
+  let reads = 0;
+  const f = await fixture(t, async () =>
+    ++reads === 1 ? new Response('', { status: 503 }) : lost(),
+  );
+  f.lose();
+  await settle();
+  await f.advance(1000);
+  f.hidden(true);
+  await f.advance(19000);
+  f.hidden(false);
+  f.event('focus');
+  f.event('online');
+  await settle();
+  assert.equal(
+    f.calls.length,
+    1,
+    'visibility and wake events cannot grant a later recovery window',
+  );
+  assert.deepEqual(f.navigations, []);
+  f.connect();
+  f.lose();
+  await settle();
+  assert.equal(
+    f.calls.length,
+    2,
+    'a genuinely new connected generation permits a future independent window',
+  );
+  assert.deepEqual(f.navigations, [base]);
+});
+
+test('focus and online respect the pending two-second retry instead of consuming all reads immediately', async (t) => {
+  const times = [];
+  const f = await fixture(t, async () => {
+    times.push(f.now());
+    return f.now() < 2000 ? new Response('', { status: 503 }) : lost();
+  });
+  f.lose();
+  await settle();
+  f.event('focus');
+  await settle();
+  f.event('online');
+  await settle();
+  assert.deepEqual(
+    times,
+    [0],
+    'wake events must not bypass the pending backoff',
+  );
+  await f.advance(1999);
+  assert.deepEqual(times, [0]);
+  await f.advance(1);
+  assert.deepEqual(times, [0, 2000]);
+  assert.deepEqual(f.navigations, [base]);
+});
+
+test('hiding an in-flight read cannot make a quick visibility return consume the next probe early', async (t) => {
+  const times = [];
+  const f = await fixture(t, async () => {
+    times.push(f.now());
+    return times.length === 1 ? new Promise(() => {}) : lost();
+  });
+  f.lose();
+  await settle();
+  await f.advance(1000);
+  f.hidden(true);
+  await f.advance(500);
+  f.hidden(false);
+  await settle();
+  assert.deepEqual(times, [0]);
+  await f.advance(1499);
+  assert.deepEqual(times, [0]);
+  await f.advance(1);
+  assert.deepEqual(times, [0, 3000]);
+  assert.deepEqual(f.navigations, [base]);
+});
+
+test('loss first observed while hidden still expires without granting a late visible window', async (t) => {
+  const f = await fixture(t);
+  f.hidden(true);
+  f.lose();
+  await f.advance(20000);
+  f.hidden(false);
+  await settle();
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(f.navigations, []);
+});
+
+test('an exact entry reply after the deadline stays inert even if browser timers have not fired', async (t) => {
+  let finish;
+  const f = await fixture(
+    t,
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  f.lose();
+  await settle();
+  f.jump(6000);
+  finish(lost());
+  await settle();
+  assert.deepEqual(f.navigations, []);
 });
 
 test('200, 403 and unmarked or non-entry 401 stop without navigation or retries', async (t) => {

@@ -399,10 +399,15 @@ window.__ModuleLoader__.load({
         attempts = 0,
         settled = false;
       let generation = connection.generation.getSnapshot();
-      let request, retryTimer, cycleTimer;
+      // Timers are cancellable resources; deadlines are facts about this loss
+      // cycle and must survive document visibility and browser wake events.
+      let request, retryTimer, cycleTimer, deadline;
+      let nextProbeAt = 0;
+      const now = () => window.performance.now();
       const cleanups = [];
       const cancel = () => {
         epoch++;
+        if (request) nextProbeAt = Math.max(nextProbeAt, now() + 2000);
         request?.abort();
         request = undefined;
         clearTimeout(retryTimer);
@@ -426,6 +431,8 @@ window.__ModuleLoader__.load({
         !navigated &&
         epoch === version &&
         pending() &&
+        deadline !== undefined &&
+        now() < deadline &&
         !document.hidden;
       async function probe() {
         if (
@@ -440,13 +447,25 @@ window.__ModuleLoader__.load({
           document.hidden
         )
           return;
+        if (deadline === undefined || now() >= deadline) {
+          settled = true;
+          cancel();
+          return;
+        }
+        if (now() < nextProbeAt) {
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined;
+            void probe();
+          }, nextProbeAt - now());
+          return;
+        }
         const version = epoch,
           controller = new AbortController();
         if (cycleTimer === undefined)
           cycleTimer = setTimeout(() => {
             settled = true;
             cancel();
-          }, 6000);
+          }, deadline - now());
         request = controller;
         attempts++;
         let abort;
@@ -504,6 +523,7 @@ window.__ModuleLoader__.load({
           // That page owns the tab marker and trusted cross-origin portal hop.
           window.location.replace(base.href);
         } else if (outcome === 'retry' && attempts < 3) {
+          nextProbeAt = now() + 2000;
           retryTimer = setTimeout(() => {
             retryTimer = undefined;
             void probe();
@@ -522,23 +542,29 @@ window.__ModuleLoader__.load({
           generation = next;
           attempts = 0;
           settled = false;
+          deadline = undefined;
+          nextProbeAt = 0;
         }
         if (connection.state.getSnapshot() === 'connected' && next) {
           cancel();
           attempts = 0;
           settled = false;
+          deadline = undefined;
+          nextProbeAt = 0;
           try {
             window.sessionStorage.removeItem(key);
           } catch {
             /* retain fail-closed loop fence */
           }
-        } else if (!pending() || document.hidden) cancel();
-        else void probe();
+        } else if (!pending()) cancel();
+        else {
+          deadline ??= now() + 6000;
+          if (document.hidden) cancel();
+          else void probe();
+        }
       };
       const resume = () => {
         if (!closed && !request) {
-          clearTimeout(retryTimer);
-          retryTimer = undefined;
           changed();
         }
       };
