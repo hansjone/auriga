@@ -348,9 +348,9 @@ func composeAccessEnv(cfg deploymentconfig.Config, supplied bool) []byte {
 			bind = cfg.PortalOrigin().Host
 		}
 	}
-	return []byte(fmt.Sprintf("COMPOSE_PROJECT_NAME='%s'\nAURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\nAURIGA_TEAM_RP_ID='%s'\nAURIGA_ACCESS_BIND='%s'\nAURIGA_PORTAL_PORT='%d'\nAURIGA_ADMIN_PORT='%d'\nAURIGA_PORTAL_TARGET_PORT='%d'\nAURIGA_ADMIN_TARGET_PORT='%d'\n",
+	return []byte(fmt.Sprintf("COMPOSE_PROJECT_NAME='%s'\nAURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\nAURIGA_TEAM_RP_ID='%s'\nAURIGA_ACCESS_BIND='%s'\nAURIGA_PORTAL_PORT='%d'\nAURIGA_ADMIN_PORT='%d'\nAURIGA_PORTAL_TARGET_PORT='%d'\nAURIGA_ADMIN_TARGET_PORT='%d'\nAURIGA_EGRESS_DENY_HOSTS='%s,%s'\n",
 		strings.TrimSuffix(cfg.InstanceControl().EdgeContainer, "-edge"), cfg.Issuer(), cfg.PortalURL(), cfg.PortalOrigin().Host, bind,
-		cfg.PortalOrigin().Port, cfg.AdminOrigin().Port, cfg.Listeners().Portal.Port, cfg.Listeners().Admin.Port))
+		cfg.PortalOrigin().Port, cfg.AdminOrigin().Port, cfg.Listeners().Portal.Port, cfg.Listeners().Admin.Port, cfg.PortalOrigin().Host, cfg.AdminOrigin().Host))
 }
 
 // These ports belong to the disposable public M2 stack, not product defaults.

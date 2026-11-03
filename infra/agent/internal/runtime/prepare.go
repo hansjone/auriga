@@ -39,8 +39,10 @@ type Preparing struct {
 	SealingPrivate [32]byte
 	// Access is loaded once from the trusted installation file.
 	Access deploymentconfig.Config
-	Chown  func(path string, uid, gid int) error
-	Log    *slog.Logger
+	// Approved control/portal/managed issuance hostnames, never instance input.
+	ProxyBypassHosts []string
+	Chown            func(path string, uid, gid int) error
+	Log              *slog.Logger
 	// ExtraEnvKeys are the Profile.Env keys a spec may set besides the
 	// platform keys; nil means DefaultExtraEnvKeys.
 	ExtraEnvKeys []string
@@ -149,13 +151,14 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		}
 
 		rend, err := renderer.Render(full, renderer.Options{
-			MetaDir:        paths.Meta,
-			HomeDir:        paths.Home,
-			Access:         p.Access,
-			SealingPrivate: p.SealingPrivate,
-			OwnerUID:       uid,
-			OwnerGID:       uid,
-			Chown:          p.Chown,
+			MetaDir:          paths.Meta,
+			HomeDir:          paths.Home,
+			Access:           p.Access,
+			ProxyBypassHosts: p.ProxyBypassHosts,
+			SealingPrivate:   p.SealingPrivate,
+			OwnerUID:         uid,
+			OwnerGID:         uid,
+			Chown:            p.Chown,
 		})
 		if err != nil {
 			return err

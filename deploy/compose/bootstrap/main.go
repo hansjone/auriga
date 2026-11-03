@@ -232,6 +232,7 @@ func main() {
 		},
 		Dsh:     &nodev1.DshRuntime{Version: version, ArtifactId: name, Image: *image},
 		Profile: profileFor(*fixture),
+		Network: &nodev1.Network{EgressProxy: "http://auriga-egress.internal:3128"},
 		Secrets: &nodev1.Secrets{
 			IdentityKeys: []*nodev1.IdentityPublicKey{{
 				Kid:       kid,

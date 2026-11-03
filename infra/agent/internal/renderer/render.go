@@ -49,9 +49,11 @@ type Options struct {
 	MetaDir string
 	HomeDir string
 	// Access is the single validated installation boundary, loaded by the agent.
-	Access         deploymentconfig.Config
-	SealingPrivate [32]byte
-	RestrictFile   func(path string) error
+	Access deploymentconfig.Config
+	// Extra trusted issuance/model hosts which must stay on the isolated bridge.
+	ProxyBypassHosts []string
+	SealingPrivate   [32]byte
+	RestrictFile     func(path string) error
 	// OwnerUID/GID set after write for secret files (0 = skip).
 	OwnerUID int
 	OwnerGID int
@@ -314,6 +316,7 @@ func buildEnvFile(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 		lines = append(lines, "AURIGA_PANEL_KEYS_FILE="+ContainerPanelKeys)
 	}
 	if net := spec.GetNetwork(); net != nil {
+		bypass := append([]string(nil), net.Allow...)
 		if net.EgressProxy != "" {
 			if err := rejectUnsafeString("egressProxy", net.EgressProxy); err != nil {
 				return nil, err
@@ -322,14 +325,23 @@ func buildEnvFile(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 				"HTTPS_PROXY="+net.EgressProxy,
 				"HTTP_PROXY="+net.EgressProxy,
 			)
+			bypass = append(bypass, opt.Access.InstanceControl().DnsAlias, opt.Access.PortalOrigin().Host)
+			bypass = append(bypass, opt.ProxyBypassHosts...)
 		}
-		if len(net.Allow) > 0 {
-			for _, a := range net.Allow {
+		if len(bypass) > 0 {
+			unique := make(map[string]bool)
+			var hosts []string
+			for _, a := range bypass {
+				if a == "" || unique[a] {
+					continue
+				}
 				if err := rejectUnsafeString("network.allow", a); err != nil {
 					return nil, err
 				}
+				unique[a] = true
+				hosts = append(hosts, a)
 			}
-			lines = append(lines, "NO_PROXY="+strings.Join(net.Allow, ","))
+			lines = append(lines, "NO_PROXY="+strings.Join(hosts, ","))
 		}
 	}
 	if prof := spec.GetProfile(); prof != nil {

@@ -363,6 +363,9 @@ func assertRuntimeInstallation(t *testing.T, out string, r runtimeInputs, m *run
 	if spec.GetProfile().GetListenPort() != 7860 || len(spec.GetProfile().GetPatches()) != 2 || spec.Profile.Patches[0].ValueJson != `"none"` || spec.Profile.Patches[1].ValueJson != `"browser-only"` {
 		t.Fatal("real profile missing")
 	}
+	if spec.GetNetwork().GetEgressProxy() != "http://auriga-egress.internal:3128" {
+		t.Fatal("real template missing the trusted HTTPS egress")
+	}
 	var public struct {
 		Keys []struct{ Kid, Alg, X string }
 	}

@@ -30,11 +30,12 @@ type Docker struct {
 	Client     *EngineClient
 	Policy     policy.Policy
 	// DataRoot is used only for default bind paths when Spec.HomeBind is empty.
-	DataRoot      string
-	EdgeContainer string
-	PlatformHost  string
-	PortalHost    string
-	ManagedHosts  []string
+	DataRoot        string
+	EdgeContainer   string
+	EgressContainer string
+	PlatformHost    string
+	PortalHost      string
+	ManagedHosts    []string
 
 	mu              sync.Mutex
 	endpoints       map[string]dockerEndpoint
@@ -50,7 +51,9 @@ type DockerConfig struct {
 	// Trusted node configuration, never supplied by an instance spec. The edge
 	// joins each isolated instance network with this platform DNS alias.
 	EdgeContainer string
-	PlatformHost  string
+	// Optional trusted public CONNECT service, shipped in the same image as edge.
+	EgressContainer string
+	PlatformHost    string
 	// Optional trusted HTTPS portal DNS alias for managed device traffic.
 	PortalHost string
 	// Native model and identity issuance hosts projected from approved
@@ -63,6 +66,9 @@ type DockerConfig struct {
 func NewDocker(cfg DockerConfig) (*Docker, error) {
 	if err := validateEdgeNetworkConfig(cfg.EdgeContainer, cfg.PlatformHost); err != nil {
 		return nil, err
+	}
+	if cfg.EgressContainer != "" && (cfg.EdgeContainer == "" || !edgeContainerRef.MatchString(cfg.EgressContainer) || cfg.EgressContainer == cfg.EdgeContainer) {
+		return nil, fmt.Errorf("docker: invalid trusted egress container")
 	}
 	if cfg.PortalHost != "" {
 		if err := validateEdgeNetworkConfig(cfg.EdgeContainer, cfg.PortalHost); err != nil {
@@ -88,6 +94,7 @@ func NewDocker(cfg DockerConfig) (*Docker, error) {
 	d := NewDockerWithClient(client, cfg.DataRoot)
 	d.Policy = normalizeDockerPolicy(cfg.Policy)
 	d.EdgeContainer, d.PlatformHost = cfg.EdgeContainer, cfg.PlatformHost
+	d.EgressContainer = cfg.EgressContainer
 	d.PortalHost = cfg.PortalHost
 	d.ManagedHosts = append([]string(nil), cfg.ManagedHosts...)
 	return d, nil
@@ -153,6 +160,9 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	}
 	if err := storage.ValidateInstanceID(s.InstanceID); err != nil {
 		return fmt.Errorf("docker: %w", err)
+	}
+	if d.EgressContainer != "" && s.Full.GetNetwork().GetEgressProxy() != "" && s.Full.GetNetwork().GetEgressProxy() != "http://"+egressHost+":3128" {
+		return fmt.Errorf("docker: instance proxy does not match trusted egress")
 	}
 	if s.Image == "" {
 		return fmt.Errorf("docker: image required (repo@sha256:…)")
@@ -371,10 +381,16 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	}
 	// A replacement edge loses its endpoints on existing instance networks.
 	// Restore the trusted bridge before starting or publishing the instance.
+	var bridges []trustedBridge
 	if d.EdgeContainer != "" {
 		if err := d.ensureEdgeNetwork(ctx, id); err != nil {
 			return err
 		}
+		n, _, _, err := d.inspectEdgeNetwork(ctx, id, record)
+		if err != nil {
+			return err
+		}
+		bridges = n.bridges
 	}
 	if err := scope.recheck(); err != nil {
 		return err
@@ -451,7 +467,7 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 		if err != nil {
 			return err
 		}
-		if _, connected := n.Containers[edgeID]; !connected {
+		if _, connected := n.Containers[edgeID]; !connected || !n.bridgesReady() || !sameBridges(bridges, n.bridges) {
 			return fmt.Errorf("docker: trusted edge disappeared before endpoint publication")
 		}
 	} else {

@@ -38,14 +38,16 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 	if err != nil {
 		return st, err
 	}
+	var bridges []trustedBridge
 	if d.EdgeContainer != "" {
 		n, edgeID, _, networkErr := d.inspectEdgeNetwork(ctx, id, record)
 		if networkErr != nil {
 			return st, networkErr
 		}
-		if _, connected := n.Containers[edgeID]; !connected {
+		if _, connected := n.Containers[edgeID]; !connected || !n.bridgesReady() {
 			return st, nil
 		}
+		bridges = n.bridges
 	}
 	port, err := instancePort(insp)
 	if err != nil {
@@ -80,8 +82,11 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 		if err != nil {
 			return st, err
 		}
-		if _, connected := n.Containers[edgeID]; !connected {
+		if _, connected := n.Containers[edgeID]; !connected || !n.bridgesReady() {
 			return st, nil
+		}
+		if !sameBridges(bridges, n.bridges) {
+			return st, fmt.Errorf("docker: trusted bridge changed during health check")
 		}
 	} else {
 		after, err = d.verifyContainer(ctx, record)

@@ -412,6 +412,7 @@ public final class WorkspaceService {
                 && (!previous.getDsh().equals(next.getDsh())
                     || !previous.getResources().equals(next.getResources())
                     || !previous.getPluginsList().equals(next.getPluginsList())
+                    || !previous.getNetwork().equals(next.getNetwork())
                     || !previous.getProfile().equals(next.getProfile())));
     if (row.get("node_id") != null) {
       var node = store.node((UUID) row.get("node_id"));

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -190,8 +191,9 @@ func runAgent(args []string, logs io.Writer) error {
 			UIDs:       storage.NewUIDTable(cfg.AgentDir()),
 			Policy:     pol,
 			// The instance-facing HTTP entry, never the gRPC control address.
-			Access: surface.Access,
-			Chown:  storage.Lchown,
+			Access:           surface.Access,
+			ProxyBypassHosts: append([]string{dockerCfg.PlatformHost, dockerCfg.PortalHost}, dockerCfg.ManagedHosts...),
+			Chown:            storage.Lchown,
 		}
 		if mat, loadErr := identity.Load(cfg.AgentDir()); loadErr == nil {
 			prep.SealingPrivate = mat.SealingPrivate
@@ -270,12 +272,14 @@ func artifactGCInterval() (time.Duration, error) {
 type instanceSurface struct {
 	Access              deploymentconfig.Config
 	EdgeContainer       string
+	EgressContainer     string
 	ManagedPlatformHost string
 	ManagedIdentityHost string
 }
 
 func (s instanceSurface) dockerConfig(base runtime.DockerConfig) runtime.DockerConfig {
 	base.EdgeContainer = s.EdgeContainer
+	base.EgressContainer = s.EgressContainer
 	base.PlatformHost, base.PortalHost, base.ManagedHosts = "", "", nil
 	if s.EdgeContainer != "" {
 		base.PlatformHost = s.Access.InstanceControl().DnsAlias
@@ -322,7 +326,11 @@ func instanceSurfaceFromEnv() (instanceSurface, error) {
 	if err != nil {
 		return instanceSurface{}, err
 	}
-	return instanceSurface{Access: access, EdgeContainer: access.InstanceControl().EdgeContainer, ManagedPlatformHost: managedHost, ManagedIdentityHost: identityHost}, nil
+	egress := os.Getenv("AURIGA_AGENT_EGRESS_CONTAINER")
+	if egress != "" && egress != strings.TrimSuffix(access.InstanceControl().EdgeContainer, "-edge")+"-egress" {
+		return instanceSurface{}, fmt.Errorf("egress container must belong to the validated installation")
+	}
+	return instanceSurface{Access: access, EdgeContainer: access.InstanceControl().EdgeContainer, EgressContainer: egress, ManagedPlatformHost: managedHost, ManagedIdentityHost: identityHost}, nil
 }
 
 func ensureLayout(cfg config.Config) error {

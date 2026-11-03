@@ -42,6 +42,9 @@ type edgeRecoveryFixture struct {
 	healthHook      func()
 	appliedAliases  []string
 	requiredAliases []string
+	egressAttached  bool
+	egressID        string
+	egressStartedAt string
 }
 
 func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
@@ -86,6 +89,9 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 			if f.attached {
 				members["replacement-edge-id"] = map[string]string{"Name": "test-edge"}
 			}
+			if f.egressAttached {
+				members[f.egressID] = map[string]string{"Name": "test-egress"}
+			}
 			if f.failure == "foreign-member" {
 				members["foreign-id"] = map[string]string{"Name": "unrelated"}
 			}
@@ -122,9 +128,15 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 				}
 				networks["auriga-net-recovery-test"] = map[string]any{"NetworkID": networkID, "Aliases": aliases}
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "replacement-edge-id", "Config": map[string]any{"Labels": map[string]string{"auriga.role": role}},
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "replacement-edge-id", "Image": fixtureConfigID, "Config": map[string]any{"Labels": map[string]string{"auriga.role": role, "com.docker.compose.project": "test"}},
 				"State": map[string]bool{"Running": f.failure != "stopped-edge"}, "HostConfig": map[string]string{"NetworkMode": mode},
 				"NetworkSettings": map[string]any{"Networks": networks}})
+		case r.Method == http.MethodGet && r.URL.Path == "/containers/test-egress/json":
+			if f.failure == "egress-missing" {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(f.egressInspect())
 		case r.Method == http.MethodGet && (r.URL.Path == "/containers/auriga-inst-recovery-test/json" || r.URL.Path == "/containers/"+fixtureContainerID+"/json"):
 			owner := "recovery-test"
 			if f.failure == "instance-owner" {
@@ -143,15 +155,32 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 				EndpointConfig struct{ Aliases []string }
 			}
 			aliases := []string{"portal.example.com"}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if body.Container == f.egressID && f.egressID != "" {
+				if !reflect.DeepEqual(body.EndpointConfig.Aliases, []string{"auriga-egress.internal"}) {
+					t.Errorf("wrong egress alias: %+v", body)
+				}
+				f.egressAttached = f.failure != "egress-noop"
+				if f.failure == "egress-replaced" {
+					f.egressID += "-replacement"
+				}
+				if f.failure == "egress-lifetime" {
+					f.egressStartedAt = "2026-01-01T01:03:04Z"
+				}
+				w.WriteHeader(http.StatusOK)
+				return
+			}
 			if f.driver.PortalHost != "" {
 				aliases = append(aliases, f.driver.PortalHost)
 			}
 			if f.requiredAliases != nil {
 				aliases = f.requiredAliases
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Container != "replacement-edge-id" ||
+			if body.Container != "replacement-edge-id" ||
 				!reflect.DeepEqual(body.EndpointConfig.Aliases, aliases) {
-				t.Errorf("wrong recovery edge/alias: %+v %v", body, err)
+				t.Errorf("wrong recovery edge/alias: %+v", body)
 			}
 			if f.failure == "connect-error" {
 				w.WriteHeader(http.StatusForbidden)
@@ -685,7 +714,7 @@ func TestDockerStartRejectsUnsafeEdgeRecoveryBeforeStartingOrProbing(t *testing.
 		"foreign-member": "unexpected instance network member", "instance-owner": "actual container identity mismatch",
 		"edge-owner": "running labelled bridge container", "host-edge": "running labelled bridge container", "stopped-edge": "running labelled bridge container",
 		"existing-alias": "existing edge endpoint has wrong platform alias", "connect-error": "403",
-		"connect-noop": "edge platform alias was not applied", "connect-alias": "edge platform alias was not applied", "connect-network": "edge platform alias was not applied",
+		"connect-noop": "trusted bridge alias was not applied", "connect-alias": "trusted bridge alias was not applied", "connect-network": "trusted bridge alias was not applied",
 	} {
 		t.Run(failure, func(t *testing.T) {
 			// Only this negative fixture has a longer fake I/O guard. Leave the

@@ -1,5 +1,5 @@
 # M2 single-host stack for GitHub Actions / Linux. Agent + platform use host
-# networking. The trusted edge joins each instance's internal network; instances
+# networking. Trusted edge and egress join each instance's internal network; instances
 # never join the control network or gain a default route to external networks.
 name: auriga-m2
 
@@ -43,7 +43,14 @@ services:
     security_opt: ['no-new-privileges:true']
     read_only: true
     tmpfs: ['/tmp:rw,noexec,nosuid,size=64m']
-    secrets: [bifrost_admin_password, bifrost_member_password, bifrost_encryption_key, bifrost_pg_password, bifrost_pg_migration_password]
+    secrets:
+      [
+        bifrost_admin_password,
+        bifrost_member_password,
+        bifrost_encryption_key,
+        bifrost_pg_password,
+        bifrost_pg_migration_password,
+      ]
     volumes:
       - ./var/access.json:/etc/auriga/access.json:ro
     depends_on:
@@ -51,7 +58,8 @@ services:
         condition: service_healthy
     networks: [default]
     healthcheck:
-      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/health']
+      test:
+        ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/health']
       interval: 5s
       timeout: 5s
       retries: 30
@@ -82,6 +90,34 @@ services:
       - network-tokens:/run/auriga-network-token:ro
     group_add: ['65533', '10006']
     networks: [default]
+
+  egress:
+    logging: *log-options
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.edge
+    container_name: ${COMPOSE_PROJECT_NAME:-auriga-m2}-egress
+    env_file:
+      - path: ./var/access.env
+        required: false
+    labels:
+      auriga.role: egress
+      auriga.egress.for-edge: ${COMPOSE_PROJECT_NAME:-auriga-m2}-edge
+    user: '65532:65532'
+    entrypoint: ['/auriga-egress']
+    command: ['--listen', '0.0.0.0:3128']
+    environment:
+      AURIGA_EGRESS_DNS_SERVER: ${AURIGA_EGRESS_DNS_SERVER:-}
+    cap_drop: [ALL]
+    read_only: true
+    security_opt: ['no-new-privileges:true']
+    networks: [egress-out]
+    healthcheck:
+      test: ['CMD', '/auriga-egress', '--check']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No host port, Docker socket, platform credentials or other instance mounts.
 
   nats:
     logging: *log-options
@@ -395,6 +431,8 @@ services:
         condition: service_started
       edge:
         condition: service_started
+      egress:
+        condition: service_healthy
     environment:
       AURIGA_AGENT_DATA_ROOT: ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}
       AURIGA_AGENT_SERVER: https://127.0.0.1:7443
@@ -407,6 +445,7 @@ services:
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_RUNTIME_PROOFS_DIR: /etc/auriga/runtime-proofs
       AURIGA_AGENT_DRIVERS: docker
+      AURIGA_AGENT_EGRESS_CONTAINER: ${COMPOSE_PROJECT_NAME:-auriga-m2}-egress
       AURIGA_AGENT_PANEL_KEYS_FILE: /etc/auriga/panel-keys.json
       # Same validated installation file as edge; internal alias and browser origin stay separate.
       AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
@@ -527,6 +566,9 @@ volumes:
   collab-tokens:
 
 networks:
+  egress-out:
+    driver: bridge
+    internal: false
   observability:
     internal: true
   grafana-publish:

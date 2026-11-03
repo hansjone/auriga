@@ -63,6 +63,9 @@ func TestFixtureTemplates(t *testing.T) {
 			t.Fatalf("wrong runtime binding in %s template", fixture)
 		}
 		patches := spec.GetProfile().GetPatches()
+		if spec.GetNetwork().GetEgressProxy() != "http://auriga-egress.internal:3128" {
+			t.Fatal("fixture has no trusted instance egress")
+		}
 		if fixture == "real" {
 			if len(patches) != 2 || patches[0].GetPath() != "plugins.auriga-dsh.imBots" || patches[0].GetValueJson() != `"none"` ||
 				patches[1].GetPath() != "plugins.auriga-dsh.terminalSources" || patches[1].GetValueJson() != `"browser-only"` {
