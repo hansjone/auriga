@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -101,8 +102,10 @@ func edgeHasAlias(insp map[string]any, n *engineNetwork, alias string) bool {
 
 func (d *Docker) edgeAliases() []string {
 	aliases := []string{d.PlatformHost}
-	if d.PortalHost != "" && d.PortalHost != d.PlatformHost {
-		aliases = append(aliases, d.PortalHost)
+	for _, host := range append([]string{d.PortalHost}, d.ManagedHosts...) {
+		if host != "" && !slices.Contains(aliases, host) {
+			aliases = append(aliases, host)
+		}
 	}
 	return aliases
 }

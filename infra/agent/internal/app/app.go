@@ -161,14 +161,7 @@ func runAgent(args []string, logs io.Writer) error {
 		if err != nil {
 			return err
 		}
-		dockerCfg.EdgeContainer = surface.EdgeContainer
-		if surface.EdgeContainer != "" {
-			dockerCfg.PlatformHost = surface.Access.InstanceControl().DnsAlias
-			portal := surface.Access.PortalOrigin()
-			if portal.Scheme == "https" && net.ParseIP(portal.Host) == nil {
-				dockerCfg.PortalHost = portal.Host
-			}
-		}
+		dockerCfg = surface.dockerConfig(dockerCfg)
 	}
 	inner, err := runtime.SelectDriver(driverName, dockerCfg)
 	if err != nil {
@@ -275,8 +268,28 @@ func artifactGCInterval() (time.Duration, error) {
 
 // instanceSurface keeps validated public and internal installation origins together.
 type instanceSurface struct {
-	Access        deploymentconfig.Config
-	EdgeContainer string
+	Access              deploymentconfig.Config
+	EdgeContainer       string
+	ManagedPlatformHost string
+	ManagedIdentityHost string
+}
+
+func (s instanceSurface) dockerConfig(base runtime.DockerConfig) runtime.DockerConfig {
+	base.EdgeContainer = s.EdgeContainer
+	base.PlatformHost, base.PortalHost, base.ManagedHosts = "", "", nil
+	if s.EdgeContainer != "" {
+		base.PlatformHost = s.Access.InstanceControl().DnsAlias
+		portal := s.Access.PortalOrigin()
+		if portal.Scheme == "https" && net.ParseIP(portal.Host) == nil {
+			base.PortalHost = portal.Host
+		}
+		for _, host := range []string{s.ManagedPlatformHost, s.ManagedIdentityHost} {
+			if host != "" {
+				base.ManagedHosts = append(base.ManagedHosts, host)
+			}
+		}
+	}
+	return base
 }
 
 // instanceSurfaceFromEnv never derives trust from control URLs or legacy host-only variables.
@@ -298,7 +311,18 @@ func instanceSurfaceFromEnv() (instanceSurface, error) {
 	if err != nil {
 		return instanceSurface{}, fmt.Errorf("load deployment access: %w", err)
 	}
-	return instanceSurface{Access: access, EdgeContainer: access.InstanceControl().EdgeContainer}, nil
+	allowedOrigins := os.Getenv("AURIGA_LINKS_ALLOWED_ORIGINS")
+	managedHost, err := managedOriginHost(os.Getenv("AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN"), allowedOrigins)
+	if err != nil {
+		return instanceSurface{}, err
+	}
+	// The receipt-checked static identity may use the exact approved access
+	// portal without a duplicate allowlist entry, as the NAS bootstrap does.
+	identityHost, err := managedIdentityHost(os.Getenv("AURIGA_AGENT_MANAGED_INSTALLATION_FILE"), allowedOrigins+","+access.PortalURL())
+	if err != nil {
+		return instanceSurface{}, err
+	}
+	return instanceSurface{Access: access, EdgeContainer: access.InstanceControl().EdgeContainer, ManagedPlatformHost: managedHost, ManagedIdentityHost: identityHost}, nil
 }
 
 func ensureLayout(cfg config.Config) error {
