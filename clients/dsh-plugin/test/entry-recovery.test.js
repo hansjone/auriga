@@ -51,9 +51,13 @@ async function fixture(t, http = async () => lost(), options = {}) {
   let now = 0;
   const logs = [],
     consoleEntries = [];
+  const retryTimerLags = [...(options.retryTimerLags ?? [])];
   const schedule = (fn, ms) => {
     const id = ++timerId;
-    timers.set(id, { fn, ms, at: now + ms });
+    // Replay observed entry-timer dispatch lag without changing product delays
+    // or fabricating another deduplicated Connection state event.
+    const lag = [2000, 10000].includes(ms) ? (retryTimerLags.shift() ?? 0) : 0;
+    timers.set(id, { fn, ms, at: now + ms + lag });
     return id;
   };
   const cancelTimer = (id) => timers.delete(id);
@@ -227,7 +231,7 @@ test('exact entry gate loss re-enters the same instance once through document na
   assert.equal(f.navigations.length, 1);
 });
 
-test('network/temporary failures allow only two paced availability reads after the three short probes', async (t) => {
+test('network/temporary failures allow only three paced availability reads after the three short probes', async (t) => {
   let count = 0;
   const f = await fixture(t, async () => {
     if (++count === 1) throw new TypeError('network');
@@ -255,15 +259,23 @@ test('network/temporary failures allow only two paced availability reads after t
   assert.equal(f.calls.length, 4);
   await f.advance(10000);
   assert.equal(f.calls.length, 5);
+  for (let i = 0; i < 10; i++) {
+    f.event('focus');
+    f.event('online');
+  }
+  await f.advance(9999);
+  assert.equal(f.calls.length, 5);
+  await f.advance(1);
+  assert.equal(f.calls.length, 6);
   assert.deepEqual(
     f.calls.map((call) => call.at),
-    [0, 2000, 4000, 14000, 24000],
+    [0, 2000, 4000, 14000, 24000, 34000],
   );
   assert.equal(f.timers.size, 0);
   f.event('focus');
   f.event('online');
-  await f.advance(20000);
-  assert.equal(f.calls.length, 5);
+  await f.advance(40000);
+  assert.equal(f.calls.length, 6);
 });
 
 test('availability eligibility excludes other HTTP failures and stops at the first definitive reply', async (t) => {
@@ -271,7 +283,7 @@ test('availability eligibility excludes other HTTP failures and stops at the fir
     const f = await fixture(t, async () => new Response('', { status }));
     f.lose();
     await settle();
-    await f.advance(30000);
+    await f.advance(60000);
     assert.equal(f.calls.length, status === 504 ? 3 : 1);
     assert.deepEqual(f.navigations, []);
   }
@@ -281,7 +293,7 @@ test('availability eligibility excludes other HTTP failures and stops at the fir
   );
   f.lose();
   await settle();
-  await f.advance(30000);
+  await f.advance(60000);
   assert.equal(f.calls.length, 4);
   assert.deepEqual(f.navigations, []);
 });
@@ -306,7 +318,7 @@ test('a locally cancelled short probe cannot qualify two completed failures for 
     [0, 2500, 4500],
   );
   assert.equal(f.calls[0].init.signal.aborted, true);
-  await f.advance(25500);
+  await f.advance(55500);
   f.event('focus');
   f.event('online');
   await settle();
@@ -329,7 +341,7 @@ test('HTTP 504 in availability ends the cycle instead of reaching the second lat
   );
   f.lose();
   await settle();
-  await f.advance(30000);
+  await f.advance(60000);
   f.event('focus');
   f.event('online');
   await settle();
@@ -347,13 +359,98 @@ test('an explicitly aborted fetch is not a completed network-unavailable result'
   });
   f.lose();
   await settle();
-  await f.advance(30000);
+  await f.advance(60000);
   assert.equal(f.calls.length, 1);
   assert.ok(!f.logs.some((row) => row.event === 'availability_wait'));
   assert.deepEqual(f.navigations, []);
 });
 
-test('availability keeps the original absolute thirty-second deadline across hiding and late replies', async (t) => {
+test('the fifth and sixth reads stop on a definitive response without a seventh read', async (t) => {
+  for (const attempt of [5, 6])
+    for (const status of [200, 401, 403, 504])
+      await t.test(`read ${attempt}, status ${status}`, async (t) => {
+        const f = await fixture(t, async () =>
+          f.calls.length < attempt
+            ? new Response('', { status: 502 })
+            : f.calls.length === attempt
+              ? new Response('', { status })
+              : lost(),
+        );
+        f.lose();
+        await settle();
+        await f.advance(60000);
+        for (let i = 0; i < 10; i++) {
+          f.event('focus');
+          f.event('online');
+        }
+        await f.advance(60000);
+        assert.equal(f.calls.length, attempt);
+        assert.deepEqual(f.navigations, []);
+        assert.ok(
+          f.logs.some(
+            (row) =>
+              row.event === 'cycle_stopped' &&
+              row.reason === 'non_entry_reply' &&
+              row.attempt === attempt &&
+              row.status === status,
+          ),
+        );
+        assert.equal(f.timers.size, 0);
+      });
+});
+
+test('cancelling the fifth or sixth read consumes that start and fences its late entry reply', async (t) => {
+  for (const attempt of [5, 6])
+    await t.test(`hidden during read ${attempt}`, async (t) => {
+      let finish;
+      const f = await fixture(t, async () =>
+        f.calls.length === attempt
+          ? new Promise((resolve) => {
+              finish = resolve;
+            })
+          : new Response('', { status: 502 }),
+      );
+      f.lose();
+      await settle();
+      await f.advance(attempt === 5 ? 24000 : 34000);
+      assert.equal(f.calls.length, attempt);
+      f.hidden(true);
+      f.hidden(false);
+      finish(lost());
+      await settle();
+      assert.equal(f.calls[attempt - 1].init.signal.aborted, true);
+      assert.deepEqual(f.navigations, []);
+      f.event('focus');
+      f.event('online');
+      await f.advance(60000);
+      assert.equal(f.calls.length, 6);
+      assert.deepEqual(f.navigations, []);
+      assert.equal(f.timers.size, 0);
+    });
+});
+
+test('a local timeout in the fifth or sixth read ends the cycle without replacement', async (t) => {
+  for (const attempt of [5, 6])
+    await t.test(`timeout during read ${attempt}`, async (t) => {
+      const f = await fixture(t, async () =>
+        f.calls.length === attempt
+          ? new Promise(() => {})
+          : new Response('', { status: 502 }),
+      );
+      f.lose();
+      await settle();
+      await f.advance(60000);
+      f.event('focus');
+      f.event('online');
+      await f.advance(60000);
+      assert.equal(f.calls.length, attempt);
+      assert.equal(f.calls[attempt - 1].init.signal.aborted, true);
+      assert.deepEqual(f.navigations, []);
+      assert.equal(f.timers.size, 0);
+    });
+});
+
+test('availability keeps the original absolute sixty-second deadline across hiding and late replies', async (t) => {
   let finish;
   const f = await fixture(t, async () =>
     f.calls.length <= 3
@@ -366,7 +463,7 @@ test('availability keeps the original absolute thirty-second deadline across hid
   await settle();
   await f.advance(14000);
   assert.equal(f.calls.length, 4);
-  f.jump(16000);
+  f.jump(46000);
   finish(lost());
   await settle();
   assert.deepEqual(f.navigations, []);
@@ -375,7 +472,7 @@ test('availability keeps the original absolute thirty-second deadline across hid
   await settle();
   await g.advance(5000);
   g.hidden(true);
-  await g.advance(26000);
+  await g.advance(56000);
   g.hidden(false);
   g.event('focus');
   g.event('online');
@@ -388,7 +485,7 @@ test('stale cycle and retry callbacks cannot replace the original deadline after
   const f = await fixture(t, async () => new Response('', { status: 503 }));
   f.lose();
   await settle();
-  const oldExpiry = [...f.timers.values()].find((v) => v.ms === 30000).fn;
+  const oldExpiry = [...f.timers.values()].find((v) => v.ms === 60000).fn;
   await f.advance(4000);
   const oldRetry = [...f.timers.values()].find((v) => v.ms === 10000).fn;
   assert.equal(f.calls.length, 3);
@@ -464,7 +561,7 @@ test('transient unavailable then precise entry 401 recovers within the bounded c
   assert.deepEqual(f.navigations, [base]);
 });
 
-test('same loss deadline survives a hidden document beyond the absolute thirty-second window', async (t) => {
+test('same loss deadline survives a hidden document beyond the absolute sixty-second window', async (t) => {
   let reads = 0;
   const f = await fixture(t, async () =>
     ++reads === 1 ? new Response('', { status: 503 }) : lost(),
@@ -473,7 +570,7 @@ test('same loss deadline survives a hidden document beyond the absolute thirty-s
   await settle();
   await f.advance(1000);
   f.hidden(true);
-  await f.advance(30000);
+  await f.advance(60000);
   f.hidden(false);
   f.event('focus');
   f.event('online');
@@ -544,7 +641,7 @@ test('loss first observed while hidden still expires without granting a late vis
   const f = await fixture(t);
   f.hidden(true);
   f.lose();
-  await f.advance(31000);
+  await f.advance(61000);
   f.hidden(false);
   await settle();
   assert.equal(f.calls.length, 0);
@@ -562,7 +659,7 @@ test('an exact entry reply after the deadline stays inert even if browser timers
   );
   f.lose();
   await settle();
-  f.jump(30000);
+  f.jump(60000);
   finish(lost());
   await settle();
   assert.deepEqual(f.navigations, []);
@@ -610,7 +707,7 @@ test('late HTTP 503 or network completion cannot qualify or replace a timed-out 
       await settle();
       f.event('focus');
       f.event('online');
-      await f.advance(30000);
+      await f.advance(60000);
       assert.equal(f.calls.length, 1);
       assert.equal(f.calls[0].init.signal.aborted, true);
       assert.ok(!f.logs.some((row) => row.event === 'availability_wait'));
@@ -759,7 +856,7 @@ test('hidden document cancels a late result and bounded probe timeout remains ca
   g.event('focus');
   g.event('online');
   late(lost());
-  await g.advance(30000);
+  await g.advance(60000);
   assert.equal(g.calls.length, 1);
   assert.deepEqual(g.navigations, []);
   assert.ok(!g.logs.some((row) => row.event === 'availability_wait'));
@@ -767,9 +864,9 @@ test('hidden document cancels a late result and bounded probe timeout remains ca
   assert.equal(g.timers.size, 0);
 });
 
-test('slow completed reads and a pending availability read share the original thirty-second cap', async (t) => {
+test('slow completed reads and a pending sixth read share the original sixty-second cap', async (t) => {
   let late;
-  const delays = [5000, 5000, 3999];
+  const delays = [5000, 5000, 4999, 5000, 5000];
   const f = await fixture(t, async () => {
     const delay = delays[f.calls.length - 1];
     if (delay !== undefined) {
@@ -782,20 +879,20 @@ test('slow completed reads and a pending availability read share the original th
   });
   f.lose();
   await settle();
-  await f.advance(29999);
+  await f.advance(59999);
   assert.deepEqual(
     f.calls.map((call) => call.at),
-    [0, 7000, 14000, 27999],
+    [0, 7000, 14000, 28999, 43999, 58999],
   );
-  assert.equal(f.calls[3].init.signal.aborted, false);
+  assert.equal(f.calls[5].init.signal.aborted, false);
   await f.advance(1);
-  assert.equal(f.calls[3].init.signal.aborted, true);
+  assert.equal(f.calls[5].init.signal.aborted, true);
   assert.equal(f.timers.size, 0);
   late(lost());
   f.event('focus');
   f.event('online');
-  await f.advance(30000);
-  assert.equal(f.calls.length, 4);
+  await f.advance(60000);
+  assert.equal(f.calls.length, 6);
   assert.deepEqual(f.navigations, []);
 });
 
@@ -872,10 +969,31 @@ test(
   'locked Connection plus the default edge recreation interval recovers without a fabricated second state event',
   { skip: !process.env.AURIGA_ENTRY_CONNECTION_BUNDLE },
   async (t) => {
-    for (const { lossAt, latencies = [] } of [
+    for (const {
+      lossAt,
+      latencies = [],
+      retryTimerLags = [],
+      readyAt = 11846,
+      unavailableStatus = 503,
+      until = 25000,
+      expectedProbes,
+    } of [
       { lossAt: 0 },
       { lossAt: 10000 },
-      { lossAt: 0, latencies: [74, 3025] },
+      {
+        lossAt: 0,
+        latencies: [74, 3025],
+        expectedProbes: [0, 2074, 7099, 17099],
+      },
+      {
+        lossAt: 0,
+        latencies: [147, 3029, 3031, 3030, 3030],
+        retryTimerLags: [11, 16, 15],
+        readyAt: 39100,
+        unavailableStatus: 502,
+        until: 60000,
+        expectedProbes: [0, 2158, 7203, 20249, 33279, 46309],
+      },
     ])
       await t.test(`loss ${lossAt}, lag ${latencies}`, async (t) => {
         let f, nativeModule;
@@ -920,9 +1038,11 @@ test(
             const latency = latencies[f.calls.length - 1] ?? 0;
             if (latency)
               await new Promise((resolve) => f.schedule(resolve, latency));
-            return f.now() < 11846 ? new Response('', { status: 503 }) : lost();
+            return f.now() < readyAt
+              ? new Response('', { status: unavailableStatus })
+              : lost();
           },
-          { connection },
+          { connection, retryTimerLags },
         );
         let drop;
         const attempts = [],
@@ -937,7 +1057,7 @@ test(
               });
             } else
               throw new Error(
-                f.now() < 11846
+                f.now() < readyAt
                   ? 'fixture edge unavailable'
                   : 'fixture edge entry unauthorized',
               );
@@ -957,11 +1077,11 @@ test(
         drop(new Error('fixture old edge stopped'));
         await settle();
         await settle();
-        await f.advance(25000 - lossAt);
+        await f.advance(until - lossAt);
         t.diagnostic(
           JSON.stringify({
             lossAt,
-            readyAt: 11846,
+            readyAt,
             latencies,
             probes: f.calls.map((call) => call.at),
             completions: f.logs
@@ -977,10 +1097,10 @@ test(
           }),
         );
         assert.deepEqual(f.navigations, [base]);
-        if (latencies.length)
+        if (expectedProbes)
           assert.deepEqual(
             f.calls.map((call) => call.at),
-            [0, 2074, 7099, 17099],
+            expectedProbes,
           );
         assert.equal(
           states.filter(({ state }) => state === 'connecting').length,

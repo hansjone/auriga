@@ -186,15 +186,21 @@ The browser client observes the public Connection state/generation API. On loss,
 it reads only the current same-origin health route and follows only an exact
 edge entry rejection. The first phase permits at most three read starts, with at
 least two seconds after each completed read before the next. Every read has a
-six-second timeout; all phases share one absolute thirty-second limit from the
+six-second timeout; all phases share one absolute sixty-second limit from the
 original connection loss. Slow replies do not consume a separate short window.
-If all three complete with network errors or HTTP 502/503, at most two further
+If all three complete with network errors or HTTP 502/503, at most three further
 availability reads may run at least ten seconds apart. Locally cancelled or
 timed-out reads consume a start without qualifying for the availability phase;
 HTTP 504 does not qualify and stops that phase. This covers edge replacement
 without treating an unavailable edge as an authentication decision. HTTP 200/403 and
 other 401 responses stop the check; visibility and wake events cannot reset its
 deadline or consume a pending retry early.
+
+The six-start budget covers the measured roughly thirty-nine-second WAN recovery
+after a normal NAS qnet edge replacement, using the native ten-second backoff
+bound for the availability phase. A stable LAN MAC alone did not remove that
+delay. This does not promise recovery beyond sixty seconds or allow unlimited
+polling; NAS shutdown timing, DNS, router settings and identity checks are unchanged.
 
 A later successful generation permits recovery from a future outage. After the
 bounded check, use a normal page refresh or the portal entry if recovery did not
