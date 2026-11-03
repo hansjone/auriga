@@ -46,6 +46,61 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.resetAllMocks());
+it('persists inherited metadata and configured recommendations while treating a typed row value as an explicit override', async () => {
+  vi.mocked(relayApi.providerModels).mockResolvedValue({
+    items: [
+      { id: 'a', contextWindow: 2000000, maxOutputTokens: 128000 },
+      { id: 'b' },
+    ],
+  });
+  const w = make();
+  await flushPromises();
+  await w.get('input[value="a"]').setValue(true);
+  await w.get('input[value="b"]').setValue(true);
+  await w.get('[data-testid="import-preview"]').trigger('click');
+  await w.get('[name="importRecommendedContext"]').setValue('1000000');
+  await w.get('[name="importRecommendedOutput"]').setValue('64000');
+  expect(
+    (w.get('[name="importContext0"]').element as HTMLInputElement).value,
+  ).toBe('2000000');
+  expect(
+    (w.get('[name="importContext1"]').element as HTMLInputElement).value,
+  ).toBe('1000000');
+  await w.get('[name="importContext0"]').setValue('750000');
+  expect(
+    (w.get('[name="importContextMode0"]').element as HTMLSelectElement).value,
+  ).toBe('manual');
+  await w.get('[name="importInputPrice"]').setValue('1');
+  await w.get('[name="importOutputPrice"]').setValue('1');
+  await w.get('[name="importConfirmed"]').setValue(true);
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  expect(saved[0]).toMatchObject({
+    contextWindow: 750000,
+    maxOutputTokens: 128000,
+    capabilities: {
+      sourceModel: 'a',
+      contextWindowMode: 'manual',
+      maxOutputTokensMode: 'inherit',
+      upstream: {
+        model: { id: 'a', contextWindow: 2000000, maxOutputTokens: 128000 },
+      },
+    },
+  });
+  expect(saved[1]).toMatchObject({
+    contextWindow: 1000000,
+    maxOutputTokens: 64000,
+    capabilities: {
+      sourceModel: 'b',
+      contextWindowMode: 'inherit',
+      maxOutputTokensMode: 'inherit',
+      recommendedContextWindow: 1000000,
+      recommendedMaxOutputTokens: 64000,
+      upstream: { model: { id: 'b' } },
+    },
+  });
+  w.unmount();
+});
 it('clears every selected search result including a manually selected existing model', async () => {
   const w = make();
   await w.setProps({ pools: [{ id: 'a' } as RelayPool] });

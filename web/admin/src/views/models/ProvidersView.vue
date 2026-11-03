@@ -20,7 +20,13 @@ import { useRelayUi } from './relayUi';
 import './modelUsage.css';
 import './relayManagement.css';
 import ModelImportPanel from './ModelImportPanel.vue';
-import { applyKnownLimits, type CatalogModel } from './modelImport';
+import PoolCapabilitiesEditor from './PoolCapabilitiesEditor.vue';
+import {
+  createCapabilityPolicy,
+  reconcileCapabilitySource,
+  validCapabilityPolicy,
+  type CatalogState,
+} from './poolCapabilities';
 const requestKey = ref('');
 const importProvider = ref(''),
   poolSearch = ref(''),
@@ -45,9 +51,7 @@ const draft = ref<RelayPool>();
 const autoEditor = ref(false);
 const poolsReady = ref(false);
 const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
-const catalogs = ref<
-  Record<string, { items: CatalogModel[]; loading: boolean; error: string }>
->({});
+const catalogs = ref<Record<string, CatalogState>>({});
 const catalogRequests = new Set<globalThis.AbortController>();
 let catalogEpoch = 0;
 function clearCatalogs() {
@@ -119,6 +123,12 @@ const freshPool = (): RelayPool => ({
   enabled: true,
   contextWindow: 0,
   maxOutputTokens: 0,
+  capabilities: {
+    sourceProviderId: '',
+    sourceModel: '',
+    contextWindowMode: 'inherit',
+    maxOutputTokensMode: 'inherit',
+  },
   routes: [],
   price: {
     currency: 'USD',
@@ -195,6 +205,7 @@ function editPool(row?: RelayPool) {
   close();
   selected.value = row?.id ?? '';
   draft.value = row ? globalThis.structuredClone(row) : freshPool();
+  draft.value.capabilities ??= createCapabilityPolicy(draft.value, 'manual');
   editor.value = 'pool';
 }
 function editAutoPool() {
@@ -264,6 +275,7 @@ function askPool() {
   body.routes.forEach((route) => {
     route.model = route.model.trim();
   });
+  if (body.capabilities) reconcileCapabilitySource(body);
   const routeIdentities = new Set<string>();
   const duplicate = body.routes.findIndex((route) => {
     const identity = JSON.stringify([route.providerId, route.model]);
@@ -283,6 +295,7 @@ function askPool() {
   ];
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.id) ||
+    !validCapabilityPolicy(body) ||
     ints.some((v) => !Number.isSafeInteger(v) || v < 0) ||
     body.contextWindow === 1 ||
     (body.contextWindow > 0 && body.maxOutputTokens >= body.contextWindow) ||
@@ -339,26 +352,16 @@ function openImport(row: RelayProvider) {
 function accessChanged(permissions: string[]) {
   ui.permissions.value = permissions;
 }
-function applyCapabilities() {
-  if (!draft.value) return;
-  const models = draft.value.routes.map(
-    (r) =>
-      catalogs.value[r.providerId]?.items.find((m) => m.id === r.model) ?? {
-        id: r.model,
-      },
+async function applyCapabilities() {
+  const policy = draft.value?.capabilities;
+  if (!policy?.sourceProviderId || !policy.sourceModel) return;
+  await fetchModels(policy.sourceProviderId);
+  if (draft.value?.capabilities !== policy) return;
+  capabilityNotice.value = t(
+    catalogs.value[policy.sourceProviderId]?.error
+      ? 'capabilityRefreshFailed'
+      : 'capabilityApplied',
   );
-  const limits = applyKnownLimits(
-    draft.value.contextWindow,
-    draft.value.maxOutputTokens,
-    models,
-  );
-  if (!limits || limits.output >= limits.context) {
-    capabilityNotice.value = t('capabilityUnknown');
-    return;
-  }
-  draft.value.contextWindow = limits.context;
-  draft.value.maxOutputTokens = limits.output;
-  capabilityNotice.value = t('capabilityApplied');
 }
 async function confirm() {
   const action = pending.value;
@@ -644,36 +647,16 @@ async function confirm() {
             name="poolEnabled"
             type="checkbox"
           />{{ t('enabled') }}</label
-        ><label
-          >{{ t('context')
-          }}<input
-            v-model.number="draft.contextWindow"
-            name="contextWindow"
-            type="number"
-            min="0"
-            max="9007199254740991"
-            required /></label
-        ><label
-          >{{ t('output')
-          }}<input
-            v-model.number="draft.maxOutputTokens"
-            name="maxOutputTokens"
-            type="number"
-            min="0"
-            max="9007199254740991"
-            required
-        /></label>
-        <div class="relay-wide relay-limit-help">
-          <button
-            type="button"
-            data-testid="apply-capabilities"
-            @click="applyCapabilities"
-          >
-            {{ t('applyCapabilities') }}
-          </button>
-          <p>{{ t('capabilityNote') }}</p>
-          <p v-if="capabilityNotice" role="status">{{ capabilityNotice }}</p>
-        </div>
+        >
+        <PoolCapabilitiesEditor
+          v-model="draft"
+          :providers="providers"
+          :catalogs="catalogs"
+          @refresh="applyCapabilities"
+        />
+        <p v-if="capabilityNotice" class="relay-wide" role="status">
+          {{ capabilityNotice }}
+        </p>
         <div
           v-for="(route, index) in draft.routes"
           :key="index"

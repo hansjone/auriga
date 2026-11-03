@@ -50,6 +50,17 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(100px, 0.4fr);
   gap: 12px 16px;
 }
+.relay-capability-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  padding: 16px;
+  background: var(--relay-surface);
+  border-radius: 8px;
+}
+.relay-capability-editor small {
+  color: var(--el-text-color-secondary);
+}
 .relay-route-title,
 .relay-route-actions,
 .relay-route > p {

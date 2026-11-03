@@ -86,7 +86,16 @@ it('rejects context one before confirmation while retaining zero as unknown', as
   await w.get('[data-testid="confirm-action"]').trigger('click');
   await flushPromises();
   expect(relayApi.savePool).toHaveBeenCalledWith(
-    { ...auto, contextWindow: 0 },
+    {
+      ...auto,
+      contextWindow: 0,
+      capabilities: {
+        sourceProviderId: p.id,
+        sourceModel: 'real',
+        contextWindowMode: 'manual',
+        maxOutputTokensMode: 'manual',
+      },
+    },
     expect.any(String),
     expect.any(AbortSignal),
   );
@@ -156,7 +165,15 @@ it('saves different models from the same provider in auto and identifies an exac
   await w.get('[data-testid="confirm-action"]').trigger('click');
   await flushPromises();
   expect(relayApi.savePool).toHaveBeenCalledWith(
-    auto,
+    {
+      ...auto,
+      capabilities: {
+        sourceProviderId: p.id,
+        sourceModel: 'first',
+        contextWindowMode: 'manual',
+        maxOutputTokensMode: 'manual',
+      },
+    },
     expect.any(String),
     expect.any(AbortSignal),
   );
@@ -211,7 +228,15 @@ it('auto entry edits the current auto routes while retaining legacy pools', asyn
   await w.get('[data-testid="confirm-action"]').trigger('click');
   await flushPromises();
   expect(relayApi.savePool).toHaveBeenCalledWith(
-    auto,
+    {
+      ...auto,
+      capabilities: {
+        sourceProviderId: p.id,
+        sourceModel: 'actual-model',
+        contextWindowMode: 'manual',
+        maxOutputTokensMode: 'manual',
+      },
+    },
     expect.any(String),
     expect.any(AbortSignal),
   );
@@ -686,9 +711,20 @@ it('explicitly refreshes larger upstream capabilities and rejects zero prices be
   expect(
     (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
   ).toBe('128000');
+  await w.get('[name="contextCapabilityMode"]').setValue('manual');
+  await w.get('[name="outputCapabilityMode"]').setValue('manual');
   await w.get('[name="contextWindow"]').setValue('16000');
   await w.get('[name="maxOutputTokens"]').setValue('1024');
   await w.get('[data-testid="apply-capabilities"]').trigger('click');
+  await flushPromises();
+  expect(
+    (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
+  ).toBe('16000');
+  expect(
+    (w.get('[name="maxOutputTokens"]').element as HTMLInputElement).value,
+  ).toBe('1024');
+  await w.get('[name="contextCapabilityMode"]').setValue('inherit');
+  await w.get('[name="outputCapabilityMode"]').setValue('inherit');
   expect(
     (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
   ).toBe('128000');

@@ -282,6 +282,10 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 		if e := decode(w, r, &p); e != nil {
 			return e
 		}
+		p, err = resolvePoolCapabilities(p)
+		if err != nil {
+			return err
+		}
 		if createOnly {
 			err = b.CreatePool(r.Context(), tenant, p)
 		} else {
