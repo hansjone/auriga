@@ -1,5 +1,6 @@
+import { modelDirectory } from './catalog.js';
 import { newTraceparent, logEvent } from '../observability/index.js';
-import { AdapterError, check, integer, only, text } from './guard.js';
+import { AdapterError, check, integer, text } from './guard.js';
 import { buildRequest } from './request.js';
 import { responseState } from './response.js';
 import { operation, readJson, readSse } from './transport.js';
@@ -188,27 +189,16 @@ export function createAurigaAdapter(options) {
             'application/json',
           'SERVER',
         );
-        const list = only(await readJson(response, op), ['object', 'data']);
-        check(
-          list.object === 'list' &&
-            Array.isArray(list.data) &&
-            list.data.length <= 1000,
-          'SERVER',
+        const models = modelDirectory(await readJson(response, op)).map(
+          (item) => ({
+            provider: 'auriga',
+            id: item.id,
+            name: item.id,
+            ...(item.context_window === undefined
+              ? {}
+              : { context: { contextWindow: item.context_window } }),
+          }),
         );
-        const ids = new Set();
-        const models = list.data.map((raw) => {
-          const item = only(raw, ['id', 'object', 'created', 'owned_by']);
-          text(item.id, 128, 1);
-          integer(item.created);
-          check(
-            item.object === 'model' &&
-              item.owned_by === 'auriga' &&
-              !ids.has(item.id),
-            'SERVER',
-          );
-          ids.add(item.id);
-          return { provider: 'auriga', id: item.id, name: item.id };
-        });
         op.assert();
         check(epoch === catalogEpoch, 'AUTH');
         catalog = { ids: models.map((item) => item.id), ...lease };

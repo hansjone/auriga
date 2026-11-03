@@ -177,7 +177,12 @@ test('independent native slots: settings retains trusted bootstrap and versions 
   try {
     assert.deepEqual(
       [...host.registrations.keys()],
-      ['sidebar.panellist', 'main', 'settings.section'],
+      [
+        'sidebar.panellist',
+        'main',
+        'settings.models.provider-card',
+        'settings.section',
+      ],
     );
     assert.equal(
       host.registrations.get('main').meta.key,
@@ -216,8 +221,8 @@ test('independent native slots: settings retains trusted bootstrap and versions 
     assert.equal(calls[0].init.redirect, 'error');
     settings.close();
     host.dispose();
-    assert.equal(host.counts.registered, 3);
-    assert.equal(host.counts.unregistered, 3);
+    assert.equal(host.counts.registered, 4);
+    assert.equal(host.counts.unregistered, 4);
     assert.equal(host.registrations.size, 0);
     assert.equal(host.scheme.size, 0);
     assert.equal(host.subscriptions.size, 0);

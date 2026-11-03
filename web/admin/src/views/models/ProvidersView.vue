@@ -43,6 +43,7 @@ const provider = ref<RelayProviderInput>({
   enabled: true,
 });
 const draft = ref<RelayPool>();
+const autoEditor = ref(false);
 const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
 const catalogs = ref<
   Record<string, { items: CatalogModel[]; loading: boolean; error: string }>
@@ -143,6 +144,7 @@ onBeforeUnmount(() => {
   pending.value = undefined;
 });
 function close() {
+  autoEditor.value = false;
   importProvider.value = '';
   importRunning.value = false;
   capabilityNotice.value = '';
@@ -187,6 +189,11 @@ function editPool(row?: RelayPool) {
   draft.value = row ? globalThis.structuredClone(row) : freshPool();
   limitEdited.value = { context: !!row, output: !!row };
   editor.value = 'pool';
+}
+function editAutoPool() {
+  editPool(pools.value.find((pool) => pool.id === 'auto'));
+  autoEditor.value = true;
+  draft.value!.id = 'auto';
 }
 function editCredential(row: RelayProvider) {
   requestKey.value = globalThis.crypto.randomUUID();
@@ -505,6 +512,14 @@ async function confirm() {
     </form>
     <h2>{{ t('pools') }}</h2>
     <p>{{ t('poolNote') }}</p>
+    <button
+      data-testid="configure-auto"
+      :disabled="busy || !!pending || !ui.can('ai.providers.write')"
+      @click="editAutoPool"
+    >
+      {{ t('configureAuto') }}
+    </button>
+    <p>{{ t('autoNote') }}</p>
     <label class="relay-search"
       >{{ t('publicSearch')
       }}<input
@@ -568,7 +583,7 @@ async function confirm() {
           }}<input
             v-model="draft.id"
             name="poolId"
-            :disabled="!!selected"
+            :disabled="!!selected || autoEditor"
             pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
             required /></label
         ><label

@@ -51,6 +51,12 @@ const runtime = await mode.create({
 
 ## 托管模式（managed）
 
+模型目录沿 DSH 0.2.1-rc.3 的公开 `settings`、`llm.discoverModels` 和 Models 提供商卡片扩展槽接线。
+启动及运行中约30秒重新读取当前在线获权目录；原生模型页打开、手动重新获取和浏览器恢复联网也会检查。
+只热写模型数组，不改可信身份/端点、不注销 adapter、不改变在途流和已有会话模型。失败保旧目录并显示状态。
+自动刷新和原生发现共享有界单飞读取；设置 revision 冲突只重读合并一次，用户未提交的原生草稿由宿主保留。
+原生个人提供商、凭据与默认选择不受平台模型守卫影响；当前普通 connect 的生成仍要求完整可信计量端口，目录成功不作为生成已接通证据。
+
 环境变量见 `contracts/plugin/README.md` 第 3 节。必需：`AURIGA_INSTANCE_ID`、`AURIGA_OWNER_ID`、`AURIGA_PLATFORM_URL`、`AURIGA_IDENTITY_KEYS_FILE`、`AURIGA_INSTANCE_TOKEN_FILE`。
 
 Loader 行配置（节点代理渲染进 `cordis.patch.yml` 的 `auriga-dsh` 行）：
