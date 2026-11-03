@@ -411,6 +411,15 @@ func (b *Backend) ListProviders(ctx context.Context, tenant string, pages ...lis
 	return out, e
 }
 func (b *Backend) SavePool(ctx context.Context, tenant string, p api.RelayPool) error {
+	return b.savePool(ctx, tenant, p, false)
+}
+
+// CreatePool atomically refuses an existing tenant-scoped public model ID.
+func (b *Backend) CreatePool(ctx context.Context, tenant string, p api.RelayPool) error {
+	return b.savePool(ctx, tenant, p, true)
+}
+
+func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, createOnly bool) error {
 	if !modelID.MatchString(p.Id) || len(p.Routes) < 1 || len(p.Routes) > 8 || p.ContextWindow < 2 || p.ContextWindow > 1048576 || p.MaxOutputTokens < 1 || p.MaxOutputTokens > 32768 || p.MaxOutputTokens >= p.ContextWindow || p.Price.Currency != "USD" || p.Price.Version == "" || p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(time.Now()) || p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.OutputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger || p.Price.OutputMicrosPerMillionTokens > maxInteger {
 		return invalid
 	}
@@ -439,6 +448,16 @@ func (b *Backend) SavePool(ctx context.Context, tenant string, p api.RelayPool) 
 		raw, e := json.Marshal(p)
 		if e != nil {
 			return e
+		}
+		if createOnly {
+			tag, err := tx.Exec(ctx, `INSERT INTO ai.relay_pool(tenant_id,id,document) VALUES($1,$2,$3) ON CONFLICT(tenant_id,id) DO NOTHING`, tenant, p.Id, raw)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return fault("common.precondition_failed")
+			}
+			return nil
 		}
 		_, e = tx.Exec(ctx, `INSERT INTO ai.relay_pool(tenant_id,id,document) VALUES($1,$2,$3) ON CONFLICT(tenant_id,id) DO UPDATE SET document=EXCLUDED.document`, tenant, p.Id, raw)
 		return e

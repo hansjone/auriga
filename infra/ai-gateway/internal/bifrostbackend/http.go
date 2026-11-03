@@ -46,8 +46,10 @@ func reject(w http.ResponseWriter, err error) {
 		status = 400
 	case "common.rate_limited", "ai.budget_exceeded":
 		status = 429
-	case "common.conflict", "ai.request_in_progress", "ai.replay_unavailable", "common.precondition_failed":
+	case "common.conflict", "ai.request_in_progress", "ai.replay_unavailable":
 		status = 409
+	case "common.precondition_failed":
+		status = 412
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
@@ -267,12 +269,21 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 		}
 		respond(w, out)
 	case len(parts) == 1 && parts[0] == "pools" && r.Method == http.MethodPost:
+		createOnly, err := poolCreateOnly(r)
+		if err != nil {
+			return err
+		}
 		var p api.RelayPool
 		if e := decode(w, r, &p); e != nil {
 			return e
 		}
-		if e := b.SavePool(r.Context(), tenant, p); e != nil {
-			return e
+		if createOnly {
+			err = b.CreatePool(r.Context(), tenant, p)
+		} else {
+			err = b.SavePool(r.Context(), tenant, p)
+		}
+		if err != nil {
+			return err
 		}
 		respond(w, p)
 	case len(parts) == 1 && parts[0] == "virtual-keys" && r.Method == http.MethodGet:
@@ -353,6 +364,18 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 	}
 	return nil
 }
+
+func poolCreateOnly(r *http.Request) (bool, error) {
+	values := r.Header.Values("If-None-Match")
+	if len(values) == 0 {
+		return false, nil
+	}
+	if r.Method != http.MethodPost || r.URL.Path != "/api/pools" || len(values) != 1 || values[0] != "*" {
+		return false, invalid
+	}
+	return true, nil
+}
+
 func urlQuery(r *http.Request) (map[string]string, error) {
 	out := map[string]string{}
 	q, e := url.ParseQuery(r.URL.RawQuery)

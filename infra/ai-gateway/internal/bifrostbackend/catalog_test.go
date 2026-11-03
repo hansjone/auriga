@@ -22,7 +22,7 @@ func TestCatalogCapabilityMetadata(t *testing.T) {
 	}{
 		{"id-only", "openai", `{"data":[{"id":"model-a"}]}`, `{"id":"model-a"}`},
 		{"compatible", "openai", `{"data":[{"id":"model-a","context_window":128000,"context_length":64000,"max_output_tokens":8192,"max_completion_tokens":4096,"top_provider":{"max_completion_tokens":2048},"api_key":"not-for-client"}]}`, `{"id":"model-a","contextWindow":64000,"maxOutputTokens":2048}`},
-		{"compatible-nested", "deepseek", `{"data":[{"id":"model-a","context_length":64000,"top_provider":{"max_completion_tokens":4096}}]}`, `{"id":"model-a","contextWindow":64000,"maxOutputTokens":4096}`},
+		{"compatible-nested", "deepseek", `{"data":[{"id":"model-a","context_length":64000,"top_provider":{"context_length":32000,"max_completion_tokens":4096}}]}`, `{"id":"model-a","contextWindow":32000,"maxOutputTokens":4096}`},
 		{"anthropic", "anthropic", `{"data":[{"id":"model-a","max_input_tokens":200000,"max_tokens":64000}]}`, `{"id":"model-a","maxInputTokens":200000,"maxOutputTokens":64000}`},
 		{"gemini", "gemini", `{"models":[{"name":"models/model-a","inputTokenLimit":1048576,"outputTokenLimit":65536,"supportedGenerationMethods":["generateContent"]}]}`, `{"id":"model-a","maxInputTokens":1048576,"maxOutputTokens":65536}`},
 		{"unknown-openai-fields", "openai", `{"data":[{"id":"model-a","max_input_tokens":200000,"max_tokens":64000,"inputTokenLimit":100000,"outputTokenLimit":4096}]}`, `{"id":"model-a"}`},

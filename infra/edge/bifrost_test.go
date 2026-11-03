@@ -15,12 +15,14 @@ import (
 
 func TestBifrostAdminAuthority(t *testing.T) {
 	var calls atomic.Int32
+	var lastCondition atomic.Value
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		u, p, ok := r.BasicAuth()
-		if !ok || u != "auriga" || p != strings.Repeat("s", 64) || (r.URL.Path != "/api/providers" && r.URL.Path != "/api/virtual-keys" && r.URL.Path != "/api/providers/019a0000-0000-7000-8000-000000000001/models") || r.Header.Get("X-Auriga-Tenant") == "forged" || r.Header.Get("Cookie") != "" {
+		if !ok || u != "auriga" || p != strings.Repeat("s", 64) || (r.URL.Path != "/api/providers" && r.URL.Path != "/api/pools" && r.URL.Path != "/api/virtual-keys" && r.URL.Path != "/api/providers/019a0000-0000-7000-8000-000000000001/models") || r.Header.Get("X-Auriga-Tenant") == "forged" || r.Header.Get("Cookie") != "" {
 			t.Error("unsafe management proxy")
 		}
+		lastCondition.Store(r.Header.Get("If-None-Match"))
 		w.Header().Set("Set-Cookie", "bad=1")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		_, _ = w.Write([]byte(`{"items":[]}`))
@@ -81,6 +83,39 @@ func TestBifrostAdminAuthority(t *testing.T) {
 	code, _, _ = aiAdminRequest(t, g, addresses, "admin", "POST", relayAdminPrefix+"/providers", headers)
 	if code != 200 {
 		t.Fatalf("write %d", code)
+	}
+	for _, tc := range []struct {
+		name, path, method string
+		values             []string
+		status             int
+		forwarded          string
+	}{
+		{"pool-create", "/pools", "POST", []string{"*"}, 200, "*"},
+		{"pool-edit", "/pools", "POST", nil, 200, ""},
+		{"pool-invalid", "/pools", "POST", []string{`"etag"`}, 400, ""},
+		{"pool-multiple", "/pools", "POST", []string{"*", "*"}, 400, ""},
+		{"pool-comma", "/pools", "POST", []string{"*, *"}, 400, ""},
+		{"other-resource", "/providers", "POST", []string{"*"}, 400, ""},
+		{"pool-read", "/pools", "GET", []string{"*"}, 400, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := headers.Clone()
+			if tc.values != nil {
+				h["If-None-Match"] = tc.values
+			}
+			n := calls.Load()
+			status, _, _ := aiAdminRequest(t, g, addresses, "admin", tc.method, relayAdminPrefix+tc.path, h)
+			if status != tc.status {
+				t.Fatalf("status %d; want %d", status, tc.status)
+			}
+			if status == 200 {
+				if calls.Load() != n+1 || lastCondition.Load() != tc.forwarded {
+					t.Fatalf("condition not forwarded precisely: calls=%d header=%v", calls.Load()-n, lastCondition.Load())
+				}
+			} else if calls.Load() != n {
+				t.Fatal("invalid condition contacted backend")
+			}
+		})
 	}
 	for _, tc := range []struct {
 		name, role, path, header, value string

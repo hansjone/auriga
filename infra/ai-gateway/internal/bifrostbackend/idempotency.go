@@ -17,6 +17,11 @@ import (
 // never a duplicate mutation. Successful replies (including issued VKs) are
 // encrypted at rest and replayed only for the same tenant, key and request.
 func (b *Backend) idempotentManagement(w http.ResponseWriter, r *http.Request, tenant string) {
+	createOnly, err := poolCreateOnly(r)
+	if err != nil {
+		reject(w, err)
+		return
+	}
 	keys := r.Header.Values("Idempotency-Key")
 	if len(keys) != 1 || len(keys[0]) < 1 || len(keys[0]) > 128 {
 		reject(w, invalid)
@@ -29,7 +34,11 @@ func (b *Backend) idempotentManagement(w http.ResponseWriter, r *http.Request, t
 	}
 	sum := sha256.Sum256([]byte(keys[0]))
 	id := hex.EncodeToString(sum[:])
-	fingerprint := sha256.Sum256(append([]byte(r.Method+" "+r.URL.RequestURI()+"\n"), raw...))
+	prefix := r.Method + " " + r.URL.RequestURI() + "\n"
+	if createOnly {
+		prefix += "If-None-Match: *\n"
+	}
+	fingerprint := sha256.Sum256(append([]byte(prefix), raw...))
 	var replay []byte
 	owned := false
 	err = b.db.Transaction(r.Context(), tenant, func(tx pgx.Tx) error {

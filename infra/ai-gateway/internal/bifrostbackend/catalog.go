@@ -229,11 +229,12 @@ func decodeCatalog(kind string, raw []byte) ([]api.RelayProviderModel, string, e
 				model.MaxOutputTokens = catalogTokenLimit(m.MaxTokens)
 			} else {
 				var top struct {
+					ContextLength       json.RawMessage `json:"context_length"`
 					MaxCompletionTokens json.RawMessage `json:"max_completion_tokens"`
 				}
 				// A malformed optional extension must not discard the model ID.
 				_ = json.Unmarshal(m.TopProvider, &top)
-				model.ContextWindow = minimumKnown(catalogTokenLimit(m.ContextWindow), catalogTokenLimit(m.ContextLength))
+				model.ContextWindow = minimumKnown(catalogTokenLimit(m.ContextWindow), catalogTokenLimit(m.ContextLength), catalogTokenLimit(top.ContextLength))
 				model.MaxOutputTokens = minimumKnown(catalogTokenLimit(m.MaxOutputTokens), catalogTokenLimit(m.MaxCompletionTokens), catalogTokenLimit(top.MaxCompletionTokens))
 			}
 			models = append(models, model)
@@ -252,7 +253,7 @@ func decodeCatalog(kind string, raw []byte) ([]api.RelayProviderModel, string, e
 // projected. A missing, malformed or out-of-range optional limit stays unknown.
 func catalogTokenLimit(raw json.RawMessage) *int64 {
 	n, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
-	if err != nil || n < 1 || n > 9007199254740991 {
+	if err != nil || n < 1 || n > maxInteger {
 		return nil
 	}
 	return &n

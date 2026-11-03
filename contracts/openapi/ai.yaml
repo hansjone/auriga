@@ -3519,12 +3519,25 @@
           "common.conflict",
           "common.rate_limited",
           "common.unavailable",
-          "iam.step_up_required"
+          "iam.step_up_required",
+          "common.precondition_failed"
         ],
         "x-events": [],
         "parameters": [
           {
             "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "*"
+              ]
+            },
+            "description": "仅创建，已有公开模型 ID 返回412；只接受单值星号。缺省保持原保存行为。"
           }
         ],
         "responses": {
@@ -3607,6 +3620,16 @@
                 }
               }
             }
+          },
+          "412": {
+            "description": "common.precondition_failed；公开模型 ID 已存在，未修改原配置。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -3619,7 +3642,8 @@
             }
           }
         },
-        "x-step-up-max-age-seconds": 600
+        "x-step-up-max-age-seconds": 600,
+        "description": "保存模型池；缺省为编辑或创建。If-None-Match: * 表示仅创建，已存在的租户内公开 ID 原子拒绝，不覆盖；该条件参与 Idempotency-Key 请求指纹。"
       }
     },
     "/api/ai/v1/admin/relay/virtual-keys": {

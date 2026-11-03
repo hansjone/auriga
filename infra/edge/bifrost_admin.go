@@ -67,6 +67,11 @@ func (g *Gateway) proxyRelayAdmin(w http.ResponseWriter, r *http.Request, audien
 		fail(405, "common.validation_failed")
 		return
 	}
+	conditions := r.Header.Values("If-None-Match")
+	if len(conditions) != 0 && (suffix != "/pools" || r.Method != http.MethodPost || len(conditions) != 1 || conditions[0] != "*") {
+		fail(400, "common.validation_failed")
+		return
+	}
 	if isWriteMethod(r.Method) && !strictOrigin(r, entry) {
 		fail(403, "common.forbidden")
 		return
@@ -195,6 +200,9 @@ func (g *Gateway) proxyRelayAdmin(w http.ResponseWriter, r *http.Request, audien
 		pr.Out.Header.Set("Accept", "application/json")
 		pr.Out.Header.Set("X-Auriga-Tenant", fresh.TenantID)
 		pr.Out.Header.Set("Idempotency-Key", r.Header.Get("Idempotency-Key"))
+		if len(conditions) == 1 {
+			pr.Out.Header.Set("If-None-Match", "*")
+		}
 		pr.Out.Header.Set("X-Request-Id", rid)
 		pr.Out.Header.Set("traceparent", ensureTraceparent(r))
 	}

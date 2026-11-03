@@ -282,6 +282,7 @@ export interface paths {
     };
     get: operations['listRelayPools'];
     put?: never;
+    /** @description 保存模型池；缺省为编辑或创建。If-None-Match: * 表示仅创建，已存在的租户内公开 ID 原子拒绝，不覆盖；该条件参与 Idempotency-Key 请求指纹。 */
     post: operations['saveRelayPool'];
     delete?: never;
     options?: never;
@@ -3471,6 +3472,8 @@ export interface operations {
       query?: never;
       header?: {
         'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description 仅创建，已有公开模型 ID 返回412；只接受单值星号。缺省保持原保存行为。 */
+        'If-None-Match'?: '*';
       };
       path?: never;
       cookie?: never;
@@ -3528,6 +3531,15 @@ export interface operations {
       };
       /** @description common.conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed；公开模型 ID 已存在，未修改原配置。 */
+      412: {
         headers: {
           [name: string]: unknown;
         };
