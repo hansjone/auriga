@@ -2,27 +2,35 @@
  * fallbacks keep the anonymous page legible in light and dark without them. */
 export const loginStyles = `
 .auriga-login {
-  --al-fg: var(--dsw-alias-label-primary, #16202a);
-  --al-muted: var(--dsw-alias-label-secondary, #5b6875);
-  --al-surface: var(--dsw-alias-bg-layer-1, #ffffff);
-  --al-page: var(--dsw-alias-bg-layer-2, #f3f5f7);
-  --al-line: var(--dsw-alias-border-l1, #d5dbe1);
-  --al-accent: var(--dsw-alias-state-business-primary, #1f6fd1);
-  --al-error: var(--dsw-alias-state-error-primary, #c4352b);
-  font: inherit; color: var(--al-fg); background: var(--al-page);
+  /* Same values as DSH's own body / body[data-ds-dark-theme] tokens, so the
+     page matches DSH even when the anonymous host does not load its theme. */
+  --al-fg: var(--dsw-alias-label-primary, rgb(15 17 21));
+  --al-muted: var(--dsw-alias-label-secondary, rgb(97 102 107));
+  --al-page: var(--dsw-alias-bg-layer-1, rgb(255 255 255));
+  --al-surface: var(--dsw-alias-bg-layer-2, rgb(255 255 255));
+  --al-line: var(--dsw-alias-border-l2, #0000001a);
+  --al-accent: var(--dsw-alias-state-business-primary, rgb(65 118 230));
+  --al-on-accent: #fff;
+  --al-error: var(--dsw-alias-state-error-primary, rgb(236 19 19));
+  --al-hover: var(--dsw-alias-interactive-bg-hover, #2631480f);
+  font-family: Helvetica Neue, Helvetica, Arial, PingFang SC, Hiragino Sans GB, Heiti SC, Microsoft YaHei, WenQuanYi Micro Hei, sans-serif;
+  color: var(--al-fg); background: var(--al-page);
   /* The page is exclusively ours: own the whole window, not just the content height. */
   position: fixed; inset: 0; overflow: auto; padding: 12vh 20px 32px;
   display: grid; justify-items: center; align-content: start; gap: 18px;
 }
 @media (prefers-color-scheme: dark) {
+  /* DSH drives prefers-color-scheme from its own theme setting. */
   .auriga-login {
-    --al-fg: var(--dsw-alias-label-primary, #e6ebf0);
-    --al-muted: var(--dsw-alias-label-secondary, #93a0ad);
-    --al-surface: var(--dsw-alias-bg-layer-1, #161c22);
-    --al-page: var(--dsw-alias-bg-layer-2, #0e1317);
-    --al-line: var(--dsw-alias-border-l1, #2a333c);
-    --al-accent: var(--dsw-alias-state-business-primary, #4c8fe6);
-    --al-error: var(--dsw-alias-state-error-primary, #f0776c);
+    --al-fg: var(--dsw-alias-label-primary, rgb(249 250 251));
+    --al-muted: var(--dsw-alias-label-secondary, rgb(207 211 214));
+    --al-page: var(--dsw-alias-bg-layer-1, rgb(35 35 36));
+    --al-surface: var(--dsw-alias-bg-layer-2, rgb(44 44 46));
+    --al-line: var(--dsw-alias-border-l2, #ffffff1f);
+    --al-accent: var(--dsw-alias-state-business-primary, rgb(122 170 255));
+    --al-on-accent: rgb(15 17 21);
+    --al-error: var(--dsw-alias-state-error-primary, rgb(242 90 90));
+    --al-hover: var(--dsw-alias-interactive-bg-hover, #ffffff14);
   }
 }
 .auriga-login * { box-sizing: border-box; }
@@ -40,10 +48,10 @@ export const loginStyles = `
 .auriga-login input:hover, .auriga-login select:hover { border-color: var(--al-muted); }
 .auriga-login [aria-invalid=true] { border-color: var(--al-error); }
 .auriga-login button { font: inherit; cursor: pointer; border-radius: 8px; padding: 10px 14px; width: 100%; margin-top: 6px; border: 1px solid var(--al-line); background: transparent; color: inherit; }
-.auriga-login button.primary { background: var(--al-accent); border-color: var(--al-accent); color: #fff; font-weight: 600; }
+.auriga-login button.primary { background: var(--al-accent); border-color: var(--al-accent); color: var(--al-on-accent); font-weight: 600; }
 .auriga-login button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .auriga-login button.ghost { border-color: transparent; color: var(--al-muted); }
-.auriga-login button.ghost:hover:not(:disabled), .auriga-login button:not(.primary):not(.link):hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, var(--al-fg) 6%, transparent)); }
+.auriga-login button.ghost:hover:not(:disabled), .auriga-login button:not(.primary):not(.link):hover:not(:disabled) { background: var(--al-hover); }
 .auriga-login button.link { width: auto; margin: 0; padding: 6px 10px; border: 0; background: none; color: var(--al-muted); font-size: .9em; }
 .auriga-login button.link:hover { color: var(--al-fg); text-decoration: underline; }
 .auriga-login button:disabled { opacity: .55; cursor: default; }
