@@ -15,6 +15,7 @@ vi.mock('../../admin/relayApi', () => ({
     saveProvider: vi.fn(),
     credential: vi.fn(),
     savePool: vi.fn(),
+    createPool: vi.fn(),
     createKey: vi.fn(),
     updateKey: vi.fn(),
     usage: vi.fn(),
@@ -96,6 +97,119 @@ it('auto entry edits the current auto routes while retaining legacy pools', asyn
   ).toBe('32000');
   expect(w.findAll('[data-testid="edit-pool"]')).toHaveLength(2);
   expect(relayApi.savePool).not.toHaveBeenCalled();
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.savePool).toHaveBeenCalledWith(
+    auto,
+    expect.any(String),
+    expect.any(AbortSignal),
+  );
+  expect(relayApi.createPool).not.toHaveBeenCalled();
+  w.unmount();
+});
+
+it('keeps Auto disabled until a successful current pool snapshot is available', async () => {
+  let complete!: (value: Awaited<ReturnType<typeof relayApi.pools>>) => void;
+  vi.mocked(relayApi.pools).mockReturnValue(
+    new Promise((resolve) => {
+      complete = resolve;
+    }),
+  );
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  const button = w.get('[data-testid="configure-auto"]');
+  expect((button.element as HTMLButtonElement).disabled).toBe(true);
+  await button.trigger('click');
+  expect(w.find('[name="poolId"]').exists()).toBe(false);
+  complete({
+    items: [
+      {
+        id: 'auto',
+        enabled: true,
+        contextWindow: 64000,
+        maxOutputTokens: 8192,
+        routes: [{ providerId: p.id, model: 'real-auto', weight: 1 }],
+        price: {
+          currency: 'USD',
+          inputMicrosPerMillionTokens: 1,
+          outputMicrosPerMillionTokens: 1,
+          version: 'v1',
+          effectiveAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    ],
+  });
+  await flushPromises();
+  expect(w.find('[name="poolId"]').exists()).toBe(false);
+  await button.trigger('click');
+  expect(
+    (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
+  ).toBe('64000');
+  expect(w.text()).toContain('real-auto');
+  expect(relayApi.savePool).not.toHaveBeenCalled();
+  w.unmount();
+});
+
+it('never treats a failed pool snapshot as proof that auto is absent', async () => {
+  vi.mocked(relayApi.pools).mockRejectedValue(new Error('offline-fixture'));
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  const button = w.get('[data-testid="configure-auto"]');
+  expect((button.element as HTMLButtonElement).disabled).toBe(true);
+  await button.trigger('click');
+  expect(w.find('[name="poolId"]').exists()).toBe(false);
+  expect(relayApi.savePool).not.toHaveBeenCalled();
+  expect(relayApi.createPool).not.toHaveBeenCalled();
+  w.unmount();
+});
+
+it('invalidates an Auto draft before reloading, and a failed reload never leaves a saveable stale draft', async () => {
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  expect(w.find('[name="poolId"]').exists()).toBe(true);
+  vi.mocked(relayApi.pools).mockRejectedValue(new Error('reload-fixture'));
+  await w.findAll('header button')[0]!.trigger('click');
+  await flushPromises();
+  expect(w.find('[data-testid="pool-form"]').exists()).toBe(false);
+  expect(
+    (w.get('[data-testid="configure-auto"]').element as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(relayApi.savePool).not.toHaveBeenCalled();
+  w.unmount();
+});
+
+it('creates a genuinely absent Auto through create-only protection and never falls back to an overwrite', async () => {
+  vi.mocked(relayApi.createPool).mockRejectedValue({
+    status: 409,
+    problem: { code: 'common.conflict' },
+  });
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await w
+    .findAll('button')
+    .find((button) => button.text() === '添加池路由')!
+    .trigger('click');
+  await w.get('[name="routeProvider0"]').setValue(p.id);
+  await w.get('[name="routeModel0"]').setValue('real-auto');
+  await w.get('[name="inputPrice"]').setValue('1');
+  await w.get('[name="outputPrice"]').setValue('1');
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.createPool).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: 'auto',
+      routes: [{ providerId: p.id, model: 'real-auto', weight: 1 }],
+    }),
+    expect.any(String),
+    expect.any(AbortSignal),
+  );
+  expect(relayApi.savePool).not.toHaveBeenCalled();
+  expect(w.find('[data-testid="pool-form"]').exists()).toBe(true);
   w.unmount();
 });
 
