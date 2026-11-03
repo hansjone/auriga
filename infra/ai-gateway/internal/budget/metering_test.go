@@ -53,3 +53,21 @@ func TestMeteringOnlyCannotCoexistWithExplicitBudget(t *testing.T) {
 		t.Fatalf("unlimited flight=%d %v", cap, err)
 	}
 }
+
+func TestUnsetQuotaDoesNotDisableStrictReservationOrFinalUsageBounds(t *testing.T) {
+	s := snapshot(t)
+	s.Admission.DailyTokens = nil
+	s.Admission.MonthlyBudgetMicros = nil
+	l := &Ledger{currency: "USD", policy: api.AdmissionPolicy{MaxActiveRequestsPerSubject: 2, MaxInFlightPercent: 25}}
+	a, err := l.snapshot(s, time.Now())
+	if err != nil || a.MeteringOnly || a.ReservedTokens != 10 || a.ReservedMicros != 10 || a.MaxActiveRequestsPerSubject != 2 {
+		t.Fatalf("unset quota bypassed strict admission: %v %v", a, err)
+	}
+	r := &record{a: a, price: s.Price}
+	if !validFinalUsage(r, &FinalUsage{InputTokens: 8, OutputTokens: 2, Price: s.Price}) {
+		t.Fatal("valid strict final usage rejected")
+	}
+	if validFinalUsage(r, &FinalUsage{InputTokens: 9, OutputTokens: 2, Price: s.Price}) || validFinalUsage(r, &FinalUsage{InputTokens: 8, OutputTokens: 3, Price: s.Price}) {
+		t.Fatal("unset quota bypassed strict input/output reservations")
+	}
+}
