@@ -10,7 +10,8 @@ export const loginStyles = `
   --al-accent: var(--dsw-alias-state-business-primary, #1f6fd1);
   --al-error: var(--dsw-alias-state-error-primary, #c4352b);
   font: inherit; color: var(--al-fg); background: var(--al-page);
-  min-height: 100%; padding: 12vh 20px 32px;
+  /* The page is exclusively ours: own the whole window, not just the content height. */
+  position: fixed; inset: 0; overflow: auto; padding: 12vh 20px 32px;
   display: grid; justify-items: center; align-content: start; gap: 18px;
 }
 @media (prefers-color-scheme: dark) {
