@@ -845,6 +845,21 @@ export interface components {
     RelayProviderModel: {
       /** @description 供应商返回的真实上游模型 ID，仅管理端目录使用。 */
       id: string;
+      /**
+       * Format: int64
+       * @description 供应商明确返回的总上下文 Token 上限；缺失表示未知，不由模型名称或输入输出上限相加推断。仅为目录元数据，不自动变更模型池或预算。
+       */
+      contextWindow?: number;
+      /**
+       * Format: int64
+       * @description 供应商明确返回的输入 Token 上限；与总上下文上限分别表达，缺失表示未知。
+       */
+      maxInputTokens?: number;
+      /**
+       * Format: int64
+       * @description 供应商明确返回的输出 Token 上限；缺失表示未知。合法的同义字段或重复模型记录按维度取已知最小值；重复记录任一未知则该维度未知。
+       */
+      maxOutputTokens?: number;
     };
     RelayProviderModelPage: {
       items: components['schemas']['RelayProviderModel'][];

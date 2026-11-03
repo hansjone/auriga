@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -74,7 +75,7 @@ func fetchProviderModels(ctx context.Context, route Route, allowPrivate bool) (a
 	transport := &http.Transport{Proxy: nil, DialContext: dial, TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 5 * time.Second, MaxResponseHeaderBytes: 32 << 10}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	pageToken := ""
 	for page := 0; page < 5; page++ {
 		endpoint, headers, err := catalogEndpoint(route, pageToken)
@@ -114,20 +115,25 @@ func fetchProviderModels(ctx context.Context, route Route, allowPrivate bool) (a
 		if readErr != nil || len(raw) > catalogBytes {
 			return out, catalogFailure("upstream_invalid_response")
 		}
-		ids, next, err := decodeCatalog(route.Kind, raw)
+		models, next, err := decodeCatalog(route.Kind, raw)
 		if err != nil {
 			return out, err
 		}
-		for _, id := range ids {
-			if !validCatalogID(id) {
+		for _, model := range models {
+			if !validCatalogID(model.Id) {
 				return out, catalogFailure("upstream_invalid_response")
 			}
-			if !seen[id] {
+			if index, exists := seen[model.Id]; exists {
+				previous := &out.Items[index]
+				previous.ContextWindow = minimumKnownByBoth(previous.ContextWindow, model.ContextWindow)
+				previous.MaxInputTokens = minimumKnownByBoth(previous.MaxInputTokens, model.MaxInputTokens)
+				previous.MaxOutputTokens = minimumKnownByBoth(previous.MaxOutputTokens, model.MaxOutputTokens)
+			} else {
 				if len(out.Items) == catalogLimit {
 					return out, catalogFailure("catalog_too_large")
 				}
-				seen[id] = true
-				out.Items = append(out.Items, api.RelayProviderModel{Id: id})
+				seen[model.Id] = len(out.Items)
+				out.Items = append(out.Items, model)
 			}
 		}
 		if next == "" {
@@ -175,14 +181,23 @@ func catalogEndpoint(route Route, token string) (string, http.Header, error) {
 	return u.String(), headers, nil
 }
 
-func decodeCatalog(kind string, raw []byte) ([]string, string, error) {
+func decodeCatalog(kind string, raw []byte) ([]api.RelayProviderModel, string, error) {
 	var body struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID                  string          `json:"id"`
+			ContextWindow       json.RawMessage `json:"context_window"`
+			ContextLength       json.RawMessage `json:"context_length"`
+			MaxInputTokens      json.RawMessage `json:"max_input_tokens"`
+			MaxTokens           json.RawMessage `json:"max_tokens"`
+			MaxOutputTokens     json.RawMessage `json:"max_output_tokens"`
+			MaxCompletionTokens json.RawMessage `json:"max_completion_tokens"`
+			TopProvider         json.RawMessage `json:"top_provider"`
 		} `json:"data"`
 		Models []struct {
-			Name    string   `json:"name"`
-			Methods []string `json:"supportedGenerationMethods"`
+			Name             string          `json:"name"`
+			Methods          []string        `json:"supportedGenerationMethods"`
+			InputTokenLimit  json.RawMessage `json:"inputTokenLimit"`
+			OutputTokenLimit json.RawMessage `json:"outputTokenLimit"`
 		} `json:"models"`
 		HasMore bool   `json:"has_more"`
 		LastID  string `json:"last_id"`
@@ -191,7 +206,7 @@ func decodeCatalog(kind string, raw []byte) ([]string, string, error) {
 	if json.Unmarshal(raw, &body) != nil {
 		return nil, "", catalogFailure("upstream_invalid_response")
 	}
-	ids := []string{}
+	models := []api.RelayProviderModel{}
 	next := ""
 	if kind == "gemini" {
 		if body.Models == nil {
@@ -199,7 +214,7 @@ func decodeCatalog(kind string, raw []byte) ([]string, string, error) {
 		}
 		for _, m := range body.Models {
 			if slices.Contains(m.Methods, "generateContent") {
-				ids = append(ids, strings.TrimPrefix(m.Name, "models/"))
+				models = append(models, api.RelayProviderModel{Id: strings.TrimPrefix(m.Name, "models/"), MaxInputTokens: catalogTokenLimit(m.InputTokenLimit), MaxOutputTokens: catalogTokenLimit(m.OutputTokenLimit)})
 			}
 		}
 		next = body.Next
@@ -208,7 +223,20 @@ func decodeCatalog(kind string, raw []byte) ([]string, string, error) {
 			return nil, "", catalogFailure("upstream_invalid_response")
 		}
 		for _, m := range body.Data {
-			ids = append(ids, m.ID)
+			model := api.RelayProviderModel{Id: m.ID}
+			if kind == "anthropic" {
+				model.MaxInputTokens = catalogTokenLimit(m.MaxInputTokens)
+				model.MaxOutputTokens = catalogTokenLimit(m.MaxTokens)
+			} else {
+				var top struct {
+					MaxCompletionTokens json.RawMessage `json:"max_completion_tokens"`
+				}
+				// A malformed optional extension must not discard the model ID.
+				_ = json.Unmarshal(m.TopProvider, &top)
+				model.ContextWindow = minimumKnown(catalogTokenLimit(m.ContextWindow), catalogTokenLimit(m.ContextLength))
+				model.MaxOutputTokens = minimumKnown(catalogTokenLimit(m.MaxOutputTokens), catalogTokenLimit(m.MaxCompletionTokens), catalogTokenLimit(top.MaxCompletionTokens))
+			}
+			models = append(models, model)
 		}
 		if kind == "anthropic" && body.HasMore {
 			next = body.LastID
@@ -217,7 +245,36 @@ func decodeCatalog(kind string, raw []byte) ([]string, string, error) {
 			}
 		}
 	}
-	return ids, next, nil
+	return models, next, nil
+}
+
+// Only integer literals that can be represented exactly by all API consumers are
+// projected. A missing, malformed or out-of-range optional limit stays unknown.
+func catalogTokenLimit(raw json.RawMessage) *int64 {
+	n, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil || n < 1 || n > 9007199254740991 {
+		return nil
+	}
+	return &n
+}
+
+func minimumKnown(values ...*int64) *int64 {
+	var minimum *int64
+	for _, value := range values {
+		if value != nil && (minimum == nil || *value < *minimum) {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
+// Duplicate provider records may describe different routes. Never advertise a
+// limit as known unless every record supplying that model ID knows that limit.
+func minimumKnownByBoth(a, b *int64) *int64 {
+	if a == nil || b == nil {
+		return nil
+	}
+	return minimumKnown(a, b)
 }
 
 func validCatalogID(id string) bool {

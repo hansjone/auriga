@@ -23,6 +23,12 @@ var _ MappedNullable = &RelayProviderModel{}
 type RelayProviderModel struct {
 	// 供应商返回的真实上游模型 ID，仅管理端目录使用。
 	Id string `json:"id"`
+	// 供应商明确返回的总上下文 Token 上限；缺失表示未知，不由模型名称或输入输出上限相加推断。仅为目录元数据，不自动变更模型池或预算。
+	ContextWindow *int64 `json:"contextWindow,omitempty"`
+	// 供应商明确返回的输入 Token 上限；与总上下文上限分别表达，缺失表示未知。
+	MaxInputTokens *int64 `json:"maxInputTokens,omitempty"`
+	// 供应商明确返回的输出 Token 上限；缺失表示未知。合法的同义字段或重复模型记录按维度取已知最小值；重复记录任一未知则该维度未知。
+	MaxOutputTokens *int64 `json:"maxOutputTokens,omitempty"`
 }
 
 type _RelayProviderModel RelayProviderModel
@@ -69,6 +75,102 @@ func (o *RelayProviderModel) SetId(v string) {
 	o.Id = v
 }
 
+// GetContextWindow returns the ContextWindow field value if set, zero value otherwise.
+func (o *RelayProviderModel) GetContextWindow() int64 {
+	if o == nil || IsNil(o.ContextWindow) {
+		var ret int64
+		return ret
+	}
+	return *o.ContextWindow
+}
+
+// GetContextWindowOk returns a tuple with the ContextWindow field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayProviderModel) GetContextWindowOk() (*int64, bool) {
+	if o == nil || IsNil(o.ContextWindow) {
+		return nil, false
+	}
+	return o.ContextWindow, true
+}
+
+// HasContextWindow returns a boolean if a field has been set.
+func (o *RelayProviderModel) HasContextWindow() bool {
+	if o != nil && !IsNil(o.ContextWindow) {
+		return true
+	}
+
+	return false
+}
+
+// SetContextWindow gets a reference to the given int64 and assigns it to the ContextWindow field.
+func (o *RelayProviderModel) SetContextWindow(v int64) {
+	o.ContextWindow = &v
+}
+
+// GetMaxInputTokens returns the MaxInputTokens field value if set, zero value otherwise.
+func (o *RelayProviderModel) GetMaxInputTokens() int64 {
+	if o == nil || IsNil(o.MaxInputTokens) {
+		var ret int64
+		return ret
+	}
+	return *o.MaxInputTokens
+}
+
+// GetMaxInputTokensOk returns a tuple with the MaxInputTokens field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayProviderModel) GetMaxInputTokensOk() (*int64, bool) {
+	if o == nil || IsNil(o.MaxInputTokens) {
+		return nil, false
+	}
+	return o.MaxInputTokens, true
+}
+
+// HasMaxInputTokens returns a boolean if a field has been set.
+func (o *RelayProviderModel) HasMaxInputTokens() bool {
+	if o != nil && !IsNil(o.MaxInputTokens) {
+		return true
+	}
+
+	return false
+}
+
+// SetMaxInputTokens gets a reference to the given int64 and assigns it to the MaxInputTokens field.
+func (o *RelayProviderModel) SetMaxInputTokens(v int64) {
+	o.MaxInputTokens = &v
+}
+
+// GetMaxOutputTokens returns the MaxOutputTokens field value if set, zero value otherwise.
+func (o *RelayProviderModel) GetMaxOutputTokens() int64 {
+	if o == nil || IsNil(o.MaxOutputTokens) {
+		var ret int64
+		return ret
+	}
+	return *o.MaxOutputTokens
+}
+
+// GetMaxOutputTokensOk returns a tuple with the MaxOutputTokens field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayProviderModel) GetMaxOutputTokensOk() (*int64, bool) {
+	if o == nil || IsNil(o.MaxOutputTokens) {
+		return nil, false
+	}
+	return o.MaxOutputTokens, true
+}
+
+// HasMaxOutputTokens returns a boolean if a field has been set.
+func (o *RelayProviderModel) HasMaxOutputTokens() bool {
+	if o != nil && !IsNil(o.MaxOutputTokens) {
+		return true
+	}
+
+	return false
+}
+
+// SetMaxOutputTokens gets a reference to the given int64 and assigns it to the MaxOutputTokens field.
+func (o *RelayProviderModel) SetMaxOutputTokens(v int64) {
+	o.MaxOutputTokens = &v
+}
+
 func (o RelayProviderModel) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -80,6 +182,15 @@ func (o RelayProviderModel) MarshalJSON() ([]byte, error) {
 func (o RelayProviderModel) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
+	if !IsNil(o.ContextWindow) {
+		toSerialize["contextWindow"] = o.ContextWindow
+	}
+	if !IsNil(o.MaxInputTokens) {
+		toSerialize["maxInputTokens"] = o.MaxInputTokens
+	}
+	if !IsNil(o.MaxOutputTokens) {
+		toSerialize["maxOutputTokens"] = o.MaxOutputTokens
+	}
 	return toSerialize, nil
 }
 
