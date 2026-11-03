@@ -282,3 +282,20 @@ test('a non-retryable failure still offers a fresh attempt and skip', async (t) 
   assert.equal(restarted, 1);
   assert.ok(root.querySelector('form input[name=recoveryCode]'));
 });
+
+test('a restart that is rejected again does not loop and stays restartable', async (t) => {
+  let restarted = 0;
+  const { root, view } = mount(t, {
+    onRestart: async () => {
+      restarted++;
+      return { type: 'fail', code: 'iam.invalid_credentials' };
+    },
+    onSkip: () => {},
+  });
+  view.setStep({ type: 'fail', code: 'iam.invalid_credentials' });
+  await tick();
+  await tick();
+  assert.equal(restarted, 1);
+  assert.ok(root.querySelector('[data-action=restart]'));
+  assert.ok(root.querySelector('[data-action=skip]'));
+});

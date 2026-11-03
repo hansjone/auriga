@@ -34,6 +34,9 @@ export const loginStyles = `
   }
 }
 .auriga-login * { box-sizing: border-box; }
+/* The page notice sits outside the full-window shell; keep it above it. */
+.auriga-login-notice { position: fixed; inset: 12px 16px auto; z-index: 1; margin: 0; text-align: center; font-size: .9em; color: var(--dsw-alias-label-secondary, rgb(97 102 107)); }
+.auriga-login-notice:empty { display: none; }
 .auriga-login .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1.05em; letter-spacing: .01em; }
 .auriga-login .brand svg { width: 24px; height: 24px; color: var(--al-accent); }
 .auriga-login .card { width: min(360px, 100%); padding: 28px 28px 24px; border-radius: 14px; border: 1px solid var(--al-line); background: var(--al-surface); display: grid; gap: 4px; }

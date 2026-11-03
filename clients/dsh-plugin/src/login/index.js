@@ -150,11 +150,17 @@ export function createLoginView(root, options) {
     if (disposed) return;
     invalidate();
     notice = undefined;
+    if (next.type !== 'form' && next.type !== 'fail') flash = undefined;
     step = next;
     render();
-    if (next.type === 'fail' && next.code === 'iam.invalid_credentials') {
+    if (
+      next.type === 'fail' &&
+      next.code === 'iam.invalid_credentials' &&
+      !flash
+    ) {
       // A rejected password ends the transaction; open a fresh one so the user
-      // can simply type again instead of being stuck on a dead end.
+      // can simply type again instead of being stuck on a dead end. Only once:
+      // a restart that fails the same way stays on the restartable fail card.
       flash = next.code;
       const card = shell.querySelector('.card');
       if (card instanceof doc.defaultView.HTMLElement)
@@ -505,6 +511,7 @@ export function createLoginView(root, options) {
       if (disposed) return;
       invalidate();
       step = undefined;
+      flash = undefined;
       notice = reason;
       render();
     },

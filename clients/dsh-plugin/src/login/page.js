@@ -12,6 +12,7 @@ export function mountLocalLoginPage(root, options) {
   const scope = new AbortController();
   const notice = root.ownerDocument.createElement('p');
   notice.setAttribute('role', 'status');
+  notice.className = 'auriga-login-notice';
   const controller = createLocalLoginController({
     fetch: options.fetch,
     onStatus: (state) => {
