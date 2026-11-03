@@ -20,12 +20,18 @@ test('the standard directory accepts disclosed pool limits and unknown creation 
     'legacy',
   );
 });
+test('directory capacity metadata accepts upstream safe integers beyond former relay defaults', () => {
+  const item = { ...row, context_window: 4000000, max_output_tokens: 131072 };
+  assert.deepEqual(modelDirectory({ object: 'list', data: [item] }), [item]);
+});
 for (const patch of [
   { created: undefined },
   { created: -1 },
   { context_window: 0 },
+  { context_window: Number.MAX_SAFE_INTEGER + 1 },
   { max_output_tokens: 64000 },
   { max_output_tokens: 1.5 },
+  { max_output_tokens: Number.MAX_SAFE_INTEGER + 1 },
   { endpoint: 'https://other.example' },
   { owned_by: 'other' },
   { id: '../other' },

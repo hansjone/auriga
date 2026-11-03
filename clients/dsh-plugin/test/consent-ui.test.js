@@ -163,7 +163,7 @@ const text = (tree) =>
 
 for (const locale of ['zh', 'en'])
   test(
-    'native model editor owns synchronization without an extra card or status poll: ' +
+    'without native Remote capabilities no sync card or automatic status poll is installed: ' +
       locale,
     async () => {
       let calls = 0;

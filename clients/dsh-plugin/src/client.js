@@ -19,6 +19,19 @@ window.__ModuleLoader__.load({
       failed: '加载失败',
       retry: '重试',
       refresh: '刷新状态',
+      syncModels: '同步已有模型能力',
+      syncHint:
+        '更新已添加模型的上下文和输出能力；新增模型请用原生“获取可用模型”。',
+      syncPreview: '将覆盖下列模型的本地容量设置，显示名称和其他模型设置保留。',
+      syncApply: '应用更新',
+      syncCancel: '取消',
+      syncCurrent: '没有需要更新的已知模型能力。',
+      syncDone: '已同步；已打开的编辑表单请取消后重新打开。',
+      syncConflict: '模型设置已更改，请重新获取后再确认。',
+      syncFailed: '暂时无法同步模型能力，请稍后重试。',
+      syncContext: '上下文',
+      syncOutput: '输出',
+      syncUnknown: '未设置',
       authRequired: '需要重新登录平台',
       dismiss: '关闭',
       connection: '总部连接',
@@ -99,6 +112,22 @@ window.__ModuleLoader__.load({
       failed: 'Failed to load',
       retry: 'Retry',
       refresh: 'Refresh status',
+      syncModels: 'Sync existing model capabilities',
+      syncHint:
+        'Update context and output capabilities of added models. Use native Fetch available models to add more.',
+      syncPreview:
+        'This replaces the listed local capacity settings. Display names and other model settings are kept.',
+      syncApply: 'Apply updates',
+      syncCancel: 'Cancel',
+      syncCurrent: 'No known capability changes for existing models.',
+      syncDone:
+        'Synced. Cancel and reopen any model editor that was already open.',
+      syncConflict: 'Model settings changed. Fetch again before confirming.',
+      syncFailed:
+        'Model capability sync is temporarily unavailable. Please retry.',
+      syncContext: 'Context',
+      syncOutput: 'Output',
+      syncUnknown: 'Not set',
       authRequired: 'Platform sign-in required',
       dismiss: 'Dismiss',
       connection: 'Headquarters connection',
@@ -1521,6 +1550,250 @@ window.__ModuleLoader__.load({
               ),
             ),
           'auriga-shell: main',
+        );
+        effect(
+          () =>
+            ctx.inject?.(
+              ['remote', 'remote.llm', 'remote.settings'],
+              (scope) => {
+                const remote = scope.remote;
+                if (
+                  typeof remote?.llm?.discoverModels !== 'function' ||
+                  typeof remote?.settings?.describe !== 'function' ||
+                  typeof remote?.settings?.mutate !== 'function'
+                )
+                  return;
+                let active = true;
+                scope.effect(
+                  () => () => {
+                    active = false;
+                  },
+                  'auriga-shell: model sync lifetime',
+                );
+                function ModelsSync({ provider }) {
+                  const [view, setView] = React.useState({});
+                  const operation = React.useRef({ live: true, busy: false });
+                  React.useEffect(() => {
+                    operation.current.live = true;
+                    return () => {
+                      operation.current.live = false;
+                    };
+                  }, []);
+                  if (provider.provider !== 'auriga-managed') return null;
+                  const alive = () =>
+                    operation.current.live && active && !disposed;
+                  const run = async (action) => {
+                    if (!alive() || operation.current.busy) return;
+                    operation.current.busy = true;
+                    setView((old) => ({
+                      ...old,
+                      busy: true,
+                      message: undefined,
+                    }));
+                    try {
+                      await action();
+                    } catch {
+                      if (alive()) setView({ message: 'syncFailed' });
+                    } finally {
+                      operation.current.busy = false;
+                      if (alive()) setView((old) => ({ ...old, busy: false }));
+                    }
+                  };
+                  const preview = () =>
+                    run(async () => {
+                      const found = await remote.llm.discoverModels(
+                        'llm-pi-ai',
+                        {
+                          provider: 'auriga-managed',
+                        },
+                      );
+                      if (!alive()) return;
+                      if (
+                        !found.ok ||
+                        !Array.isArray(found.value) ||
+                        found.value.length > 256
+                      )
+                        throw failure();
+                      const directory = new Map();
+                      for (const item of found.value) {
+                        if (
+                          typeof item?.id !== 'string' ||
+                          directory.has(item.id) ||
+                          ['contextWindow', 'maxTokens'].some(
+                            (key) =>
+                              item[key] !== undefined &&
+                              (!Number.isSafeInteger(item[key]) ||
+                                item[key] < 1),
+                          )
+                        )
+                          throw failure();
+                        directory.set(item.id, item);
+                      }
+                      const answer = await remote.settings.describe();
+                      if (!alive()) return;
+                      const namespace =
+                        answer.ok &&
+                        answer.value?.namespaces?.find(
+                          (row) => row.ns === 'llm-pi-ai',
+                        );
+                      const models =
+                        namespace?.value?.providers?.['auriga-managed']?.models;
+                      if (
+                        !Number.isSafeInteger(namespace?.revision) ||
+                        !Array.isArray(models) ||
+                        models.length > 256
+                      )
+                        throw failure();
+                      const changes = [];
+                      const operations = [];
+                      models.forEach((model, index) => {
+                        const candidate = directory.get(model.id);
+                        if (!candidate) return;
+                        const updated = { ...model };
+                        for (const key of ['contextWindow', 'maxTokens'])
+                          if (
+                            candidate[key] !== undefined &&
+                            candidate[key] !== model[key]
+                          ) {
+                            updated[key] = candidate[key];
+                            operations.push({
+                              op: 'set',
+                              path: [
+                                'providers',
+                                'auriga-managed',
+                                'models',
+                                String(index),
+                                key,
+                              ],
+                              value: candidate[key],
+                            });
+                          }
+                        if (
+                          updated.contextWindow !== model.contextWindow ||
+                          updated.maxTokens !== model.maxTokens
+                        )
+                          changes.push({ before: model, after: updated });
+                      });
+                      setView(
+                        changes.length
+                          ? {
+                              preview: {
+                                revision: namespace.revision,
+                                operations,
+                                changes,
+                              },
+                            }
+                          : { message: 'syncCurrent' },
+                      );
+                    });
+                  const apply = () =>
+                    run(async () => {
+                      if (!view.preview) return;
+                      const answer = await remote.settings.mutate(
+                        'llm-pi-ai',
+                        view.preview.operations,
+                        view.preview.revision,
+                      );
+                      if (!alive()) return;
+                      setView({
+                        message: answer.ok
+                          ? 'syncDone'
+                          : answer.error?.code === 'settings/conflict' ||
+                              answer.error?.code === 'SETTINGS_CONFLICT'
+                            ? 'syncConflict'
+                            : 'syncFailed',
+                      });
+                    });
+                  const capacity = (value) =>
+                    value === undefined ? t('syncUnknown') : String(value);
+                  return h(
+                    'section',
+                    {
+                      className: 'auriga-shell auriga-model-sync',
+                      'aria-label': t('syncModels'),
+                    },
+                    h('p', null, t('syncHint')),
+                    h(
+                      'button',
+                      { type: 'button', disabled: view.busy, onClick: preview },
+                      t('syncModels'),
+                    ),
+                    view.preview &&
+                      h(
+                        'div',
+                        null,
+                        h('p', null, t('syncPreview')),
+                        h(
+                          'ul',
+                          null,
+                          ...view.preview.changes.map(({ before, after }) =>
+                            h(
+                              'li',
+                              { key: before.id },
+                              before.name || before.id,
+                              ' · ',
+                              t('syncContext'),
+                              ': ',
+                              capacity(before.contextWindow),
+                              ' → ',
+                              capacity(after.contextWindow),
+                              ' · ',
+                              t('syncOutput'),
+                              ': ',
+                              capacity(before.maxTokens),
+                              ' → ',
+                              capacity(after.maxTokens),
+                            ),
+                          ),
+                        ),
+                        h(
+                          'div',
+                          { className: 'auriga-setting-actions' },
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              disabled: view.busy,
+                              onClick: apply,
+                            },
+                            t('syncApply'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              disabled: view.busy,
+                              onClick: () => setView({}),
+                            },
+                            t('syncCancel'),
+                          ),
+                        ),
+                      ),
+                    view.message &&
+                      h(
+                        'p',
+                        { role: 'status', 'aria-live': 'polite' },
+                        t(view.message),
+                      ),
+                  );
+                }
+                scope.effect(
+                  () =>
+                    ctx.slots.inject('settings.models.provider-card', () =>
+                      ctx.slots.register(
+                        {
+                          name: 'settings.models.provider-card',
+                          key: 'llm-pi-ai',
+                          locale: NS,
+                        },
+                        ModelsSync,
+                      ),
+                    ),
+                  'auriga-shell: native model sync',
+                );
+              },
+            ),
+          'auriga-shell: model sync services',
         );
         effect(
           () =>

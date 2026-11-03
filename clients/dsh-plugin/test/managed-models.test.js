@@ -180,6 +180,26 @@ test('binding and elapsed time never poll the model directory', async (t) => {
   assert.equal(f.requests, 0);
   assert.equal(f.edits, 0);
 });
+test('manual discovery uses current upstream capacity beyond bootstrap limits and preserves unknown metadata', async (t) => {
+  const f = fixture(t);
+  f.attach();
+  await f.model.ready;
+  f.directory([
+    row('auto', 4000000, 131072),
+    {
+      id: 'unknown',
+      object: 'model',
+      created: 0,
+      owned_by: 'auriga',
+    },
+  ]);
+  assert.deepEqual(await f.discover(), [
+    { id: 'auto', name: 'auto', contextWindow: 4000000, maxTokens: 131072 },
+    { id: 'unknown', name: 'unknown' },
+  ]);
+  assert.equal(f.value.providers[ID].models[0].contextWindow, 32000);
+  assert.equal(f.edits, 0);
+});
 for (const patch of [
   { baseURL: 'https://other.example.com/v1' },
   { api: 'anthropic-messages' },

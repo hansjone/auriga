@@ -62,7 +62,9 @@ export async function runNativeModels(
     readFileSync(join(metaRoot, 'model-credential.json'), 'utf8'),
   );
   const requests = [];
-  let redirect = false;
+  let redirect = false,
+    catalogContext = 24576,
+    catalogOutput = 2048;
   const receive = async (request, response) => {
     requests.push({
       path: request.url,
@@ -85,8 +87,8 @@ export async function runNativeModels(
               object: 'model',
               created: 0,
               owned_by: 'auriga',
-              context_window: 24576,
-              max_output_tokens: 2048,
+              context_window: catalogContext,
+              max_output_tokens: catalogOutput,
             },
           ],
         }),
@@ -309,6 +311,58 @@ export async function runNativeModels(
         }),
       ),
       [...models, ...candidate],
+    );
+    assert.deepEqual(describe().value.providers.personal, personalBefore);
+    // The native picker preserves old same-ID objects. The explicit capability
+    // sync uses the current authenticated directory and a normal revision CAS.
+    catalogContext = 1000000;
+    catalogOutput = 131072;
+    const updatedDirectory = await ctx.llm.remoteDiscoverModels('llm-pi-ai', {
+      provider: 'auriga-managed',
+    });
+    assert.equal(updatedDirectory[0].contextWindow, catalogContext);
+    assert.equal(updatedDirectory[0].maxTokens, catalogOutput);
+    assert.equal(
+      describe().value.providers['auriga-managed'].models[1].contextWindow,
+      24576,
+      'fetching alone never overwrites the saved same-ID model',
+    );
+    const sameIDSnapshot = describe();
+    const synchronized = sameIDSnapshot.value.providers[
+      'auriga-managed'
+    ].models.map((model) =>
+      model.id === 'added'
+        ? {
+            ...model,
+            contextWindow: updatedDirectory[0].contextWindow,
+            maxTokens: updatedDirectory[0].maxTokens,
+          }
+        : model,
+    );
+    await settings.mutate(
+      'llm-pi-ai',
+      [
+        {
+          op: 'set',
+          path: ['providers', 'auriga-managed', 'models', '1', 'contextWindow'],
+          value: catalogContext,
+        },
+        {
+          op: 'set',
+          path: ['providers', 'auriga-managed', 'models', '1', 'maxTokens'],
+          value: catalogOutput,
+        },
+      ],
+      sameIDSnapshot.revision,
+    );
+    candidate[0] = {
+      ...candidate[0],
+      contextWindow: catalogContext,
+      maxTokens: catalogOutput,
+    };
+    assert.deepEqual(
+      describe().value.providers['auriga-managed'].models,
+      synchronized,
     );
     assert.deepEqual(describe().value.providers.personal, personalBefore);
     assert.equal(typeof credentials.resolve, 'undefined');
@@ -638,6 +692,7 @@ export async function runNativeModels(
         persistedReload: true,
         legacyMigrated: true,
         capacityAndPreferences: true,
+        manualSameIDCapacitySync: true,
         managedAndPersonalWire: true,
         reservedReferenceIsolated: true,
         capturedReferenceRacesRejected: true,

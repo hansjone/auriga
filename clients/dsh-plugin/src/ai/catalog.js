@@ -34,14 +34,6 @@ export function modelDirectory(value) {
     if (item.max_output_tokens !== undefined)
       integer(item.max_output_tokens, 1);
     check(
-      item.context_window === undefined || item.context_window <= 1048576,
-      'SERVER',
-    );
-    check(
-      item.max_output_tokens === undefined || item.max_output_tokens <= 32768,
-      'SERVER',
-    );
-    check(
       item.context_window === undefined ||
         item.max_output_tokens === undefined ||
         item.max_output_tokens < item.context_window,
