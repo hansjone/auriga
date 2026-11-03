@@ -229,6 +229,13 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 			return e
 		}
 		respond(w, out)
+	case len(parts) == 3 && parts[0] == "providers" && parts[2] == "models" && r.Method == http.MethodGet:
+		out, e := b.ProviderModels(r.Context(), tenant, parts[1])
+		if e != nil {
+			rejectCatalog(w, e)
+			return nil
+		}
+		respond(w, out)
 	case parts[0] == "providers" && ((len(parts) == 1 && r.Method == http.MethodPost) || (len(parts) == 2 && r.Method == http.MethodPut)):
 		var p api.RelayProviderInput
 		if e := decode(w, r, &p); e != nil {

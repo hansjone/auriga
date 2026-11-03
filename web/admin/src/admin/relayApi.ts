@@ -47,6 +47,11 @@ export function createRelayApi(client: ApiClient) {
   return {
     providers: (signal?: AbortSignal) =>
       all<S['RelayProviderPage']>('/providers', signal),
+    providerModels: (providerId: string, signal?: AbortSignal) =>
+      client.get<S['RelayProviderModelPage']>(
+        base + '/providers/' + id(providerId) + '/models',
+        { cache: 'no-store', signal },
+      ),
     pools: (signal?: AbortSignal) => all<S['RelayPoolPage']>('/pools', signal),
     keys: (signal?: AbortSignal) =>
       all<S['RelayKeyPage']>('/virtual-keys', signal),

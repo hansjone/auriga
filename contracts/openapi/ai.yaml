@@ -4103,6 +4103,121 @@
         },
         "x-step-up-max-age-seconds": 600
       }
+    },
+    "/api/ai/v1/admin/relay/providers/{id}/models": {
+      "get": {
+        "operationId": "listRelayProviderModels",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；只返回上游真实模型 ID，不返回供应商凭据或原始响应。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayProviderModelPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "summary": "获取供应商的真实模型目录",
+        "description": "使用当前租户已保存的供应商地址及密钥向供应商读取模型目录；不接受客户端地址或密钥。失败时保留手动输入模型 ID 的能力。返回的目录不会自动创建公开模型。"
+      }
     }
   },
   "components": {
@@ -5739,6 +5854,37 @@
           }
         },
         "description": "第一步供应商配置。网络期限与并发由中转服务固定安全上限控制，不接受尚未映射的高级参数。"
+      },
+      "RelayProviderModel": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "供应商返回的真实上游模型 ID，仅管理端目录使用。"
+          }
+        }
+      },
+      "RelayProviderModelPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/RelayProviderModel"
+            }
+          }
+        }
       }
     }
   },

@@ -9,6 +9,7 @@ import { adminApi } from '../../admin/api';
 vi.mock('../../admin/relayApi', () => ({
   relayApi: {
     providers: vi.fn(),
+    providerModels: vi.fn(),
     pools: vi.fn(),
     keys: vi.fn(),
     saveProvider: vi.fn(),
@@ -201,5 +202,100 @@ it('preserves member concurrency and in-flight limits when editing a budget', as
     }),
     expect.any(AbortSignal),
   );
+  w.unmount();
+});
+
+it('fetches searchable upstream IDs, retains manual input and saves a public alias', async () => {
+  vi.mocked(relayApi.providerModels).mockResolvedValue({
+    items: [{ id: 'gpt-real' }, { id: 'other-real' }],
+  });
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w
+    .findAll('button')
+    .find((b) => b.text() === '添加模型池')!
+    .trigger('click');
+  await w
+    .findAll('button')
+    .find((b) => b.text() === '添加池路由')!
+    .trigger('click');
+  await w.get('[name="routeProvider0"]').setValue(p.id);
+  await w.get('[data-testid="fetch-provider-models-0"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.providerModels).toHaveBeenCalledWith(
+    p.id,
+    expect.any(AbortSignal),
+  );
+  expect(
+    w.findAll('datalist option').map((v) => v.attributes('value')),
+  ).toEqual(['gpt-real', 'other-real']);
+  await w.get('[name="routeModel0"]').setValue('gpt-real');
+  await w.get('[name="routeModel0"]').trigger('change');
+  expect((w.get('[name="poolId"]').element as HTMLInputElement).value).toBe(
+    'gpt-real',
+  );
+  await w.get('[name="poolId"]').setValue('deepseek-public');
+  await w.get('[name="routeModel0"]').setValue('manually-entered-real');
+  await w.get('[name="routeModel0"]').trigger('change');
+  expect(w.get('[data-testid="model-mapping"]').text()).toBe(
+    'manually-entered-real → deepseek-public',
+  );
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.savePool).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: 'deepseek-public',
+      routes: [{ providerId: p.id, model: 'manually-entered-real', weight: 1 }],
+    }),
+    expect.any(String),
+    expect.any(AbortSignal),
+  );
+  w.unmount();
+});
+it('retains manual input on catalog failure and discards late results after close', async () => {
+  let finish!: (value: { items: { id: string }[] }) => void;
+  vi.mocked(relayApi.providerModels).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w
+    .findAll('button')
+    .find((b) => b.text() === '添加模型池')!
+    .trigger('click');
+  await w
+    .findAll('button')
+    .find((b) => b.text() === '添加池路由')!
+    .trigger('click');
+  await w.get('[name="routeProvider0"]').setValue(p.id);
+  await w.get('[data-testid="fetch-provider-models-0"]').trigger('click');
+  await w
+    .findAll('button')
+    .find((b) => b.text() === '关闭编辑')!
+    .trigger('click');
+  finish({ items: [{ id: 'late-model' }] });
+  await flushPromises();
+  expect(w.text()).not.toContain('late-model');
+  vi.mocked(relayApi.providerModels).mockRejectedValue(new Error('upstream'));
+  await w
+    .findAll('button')
+    .find((b) => b.text() === '添加模型池')!
+    .trigger('click');
+  await w
+    .findAll('button')
+    .find((b) => b.text() === '添加池路由')!
+    .trigger('click');
+  await w.get('[name="routeProvider0"]').setValue(p.id);
+  await w.get('[data-testid="fetch-provider-models-0"]').trigger('click');
+  await flushPromises();
+  expect(w.text()).toContain('暂时无法获取供应商模型');
+  await w.get('[name="routeModel0"]').setValue('manual-still-works');
+  expect(
+    (w.get('[name="routeModel0"]').element as HTMLInputElement).value,
+  ).toBe('manual-still-works');
   w.unmount();
 });

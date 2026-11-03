@@ -1,6 +1,20 @@
 ﻿import { useI18n } from 'vue-i18n';
 const zh = {
   relay: '中转站',
+  fetchModels: '获取供应商模型',
+  catalogHint: '获取后可在输入框搜索并选择，也可手动填写上游模型 ID。',
+  catalogEmpty: '供应商没有返回可用模型，可继续手动填写。',
+  aliasNote:
+    '上游真实模型 ID 用于调用供应商；对外公开 ID 可自定义，成员和外部 Key 使用公开 ID。',
+  catalog_credential_missing: '请先为此供应商配置密钥。',
+  catalog_provider_disabled: '供应商已停用，请启用后再获取。',
+  catalog_unsupported: '此供应商未提供兼容的模型目录，请手动填写。',
+  catalog_upstream_unauthorized: '供应商拒绝了目录请求，请检查已配置的密钥。',
+  catalog_upstream_rate_limited: '供应商请求过于频繁，请稍后再试或手动填写。',
+  catalog_upstream_timeout: '读取供应商模型超时，请重试或手动填写。',
+  catalog_upstream_invalid_response: '供应商目录格式无法读取，请手动填写。',
+  catalog_catalog_too_large: '供应商目录超出读取上限，请手动填写。',
+  catalog_failed: '暂时无法获取供应商模型，可重试或手动填写。',
   providers: '模型与供应商',
   keys: '虚拟 Key',
   usage: '用量查询',
@@ -24,8 +38,8 @@ const zh = {
   secretNote: '仅发送本次输入的密钥，不读取或展示已有密钥。',
   pools: '模型池与自动切换',
   addPool: '添加模型池',
-  model: '上游模型名',
-  poolId: '公开模型 ID',
+  model: '上游真实模型 ID',
+  poolId: '对外公开模型 ID / 别名',
   context: '上下文 Token 上限',
   output: '输出 Token 上限',
   weight: '分配权重',
@@ -93,6 +107,28 @@ const zh = {
 };
 const en: Record<keyof typeof zh, string> = {
   relay: 'Relay',
+  fetchModels: 'Fetch provider models',
+  catalogHint:
+    'After fetching, search and select in the model input, or enter an upstream ID manually.',
+  catalogEmpty:
+    'The provider returned no available models. You can enter an ID manually.',
+  aliasNote:
+    'The upstream model ID selects the provider model. Members and external keys use your custom public model ID.',
+  catalog_credential_missing: 'Configure a credential for this provider first.',
+  catalog_provider_disabled: 'Enable this provider before fetching models.',
+  catalog_unsupported:
+    'This provider does not expose a compatible model catalog. Enter the model ID manually.',
+  catalog_upstream_unauthorized:
+    'The provider rejected the catalog request. Check its configured credential.',
+  catalog_upstream_rate_limited:
+    'The provider rate limited this request. Retry later or enter an ID manually.',
+  catalog_upstream_timeout:
+    'Provider catalog request timed out. Retry or enter an ID manually.',
+  catalog_upstream_invalid_response:
+    'The provider catalog could not be read. Enter an ID manually.',
+  catalog_catalog_too_large:
+    'The provider catalog exceeds the read limit. Enter an ID manually.',
+  catalog_failed: 'Unable to fetch models. Retry or enter an ID manually.',
   providers: 'Models and providers',
   keys: 'Virtual keys',
   usage: 'Usage',

@@ -1,5 +1,6 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { isApiError } from '@auriga/shared';
 import {
   relayApi,
   type RelayProvider,
@@ -27,6 +28,75 @@ const provider = ref<RelayProviderInput>({
 });
 const draft = ref<RelayPool>();
 const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
+const catalogs = ref<
+  Record<string, { items: string[]; loading: boolean; error: string }>
+>({});
+const catalogRequests = new Set<globalThis.AbortController>();
+let catalogEpoch = 0;
+function clearCatalogs() {
+  catalogEpoch++;
+  for (const controller of catalogRequests) controller.abort();
+  catalogRequests.clear();
+  catalogs.value = {};
+}
+async function fetchModels(providerId: string) {
+  if (
+    !providerId ||
+    catalogs.value[providerId]?.loading ||
+    !ui.can('ai.providers.read')
+  )
+    return;
+  const epoch = catalogEpoch;
+  const controller = new globalThis.AbortController();
+  catalogRequests.add(controller);
+  catalogs.value[providerId] = { items: [], loading: true, error: '' };
+  try {
+    const result = await relayApi.providerModels(providerId, controller.signal);
+    if (epoch !== catalogEpoch) return;
+    catalogs.value[providerId] = {
+      items: result.items.map((v) => v.id),
+      loading: false,
+      error: '',
+    };
+  } catch (e) {
+    if (epoch !== catalogEpoch) return;
+    const reason = isApiError(e) ? e.problem.params?.reason : undefined;
+    const key =
+      typeof reason === 'string' &&
+      [
+        'credential_missing',
+        'provider_disabled',
+        'unsupported',
+        'upstream_unauthorized',
+        'upstream_rate_limited',
+        'upstream_timeout',
+        'upstream_invalid_response',
+        'catalog_too_large',
+      ].includes(reason)
+        ? 'catalog_' + reason
+        : 'catalog_failed';
+    catalogs.value[providerId] = {
+      items: [],
+      loading: false,
+      error:
+        isApiError(e) && [401, 403].includes(e.status)
+          ? t('forbidden')
+          : t(key),
+    };
+  } finally {
+    catalogRequests.delete(controller);
+  }
+}
+function providerChanged(index: number) {
+  if (draft.value) draft.value.routes[index]!.model = '';
+}
+function modelChanged(model: string) {
+  if (draft.value && !draft.value.id && !selected.value) {
+    const proposed = model.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 128);
+    if (/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(proposed))
+      draft.value.id = proposed;
+  }
+}
 const freshPool = (): RelayPool => ({
   id: '',
   enabled: true,
@@ -52,10 +122,12 @@ async function load() {
 }
 onMounted(load);
 onBeforeUnmount(() => {
+  clearCatalogs();
   secret.value = '';
   pending.value = undefined;
 });
 function close() {
+  clearCatalogs();
   editor.value = '';
   secret.value = '';
   draft.value = undefined;
@@ -378,6 +450,7 @@ async function confirm() {
     >
       <fieldset :disabled="busy || !!pending">
         <legend>{{ t('pools') }}</legend>
+        <p>{{ t('aliasNote') }}</p>
         <label
           >{{ t('poolId')
           }}<input
@@ -422,6 +495,7 @@ async function confirm() {
               v-model="route.providerId"
               :name="'routeProvider' + index"
               required
+              @change="providerChanged(index)"
             >
               <option disabled value="">{{ t('providers') }}</option>
               <option v-for="p in providers" :key="p.id" :value="p.id">
@@ -433,9 +507,46 @@ async function confirm() {
             }}<input
               v-model="route.model"
               :name="'routeModel' + index"
+              :list="'route-model-catalog-' + index"
               required
-              maxlength="256" /></label
-          ><label
+              maxlength="256"
+              @change="modelChanged(route.model)"
+            />
+            <datalist :id="'route-model-catalog-' + index">
+              <option
+                v-for="model in catalogs[route.providerId]?.items ?? []"
+                :key="model"
+                :value="model"
+              />
+            </datalist>
+          </label>
+          <button
+            type="button"
+            :data-testid="'fetch-provider-models-' + index"
+            :disabled="!route.providerId || catalogs[route.providerId]?.loading"
+            @click="fetchModels(route.providerId)"
+          >
+            {{
+              t(catalogs[route.providerId]?.loading ? 'loading' : 'fetchModels')
+            }}
+          </button>
+          <p>{{ t('catalogHint') }}</p>
+          <p v-if="catalogs[route.providerId]?.error" role="alert">
+            {{ catalogs[route.providerId]?.error }}
+          </p>
+          <p
+            v-else-if="
+              catalogs[route.providerId] &&
+              !catalogs[route.providerId]?.loading &&
+              !catalogs[route.providerId]?.items.length
+            "
+          >
+            {{ t('catalogEmpty') }}
+          </p>
+          <p v-if="route.model && draft.id" data-testid="model-mapping">
+            {{ route.model }} → {{ draft.id }}
+          </p>
+          <label
             >{{ t('weight')
             }}<input
               v-model.number="route.weight"

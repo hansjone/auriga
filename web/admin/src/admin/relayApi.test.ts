@@ -46,8 +46,12 @@ describe('relay management transport', () => {
         }),
     );
     const api = createRelayApi(createApiClient({ fetch }));
-    await api.usage('accountId', 'member/id', 'next token');
+    await api.providerModels('provider/id');
     expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      '/api/ai/v1/admin/relay/providers/provider%2Fid/models',
+    );
+    await api.usage('accountId', 'member/id', 'next token');
+    expect(String(fetch.mock.calls[1]?.[0])).toBe(
       '/api/ai/v1/admin/relay/logs?accountId=member%2Fid&limit=50&cursor=next+token',
     );
   });

@@ -15,7 +15,7 @@ import (
 
 const relayAdminPrefix = "/api/ai/v1/admin/relay"
 
-var relayManagementPath = regexp.MustCompile(`^/(providers(?:/[a-zA-Z0-9_-]+(?:/keys)?)?|pools|virtual-keys(?:/[a-zA-Z0-9_-]+)?|logs)$`)
+var relayManagementPath = regexp.MustCompile(`^/(providers(?:/[a-zA-Z0-9_-]+(?:/(?:keys|models))?)?|pools|virtual-keys(?:/[a-zA-Z0-9_-]+)?|logs)$`)
 
 // The JWT is returned by authenticated IAM introspection on this request.
 // It is never taken from a caller Bearer header or a cached allow decision.
@@ -56,6 +56,10 @@ func (g *Gateway) proxyRelayAdmin(w http.ResponseWriter, r *http.Request, audien
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
+		fail(405, "common.validation_failed")
+		return
+	}
+	if strings.HasSuffix(suffix, "/models") && r.Method != http.MethodGet {
 		fail(405, "common.validation_failed")
 		return
 	}

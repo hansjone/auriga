@@ -337,6 +337,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/ai/v1/admin/relay/providers/{id}/models': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 获取供应商的真实模型目录
+     * @description 使用当前租户已保存的供应商地址及密钥向供应商读取模型目录；不接受客户端地址或密钥。失败时保留手动输入模型 ID 的能力。返回的目录不会自动创建公开模型。
+     */
+    get: operations['listRelayProviderModels'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -821,6 +841,13 @@ export interface components {
        */
       baseUrl: string;
       enabled: boolean;
+    };
+    RelayProviderModel: {
+      /** @description 供应商返回的真实上游模型 ID，仅管理端目录使用。 */
+      id: string;
+    };
+    RelayProviderModelPage: {
+      items: components['schemas']['RelayProviderModel'][];
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -3800,6 +3827,91 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['UsagePage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  listRelayProviderModels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；只返回上游真实模型 ID，不返回供应商凭据或原始响应。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayProviderModelPage'];
         };
       };
       /** @description common.validation_failed */
