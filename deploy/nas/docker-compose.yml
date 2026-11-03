@@ -475,7 +475,9 @@ services:
       AURIGA_AGENT_DRIVERS: docker
       AURIGA_AGENT_PANEL_KEYS_FILE: /etc/auriga/panel-keys.json
       AURIGA_AGENT_MANAGED_CA_FILE: ${AURIGA_MANAGED_PLATFORM_ORIGIN:+/etc/auriga/managed-ca/ca.crt}
-      # Trusted edge identity and internal alias come only from access.json.
+      AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN: ${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
+      AURIGA_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
+      # Access and checked managed installation supply only their necessary DNS aliases.
       AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/socket-share/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
       AURIGA_AGENT_CAPACITY_MAX_INSTANCES: ${AURIGA_AGENT_CAPACITY_MAX_INSTANCES:-1}

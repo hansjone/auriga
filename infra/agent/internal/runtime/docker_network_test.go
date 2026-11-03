@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -47,8 +48,20 @@ func TestDockerRejectsForeignNetworkConflict(t *testing.T) {
 // The fixture models actual Engine inspect/connect state: an API success alone
 // does not prove the edge is attached to the correct isolated network.
 func TestDockerTrustedEdgeNetwork(t *testing.T) {
-	for _, mode := range []string{"ok", "managed-network", "managed-wrong-alias", "foreign-network", "external-network", "foreign-member", "wrong-edge", "host-edge", "wrong-alias", "connect-failure"} {
+	for _, mode := range []string{"ok", "managed-network", "managed-wrong-alias", "native-origin", "native-missing-alias", "foreign-network", "external-network", "foreign-member", "wrong-edge", "host-edge", "wrong-alias", "connect-failure"} {
 		t.Run(mode, func(t *testing.T) {
+			platform, portal := "portal.example.com", ""
+			var managed []string
+			wantAliases := []string{platform}
+			if strings.HasPrefix(mode, "managed-") {
+				portal = "network.example.com"
+				wantAliases = append(wantAliases, portal)
+			}
+			if strings.HasPrefix(mode, "native-") {
+				platform = "auriga-instance.internal"
+				managed = []string{platform, "native.example.com"}
+				wantAliases = []string{platform, "native.example.com"}
+			}
 			connected, created, disconnected, removedNetwork, edgeStopped := false, false, false, false, false
 			base := (&fakeEngine{}).handler()
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,11 +75,7 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 						EndpointConfig struct{ Aliases []string }
 					}
 					_ = json.NewDecoder(r.Body).Decode(&body)
-					want := 1
-					if strings.HasPrefix(mode, "managed-") {
-						want = 2
-					}
-					if body.Container != "edge-id" || len(body.EndpointConfig.Aliases) != want || body.EndpointConfig.Aliases[0] != "portal.example.com" || (want == 2 && body.EndpointConfig.Aliases[1] != "network.example.com") {
+					if body.Container != "edge-id" || !reflect.DeepEqual(body.EndpointConfig.Aliases, wantAliases) {
 						t.Error("unexpected edge/alias attachment")
 					}
 					if mode == "connect-failure" {
@@ -115,13 +124,16 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 					}
 					nets := map[string]any{}
 					if connected {
-						alias := "portal.example.com"
+						alias := platform
 						if mode == "wrong-alias" {
 							alias = "other.example.com"
 						}
 						aliases := []string{alias}
 						if mode == "managed-network" {
 							aliases = append(aliases, "network.example.com")
+						}
+						if mode == "native-origin" {
+							aliases = append(aliases, "native.example.com")
 						}
 						nets["auriga-net-inst_i1"] = map[string]any{"NetworkID": "net1", "Aliases": aliases}
 					}
@@ -164,18 +176,14 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 				}
 			}))
 			defer srv.Close()
-			portal := ""
-			if strings.HasPrefix(mode, "managed-") {
-				portal = "network.example.com"
-			}
-			d, err := runtime.NewDocker(runtime.DockerConfig{Host: srv.URL, EdgeContainer: "test-edge", PlatformHost: "portal.example.com", PortalHost: portal})
+			d, err := runtime.NewDocker(runtime.DockerConfig{Host: srv.URL, EdgeContainer: "test-edge", PlatformHost: platform, PortalHost: portal, ManagedHosts: managed})
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.Policy.AllowAnyImage = true
 			s := &runtime.Spec{InstanceID: "inst_i1", Image: "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32), HomeBind: t.TempDir(), MetaBind: t.TempDir(), HostUID: 200001}
 			err = ensureDocker(t, d, context.Background(), s, nil)
-			if mode != "ok" && mode != "managed-network" {
+			if mode != "ok" && mode != "managed-network" && mode != "native-origin" {
 				if err == nil || created {
 					t.Fatalf("unsafe instance created: err=%v created=%v", err, created)
 				}
@@ -206,6 +214,9 @@ func TestDockerEdgeConfigRequiresDNSAndExplicitContainer(t *testing.T) {
 		{EdgeContainer: "test-edge", PlatformHost: "192.0.2.1"},
 		{EdgeContainer: "../test-edge", PlatformHost: "portal.example.com"},
 		{EdgeContainer: "test-edge", PlatformHost: "*.example.com"},
+		{EdgeContainer: "test-edge", PlatformHost: "internal.example.com", ManagedHosts: []string{"192.0.2.10"}},
+		{EdgeContainer: "test-edge", PlatformHost: "internal.example.com", ManagedHosts: []string{"*.example.com"}},
+		{EdgeContainer: "test-edge", PlatformHost: "internal.example.com", ManagedHosts: []string{"a.example.com", "b.example.com", "c.example.com"}},
 	} {
 		if _, err := runtime.NewDocker(cfg); err == nil {
 			t.Fatal("invalid trusted edge configuration accepted")

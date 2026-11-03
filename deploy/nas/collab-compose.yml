@@ -1,5 +1,14 @@
 # Selected only after the separate activation receipt and runtime checks pass.
 services:
+  agent:
+    environment:
+      AURIGA_AGENT_MANAGED_INSTALLATION_FILE: /etc/auriga/managed-identity.json
+    volumes:
+      - type: bind
+        source: ${AURIGA_DATA_ROOT}/config/collab-runtime/platform/managed-network.json
+        target: /etc/auriga/managed-identity.json
+        read_only: true
+        bind: { create_host_path: false }
   collab-renew:
     profiles: [collab-renew]
     image: ${AURIGA_INSTALLER_IMAGE:-${AURIGA_IMAGE_PLATFORM}}
