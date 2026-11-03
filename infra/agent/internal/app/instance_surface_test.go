@@ -8,8 +8,22 @@ import (
 
 func clearSurfaceEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"AURIGA_DEPLOYMENT_ACCESS_FILE", "AURIGA_AGENT_INSTANCE_PLATFORM_URL", "AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "AURIGA_AGENT_DOCKER_EDGE_CONTAINER"} {
+	for _, key := range []string{"AURIGA_DEPLOYMENT_ACCESS_FILE", "AURIGA_AGENT_INSTANCE_PLATFORM_URL", "AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "AURIGA_AGENT_DOCKER_EDGE_CONTAINER", "AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN", "AURIGA_AGENT_MANAGED_INSTALLATION_FILE", "AURIGA_LINKS_ALLOWED_ORIGINS"} {
 		t.Setenv(key, "")
+	}
+}
+
+func TestInstanceSurfaceRejectsUnapprovedManagedOrigin(t *testing.T) {
+	clearSurfaceEnv(t)
+	path, err := filepath.Abs(filepath.Join("../../../../contracts/deployment/fixtures", "ip-http.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AURIGA_DEPLOYMENT_ACCESS_FILE", path)
+	t.Setenv("AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN", "https://native.example.com")
+	t.Setenv("AURIGA_LINKS_ALLOWED_ORIGINS", "https://other.example.com")
+	if _, err := instanceSurfaceFromEnv(); err == nil {
+		t.Fatal("independent managed origin was not bound to the installation allowlist")
 	}
 }
 func TestInstanceSurfaceFromEnv(t *testing.T) {

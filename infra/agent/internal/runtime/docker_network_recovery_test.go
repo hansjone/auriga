@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,20 +26,22 @@ import (
 // endpoint. Only the network connect and idempotent container start may mutate
 // the Engine; creating/replacing the instance or network is always a test error.
 type edgeRecoveryFixture struct {
-	driver     *runtime.Docker
-	client     *runtime.EngineClient
-	mu         sync.Mutex
-	failure    string
-	attached   bool
-	starts     atomic.Int64
-	connects   atomic.Int64
-	probes     atomic.Int64
-	unhealthy  atomic.Bool
-	revokes    atomic.Int64
-	request    atomic.Value // Last Engine request, for scheduling-guard diagnostics.
-	startedAt  string
-	pid        int
-	healthHook func()
+	driver          *runtime.Docker
+	client          *runtime.EngineClient
+	mu              sync.Mutex
+	failure         string
+	attached        bool
+	starts          atomic.Int64
+	connects        atomic.Int64
+	probes          atomic.Int64
+	unhealthy       atomic.Bool
+	revokes         atomic.Int64
+	request         atomic.Value // Last Engine request, for scheduling-guard diagnostics.
+	startedAt       string
+	pid             int
+	healthHook      func()
+	appliedAliases  []string
+	requiredAliases []string
 }
 
 func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
@@ -102,16 +105,20 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 			}
 			networks := map[string]any{}
 			if f.attached {
-				alias, networkID := "portal.example.com", "existing-network-id"
+				alias, networkID := f.driver.PlatformHost, "existing-network-id"
 				if f.failure == "existing-alias" || f.failure == "connect-alias" {
 					alias = "other.example.com"
 				}
 				if f.failure == "connect-network" {
 					networkID = "foreign-network-id"
 				}
-				aliases := []string{alias}
-				if f.driver.PortalHost != "" && f.failure != "missing-portal-alias" {
-					aliases = append(aliases, f.driver.PortalHost)
+				aliases := append([]string(nil), f.appliedAliases...)
+				if len(aliases) == 0 {
+					aliases = []string{f.driver.PlatformHost}
+				}
+				aliases[0] = alias
+				if f.failure == "missing-portal-alias" {
+					aliases = slices.DeleteFunc(aliases, func(host string) bool { return host == f.driver.PortalHost })
 				}
 				networks["auriga-net-recovery-test"] = map[string]any{"NetworkID": networkID, "Aliases": aliases}
 			}
@@ -139,6 +146,9 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 			if f.driver.PortalHost != "" {
 				aliases = append(aliases, f.driver.PortalHost)
 			}
+			if f.requiredAliases != nil {
+				aliases = f.requiredAliases
+			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Container != "replacement-edge-id" ||
 				!reflect.DeepEqual(body.EndpointConfig.Aliases, aliases) {
 				t.Errorf("wrong recovery edge/alias: %+v %v", body, err)
@@ -148,6 +158,7 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 				return
 			}
 			f.attached = f.failure != "connect-noop"
+			f.appliedAliases = append([]string(nil), body.EndpointConfig.Aliases...)
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && r.URL.Path == "/containers/"+fixtureContainerID+"/start":
 			f.starts.Add(1)
@@ -170,6 +181,46 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 	// fixture setup, not part of the bounded Engine recovery being asserted.
 	seedDockerRecord(t, f.driver, "recovery-test", 7)
 	return f
+}
+
+func TestDockerIndependentIdentityAliasesSurviveStartAndAutomaticRecovery(t *testing.T) {
+	f := newEdgeRecoveryFixture(t, "")
+	// The app's IP access + internal model origin + independent static issuer
+	// projection supplies these two managed hosts. Only the necessary unique
+	// internal/issuer aliases may be connected, not the whole origin allowlist.
+	f.driver.PlatformHost = "auriga-instance.internal"
+	f.driver.ManagedHosts = []string{"auriga-instance.internal", "native.example.com"}
+	f.requiredAliases = []string{"auriga-instance.internal", "native.example.com"}
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	rec, _, statuses := newMaintenanceReconciler(t, f)
+	f.mu.Lock()
+	f.attached = false
+	f.appliedAliases = nil
+	f.mu.Unlock()
+	rec.RequestHealth("recovery-test")
+	guard := time.NewTimer(5 * time.Second)
+	defer guard.Stop()
+	for {
+		select {
+		case st := <-statuses:
+			if st.Error != nil {
+				t.Fatal(st)
+			}
+			if st.Ready {
+				f.mu.Lock()
+				aliases := append([]string(nil), f.appliedAliases...)
+				f.mu.Unlock()
+				if !reflect.DeepEqual(aliases, []string{"auriga-instance.internal", "native.example.com"}) || f.starts.Load() != 1 || f.connects.Load() != 2 {
+					t.Fatalf("independent issuer alias lost or original process restarted: aliases=%v starts=%d connects=%d", aliases, f.starts.Load(), f.connects.Load())
+				}
+				return
+			}
+		case <-guard.C:
+			t.Fatal("automatic recovery did not restore independent identity aliases")
+		}
+	}
 }
 
 func TestDockerHealthRejectsProcessLifetimeChange(t *testing.T) {

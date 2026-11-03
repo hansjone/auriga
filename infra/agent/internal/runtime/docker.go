@@ -34,6 +34,7 @@ type Docker struct {
 	EdgeContainer string
 	PlatformHost  string
 	PortalHost    string
+	ManagedHosts  []string
 
 	mu              sync.Mutex
 	endpoints       map[string]dockerEndpoint
@@ -52,6 +53,9 @@ type DockerConfig struct {
 	PlatformHost  string
 	// Optional trusted HTTPS portal DNS alias for managed device traffic.
 	PortalHost string
+	// Native model and identity issuance hosts projected from approved
+	// installation inputs, never instance or browser request values.
+	ManagedHosts []string
 }
 
 // NewDocker dials the Engine API.
@@ -62,6 +66,14 @@ func NewDocker(cfg DockerConfig) (*Docker, error) {
 	}
 	if cfg.PortalHost != "" {
 		if err := validateEdgeNetworkConfig(cfg.EdgeContainer, cfg.PortalHost); err != nil {
+			return nil, err
+		}
+	}
+	if len(cfg.ManagedHosts) > 2 {
+		return nil, fmt.Errorf("docker: too many managed installation hosts")
+	}
+	for _, host := range cfg.ManagedHosts {
+		if err := validateEdgeNetworkConfig(cfg.EdgeContainer, host); err != nil {
 			return nil, err
 		}
 	}
@@ -77,6 +89,7 @@ func NewDocker(cfg DockerConfig) (*Docker, error) {
 	d.Policy = normalizeDockerPolicy(cfg.Policy)
 	d.EdgeContainer, d.PlatformHost = cfg.EdgeContainer, cfg.PlatformHost
 	d.PortalHost = cfg.PortalHost
+	d.ManagedHosts = append([]string(nil), cfg.ManagedHosts...)
 	return d, nil
 }
 
