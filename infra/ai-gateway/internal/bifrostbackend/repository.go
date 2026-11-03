@@ -557,7 +557,7 @@ func (b *Backend) poolRoutes(ctx context.Context, tenant, id string) (api.RelayP
 			if e != nil {
 				return e
 			}
-			routes = append(routes, Route{ID: r.ProviderId, Kind: providerKind(cfg.Kind), URL: cfg.BaseUrl, Secret: key, Model: r.Model, Weight: r.Weight})
+			routes = append(routes, Route{ID: r.ProviderId, Kind: cfg.Kind, URL: cfg.BaseUrl, Secret: key, Model: r.Model, Weight: r.Weight})
 		}
 		return nil
 	})

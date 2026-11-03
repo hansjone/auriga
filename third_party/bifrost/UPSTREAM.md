@@ -10,6 +10,7 @@
 删除所有 plugins/framework：governance 经 configstore 引入 vectorstore/objectstore，logging 又关联 MCP/jobaccounting 等；无法满足最小引入目标。因此按任务备选方案复原 Auriga PR #265 删除前的 budget/store（`6938b4d^`），复用预算、预占、结算和用量记录，没有另造计费引擎。
 
 本地修改：
+- ProviderConfig新增默认false的PreferResponses，仅OpenAI且请求可表达时在两Chat dispatch局部选择既有Responses转换/流hook；不写跨fallback的协议偏好context。Chat独有参数及ToResponsesRequest未映射的显式类型扩展保Chat，默认配置与既有reasoning.mode行为不改。启用该选项后，保Chat时仅序列化副本使用OpenAI基类，防止custom provider alias误入通用过滤而丢prediction/web_search_options；原请求/worker/key/fallback身份保留。Auriga按原生openai启用，compatible关闭；protocol_test.go为本地新增纯测试，无对应上游文件（清单标upstream=none）。
 - Chat Completions 不再把调用方小于16的最大输出值上调到16；缺省值仍留给上游，参数名按协议适配。真实Run回归覆盖缺省、1及65536，Responses路径未改。
 - 所有保留 Go 源文件与 go.mod 都有显著的 Auriga 修改头声明；go.sum 的修改声明在相邻 go.sum.NOTICE。哈希清单在修改后重新生成。
 - MiniMax/DeepSeek 原生适配补上 custom provider alias，保证供应商 UUID 与选 Key 的回调一致；默认禁止回环目的地址，仅显式私网测试配置允许。
@@ -19,7 +20,7 @@
 - schemas 中少量 MCP 错误/联合协议数据类型仍由通用 schema 使用，因此 mcp-go 模块仍是实际编译依赖；没有 MCP server/client runtime。后续升级不能把这些残留数据类型误称为已启用 MCP。
 - go.mod/go.sum 经 GOWORK=off go mod tidy 清理，Go 工具链统一为 Auriga 的 1.27.3；版本沿用该 release 的必需依赖，不为裁剪引入框架替代包。
 
-体积口径（原始源码不含仓库外围文档；裁剪统计包含许可证与修改声明，不含本文件及 SOURCE.sha256）：原 core/framework/plugins/transports 为 2256 文件、51,665,393 字节；裁剪源码和许可证共 199 文件、3,091,486 字节（约原来的 5.98%）。
+体积口径（原始源码不含仓库外围文档；裁剪统计包含许可证与修改声明，不含本文件及 SOURCE.sha256）：原 core/framework/plugins/transports 为 2256 文件、51,665,393 字节；裁剪源码和许可证共 200 文件、3,097,865 字节（约原来的 6.00%）。
 依赖口径：原 transports `go list -deps ./bifrost-http` 1687 包（非标准库1431），裁剪 core `GOWORK=off go list -deps ./...` 364 包（非标准库143）；`go list -m all` 模块图 662 → 98 项。模块图包含依赖模块自身的声明，不能当成实际链接的模块数。
 
 升级流程：取相同 tag 归档核 SHA256，按 SOURCE.sha256 找到原文件，再做三方比对；重新测普通/流式、fallback、取消、SSRF、身份和真实 PG 预算/用量。不得直接覆盖这份裁剪树或仅更新 go.mod。

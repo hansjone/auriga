@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -47,6 +48,9 @@ func TestRunnerSameProviderModelsKeepWeightsAndFallbacks(t *testing.T) {
 			var mu sync.Mutex
 			var called []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !strings.HasSuffix(r.URL.Path, "/responses") {
+					t.Error("native OpenAI must retain Responses across models")
+				}
 				var body struct {
 					Model string `json:"model"`
 				}
@@ -62,7 +66,7 @@ func TestRunnerSameProviderModelsKeepWeightsAndFallbacks(t *testing.T) {
 					_, _ = w.Write([]byte(`{"error":{"message":"unavailable","type":"server_error"}}`))
 					return
 				}
-				_, _ = w.Write([]byte(`{"id":"reply","object":"chat.completion","created":1,"model":"second","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
+				protocolRespond(w, "second", false, true, false)
 			}))
 			defer server.Close()
 			routes := []Route{{ID: "same-provider", Kind: "openai", URL: server.URL, Secret: "fixture", Model: "first", Weight: tc.weights[0]}, {ID: "same-provider", Kind: "openai", URL: server.URL, Secret: "fixture", Model: "second", Weight: tc.weights[1]}}

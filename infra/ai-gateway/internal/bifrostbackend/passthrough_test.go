@@ -36,7 +36,9 @@ func TestRunnerDoesNotInventOrIncreaseAnOutputLimit(t *testing.T) {
 				request["max_completion_tokens"] = limit
 			}
 			raw, _ := json.Marshal(request)
-			_, err := Run(t.Context(), []Route{{ID: "provider", Kind: "openai", URL: upstream.URL, Secret: "fixture", Model: "upstream", Weight: 1}}, raw, true, func([]byte) error { return nil })
+			// Chat keeps the caller's exact small limit; protocol_test.go separately
+			// checks the SDK's pre-existing Responses minimum and absent/large limits.
+			_, err := Run(t.Context(), []Route{{ID: "provider", Kind: "openai-compatible", URL: upstream.URL, Secret: "fixture", Model: "upstream", Weight: 1}}, raw, true, func([]byte) error { return nil })
 			if err != nil {
 				t.Fatal(err)
 			}

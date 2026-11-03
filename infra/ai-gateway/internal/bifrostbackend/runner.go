@@ -52,9 +52,10 @@ func (a account) GetConfigForProvider(id schemas.ModelProvider) (*schemas.Provid
 	for _, r := range a.routes {
 		if string(id) == r.ID {
 			return &schemas.ProviderConfig{
+				PreferResponses:          strings.EqualFold(r.Kind, "openai"),
 				NetworkConfig:            schemas.NetworkConfig{BaseURL: r.URL, DefaultRequestTimeoutInSeconds: 120, MaxRetries: 0, StreamIdleTimeoutInSeconds: 30, MaxConnsPerHost: 2, AllowPrivateNetwork: a.private},
 				ConcurrencyAndBufferSize: schemas.ConcurrencyAndBufferSize{Concurrency: 1, BufferSize: 2},
-				CustomProviderConfig:     &schemas.CustomProviderConfig{BaseProviderType: schemas.ModelProvider(r.Kind)},
+				CustomProviderConfig:     &schemas.CustomProviderConfig{BaseProviderType: schemas.ModelProvider(providerKind(r.Kind))},
 			}, nil
 		}
 	}

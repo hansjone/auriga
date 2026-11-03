@@ -39,7 +39,9 @@ func TestRunnerUsesBifrostFallbackAndStreaming(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"reply","object":"chat.completion","created":1,"model":"upstream-model","choices":[{"index":0,"message":{"role":"assistant","content":"mention upstream-model unchanged"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
 	}))
 	t.Cleanup(second.Close)
-	routes := []Route{{ID: "first", Kind: "openai", URL: first.URL, Secret: "fixture-provider", Model: "primary-private-model", Weight: 1}, {ID: "second", Kind: "openai", URL: second.URL, Secret: "fixture-provider", Model: "upstream-model", Weight: 0}}
+	// This fixture deliberately implements Chat SSE; native OpenAI Responses is
+	// covered independently by protocol_test.go, including the same fallback path.
+	routes := []Route{{ID: "first", Kind: "openai-compatible", URL: first.URL, Secret: "fixture-provider", Model: "primary-private-model", Weight: 1}, {ID: "second", Kind: "openai-compatible", URL: second.URL, Secret: "fixture-provider", Model: "upstream-model", Weight: 0}}
 	for _, stream := range []bool{false, true} {
 		body, _ := json.Marshal(map[string]any{"model": "pool", "messages": []map[string]string{{"role": "user", "content": "你好"}}, "stream": stream, "max_tokens": 16, "stream_options": map[string]bool{"include_usage": true}})
 		chunks := 0
