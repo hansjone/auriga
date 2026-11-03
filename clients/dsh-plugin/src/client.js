@@ -354,6 +354,246 @@ window.__ModuleLoader__.load({
         });
       };
     }
+    // Uses only the public rc.3 Connection observables. Entry recovery never
+    // replaces the native transport or replays a lifecycle/API write.
+    function installEntryRecovery(ctx) {
+      const connection = ctx.connection;
+      if (
+        !['state', 'generation'].every(
+          (name) =>
+            typeof connection?.[name]?.getSnapshot === 'function' &&
+            typeof connection?.[name]?.subscribe === 'function',
+        )
+      ) {
+        console.warn(
+          'Auriga entry recovery unavailable: Connection observables missing',
+        );
+        return () => {};
+      }
+      let base;
+      try {
+        base = new URL(document.baseURI);
+      } catch {
+        return () => {};
+      }
+      if (
+        window.top !== window ||
+        !['http:', 'https:'].includes(base.protocol) ||
+        base.origin !== window.location.origin ||
+        base.username ||
+        base.password ||
+        base.search ||
+        base.hash ||
+        !(
+          /^\/i\/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/$/.test(
+            base.pathname,
+          ) || base.pathname === '/'
+        ) ||
+        !window.location.pathname.startsWith(base.pathname)
+      )
+        return () => {};
+      const key = 'auriga.entry-recovery:' + base.pathname;
+      let closed = false,
+        navigated = false,
+        epoch = 0,
+        attempts = 0,
+        settled = false;
+      let generation = connection.generation.getSnapshot();
+      // Timers are cancellable resources; deadlines are facts about this loss
+      // cycle and must survive document visibility and browser wake events.
+      let request, retryTimer, cycleTimer, deadline;
+      let nextProbeAt = 0;
+      const now = () => window.performance.now();
+      const cleanups = [];
+      const cancel = () => {
+        epoch++;
+        if (request) nextProbeAt = Math.max(nextProbeAt, now() + 2000);
+        request?.abort();
+        request = undefined;
+        clearTimeout(retryTimer);
+        retryTimer = undefined;
+        clearTimeout(cycleTimer);
+        cycleTimer = undefined;
+      };
+      const blocked = () => {
+        try {
+          return window.sessionStorage.getItem(key) !== null;
+        } catch {
+          return true;
+        } // no automatic navigation without the loop fence
+      };
+      const pending = () =>
+        ['connecting', 'disconnected'].includes(
+          connection.state.getSnapshot(),
+        ) && connection.generation.getSnapshot() === undefined;
+      const current = (version) =>
+        !closed &&
+        !navigated &&
+        epoch === version &&
+        pending() &&
+        deadline !== undefined &&
+        now() < deadline &&
+        !document.hidden;
+      async function probe() {
+        if (
+          closed ||
+          navigated ||
+          request ||
+          retryTimer ||
+          settled ||
+          attempts >= 3 ||
+          blocked() ||
+          !pending() ||
+          document.hidden
+        )
+          return;
+        if (deadline === undefined || now() >= deadline) {
+          settled = true;
+          cancel();
+          return;
+        }
+        if (now() < nextProbeAt) {
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined;
+            void probe();
+          }, nextProbeAt - now());
+          return;
+        }
+        const version = epoch,
+          controller = new AbortController();
+        if (cycleTimer === undefined)
+          cycleTimer = setTimeout(() => {
+            settled = true;
+            cancel();
+          }, deadline - now());
+        request = controller;
+        attempts++;
+        let abort;
+        const cancelled = new Promise((_, reject) => {
+          abort = () => reject(new Error('entry probe cancelled'));
+          controller.signal.addEventListener('abort', abort, { once: true });
+        });
+        let outcome = 'stop';
+        try {
+          outcome = await Promise.race([
+            (async () => {
+              // The existing exact health route bypasses interaction activity;
+              // probing the native document would incorrectly touch idle time.
+              const response = await fetch(
+                new URL('_auriga/health', base).href,
+                {
+                  method: 'GET',
+                  credentials: 'same-origin',
+                  redirect: 'error',
+                  cache: 'no-store',
+                  headers: { Accept: 'application/problem+json' },
+                  signal: controller.signal,
+                },
+              );
+              if ([502, 503, 504].includes(response.status)) return 'retry';
+              if (
+                response.status !== 401 ||
+                response.headers.get('X-Auriga-Instance-Entry') !==
+                  'required' ||
+                !response.headers
+                  .get('Content-Type')
+                  ?.startsWith('application/problem+json')
+              )
+                return 'stop';
+              const problem = await response.json().catch(() => null);
+              return problem?.code === 'edge.unauthorized' &&
+                problem.status === 401 &&
+                problem.detail === 'instance cookie required'
+                ? 'recover'
+                : 'stop';
+            })(),
+            cancelled,
+          ]);
+        } catch {
+          outcome = 'retry';
+        } finally {
+          controller.signal.removeEventListener('abort', abort);
+          if (request === controller) request = undefined;
+        }
+        if (!current(version)) return;
+        if (outcome === 'recover' && !controller.signal.aborted && !blocked()) {
+          navigated = true;
+          cancel();
+          // The top-level GET receives edge's fixed normal-open recovery page.
+          // That page owns the tab marker and trusted cross-origin portal hop.
+          window.location.replace(base.href);
+        } else if (outcome === 'retry' && attempts < 3) {
+          nextProbeAt = now() + 2000;
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined;
+            void probe();
+          }, 2000);
+        } else {
+          settled = true;
+          clearTimeout(cycleTimer);
+          cycleTimer = undefined;
+        }
+      }
+      const changed = () => {
+        if (closed) return;
+        const next = connection.generation.getSnapshot();
+        if (next !== generation) {
+          cancel();
+          generation = next;
+          attempts = 0;
+          settled = false;
+          deadline = undefined;
+          nextProbeAt = 0;
+        }
+        if (connection.state.getSnapshot() === 'connected' && next) {
+          cancel();
+          attempts = 0;
+          settled = false;
+          deadline = undefined;
+          nextProbeAt = 0;
+          try {
+            window.sessionStorage.removeItem(key);
+          } catch {
+            /* retain fail-closed loop fence */
+          }
+        } else if (!pending()) cancel();
+        else {
+          deadline ??= now() + 6000;
+          if (document.hidden) cancel();
+          else void probe();
+        }
+      };
+      const resume = () => {
+        if (!closed && !request) {
+          changed();
+        }
+      };
+      const stop = () => {
+        if (closed) return;
+        closed = true;
+        cancel();
+        cleanups
+          .splice(0)
+          .reverse()
+          .forEach((cleanup) => cleanup());
+      };
+      cleanups.push(
+        connection.state.subscribe(changed),
+        connection.generation.subscribe(changed),
+      );
+      for (const event of ['focus', 'online']) {
+        window.addEventListener(event, resume);
+        cleanups.push(() => window.removeEventListener(event, resume));
+      }
+      document.addEventListener('visibilitychange', changed);
+      cleanups.push(() =>
+        document.removeEventListener('visibilitychange', changed),
+      );
+      window.addEventListener('pagehide', stop);
+      cleanups.push(() => window.removeEventListener('pagehide', stop));
+      changed();
+      return stop;
+    }
     return {
       inject: ['slots', 'locale', 'theme'],
       apply(ctx) {
@@ -376,6 +616,16 @@ window.__ModuleLoader__.load({
           const cleanup = own(install());
           ctx.effect?.(() => cleanup, label);
         };
+        effect(
+          () =>
+            ctx.inject?.(['connection'], (scope) => {
+              scope.effect(
+                () => installEntryRecovery(scope),
+                'auriga-shell: entry recovery',
+              );
+            }),
+          'auriga-shell: entry connection',
+        );
         effect(
           () => ctx.locale.register(NS, { zh, en }),
           'auriga-shell: dictionaries',
