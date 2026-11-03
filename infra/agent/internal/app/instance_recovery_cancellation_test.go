@@ -48,7 +48,7 @@ func TestRuntimeObservationPropagatesCallerCancellation(t *testing.T) {
 					return
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": fixtureConfigID,
-					"State": map[string]any{"Running": true}, "Config": map[string]any{"Labels": map[string]string{
+					"State": map[string]any{"Running": true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": 42}, "Config": map[string]any{"Labels": map[string]string{
 						"auriga.generation": "1", "auriga.instance": "recovery-test", "auriga.managed": "true"}}})
 			}))
 			t.Cleanup(engine.Close)

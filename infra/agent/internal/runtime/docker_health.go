@@ -34,6 +34,10 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 	if !st.Running {
 		return st, nil
 	}
+	process, err := containerProcess(insp)
+	if err != nil {
+		return st, err
+	}
 	if d.EdgeContainer != "" {
 		n, edgeID, _, networkErr := d.inspectEdgeNetwork(ctx, id, record)
 		if networkErr != nil {
@@ -68,15 +72,6 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 	if current.ContainerID != record.ContainerID || current.Generation != record.Generation {
 		return st, fmt.Errorf("docker: execution changed during health check")
 	}
-	after, err := d.verifyContainer(ctx, record)
-	if err != nil {
-		return st, err
-	}
-	state, _ := after["State"].(map[string]any)
-	if state["Running"] != true {
-		st.Running = false
-		return st, nil
-	}
 	if d.EdgeContainer != "" {
 		n, edgeID, _, networkErr := d.inspectEdgeNetwork(ctx, id, record)
 		if networkErr != nil {
@@ -86,11 +81,28 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 			return st, nil
 		}
 	}
+	after, err := d.verifyContainer(ctx, record)
+	if err != nil {
+		return st, err
+	}
+	state, _ := after["State"].(map[string]any)
+	if state["Running"] != true {
+		st.Running = false
+		return st, nil
+	}
+	finalProcess, err := containerProcess(after)
+	if err != nil {
+		return st, err
+	}
+	if process != finalProcess {
+		return st, fmt.Errorf("docker: process changed during health check")
+	}
 	if err := ctx.Err(); err != nil {
 		return st, err
 	}
 	d.mu.Lock()
-	st.Ready = d.endpoints[id] == endpoint
+	ep := d.endpoints[id]
+	st.Ready = ep.url == endpoint && ep.process == process
 	d.mu.Unlock()
 	return st, nil
 }

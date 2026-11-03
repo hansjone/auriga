@@ -25,17 +25,20 @@ import (
 // endpoint. Only the network connect and idempotent container start may mutate
 // the Engine; creating/replacing the instance or network is always a test error.
 type edgeRecoveryFixture struct {
-	driver    *runtime.Docker
-	client    *runtime.EngineClient
-	mu        sync.Mutex
-	failure   string
-	attached  bool
-	starts    atomic.Int64
-	connects  atomic.Int64
-	probes    atomic.Int64
-	unhealthy atomic.Bool
-	revokes   atomic.Int64
-	request   atomic.Value // Last Engine request, for scheduling-guard diagnostics.
+	driver     *runtime.Docker
+	client     *runtime.EngineClient
+	mu         sync.Mutex
+	failure    string
+	attached   bool
+	starts     atomic.Int64
+	connects   atomic.Int64
+	probes     atomic.Int64
+	unhealthy  atomic.Bool
+	revokes    atomic.Int64
+	request    atomic.Value // Last Engine request, for scheduling-guard diagnostics.
+	startedAt  string
+	pid        int
+	healthHook func()
 }
 
 func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
@@ -45,13 +48,19 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 
 func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard time.Duration) *edgeRecoveryFixture {
 	t.Helper()
-	f := &edgeRecoveryFixture{failure: failure, attached: failure == "existing-alias"}
+	f := &edgeRecoveryFixture{failure: failure, attached: failure == "existing-alias", startedAt: "2026-01-01T01:02:03Z", pid: 42}
 	f.request.Store("no Engine request")
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		f.probes.Add(1)
 		body := readyBody
 		if f.unhealthy.Load() {
 			body = strings.Replace(body, `"ready":true`, `"ready":false`, 1)
+		}
+		f.mu.Lock()
+		hook := f.healthHook
+		f.mu.Unlock()
+		if hook != nil {
+			hook()
 		}
 		_, _ = w.Write([]byte(body))
 	}))
@@ -114,7 +123,7 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 			if f.failure == "instance-owner" {
 				owner = "other"
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": fixtureConfigID, "State": map[string]any{"Running": true, "StartedAt": "2026-01-01T01:02:03Z"},
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": fixtureConfigID, "State": map[string]any{"Running": true, "StartedAt": f.startedAt, "Pid": f.pid},
 				"Config":     map[string]any{"Labels": map[string]string{"auriga.managed": "true", "auriga.instance": owner, "auriga.generation": "7"}},
 				"Mounts":     []any{map[string]any{"Source": "/data/instances/recovery-test/home", "Destination": "/home/dsh", "RW": true}},
 				"HostConfig": map[string]any{"NetworkMode": "auriga-net-recovery-test", "PortBindings": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": "0"}}}},
@@ -161,6 +170,116 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 	// fixture setup, not part of the bounded Engine recovery being asserted.
 	seedDockerRecord(t, f.driver, "recovery-test", 7)
 	return f
+}
+
+func TestDockerHealthRejectsProcessLifetimeChange(t *testing.T) {
+	for _, operation := range []string{"check", "recover"} {
+		for _, change := range []string{"started-at", "pid", "both"} {
+			t.Run(operation+"/"+change, func(t *testing.T) {
+				f := newEdgeRecoveryFixture(t, "")
+				if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+					t.Fatal(err)
+				}
+				f.mu.Lock()
+				f.healthHook = func() {
+					f.mu.Lock()
+					defer f.mu.Unlock()
+					if change != "pid" {
+						f.startedAt = "2026-01-01T01:02:04Z"
+					}
+					if change != "started-at" {
+						f.pid++
+					}
+					f.unhealthy.Store(true)
+				}
+				f.mu.Unlock()
+				if operation == "check" {
+					st, err := f.driver.CheckHealth(t.Context(), "recovery-test")
+					if err == nil || st.Ready {
+						t.Fatalf("HTTP proof survived process lifetime change: %+v %v", st, err)
+					}
+				} else if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err == nil {
+					t.Fatal("recovery published old HTTP proof for a new process lifetime")
+				}
+				if _, err := f.driver.Endpoint("recovery-test"); err == nil || f.starts.Load() != 1 {
+					t.Fatal("changed process retained endpoint or recovery restarted it")
+				}
+			})
+		}
+	}
+}
+
+func TestDockerEndpointRejectsProcessChangeBetweenHealthPolls(t *testing.T) {
+	f := newEdgeRecoveryFixture(t, "")
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.pid++
+	f.mu.Unlock()
+	if _, err := f.driver.Endpoint("recovery-test"); err == nil {
+		t.Fatal("cached endpoint remained usable for a different process")
+	}
+	st, err := f.driver.CheckHealth(t.Context(), "recovery-test")
+	if err != nil || st.Ready {
+		t.Fatalf("a fresh healthy process inherited the old endpoint proof: %+v %v", st, err)
+	}
+}
+
+type processPublicationStore struct {
+	runtime.ReleaseState
+	afterSave func()
+}
+
+func (s processPublicationStore) PutExecution(record state.ExecutionRecord) error {
+	if err := s.ReleaseState.PutExecution(record); err != nil {
+		return err
+	}
+	s.afterSave()
+	return nil
+}
+
+func TestDockerRecoveryRejectsProcessChangeDuringExecutionSave(t *testing.T) {
+	f := newEdgeRecoveryFixture(t, "")
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	f.driver.Activation.Store = processPublicationStore{ReleaseState: f.driver.Activation.Store, afterSave: func() {
+		f.mu.Lock()
+		f.pid++
+		f.mu.Unlock()
+	}}
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err == nil {
+		t.Fatal("recovery published a process proof invalidated during durable save")
+	}
+	if _, err := f.driver.Endpoint("recovery-test"); err == nil {
+		t.Fatal("changed process retained its old endpoint")
+	}
+}
+
+func TestDockerHealthRejectsUnavailableProcessLifetime(t *testing.T) {
+	for _, field := range []string{"started-at", "pid"} {
+		t.Run(field, func(t *testing.T) {
+			f := newEdgeRecoveryFixture(t, "")
+			if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			if field == "started-at" {
+				f.startedAt = ""
+			} else {
+				f.pid = 0
+			}
+			f.mu.Unlock()
+			st, err := f.driver.CheckHealth(t.Context(), "recovery-test")
+			if err == nil || st.Ready {
+				t.Fatalf("unavailable process identity was accepted: %+v %v", st, err)
+			}
+			if _, err := f.driver.Endpoint("recovery-test"); err == nil {
+				t.Fatal("unavailable process retained endpoint")
+			}
+		})
+	}
 }
 
 func TestDockerMaintenanceDetectsEdgeReplacementAndPreservesHealthyBridge(t *testing.T) {

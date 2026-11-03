@@ -36,7 +36,7 @@ type Docker struct {
 	PortalHost    string
 
 	mu              sync.Mutex
-	endpoints       map[string]string
+	endpoints       map[string]dockerEndpoint
 	endpointRevoker func(string)
 }
 
@@ -87,7 +87,7 @@ func NewDockerWithClient(client *EngineClient, dataRoot string) *Docker {
 		Client:    client,
 		DataRoot:  dataRoot,
 		Policy:    policy.Default(),
-		endpoints: make(map[string]string),
+		endpoints: make(map[string]dockerEndpoint),
 	}
 }
 
@@ -368,6 +368,13 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	}
 	name := record.ContainerID
 	liveState, _ := before["State"].(map[string]any)
+	var original processLifetime
+	if liveState["Running"] == true {
+		original, err = containerProcess(before)
+		if err != nil {
+			return err
+		}
+	}
 	if record.Phase != "started" || liveState["Running"] != true {
 		if err := d.Client.ContainerStart(ctx, name); err != nil {
 			return err
@@ -380,6 +387,13 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	startedState, _ := insp["State"].(map[string]any)
 	if startedState["Running"] != true {
 		return fmt.Errorf("docker: actual container did not remain running")
+	}
+	process, err := containerProcess(insp)
+	if err != nil {
+		return err
+	}
+	if liveState["Running"] == true && original != process {
+		return fmt.Errorf("docker: process changed during recovery")
 	}
 	port, err := instancePort(insp)
 	if err != nil {
@@ -403,9 +417,29 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if finalState["Running"] != true {
 		return fmt.Errorf("docker: actual container exited before Ready")
 	}
+	finalProcess, err := containerProcess(final)
+	if err != nil {
+		return err
+	}
+	if finalProcess != process {
+		return fmt.Errorf("docker: process changed during health wait")
+	}
 	record.Phase = "started"
 	if err := d.Activation.Store.PutExecution(*record); err != nil {
 		return err
+	}
+	// Durable saving may block. Do not publish a proof for a process that was
+	// replaced while that save completed, even inside the same container.
+	published, err := d.verifyContainer(ctx, record)
+	if err != nil {
+		return err
+	}
+	publishedProcess, err := containerProcess(published)
+	if err != nil {
+		return err
+	}
+	if publishedProcess != process {
+		return fmt.Errorf("docker: process changed before endpoint publication")
 	}
 	d.mu.Lock()
 	// Saving the execution is synchronous and may outlive the Start deadline.
@@ -414,7 +448,7 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 		d.mu.Unlock()
 		return err
 	}
-	d.endpoints[id] = endpoint
+	d.endpoints[id] = dockerEndpoint{url: endpoint, process: process}
 	d.mu.Unlock()
 	return nil
 }
@@ -626,16 +660,21 @@ func (d *Docker) endpoint(ctx context.Context, id string) (Endpoint, error) {
 		return Endpoint{}, err
 	}
 	d.mu.Lock()
-	u := d.endpoints[id]
+	ep := d.endpoints[id]
 	d.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		d.revoke(id)
 		return Endpoint{}, err
 	}
-	if u == "" {
+	if ep.url == "" {
 		return Endpoint{}, fmt.Errorf("docker: no endpoint for %s", id)
 	}
-	return Endpoint{URL: u}, nil
+	process, err := containerProcess(insp)
+	if err != nil || process != ep.process {
+		d.revoke(id)
+		return Endpoint{}, fmt.Errorf("docker: endpoint process lifetime changed")
+	}
+	return Endpoint{URL: ep.url}, nil
 }
 
 func (d *Docker) List(ctx context.Context) ([]Status, error) {
