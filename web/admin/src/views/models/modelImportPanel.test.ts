@@ -46,6 +46,70 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.resetAllMocks());
+it('shows retained recommendations when returning to selection and rebuilding the preview', async () => {
+  const w = make();
+  await flushPromises();
+  await w.get('input[value="b"]').setValue(true);
+  await w.get('[data-testid="import-preview"]').trigger('click');
+  await w.get('[name="importRecommendedContext"]').setValue('1000000');
+  await w.get('[name="importRecommendedOutput"]').setValue('64000');
+  await w
+    .findAll('button')
+    .find((button) => button.text() === '返回选择')!
+    .trigger('click');
+  await w.get('[data-testid="import-preview"]').trigger('click');
+  expect(
+    (w.get('[name="importContext0"]').element as HTMLInputElement).value,
+  ).toBe('1000000');
+  expect(
+    (w.get('[name="importOutput0"]').element as HTMLInputElement).value,
+  ).toBe('64000');
+  w.unmount();
+});
+it('validates a changed model against retained recommendations before freezing a body and allows correcting the row', async () => {
+  vi.mocked(relayApi.providerModels).mockResolvedValue({
+    items: [{ id: 'b' }, { id: 'small', contextWindow: 32768 }],
+  });
+  const w = make();
+  await flushPromises();
+  await w.get('input[value="b"]').setValue(true);
+  await w.get('[data-testid="import-preview"]').trigger('click');
+  await w.get('[name="importRecommendedContext"]').setValue('1000000');
+  await w.get('[name="importRecommendedOutput"]').setValue('64000');
+  await w
+    .findAll('button')
+    .find((button) => button.text() === '返回选择')!
+    .trigger('click');
+  await w.get('input[value="b"]').setValue(false);
+  await w.get('input[value="small"]').setValue(true);
+  await w.get('[data-testid="import-preview"]').trigger('click');
+  await w.get('[name="importInputPrice"]').setValue('1');
+  await w.get('[name="importOutputPrice"]').setValue('1');
+  await w.get('[name="importConfirmed"]').setValue(true);
+  expect(
+    (w.get('[name="importOutput0"]').element as HTMLInputElement).value,
+  ).toBe('64000');
+  expect(
+    (w.get('[data-testid="import-run"]').element as HTMLButtonElement).disabled,
+  ).toBe(true);
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.createPool).not.toHaveBeenCalled();
+  expect(
+    (w.get('[name="importOutput0"]').element as HTMLInputElement).disabled,
+  ).toBe(false);
+  await w.get('[name="importOutput0"]').setValue('4096');
+  await w.get('[name="importConfirmed"]').setValue(true);
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  expect(saved).toHaveLength(1);
+  expect(saved[0]).toMatchObject({
+    contextWindow: 32768,
+    maxOutputTokens: 4096,
+    capabilities: { maxOutputTokensMode: 'manual' },
+  });
+  w.unmount();
+});
 it('persists inherited metadata and configured recommendations while treating a typed row value as an explicit override', async () => {
   vi.mocked(relayApi.providerModels).mockResolvedValue({
     items: [
@@ -159,7 +223,7 @@ it('previews independent public aliases, inherits known capabilities and leaves 
   ).toBe('8192');
   expect(
     (w.get('[name="importContext1"]').element as HTMLInputElement).value,
-  ).toBe('');
+  ).toBe('0');
   await w.get('[name="importConfirmed"]').setValue(true);
   expect(
     w.get('[data-testid="import-run"]').attributes('disabled'),

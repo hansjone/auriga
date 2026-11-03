@@ -52,6 +52,9 @@ const autoEditor = ref(false);
 const poolsReady = ref(false);
 const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
 const catalogs = ref<Record<string, CatalogState>>({});
+const catalogLoading = computed(() =>
+  Object.values(catalogs.value).some((catalog) => catalog.loading),
+);
 const catalogRequests = new Set<globalThis.AbortController>();
 let catalogEpoch = 0;
 function clearCatalogs() {
@@ -63,6 +66,8 @@ function clearCatalogs() {
 async function fetchModels(providerId: string) {
   if (
     !providerId ||
+    busy.value ||
+    pending.value ||
     catalogs.value[providerId]?.loading ||
     !ui.can('ai.providers.read')
   )
@@ -106,6 +111,12 @@ async function fetchModels(providerId: string) {
     };
   } finally {
     catalogRequests.delete(controller);
+    if (
+      epoch === catalogEpoch &&
+      !catalogLoading.value &&
+      capabilityNotice.value === t('capabilityRefreshPending')
+    )
+      capabilityNotice.value = '';
   }
 }
 function providerChanged(index: number) {
@@ -268,7 +279,11 @@ function askCredential() {
   };
 }
 function askPool() {
-  if (!draft.value) return;
+  if (!draft.value || pending.value || busy.value) return;
+  if (catalogLoading.value) {
+    capabilityNotice.value = t('capabilityRefreshPending');
+    return;
+  }
   if (draft.value.id === 'auto' && (!poolsReady.value || loading.value)) return;
   const createOnly = draft.value.id === 'auto' && !selected.value;
   const body = JSON.parse(JSON.stringify(draft.value)) as RelayPool;
@@ -353,10 +368,18 @@ function accessChanged(permissions: string[]) {
   ui.permissions.value = permissions;
 }
 async function applyCapabilities() {
+  if (pending.value || busy.value) return;
   const policy = draft.value?.capabilities;
   if (!policy?.sourceProviderId || !policy.sourceModel) return;
-  await fetchModels(policy.sourceProviderId);
-  if (draft.value?.capabilities !== policy) return;
+  const providerId = policy.sourceProviderId,
+    model = policy.sourceModel;
+  await fetchModels(providerId);
+  if (
+    draft.value?.capabilities !== policy ||
+    policy.sourceProviderId !== providerId ||
+    policy.sourceModel !== model
+  )
+    return;
   capabilityNotice.value = t(
     catalogs.value[policy.sourceProviderId]?.error
       ? 'capabilityRefreshFailed'
@@ -771,7 +794,12 @@ async function confirm() {
             required
         /></label>
         <p class="relay-wide">{{ t('priceNote') }}</p>
-        <button type="submit">{{ t('save') }}</button
+        <button
+          type="submit"
+          data-testid="save-pool"
+          :disabled="catalogLoading"
+        >
+          {{ t('save') }}</button
         ><button type="button" @click="close">{{ t('close') }}</button>
       </fieldset>
     </form>
