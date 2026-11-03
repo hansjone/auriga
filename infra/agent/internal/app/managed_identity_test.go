@@ -61,18 +61,102 @@ func TestInstanceSurfaceCombinesIPAccessInternalModelsAndIndependentIdentity(t *
 	}
 }
 
+func TestInstanceSurfaceApprovedHTTPSIPIdentityDoesNotNeedDNSAlias(t *testing.T) {
+	for _, tc := range []struct {
+		name, identity, models string
+		wantHosts              []string
+	}{
+		{"ipv4-identity", "https://192.0.2.10:8443", "https://auriga-instance.internal:18446", []string{"auriga-instance.internal"}},
+		{"ipv6-identity", "https://[2001:db8::10]:8443", "https://auriga-instance.internal:18446", []string{"auriga-instance.internal"}},
+		{"ip-models-and-identity", "https://192.0.2.10:8443", "https://192.0.2.10:8443", nil},
+		{"ip-identity-only", "https://[2001:db8::10]", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearSurfaceEnv(t)
+			path, err := filepath.Abs(filepath.Join("../../../../contracts/deployment/fixtures", "ip-http.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AURIGA_DEPLOYMENT_ACCESS_FILE", path)
+			t.Setenv("AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN", tc.models)
+			t.Setenv("AURIGA_AGENT_MANAGED_INSTALLATION_FILE", managedInstallationFixture(t, fmt.Sprintf(`{"platformOrigin":%q,"issuer":%q,"network":{}}`, tc.identity, tc.identity)))
+			t.Setenv("AURIGA_LINKS_ALLOWED_ORIGINS", strings.Join([]string{"http://192.0.2.10:8080", tc.identity, tc.models}, ","))
+			surface, err := instanceSurfaceFromEnv()
+			if err != nil {
+				t.Fatalf("approved HTTPS/IP installation blocked agent configuration: %v", err)
+			}
+			cfg := surface.dockerConfig(runtime.DockerConfig{Host: "http://127.0.0.1:1"})
+			if surface.ManagedIdentityHost != "" || cfg.PlatformHost != "auriga-instance.internal" || cfg.PortalHost != "" || !reflect.DeepEqual(cfg.ManagedHosts, tc.wantHosts) {
+				t.Fatalf("IP source changed required DNS aliases: %+v", cfg)
+			}
+			if surface.Access.PortalURL() != "http://192.0.2.10:8080" || surface.Access.Issuer() != "http://192.0.2.10:8080" {
+				t.Fatal("HTTPS/IP issuance rewrote the original HTTP/IP access")
+			}
+			if _, err := runtime.NewDocker(cfg); err != nil {
+				t.Fatalf("approved IP installation cannot construct the runtime: %v", err)
+			}
+		})
+	}
+}
+
+func TestInstanceSurfaceIdentityTrustsOnlyExactApprovedPortalWithoutExtraAllowlist(t *testing.T) {
+	for _, tc := range []struct {
+		name, origin, allowed string
+		wantOK                bool
+	}{
+		{"default-portal", "https://portal.example.com", "", true},
+		{"default-portal-unrelated-list", "https://portal.example.com", "https://relay.example.com", true},
+		{"admin-is-not-portal", "https://admin.example.com", "", false},
+		{"other-domain", "https://other.example.com", "", false},
+		{"same-host-other-port", "https://portal.example.com:8443", "", false},
+		{"portal-suffix", "https://portal.example.com.evil.test", "", false},
+		{"http-is-not-issuance", "http://portal.example.com", "http://portal.example.com", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearSurfaceEnv(t)
+			path, err := filepath.Abs(filepath.Join("../../../../contracts/deployment/fixtures", "domain-proxy.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AURIGA_DEPLOYMENT_ACCESS_FILE", path)
+			t.Setenv("AURIGA_AGENT_MANAGED_INSTALLATION_FILE", managedInstallationFixture(t, fmt.Sprintf(`{"platformOrigin":%q,"issuer":%q,"network":{}}`, tc.origin, tc.origin)))
+			t.Setenv("AURIGA_LINKS_ALLOWED_ORIGINS", tc.allowed)
+			surface, err := instanceSurfaceFromEnv()
+			if !tc.wantOK {
+				if err == nil {
+					t.Fatal("unapproved static identity origin inherited portal trust")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("original approved portal required duplicate allowlist configuration: %v", err)
+			}
+			cfg := surface.dockerConfig(runtime.DockerConfig{Host: "http://127.0.0.1:1"})
+			if surface.ManagedIdentityHost != "portal.example.com" || cfg.PortalHost != "portal.example.com" || !reflect.DeepEqual(cfg.ManagedHosts, []string{"portal.example.com"}) {
+				t.Fatalf("default issuance portal was not preserved: %+v", cfg)
+			}
+			if _, err := runtime.NewDocker(cfg); err != nil {
+				t.Fatalf("original portal installation cannot construct runtime: %v", err)
+			}
+		})
+	}
+}
+
 func TestManagedIdentityInstallationRejectsUnavailableOrUnboundSource(t *testing.T) {
 	const origin = "https://native.example.com"
 	for name, raw := range map[string]string{
-		"empty":        "",
-		"invalid":      "{",
-		"mismatch":     `{"platformOrigin":"https://native.example.com","issuer":"https://other.example.com","network":{}}`,
-		"unapproved":   `{"platformOrigin":"https://other.example.com","issuer":"https://other.example.com","network":{}}`,
-		"duplicate":    `{"platformOrigin":"https://native.example.com","platformOrigin":"https://native.example.com","issuer":"https://native.example.com","network":{}}`,
-		"credential":   `{"platformOrigin":"https://native.example.com","issuer":"https://native.example.com","network":{},"credential":"do-not-echo-this"}`,
-		"null-network": `{"platformOrigin":"https://native.example.com","issuer":"https://native.example.com","network":null}`,
-		"trailing":     `{"platformOrigin":"https://native.example.com","issuer":"https://native.example.com","network":{}} {}`,
-		"oversized":    strings.Repeat(" ", 65537),
+		"empty":         "",
+		"invalid":       "{",
+		"mismatch":      `{"platformOrigin":"https://native.example.com","issuer":"https://other.example.com","network":{}}`,
+		"unapproved":    `{"platformOrigin":"https://other.example.com","issuer":"https://other.example.com","network":{}}`,
+		"unapproved-ip": `{"platformOrigin":"https://192.0.2.10:8443","issuer":"https://192.0.2.10:8443","network":{}}`,
+		"http-ip":       `{"platformOrigin":"http://192.0.2.10:8443","issuer":"http://192.0.2.10:8443","network":{}}`,
+		"ip-mismatch":   `{"platformOrigin":"https://192.0.2.10:8443","issuer":"https://192.0.2.11:8443","network":{}}`,
+		"duplicate":     `{"platformOrigin":"https://native.example.com","platformOrigin":"https://native.example.com","issuer":"https://native.example.com","network":{}}`,
+		"credential":    `{"platformOrigin":"https://native.example.com","issuer":"https://native.example.com","network":{},"credential":"do-not-echo-this"}`,
+		"null-network":  `{"platformOrigin":"https://native.example.com","issuer":"https://native.example.com","network":null}`,
+		"trailing":      `{"platformOrigin":"https://native.example.com","issuer":"https://native.example.com","network":{}} {}`,
+		"oversized":     strings.Repeat(" ", 65537),
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := managedInstallationFixture(t, raw)
@@ -88,15 +172,23 @@ func TestManagedIdentityInstallationRejectsUnavailableOrUnboundSource(t *testing
 	}
 }
 
-func TestManagedOriginRequiresExactApprovedCanonicalDNSOrigin(t *testing.T) {
-	for _, origin := range []string{"http://native.example.com", "https://192.0.2.10", "https://native.example.com/", "https://native.example.com?", "https://native.example.com#x", "https://user@native.example.com", "https://Native.example.com", "https://native.example.com:", "https://native.example.com:0", "https://native.example.com:65536", "https://native.example.com:0443", "https://*.example.com", "https://native.example.com."} {
+func TestManagedOriginRequiresExactApprovedCanonicalHTTPSOrigin(t *testing.T) {
+	for _, origin := range []string{"http://native.example.com", "http://192.0.2.10", "https://192.0.2.10:", "https://192.0.2.10:0443", "https://192.0.2.10:65536", "https://[2001:DB8::10]", "https://[2001:db8::10]:", "https://[2001:db8::10]:0", "https://[2001:db8::10%25eth0]", "https://native.example.com/", "https://native.example.com?", "https://native.example.com#x", "https://user@native.example.com", "https://Native.example.com", "https://native.example.com:", "https://native.example.com:0", "https://native.example.com:65536", "https://native.example.com:0443", "https://*.example.com", "https://native.example.com."} {
 		if _, err := managedOriginHost(origin, origin); err == nil {
 			t.Fatal("unsafe managed origin accepted")
 		}
 	}
-	for _, origin := range []string{"https://native.example.com", "https://native.example.com:443", "https://auriga-instance.internal:18446"} {
-		if host, err := managedOriginHost(origin, origin); err != nil || host == "" {
-			t.Fatalf("approved HTTPS origin rejected: %v", err)
+	for origin, wantHost := range map[string]string{
+		"https://native.example.com":             "native.example.com",
+		"https://native.example.com:443":         "native.example.com",
+		"https://auriga-instance.internal:18446": "auriga-instance.internal",
+		"https://192.0.2.10":                     "",
+		"https://192.0.2.10:8443":                "",
+		"https://[2001:db8::10]":                 "",
+		"https://[2001:db8::10]:8443":            "",
+	} {
+		if host, err := managedOriginHost(origin, origin); err != nil || host != wantHost {
+			t.Fatalf("approved HTTPS origin host=%q, want=%q, err=%v", host, wantHost, err)
 		}
 	}
 }
