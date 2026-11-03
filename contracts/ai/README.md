@@ -5,7 +5,7 @@
 所有部署都适用，包括域名 TLS、显式内网 IP:port HTTP 前台；内部身份通道仍须节点/edge mTLS，
 同机可用经过操作系统身份验证的专有 socket。前台 HTTP 不代表允许未认证的跨主机内部调用。
 
-严格预算的中转请求尚无可信媒体输入Token上界，因此只放行文本内容；媒体、文件引用及未知内容块必须在预算准入/供应商派发前拒绝，使用既有`common.validation_failed`和`params.field=/messages`。URL长度与pool能力提示不是媒体上界，不能据此先消费再隔离超额。仅计量成员不受该严格预算条件限制。模型上下文能力须为0（未知）或至少2，不能发布1。
+严格预算的中转请求只放行内联文本、普通本地函数工具及其文本结果；媒体、文件、不透明历史、服务器取文/搜索/代码执行/MCP等工具及未知扩展须在预算准入/供应商派发前拒绝。标准函数选择和内联JSON输出schema保留，schema引用限本地片段。失败使用既有`common.validation_failed`，`params.field`指出`/messages`、`/tools`、`/tool_choice`或`/response_format`等入口。URL/请求字节和pool能力提示不能给动态输入证明上界，不能先消费再隔离超额；不能只补单个服务器工具黑名单。仅计量成员保上游媒体和服务器工具语义，不受该严格预算条件限制。模型上下文能力须为0（未知）或至少2，不能发布1。
 
 中转站成员模式可明确启用`RelayMemberEnsure/RelayKey.meteringOnly`，与显式预算治理分开：保在线身份、模型授权、吊销和用量，不设预算或流量业务限额。预算0仍禁止；流量参数0/缺省才表示不设该流量限制。仅计量位由受信端生成、持久在`BudgetAdmission.metering_only`，外部Key不能启用。管理员保存标`policyOrigin=administrator`，ensure仅更新`default`；无来源的旧记录按`legacy`保留，不能猜测是否由管理员配置。
 
