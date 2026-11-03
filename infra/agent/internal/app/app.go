@@ -249,6 +249,7 @@ func runAgent(args []string, logs io.Writer) error {
 		bridge.Sync(st)
 		statusSink(st)
 	}
+	rec.StartHealthChecks(ctx, 15*time.Second)
 
 	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot, "driver", driverName)
 	return sess.Run(ctx)

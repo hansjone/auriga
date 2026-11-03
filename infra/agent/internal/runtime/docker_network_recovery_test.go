@@ -14,22 +14,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
+	"github.com/hansjone/auriga/infra/agent/internal/state"
+	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Model an existing running instance and a replacement edge that has lost its
 // endpoint. Only the network connect and idempotent container start may mutate
 // the Engine; creating/replacing the instance or network is always a test error.
 type edgeRecoveryFixture struct {
-	driver   *runtime.Docker
-	client   *runtime.EngineClient
-	mu       sync.Mutex
-	failure  string
-	attached bool
-	starts   atomic.Int64
-	connects atomic.Int64
-	probes   atomic.Int64
-	request  atomic.Value // Last Engine request, for scheduling-guard diagnostics.
+	driver    *runtime.Docker
+	client    *runtime.EngineClient
+	mu        sync.Mutex
+	failure   string
+	attached  bool
+	starts    atomic.Int64
+	connects  atomic.Int64
+	probes    atomic.Int64
+	unhealthy atomic.Bool
+	revokes   atomic.Int64
+	request   atomic.Value // Last Engine request, for scheduling-guard diagnostics.
 }
 
 func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
@@ -43,7 +49,11 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 	f.request.Store("no Engine request")
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		f.probes.Add(1)
-		_, _ = w.Write([]byte(readyBody))
+		body := readyBody
+		if f.unhealthy.Load() {
+			body = strings.Replace(body, `"ready":true`, `"ready":false`, 1)
+		}
+		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(health.Close)
 	_, port, err := net.SplitHostPort(strings.TrimPrefix(health.URL, "http://"))
@@ -90,7 +100,11 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 				if f.failure == "connect-network" {
 					networkID = "foreign-network-id"
 				}
-				networks["auriga-net-recovery-test"] = map[string]any{"NetworkID": networkID, "Aliases": []string{alias}}
+				aliases := []string{alias}
+				if f.driver.PortalHost != "" && f.failure != "missing-portal-alias" {
+					aliases = append(aliases, f.driver.PortalHost)
+				}
+				networks["auriga-net-recovery-test"] = map[string]any{"NetworkID": networkID, "Aliases": aliases}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "replacement-edge-id", "Config": map[string]any{"Labels": map[string]string{"auriga.role": role}},
 				"State": map[string]bool{"Running": f.failure != "stopped-edge"}, "HostConfig": map[string]string{"NetworkMode": mode},
@@ -112,8 +126,12 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 				Container      string
 				EndpointConfig struct{ Aliases []string }
 			}
+			aliases := []string{"portal.example.com"}
+			if f.driver.PortalHost != "" {
+				aliases = append(aliases, f.driver.PortalHost)
+			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Container != "replacement-edge-id" ||
-				!reflect.DeepEqual(body.EndpointConfig.Aliases, []string{"portal.example.com"}) {
+				!reflect.DeepEqual(body.EndpointConfig.Aliases, aliases) {
 				t.Errorf("wrong recovery edge/alias: %+v %v", body, err)
 			}
 			if f.failure == "connect-error" {
@@ -143,6 +161,142 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 	// fixture setup, not part of the bounded Engine recovery being asserted.
 	seedDockerRecord(t, f.driver, "recovery-test", 7)
 	return f
+}
+
+func TestDockerMaintenanceDetectsEdgeReplacementAndPreservesHealthyBridge(t *testing.T) {
+	f := newEdgeRecoveryFixture(t, "")
+	f.driver.PortalHost = "public.example.com"
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	f.driver.SetEndpointRevoker(func(string) { f.revokes.Add(1) })
+	for range 2 {
+		st, err := f.driver.CheckHealth(t.Context(), "recovery-test")
+		if err != nil || !st.Ready || !st.Running {
+			t.Fatalf("healthy maintenance failed: %+v %v", st, err)
+		}
+	}
+	if f.revokes.Load() != 0 || f.connects.Load() != 1 || f.starts.Load() != 1 {
+		t.Fatal("healthy polling revoked the bridge or mutated the Engine")
+	}
+	// The old process is still running and its access token may still be valid.
+	// Topology, rather than eventual token expiry, must detect the lost edge now.
+	f.mu.Lock()
+	f.attached = false
+	f.mu.Unlock()
+	st, err := f.driver.CheckHealth(t.Context(), "recovery-test")
+	if err != nil || st.Ready || !st.Running || f.revokes.Load() == 0 {
+		t.Fatalf("replacement edge retained readiness: %+v %v", st, err)
+	}
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	st, err = f.driver.CheckHealth(t.Context(), "recovery-test")
+	if err != nil || !st.Ready || f.connects.Load() != 2 || f.starts.Load() != 1 {
+		t.Fatalf("edge was not restored without restarting original process: %+v %v", st, err)
+	}
+	f.unhealthy.Store(true)
+	st, err = f.driver.CheckHealth(t.Context(), "recovery-test")
+	if err != nil || st.Ready {
+		t.Fatalf("public health false retained Ready: %+v %v", st, err)
+	}
+}
+
+func TestDockerMaintenanceRejectsUnsafeNetworksAndMissingSecondAlias(t *testing.T) {
+	for _, failure := range []string{"foreign-member", "network-owner", "edge-owner", "missing-portal-alias"} {
+		t.Run(failure, func(t *testing.T) {
+			f := newEdgeRecoveryFixture(t, "")
+			f.driver.PortalHost = "public.example.com"
+			if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			f.failure = failure
+			f.mu.Unlock()
+			st, err := f.driver.CheckHealth(t.Context(), "recovery-test")
+			if err == nil || st.Ready || f.connects.Load() != 1 || f.starts.Load() != 1 {
+				t.Fatalf("unsafe maintenance changed network/process or reported Ready: %+v %v", st, err)
+			}
+		})
+	}
+}
+
+func TestDockerMaintenanceNaturallyRepairsReplacementEdgeThroughReleaseReconciler(t *testing.T) {
+	for _, failure := range []string{"connect-noop", "health"} {
+		t.Run(failure, func(t *testing.T) { testDockerNaturalMaintenance(t, failure) })
+	}
+}
+
+func testDockerNaturalMaintenance(t *testing.T, failure string) {
+	f := newEdgeRecoveryFixture(t, "")
+	f.driver.PortalHost = "public.example.com"
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.client.ContainerInspect(t.Context(), fixtureContainerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := dockerFixture(t, f.driver).store
+	if err := store.PutDesired(&nodev1.InstanceSpec{InstanceId: "recovery-test", Generation: 7, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutActual(state.ActualRecord{Status: &nodev1.InstanceStatus{InstanceId: "recovery-test", ObservedGeneration: 7, Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, Ready: true, StartedAt: timestamppb.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	rec := reconciler.New(store, f.driver, nil, 1)
+	rec.StartTimeout = 100 * time.Millisecond
+	t.Cleanup(rec.Close)
+	statuses := make(chan *nodev1.InstanceStatus, 64)
+	rec.Sink = func(st *nodev1.InstanceStatus) { statuses <- st }
+	f.driver.SetEndpointRevoker(func(string) { f.revokes.Add(1) })
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	rec.StartHealthChecks(ctx, 20*time.Millisecond)
+	f.mu.Lock()
+	f.attached, f.failure = false, failure
+	if failure == "health" {
+		f.failure = ""
+		f.unhealthy.Store(true)
+	}
+	f.mu.Unlock()
+	rec.RequestHealth("recovery-test")
+	waitStatus := func(ready bool) {
+		t.Helper()
+		guard := time.NewTimer(10 * time.Second)
+		defer guard.Stop()
+		for {
+			select {
+			case st := <-statuses:
+				if st.Ready == ready && (ready || st.Error != nil) {
+					if st.ObservedGeneration != 7 {
+						t.Fatal("maintenance changed execution generation", st)
+					}
+					return
+				}
+			case <-guard.C:
+				t.Fatal("real release/Engine maintenance status missing")
+			}
+		}
+	}
+	waitStatus(false)
+	if _, err := f.driver.Endpoint("recovery-test"); err == nil || f.revokes.Load() == 0 {
+		t.Fatal("failed recovery retained the old ingress endpoint")
+	}
+	f.mu.Lock()
+	f.failure = ""
+	f.unhealthy.Store(false)
+	f.mu.Unlock()
+	// No new observer hint, restart command or spec change: the independent
+	// maintenance loop must recover after the revoked target has disappeared.
+	waitStatus(true)
+	after, err := f.client.ContainerInspect(t.Context(), fixtureContainerID)
+	if err != nil || !reflect.DeepEqual(before, after) || f.starts.Load() != 1 {
+		t.Fatalf("natural repair replaced/restarted original instance: starts=%d err=%v", f.starts.Load(), err)
+	}
+	if _, err := f.driver.Endpoint("recovery-test"); err != nil {
+		t.Fatal("natural repair did not republish the verified endpoint", err)
+	}
 }
 
 func TestDockerStartRestoresReplacementEdgeWithoutRebuildingInstance(t *testing.T) {

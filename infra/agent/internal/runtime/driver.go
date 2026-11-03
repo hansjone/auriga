@@ -49,6 +49,12 @@ type Status struct {
 	Error      string
 }
 
+// HealthChecker revalidates the current execution, control network and public
+// health endpoint without starting a process or replacing its configuration.
+type HealthChecker interface {
+	CheckHealth(ctx context.Context, id string) (Status, error)
+}
+
 // Usage is resource usage for one instance.
 type Usage struct {
 	CPUMillis int64

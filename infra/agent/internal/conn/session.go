@@ -150,10 +150,14 @@ func (s *Session) ReportWake(w *nodev1.WakeSchedule) {
 	}
 }
 
-// ReportReady is accepted for observer.Reporter; ready flips travel via InstanceStatus.
+// The observer's old ID/bool is only a request to recheck the current execution.
+// Canonical readiness still travels through the serialized InstanceStatus sink.
 func (s *Session) ReportReady(instanceID string, ready bool) {
 	if s.cfg.Logger != nil {
 		s.cfg.Logger.Debug("instance ready probe", "instance", instanceID, "ready", ready)
+	}
+	if s.cfg.Reconciler != nil {
+		s.cfg.Reconciler.RequestHealth(instanceID)
 	}
 }
 
