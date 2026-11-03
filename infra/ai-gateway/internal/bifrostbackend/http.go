@@ -469,22 +469,16 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	if key.Source == "member" && validUUID(r.Header.Get("X-Auriga-Device")) {
 		device = r.Header.Get("X-Auriga-Device")
 	}
-	inputEstimate := int64(len(raw))*2 + 64
-	// Metadata is a client capability hint, never a relay context ceiling.
-	// Text bytes give a conservative tokenizer-independent estimate; media uses
-	// the known capacity when it is larger. Only the provider confirms usage.
-	inputBound := inputEstimate
-	for _, marker := range []string{"image_url", "input_audio", "video_url", "input_file", "file_data"} {
-		if bytes.Contains(raw, []byte(marker)) {
-			inputBound = max(inputBound, pool.ContextWindow)
-			break
-		}
+	inputEstimate, estimateErr := inputTokenEstimate(raw, key.Source == "member" && key.GetMeteringOnly())
+	if estimateErr != nil {
+		rejectInputAccounting(w)
+		return
 	}
 	outputEstimate := maxTokens
 	if outputEstimate == 0 {
 		outputEstimate = max(int64(1), pool.MaxOutputTokens)
 	}
-	admission := &ai.BudgetAdmission{TenantId: tenant, AccountId: key.Id, ModelId: pool.Id, ProviderId: routes[0].ID, CredentialId: routes[0].ID, Currency: "USD", PriceVersion: pool.Price.Version, InputTokenUpperBound: inputBound, MaxOutputTokens: outputEstimate, MonthlyBudgetMicros: &key.MonthlyBudgetMicros, Origin: &ai.BudgetAdmission_DeviceId{DeviceId: device}, TokenExpiresAt: timestamppb.New(expiry)}
+	admission := &ai.BudgetAdmission{TenantId: tenant, AccountId: key.Id, ModelId: pool.Id, ProviderId: routes[0].ID, CredentialId: routes[0].ID, Currency: "USD", PriceVersion: pool.Price.Version, InputTokenUpperBound: inputEstimate, MaxOutputTokens: outputEstimate, MonthlyBudgetMicros: &key.MonthlyBudgetMicros, Origin: &ai.BudgetAdmission_DeviceId{DeviceId: device}, TokenExpiresAt: timestamppb.New(expiry)}
 	if key.Source == "member" && key.GetMeteringOnly() {
 		admission.MeteringOnly = true
 		admission.MonthlyBudgetMicros = nil
@@ -521,14 +515,6 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	if !result.NoCharge {
 		finish.Estimated = true
 		finish.Usage.InputTokens = inputEstimate
-		// Remote media cannot be bounded by the bytes of its URL. Preserve the
-		// admitted input ceiling when no provider usage is available.
-		for _, marker := range []string{"image_url", "input_audio", "video_url", "input_file", "file_data"} {
-			if bytes.Contains(raw, []byte(marker)) {
-				finish.Usage.InputTokens = inputBound
-				break
-			}
-		}
 		finish.Usage.OutputTokens = min(outputEstimate, result.ObservedBytes)
 		if admission.MeteringOnly {
 			finish.Usage.OutputTokens = result.ObservedBytes

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 )
@@ -27,6 +28,24 @@ func TestPublicModelNeverInventsUnknownCapabilitiesOrClampsKnownValues(t *testin
 	known := publicModel(api.RelayPool{Id: "auto", ContextWindow: 2000000, MaxOutputTokens: 128000})
 	if known["context_window"] != int64(2000000) || known["max_output_tokens"] != int64(128000) {
 		t.Fatal("known capabilities clamped")
+	}
+	if _, ok := publicModel(api.RelayPool{Id: "legacy", ContextWindow: 1})["context_window"]; ok {
+		t.Fatal("invalid legacy context poisoned the directory")
+	}
+}
+
+func TestPoolCapabilitiesMatchCatalogConsumerLowerBound(t *testing.T) {
+	for _, tc := range []struct {
+		context, output int64
+		valid           bool
+	}{{0, 0, true}, {0, 1, true}, {1, 0, false}, {2, 0, true}, {2, 1, true}, {2, 2, false}, {-1, 0, false}, {maxInteger, 1, true}} {
+		if got := validPoolCapabilities(tc.context, tc.output); got != tc.valid {
+			t.Fatalf("capability %d/%d valid=%v", tc.context, tc.output, got)
+		}
+	}
+	pool := api.RelayPool{Id: "auto", ContextWindow: 1, Routes: []api.RelayRoute{{ProviderId: "019a0000-0000-7000-8000-000000000001", Model: "fixture", Weight: 1}}, Price: api.Price{Currency: "USD", Version: "fixture", EffectiveAt: time.Now().Add(-time.Minute), InputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}}
+	if err := (&Backend{}).SavePool(t.Context(), "tenant", pool); err != invalid {
+		t.Fatal("invalid context reached persistence")
 	}
 }
 
