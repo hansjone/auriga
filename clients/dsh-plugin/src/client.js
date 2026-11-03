@@ -476,7 +476,7 @@ window.__ModuleLoader__.load({
           request ||
           retryTimer ||
           settled ||
-          attempts >= (availability ? 5 : 3) ||
+          attempts >= (availability ? 6 : 3) ||
           blocked() ||
           !pending() ||
           document.hidden
@@ -595,13 +595,13 @@ window.__ModuleLoader__.load({
           )
             qualifiedShortReads++;
           // A missing edge is not an authentication verdict. Only three
-          // completed availability failures admit the two low-frequency reads.
+          // completed availability failures admit the three low-frequency reads.
           // Their absolute cap remains anchored to the original connection loss.
           if (!availability && attempts === 3 && qualifiedShortReads === 3) {
             availability = true;
             trace('availability_wait', 'edge_unavailable', status);
           }
-          if (attempts < (availability ? 5 : 3)) {
+          if (attempts < (availability ? 6 : 3)) {
             const delay = availability ? 10000 : 2000;
             nextProbeAt = now() + delay;
             scheduleProbe(delay);
@@ -650,7 +650,7 @@ window.__ModuleLoader__.load({
         } else if (!pending()) cancel();
         else {
           lossStartedAt ??= now();
-          deadline ??= lossStartedAt + 30000;
+          deadline ??= lossStartedAt + 60000;
           if (document.hidden) cancel();
           else void probe();
         }
