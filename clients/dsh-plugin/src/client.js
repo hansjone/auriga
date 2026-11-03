@@ -493,6 +493,7 @@ window.__ModuleLoader__.load({
           return;
         }
         const version = epoch,
+          readDeadline = Math.min(deadline, now() + 6000),
           controller = new AbortController();
         if (cycleTimer === undefined) {
           const until = deadline;
@@ -511,14 +512,11 @@ window.__ModuleLoader__.load({
           abort = () => reject(new Error('entry probe cancelled'));
           controller.signal.addEventListener('abort', abort, { once: true });
         });
-        const readTimer = setTimeout(
-          () => {
-            if (request !== controller) return;
-            trace('probe_timed_out', 'read_deadline');
-            controller.abort();
-          },
-          Math.min(6000, deadline - now()),
-        );
+        const readTimer = setTimeout(() => {
+          if (request !== controller) return;
+          trace('probe_timed_out', 'read_deadline');
+          controller.abort();
+        }, readDeadline - now());
         let outcome = 'stop';
         let status;
         try {
@@ -568,6 +566,15 @@ window.__ModuleLoader__.load({
               : 'retry';
         } finally {
           clearTimeout(readTimer);
+          // Browser timers may run after a response continuation. The deadline
+          // remains authoritative for HTTP, body and network-error completion.
+          if (now() >= readDeadline) {
+            outcome = 'stop';
+            if (!controller.signal.aborted) {
+              trace('probe_timed_out', 'read_deadline');
+              controller.abort();
+            }
+          }
           controller.signal.removeEventListener('abort', abort);
           if (request === controller) request = undefined;
         }

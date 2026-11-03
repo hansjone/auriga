@@ -568,6 +568,56 @@ test('an exact entry reply after the deadline stays inert even if browser timers
   assert.deepEqual(f.navigations, []);
 });
 
+test('HTTP and JSON completion enforce the read deadline even while timer callbacks are delayed', async (t) => {
+  for (const stage of ['http', 'json'])
+    for (const elapsed of [5999, 6000, 6500])
+      await t.test(`${stage} completed at ${elapsed}ms`, async (t) => {
+        let finish;
+        const pending = new Promise((resolve) => {
+          finish = resolve;
+        });
+        const reply = lost();
+        const problem = await reply.clone().json();
+        if (stage === 'json') reply.json = () => pending;
+        const f = await fixture(t, () => (stage === 'http' ? pending : reply));
+        f.lose();
+        await settle();
+        f.jump(elapsed); // deliberately do not dispatch the six-second timer
+        finish(stage === 'http' ? reply : problem);
+        await settle();
+        assert.deepEqual(f.navigations, elapsed < 6000 ? [base] : []);
+        assert.equal(f.calls[0].init.signal.aborted, elapsed >= 6000);
+        assert.equal(f.timers.size, 0);
+      });
+});
+
+test('late HTTP 503 or network completion cannot qualify or replace a timed-out read', async (t) => {
+  for (const outcome of ['http', 'network'])
+    await t.test(outcome, async (t) => {
+      let finish, fail;
+      const first = new Promise((resolve, reject) => {
+        finish = resolve;
+        fail = reject;
+      });
+      const f = await fixture(t, () =>
+        f.calls.length === 1 ? first : new Response('', { status: 503 }),
+      );
+      f.lose();
+      await settle();
+      f.jump(6500);
+      if (outcome === 'http') finish(new Response('', { status: 503 }));
+      else fail(new TypeError('fixture network unavailable'));
+      await settle();
+      f.event('focus');
+      f.event('online');
+      await f.advance(30000);
+      assert.equal(f.calls.length, 1);
+      assert.equal(f.calls[0].init.signal.aborted, true);
+      assert.ok(!f.logs.some((row) => row.event === 'availability_wait'));
+      assert.deepEqual(f.navigations, []);
+    });
+});
+
 test('200, 403 and unmarked or non-entry 401 stop without navigation or retries', async (t) => {
   for (const response of [
     () => new Response('', { status: 200 }),
