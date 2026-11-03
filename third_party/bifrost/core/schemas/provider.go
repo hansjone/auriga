@@ -142,6 +142,9 @@ type ResponsesNamespaceToolProvider interface {
 type ProviderConfig struct {
 	NetworkConfig            NetworkConfig            `json:"network_config"`
 	ConcurrencyAndBufferSize ConcurrencyAndBufferSize `json:"concurrency_and_buffer_size"`
+	// PreferResponses opts OpenAI chat requests into Responses when their explicit
+	// parameters can be represented. The zero value preserves Chat dispatch.
+	PreferResponses bool `json:"prefer_responses,omitempty"`
 
 	Logger                  Logger                `json:"-"`
 	ProxyConfig             *ProxyConfig          `json:"proxy_config,omitempty"`

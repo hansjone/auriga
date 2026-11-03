@@ -16,6 +16,10 @@
 
 一个公开别名可以包含同一供应商的多个不同模型。路由按“供应商 ID + 上游真实模型 ID”去重，权重选择以每条路由为单位；同供应商的其他模型也参与故障切换。完全相同的路由应合并权重，不能重复添加。
 
+供应商种类决定内部协议：`openai` 默认经 Bifrost 既有转换使用 Responses，`openai-compatible` 保持 Chat Completions，其他厂商沿原生适配。选择不按模型名特判，每次故障切换按当前供应商重新判断；对外仍只有现有 Chat 入口，回复保留公开池别名。显式 stop、seed、多候选、惩罚、logprobs、音频、prediction、web_search_options 等无法等价转换的 Chat 参数保留 Chat 路径；这不保证每个上游型号都支持这些参数。原生 OpenAI 在这条路径只给序列化输入副本标明基类，避免供应商别名误触发通用兼容过滤；路由、凭据与回退身份不变。
+
+只支持 Chat 的旧 OpenAI 型号可另配 `openai-compatible` 供应商；修改已有供应商种类会清凭据，须按正常流程重新录入。未知型号按所选协议请求，不按名称猜能力，也不在协议失败后盲目重发。SDK 原有 Responses 显式小于16的输出值规范化为16，缺省不注入输出值；legacy `user` 沿 SDK 既有转换约定，`safety_identifier` 和 `prompt_cache_key` 各自保留语义。Run 目前只解析已知参数，未知顶层 JSON 扩展没有提取到 SDK 的 `ExtraParams`；SDK 内部显式 `ExtraParams` 的转换行为保留，不能据此宣称公开入口支持任意字段透传。这批以假上游矩阵验证接线，不代表模型目录中全部型号均已真实付费验证。
+
 主密钥经 HKDF 独立派生签名键和加密键；虚拟 Key 使用 HMAC，数据库不存明文。供应商凭据与管理幂等响应使用 AES-GCM，密文带格式版本1，租户/记录 ID 为 AAD。外发 user 使用 HMAC 匿名标识。修改供应商根地址或种类会清除原凭据，必须重新录入。管理 POST 必须 Idempotency-Key，同租户同键不同内容409；崩溃后的未完成声明保持阻塞，避免重复签发。五个独立文件秘密由部署工具首次生成并拒绝隐式旋转。
 
 PostgreSQL 独立 bifrost 数据库，迁移 owner 与运行账号/口令分离，表强制租户 RLS。用量复用原有账本和 outbox，不保存提示词正文。新成员默认 `meteringOnly=true`：保每次在线身份、模型权限与吊销检查，保幂等和派发CAS，按上游确认用量记账；不预占金额、不设RPM/并发/在途Token业务限制。`BudgetAdmission.metering_only`随原持久化protobuf保存，重启不会把估计值误当上限。

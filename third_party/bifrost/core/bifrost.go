@@ -3203,7 +3203,16 @@ func toolSchemaPolicy(caps schemas.ModelCaps) providerUtils.ToolSchemaPolicy {
 }
 
 func prepareChatRequest(ctx *schemas.BifrostContext, config *schemas.ProviderConfig, provider schemas.ModelProvider, r *schemas.BifrostChatRequest) *schemas.BifrostChatRequest {
-	return normalizeChatToolSchemas(ctx, provider, promptCacheChatRequest(ctx, config, provider, r))
+	r = normalizeChatToolSchemas(ctx, provider, promptCacheChatRequest(ctx, config, provider, r))
+	if r != nil && config != nil && config.PreferResponses && schemas.ResolveBaseProvider(ctx, provider) == schemas.OpenAI {
+		// The provider/key routing identity stays on the original request. Only
+		// serialization needs the native base: an alias would take OpenAI's generic
+		// compatibility filter and discard Chat-only prediction/search parameters.
+		cp := *r
+		cp.Provider = schemas.OpenAI
+		return &cp
+	}
+	return r
 }
 
 func promptCacheChatRequest(ctx *schemas.BifrostContext, config *schemas.ProviderConfig, provider schemas.ModelProvider, r *schemas.BifrostChatRequest) *schemas.BifrostChatRequest {
@@ -3273,11 +3282,42 @@ func injectedMCPInstructions(ctx *schemas.BifrostContext) *string {
 	return instructions
 }
 
+// preferResponsesForChat is a per-attempt preference, never a context signal:
+// a fallback provider must choose its own protocol from the original chat input.
+func preferResponsesForChat(ctx *schemas.BifrostContext, provider schemas.Provider, config *schemas.ProviderConfig, req *schemas.BifrostChatRequest) bool {
+	if config == nil || !config.PreferResponses || req == nil || schemas.ResolveBaseProvider(ctx, provider.GetProviderKey()) != schemas.OpenAI {
+		return false
+	}
+	if useRawBody, _ := ctx.Value(schemas.BifrostContextKeyUseRawRequestBody).(bool); useRawBody {
+		return false
+	}
+	p := req.Params
+	if p == nil {
+		return true
+	}
+	if len(chatParamsWithoutResponsesEquivalent(p)) > 0 {
+		return false
+	}
+	// These typed extensions are not copied by ToResponsesRequest. Keep them on
+	// Chat rather than silently discarding them merely because of the preference.
+	if p.TopK != nil || p.Speed != nil || p.InferenceGeo != nil || len(p.MCPServers) > 0 || p.Container != nil || p.CacheControl != nil || p.TaskBudget != nil || len(p.ContextManagement) > 0 || p.IncludeServerSideToolInvocations != nil {
+		return false
+	}
+	if p.Reasoning != nil && p.Reasoning.Display != nil {
+		return false
+	}
+	if p.ResponseFormat != nil && schemas.ResponsesTextConfigFormatFromChatResponseFormat(p.ResponseFormat) == nil {
+		return false
+	}
+	return true
+}
+
 func (bifrost *Bifrost) dispatchChat(ctx *schemas.BifrostContext, provider schemas.Provider, config *schemas.ProviderConfig, key schemas.Key, chatRequest, original *schemas.BifrostChatRequest) (*schemas.BifrostChatResponse, *schemas.BifrostError) {
 	if bifrostError := routeChatReasoningMode(ctx, provider, chatRequest); bifrostError != nil {
 		return nil, bifrostError
 	}
-	if changeType, ok := ctx.Value(schemas.BifrostContextKeyChangeRequestType).(schemas.RequestType); ok && changeType == schemas.ResponsesRequest {
+	changeType, _ := ctx.Value(schemas.BifrostContextKeyChangeRequestType).(schemas.RequestType)
+	if changeType == schemas.ResponsesRequest || preferResponsesForChat(ctx, provider, config, chatRequest) {
 		responsesRequest := chatRequest.ToResponsesRequest()
 		if responsesRequest != nil {
 			responsesRequest, bifrostError := prepareResponsesRequest(ctx, config, provider, key, responsesRequest)
@@ -3308,7 +3348,8 @@ func (bifrost *Bifrost) dispatchChatStream(ctx *schemas.BifrostContext, provider
 	if bifrostError := routeChatReasoningMode(ctx, provider, chatRequest); bifrostError != nil {
 		return nil, bifrostError
 	}
-	if changeType, ok := ctx.Value(schemas.BifrostContextKeyChangeRequestType).(schemas.RequestType); ok && changeType == schemas.ResponsesRequest {
+	changeType, _ := ctx.Value(schemas.BifrostContextKeyChangeRequestType).(schemas.RequestType)
+	if changeType == schemas.ResponsesRequest || preferResponsesForChat(ctx, provider, config, chatRequest) {
 		responsesRequest := chatRequest.ToResponsesRequest()
 		if responsesRequest != nil {
 			responsesRequest, bifrostError := prepareResponsesRequest(ctx, config, provider, key, responsesRequest)
