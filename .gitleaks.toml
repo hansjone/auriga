@@ -17,6 +17,32 @@ paths = [
   '''(^|[/\\])clients/dsh-plugin/test/'''
 ]
 
+# The vendor provenance manifest contains checksums, not credentials. Match the
+# complete manifest line AND its exact path; other content stays scanned.
+[[allowlists]]
+description = "Bifrost provenance checksum records"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|[/\\])third_party/bifrost/SOURCE\.sha256$''']
+regexTarget = "line"
+regexes = ['''^[\r\n]*[a-f0-9]{64}  [A-Za-z0-9_./-]+  upstream=[a-f0-9]{64}[\r\n]*$''']
+
+[[allowlists]]
+description = "Standard RFC1918 ranges in Bifrost private-address rejection"
+targetRules = ["private-ipv4"]
+condition = "AND"
+paths = ['''(^|[/\\])third_party/bifrost/core/network/utils\.go$''']
+regexTarget = "line"
+regexes = ['''^[\r\n]*[ \t]*"(?:10\.0\.0\.0/8|172\.16\.0\.0/12|192\.168\.0\.0/16)",[ \t]*[\r\n]*$''']
+
+[[allowlists]]
+description = "One synthetic private address in egress rejection fixtures"
+targetRules = ["private-ipv4"]
+condition = "AND"
+paths = ['''(^|[/\\])infra/egress/internal/proxy/target_test\.go$''']
+regexTarget = "secret"
+regexes = ['''^10\.0\.0\.1$''']
+
 [[rules]]
 id = "private-ipv4"
 description = "RFC 1918 addresses must not appear in the public repository"
