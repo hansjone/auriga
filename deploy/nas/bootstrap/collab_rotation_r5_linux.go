@@ -20,8 +20,14 @@ func nasRotationHistoricalBinding(old, expected nasRotationBinding) (nasRotation
 }
 
 func nasRotationReusable(p nasRotationPayload, now time.Time, mature bool) bool {
+	// Weekly requests share this archive but may be issued days from now.
+	// A single prepare must select a request that is publishable now.
+	issued, e := time.Parse(time.RFC3339, p.Issued)
+	if e != nil || now.Before(issued) {
+		return false
+	}
 	expiry, e := time.Parse(time.RFC3339, p.Until)
-	if e != nil || expiry.Sub(now) < 18*time.Hour {
+	if e != nil || expiry.Sub(issued) > 24*time.Hour || expiry.Sub(now) < 18*time.Hour {
 		return false
 	}
 	for _, k := range p.Keys {

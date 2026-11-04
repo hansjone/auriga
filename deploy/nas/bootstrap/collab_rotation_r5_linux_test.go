@@ -58,7 +58,7 @@ func TestNASRotationR5PrepareSelectsTenBeforeNineAndReplacesStale(t *testing.T) 
 
 func TestNASRotationR5RequestFreshnessAndNumericSelection(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	p := nasRotationPayload{Until: now.Add(18 * time.Hour).Format(time.RFC3339)}
+	p := nasRotationPayload{Issued: now.Format(time.RFC3339), Until: now.Add(18 * time.Hour).Format(time.RFC3339)}
 	if !nasRotationReusable(p, now, false) {
 		t.Fatal("18h reserve refused")
 	}

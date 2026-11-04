@@ -74,7 +74,7 @@ sh deploy-nas/scripts/schedule-collab-renewal.sh
 
 `collab-renew` 使用现有安装器镜像、无网络、只读数据根，专用 operations 与原 state 目录可写。它每小时检查一次。已导入预签队列时，到点复用生产 Java publish/install，按原容器定义只重建 collab/network，使新配置挂载生效，不启动 PG 或其余控制服务。业务私钥只在 NAS，原根只在离线设施。默认业务钥 7 天，到期前 48h 准备 next；新 next 最早在计划首发 36h 后转 active，给小时调度留 1h 余量，真正首发成熟仍由 PG 强制。停机超出计划余量时，不跳过不成熟门禁，告警并由运营者重新排队。
 
-没有队列时巡检只准备单份请求，并在清单或业务钥不足 6h 时告警。单份请求只在剩余至少 18h 时复用，publish 要求至少剩余 12h；过旧请求需要重新 prepare/根签，不会把旧签名当作续期。`stop.sh` 先暂停调度，`start.sh` 正常启动后恢复；`start.sh --network-offline` 明确只启动核心服务并暂停消息调度。也可用 `rotate-collab-keys.sh pause|resume` 控制；不删除历史或改变有效期。
+没有队列时巡检只准备单份请求，并在清单或业务钥不足 6h 时告警。单份请求只在已到签发时刻、清单期限不超过 24h 且剩余至少 18h 时复用，原有 next 成熟检查仍保留；未来周队列候选原样保留，但不能遮挡当前单份准备。没有适用候选时，以当前发布历史生成高于全部已分配请求版本的新请求。publish 要求至少剩余 12h；过旧请求需要重新 prepare/根签，不会把旧签名当作续期。`stop.sh` 先暂停调度，`start.sh` 正常启动后恢复；`start.sh --network-offline` 明确只启动核心服务并暂停消息调度。也可用 `rotate-collab-keys.sh pause|resume` 控制；不删除历史或改变有效期。
 
 ## 每周一次离线批签（默认 14 份）
 
