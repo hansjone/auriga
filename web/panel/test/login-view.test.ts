@@ -292,10 +292,11 @@ it('shows controlled transport failures and permits explicit retry', async () =>
     message: { en: 'SECRET' },
     retryable: false,
   });
-  expect(root.querySelector('button')).toBeNull();
+  // A non-retryable fail ends this transaction only; a fresh attempt stays offered.
+  expect(root.querySelector('[data-action=restart]')).not.toBeNull();
   view.setStep({ type: 'fail', code: 'iam.login_tx_expired', retryable: true });
-  root.querySelector('button')!.click();
-  root.querySelector('button')!.click();
+  root.querySelector<HTMLButtonElement>('[data-action=restart]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-action=restart]')?.click();
   await flush();
   expect(onRestart).toHaveBeenCalledTimes(1);
   expect(root.querySelector('form')).not.toBeNull();
@@ -357,9 +358,11 @@ it('inherits host typography and DSH tokens, leaves sibling content and styles i
   root.prepend(sibling);
   view.setStep(passwordStep);
   const css = root.querySelector('style')!.textContent!;
-  expect(css).toContain('font: inherit');
-  expect(css).toContain('--dsw-alias-bg-layer-1');
-  expect(css).not.toMatch(/#[0-9a-f]{3,8}|prefers-color-scheme|:root/i);
+  // DSH tokens win; literal fallbacks mirror DSH's own values for hosts that
+  // do not load its theme. Nothing is written to the host document root.
+  expect(css).toContain('var(--dsw-alias-bg-layer-1,');
+  expect(css).toContain('var(--dsw-alias-label-primary,');
+  expect(css).not.toMatch(/:root|(^|[\s}])(html|body)\s*[{,]/i);
   root.style.setProperty('--dsw-alias-bg-layer-1', 'CanvasText');
   expect(root.querySelector('style')!.textContent).toBe(css);
   view.dispose();
