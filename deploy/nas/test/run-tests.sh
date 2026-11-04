@@ -282,8 +282,9 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
     else fail_msg "source_authority_override_$1" "override or explicit zero lost"; fi
     if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
       && command -v python3 >/dev/null 2>&1; then
-      if AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2 \
-        docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" config --format json >"$TMP/source-compose.json" \
+      if (load_nas_access_env "$DATA/config/materials/access.env"
+        AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2 \
+          docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" config --format json) >"$TMP/source-compose.json" \
         && python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["services"]["platform"]["environment"]; assert str(e["AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS"]) == sys.argv[2]; assert str(e["AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS"]) == sys.argv[3]' "$TMP/source-compose.json" "$1" "$2"; then
         pass "source_authority_compose_$1"
       else fail_msg "source_authority_compose_$1" "normalized override lost"; fi
