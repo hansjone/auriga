@@ -17,6 +17,7 @@ import {
 import ActionConfirm from '../../admin/ActionConfirm.vue';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
+import { useRelayWriteIntent, type RelayWriteAction } from './relayWriteIntent';
 import './modelUsage.css';
 import './relayManagement.css';
 import ModelImportPanel from './ModelImportPanel.vue';
@@ -27,7 +28,6 @@ import {
   validCapabilityPolicy,
   type CatalogState,
 } from './poolCapabilities';
-const requestKey = ref('');
 const importProvider = ref(''),
   poolSearch = ref(''),
   capabilityNotice = ref('');
@@ -35,6 +35,8 @@ const importSession = ref(0),
   importRunning = ref(false);
 const { t } = useRelayI18n();
 const ui = useRelayUi(t);
+const writeIntent = useRelayWriteIntent(ui);
+const { unresolved } = writeIntent;
 const { loading, busy, error, notice } = ui;
 const providers = shallowRef<RelayProvider[]>([]),
   pools = shallowRef<RelayPool[]>([]);
@@ -50,7 +52,15 @@ const provider = ref<RelayProviderInput>({
 const draft = ref<RelayPool>();
 const autoEditor = ref(false);
 const poolsReady = ref(false);
-const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
+const pending = shallowRef<RelayWriteAction>();
+function canPrepare() {
+  if (busy.value || pending.value) return false;
+  if (unresolved.value) {
+    error.value = t('writeUncertain');
+    return false;
+  }
+  return true;
+}
 const catalogs = ref<Record<string, CatalogState>>({});
 const catalogLoading = computed(() =>
   Object.values(catalogs.value).some((catalog) => catalog.loading),
@@ -151,7 +161,7 @@ const freshPool = (): RelayPool => ({
 });
 async function load() {
   poolsReady.value = false;
-  if (draft.value?.id === 'auto') {
+  if (draft.value?.id === 'auto' && !unresolved.value) {
     close();
     pending.value = undefined;
   }
@@ -171,6 +181,7 @@ onBeforeUnmount(() => {
   pending.value = undefined;
 });
 function close() {
+  writeIntent.reset();
   autoEditor.value = false;
   importProvider.value = '';
   importRunning.value = false;
@@ -202,7 +213,7 @@ watch(
   },
 );
 function editProvider(row?: RelayProvider) {
-  requestKey.value = globalThis.crypto.randomUUID();
+  if (!canPrepare()) return;
   close();
   selected.value = row?.id ?? '';
   provider.value = row
@@ -211,8 +222,8 @@ function editProvider(row?: RelayProvider) {
   editor.value = 'provider';
 }
 function editPool(row?: RelayPool) {
+  if (!canPrepare()) return;
   if (row?.id === 'auto' && (!poolsReady.value || loading.value)) return;
-  requestKey.value = globalThis.crypto.randomUUID();
   close();
   selected.value = row?.id ?? '';
   draft.value = row ? globalThis.structuredClone(row) : freshPool();
@@ -225,6 +236,7 @@ function editAutoPool() {
     loading.value ||
     busy.value ||
     pending.value ||
+    unresolved.value ||
     !ui.can('ai.providers.write')
   )
     return;
@@ -233,53 +245,47 @@ function editAutoPool() {
   draft.value!.id = 'auto';
 }
 function editCredential(row: RelayProvider) {
-  requestKey.value = globalThis.crypto.randomUUID();
+  if (!canPrepare()) return;
   close();
   selected.value = row.id;
   provider.value = { ...row.configuration };
   editor.value = 'credential';
 }
 function askProvider() {
+  if (!canPrepare()) return;
   const body = { ...provider.value };
   if (!body.name.trim() || body.name !== body.name.trim()) {
     error.value = t('invalid');
     return;
   }
-  const id = selected.value,
-    key = requestKey.value;
-  pending.value = {
-    message: t('confirmSave', { name: body.name }),
-    run: () =>
-      ui.write(
-        'ai.providers.write',
-        () => relayApi.saveProvider(id, body, key, ui.signal),
-        close,
-        load,
-      ),
-  };
+  const id = selected.value;
+  pending.value = writeIntent.createAction(
+    'ai.providers.write',
+    t('confirmSave', { name: body.name }),
+    (key) => relayApi.saveProvider(id, body, key, ui.signal),
+    close,
+    load,
+  );
 }
 function askCredential() {
+  if (!canPrepare()) return;
   if (!secret.value.trim()) {
     error.value = t('invalid');
     return;
   }
   const value = secret.value,
-    id = selected.value,
-    key = requestKey.value;
+    id = selected.value;
   secret.value = '';
-  pending.value = {
-    message: t('confirmSecret', { name: provider.value.name }),
-    run: () =>
-      ui.write(
-        'ai.credentials.rotate',
-        () => relayApi.credential(id, value, key, ui.signal),
-        close,
-        load,
-      ),
-  };
+  pending.value = writeIntent.createAction(
+    'ai.credentials.rotate',
+    t('confirmSecret', { name: provider.value.name }),
+    (key) => relayApi.credential(id, value, key, ui.signal),
+    close,
+    load,
+  );
 }
 function askPool() {
-  if (!draft.value || pending.value || busy.value) return;
+  if (!draft.value || !canPrepare()) return;
   if (catalogLoading.value) {
     capabilityNotice.value = t('capabilityRefreshPending');
     return;
@@ -330,20 +336,16 @@ function askPool() {
     error.value = t('invalid');
     return;
   }
-  const key = requestKey.value;
-  pending.value = {
-    message: t('confirmSave', { name: body.id }),
-    run: () =>
-      ui.write(
-        'ai.providers.write',
-        () =>
-          createOnly
-            ? relayApi.createPool(body, key, ui.signal)
-            : relayApi.savePool(body, key, ui.signal),
-        close,
-        load,
-      ),
-  };
+  pending.value = writeIntent.createAction(
+    'ai.providers.write',
+    t('confirmSave', { name: body.id }),
+    (key) =>
+      createOnly
+        ? relayApi.createPool(body, key, ui.signal)
+        : relayApi.savePool(body, key, ui.signal),
+    close,
+    load,
+  );
 }
 const visiblePools = computed(() => {
   const query = poolSearch.value.toLowerCase();
@@ -359,7 +361,7 @@ const visiblePools = computed(() => {
   );
 });
 function openImport(row: RelayProvider) {
-  if (importRunning.value) return;
+  if (importRunning.value || !canPrepare()) return;
   close();
   importSession.value++;
   importProvider.value = row.id;
@@ -407,12 +409,32 @@ async function confirm() {
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
+    <div
+      v-if="unresolved"
+      class="relay-hint"
+      role="status"
+      data-testid="relay-write-uncertain"
+    >
+      <p>{{ t('writeUncertain') }}</p>
+      <button
+        type="button"
+        data-testid="retry-relay-write"
+        :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+        @click="pending = unresolved"
+      >
+        {{ t('retryOriginalWrite') }}
+      </button>
+    </div>
     <p>{{ t('providersIntro') }}</p>
     <div class="usage-filters">
       <button
         data-testid="add-provider"
         :disabled="
-          loading || busy || !!pending || !ui.can('ai.providers.write')
+          loading ||
+          busy ||
+          !!pending ||
+          !!unresolved ||
+          !ui.can('ai.providers.write')
         "
         @click="editProvider()"
       >
@@ -420,7 +442,11 @@ async function confirm() {
       ><button
         data-testid="add-pool"
         :disabled="
-          loading || busy || !!pending || !ui.can('ai.providers.write')
+          loading ||
+          busy ||
+          !!pending ||
+          !!unresolved ||
+          !ui.can('ai.providers.write')
         "
         @click="editPool()"
       >
@@ -458,6 +484,7 @@ async function confirm() {
                   busy ||
                   importRunning ||
                   !!pending ||
+                  !!unresolved ||
                   !ui.can('ai.providers.write') ||
                   !row.hasCredential ||
                   !row.configuration.enabled
@@ -468,13 +495,21 @@ async function confirm() {
               </button>
               <button
                 data-testid="edit-provider"
-                :disabled="busy || !!pending || !ui.can('ai.providers.write')"
+                :disabled="
+                  busy ||
+                  !!pending ||
+                  !!unresolved ||
+                  !ui.can('ai.providers.write')
+                "
                 @click="editProvider(row)"
               >
                 {{ t('edit') }}</button
               ><button
                 :disabled="
-                  busy || !!pending || !ui.can('ai.credentials.rotate')
+                  busy ||
+                  !!pending ||
+                  !!unresolved ||
+                  !ui.can('ai.credentials.rotate')
                 "
                 @click="editCredential(row)"
               >
@@ -502,7 +537,7 @@ async function confirm() {
       data-testid="save-provider"
       @submit.prevent="askProvider"
     >
-      <fieldset :disabled="busy || !!pending">
+      <fieldset :disabled="busy || !!pending || !!unresolved">
         <legend>{{ t(selected ? 'edit' : 'addProvider') }}</legend>
         <label
           >{{ t('name')
@@ -549,7 +584,7 @@ async function confirm() {
       </fieldset>
     </form>
     <form v-if="editor === 'credential'" @submit.prevent="askCredential">
-      <fieldset :disabled="busy || !!pending">
+      <fieldset :disabled="busy || !!pending || !!unresolved">
         <legend>{{ t('credential') }} · {{ provider.name }}</legend>
         <p>{{ t('secretNote') }}</p>
         <label
@@ -574,6 +609,7 @@ async function confirm() {
         loading ||
         busy ||
         !!pending ||
+        !!unresolved ||
         !ui.can('ai.providers.write')
       "
       @click="editAutoPool"
@@ -636,6 +672,7 @@ async function confirm() {
                 :disabled="
                   busy ||
                   !!pending ||
+                  !!unresolved ||
                   !ui.can('ai.providers.write') ||
                   (pool.id === 'auto' && (!poolsReady || loading))
                 "
@@ -653,7 +690,7 @@ async function confirm() {
       data-testid="pool-form"
       @submit.prevent="askPool"
     >
-      <fieldset :disabled="busy || !!pending">
+      <fieldset :disabled="busy || !!pending || !!unresolved">
         <legend>{{ t('pools') }}</legend>
         <p>{{ t('aliasNote') }}</p>
         <label

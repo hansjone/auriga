@@ -16,11 +16,13 @@ import {
 import ActionConfirm from '../../admin/ActionConfirm.vue';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
+import { useRelayWriteIntent, type RelayWriteAction } from './relayWriteIntent';
 import './modelUsage.css';
 import './relayManagement.css';
-const requestKey = ref('');
 const { t } = useRelayI18n();
 const ui = useRelayUi(t);
+const writeIntent = useRelayWriteIntent(ui);
+const { unresolved } = writeIntent;
 const { loading, busy, error, notice } = ui;
 const keys = shallowRef<RelayKey[]>([]),
   pools = shallowRef<RelayPool[]>([]),
@@ -67,7 +69,15 @@ watch(allModels, (allowed) => {
   if (!allowed)
     draft.value.models = draft.value.models.filter((v) => v !== '*');
 });
-const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
+const pending = shallowRef<RelayWriteAction>();
+function canPrepare() {
+  if (busy.value || pending.value) return false;
+  if (unresolved.value) {
+    error.value = t('writeUncertain');
+    return false;
+  }
+  return true;
+}
 function hide() {
   issued.value = '';
 }
@@ -79,6 +89,7 @@ watch(
       keys.value = [];
       pools.value = [];
       editing.value = false;
+      writeIntent.reset();
       pending.value = undefined;
     }
   },
@@ -105,8 +116,9 @@ async function load(preserve = false) {
 }
 onMounted(() => load());
 function edit(row?: RelayKey) {
+  if (!canPrepare()) return;
+  writeIntent.reset();
   modelSearch.value = '';
-  requestKey.value = globalThis.crypto.randomUUID();
   hide();
   selected.value = row;
   draft.value = row
@@ -160,35 +172,35 @@ function input(): RelayKeyInput | undefined {
   return body;
 }
 function ask() {
+  if (!canPrepare()) return;
   const body = input();
   if (!body) return;
   hide();
-  const row = selected.value,
-    key = requestKey.value;
-  pending.value = {
-    message: t(row ? 'confirmSave' : 'confirmIssue', { name: body.name }),
-    run: () =>
-      row
-        ? ui.write(
-            'ai.providers.write',
-            () => relayApi.updateKey(row.id, body, ui.signal),
-            () => {
-              editing.value = false;
-            },
-            () => load(true),
-          )
-        : ui.write(
-            'ai.providers.write',
-            () => relayApi.createKey(body, key, ui.signal),
-            (result) => {
-              issued.value = result.secret;
-              editing.value = false;
-            },
-            () => load(true),
-          ),
-  };
+  const row = selected.value;
+  const message = t(row ? 'confirmSave' : 'confirmIssue', { name: body.name });
+  pending.value = row
+    ? writeIntent.createAction(
+        'ai.providers.write',
+        message,
+        () => relayApi.updateKey(row.id, body, ui.signal),
+        () => {
+          editing.value = false;
+        },
+        () => load(true),
+      )
+    : writeIntent.createAction(
+        'ai.providers.write',
+        message,
+        (key) => relayApi.createKey(body, key, ui.signal),
+        (result) => {
+          issued.value = result.secret;
+          editing.value = false;
+        },
+        () => load(true),
+      );
 }
 function revoke(row: RelayKey) {
+  if (!canPrepare()) return;
   hide();
   const body: RelayKeyInput = {
     name: row.name,
@@ -200,20 +212,17 @@ function revoke(row: RelayKey) {
     meteringOnly: row.meteringOnly ?? false,
     models: [...row.models],
   };
-  pending.value = {
-    message: t('confirmRevoke', {
+  pending.value = writeIntent.createAction(
+    'ai.providers.write',
+    t('confirmRevoke', {
       name: row.source === 'member' ? row.accountId : row.name,
     }),
-    run: () =>
-      ui.write(
-        'ai.providers.write',
-        () => relayApi.updateKey(row.id, body, ui.signal),
-        () => {
-          editing.value = false;
-        },
-        () => load(true),
-      ),
-  };
+    () => relayApi.updateKey(row.id, body, ui.signal),
+    () => {
+      editing.value = false;
+    },
+    () => load(true),
+  );
 }
 async function confirm() {
   const action = pending.value;
@@ -236,9 +245,31 @@ async function confirm() {
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
+    <div
+      v-if="unresolved"
+      class="relay-hint"
+      role="status"
+      data-testid="relay-write-uncertain"
+    >
+      <p>{{ t('writeUncertain') }}</p>
+      <button
+        type="button"
+        data-testid="retry-relay-write"
+        :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+        @click="pending = unresolved"
+      >
+        {{ t('retryOriginalWrite') }}
+      </button>
+    </div>
     <button
       data-testid="new-key"
-      :disabled="loading || busy || !!pending || !ui.can('ai.providers.write')"
+      :disabled="
+        loading ||
+        busy ||
+        !!pending ||
+        !!unresolved ||
+        !ui.can('ai.providers.write')
+      "
       @click="edit()"
     >
       {{ t('createKey') }}
@@ -299,13 +330,24 @@ async function confirm() {
             <td>
               <button
                 data-testid="edit-key"
-                :disabled="busy || !!pending || !ui.can('ai.providers.write')"
+                :disabled="
+                  busy ||
+                  !!pending ||
+                  !!unresolved ||
+                  !ui.can('ai.providers.write')
+                "
                 @click="edit(row)"
               >
                 {{ t('edit') }}</button
               ><button
                 data-testid="revoke-key"
-                :disabled="busy || !row.active || !ui.can('ai.providers.write')"
+                :disabled="
+                  busy ||
+                  !!pending ||
+                  !!unresolved ||
+                  !row.active ||
+                  !ui.can('ai.providers.write')
+                "
                 @click="revoke(row)"
               >
                 {{ t('revoke') }}
@@ -317,7 +359,7 @@ async function confirm() {
     </div>
     <p>{{ t('externalKeyNote') }}</p>
     <form v-if="editing" data-testid="key-form" @submit.prevent="ask">
-      <fieldset :disabled="busy || !!pending">
+      <fieldset :disabled="busy || !!pending || !!unresolved">
         <legend>{{ t(selected ? 'edit' : 'createKey') }}</legend>
         <label
           >{{ t('name')
