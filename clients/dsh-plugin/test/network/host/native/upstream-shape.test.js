@@ -19,7 +19,7 @@ test('host baseline follows the real-dsh lockfile instead of a desktop release',
     ),
   );
   assert.equal(
-    '0.2.0-rc.2',
+    '0.2.1-rc.3',
     lock.packages['node_modules/@deepseek-ai/dsh'].version,
   );
 });

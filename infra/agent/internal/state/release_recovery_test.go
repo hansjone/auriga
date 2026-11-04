@@ -43,7 +43,11 @@ func interruptedRecoveryStore(t *testing.T) (*Store, ExecutionRecord) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return s, r
 }
 func TestOfflineRecoveryOnlyExactCommittedIntent(t *testing.T) {
@@ -136,7 +140,9 @@ func putReleaseActivationForRecoveryTest(tx *bbolt.Tx, c ReleaseCandidate) error
 func TestOfflineRecoveryExistingExclusiveOnly(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 	if s, err := OpenOfflineRecovery(missing); err == nil {
-		s.Close()
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
 		t.Fatal("created missing store")
 	}
 	dir := t.TempDir()
@@ -144,9 +150,15 @@ func TestOfflineRecoveryExistingExclusiveOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer live.Close()
+	t.Cleanup(func() {
+		if err := live.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if s, err := OpenOfflineRecovery(dir); err == nil {
-		s.Close()
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
 		t.Fatal("accepted concurrent agent")
 	}
 	if _, err := live.InspectInterruptedExecution("x"); err == nil {
