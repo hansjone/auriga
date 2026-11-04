@@ -1,5 +1,8 @@
 ﻿import { useI18n } from 'vue-i18n';
 const zh = {
+  writeUncertain:
+    '保存结果尚未确认。请先重试原保存，暂时不能修改或开始其他保存；离开页面前请先核对结果。',
+  retryOriginalWrite: '重试原保存',
   unlimited: '不限制',
   meteringOnly: '仅计量（不设预算和流量限制）',
   meteringOnlyNote:
@@ -213,6 +216,9 @@ const zh = {
     '填写 HTTPS 根地址，不附加 /v1；修改地址或种类会清除原密钥，须重新录入。',
 };
 const en: Record<keyof typeof zh, string> = {
+  writeUncertain:
+    'The save outcome is unconfirmed. Retry the original save before editing or starting another save. Check the outcome before leaving this page.',
+  retryOriginalWrite: 'Retry original save',
   unlimited: 'Unlimited',
   meteringOnly: 'Meter usage only (no budget or traffic limits)',
   meteringOnlyNote:
