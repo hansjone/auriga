@@ -26,7 +26,7 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	spec.Secrets = &nodev1.Secrets{}
 	opt := renderer.Options{MetaDir: t.TempDir(), Access: testAccess(t, ""), SealingPrivate: priv}
 	credential := "amc." + spec.TenantId + "." + spec.OwnerId + "." + spec.InstanceId + ".01900000-0000-7000-8000-000000000003." + strings.Repeat("a", 43)
-	material := map[string]any{"tenantId": spec.TenantId, "ownerId": spec.OwnerId, "instanceId": spec.InstanceId, "credentialVersion": 1, "credential": credential, "baseUrl": "https://portal.example.com/ai/v1", "models": []any{map[string]any{"id": "pool-a"}, map[string]any{"id": "pool-b"}}}
+	material := map[string]any{"tenantId": spec.TenantId, "ownerId": spec.OwnerId, "instanceId": spec.InstanceId, "credentialVersion": 1, "credential": credential, "baseUrl": "https://portal.example.com/ai/v1", "models": []any{map[string]any{"id": "pool-a", "contextWindow": 32768, "maxOutputTokens": 4096}, map[string]any{"id": "pool-b", "contextWindow": 8192, "maxOutputTokens": 1024}, map[string]any{"id": "unknown"}, map[string]any{"id": "context-only", "contextWindow": 2000000}, map[string]any{"id": "output-only", "maxOutputTokens": 131072}, map[string]any{"id": "large", "contextWindow": 2000000, "maxOutputTokens": 131072}}}
 	raw, err := json.Marshal(material)
 	if err != nil {
 		t.Fatal(err)
@@ -53,8 +53,8 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 		}
 	}
 	patch, err := os.ReadFile(result.CordisPatchFile)
-	if err != nil || !bytes.Contains(patch, []byte("openai-completions")) || !bytes.Contains(patch, []byte("pool-b")) {
-		t.Fatal("native provider missing")
+	if err != nil || !bytes.Contains(patch, []byte("llm-pi-ai")) {
+		t.Fatal("native model entry missing")
 	}
 	oldDigest := result.Digest
 	if _, err = os.Stat(keysPath); !os.IsNotExist(err) {
@@ -84,25 +84,20 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	if err = yaml.Unmarshal(patch, &rows); err != nil {
 		t.Fatal(err)
 	}
-	var provider map[string]any
+	var nativeRow map[string]any
 	for _, row := range rows {
 		if row["id"] == "credentials" {
 			t.Fatal("managed models must not replace the user's credential store")
 		}
 		if row["id"] == "llm-pi-ai" {
-			provider = row["config"].(map[string]any)["providers"].(map[string]any)["auriga-managed"].(map[string]any)
+			nativeRow = row
 		}
 	}
-	if provider == nil {
+	if nativeRow == nil {
 		t.Fatal("native provider row missing")
 	}
-	compat, ok := provider["compat"].(map[string]any)
-	if !ok || compat["supportsStore"] != false {
-		t.Fatal("store must be disabled for the relay")
-	}
-	headers, ok := provider["headers"].(map[string]any)
-	if provider["apiKeyEnv"] != nil || !ok || !strings.Contains(headers["Authorization"].(string), renderer.ContainerModelCredential) {
-		t.Fatal("managed Authorization must read the sole model file")
+	if nativeRow["config"] != nil {
+		t.Fatal("the native provider must remain editable, without a command-line config override")
 	}
 	credential = strings.TrimSuffix(credential, strings.Repeat("a", 43)) + strings.Repeat("b", 43)
 	material["credential"] = credential

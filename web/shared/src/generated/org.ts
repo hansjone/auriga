@@ -632,7 +632,7 @@ export interface components {
       };
       /**
        * @deprecated
-       * @description 仅保留契约兼容；已由 LiteLLM customer 预算取代。服务拒绝写入，不读取也不返回该字段。
+       * @description 仅保留契约兼容；已由 中转站成员 Key 预算取代。服务拒绝写入，不读取也不返回该字段。
        */
       readonly model?: {
         /** @deprecated */

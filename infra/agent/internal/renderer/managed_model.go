@@ -24,7 +24,9 @@ type managedModel struct {
 	Credential string `json:"credential"`
 	BaseURL    string `json:"baseUrl"`
 	Models     []struct {
-		ID string `json:"id"`
+		ID              string          `json:"id"`
+		ContextWindow   json.RawMessage `json:"contextWindow,omitempty"`
+		MaxOutputTokens json.RawMessage `json:"maxOutputTokens,omitempty"`
 	} `json:"models"`
 }
 
@@ -63,7 +65,9 @@ func decodeManagedModel(raw []byte, spec *nodev1.InstanceSpec) (*managedModel, e
 	}
 	seen := map[string]bool{}
 	for _, model := range m.Models {
-		if strings.TrimSpace(model.ID) == "" || len(model.ID) > 200 || strings.ContainsFunc(model.ID, unicode.IsControl) || seen[model.ID] {
+		context, validContext := managedCapability(model.ContextWindow, 2)
+		output, validOutput := managedCapability(model.MaxOutputTokens, 1)
+		if strings.TrimSpace(model.ID) == "" || len(model.ID) > 200 || strings.ContainsFunc(model.ID, unicode.IsControl) || seen[model.ID] || !validContext || !validOutput || (context > 0 && output > 0 && output >= context) {
 			return fail()
 		}
 		seen[model.ID] = true
@@ -71,14 +75,19 @@ func decodeManagedModel(raw []byte, spec *nodev1.InstanceSpec) (*managedModel, e
 	return &m, nil
 }
 
-func managedModelRow(m *managedModel) any {
-	models := make([]any, 0, len(m.Models))
-	for _, model := range m.Models {
-		models = append(models, map[string]any{"id": model.ID})
+func managedCapability(raw json.RawMessage, minimum int64) (int64, bool) {
+	if len(raw) == 0 {
+		return 0, true
 	}
-	return map[string]any{"id": "llm-pi-ai", "config": map[string]any{"providers": map[string]any{"auriga-managed": map[string]any{
-		"displayName": "Auriga", "api": "openai-completions", "baseURL": m.BaseURL, "models": models,
-		"compat":  map[string]any{"supportsStore": false},
-		"headers": map[string]any{"Authorization": jsExpr("'Bearer ' + JSON.parse(process.getBuiltinModule('node:fs').readFileSync(" + jsString(ContainerModelCredential) + ", 'utf8')).credential")},
-	}}}}
+	var value int64
+	if json.Unmarshal(raw, &value) != nil || value < minimum || value > 9007199254740991 {
+		return 0, false
+	}
+	return value, true
+}
+
+func managedModelRow(_ *managedModel) any {
+	// The plugin initializes its provider through the public configuration editor.
+	// A command-line config overlay would veto every subsequent native model save.
+	return map[string]any{"id": "llm-pi-ai"}
 }

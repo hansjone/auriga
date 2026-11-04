@@ -55,6 +55,25 @@ public final class OfflineKeySigning {
 
   /** sign payload root-kid root-private.der signed-output announcement-output */
   public static void main(String[] args) throws Exception {
+    // Public, historical verification for weekly plan review. It neither reads a
+    // private key nor installs state; future/expired bases remain authenticated.
+    if (args.length == 6 && "verify-archived".equals(args[0])) {
+      var root =
+          KeyFactory.getInstance("Ed25519")
+              .generatePublic(
+                  new java.security.spec.X509EncodedKeySpec(
+                      ProtectedKeyFiles.read(Path.of(args[4]), 1024)));
+      String signed = ProtectedKeyFiles.readText(Path.of(args[1]));
+      var verifier =
+          new RootKeyPublication(
+              NetworkJson.parse(signed).path("keyset").path("realm").asString(),
+              args[3],
+              root,
+              args[5],
+              Clock.systemUTC());
+      verifier.verifyArchived(signed, ProtectedKeyFiles.readText(Path.of(args[2])));
+      return;
+    }
     if (args.length == 6 && "sign".equals(args[0])) {
       byte[] secret = ProtectedKeyFiles.readSecret(Path.of(args[3]));
       try {
@@ -102,6 +121,6 @@ public final class OfflineKeySigning {
       return;
     }
     throw new IllegalArgumentException(
-        "Expected sign or install arguments; see key operations contract");
+        "Expected sign, install or verify-archived arguments; see key operations documentation");
   }
 }

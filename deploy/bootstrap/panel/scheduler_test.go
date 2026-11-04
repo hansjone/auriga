@@ -39,7 +39,7 @@ func TestListenerHealthIndependentOfRenewalAndArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	out := t.TempDir()
 	if err := os.WriteFile(filepath.Join(out, ".panel-renew-failed"), []byte("failed"), 0600); err != nil {
 		t.Fatal(err)

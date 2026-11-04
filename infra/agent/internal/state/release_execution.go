@@ -228,7 +228,8 @@ func (s *Store) CheckReleaseExecution(c ReleaseCandidate) error {
 
 // ReleaseExecution exists only in the original synchronous qualification. A
 // failed request remains pending even if a later request returns successfully.
-// There is deliberately no public API for clearing a persisted unresolved intent.
+// Normal startup never clears a persisted unresolved intent. The separate,
+// explicit offline recovery path requires committed-candidate and Engine proof.
 type ReleaseExecution struct {
 	mu      sync.Mutex
 	pending int

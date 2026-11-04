@@ -719,7 +719,7 @@ describe('resource async boundaries and navigation', () => {
       realRouter.resolve('/resources').matched.at(-1)?.components?.default,
     ).toBe(ResourcesView);
   });
-  it('preserves headquarters and devices as unavailable and links relay to LiteLLM', async () => {
+  it('preserves headquarters and devices as unavailable and retains relay navigation for the platform pages', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [

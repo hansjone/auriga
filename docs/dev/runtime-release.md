@@ -12,6 +12,10 @@ NAS 通过[公开安装配方](nas.md#消费独立审核的正式运行时)复�
 
 ## 本地 registry 构建与原始 proof
 
+公开 DSH 配方使用仓库既定的 `0.2.1-rc.3` 公共兼容包及完整锁文件，保持已固定的 Node22.19.0 基础镜像。构建与启动前都核对真实安装包组、插件宿主要求及公开 CLI；制品检查还加载公开连接准入 API 与平台原生模块，不启动 DSH 会话。`DSH_VERSION` 从已验证的实际安装版本生成，不能靠环境变量覆盖旧包。
+
+仅准备本机候选时，可给下述构建命令增加 `--local-only`：不 push、不需要 registry，仍执行隔离非 root/无网络的制品检查；元数据中的 `image` 此时是本机 Engine ID、`localOnly=true`，不能用作正式发行 locator 或签名输入。正式发行仍走默认 push/RepoDigest 与独立批准流程。
+
 在受控本机环境准备已独立审核并固定于 `deploy/compose/real-dsh/versions.json` 的 `NODE_IMAGE`。
 从仓库根目录运行下列命令；本地 registry 须先由 operator 准备，命令会真实 build/push，
 然后从本次**精确仓库**的唯一合法 RepoDigest 写元数据。无 `--image-tag` 时仍使用
@@ -190,3 +194,33 @@ operator 审核的初始根通过既有 **CA SPKI pin + TLS 校验的首次 Join
 部署装配须将公开 M/C 按 [agent 文档](agent.md)的目录约定交付，向生产控制流程传递已签 `DshRuntime`；
 激活仍经过现有生产 S 的当前 key 检查、持久高水位、防回滚、intent 及真实 Engine 身份/启动闭窗。
 本工具的 sign/verify 成功不更新这些状态，也不承诺部署就绪或现场可用。
+
+## 已提交运行时中断后的离线恢复
+
+如果 agent 在启动或 Recover 过程中中断，持久 intent 会阻止后续启动并报
+`runtime release has unresolved execution; protected recovery required`。
+正常启动不会自动清除此记录。对于**原实际执行与 intent、已提交高水位完全相同**的候选，
+可以显式使用 `auriga-agent recover-runtime`；其它候选、缺失原执行记录或无法证明的现场仍拒绝恢复。
+
+先通过正式管理操作将实例停止，确认观测到 stopped；停止原 agent，并确认该运行时分区的实例容器均已停止。
+保留原 state、实例目录、身份、签名根和 OCI proofs。恢复进程必须持有原 state.db 的独占锁，
+并能只读查询原 Docker Engine。使用原 agent 的 `DOCKER_HOST`、`AURIGA_AGENT_POLICY_FILE`、
+`AURIGA_AGENT_RUNTIME_PROOFS_DIR`，把原 agent data root 按**原绝对路径**挂载；不创建新空目录替代原库。
+
+```sh
+# 先检查；只输出公开候选和 expectation 摘要，不输出 intent token 或账本正文。
+auriga-agent recover-runtime --data-root /original/agent-data \
+  --instance INSTANCE_ID --stopped-agent ORIGINAL_AGENT_FULL_CONTAINER_ID
+
+# 核对上一步输出后，以同一个摘要显式执行；不使用 force。
+auriga-agent recover-runtime --data-root /original/agent-data \
+  --instance INSTANCE_ID --stopped-agent ORIGINAL_AGENT_FULL_CONTAINER_ID \
+  --expect sha256:EXPECTATION_FROM_INSPECT
+```
+
+命令重新验证原执行签名、当前信任与 OCI proof，检查原 compose agent 已停且绑定该 data root，
+逐一核对实际容器不可变身份和停止状态，并拒绝未登记或变化的 managed 容器清单。
+同分区其它已停旧版本只核原实际身份，不要求升级为目标候选，也不会修改它。
+执行时重新核对相同摘要和 Engine 证明，只原子移除该分区的这一个未完成 intent；
+高水位、执行记录、其它分区、身份和 home 都保持。命令不创建、启动或删除 Docker 对象。
+之后正常启动 agent，再通过正常实例启动流程重新 Ensure；恢复命令成功本身不等于实例 READY。

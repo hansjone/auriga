@@ -66,6 +66,8 @@ check_spa() {
 log "smoke begin portal=$PORTAL_URL admin=$ADMIN_URL"
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" exec -T platform sh /etc/auriga/iam-healthcheck.sh >/dev/null \
   && log 'PASS platform_health mTLS+current_service_jwt' || { log 'FAIL platform_health'; fail=1; }
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" exec -T egress /auriga-egress --check >/dev/null \
+  && log 'PASS egress_listener' || { log 'FAIL egress_listener'; fail=1; }
 # Ordinary requests consume the real declared browser Origins. HTTPS proxy mode
 # needs the configured trusted proxy and its browser-facing certificate.
 check_spa portal_static "$PORTAL_URL/"

@@ -1,3 +1,4 @@
+import { allPages } from './relay-backend.mjs';
 import { randomBytes } from 'node:crypto';
 import { launchBrowser } from './launch.mjs';
 import { cloudReadyJourney } from './cloud-ready.mjs';
@@ -21,7 +22,6 @@ import {
   httpUrl,
   nextTotp,
   observeTrace,
-  waitSpend,
 } from './run.mjs';
 
 // Only local test resources are owned by this adapter. No remote instances or
@@ -462,6 +462,22 @@ export class BrowserSteps {
         [this.cloudPage, this.config.modelUi.cloud],
         [this.desktopPage, this.config.modelUi.desktop],
       ]) {
+        const memberId =
+          page === this.cloudPage
+            ? this.member?.accountId
+            : this.desktopEvidence?.accountId;
+        requireThat(memberId, '缺少已登录成员身份');
+        const usage = () =>
+          allPages(
+            (path, options) =>
+              this.relayAdminRequest(
+                new URL(path, this.config.relay.baseUrl),
+                state,
+                options,
+              ),
+            'logs?accountId=' + encodeURIComponent(memberId),
+          );
+        const previous = new Set((await usage()).map((row) => row.requestId));
         const marker = `phase1-model-${randomBytes(12).toString('hex')}`;
         await this.actions(page, settings?.actions, {
           model: model.name,
@@ -474,22 +490,14 @@ export class BrowserSteps {
           .locator(settings.responseSelector)
           .filter({ hasText: marker })
           .waitFor();
+        const rows = await usage();
         requireThat(
-          settings.requestIdAttribute,
-          'DSH模型回复需提供可关联LiteLLM用量的requestIdAttribute',
-        );
-        const requestId = await page
-          .locator(settings.responseSelector)
-          .filter({ hasText: marker })
-          .getAttribute(settings.requestIdAttribute);
-        await waitSpend(
-          this.config.relay,
-          requestId,
-          state,
-          this.config.relay.browserAdmin === true
-            ? (url, state, options) =>
-                this.relayAdminRequest(url, state, options)
-            : undefined,
+          rows.some(
+            (row) =>
+              !previous.has(row.requestId) &&
+              row.inputTokens + row.outputTokens > 0,
+          ),
+          '未查到当前成员的新用量',
         );
       }
     }

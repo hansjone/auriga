@@ -6,12 +6,6 @@ COMPOSE="$ROOT/deploy/compose"
 VAR="$COMPOSE/var"
 ACCESS_ARGS=()
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = --litellm-ui-origin ]; then
-    [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing LiteLLM UI origin' >&2; exit 1; }
-    ACCESS_ARGS+=("-litellm-ui-origin" "$2")
-    shift 2
-    continue
-  fi
   case "$1" in --access-file|--https-cert-file|--https-key-file|--network-collab-file) ;; *) echo 'unsupported prepare input' >&2; exit 1 ;; esac
   [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing prepare input' >&2; exit 1; }
   # Resolve once before changing directory; only the public Go loader parses it.
@@ -159,7 +153,6 @@ fi
 sh "$COMPOSE/scripts/renew-panel.sh" --install || echo "warning: panel automatic renewal unavailable; configure host cron or renew manually" >&2
 sh "$COMPOSE/scripts/renew-panel.sh" || echo "warning: panel startup check failed; stack startup remains available" >&2
 
-sh "$COMPOSE/scripts/litellm-permissions.sh" "$VAR"
-sh "$COMPOSE/../nas/litellm/prepare-ui.sh" "$VAR/litellm-ui"
+sh "$COMPOSE/scripts/bifrost-permissions.sh" "$VAR"
 
 echo "prepare done; env file: $VAR/compose.env"

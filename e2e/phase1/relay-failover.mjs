@@ -1,11 +1,6 @@
-import { requireThat, StepError } from './run.mjs';
+﻿import { requireThat, StepError } from './run.mjs';
+import { allPages } from './relay-backend.mjs';
 
-const idOf = (entry) => entry.model_info?.id;
-const blocked = (entry) =>
-  entry.blocked === true || entry.model_info?.blocked === true;
-
-// Explicitly disrupt one deployment in the named test pool. Provider credentials
-// are never read, changed or copied back from the redacted model catalog.
 export async function verifyPoolFailover(
   config,
   models,
@@ -15,86 +10,93 @@ export async function verifyPoolFailover(
   sides = ['desktop', 'cloud'],
 ) {
   requireThat(
-    Array.isArray(sides) &&
+    config.allowPoolDisruption === true &&
       sides.length > 0 &&
       new Set(sides).size === sides.length &&
       sides.every((side) => ['desktop', 'cloud'].includes(side)),
-    '故障演练端点范围无效',
+    '故障演练范围未授权',
   );
+  const pools = await allPages(api, 'pools');
+  const providers = await allPages(api, 'providers');
+  const pool = pools.find((row) => row.id === config.pool);
   requireThat(
-    config.allowPoolDisruption === true,
-    '模型池故障演练须显式allowPoolDisruption',
-  );
-  const catalog = await api('model/info');
-  const entries =
-    catalog.data?.filter((entry) => entry.model_name === config.pool) ?? [];
-  requireThat(
-    entries.length === 2 &&
+    pool?.enabled &&
+      pool.routes?.length === 2 &&
       models.length === 2 &&
-      new Set(models.map((model) => model.upstreamModel)).size === 2 &&
+      new Set(pool.routes.map((row) => row.providerId)).size === 2 &&
       models.every((model) =>
-        entries.some(
-          (entry) => entry.litellm_params?.model === model.upstreamModel,
-        ),
-      ) &&
-      entries.every(
-        (entry) =>
-          /^[A-Za-z0-9_-]{1,128}$/.test(idOf(entry) ?? '') && !blocked(entry),
-      ) &&
-      idOf(entries[0]) !== idOf(entries[1]),
-    '故障演练只允许两个已配置且在线的池部署',
+        pool.routes.some((route) => route.model === model.upstreamModel),
+      ),
+    '故障演练仅支持已配置的双供应商池',
+  );
+  const entries = pool.routes.map((route) =>
+    providers.find((row) => row.id === route.providerId),
+  );
+  requireThat(
+    entries.every((row) => row?.hasCredential && row.configuration?.enabled),
+    '池中供应商未全部在线',
   );
   const [unavailable, healthy] = entries;
+  const disabled = { ...unavailable.configuration, enabled: false };
   Object.assign(evidence, {
     verified: false,
-    blockedDeploymentId: idOf(unavailable),
-    survivingDeploymentId: idOf(healthy),
+    blockedDeploymentId: unavailable.id,
+    survivingDeploymentId: healthy.id,
     restored: false,
     sides: [...sides],
   });
-  const change = (path) =>
-    api(path, {
-      method: 'POST',
-      body: { model_id: idOf(unavailable) },
-      discardBody: true,
+  const change = (body) =>
+    api('providers/' + encodeURIComponent(unavailable.id), {
+      method: 'PUT',
+      body,
     });
   let failure;
   try {
-    // Register restoration even if the blocking response is lost after commit.
-    await change('model/block');
-    const current = await api('model/info');
-    const row = current.data?.find(
-      (entry) => idOf(entry) === idOf(unavailable),
-    );
+    await change(disabled);
+    const current = await allPages(api, 'providers');
     requireThat(
-      (!row || blocked(row)) &&
-        current.data?.some(
-          (entry) => idOf(entry) === idOf(healthy) && !blocked(entry),
+      current.some(
+        (row) => row.id === unavailable.id && !row.configuration.enabled,
+      ) &&
+        current.some(
+          (row) => row.id === healthy.id && row.configuration.enabled,
         ),
-      '未确认一个池部署不可用且另一个仍在线',
+      '未确认故障范围',
     );
     for (const side of sides) {
-      const evidence = await converse(side, config.pool);
+      const proof = await converse(side, config.pool);
       requireThat(
-        evidence.deploymentId === idOf(healthy),
-        '故障期间的原生会话用量未关联到存活部署',
+        proof?.totalTokens > 0 && proof.requestId,
+        '故障期间缺少新会话及用量证据',
       );
     }
   } catch (error) {
     failure = error;
   }
   try {
-    await change('model/unblock');
-    const restored = await api('model/info');
+    const current = (await allPages(api, 'providers')).find(
+      (row) => row.id === unavailable.id,
+    );
     requireThat(
-      restored.data?.some(
-        (entry) => idOf(entry) === idOf(unavailable) && !blocked(entry),
+      JSON.stringify(current?.configuration) === JSON.stringify(disabled) ||
+        JSON.stringify(current?.configuration) ===
+          JSON.stringify(unavailable.configuration),
+      '供应商已被其他管理员修改，拒绝覆盖',
+    );
+    await change(unavailable.configuration);
+    const restored = await allPages(api, 'providers');
+    requireThat(
+      restored.some(
+        (row) =>
+          row.id === unavailable.id &&
+          row.configuration.enabled &&
+          row.hasCredential,
       ),
-      '原池部署尚未恢复在线',
+      '供应商未恢复',
     );
     evidence.restored = true;
   } catch {
-    throw new StepError('池故障演练恢复失败，须恢复报告中原部署');
+    throw new StepError('池故障演练恢复失败，须检查报告中的供应商');
   }
   if (failure) throw failure;
   evidence.verified = true;

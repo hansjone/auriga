@@ -15,7 +15,7 @@ type staticIdleTransport struct {
 }
 
 func (t staticIdleTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if !staticAssetPath(r) && r.URL.Path != liteLLMUIConfigPath {
+	if !staticAssetPath(r) {
 		return t.base.RoundTrip(r)
 	}
 	ctx, cancel := context.WithCancel(r.Context())

@@ -9,6 +9,11 @@ import {
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { productionInputs } from './inputs.mjs';
+import {
+  runtimeInputs,
+  runtimeChecks,
+  pluginPackageFiles,
+} from './runtime.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
@@ -22,24 +27,19 @@ if (action === 'check') {
     execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim() !==
       versions.npmVersion
   ) {
-    throw new Error('Use the S4 Linux x64 Node/npm toolchain');
+    throw new Error('Use the pinned Linux x64 Node/npm toolchain');
   }
   if (
     hash(readFileSync('/opt/dsh/package-lock.json')) !== versions.lockSha256
   ) {
-    throw new Error('S4 lock SHA-256 mismatch');
+    throw new Error('DSH lock SHA-256 mismatch');
   }
-  for (const [path, entry] of Object.entries(
-    json('/opt/dsh/package-lock.json').packages,
-  )) {
-    if (
-      path &&
-      (!entry.integrity ||
-        !entry.resolved?.startsWith('https://registry.npmjs.org/'))
-    ) {
-      throw new Error(`Unlocked DSH dependency: ${path}`);
-    }
-  }
+  runtimeInputs(
+    json('/opt/dsh/package.json'),
+    json('/opt/dsh/package-lock.json'),
+    versions,
+    json('/opt/fixture/plugin-package.json'),
+  );
 } else if (action === 'plugin-lock') {
   const { pkg, lock } = productionInputs(
     json('package.json'),
@@ -54,10 +54,17 @@ if (action === 'check') {
   writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
   writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
 } else if (action === 'manifest') {
+  const pluginFiles = pluginPackageFiles('/opt/auriga-dsh');
+  const runtime = await runtimeChecks(
+    '/opt/dsh',
+    versions,
+    json('/opt/auriga-dsh/package.json'),
+  );
   const files = [];
   function walk(dir) {
     for (const name of readdirSync(dir).sort()) {
       const path = join(dir, name);
+      if (path === '/opt/fixture/manifest.json') continue;
       const st = lstatSync(path);
       if (st.isSymbolicLink()) continue;
       if (st.isDirectory()) {
@@ -78,11 +85,23 @@ if (action === 'check') {
   }
   walk('/opt/dsh');
   walk('/opt/auriga-dsh');
+  walk('/opt/fixture');
+  for (const path of pluginFiles) {
+    if (!files.some((file) => file.path === `auriga-dsh/${path}`))
+      throw new Error(
+        `Declared plugin entry is missing from manifest: ${path}`,
+      );
+  }
   writeFileSync(
     '/opt/fixture/manifest.json',
     JSON.stringify(
       {
         ...versions,
+        dshVersion: runtime.dshVersion,
+        runtimePackages: runtime.packages,
+        publicCLI: runtime.publicCLI,
+        admissionMethods: runtime.admissionMethods,
+        nativeModules: runtime.nativeModules,
         pluginVersion: json('/opt/auriga-dsh/package.json').version,
         pluginSourceLockSha256: readFileSync(
           '/opt/fixture/plugin-source-lock.sha256',

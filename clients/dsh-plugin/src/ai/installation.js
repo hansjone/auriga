@@ -117,12 +117,3 @@ export function createModelLifecycle({ broker, origin, generation }) {
     },
   };
 }
-
-// No managed adapter until a secure per-instance socket is available. A public
-// device token or ait_ credential is never an alternative transport.
-export const MANAGED_MODEL_STATUS = Object.freeze({
-  registered: false,
-  available: false,
-  authorized: false,
-  state: 'managed_socket_unavailable',
-});

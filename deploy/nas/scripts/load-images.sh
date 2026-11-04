@@ -10,7 +10,7 @@ case "${1:-}" in
   --help)
     echo 'Usage: sh load-images.sh /path/to/bundle-dir'
     echo 'Requires the checksummed nas-bundle artifact with config_id metadata and prebuilt bootstrap.'
-    echo 'Prints verified target-Engine AURIGA_IMAGE_* suggestions after all three loads succeed.'
+    echo 'Prints verified target-Engine AURIGA_IMAGE_* suggestions after all required loads succeed.'
     echo 'Does not edit stack.env or STACK_ENV, or create/claim AURIGA_DATA_ROOT.'
     exit 0 ;;
 esac
@@ -28,7 +28,7 @@ _boot=${AURIGA_NAS_BOOTSTRAP_BINARY:-$BUNDLE/deploy-nas/bin/auriga-nas-bootstrap
   || die "prebuilt auriga-nas-bootstrap required; verify bundle checksums and restore its executable bit"
 "$_boot" image-check "$BUNDLE"
 
-for _image in platform edge agent; do
+for _image in platform edge agent bifrost operator; do
   info "docker load: $_image.tar" >&2
   docker load -i "$BUNDLE/images/$_image.tar" >&2
 done

@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-var imageNames = []string{"platform", "edge", "agent"}
+var imageNames = []string{"platform", "edge", "agent", "bifrost", "operator"}
 var imageDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var imageHex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var imageCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -129,8 +129,8 @@ func verifyImageBundle(ctx context.Context, bundle string, limits imageLimits) (
 	if err := imageJSON(raw, &manifest); err != nil {
 		return nil, err
 	}
-	if !imageCommit.MatchString(manifest.Commit) || !imageCommit.MatchString(manifest.Tree) || len(manifest.Images) != 3 {
-		return nil, errors.New("missing commit/source_tree or exactly three image records")
+	if !imageCommit.MatchString(manifest.Commit) || !imageCommit.MatchString(manifest.Tree) || len(manifest.Images) != len(imageNames) {
+		return nil, errors.New("missing commit/source_tree or the required image records")
 	}
 	if manifest.Bootstrap.File != "deploy-nas/bin/auriga-nas-bootstrap" || !imageHex.MatchString(manifest.Bootstrap.SHA256) ||
 		manifest.Runtime.File != "deploy-nas/bin/runtime-release" || !imageHex.MatchString(manifest.Runtime.SHA256) ||
@@ -159,7 +159,7 @@ func verifyImageBundle(ctx context.Context, bundle string, limits imageLimits) (
 			return nil, fmt.Errorf("root checksum mismatch: %s", file)
 		}
 	}
-	sums, err := imageChecksums(filepath.Join(bundle, "images", "SHA256SUMS"), []string{"platform.tar", "edge.tar", "agent.tar"})
+	sums, err := imageChecksums(filepath.Join(bundle, "images", "SHA256SUMS"), []string{"platform.tar", "edge.tar", "agent.tar", "bifrost.tar", "operator.tar"})
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func openImageFile(file string) (*os.File, error) {
 	}
 	after, err := f.Stat()
 	if err != nil || !os.SameFile(before, after) {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.New("image input changed while opening")
 	}
 	return f, nil
@@ -232,7 +232,7 @@ func readImageFile(file string, max int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(f, max+1))
 	if int64(len(raw)) > max {
 		return nil, errors.New("image metadata byte budget exceeded")
@@ -245,7 +245,7 @@ func imageFileSHA(ctx context.Context, file string, max int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	r := &imageBudgetReader{ctx: ctx, r: f, left: max}
 	if _, err := io.Copy(h, r); err != nil {
@@ -316,7 +316,7 @@ func safeImageTarPath(name string) bool {
 		}
 	}
 	for _, c := range name {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("/._-", c)) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("/._-", c) {
 			return false
 		}
 	}
@@ -814,7 +814,7 @@ type imageLimitedBuffer struct {
 
 func (b *imageLimitedBuffer) Write(p []byte) (int, error) {
 	if len(p) > b.max-b.Len() {
-		return 0, errors.New("Docker metadata byte budget exceeded")
+		return 0, errors.New("docker metadata byte budget exceeded")
 	}
 	return b.Buffer.Write(p)
 }

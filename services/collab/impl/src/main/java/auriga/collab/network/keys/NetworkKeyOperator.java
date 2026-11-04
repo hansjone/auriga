@@ -102,6 +102,15 @@ public final class NetworkKeyOperator {
   }
 
   ObjectNode publish(RootKeyPublication.Release expected, RootKeyPublication.Release next) {
+    return publish(expected, next, false);
+  }
+
+  ObjectNode recoverExpired(RootKeyPublication.Release expected, RootKeyPublication.Release next) {
+    return publish(expected, next, true);
+  }
+
+  private ObjectNode publish(
+      RootKeyPublication.Release expected, RootKeyPublication.Release next, boolean recovery) {
     verify(next, false);
     return signerStopped(
         () ->
@@ -109,8 +118,8 @@ public final class NetworkKeyOperator {
                 () -> {
                   snapshot(
                       expected); // Refuse an empty, foreign, or unexpectedly advanced database.
-                  operations.publish(
-                      next); // All history/time/state decisions remain production decisions.
+                  if (recovery) operations.recoverExpired(next);
+                  else operations.publish(next);
                   return snapshot(next);
                 }));
   }
@@ -131,11 +140,22 @@ public final class NetworkKeyOperator {
   }
 
   void preflight(RootKeyPublication.Release expected, RootKeyPublication.Release next) {
+    preflight(expected, next, false);
+  }
+
+  void preflightExpiredRecovery(
+      RootKeyPublication.Release expected, RootKeyPublication.Release next) {
+    preflight(expected, next, true);
+  }
+
+  private void preflight(
+      RootKeyPublication.Release expected, RootKeyPublication.Release next, boolean recovery) {
     verify(next, false);
     locked(
         () -> {
           snapshot(expected);
-          operations.publish(next);
+          if (recovery) operations.recoverExpired(next);
+          else operations.publish(next);
           return snapshot(next);
         },
         true);
@@ -331,7 +351,15 @@ public final class NetworkKeyOperator {
   public static void main(String[] args) {
     try {
       if (args.length != 2
-          || !Set.of("verify", "status", "preflight", "publish", "check-private", "install")
+          || !Set.of(
+                  "verify",
+                  "status",
+                  "preflight",
+                  "publish",
+                  "check-private",
+                  "install",
+                  "preflight-recovery",
+                  "recover-expired")
               .contains(args[0])) throw ProtectedKeyFiles.invalid();
       var plan = NetworkJson.parse(text(Path.of(args[1])));
       Set<String> expected =
@@ -368,7 +396,15 @@ public final class NetworkKeyOperator {
               Path.of(plan.path("stateFile").asString()),
               properties.getProperty(prefix + "minimum-version"),
               Map.of());
-      boolean database = Set.of("status", "preflight", "publish", "install").contains(args[0]);
+      boolean database =
+          Set.of(
+                  "status",
+                  "preflight",
+                  "publish",
+                  "install",
+                  "preflight-recovery",
+                  "recover-expired")
+              .contains(args[0]);
       var source =
           database
               ? new DriverManagerDataSource(
@@ -402,12 +438,16 @@ public final class NetworkKeyOperator {
       switch (args[0]) {
         case "verify" -> operator.verify(release, false);
         case "check-private" -> operator.validatePrivate(release, settings.stateFile(), secrets);
-        case "status", "preflight", "publish" -> {
+        case "status", "preflight", "publish", "preflight-recovery", "recover-expired" -> {
           var previous =
               new RootKeyPublication.Release(
                   text(Path.of(plan.path("expectedSignedFile").asString())),
                   text(Path.of(plan.path("expectedAnnouncementFile").asString())));
-          if ("preflight".equals(args[0])) operator.preflight(previous, release);
+          if ("preflight-recovery".equals(args[0]))
+            operator.preflightExpiredRecovery(previous, release);
+          else if ("recover-expired".equals(args[0]))
+            result = operator.recoverExpired(previous, release);
+          else if ("preflight".equals(args[0])) operator.preflight(previous, release);
           else
             result =
                 "status".equals(args[0])

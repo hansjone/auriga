@@ -225,6 +225,139 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/ai/v1/admin/relay/providers': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listRelayProviders'];
+    put?: never;
+    post: operations['createRelayProvider'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/ai/v1/admin/relay/providers/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: operations['updateRelayProvider'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/ai/v1/admin/relay/providers/{id}/keys': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations['setRelayProviderKey'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/ai/v1/admin/relay/pools': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listRelayPools'];
+    put?: never;
+    /** @description 保存模型池；缺省为编辑或创建。If-None-Match: * 表示仅创建，已存在的租户内公开 ID 原子拒绝，不覆盖；该条件参与 Idempotency-Key 请求指纹。 */
+    post: operations['saveRelayPool'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/ai/v1/admin/relay/virtual-keys': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listRelayKeys'];
+    put?: never;
+    post: operations['issueRelayKey'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/ai/v1/admin/relay/virtual-keys/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: operations['updateRelayKey'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/ai/v1/admin/relay/logs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['queryRelayUsage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/ai/v1/admin/relay/providers/{id}/models': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 获取供应商的真实模型目录
+     * @description 使用当前租户已保存的供应商地址及密钥向供应商读取模型目录；不接受客户端地址或密钥。失败时保留手动输入模型 ID 的能力。返回的目录不会自动创建公开模型。
+     */
+    get: operations['listRelayProviderModels'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -261,7 +394,13 @@ export interface components {
     ProviderInput: {
       name: string;
       /** @enum {string} */
-      kind: 'openai_compatible';
+      kind:
+        | 'openai-compatible'
+        | 'openai'
+        | 'minimax'
+        | 'deepseek'
+        | 'anthropic'
+        | 'gemini';
       /**
        * Format: uri
        * @description 由受信管理者配置；默认禁止内网/重定向。显式部署的gateway端点例外另审，不能放宽实例出网。
@@ -432,8 +571,21 @@ export interface components {
         id: string;
         /** @constant */
         object: 'model';
-        /** Format: int64 */
+        /**
+         * Format: int64
+         * @description Unix seconds; 0 denotes an unknown creation time and is not a creation timestamp.
+         */
         created: number;
+        /**
+         * Format: int64
+         * @description Authenticated pool context capacity, when disclosed.
+         */
+        context_window?: number;
+        /**
+         * Format: int64
+         * @description Authenticated pool output capacity; smaller than context_window when both are disclosed.
+         */
+        max_output_tokens?: number;
         /** @constant */
         owned_by: 'auriga';
       }[];
@@ -557,10 +709,11 @@ export interface components {
       /** @enum {string} */
       outcome?: 'completed' | 'failed' | 'cancelled' | 'unknown';
     };
-    /** @description 部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。周期不限时对应正数绝对上限必填；unknown预占继续占用；0配额禁止。 */
+    /** @description 部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。未配置周期配额或绝对流量上限时不新增该限制；unknown预占继续占用；0周期配额禁止，并发0表示不限。 */
     AdmissionPolicy: {
       /**
        * Format: int64
+       * @description 并发上限，0表示不限制。
        * @default 2
        */
       maxActiveRequestsPerSubject: number;
@@ -579,6 +732,206 @@ export interface components {
       role: 'assistant';
       content: string | null;
       tool_calls?: components['schemas']['ToolCall'][];
+    };
+    RelayRoute: {
+      /** Format: uuid */
+      providerId: string;
+      model: string;
+      /** Format: double */
+      weight: number;
+    };
+    RelayPool: {
+      id: string;
+      enabled: boolean;
+      routes: components['schemas']['RelayRoute'][];
+      /**
+       * Format: int64
+       * @description 上下文能力为0（未知）或至少2的安全整数，供客户端压缩与请求参数使用，不是中转裁限；可显式从上游目录更新，公开目录省略未知值。
+       */
+      contextWindow: number;
+      /**
+       * Format: int64
+       * @description 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
+       */
+      maxOutputTokens: number;
+      capabilities?: components['schemas']['RelayPoolCapabilities'];
+      price: components['schemas']['Price'];
+    };
+    /** @description 管理端能力来源与发布策略，保存在模型池文档中；不参与调用请求裁剪或预算准入。无此配置的历史模型池保持现有显式能力值。新建默认继承首条正权重路由，可明确选择池内其他来源；不取全部路由或兜底的最小值。继承项依次取绑定来源的上游快照、管理员推荐值、未知0；manual使用模型池原字段作为显式覆盖。刷新成功后缺失字段清为未知快照，网络失败保旧；配置保存后发布给DSH与外部目录。 */
+    RelayPoolCapabilities: {
+      /** Format: uuid */
+      sourceProviderId: string;
+      sourceModel: string;
+      /** @enum {string} */
+      contextWindowMode: 'inherit' | 'manual';
+      /** @enum {string} */
+      maxOutputTokensMode: 'inherit' | 'manual';
+      /**
+       * Format: int64
+       * @description 管理员配置的推荐上下文，仅继承模式且上游未提供总上下文字段时使用；0或缺失为未知，不由输入上限推算。
+       */
+      recommendedContextWindow?: number;
+      /**
+       * Format: int64
+       * @description 管理员配置的推荐输出，仅继承模式且上游未提供输出字段时使用；0或缺失为未知。
+       */
+      recommendedMaxOutputTokens?: number;
+      upstream?: components['schemas']['RelayPoolUpstreamCapabilities'];
+    };
+    /** @description 管理员最近一次成功获取的目录快照。供应商及真实模型ID仅用于绑定所选能力来源，绝不发布到公开目录；换来源或来源路由不存在时不能沿用其他模型的旧快照。 */
+    RelayPoolUpstreamCapabilities: {
+      /** Format: uuid */
+      providerId: string;
+      model: components['schemas']['RelayProviderModel'];
+    };
+    RelayKeyInput: {
+      name: string;
+      active: boolean;
+      /** Format: int64 */
+      monthlyBudgetMicros: number;
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      requestsPerMinute: number;
+      models: string[];
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      maxConcurrency?: number;
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      maxInFlightTokens?: number;
+      /** @description 仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。 */
+      meteringOnly?: boolean;
+    };
+    RelayKey: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      /** @enum {string} */
+      source: 'member' | 'external';
+      accountId: string;
+      active: boolean;
+      /** Format: int64 */
+      monthlyBudgetMicros: number;
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      requestsPerMinute: number;
+      models: string[];
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      maxConcurrency?: number;
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      maxInFlightTokens?: number;
+      /** @description 仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。 */
+      meteringOnly?: boolean;
+      /**
+       * @description 治理来源。ensure只更新default；旧无来源保留为legacy，管理员保存标administrator。
+       * @enum {string}
+       */
+      policyOrigin?: 'default' | 'administrator' | 'legacy';
+    };
+    RelayKeyIssued: {
+      key: components['schemas']['RelayKey'];
+      /** @description 仅签发响应或受信成员身份桥返回；不存明文、不写日志。 */
+      secret: string;
+    };
+    RelayMemberEnsure: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      accountId: string;
+      /** Format: int64 */
+      monthlyBudgetMicros: number;
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      requestsPerMinute: number;
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      maxConcurrency?: number;
+      /**
+       * Format: int64
+       * @description 显式流量限制，0或未指定表示不限制。
+       */
+      maxInFlightTokens?: number;
+      /** @description 仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。 */
+      meteringOnly?: boolean;
+    };
+    RelayProvider: {
+      /** Format: uuid */
+      id: string;
+      configuration: components['schemas']['RelayProviderInput'];
+      hasCredential: boolean;
+    };
+    RelayProviderPage: {
+      items: components['schemas']['RelayProvider'][];
+      /** @description 后续页游标，绑定当前租户和资源。 */
+      nextCursor?: string;
+    };
+    RelayPoolPage: {
+      items: components['schemas']['RelayPool'][];
+      /** @description 后续页游标，绑定当前租户和资源。 */
+      nextCursor?: string;
+    };
+    RelayKeyPage: {
+      items: components['schemas']['RelayKey'][];
+      /** @description 后续页游标，绑定当前租户和资源。 */
+      nextCursor?: string;
+    };
+    /** @description 第一步供应商配置。网络期限与并发由中转服务固定安全上限控制，不接受尚未映射的高级参数。 */
+    RelayProviderInput: {
+      name: string;
+      /** @enum {string} */
+      kind:
+        | 'openai-compatible'
+        | 'openai'
+        | 'minimax'
+        | 'deepseek'
+        | 'anthropic'
+        | 'gemini';
+      /**
+       * Format: uri
+       * @description 由受信管理者配置；默认禁止内网/重定向。显式部署的gateway端点例外另审，不能放宽实例出网。
+       */
+      baseUrl: string;
+      enabled: boolean;
+    };
+    RelayProviderModel: {
+      /** @description 供应商返回的真实上游模型 ID，仅管理端目录使用。 */
+      id: string;
+      /**
+       * Format: int64
+       * @description 供应商明确返回的总上下文 Token 上限；缺失表示未知，不由模型名称或输入输出上限相加推断。仅为目录元数据，不自动变更模型池或预算。
+       */
+      contextWindow?: number;
+      /**
+       * Format: int64
+       * @description 供应商明确返回的输入 Token 上限；与总上下文上限分别表达，缺失表示未知。
+       */
+      maxInputTokens?: number;
+      /**
+       * Format: int64
+       * @description 供应商明确返回的输出 Token 上限；缺失表示未知。合法的同义字段或重复模型记录按维度取已知最小值；重复记录任一未知则该维度未知。
+       */
+      maxOutputTokens?: number;
+    };
+    RelayProviderModelPage: {
+      items: components['schemas']['RelayProviderModel'][];
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -2730,6 +3083,988 @@ export interface operations {
       };
       /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
       default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  listRelayProviders: {
+    parameters: {
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayProviderPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  createRelayProvider: {
+    parameters: {
+      query?: never;
+      header?: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelayProviderInput'];
+      };
+    };
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayProvider'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  updateRelayProvider: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelayProviderInput'];
+      };
+    };
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayProvider'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  setRelayProviderKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CredentialInput'];
+      };
+    };
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayProvider'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  listRelayPools: {
+    parameters: {
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayPoolPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  saveRelayPool: {
+    parameters: {
+      query?: never;
+      header?: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description 仅创建，已有公开模型 ID 返回412；只接受单值星号。缺省保持原保存行为。 */
+        'If-None-Match'?: '*';
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelayPool'];
+      };
+    };
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayPool'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed；公开模型 ID 已存在，未修改原配置。 */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  listRelayKeys: {
+    parameters: {
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayKeyPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  issueRelayKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelayKeyInput'];
+      };
+    };
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayKeyIssued'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  updateRelayKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RelayKeyInput'];
+      };
+    };
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayKey'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  queryRelayUsage: {
+    parameters: {
+      query?: {
+        keyId?: string;
+        accountId?: string;
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；凭据仅在明示的签发响应返回。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UsagePage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  listRelayProviderModels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；只返回上游真实模型 ID，不返回供应商凭据或原始响应。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelayProviderModelPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };

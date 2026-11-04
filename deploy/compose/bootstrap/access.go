@@ -14,7 +14,6 @@ import (
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
-	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
@@ -30,7 +29,7 @@ var identityMaterialFiles = []string{
 	"edge.config.json", "access.env", "agent-policy.yaml",
 	"runtime-keys/root.pb",
 	"pki/gateway.crt", "pki/gateway.key",
-	"litellm-runtime.json", "litellm-public.env",
+	"bifrost-runtime.json",
 }
 
 func init() {
@@ -338,7 +337,7 @@ func validateComposeAccess(cfg deploymentconfig.Config, edgeContainer string) er
 	return nil
 }
 
-func composeAccessEnv(cfg deploymentconfig.Config, supplied bool, uiConfig ...relayui.Config) []byte {
+func composeAccessEnv(cfg deploymentconfig.Config, supplied bool) []byte {
 	// No shell syntax can enter these values: all hosts/ports were validated by
 	// deploymentconfig.Load. Custom domain installs publish on all interfaces;
 	// custom IP installs publish only the declared IPv4. Default M2 stays local.
@@ -349,15 +348,9 @@ func composeAccessEnv(cfg deploymentconfig.Config, supplied bool, uiConfig ...re
 			bind = cfg.PortalOrigin().Host
 		}
 	}
-	ui, err := relayui.Resolve(cfg, "")
-	if len(uiConfig) > 0 {
-		ui = uiConfig[0]
-	} else if err != nil {
-		panic(err) // All callers must supply an already validated installation.
-	}
-	return []byte(fmt.Sprintf("COMPOSE_PROJECT_NAME='%s'\nAURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\nAURIGA_TEAM_RP_ID='%s'\nAURIGA_ACCESS_BIND='%s'\nAURIGA_PORTAL_PORT='%d'\nAURIGA_ADMIN_PORT='%d'\nAURIGA_PORTAL_TARGET_PORT='%d'\nAURIGA_ADMIN_TARGET_PORT='%d'\nAURIGA_LITELLM_UI_PORT='%d'\nAURIGA_LITELLM_UI_TARGET_PORT='%d'\n",
+	return []byte(fmt.Sprintf("COMPOSE_PROJECT_NAME='%s'\nAURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\nAURIGA_TEAM_RP_ID='%s'\nAURIGA_ACCESS_BIND='%s'\nAURIGA_PORTAL_PORT='%d'\nAURIGA_ADMIN_PORT='%d'\nAURIGA_PORTAL_TARGET_PORT='%d'\nAURIGA_ADMIN_TARGET_PORT='%d'\nAURIGA_EGRESS_DENY_HOSTS='%s,%s'\n",
 		strings.TrimSuffix(cfg.InstanceControl().EdgeContainer, "-edge"), cfg.Issuer(), cfg.PortalURL(), cfg.PortalOrigin().Host, bind,
-		cfg.PortalOrigin().Port, cfg.AdminOrigin().Port, cfg.Listeners().Portal.Port, cfg.Listeners().Admin.Port, ui.Origin.Port, ui.Listener.Port))
+		cfg.PortalOrigin().Port, cfg.AdminOrigin().Port, cfg.Listeners().Portal.Port, cfg.Listeners().Admin.Port, cfg.PortalOrigin().Host, cfg.AdminOrigin().Host))
 }
 
 // These ports belong to the disposable public M2 stack, not product defaults.

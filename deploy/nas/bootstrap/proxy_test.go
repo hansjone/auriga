@@ -60,7 +60,7 @@ func TestNASGeneratedProxyTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	for _, name := range []string{"proxy-client", "missing", "edge-iam"} {
 		t.Run(name, func(t *testing.T) {
 			done := make(chan error, 1)
@@ -70,8 +70,11 @@ func TestNASGeneratedProxyTrust(t *testing.T) {
 					done <- err
 					return
 				}
-				defer c.Close()
-				c.SetDeadline(time.Now().Add(3 * time.Second))
+				defer func() { _ = c.Close() }()
+				if err = c.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+					done <- err
+					return
+				}
 				err = c.(*tls.Conn).Handshake()
 				if err == nil {
 					_, err = c.Write([]byte{1})
@@ -88,10 +91,12 @@ func TestNASGeneratedProxyTrust(t *testing.T) {
 			}
 			client, err := tls.Dial("tcp", listener.Addr().String(), config)
 			if err == nil {
-				client.SetDeadline(time.Now().Add(3 * time.Second))
+				if err := client.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+					t.Fatal(err)
+				}
 				b := make([]byte, 1)
 				_, err = client.Read(b)
-				client.Close()
+				_ = client.Close()
 			}
 			serverErr := <-done
 			if name == "proxy-client" && (err != nil || serverErr != nil) {

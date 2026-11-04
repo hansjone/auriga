@@ -2,7 +2,7 @@
 set -eu
 ROOT=$1
 PARENT=$2
-python3 - "$ROOT/docker-compose.yml" <<'PY'
+python3 - "$ROOT/docker-compose.yml" "$ROOT/collab-compose.yml" "$ROOT/managed-identity-compose.yml" <<'PY'
 import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text(encoding='utf8')
 mount = '${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro'
@@ -14,6 +14,17 @@ for name in ('platform', 'agent'):
     assert mount in block, name + ' must mount the configured managed CA'
 block = service('ai-relay')
 assert mount not in block, 'relay does not consume the managed CA'
+block = service('agent')
+assert 'AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN: ${AURIGA_MANAGED_PLATFORM_ORIGIN:-}' in block
+assert 'AURIGA_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}' in block
+for path in sys.argv[2:]:
+    checked = pathlib.Path(path).read_text(encoding='utf8').split('\nservices:\n', 1)[1]
+    agent = re.search(r'^  agent:\n(.*?)(?=^  \S|\Z)', checked, re.M | re.S).group(1)
+    assert 'AURIGA_AGENT_MANAGED_INSTALLATION_FILE: /etc/auriga/managed-identity.json' in agent
+    assert 'source: ${AURIGA_DATA_ROOT}/config/collab-runtime/platform/managed-network.json' in agent
+    assert 'target: /etc/auriga/managed-identity.json' in agent
+    assert 'read_only: true' in agent and 'create_host_path: false' in agent
+    assert '/config/collab-runtime/platform:' not in agent, 'agent must not receive the credential directory'
 PY
 DATA="$PARENT/auriga-managed-tls-data"
 mkdir -p "$DATA/config/materials/pki" "$DATA/config/pki-edge"

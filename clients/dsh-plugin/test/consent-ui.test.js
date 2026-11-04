@@ -71,7 +71,11 @@ async function fixture(api, locale = 'zh', http) {
           if (String(url).endsWith('/status'))
             return {
               ok: true,
-              json: async () => ({ loggedIn: true, csrf: 'native-test-csrf' }),
+              json: async () => ({
+                loggedIn: true,
+                csrf: 'native-test-csrf',
+                capabilities: { consent: true },
+              }),
             };
           try {
             const input = init.body ? JSON.parse(init.body) : undefined;
@@ -142,6 +146,7 @@ async function fixture(api, locale = 'zh', http) {
   };
   return {
     render,
+    hasModelsCard: () => slots.has('settings.models.provider-card'),
     close: () => {
       for (const v of values) v?.cleanup?.();
       dispose();
@@ -155,6 +160,26 @@ function all(tree) {
 }
 const text = (tree) =>
   typeof tree === 'string' ? tree : (tree?.children ?? []).map(text).join(' ');
+
+for (const locale of ['zh', 'en'])
+  test(
+    'without native Remote capabilities no sync card or automatic status poll is installed: ' +
+      locale,
+    async () => {
+      let calls = 0;
+      const f = await fixture(undefined, locale, async () => {
+        calls++;
+        throw new Error('unexpected model status request');
+      });
+      try {
+        assert.equal(f.hasModelsCard(), false);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(calls, 0);
+      } finally {
+        f.close();
+      }
+    },
+  );
 function data() {
   return {
     policyRevision: 3,
@@ -175,6 +200,31 @@ function data() {
   };
 }
 
+for (const consent of [false, undefined])
+  test(
+    'R2 unavailable first-contact capability hides the section without reading a snapshot: ' +
+      consent,
+    async () => {
+      const calls = [];
+      const f = await fixture({}, 'zh', async (url) => {
+        calls.push(String(url));
+        if (String(url).endsWith('/status'))
+          return {
+            ok: true,
+            json: async () => ({ loggedIn: true, capabilities: { consent } }),
+          };
+        throw Error('unsupported consent must not be requested');
+      });
+      try {
+        assert.equal(await f.render(true), null);
+        assert.equal(calls.length, 1);
+        assert.match(calls[0], /\/status$/);
+      } finally {
+        f.close();
+      }
+    },
+  );
+
 test('a same-name browser plugin service cannot replace the authenticated consent HTTP bridge', async () => {
   let injectedCalls = 0,
     httpCalls = 0;
@@ -186,8 +236,16 @@ test('a same-name browser plugin service cannot replace the authenticated consen
       },
     },
     'zh',
-    async () => {
+    async (url) => {
       httpCalls++;
+      if (String(url).endsWith('/status'))
+        return {
+          ok: true,
+          json: async () => ({
+            loggedIn: true,
+            capabilities: { consent: true },
+          }),
+        };
       return { ok: true, json: async () => ({ ...data(), pending: [] }) };
     },
   );
@@ -224,8 +282,16 @@ for (const managed of [false, true])
         let body = state;
         if (String(url).endsWith('/status'))
           body = managed
-            ? { loggedIn: true, mode: 'managed' }
-            : { loggedIn: true, csrf: 'fresh-native-csrf' };
+            ? {
+                loggedIn: true,
+                mode: 'managed',
+                capabilities: { consent: true },
+              }
+            : {
+                loggedIn: true,
+                csrf: 'fresh-native-csrf',
+                capabilities: { consent: true },
+              };
         if (String(url).endsWith('/decide')) {
           body = { ok: true };
           state.pending = [];

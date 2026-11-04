@@ -1,0 +1,387 @@
+// Auriga modifications: trimmed relay core/providers; see third_party/bifrost/UPSTREAM.md.
+
+package openai
+
+import (
+	"bytes"
+	"mime/multipart"
+	"strconv"
+	"strings"
+
+	"github.com/bytedance/sonic"
+	providerUtils "github.com/maximhq/bifrost/core/providers/utils"
+	"github.com/maximhq/bifrost/core/schemas"
+)
+
+type oaiChatUsageWrapper struct {
+	Usage       *schemas.BifrostLLMUsage `json:"usage"`
+	ServiceTier *string                  `json:"service_tier"`
+}
+type oaiTranscriptionResponseWrapper struct {
+	Usage    *schemas.TranscriptionUsage `json:"usage"`
+	Duration float64                     `json:"duration"`
+}
+type oaiResponsesWrapper struct {
+	Response *struct {
+		Usage       *schemas.ResponsesResponseUsage `json:"usage"`
+		ToolUsage   *schemas.ToolUsage              `json:"tool_usage"`
+		ServiceTier *string                         `json:"service_tier"`
+	} `json:"response"`
+	Usage       *schemas.ResponsesResponseUsage `json:"usage"`
+	ToolUsage   *schemas.ToolUsage              `json:"tool_usage"`
+	ServiceTier *string                         `json:"service_tier"`
+}
+
+func ClassifyPassthroughPath(method, path string) schemas.RequestType {
+	if idx := strings.IndexByte(path, '?'); idx >= 0 {
+		path = path[:idx]
+	}
+	if !strings.EqualFold(method, "POST") {
+		if strings.EqualFold(method, "GET") && strings.HasSuffix(path, "/containers") {
+			return schemas.ContainerListRequest
+		}
+		return ""
+	}
+
+	switch {
+	case strings.HasSuffix(path, "/chat/completions"):
+		return schemas.ChatCompletionRequest
+	case strings.HasSuffix(path, "/completions"):
+		return schemas.TextCompletionRequest
+	case strings.HasSuffix(path, "/responses"):
+		return schemas.ResponsesRequest
+	case strings.HasSuffix(path, "/embeddings"):
+		return schemas.EmbeddingRequest
+	case strings.HasSuffix(path, "/audio/speech"):
+		return schemas.SpeechRequest
+	case strings.HasSuffix(path, "/audio/transcriptions"),
+		strings.HasSuffix(path, "/audio/translations"):
+		return schemas.TranscriptionRequest
+	case strings.HasSuffix(path, "/images/generations"):
+		return schemas.ImageGenerationRequest
+	case strings.HasSuffix(path, "/images/edits"):
+		return schemas.ImageEditRequest
+	case strings.HasSuffix(path, "/images/variations"):
+		return schemas.ImageVariationRequest
+	case strings.Contains(path, "/video"):
+		return schemas.VideoGenerationRequest
+	case strings.HasSuffix(path, "/containers"):
+
+		return schemas.ContainerCreateRequest
+	}
+	return ""
+}
+
+func ExtractOpenAIPassthroughUsage(method, path string, reqBody, body []byte) *schemas.BifrostPassthroughUsage {
+	switch ClassifyPassthroughPath(method, path) {
+	case schemas.ChatCompletionRequest, schemas.TextCompletionRequest:
+		return ExtractOAIChatUsage(body)
+	case schemas.ResponsesRequest:
+		return extractOAIResponsesUsage(body)
+	case schemas.EmbeddingRequest:
+		return extractOAIEmbeddingUsage(body)
+	case schemas.SpeechRequest:
+		return extractOAISpeechUsage(reqBody)
+	case schemas.TranscriptionRequest:
+		return extractOAITranscriptionUsage(body)
+	case schemas.ImageGenerationRequest, schemas.ImageEditRequest, schemas.ImageVariationRequest:
+		return extractOAIImageUsage(reqBody, body)
+	case schemas.VideoGenerationRequest:
+		return extractOAIVideoUsage(reqBody)
+	case schemas.ContainerCreateRequest, schemas.ContainerListRequest:
+
+		return extractOAIContainerUsage(body)
+	}
+	return nil
+}
+
+func HasOpenAIPassthroughUsage(event []byte) bool {
+	return providerUtils.GetJSONField(event, "usage").Exists() ||
+		providerUtils.GetJSONField(event, "response.usage").Exists()
+}
+
+func EndsOpenAIPassthroughStream(event []byte) bool {
+	switch providerUtils.GetJSONField(event, "type").Str {
+	case "response.completed", "response.failed", "response.incomplete", "error":
+		return true
+	}
+	return false
+}
+
+const openAIVideoDefaultSeconds = 4
+
+func extractOAIVideoUsage(reqBody []byte) *schemas.BifrostPassthroughUsage {
+	secs := openAIVideoDefaultSeconds
+	if len(reqBody) > 0 {
+
+		if v := providerUtils.GetJSONField(reqBody, "seconds"); v.Exists() && v.Float() > 0 {
+			secs = int(v.Float())
+		} else if form := parseMultipartFormValues(reqBody); form != nil {
+
+			if v := firstFormValue(form, "seconds"); v != "" {
+				if f, parseErr := strconv.ParseFloat(v, 64); parseErr == nil && f > 0 {
+					secs = int(f)
+				}
+			}
+		}
+	}
+	return &schemas.BifrostPassthroughUsage{VideoSeconds: &secs}
+}
+
+func parseMultipartFormValues(body []byte) map[string][]string {
+	if len(body) == 0 {
+		return nil
+	}
+	firstLine, _, _ := bytes.Cut(body, []byte("\n"))
+	boundary := strings.TrimRight(strings.TrimPrefix(string(firstLine), "--"), "\r")
+	if boundary == "" {
+		return nil
+	}
+	mr := multipart.NewReader(bytes.NewReader(body), boundary)
+	form, err := mr.ReadForm(32 << 20)
+	if err != nil {
+		return nil
+	}
+
+	defer form.RemoveAll()
+	return form.Value
+}
+
+func firstFormValue(form map[string][]string, key string) string {
+	if v := form[key]; len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
+func ExtractOAIChatUsage(body []byte) *schemas.BifrostPassthroughUsage {
+	if len(body) == 0 {
+		return nil
+	}
+	var w oaiChatUsageWrapper
+	if err := sonic.Unmarshal(body, &w); err != nil || w.Usage == nil || w.Usage.TotalTokens == 0 {
+		return nil
+	}
+	u := &schemas.BifrostPassthroughUsage{LLMUsage: w.Usage}
+	if w.ServiceTier != nil {
+		t := schemas.BifrostServiceTier(*w.ServiceTier)
+		u.ServiceTier = &t
+	}
+	return u
+}
+
+func extractOAIResponsesUsage(body []byte) *schemas.BifrostPassthroughUsage {
+	if len(body) == 0 {
+		return nil
+	}
+
+	var w oaiResponsesWrapper
+	if err := sonic.Unmarshal(body, &w); err != nil {
+		return nil
+	}
+
+	ru, toolUsage, tier := w.Usage, w.ToolUsage, w.ServiceTier
+	if w.Response != nil && w.Response.Usage != nil && w.Response.Usage.TotalTokens > 0 {
+		ru, toolUsage, tier = w.Response.Usage, w.Response.ToolUsage, w.Response.ServiceTier
+	}
+	if ru == nil || ru.TotalTokens == 0 {
+		return nil
+	}
+	ru.ToolUsage = toolUsage
+	return buildOAIResponsesUsage(ru, tier)
+}
+
+func buildOAIResponsesUsage(ru *schemas.ResponsesResponseUsage, serviceTier *string) *schemas.BifrostPassthroughUsage {
+	usage := &schemas.BifrostLLMUsage{
+		PromptTokens:     ru.InputTokens,
+		CompletionTokens: ru.OutputTokens,
+		TotalTokens:      ru.TotalTokens,
+	}
+	if ru.InputTokensDetails != nil {
+		usage.PromptTokensDetails = &schemas.ChatPromptTokensDetails{
+			CachedReadTokens:  ru.InputTokensDetails.CachedReadTokens,
+			CachedWriteTokens: ru.InputTokensDetails.CachedWriteTokens,
+		}
+	}
+	if ru.OutputTokensDetails != nil {
+		usage.CompletionTokensDetails = &schemas.ChatCompletionTokensDetails{
+			ReasoningTokens: ru.OutputTokensDetails.ReasoningTokens,
+		}
+		if ru.OutputTokensDetails.NumSearchQueries != nil {
+			usage.CompletionTokensDetails.NumSearchQueries = ru.OutputTokensDetails.NumSearchQueries
+		}
+	}
+	usage.ToolUsage = ru.ToolUsage.DeepCopy()
+	u := &schemas.BifrostPassthroughUsage{LLMUsage: usage}
+	if serviceTier != nil {
+		t := schemas.BifrostServiceTier(*serviceTier)
+		u.ServiceTier = &t
+	}
+	return u
+}
+
+func extractOAIEmbeddingUsage(body []byte) *schemas.BifrostPassthroughUsage {
+	if len(body) == 0 {
+		return nil
+	}
+	var w oaiChatUsageWrapper
+	if err := sonic.Unmarshal(body, &w); err != nil || w.Usage == nil || w.Usage.TotalTokens == 0 {
+		return nil
+	}
+	return &schemas.BifrostPassthroughUsage{LLMUsage: w.Usage}
+}
+
+func extractOAISpeechUsage(reqBody []byte) *schemas.BifrostPassthroughUsage {
+	if len(reqBody) == 0 {
+		return nil
+	}
+	var req OpenAISpeechRequest
+	if err := sonic.Unmarshal(reqBody, &req); err != nil || req.Input == "" {
+		return nil
+	}
+	return &schemas.BifrostPassthroughUsage{
+		AudioInputChars: len([]rune(req.Input)),
+	}
+}
+
+func extractOAITranscriptionUsage(body []byte) *schemas.BifrostPassthroughUsage {
+	var r oaiTranscriptionResponseWrapper
+	if err := sonic.Unmarshal(body, &r); err != nil {
+		return nil
+	}
+	u := &schemas.BifrostPassthroughUsage{}
+	if r.Usage != nil && r.Usage.TotalTokens != nil && *r.Usage.TotalTokens > 0 {
+		promptTokens := 0
+		if r.Usage.InputTokens != nil {
+			promptTokens = *r.Usage.InputTokens
+		}
+		u.LLMUsage = &schemas.BifrostLLMUsage{
+			PromptTokens: promptTokens,
+			TotalTokens:  *r.Usage.TotalTokens,
+		}
+		if r.Usage.InputTokenDetails != nil {
+			u.AudioTokenDetails = &schemas.TranscriptionUsageInputTokenDetails{
+				AudioTokens: r.Usage.InputTokenDetails.AudioTokens,
+				TextTokens:  r.Usage.InputTokenDetails.TextTokens,
+			}
+		}
+		if r.Usage.Seconds != nil {
+			u.AudioSeconds = new(int(*r.Usage.Seconds))
+		}
+	} else if r.Duration > 0 {
+		u.AudioSeconds = new(int(r.Duration))
+	}
+	if u.LLMUsage == nil && u.AudioSeconds == nil {
+		return nil
+	}
+	return u
+}
+
+func extractOAIImageUsage(reqBody, body []byte) *schemas.BifrostPassthroughUsage {
+	u := &schemas.BifrostPassthroughUsage{}
+
+	if len(reqBody) > 0 {
+		var size, quality string
+		var n int
+		if form := parseMultipartFormValues(reqBody); form != nil {
+			size = firstFormValue(form, "size")
+			quality = firstFormValue(form, "quality")
+			if v := firstFormValue(form, "n"); v != "" {
+				if parsed, err := strconv.Atoi(v); err == nil {
+					n = parsed
+				}
+			}
+		} else {
+			var req OpenAIImageGenerationRequest
+			if err := sonic.Unmarshal(reqBody, &req); err == nil {
+				if req.Size != nil {
+					size = *req.Size
+				}
+				if req.Quality != nil {
+					quality = *req.Quality
+				}
+				if req.N != nil {
+					n = *req.N
+				}
+			}
+		}
+		if size != "" {
+			u.ImageSize = size
+		}
+		if quality != "" {
+			u.ImageQuality = quality
+		}
+		if n > 0 {
+			if u.ImageUsage == nil {
+				u.ImageUsage = &schemas.ImageUsage{}
+			}
+			if u.ImageUsage.OutputTokensDetails == nil {
+				u.ImageUsage.OutputTokensDetails = &schemas.ImageTokenDetails{}
+			}
+			u.ImageUsage.OutputTokensDetails.NImages = n
+		}
+	}
+
+	if len(body) > 0 {
+		var resp OpenAIImageStreamResponse
+		if err := sonic.Unmarshal(body, &resp); err == nil {
+			if resp.Usage != nil {
+				u.ImageUsage = resp.Usage
+			}
+			if resp.Size != "" && u.ImageSize == "" {
+				u.ImageSize = resp.Size
+			}
+			if resp.Quality != "" && u.ImageQuality == "" {
+				u.ImageQuality = resp.Quality
+			}
+		}
+
+		if dataLen := int(providerUtils.GetJSONField(body, "data.#").Int()); dataLen > 0 {
+			if u.ImageUsage == nil {
+				u.ImageUsage = &schemas.ImageUsage{}
+			}
+			if u.ImageUsage.OutputTokensDetails == nil {
+				u.ImageUsage.OutputTokensDetails = &schemas.ImageTokenDetails{}
+			}
+			if u.ImageUsage.OutputTokensDetails.NImages == 0 {
+				u.ImageUsage.OutputTokensDetails.NImages = dataLen
+			}
+		}
+	}
+
+	if u.ImageUsage == nil {
+		u.ImageUsage = &schemas.ImageUsage{}
+	}
+
+	if u.ImageUsage.TotalTokens > 0 {
+		u.LLMUsage = &schemas.BifrostLLMUsage{
+			PromptTokens:     u.ImageUsage.InputTokens,
+			CompletionTokens: u.ImageUsage.OutputTokens,
+			TotalTokens:      u.ImageUsage.TotalTokens,
+		}
+	}
+	return u
+}
+
+func extractOAIContainerUsage(body []byte) *schemas.BifrostPassthroughUsage {
+	if len(body) == 0 {
+		return nil
+	}
+	var resp struct {
+		Object      string `json:"object"`
+		ID          string `json:"id"`
+		MemoryLimit string `json:"memory_limit"`
+	}
+	if err := sonic.Unmarshal(body, &resp); err != nil {
+		return nil
+	}
+
+	if resp.Object != "container" || resp.ID == "" {
+		return nil
+	}
+	identifier := "container"
+	if resp.MemoryLimit != "" {
+		identifier = "container-" + resp.MemoryLimit
+	}
+	return &schemas.BifrostPassthroughUsage{ContainerIdentifier: identifier}
+}

@@ -116,8 +116,21 @@ export interface components {
         id: string;
         /** @constant */
         object: 'model';
-        /** Format: int64 */
+        /**
+         * Format: int64
+         * @description Unix seconds; 0 denotes an unknown creation time and is not a creation timestamp.
+         */
         created: number;
+        /**
+         * Format: int64
+         * @description Authenticated pool context capacity, when disclosed.
+         */
+        context_window?: number;
+        /**
+         * Format: int64
+         * @description Authenticated pool output capacity; smaller than context_window when both are disclosed.
+         */
+        max_output_tokens?: number;
         /** @constant */
         owned_by: 'auriga';
       }[];

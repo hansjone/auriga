@@ -222,13 +222,20 @@ for (const name of [undefined, 'Verified Alice'])
 test('R4 an online owner does not reverify or reconnect Team every timer tick', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
   const { runtime, requests } = await runtimePeer(t);
-  const before = requests.length;
+  const authorityRequests = () =>
+    requests.filter((path) => !path.startsWith('/api/iam/v1/network/systems'))
+      .length;
+  const before = authorityRequests();
   for (let i = 0; i < 30; i++) {
     t.mock.timers.tick(1000);
     await delay(2);
   }
   assert.equal(runtime.isReady(), true);
-  assert.equal(requests.length, before);
+  assert.equal(authorityRequests(), before);
+  assert.ok(
+    requests.filter((path) => path.startsWith('/api/iam/v1/network/systems'))
+      .length <= 1,
+  );
   assert.equal(
     runtime.status(runtime.nativeRequest({ principal: { kind: 'owner' } }))
       .communication,

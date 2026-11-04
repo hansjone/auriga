@@ -1,0 +1,19 @@
+{
+  "accessFile": "/etc/auriga/access.json",
+  "listen": "0.0.0.0:8080",
+  "privateNetwork": true,
+  "adminPasswordFile": "/run/secrets/bifrost_admin_password",
+  "encryptionKeyFile": "/run/secrets/bifrost_encryption_key",
+  "allowPrivateProviders": false,
+  "postgres": {
+    "host": "postgres",
+    "port": 5432,
+    "database": "bifrost",
+    "user": "auriga_bifrost",
+    "migrationUser": "auriga_bifrost_owner",
+    "passwordFile": "/run/secrets/bifrost_pg_password",
+    "migrationPasswordFile": "/run/secrets/bifrost_pg_migration_password",
+    "sslMode": "disable"
+  },
+  "memberPasswordFile": "/run/secrets/bifrost_member_password"
+}

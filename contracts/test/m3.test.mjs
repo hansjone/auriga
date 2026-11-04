@@ -59,6 +59,25 @@ ajv.addSchema({
   $defs: schemaRefs(read('openapi/ai.yaml').components.schemas),
 });
 
+test('公开模型能力接受大容量与安全整数，缺失保持未知，非法数值拒绝', () => {
+  const models = ajv.getSchema(aiUri + '#/$defs/ModelList');
+  const entry = { id: 'auto', object: 'model', created: 0, owned_by: 'auriga' };
+  const response = (extra) => ({ object: 'list', data: [{ ...entry, ...extra }] });
+  for (const extra of [
+    {},
+    { context_window: 4000000, max_output_tokens: 256000 },
+    { context_window: Number.MAX_SAFE_INTEGER, max_output_tokens: Number.MAX_SAFE_INTEGER - 1 },
+  ]) assert.equal(models(response(extra)), true, JSON.stringify(models.errors));
+  for (const extra of [
+    { context_window: 1 },
+    { context_window: 1.5 },
+    { context_window: Number.MAX_SAFE_INTEGER + 1 },
+    { max_output_tokens: 0 },
+    { max_output_tokens: 1.5 },
+    { max_output_tokens: Number.MAX_SAFE_INTEGER + 1 },
+  ]) assert.equal(models(response(extra)), false, JSON.stringify(extra));
+});
+
 test('受限JSON与SSE golden逐帧校验，未知字段/单字符串stop/缺输出上限拒绝', () => {
   const request = ajv.getSchema(aiUri + '#/$defs/ChatCompletionRequest');
   const completion = ajv.getSchema(aiUri + '#/$defs/ChatCompletion');
@@ -204,8 +223,9 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 37);
-  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 16);
+  assert.equal(count, 48);
+  assert(ids.has('listRelayProviderModels'));
+  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 23);
   for (const [key, p] of Object.entries(catalog.permissions)) {
     assert(p.description.en && p.description['zh-CN'], key);
     assert.equal(typeof p.adminOnly, 'boolean');

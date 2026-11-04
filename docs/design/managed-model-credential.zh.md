@@ -15,17 +15,23 @@ HTTP 部署保留支持；HTTPS 验证走 JVM 信任库，不跳过证书检查�
 独立的 `workspace.instance.managed_model_credential` 保存加密 JSON；每次规格生成重新以节点公钥和规格代次封装。
 agent 解封后核对 tenant、成员、实例及材料结构，写 `/run/auriga/model-credential.json`（0600，随元数据只读挂载）。
 renderer 生成 DSH 公开 `llm-pi-ai` 行的 `auriga-managed` OpenAI Chat Completions 提供方，设置 `compat.supportsStore:false`，中转站仍明确拒绝 `store` 字段。
-配置使用 `!!js` 文件表达式生成 Authorization 头，Loader 求值时读取唯一的 `/run/auriga/model-credential.json`；公开 YAML 和环境变量不包含 Key。旧版 `model-keys.json` 副本会被删除。
+配置只保存公开凭据引用 `apiKeyEnv: AURIGA_MANAGED_MODEL`，不使用 `headers.Authorization` 表达式。插件通过公开凭据服务，仅为持有受管路由的 `llm-pi-ai` 服务端作用域按操作读取唯一私有文件；不写全局环境变量或用户凭据存储。旧版 `model-keys.json` 副本会被删除。
 渲染层不覆盖原生 `credentials` 行或其存储位置；用户已有个人 Key、`credentials/set` 和 OAuth record 更新继续使用用户可写的原生凭据文件。
 `llm-pi-ai` 与凭据路径不能通过实例 Profile patch 覆盖；任意 `Profile.model_providers` 仍拒绝。缺材料删除私有模型文件，Key 改变影响渲染摘要并走受管材料重启。
-托管实例使用平台专用的隔离 profile，要求标准基线的 `llm-pi-ai` 行；渲染层管理该行的提供方配置。不将本层补丁应用到用户桌面或已有个人 profile，不承诺合并个人提供方；这不影响云端原生凭据存储的读写。
-**已知并接受**：仅实例主人经 `settings/describe` 可见 `llm-pi-ai` 命名空间的 `value.providers.auriga-managed.headers.Authorization`，属 MANAGED-N1 同机边界，跟踪 backlog **B-MM-DESCRIBE**。探针仅对此精确位置给出警告；其他任何位置出现 Key 仍判失败，profile 仍不得保存 Key 明文。
-成员在 DSH 原生模型选择器选择池中模型；已有会话的模型选择不被改写。池列表在首次下发和实例重启时读取，运行时池变更的调用权限由 LiteLLM 实时执行。
+托管实例要求标准基线的 `llm-pi-ai` 行；renderer 不再用命令行 overlay 覆盖可编辑配置，插件经公开 `configEditor` 仅初始化自己的提供商并迁移旧平台请求头表达式，保留已有模型偏好及个人提供方。必要的插件加载和身份守卫 overlay 保留。
+`settings/describe` 只可见引用名，凭据 `describe` 只返回配置状态、来源及不可写标记；浏览器 Remote 不提供 `resolve`。取票还要求公开 LLM 操作的服务端作用域，绑定实际提供方、准备时目标与配置代次；当前配置修正不能把个人旧快照或旧 prepared 句柄升级成托管授权。个人提供方引用保留名、其他服务端作用域取该引用、草稿端点或密钥覆盖均拒绝。原 **B-MM-DESCRIBE** 请求头暴露位置被移除，真实升级验收仍须检查设置与持久化均无 Key。
+成员在 DSH 原生模型选择器选择池中模型；已有会话的模型选择不被改写。密封材料中的模型列表仅是启动兜底，不是权限 allowlist。
+启动材料中的上下文和输出能力分别可选；未知字段省略，不填 0、固定小值或“无限”。已公开的值为安全整数（上下文至少 2、输出至少 1），只有两项均已知时要求输出小于上下文。workspace、agent 与插件保持同一规则，未知模型不会拖垮整个获权目录，也不为补容量而轮换身份。原生 DSH 自己的缺省能力仍由其适配器处理，后续可手动同步管理台已知能力。
+新增模型沿原生“编辑提供商→自定义设置→获取可用模型→勾选→添加所选→保存”。已有模型容量另由同一原生 Auriga 提供商卡的“同步已有模型能力”明确操作：读取当前获权目录与原生设置，预览同 ID 的上下文和输出变化，用户确认后以原生 `settings.mutate` 的修订号比较写入。只更新已知的两项容量；同 ID 的显示名称、其他选项、个人提供商、当前选择和不在目录中的本地行保留。未知能力不填固定兜底或无限值，并发修改冲突时要求重新获取，不重试覆盖。
+发现返回当前管理台明确的模型 ID 与能力，首批名称用公开 ID；原生添加本身仍保留已有行。没有后台目录轮询；不重封材料、不重启、不注销在途 adapter。本地列表不自动清理；失联或空结果不冒授权成功。已打开的原生编辑表单在同步后取消并重新打开，避免再保存旧草稿。
+托管 `discoverModels` 只读取可信平台目标、拒绝草稿地址/协议/密钥覆盖和重定向。个人提供商继续走原生发现。
+平台连接身份、端点、请求头、凭据引用和存储兼容开关保持保护，安全模型字段仍可按原生行编辑。目录可见不代表调用通过；每次调用仍在线核权限及预算。容量是提供给 DSH 的请求与压缩策略信息，不是中转站额外裁剪用户请求的规则。
+`auto` 是管理台已有模型池的固定公开 ID；启动目录真实存在 auto 时，只为没有用户层显式默认的新 Agent 设置默认。仅调整池内路由不需要同步 DSH 目录；旧池和已有会话不删除、不强制迁移。
 
-ai-gateway 通过既有受认证 IAM gRPC 每请求验证模型 Key，继续核验当前成员及模型权限，再用现有专用服务 Key 调 LiteLLM。IAM仍只签最多300秒租约，网关上限检查接受5秒跨主机时钟偏差，过期、身份及在线核权检查不变。
+ai-gateway 通过既有受认证 IAM gRPC 每请求验证模型 Key，继续核验当前成员及模型权限，再用独立成员服务口令调 Bifrost。IAM仍只签最多300秒租约，网关上限检查接受5秒跨主机时钟偏差，过期、身份及在线核权检查不变。
 `user=tenantId:accountId` 和可信 metadata 的覆盖规则与桌面一致；调用方提供的 user/metadata 不影响成员用量归属。
-模型列表、预算、速率和吊销仍由 LiteLLM 负责，不增加第二套模型池或管理员 Key。
+模型列表、预算、速率和吊销仍由 Bifrost 负责，不增加第二套模型池或管理员 Key。
 
 部署变化：更新 platform（IAM/workspace，自动执行 workspace V7 迁移）和 ai-relay、agent 镜像；DSH 镜像需已包含基线的 `@deepseek-ai/dsh-llm-pi-ai`。
 无需更新用户桌面 profile、外部模型 Key 或安装新插件依赖。安装材料若指定 `modelBaseUrl`，workspace 和实例必须都能访问该入口并信任其证书。
-共享栈真实对话、LiteLLM 成员账单及 NAS 验收须在部署这三项后由授权执行槽验证；组件单测不替代该证据。
+共享栈真实对话、Auriga 成员用量及 NAS 验收须在部署这三项后由授权执行槽验证；组件单测不替代该证据。

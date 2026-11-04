@@ -6,6 +6,8 @@ set -eu
 ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 export NAS_ROOT="$ROOT"
 export NAS_ALLOW_EXAMPLE_ENV=1
+export AURIGA_IMAGE_BIFROST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+export AURIGA_IMAGE_OPERATOR=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 export NAS_ALLOW_NONROOT=${NAS_ALLOW_NONROOT:-0}
 TMP=$(mktemp -d)
 chmod 0755 "$TMP"
@@ -33,6 +35,22 @@ else fail_msg internal_dynamic_pool_excludes_edge 'dynamic allocation must not c
 
 if sh "$ROOT/test/join-node.sh"; then pass join_node_boundary
 else fail_msg join_node_boundary 'private join token import failed'; fi
+if sh "$ROOT/test/message-edge-recovery.sh"; then pass message_edge_recovery_fixture
+else fail_msg message_edge_recovery_fixture 'edge/consumer recovery fixture failed'; fi
+if sh "$ROOT/test/announcement-hook-security.sh"; then pass announcement_hook_security_fixture
+else fail_msg announcement_hook_security_fixture 'trusted hook/real UID boundary failed'; fi
+
+if sh "$ROOT/test/bifrost-core-render.sh"; then pass bifrost_core_message_render
+else fail_msg bifrost_core_message_render "staged Bifrost coupled core to message projections"; fi
+
+if sh "$ROOT/test/start-edge-recovery.sh"; then pass start_edge_recovery
+else fail_msg start_edge_recovery 'public start did not recover instance bridges'; fi
+if sh "$ROOT/test/collab-rotation-routing.sh"; then pass collab_rotation_public_routing
+else fail_msg collab_rotation_public_routing 'fixed NAS key operations routing failed'; fi
+if python3 "$ROOT/test/collab_queue_test.py"; then pass collab_weekly_offline_signer
+else fail_msg collab_weekly_offline_signer 'weekly offline approval boundary failed'; fi
+if python3 "$ROOT/test/collab_queue_semantics_test.py"; then pass collab_weekly_key_semantics
+else fail_msg collab_weekly_key_semantics 'weekly key transition review failed'; fi
 
 if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
 else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi
@@ -50,15 +68,13 @@ if sh "$ROOT/test/panel-renew-cron.sh"; then pass panel_renewal_cron_regressions
 else fail_msg panel_renewal_cron_regressions "hourly renewal scheduling failed"; fi
 if sh "$ROOT/test/panel-renew-nonroot.sh"; then pass panel_renewal_nonroot_regressions
 else fail_msg panel_renewal_nonroot_regressions "container-mode non-root startup failed"; fi
-if python3 "$ROOT/litellm/permissions_test.py"; then pass litellm_permissions
-else fail_msg litellm_permissions "LiteLLM group permissions regression failed"; fi
-if python3 "$ROOT/litellm/prepare_ui_test.py"; then pass litellm_ui_preparation
-else fail_msg litellm_ui_preparation "image-independent atomic UI credential preparation failed"; fi
 
 if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
 else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi
 if sh "$ROOT/test/runtime-upgrade.sh"; then pass runtime_upgrade_transaction
 else fail_msg runtime_upgrade_transaction "runtime activation or rollback failed"; fi
+if sh "$ROOT/test/materials-upgrade.sh"; then pass materials_upgrade_boundary
+else fail_msg materials_upgrade_boundary "material activation arguments or failure handling failed"; fi
 if sh "$ROOT/test/container-installer.sh"; then pass container_installer_regressions
 else fail_msg container_installer_regressions "container installer boundary failed"; fi
 
@@ -266,8 +282,9 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
     else fail_msg "source_authority_override_$1" "override or explicit zero lost"; fi
     if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
       && command -v python3 >/dev/null 2>&1; then
-      if AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2 \
-        docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" config --format json >"$TMP/source-compose.json" \
+      if (load_nas_access_env "$DATA/config/materials/access.env"
+        AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2 \
+          docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" config --format json) >"$TMP/source-compose.json" \
         && python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["services"]["platform"]["environment"]; assert str(e["AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS"]) == sys.argv[2]; assert str(e["AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS"]) == sys.argv[3]' "$TMP/source-compose.json" "$1" "$2"; then
         pass "source_authority_compose_$1"
       else fail_msg "source_authority_compose_$1" "normalized override lost"; fi

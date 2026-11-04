@@ -18,6 +18,7 @@ runtime_action() {
     "$(bootstrap_binary)" runtime-upgrade "$@"
   fi
 }
+sh "$NAS_ROOT/scripts/preflight.sh"
 runtime_action stage
 rollback() {
   _exit=$?
@@ -37,7 +38,6 @@ trap rollback EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # Recreate only control consumers. Existing instance volumes and collab stay put.
-sh "$NAS_ROOT/scripts/preflight.sh"
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never platform agent
 runtime_action commit
 trap - EXIT INT TERM

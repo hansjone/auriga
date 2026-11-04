@@ -4,6 +4,13 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { productionInputs } from '../../deploy/compose/real-dsh/inputs.mjs';
 import {
+  runtimeInputs,
+  installedRuntime,
+} from '../../deploy/compose/real-dsh/runtime.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
   assertDoorRejected,
   assertRealHealth,
   realDshPageOk,
@@ -33,7 +40,7 @@ function runtimeFixture(engineForm = 'config', configFields = {}) {
   );
   const metadata = {
     image: `127.0.0.1:5000/auriga/real-dsh@${digest(manifest)}`,
-    dshVersion: '0.2.0-rc.2',
+    dshVersion: '0.2.1-rc.3',
     nodeVersion: '22.19.0',
     target: 'linux/amd64',
   };
@@ -200,6 +207,7 @@ test('runtime metadata retains immutable real repository and version/target cons
     { image: metadata.image.replace('real-dsh', 'fake-dsh') },
     { image: metadata.image + '0' },
     { dshVersion: '0.2.0' },
+    { dshVersion: '0.2.0-rc.2' },
     { nodeVersion: '22.20.0' },
     { target: 'linux/arm64' },
   ]) {
@@ -273,7 +281,7 @@ test('real door probe fails immediately if a host exposes unsigned pages', async
   );
 });
 
-test('fixture retains the exact reviewed S4 closure and registry integrity', () => {
+test('runtime retains the selected rc.3 public host closure byte-for-byte', () => {
   const base = new URL('../../deploy/compose/real-dsh/', import.meta.url);
   const bytes = readFileSync(new URL('package-lock.json', base));
   const versions = JSON.parse(
@@ -284,6 +292,28 @@ test('fixture retains the exact reviewed S4 closure and registry integrity', () 
     versions.lockSha256,
   );
   const lock = JSON.parse(bytes);
+  assert.deepEqual(
+    bytes,
+    readFileSync(
+      new URL(
+        '../../scripts/beta-ui/dsh-runtime/package-lock.json',
+        import.meta.url,
+      ),
+    ),
+  );
+  const pkg = JSON.parse(readFileSync(new URL('package.json', base), 'utf8'));
+  const plugin = JSON.parse(
+    readFileSync(
+      new URL('../../clients/dsh-plugin/package.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  const packages = runtimeInputs(pkg, lock, versions, plugin);
+  assert.ok(
+    packages.some(
+      (entry) => entry.name === '@deepseek-ai/dsh-client-connection',
+    ),
+  );
   assert.equal(
     lock.packages['node_modules/@deepseek-ai/dsh'].version,
     versions.dshVersion,
@@ -292,6 +322,96 @@ test('fixture retains the exact reviewed S4 closure and registry integrity', () 
     if (!name) continue;
     assert.match(entry.resolved, /^https:\/\/registry\.npmjs\.org\//);
     assert.match(entry.integrity, /^sha512-/);
+  }
+});
+
+test('old rc.2 and mixed actual packages cannot be hidden by a new ENV version', () => {
+  const base = new URL('../../deploy/compose/real-dsh/', import.meta.url);
+  const pkg = JSON.parse(readFileSync(new URL('package.json', base), 'utf8'));
+  const bytes = readFileSync(new URL('package-lock.json', base));
+  const lock = JSON.parse(bytes);
+  const versions = JSON.parse(
+    readFileSync(new URL('versions.json', base), 'utf8'),
+  );
+  const plugin = JSON.parse(
+    readFileSync(
+      new URL('../../clients/dsh-plugin/package.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  assert.throws(
+    () =>
+      runtimeInputs(
+        pkg,
+        lock,
+        { ...versions, dshVersion: '0.2.0-rc.2' },
+        plugin,
+      ),
+    /plugin public host minimum/,
+  );
+  const mixed = structuredClone(lock);
+  mixed.packages['node_modules/@deepseek-ai/dsh-client-connection'].version =
+    '0.2.0-rc.2';
+  assert.throws(
+    () => runtimeInputs(pkg, mixed, versions, plugin),
+    /Mixed DSH package group/,
+  );
+  const unsealed = structuredClone(lock);
+  delete unsealed.packages['node_modules/@deepseek-ai/dsh'].integrity;
+  assert.throws(
+    () => runtimeInputs(pkg, unsealed, versions, plugin),
+    /Unlocked/,
+  );
+  const dir = mkdtempSync(join(tmpdir(), 'auriga-runtime-packages-'));
+  const prior = process.env.DSH_VERSION;
+  try {
+    process.env.DSH_VERSION = versions.dshVersion;
+    writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg));
+    writeFileSync(join(dir, 'package-lock.json'), bytes);
+    const packages = runtimeInputs(pkg, lock, versions, plugin);
+    for (const entry of packages) {
+      const path = join(dir, entry.path);
+      mkdirSync(path, { recursive: true });
+      writeFileSync(
+        join(path, 'package.json'),
+        JSON.stringify({
+          name: entry.name,
+          version: entry.version,
+          ...(entry.name === '@deepseek-ai/dsh'
+            ? { bin: { dsh: 'cli.js' } }
+            : {}),
+        }),
+      );
+    }
+    writeFileSync(join(dir, 'node_modules/@deepseek-ai/dsh/cli.js'), '');
+    assert.equal(
+      installedRuntime(dir, versions, plugin).dshVersion,
+      versions.dshVersion,
+    );
+    writeFileSync(
+      join(dir, 'node_modules/@deepseek-ai/dsh/package.json'),
+      JSON.stringify({
+        name: '@deepseek-ai/dsh',
+        version: '0.2.0-rc.2',
+        bin: { dsh: 'cli.js' },
+      }),
+    );
+    assert.throws(
+      () => installedRuntime(dir, versions, plugin),
+      /Installed DSH package differs from lock/,
+    );
+    writeFileSync(
+      join(dir, 'package-lock.json'),
+      Buffer.concat([bytes, Buffer.from(' ')]),
+    );
+    assert.throws(
+      () => installedRuntime(dir, versions, plugin),
+      /lock SHA-256 mismatch/,
+    );
+  } finally {
+    if (prior === undefined) delete process.env.DSH_VERSION;
+    else process.env.DSH_VERSION = prior;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

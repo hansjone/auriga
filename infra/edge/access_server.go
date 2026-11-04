@@ -34,15 +34,6 @@ func (s *Server) runAccess(ctx context.Context) error {
 			config deployment.Listener
 		}{"managed", deployment.Listener{Address: "0.0.0.0", Port: int32(entry.port), Tls: true}})
 	}
-	if s.Cfg.LiteLLMUI != nil {
-		if err := s.Cfg.validateLiteLLMUI(); err != nil {
-			return err
-		}
-		entries = append(entries, struct {
-			role   string
-			config deployment.Listener
-		}{"relayAdmin", s.Cfg.LiteLLMUI.Listener})
-	}
 	var sockets []net.Listener
 	var servers []*http.Server
 	defer func() {

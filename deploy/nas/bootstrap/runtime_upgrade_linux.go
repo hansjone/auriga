@@ -470,6 +470,10 @@ func writeRuntimeGeneration(out, base string, spec *nodev1.InstanceSpec, m *runt
 	}
 	copySpec := proto.Clone(spec).(*nodev1.InstanceSpec)
 	copySpec.Dsh = m.Runtime()
+	if copySpec.Network == nil {
+		copySpec.Network = &nodev1.Network{}
+	}
+	copySpec.Network.EgressProxy = "http://auriga-egress.internal:3128"
 	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(copySpec)
 	if err != nil {
 		return err

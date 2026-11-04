@@ -80,7 +80,7 @@ func TestActivationComposeProjectBinding(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"compose.sh", "activate-collab.sh"} {
+	for _, name := range []string{"compose.sh", "activate-collab.sh", "upgrade-bifrost.sh"} {
 		b, err := os.ReadFile("../scripts/" + name)
 		if err != nil {
 			t.Fatal(err)
@@ -199,6 +199,27 @@ if [ "$ps" = true ] && [ "$AURIGA_TEST_RUNNING" = 1 ] && [ "$project" = public-t
 			t.Fatalf("changed preflight project accepted: %v %s %s", err, b, log)
 		}
 	})
+	t.Run("bifrost-upgrade", func(t *testing.T) {
+		b, log, err := run("upgrade-bifrost.sh", false)
+		if err != nil || !strings.Contains(log, "run --rm --no-deps --pull never --user 999:999 -e PGHOST=postgres --entrypoint sh postgres /docker-entrypoint-initdb.d/03-bifrost.sh") {
+			t.Fatalf("fixed upgrade helper: %v %s %s", err, b, log)
+		}
+		assertDocker(t, log)
+	})
+	for _, args := range [][]string{{"run", "postgres", "sh"}, {"upgrade-bifrost", "--file=foreign.yml"}, {"upgrade-bifrost", "edge"}} {
+		t.Run("bifrost-refuse-"+strings.Join(args, "_"), func(t *testing.T) {
+			b, log, err := run("compose.sh", false, args...)
+			if err == nil || strings.Contains(log, "DOCKER|") {
+				t.Fatalf("unbounded helper accepted: %v %s %s", err, b, log)
+			}
+		})
+	}
+	t.Run("bifrost-wrapper-refuses-args", func(t *testing.T) {
+		b, log, err := run("upgrade-bifrost.sh", false, "edge")
+		if err == nil || strings.Contains(log, "DOCKER|") {
+			t.Fatalf("wrapper ignored arguments: %v %s %s", err, b, log)
+		}
+	})
 	t.Run("pending-bounded-stop", func(t *testing.T) {
 		lock := filepath.Join(f.out, ".collab-activation.lock")
 		write(lock, "busy fixture")
@@ -210,6 +231,9 @@ if [ "$ps" = true ] && [ "$AURIGA_TEST_RUNNING" = 1 ] && [ "$project" = public-t
 		}
 		if b, log, err := run("compose.sh", false, "up"); err == nil || strings.Contains(log, "DOCKER|") {
 			t.Fatalf("pending activation started: %v %s %s", err, b, log)
+		}
+		if b, log, err := run("upgrade-bifrost.sh", false); err == nil || strings.Contains(log, "DOCKER|") {
+			t.Fatalf("upgrade bypassed pending activation: %v %s %s", err, b, log)
 		}
 	})
 	// Project B is empty, but the sealed project's ps reports a running process.

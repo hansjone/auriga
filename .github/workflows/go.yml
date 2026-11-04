@@ -1,9 +1,9 @@
 name: Go
 on:
   push:
-    paths: ['infra/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1']
+    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1']
   pull_request:
-    paths: ['infra/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1']
+    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1']
 permissions:
   contents: read
 jobs:

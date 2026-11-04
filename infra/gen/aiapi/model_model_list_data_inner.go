@@ -21,10 +21,15 @@ var _ MappedNullable = &ModelListDataInner{}
 
 // ModelListDataInner struct for ModelListDataInner
 type ModelListDataInner struct {
-	Id      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
+	Id     string `json:"id"`
+	Object string `json:"object"`
+	// Unix seconds; 0 denotes an unknown creation time and is not a creation timestamp.
+	Created int64 `json:"created"`
+	// Authenticated pool context capacity, when disclosed.
+	ContextWindow *int64 `json:"context_window,omitempty"`
+	// Authenticated pool output capacity; smaller than context_window when both are disclosed.
+	MaxOutputTokens *int64 `json:"max_output_tokens,omitempty"`
+	OwnedBy         string `json:"owned_by"`
 }
 
 type _ModelListDataInner ModelListDataInner
@@ -122,6 +127,70 @@ func (o *ModelListDataInner) SetCreated(v int64) {
 	o.Created = v
 }
 
+// GetContextWindow returns the ContextWindow field value if set, zero value otherwise.
+func (o *ModelListDataInner) GetContextWindow() int64 {
+	if o == nil || IsNil(o.ContextWindow) {
+		var ret int64
+		return ret
+	}
+	return *o.ContextWindow
+}
+
+// GetContextWindowOk returns a tuple with the ContextWindow field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ModelListDataInner) GetContextWindowOk() (*int64, bool) {
+	if o == nil || IsNil(o.ContextWindow) {
+		return nil, false
+	}
+	return o.ContextWindow, true
+}
+
+// HasContextWindow returns a boolean if a field has been set.
+func (o *ModelListDataInner) HasContextWindow() bool {
+	if o != nil && !IsNil(o.ContextWindow) {
+		return true
+	}
+
+	return false
+}
+
+// SetContextWindow gets a reference to the given int64 and assigns it to the ContextWindow field.
+func (o *ModelListDataInner) SetContextWindow(v int64) {
+	o.ContextWindow = &v
+}
+
+// GetMaxOutputTokens returns the MaxOutputTokens field value if set, zero value otherwise.
+func (o *ModelListDataInner) GetMaxOutputTokens() int64 {
+	if o == nil || IsNil(o.MaxOutputTokens) {
+		var ret int64
+		return ret
+	}
+	return *o.MaxOutputTokens
+}
+
+// GetMaxOutputTokensOk returns a tuple with the MaxOutputTokens field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ModelListDataInner) GetMaxOutputTokensOk() (*int64, bool) {
+	if o == nil || IsNil(o.MaxOutputTokens) {
+		return nil, false
+	}
+	return o.MaxOutputTokens, true
+}
+
+// HasMaxOutputTokens returns a boolean if a field has been set.
+func (o *ModelListDataInner) HasMaxOutputTokens() bool {
+	if o != nil && !IsNil(o.MaxOutputTokens) {
+		return true
+	}
+
+	return false
+}
+
+// SetMaxOutputTokens gets a reference to the given int64 and assigns it to the MaxOutputTokens field.
+func (o *ModelListDataInner) SetMaxOutputTokens(v int64) {
+	o.MaxOutputTokens = &v
+}
+
 // GetOwnedBy returns the OwnedBy field value
 func (o *ModelListDataInner) GetOwnedBy() string {
 	if o == nil {
@@ -159,6 +228,12 @@ func (o ModelListDataInner) ToMap() (map[string]interface{}, error) {
 	toSerialize["id"] = o.Id
 	toSerialize["object"] = o.Object
 	toSerialize["created"] = o.Created
+	if !IsNil(o.ContextWindow) {
+		toSerialize["context_window"] = o.ContextWindow
+	}
+	if !IsNil(o.MaxOutputTokens) {
+		toSerialize["max_output_tokens"] = o.MaxOutputTokens
+	}
 	toSerialize["owned_by"] = o.OwnedBy
 	return toSerialize, nil
 }

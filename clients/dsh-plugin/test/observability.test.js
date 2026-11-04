@@ -14,6 +14,9 @@ import {
   validTraceparent,
   traceFetch,
   natsTraceparent,
+  installObservability,
+  logEvent,
+  logDirectory,
 } from '../src/observability/index.js';
 
 test('mask bounds work before scanning and keeps long tokens within the CI budget', () => {
@@ -32,6 +35,7 @@ test('mask bounds work before scanning and keeps long tokens within the CI budge
     'a.'.repeat(32768),
     'eyJ-'.repeat(16384),
     'eyJ' + 'x'.repeat(65000) + '.payload.signature',
+    '{"' + 'A'.repeat(64000) + '":"public"}',
     '-----BEGIN PRIVATE KEY-----\n'.repeat(2048),
   ]) {
     const start = performance.now();
@@ -248,6 +252,110 @@ test('stale slot reclamation is serialized across concurrent writers; file failu
     await broken.close();
     assert.equal(broken.dropped, 1);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('final JSON bounds recursive values, encoded text and cause chains while retaining context', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'auriga-log-bounded-'));
+  const original = {
+    local: process.env.LOCALAPPDATA,
+    state: process.env.XDG_STATE_HOME,
+  };
+  process.env.LOCALAPPDATA = directory;
+  process.env.XDG_STATE_HOME = directory;
+  const cleanups = [];
+  installObservability({
+    effect(setup) {
+      cleanups.push(setup());
+    },
+  });
+  try {
+    const nested = {};
+    let cursor = nested;
+    let error = new Error('deep end credential=sentinel-deep-end');
+    let encoded = JSON.stringify({ ticket: 'sentinel-deep-encoded' });
+    for (let i = 0; i < 100; i++) {
+      cursor.child = {};
+      cursor = cursor.child;
+      error = new Error(`cause ${i} code=retry_declined`, { cause: error });
+      if (i < 15) encoded = JSON.stringify(encoded);
+    }
+    cursor.password = 'sentinel-deep-object';
+    const cycle = {};
+    cycle.self = cycle;
+    const sparse = [];
+    sparse[100000000] = { ticket: 'sentinel-sparse' };
+    let converted = false;
+    const custom = {
+      toJSON() {
+        converted = true;
+        return 'sentinel-custom-json';
+      },
+      code: 'public-code',
+    };
+    logEvent(
+      'WARN',
+      'bounded context retained',
+      {
+        instance_id: 'instance-public',
+        nested,
+        cycle,
+        encoded,
+        sparse,
+        custom,
+      },
+      error,
+    );
+    logEvent(
+      'WARN',
+      'oversized value retained as marker',
+      { instance_id: 'instance-public' },
+      new Error('sentinel-large-' + 'x'.repeat(65536)),
+    );
+    const details = {
+      sourceBinding: { raw: 'sentinel-source' },
+      apiKey: 'sentinel-api-key',
+      http_status: 503,
+      credential_version: 8,
+    };
+    logEvent('WARN', 'selected detail retained ' + JSON.stringify(details), {
+      account_id: 'account-public',
+    });
+    await Promise.all(cleanups.map((close) => close()));
+    const text = (
+      await Promise.all(
+        (await readdir(logDirectory()))
+          .filter((name) => name.endsWith('.jsonl'))
+          .map((name) => readFile(join(logDirectory(), name), 'utf8')),
+      )
+    ).join('');
+    const records = text.trim().split('\n').map(JSON.parse);
+    assert.equal(records.length, 3);
+    assert.doesNotMatch(text, /sentinel-/);
+    assert.equal(records[0].instance_id, 'instance-public');
+    assert.equal(converted, false);
+    assert.equal(records[0].custom.code, 'public-code');
+    assert.equal(records[0].sparse.length, 1);
+    assert.match(records[0].exception, /cause 99/);
+    assert.match(records[0].exception, /at /);
+    assert.match(records[0].cause, /cause 98/);
+    assert.match(text, /nesting limit/);
+    assert.match(records[1].exception, /size limit/);
+    assert.match(records[2].message, /503/);
+    assert.match(records[2].message, /credential_version.*8/);
+    assert.equal(records[2].account_id, 'account-public');
+    assert.ok(
+      records.every(
+        (record) => Buffer.byteLength(JSON.stringify(record)) < 65536,
+      ),
+    );
+  } finally {
+    await Promise.all(cleanups.map((close) => close()));
+    if (original.local === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = original.local;
+    if (original.state === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = original.state;
     await rm(directory, { recursive: true, force: true });
   }
 });

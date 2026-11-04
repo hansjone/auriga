@@ -214,7 +214,7 @@ type BudgetAdmission struct {
 	MaxOutputTokens      int64  `protobuf:"varint,12,opt,name=max_output_tokens,json=maxOutputTokens,proto3" json:"max_output_tokens,omitempty"`
 	ReservedTokens       int64  `protobuf:"varint,13,opt,name=reserved_tokens,json=reservedTokens,proto3" json:"reserved_tokens,omitempty"`
 	ReservedMicros       int64  `protobuf:"varint,14,opt,name=reserved_micros,json=reservedMicros,proto3" json:"reserved_micros,omitempty"`
-	// effective quota 不设置=不限，0=禁止；不限仍必须配置正数绝对在途上限。
+	// effective quota 不设置=不限，0=禁止。显式在途限制独立于模型能力。
 	MonthlyBudgetMicros         *int64 `protobuf:"varint,15,opt,name=monthly_budget_micros,json=monthlyBudgetMicros,proto3,oneof" json:"monthly_budget_micros,omitempty"`
 	DailyTokens                 *int64 `protobuf:"varint,16,opt,name=daily_tokens,json=dailyTokens,proto3,oneof" json:"daily_tokens,omitempty"`
 	MaxActiveRequestsPerSubject uint32 `protobuf:"varint,17,opt,name=max_active_requests_per_subject,json=maxActiveRequestsPerSubject,proto3" json:"max_active_requests_per_subject,omitempty"`
@@ -230,8 +230,11 @@ type BudgetAdmission struct {
 	Origin         isBudgetAdmission_Origin `protobuf_oneof:"origin"`
 	AdmittedAt     *timestamppb.Timestamp   `protobuf:"bytes,23,opt,name=admitted_at,json=admittedAt,proto3" json:"admitted_at,omitempty"`
 	TokenExpiresAt *timestamppb.Timestamp   `protobuf:"bytes,24,opt,name=token_expires_at,json=tokenExpiresAt,proto3" json:"token_expires_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// 仅经受信成员策略启用；不预设预算/流量额度，保幂等、归属和真实用量。
+	// 此时输入/输出及预占数仅为计量估计，不得作为拒绝/截断上游的上限。
+	MeteringOnly  bool `protobuf:"varint,25,opt,name=metering_only,json=meteringOnly,proto3" json:"metering_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BudgetAdmission) Reset() {
@@ -443,6 +446,13 @@ func (x *BudgetAdmission) GetTokenExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *BudgetAdmission) GetMeteringOnly() bool {
+	if x != nil {
+		return x.MeteringOnly
+	}
+	return false
+}
+
 type isBudgetAdmission_Origin interface {
 	isBudgetAdmission_Origin()
 }
@@ -609,7 +619,7 @@ const file_auriga_ai_v1_ai_proto_rawDesc = "" +
 	"\x11max_output_tokens\x18\x04 \x01(\x03R\x0fmaxOutputTokens\"}\n" +
 	"\x1bListEffectiveModelsResponse\x124\n" +
 	"\x06models\x18\x01 \x03(\v2\x1c.auriga.ai.v1.EffectiveModelR\x06models\x12(\n" +
-	"\x10managed_base_url\x18\x02 \x01(\tR\x0emanagedBaseUrl\"\x8d\t\n" +
+	"\x10managed_base_url\x18\x02 \x01(\tR\x0emanagedBaseUrl\"\xb2\t\n" +
 	"\x0fBudgetAdmission\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
@@ -640,7 +650,8 @@ const file_auriga_ai_v1_ai_proto_rawDesc = "" +
 	"\tdevice_id\x18\x16 \x01(\tH\x00R\bdeviceId\x12;\n" +
 	"\vadmitted_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"admittedAt\x12D\n" +
-	"\x10token_expires_at\x18\x18 \x01(\v2\x1a.google.protobuf.TimestampR\x0etokenExpiresAtB\b\n" +
+	"\x10token_expires_at\x18\x18 \x01(\v2\x1a.google.protobuf.TimestampR\x0etokenExpiresAt\x12#\n" +
+	"\rmetering_only\x18\x19 \x01(\bR\fmeteringOnlyB\b\n" +
 	"\x06originB\x18\n" +
 	"\x16_monthly_budget_microsB\x0f\n" +
 	"\r_daily_tokensB\x17\n" +

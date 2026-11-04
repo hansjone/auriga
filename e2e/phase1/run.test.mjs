@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { parseArgs, runPhase1, totp, nextTotp } from './run.mjs';
+import { parseArgs, runPhase1, totp, nextTotp, request } from './run.mjs';
 
 test('第⑤项调用固定模型原生云桌入口，单项通过不声称完整八项通过', async () => {
   let calls = 0;
@@ -119,7 +119,7 @@ async function fixture(t, handler) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-test('CLI落盘八项JSON与部分验收退出码2', async (t) => {
+test('CLI落盘八项JSON，中转站未配置退出码1', async (t) => {
   const baseUrl = await fixture(t, (req, res) => {
     res.setHeader('content-type', 'application/json');
     res.end('{"items":[]}');
@@ -154,11 +154,11 @@ test('CLI落盘八项JSON与部分验收退出码2', async (t) => {
     child.once('error', reject);
     child.once('exit', resolve);
   });
-  assert.equal(code, 2);
+  assert.equal(code, 1);
   const report = JSON.parse(await readFile(output, 'utf8'));
   assert.equal(report.items.length, 8);
   assert.equal(report.complete, false);
-  assert.match(stdout, /PASS=0 FAIL=0 SKIP=8/);
+  assert.match(stdout, /PASS=0 FAIL=1 SKIP=7/);
 });
 
 test('CLI实际加载浏览器模块不被反向导入与顶层await锁死', async (t) => {
@@ -339,7 +339,7 @@ test('连续注册/登录等待下一个TOTP窗口，避免真实IAM重放拒绝
   assert.equal(otp, totp(credentials.totpSecret, time));
 });
 
-test('健康核心通过，未部署LiteLLM是SKIP而不是PASS', async (t) => {
+test('健康核心通过但中转站未配置必须FAIL', async (t) => {
   const baseUrl = await fixture(t, (req, res) => {
     assert.match(req.headers.traceparent, /^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/);
     res.setHeader('content-type', 'application/json');
@@ -349,7 +349,7 @@ test('健康核心通过，未部署LiteLLM是SKIP而不是PASS', async (t) => {
     { baseUrl, only: [1] },
     { healthChecks: [{ name: 'platform', url: '/health', kind: 'spring' }] },
   );
-  assert.equal(report.items[0].status, 'SKIP');
+  assert.equal(report.items[0].status, 'FAIL');
   assert.equal(report.items[0].checks[0].status, 'PASS');
   assert.equal(report.items[1].status, 'SKIP');
 });
@@ -387,8 +387,8 @@ test('邀请失败不阻断其他条目，缺少桌面和中转站均给SKIP原�
   );
   assert.equal(report.items[1].status, 'FAIL');
   assert.equal(report.items[3].status, 'SKIP');
-  assert.equal(report.items[5].status, 'SKIP');
-  assert.equal(report.items[6].status, 'SKIP');
+  assert.equal(report.items[5].status, 'FAIL');
+  assert.equal(report.items[6].status, 'FAIL');
   assert.equal(report.items[7].status, 'SKIP');
   assert.equal(JSON.stringify(report).includes('must-not-leak'), false);
   assert.ok(
@@ -484,7 +484,7 @@ test('邀请首失后依赖条目沿用首失trace，不重放创建邀请', asy
   assert.equal(report.items[1].traceId, report.items[2].traceId);
 });
 
-test('已配置的LiteLLM 503不能冒未部署SKIP', async (t) => {
+test('已配置的中转站 503不能冒未部署SKIP', async (t) => {
   const baseUrl = await fixture(t, (req, res) => {
     res.writeHead(503);
     res.end('{}');
@@ -505,20 +505,24 @@ for (const mismatch of [false, true]) {
       upstreamModel: 'openai/' + name,
     }));
     const baseUrl = await fixture(t, (req, res) => {
-      assert.equal(req.url, '/model/info');
       res.setHeader('content-type', 'application/json');
+      const pools = models.map((model, i) => ({
+        id: model.name,
+        enabled: true,
+        routes: [{ providerId: 'provider-' + i, model: model.upstreamModel }],
+      }));
+      const providers = models.map((model, i) => ({
+        id: 'provider-' + i,
+        hasCredential: true,
+        configuration: {
+          enabled: true,
+          baseUrl:
+            mismatch && i === 1 ? 'https://other.example.com' : model.apiBase,
+        },
+      }));
       res.end(
         JSON.stringify({
-          data: models.map((model, index) => ({
-            model_name: model.name,
-            litellm_params: {
-              api_base:
-                mismatch && index === 1
-                  ? 'https://other.example.com/v1'
-                  : model.apiBase,
-              model: model.upstreamModel,
-            },
-          })),
+          items: req.url.startsWith('/pools?') ? pools : providers,
         }),
       );
     });
@@ -531,6 +535,7 @@ for (const mismatch of [false, true]) {
         modelUi: {},
       },
       {
+        relayAdminRequest: request,
         adapter: {
           invite: async () => ({ memberVerified: true }),
           cloud: async () => ({ ready: true, pluginLoggedIn: true }),
@@ -587,8 +592,8 @@ test('真实提供商模式须显式开启且不接受伪标testOnly或重复模
       },
     },
   );
-  assert.equal(skipped.items[5].status, 'SKIP');
-  assert.equal(skipped.items[6].status, 'SKIP');
+  assert.equal(skipped.items[5].status, 'FAIL');
+  assert.equal(skipped.items[6].status, 'FAIL');
 });
 
 test('真实外部Key验收拒绝缺失公开入口或包含凭据的地址，且不签发Key', async (t) => {
@@ -628,181 +633,4 @@ test('真实外部Key验收拒绝缺失公开入口或包含凭据的地址，�
     assert.equal(requests, 0);
     assert.equal(JSON.stringify(report).includes('username:password'), false);
   }
-});
-
-for (const upstreamMode of ['fixture', 'live']) {
-  for (const { broken, budgetStatus } of [false, true].flatMap((broken) =>
-    [401, 422].map((budgetStatus) => ({ broken, budgetStatus })),
-  )) {
-    test(`虚拟Key真实HTTP流程与清理（${upstreamMode}，${budgetStatus}）：${broken ? '错误鉴权不能冒预算生效' : '成功调用/限流/预算/用量/吊销'}`, async (t) => {
-      const keys = new Map();
-      const requestId = randomBytes(8).toString('hex');
-      const adminKey = randomBytes(24).toString('hex');
-      const handler = async (req, res) => {
-        const url = new URL(req.url, 'http://localhost');
-        const chunks = [];
-        for await (const chunk of req) chunks.push(chunk);
-        const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : {};
-        const respond = (data, status = 200) => {
-          res.writeHead(status, { 'content-type': 'application/json' });
-          res.end(JSON.stringify(data));
-        };
-        const key = req.headers.authorization?.slice(7);
-        const completion = [
-          '/v1/chat/completions',
-          '/ai/v1/chat/completions',
-        ].includes(url.pathname);
-        if (!completion) assert.equal(key, adminKey);
-        else assert.notEqual(key, adminKey);
-        if (url.pathname === '/key/generate') {
-          const created = randomBytes(20).toString('hex');
-          keys.set(created, { ...body, calls: 0 });
-          return respond({ key: created });
-        }
-        if (url.pathname === '/key/delete') {
-          for (const key of body.keys) keys.delete(key);
-          return respond({});
-        }
-        if (url.pathname === '/key/info')
-          return respond({ info: { spend: 0 } });
-        if (url.pathname === '/spend/logs') {
-          assert.equal(url.searchParams.get('request_id'), requestId);
-          return respond([{ request_id: requestId, total_tokens: 2 }]);
-        }
-        if (completion) {
-          if (!keys.has(key))
-            return respond({ error: { type: 'authentication_error' } }, 401);
-          const record = keys.get(key);
-          if (record.max_budget === 0)
-            return respond(
-              {
-                error: {
-                  type: broken ? 'authentication_error' : 'budget_exceeded',
-                },
-              },
-              budgetStatus,
-            );
-          if (record.calls++)
-            return respond({ error: { type: 'rate_limit_exceeded' } }, 429);
-          return respond({
-            id: requestId,
-            choices: [{}],
-            usage: { total_tokens: 2 },
-          });
-        }
-        respond({}, 404);
-      };
-      const baseUrl = await fixture(t, (req, res) => {
-        if (upstreamMode === 'live')
-          assert.ok(!req.url.includes('chat/completions'));
-        void handler(req, res);
-      });
-      const publicUrl =
-        upstreamMode === 'live'
-          ? await fixture(t, (req, res) => {
-              assert.equal(req.url, '/ai/v1/chat/completions');
-              void handler(req, res);
-            })
-          : undefined;
-      const report = await runPhase1(
-        { baseUrl, only: [7] },
-        {
-          relay: {
-            baseUrl,
-            upstreamMode,
-            publicBaseUrl: publicUrl && publicUrl + '/ai/v1',
-            adminKey,
-            allowModelCalls: true,
-            models:
-              upstreamMode === 'live'
-                ? [
-                    {
-                      name: 'model-a',
-                      provider: 'provider-a',
-                      apiBase: 'https://models.example.com/v1',
-                      upstreamModel: 'openai/model-a',
-                    },
-                  ]
-                : [{ name: 'fake', provider: 'fake-a', testOnly: true }],
-          },
-        },
-      );
-      assert.equal(report.items[6].status, broken ? 'FAIL' : 'PASS');
-      assert.equal(keys.size, 0);
-      assert.equal(JSON.stringify(report).includes(adminKey), false);
-    });
-  }
-}
-
-test('virtual key cleanup failure retains the first HTTP status without private response data', async (t) => {
-  const privateKey = randomBytes(24).toString('hex');
-  const baseUrl = await fixture(t, (req, res) => {
-    res.setHeader('content-type', 'application/json');
-    if (req.url === '/key/generate')
-      return res.end(JSON.stringify({ key: privateKey }));
-    res.writeHead(req.url === '/key/delete' ? 500 : 403);
-    res.end(JSON.stringify({ error: { detail: privateKey } }));
-  });
-  const report = await runPhase1(
-    { baseUrl, only: [7] },
-    {
-      relay: {
-        baseUrl,
-        adminKey: 'test-master',
-        allowModelCalls: true,
-        models: [{ name: 'fake', provider: 'fake-a', testOnly: true }],
-      },
-    },
-  );
-  assert.equal(report.items[6].status, 'FAIL');
-  assert.match(
-    report.items[6].reason,
-    /虚拟Key清理失败；首失：HTTP状态403，预期200/,
-  );
-  assert.equal(JSON.stringify(report).includes(privateKey), false);
-});
-
-test('multiple virtual key cleanup failures retain the original HTTP failure', async (t) => {
-  const privateKey = randomBytes(24).toString('hex');
-  let created = 0,
-    calls = 0,
-    deleted = 0;
-  const baseUrl = await fixture(t, (req, res) => {
-    res.setHeader('content-type', 'application/json');
-    if (req.url === '/key/generate')
-      return res.end(JSON.stringify({ key: privateKey + ++created }));
-    if (req.url === '/key/delete') {
-      deleted++;
-      res.writeHead(500);
-      return res.end('{}');
-    }
-    if (++calls === 1)
-      return res.end(
-        '{"id":"test-request","choices":[{}],"usage":{"total_tokens":2}}',
-      );
-    res.writeHead(calls === 2 ? 429 : 500);
-    res.end(
-      JSON.stringify({
-        error: { type: calls === 2 ? 'rate_limit_exceeded' : privateKey },
-      }),
-    );
-  });
-  const report = await runPhase1(
-    { baseUrl, only: [7] },
-    {
-      relay: {
-        baseUrl,
-        adminKey: 'test-master',
-        allowModelCalls: true,
-        models: [{ name: 'fake', provider: 'fake-a', testOnly: true }],
-      },
-    },
-  );
-  assert.equal(created, 2);
-  assert.equal(deleted, 2);
-  assert.match(
-    report.items[6].reason,
-    /首失：HTTP状态500，预期400\/401\/402\/403\/422\/429/,
-  );
-  assert.equal(JSON.stringify(report).includes(privateKey), false);
 });

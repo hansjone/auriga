@@ -16,7 +16,7 @@ import (
 
 // Only an empty newly created source root is handed to the fixed NAS installer.
 // Existing owners/permissions are checked, never repaired.
-func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, maxMemoryMB int64, runtime runtimeInputs, validateOnly bool, uiOrigin string, browser ...*networkdeploy.BrowserTLS) error {
+func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, maxMemoryMB int64, runtime runtimeInputs, validateOnly bool, browser ...*networkdeploy.BrowserTLS) error {
 	if !validateOnly && (!filepath.IsAbs(out) || filepath.Clean(out) != out || strings.Contains(out, "\\")) {
 		return fmt.Errorf("NAS material root must be a canonical absolute path")
 	}
@@ -67,7 +67,7 @@ func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, l
 		if err != nil {
 			return fmt.Errorf("invalid NAS source root")
 		}
-		defer unix.Close(child)
+		defer func() { _ = unix.Close(child) }()
 		var before unix.Stat_t
 		if unix.Fstat(child, &before) != nil || before.Mode&0o7777 != 0o755 {
 			return fmt.Errorf("invalid NAS source root mode")
@@ -103,7 +103,7 @@ func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, l
 	if err != nil {
 		return fmt.Errorf("open current NAS bootstrap executable: %w", err)
 	}
-	defer binary.Close()
+	defer func() { _ = binary.Close() }()
 	info, err := binary.Stat()
 	if err != nil {
 		return fmt.Errorf("inspect current NAS bootstrap executable: %w", err)
@@ -112,9 +112,6 @@ func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, l
 		return fmt.Errorf("current NAS bootstrap must be a regular executable with mode0755")
 	}
 	args := []string{"-out", out, "-access-file", "-", "-edge-peer-ip", peer, "-internal-subnet", subnet, "-registry-port", fmt.Sprint(registry), "-lan-ip", lanIP, "-lan-subnet", lanSubnet, "-instance-max-memory-mb", fmt.Sprint(maxMemoryMB), "-runtime-bundle", runtime.bundle, "-runtime-root", runtime.root, "-runtime-image", runtime.image}
-	if uiOrigin != "" {
-		args = append(args, "-litellm-ui-origin", uiOrigin)
-	}
 	if validateOnly {
 		args = append(args, "-validate-access")
 	}

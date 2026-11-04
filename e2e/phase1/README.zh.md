@@ -26,12 +26,7 @@ stdout 只接受不超过 1 MiB 的原始 JSON，命令失败、超时或返回�
 桌面 URL 必须是 `relay.publicBaseUrl`；云端也应使用正式部署可达的模型入口，内网别名不能凭
 自定义 Host 已设置就声称可用。`supportsStore:false` 按中转站能力写入 DSH 兼容配置。
 
-只有独立测试部署经明确授权时才设 `modelNative.allowPoolDisruption:true`：正常双端调用后，
-仅对指定池中与两个已配置上游精确对应的一个在线部署调用 LiteLLM `model/block`，
-确认该部署不再可用，再让两端实际会话走池，且用量必须关联到存活部署的 `model_id`。
-无论中途失败与否都调用 `model/unblock` 恢复；已离线、额外或不匹配部署一律不执行演练。
-变更接口仅丢弃响应正文，不读取或回写供应商 Key。每次会话的临时 Key、凭据和提供方均清理，
-任一回复、归属、用量、切换或恢复证据缺失都不能使第⑥项通过。
+只有独立测试部署经明确授权时才设 `modelNative.allowPoolDisruption:true`：对指定双供应商池禁用一个在线供应商，读回确认另一供应商仍可路由，再让两端产生新的真实会话及成员用量。无论会话成功与否均恢复原配置并读回；若其他管理员并发修改则拒绝覆盖并 FAIL。测试不读取或回写供应商凭据，也不临时签发外部 Key 冒成员身份。
 
 已有双端接线分批交付时，可只执行桌面池停用演练，保留此前已通过的桌面普通对话证据：
 
@@ -41,7 +36,7 @@ node e2e/phase1/desktop-models.mjs --base-url https://portal.example.com --admin
 
 它只启动安装版的独立 HOME/profile，调用一次停用后的真实池对话并恢复原部署；
 报告固定为 `scope=desktop-pool-outage`、`completePhase6=false`，不会启动云端或冒完整第⑥项通过。
-同样须显式启用真实模型调用及 `allowPoolDisruption`，临时凭据/Key和配置全部清理。
+同样须显式启用真实模型调用及 `allowPoolDisruption`，新建会话取消，原供应商配置恢复。
 
 第①项可配置 `healthInventory={command,project,expectedServices,oneShotServices}`，
 由受信任操作通道采集实际部署的完整容器清单。命令接收一行
@@ -53,4 +48,4 @@ node e2e/phase1/desktop-models.mjs --base-url https://portal.example.com --admin
 长期服务须运行且已有 Docker health 为 healthy；无 health 的服务须有实际 HTTP/TCP、
 agent 在线或签名 READY 探针，`probe={kind:"http"|"tcp"|"agent-online"|"signed-ready",status:"PASS"}`。
 一次性服务只按明确的 `oneShotServices` 分类并要求 exited/0，不可将失败的长期服务改成初始化任务。
-NAS 启用日志/collab 时须把这些服务及准备任务也列入；清单结果与 IAM/LiteLLM HTTP 检查一起验收。
+NAS 启用日志/collab 时须把这些服务及准备任务也列入；清单结果与 IAM/中转站管理 检查一起验收。

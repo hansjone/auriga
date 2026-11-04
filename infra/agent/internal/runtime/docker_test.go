@@ -140,7 +140,7 @@ func (f *fakeEngine) handler() http.Handler {
 			labels := last["Labels"]
 			image := last["Image"]
 			f.mu.Unlock()
-			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": image, "State": map[string]any{"Running": true}, "Config": map[string]any{"Labels": labels}, "HostConfig": map[string]any{"PortBindings": map[string]any{"7860/tcp": []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}}, "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": port}}}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": image, "State": map[string]any{"Running": true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": 42}, "Config": map[string]any{"Labels": labels}, "HostConfig": map[string]any{"PortBindings": map[string]any{"7860/tcp": []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}}, "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": port}}}}})
 		case strings.HasSuffix(path, "/stats"):
 			_, _ = w.Write([]byte(`{"memory_stats":{"usage":67108864},"pids_stats":{"current":4}}`))
 		case r.Method == http.MethodDelete:

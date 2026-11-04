@@ -160,7 +160,7 @@ sh deploy-nas/scripts/load-images.sh "$PWD"
 mkdir -p /srv/container/auriga-test
 cp deploy-nas/env.example /srv/container/auriga-test/stack.env
 cp deploy-nas/access-ip.example.json /srv/container/auriga-access.json
-# 将 loader 输出的三条 AURIGA_IMAGE_* 和上面已准备的三个基础镜像引用填入 stack.env；另按 LiteLLM 指南预载固定镜像。
+# 将 loader 输出的三条 AURIGA_IMAGE_* 和上面已准备的三个基础镜像引用填入 stack.env；另预载 Bifrost 与 operator 的审核镜像。
 # 再编辑上述两份文件，七项镜像都必须已经在本机且为 linux/amd64。
 # 若正式 runtime image 的已批准 locator 使用 127.0.0.1:50123，
 # 签发/审批前就把 AURIGA_HOST_PUBLISH_REGISTRY 设为 50123（示例默认15000）。
@@ -239,7 +239,7 @@ IP 部署可选择公开 `scripts/admin-bootstrap.sh`，在已运行 edge 的网
 listener/虚拟主机选择，不发送 Forwarded、X-Forwarded-For 或任何伪造来源头，不改数据库。
 当前脚本明确只接受 IP 模式；HTTPS 不跳过证书校验，可读取该部署的公开浏览器证书链。
 
-helper 复用已独立批准并加载的精确 LiteLLM 镜像中的 Python 3/cryptography，以10001身份、
+helper 使用已独立批准并加载的精确 operator 镜像中的 Python 3/cryptography，以10001身份、
 cap-drop ALL、只读根运行。仅只读挂脚本、access、enrollment、收件公钥及可选公开证书，
 不挂 Docker socket、私钥、模型 Key 或整个数据根。普通 NAS operator 无须 sudo。
 
@@ -433,4 +433,29 @@ AURIGA_MOUNT_TEST_IMAGE=sha256:<platform-image-id> \
 
 后3条真实权限/安装交叉测试须在独立Linux root测试环境运行；非root普通Go测试具名跳过固定uid安装，自动CI另有强制root步骤，不能以skip当通过。NAS脚本/Go负例在自动PR E2E中运行，不只在手动bundle workflow。smoke检查真实浏览器URL、mTLS健康与未登录拒绝；没有完整E2E hook时仍exit2/PARTIAL。静态Compose、配置加载或本机测试不等于真实NAS网络、浏览器登录、real DSH心跳或IP3完整验收。
 
-???????????????? Key ?????? [LiteLLM ?????](relay-litellm.md)?
+模型、外部 Key 与用量配置见 [Bifrost 中转站](../architecture/relay-bifrost.zh.md)。
+
+## 已有数据库卷接入中转站
+
+不依赖 postgres entrypoint 的首次初始化。先核验安装材料中五份 Bifrost 秘密和审核镜像，确认原 PostgreSQL 健康，然后运行 `sh scripts/upgrade-bifrost.sh`（在 NAS 发布包根目录）。它以一次性 helper 连接原库，幂等创建角色/库/schema，保留既有数据与密码，并撤销运行账号对迁移历史表的写权限。错误 owner 或特权角色立即失败，不能通过清卷绕过。再按原部署流程更新服务。原测试中转库、角色、秘密和旧发布材料不自动删除，由主控按保留证据另行批准清理。
+
+已有 LiteLLM 安装必须先显式升级材料，不能直接运行新版本的首次安装生成器。使用已审核的新 bundle（含新 bootstrap、Bifrost/operator/edge 镜像），保留原 `stack.env`、账号、实例、PG卷与旧 bundle。以下命令在新 bundle 的 `deploy-nas` 下执行，数据根仍指向原安装：
+
+先备份原 `stack.env`；将其中显式固定的 `AURIGA_NAS_BOOTSTRAP_BINARY` 更新为新 bundle 的预编译工具路径，并核对新镜像引用。旧环境里的显式工具路径优先于 bundle 默认路径，不能把旧 bootstrap 拒绝新子命令误认为材料损坏。容器安装器给独占 `/tmp` 指定 `exec`，用于固定 uid 校验子进程；只复制当前运行的公开工具到独占临时目录，不放宽原私有 bundle 或材料目录权限，结束即清理。
+
+```sh
+# status 验证原材料并显示原 bootstrap.receipt 的 SHA256，不输出秘密。
+sh scripts/materials-upgrade.sh status
+sh scripts/materials-upgrade.sh stage ORIGINAL_RECEIPT_SHA256
+sh scripts/render.sh
+sh scripts/upgrade-bifrost.sh
+# 按原公开启动流程切换，检查健康、管理员登录、成员和外部 Key 真实调用。
+sh scripts/start.sh
+sh scripts/materials-upgrade.sh commit ORIGINAL_RECEIPT_SHA256
+```
+
+`config/materials` 的原 identity、TLS、runtime 根、模板、IAM及collab封存内容不改写。新材料位于独立的 `config/materials-upgrades/v-00000000000000000001`，升级收据绑定原收据与五份秘密/运行配置摘要；其中 collab 哈希只记录 stage 当时的历史快照，不固定后续激活状态。当前 collab 收据及源材料仍由 collab 自己的封存校验负责，因此可先升级 Bifrost、后激活 collab，而不重写升级收据。激活事件只追加，校验哈希链、版本和状态；已提交后禁止回退。domain、IP直连和trusted proxy均使用原访问配置与证书。渲染时先校验原封存与升级链，再将 Bifrost 代理配置合并到已核验的当前 collab edge 投影；不覆盖原 edge 配置。
+
+stage 普通失败会清理新建的待发布目录，原材料保持不变。切换或验收失败时，在 commit 前执行 `sh scripts/materials-upgrade.sh rollback ORIGINAL_RECEIPT_SHA256`，并从保留的旧 bundle/原 stack.env 恢复服务；不要使用新配方重新生成原身份。失败的升级收据和秘密保留供核查，后续 stage 复用同一批秘密并追加恢复事件。进程异常留下的未知待发布目录会失败关闭，需保留证据后人工核查，不自动清除。新建的空隔离数据库可保留，不能清卷或删除旧库、角色与秘密来“回滚”。模型主密钥不因此轮换；此命令只支持首次从旧配方增加 Bifrost，不是通用密钥轮换或网络参数修改命令。
+
+本机 Compose 对应入口是 `sh deploy/compose/scripts/upgrade-bifrost.sh`。它通过 Bash 调用固定的 `upgrade-bifrost` 生命周期操作，不接受额外参数，也不开放通用 `run`。原安装和密钥轮换安装均沿用封存项目、配方及状态门禁；轮换安装还须通过历史、安装收据和权威状态检查。先确认原 PostgreSQL 正常运行，升级 helper 不会自动启动或重建数据库。

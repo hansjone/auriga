@@ -1,0 +1,21 @@
+# Checked static installation only. No message service, key projection or
+# network permission can authorize an instance; the original IAM grant still does.
+services:
+  agent:
+    environment:
+      AURIGA_AGENT_MANAGED_INSTALLATION_FILE: /etc/auriga/managed-identity.json
+    volumes:
+      - type: bind
+        source: ${AURIGA_DATA_ROOT}/config/collab-runtime/platform/managed-network.json
+        target: /etc/auriga/managed-identity.json
+        read_only: true
+        bind: { create_host_path: false }
+  platform:
+    environment:
+      AURIGA_WORKSPACE_MANAGED_NETWORK_INSTALLATION_FILE: /etc/auriga/managed-identity.json
+    volumes:
+      - type: bind
+        source: ${AURIGA_DATA_ROOT}/config/collab-runtime/platform/managed-network.json
+        target: /etc/auriga/managed-identity.json
+        read_only: true
+        bind: { create_host_path: false }

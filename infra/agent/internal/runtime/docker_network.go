@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -19,6 +20,36 @@ type engineNetwork struct {
 	Internal   bool
 	Labels     map[string]string
 	Containers map[string]struct{ Name string }
+	bridges    []trustedBridge
+}
+
+const egressHost = "auriga-egress.internal"
+
+type trustedBridge struct {
+	id      string
+	aliases []string
+	process processLifetime
+}
+
+func (n *engineNetwork) bridgesReady() bool {
+	for _, bridge := range n.bridges {
+		if _, exists := n.Containers[bridge.id]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
+func sameBridges(a, b []trustedBridge) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].id != b[i].id || a[i].process != b[i].process {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *EngineClient) NetworkInspect(ctx context.Context, name string) (*engineNetwork, error) {
@@ -101,8 +132,10 @@ func edgeHasAlias(insp map[string]any, n *engineNetwork, alias string) bool {
 
 func (d *Docker) edgeAliases() []string {
 	aliases := []string{d.PlatformHost}
-	if d.PortalHost != "" && d.PortalHost != d.PlatformHost {
-		aliases = append(aliases, d.PortalHost)
+	for _, host := range append([]string{d.PortalHost}, d.ManagedHosts...) {
+		if host != "" && !slices.Contains(aliases, host) {
+			aliases = append(aliases, host)
+		}
 	}
 	return aliases
 }
@@ -117,79 +150,187 @@ func (d *Docker) edgeHasAliases(insp map[string]any, n *engineNetwork) bool {
 }
 
 func (d *Docker) ensureEdgeNetwork(ctx context.Context, id string) error {
-	n, err := d.ownedNetwork(ctx, id)
-	if err != nil {
-		return err
-	}
-	if n == nil {
-		return fmt.Errorf("docker: instance network disappeared")
-	}
-	edgeID, insp, err := d.trustedEdge(ctx, true)
-	if err != nil {
-		return err
-	}
-	// Only the matching managed instance and the trusted edge may share this
-	// network. Never attach the edge to a name-collision or contaminated network.
-	instanceRef := containerName(id)
 	var record *state.ExecutionRecord
-	if scope, ok := ctx.Value(activationKey{}).(*activationScope); ok && scope.record != nil {
+	if scope, ok := ctx.Value(activationKey{}).(*activationScope); ok {
 		record = scope.record
-		instanceRef = record.ContainerID
 	}
-	instance, err := d.Client.ContainerInspect(ctx, instanceRef)
+	n, _, _, err := d.inspectEdgeNetwork(ctx, id, record)
 	if err != nil {
 		return err
 	}
-	instanceID, _ := instance["Id"].(string)
-	if instance != nil {
-		if record != nil {
-			if _, err := d.verifyContainer(ctx, record); err != nil {
-				return err
-			}
-		}
-		cfg, _ := instance["Config"].(map[string]any)
-		labels, _ := cfg["Labels"].(map[string]any)
-		if instanceID == "" || labels[labelManaged] != "true" || labels[labelInstance] != id {
-			return fmt.Errorf("docker: existing instance container ownership mismatch")
-		}
-	}
-	for member := range n.Containers {
-		if member != edgeID && member != instanceID {
-			return fmt.Errorf("docker: unexpected instance network member")
-		}
-	}
-	if _, exists := n.Containers[edgeID]; exists {
-		if !d.edgeHasAliases(insp, n) {
-			return fmt.Errorf("docker: existing edge endpoint has wrong platform alias")
-		}
+	if n.bridgesReady() {
 		return nil
 	}
-	_, _, err = d.Client.doJSON(ctx, http.MethodPost, "/networks/"+url.PathEscape(n.ID)+"/connect", map[string]any{
-		"Container": edgeID, "EndpointConfig": map[string]any{"Aliases": d.edgeAliases()},
-	}, http.StatusOK)
-	if err != nil {
-		return err
+	for _, bridge := range n.bridges {
+		if _, exists := n.Containers[bridge.id]; exists {
+			continue
+		}
+		_, _, err = d.Client.doJSON(ctx, http.MethodPost, "/networks/"+url.PathEscape(n.ID)+"/connect", map[string]any{
+			"Container": bridge.id, "EndpointConfig": map[string]any{"Aliases": bridge.aliases},
+		}, http.StatusOK)
+		if err != nil {
+			return err
+		}
 	}
 	// Inspect again: a successful write is not sufficient evidence of the alias.
-	edgeIDAfter, after, err := d.trustedEdge(ctx, true)
+	after, _, _, err := d.inspectEdgeNetwork(ctx, id, record)
 	if err != nil {
-		return err
+		return fmt.Errorf("docker: trusted bridge alias was not applied: %w", err)
 	}
-	if edgeIDAfter != edgeID || !d.edgeHasAliases(after, n) {
-		return fmt.Errorf("docker: edge platform alias was not applied")
+	if after.ID != n.ID || !after.bridgesReady() || !sameBridges(after.bridges, n.bridges) {
+		return fmt.Errorf("docker: trusted bridge alias was not applied")
 	}
 	return nil
 }
 
+// The same ownership/isolation checks protect both read-only maintenance and
+// coordinated repair. A missing trusted edge is repairable; contamination is not.
+func (d *Docker) inspectEdgeNetwork(ctx context.Context, id string, record *state.ExecutionRecord) (*engineNetwork, string, map[string]any, error) {
+	// Only the matching managed instance and the trusted edge may share this
+	// network. Never attach the edge to a name-collision or contaminated network.
+	var instance map[string]any
+	var err error
+	if record != nil {
+		instance, err = d.verifyContainer(ctx, record)
+	} else {
+		instance, err = d.Client.ContainerInspect(ctx, containerName(id))
+	}
+	if err != nil {
+		return nil, "", nil, err
+	}
+	instanceID, _ := instance["Id"].(string)
+	if instance != nil {
+		cfg, _ := instance["Config"].(map[string]any)
+		labels, _ := cfg["Labels"].(map[string]any)
+		if instanceID == "" || labels[labelManaged] != "true" || labels[labelInstance] != id {
+			return nil, "", nil, fmt.Errorf("docker: existing instance container ownership mismatch")
+		}
+	}
+	// Read topology after the container snapshot, so a final container inspect
+	// cannot hide an edge endpoint lost immediately before that inspect replied.
+	n, err := d.ownedNetwork(ctx, id)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if n == nil {
+		return nil, "", nil, fmt.Errorf("docker: instance network disappeared")
+	}
+	edgeID, insp, err := d.trustedEdge(ctx, true)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	n.bridges = []trustedBridge{{id: edgeID, aliases: d.edgeAliases()}}
+	if d.EgressContainer != "" {
+		egress, egressInspect, err := d.trustedEgress(ctx, insp, true)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		process, err := containerProcess(egressInspect)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		n.bridges = append(n.bridges, trustedBridge{id: egress, aliases: []string{egressHost}, process: process})
+		if _, exists := n.Containers[egress]; exists && !edgeHasAlias(egressInspect, n, egressHost) {
+			return nil, "", nil, fmt.Errorf("docker: existing egress endpoint has wrong alias")
+		}
+	}
+	for member := range n.Containers {
+		trusted := member == instanceID
+		for _, bridge := range n.bridges {
+			trusted = trusted || member == bridge.id
+		}
+		if !trusted {
+			return nil, "", nil, fmt.Errorf("docker: unexpected instance network member")
+		}
+	}
+	if _, exists := n.Containers[edgeID]; exists {
+		if !d.edgeHasAliases(insp, n) {
+			return nil, "", nil, fmt.Errorf("docker: existing edge endpoint has wrong platform alias")
+		}
+	}
+	return n, edgeID, instance, nil
+}
+
 func (d *Docker) detachEdge(ctx context.Context, n *engineNetwork) error {
-	edgeID, _, err := d.trustedEdge(ctx, false)
+	edgeID, edge, err := d.trustedEdge(ctx, false)
 	if err != nil {
 		return err
 	}
-	if _, exists := n.Containers[edgeID]; !exists {
-		return nil
+	bridges := []string{edgeID}
+	if d.EgressContainer != "" {
+		egressID, _, err := d.trustedEgress(ctx, edge, false)
+		if err != nil {
+			return err
+		}
+		bridges = append(bridges, egressID)
 	}
-	_, _, err = d.Client.doJSON(ctx, http.MethodPost, "/networks/"+url.PathEscape(n.ID)+"/disconnect",
-		map[string]any{"Container": edgeID, "Force": false}, http.StatusOK)
-	return err
+	for _, id := range bridges {
+		if _, exists := n.Containers[id]; !exists {
+			continue
+		}
+		_, _, err = d.Client.doJSON(ctx, http.MethodPost, "/networks/"+url.PathEscape(n.ID)+"/disconnect",
+			map[string]any{"Container": id, "Force": false}, http.StatusOK)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Egress is a separate least-privilege process in the exact trusted edge image.
+// A role label alone cannot replace its executable, project or process identity.
+func (d *Docker) trustedEgress(ctx context.Context, edge map[string]any, requireRunning bool) (string, map[string]any, error) {
+	insp, err := d.Client.ContainerInspect(ctx, d.EgressContainer)
+	if err != nil {
+		return "", nil, err
+	}
+	cfg, _ := insp["Config"].(map[string]any)
+	labels, _ := cfg["Labels"].(map[string]any)
+	edgeCfg, _ := edge["Config"].(map[string]any)
+	edgeLabels, _ := edgeCfg["Labels"].(map[string]any)
+	state, _ := insp["State"].(map[string]any)
+	health, _ := state["Health"].(map[string]any)
+	host, _ := insp["HostConfig"].(map[string]any)
+	id, _ := insp["Id"].(string)
+	image, _ := insp["Image"].(string)
+	edgeImage, _ := edge["Image"].(string)
+	project, _ := edgeLabels["com.docker.compose.project"].(string)
+	mode, _ := host["NetworkMode"].(string)
+	mounts, _ := insp["Mounts"].([]any)
+	ports, _ := host["PortBindings"].(map[string]any)
+	capAdd, _ := host["CapAdd"].([]any)
+	if id == "" || image == "" || image != edgeImage || project == "" ||
+		labels["auriga.role"] != "egress" || labels["auriga.egress.for-edge"] != d.EdgeContainer || labels["com.docker.compose.project"] != project ||
+		cfg["User"] != "65532:65532" || host["ReadonlyRootfs"] != true || host["Privileged"] != false ||
+		!sameStrings(cfg["Entrypoint"], []string{"/auriga-egress"}) || !sameStrings(cfg["Cmd"], []string{"--listen", "0.0.0.0:3128"}) ||
+		len(mounts) != 0 || len(ports) != 0 || len(capAdd) != 0 ||
+		mode == "" || mode == "host" || mode == "none" || strings.HasPrefix(mode, "container:") ||
+		!containsString(host["CapDrop"], "ALL") || !containsString(host["SecurityOpt"], "no-new-privileges:true") ||
+		(requireRunning && (state["Running"] != true || health["Status"] != "healthy")) {
+		return "", nil, fmt.Errorf("docker: configured egress identity or isolation mismatch")
+	}
+	return id, insp, nil
+}
+
+func containsString(value any, want string) bool {
+	items, _ := value.([]any)
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func sameStrings(value any, want []string) bool {
+	items, _ := value.([]any)
+	if len(items) != len(want) {
+		return false
+	}
+	for i, item := range items {
+		if item != want[i] {
+			return false
+		}
+	}
+	return true
 }

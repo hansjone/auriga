@@ -6,6 +6,7 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
 load_stack_env
+case "${1:-}" in '') ;; --network-offline) [ "$#" = 1 ] || die 'unexpected start arguments'; export AURIGA_MESSAGE_NETWORK_OFFLINE=1 ;; *) die 'Usage: start.sh [--network-offline]' ;; esac
 require_cmd docker
 
 [ -f "$(marker_path)" ] || die "not initialized; run init.sh first"
@@ -25,7 +26,17 @@ sh "$NAS_ROOT/scripts/network-preflight.sh" || {
   exit "$_ec"
 }
 
-sh "$NAS_ROOT/scripts/render.sh"
+sh "$NAS_ROOT/scripts/render.sh" --core-only
+
+# Invariant: message configuration/check failures may only degrade messages,
+# never abort core startup. Keep core rendering strict; isolate message render
+# in its own process and omit its overlay if any projection/check fails, so
+# missing or rejected message bind sources cannot prevent core Compose up.
+export NAS_COLLAB_CONFIG_DEGRADED=0
+if ! sh "$NAS_ROOT/scripts/render-collab.sh"; then
+  export NAS_COLLAB_CONFIG_DEGRADED=1
+  printf '%s\n' 'message_network=degraded configuration_failed; continuing core startup without message projections' >&2
+fi
 
 if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
   sh "$NAS_ROOT/scripts/installer.sh" prepare-socket
@@ -40,6 +51,17 @@ fi
 info "starting project $AURIGA_NAS_PROJECT (no build, no pull)"
 # Fail closed, including when Compose does not support --pull never.
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build --pull never
+
+# Compose may replace edge while leaving an unchanged agent running. Its old
+# instance-network endpoints disappear with that edge. Agent startup recovers
+# only its verified instance bridges, preserving the existing DSH processes.
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" restart --no-deps agent
+
+# Messages are an optional availability domain. Their PG/state/key checks never
+# authorize a core login/model service or weaken the network signature guards.
+if [ -d "$AURIGA_DATA_ROOT/config/collab-source" ] || [ "$NAS_COLLAB_CONFIG_DEGRADED" = 1 ]; then
+  sh "$NAS_ROOT/scripts/start-collab-network.sh" || :
+fi
 
 info "start requested; use status.sh / smoke.sh to verify"
 info "after first seed start, set AURIGA_PLATFORM_SEED=false in stack.env and re-render"

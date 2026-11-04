@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-const maxAPIBodyBytes = 1 << 20       // 1 MiB — only /api/**
-const maxInstanceBodyBytes = 64 << 20 // 64 MiB, aligned with agent uploads.
+const maxAPIBodyBytes = 1 << 20        // 1 MiB — only /api/**
+const maxRelayChatBodyBytes = 32 << 20 // Aligned with the relay chat transport boundary.
+const maxInstanceBodyBytes = 64 << 20  // 64 MiB, aligned with agent uploads.
 
 // Gateway is the edge HTTP handler.
 type Gateway struct {
@@ -36,16 +37,14 @@ type Gateway struct {
 	IAMTransport  http.RoundTripper
 	APITransports map[*url.URL]http.RoundTripper
 
-	iamURL             *url.URL
-	orgURL             *url.URL
-	workspaceURL       *url.URL
-	teamURL            *url.URL
-	collabURL          *url.URL
-	resourceURL        *url.URL
-	deviceURL          *url.URL
-	litellmURL         *url.URL
-	litellmHandoffs    liteLLMHandoffs
-	litellmStaticCache *staticGzipCache
+	iamURL       *url.URL
+	orgURL       *url.URL
+	workspaceURL *url.URL
+	teamURL      *url.URL
+	collabURL    *url.URL
+	resourceURL  *url.URL
+	deviceURL    *url.URL
+	relayURL     *url.URL
 
 	networkSubmitURL *url.URL
 
@@ -68,10 +67,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	if err := cfg.validateLinkOrigins(); err != nil {
 		return nil, err
 	}
-	if err := cfg.validateLiteLLMUI(); err != nil {
-		return nil, err
-	}
-	litellmURL, err := cfg.parseLiteLLMOrigin()
+	relayURL, err := cfg.parseRelayOrigin()
 	if err != nil {
 		return nil, err
 	}
@@ -139,32 +135,31 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		return nil, err
 	}
 	g := &Gateway{
-		Cfg:                cfg,
-		Log:                log,
-		Trusted:            trusted,
-		Sessions:           sessions,
-		Routes:             routes,
-		Owners:             RouteOwnerChecker{Routes: routes},
-		Tickets:            tickets,
-		Signer:             signer,
-		Limiter:            NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, cfg.RateLimit.PathPrefix),
-		Conns:              hub,
-		Activity:           activity,
-		Now:                time.Now,
-		Ingress:            ingress,
-		iamURL:             iamURL,
-		orgURL:             orgURL,
-		workspaceURL:       wsURL,
-		teamURL:            teamURL,
-		collabURL:          collabURL,
-		resourceURL:        resourceURL,
-		deviceURL:          deviceURL,
-		litellmURL:         litellmURL,
-		portalStatic:       newSPAFileServer(cfg.Static.PortalRoot, staticCache),
-		adminStatic:        newSPAFileServer(cfg.Static.AdminRoot, staticCache),
-		litellmStaticCache: staticCache,
-		panelStatic:        newPanelFileServer(cfg.Static.PanelRoot),
-		networkWSS:         networkWSS,
+		Cfg:          cfg,
+		Log:          log,
+		Trusted:      trusted,
+		Sessions:     sessions,
+		Routes:       routes,
+		Owners:       RouteOwnerChecker{Routes: routes},
+		Tickets:      tickets,
+		Signer:       signer,
+		Limiter:      NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, cfg.RateLimit.PathPrefix),
+		Conns:        hub,
+		Activity:     activity,
+		Now:          time.Now,
+		Ingress:      ingress,
+		iamURL:       iamURL,
+		orgURL:       orgURL,
+		workspaceURL: wsURL,
+		teamURL:      teamURL,
+		collabURL:    collabURL,
+		resourceURL:  resourceURL,
+		deviceURL:    deviceURL,
+		relayURL:     relayURL,
+		portalStatic: newSPAFileServer(cfg.Static.PortalRoot, staticCache),
+		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot, staticCache),
+		panelStatic:  newPanelFileServer(cfg.Static.PanelRoot),
+		networkWSS:   networkWSS,
 
 		networkSubmitURL: networkSubmitURL,
 	}
@@ -263,10 +258,6 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	rid, r := ensureRequestID(r)
 	clientIP := ResolveClientIP(r, g.Trusted)
 	r = r.WithContext(context.WithValue(r.Context(), ctxKeyClientIP, clientIP))
-	if entry, ok := r.Context().Value(accessEntryKey{}).(accessEntry); ok && entry.role == "relayAdmin" {
-		g.proxyLiteLLM(w, r, entry.role, rid)
-		return
-	}
 	host := requestHost(r)
 
 	// Instance host first: only reject traversal; do not apply portal/admin path strictness (N1).
@@ -372,16 +363,13 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Both credential types are independently verified by their owning runtime.
-	// A virtual-key prefix selects LiteLLM; it never grants platform identity.
-	if g.litellmURL != nil && (path == "/ai" || strings.HasPrefix(path, "/ai/")) {
-		data := path == "/ai/v1/models" || path == "/ai/v1/chat/completions"
-		team, _ := teamMethod(path, r.Method)
-		deviceToken := audience == "portal" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer sk-")
-		if !team && (!data || !deviceToken) {
-			g.proxyLiteLLM(w, r, audience, rid)
-			return
-		}
+	if path == relayAdminPrefix || strings.HasPrefix(path, relayAdminPrefix+"/") {
+		g.proxyRelayAdmin(w, r, audience, rid)
+		return
+	}
+	if g.relayURL != nil && strings.HasPrefix(path, "/ai/v1/") && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer sk-bf-") {
+		g.proxyExternalRelay(w, r, audience, rid)
+		return
 	}
 	// Device AI has an exact route table and an independent runtime from Team.
 	if isDevicePath(path) && (path != "/api/ai/v1/me/usage" || audience == "portal") {
@@ -732,7 +720,7 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 
 	binding, err := g.lookupInstBinding(r)
 	if err != nil || binding.InstanceID != instanceID {
-		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "instance cookie required", rid))
+		g.instanceEntryRequired(w, r, instanceID, instPath, rid)
 		return
 	}
 	target := g.instanceTarget(r, instanceID)
@@ -834,11 +822,12 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		}
 		rewriteOutboundInstance(pr.Out, clientIP, token, rid, tp)
 	}
-	proxy.ModifyResponse = stripInstanceSetCookie
-	if pathSuffix != "" {
-		proxy.ModifyResponse = func(resp *http.Response) error {
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Del(instanceEntryHeader)
+		if pathSuffix != "" {
 			return mapInstanceResponse(resp, target, identityPath, r.URL.RawQuery, g.requestSecureCookies(r))
 		}
+		return stripInstanceSetCookie(resp)
 	}
 	proxy.ServeHTTP(w, r)
 }

@@ -63,7 +63,14 @@ elif [ -e "$VAR/collab-installation" ] || [ -L "$VAR/collab-installation" ]; the
   ARGS+=(-f "$COMPOSE/scripts/collab-required.yml" --profile network-collab)
   export COMPOSE_PROFILES=network-collab
 fi
-case "$1" in up|start|stop|restart|down|ps|logs|config|build|exec) ;; *) exit 2 ;; esac
+if [ "$1" = upgrade-bifrost ]; then
+  [ "$#" -eq 1 ] || exit 2
+  # A fixed maintenance action; do not expose arbitrary one-off containers.
+  set -- run --rm --no-deps --pull never --user 999:999 -e PGHOST=postgres \
+    --entrypoint sh postgres /docker-entrypoint-initdb.d/03-bifrost.sh
+else
+  case "$1" in up|start|stop|restart|down|ps|logs|config|build|exec) ;; *) exit 2 ;; esac
+fi
 # Do not let a lifecycle call silently replace this recipe or environment.
 for ARG in "$@"; do
   case "$ARG" in -p*|--project-name|--project-name=*|-f*|--file|--file=*|--env-file|--env-file=*|--profile|--profile=*|--project-directory|--project-directory=*) exit 2 ;; esac

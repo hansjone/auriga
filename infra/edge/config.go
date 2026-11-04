@@ -20,8 +20,7 @@ type Config struct {
 	InstanceControlIngress *InstanceControlIngressConfig `json:"instanceControlIngress,omitempty"`
 	IAMRPC                 IAMRPCConfig                  `json:"iamRpc"`
 	IAMHop                 IAMHopConfig                  `json:"iamHop"`
-	LiteLLMOrigin          string                        `json:"litellmOrigin"`
-	LiteLLMUI              *LiteLLMUIConfig              `json:"litellmUI,omitempty"`
+	Relay                  *RelayConfig                  `json:"relay,omitempty"`
 	DeviceHop              IAMHopConfig                  `json:"deviceHop"`
 	CollabHop              IAMHopConfig                  `json:"collabHop"`
 	NetworkSubmitHop       IAMHopConfig                  `json:"networkSubmitHop"`
@@ -109,26 +108,6 @@ func loadConfigWithAccess(path, accessPath string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid static gzip cache size")
 		}
 		cfg.Static.GzipCacheBytes = limit
-	}
-	if raw := os.Getenv("AURIGA_EDGE_LITELLM_UI_EXTERNAL_ORIGINS"); raw != "" {
-		if cfg.LiteLLMUI == nil || json.Unmarshal([]byte(raw), &cfg.LiteLLMUI.ExternalOrigins) != nil {
-			return Config{}, fmt.Errorf("invalid LiteLLM UI external origins JSON")
-		}
-	}
-	if file := os.Getenv("AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE"); file != "" {
-		if cfg.LiteLLMUI == nil {
-			return Config{}, fmt.Errorf("LiteLLM UI login requires UI configuration")
-		}
-		if cfg.LiteLLMUI.Login == nil {
-			cfg.LiteLLMUI.Login = &LiteLLMUILogin{}
-		}
-		cfg.LiteLLMUI.Login.PasswordFile = file
-	}
-	if file := os.Getenv("AURIGA_EDGE_LITELLM_KEY_INFO_FILE"); file != "" {
-		if cfg.LiteLLMUI == nil || cfg.LiteLLMUI.Login == nil {
-			return Config{}, fmt.Errorf("LiteLLM key reader requires UI configuration")
-		}
-		cfg.LiteLLMUI.Login.KeyInfoKeyFile = file
 	}
 	if accessPath != "" {
 		cfg.AccessConfigFile = accessPath

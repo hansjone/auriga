@@ -1,10 +1,7 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
-	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +20,7 @@ func TestStaticSharedBudgetConcurrentMisses(t *testing.T) {
 		c.Static.AdminRoot = t.TempDir()
 		c.Static.GzipCacheBytes = 2048
 	})
-	cache := g.litellmStaticCache
+	cache := g.portalStatic.(*spaFileServer).gzipCache
 	if g.portalStatic.(*spaFileServer).gzipCache != cache || g.adminStatic.(*spaFileServer).gzipCache != cache {
 		t.Fatal("static services do not share one budget")
 	}
@@ -107,15 +104,6 @@ func TestStaticCacheMetadataHeadAndCanonicalPath(t *testing.T) {
 	}
 }
 
-func TestLiteLLMUppercaseLayoutDirectory(t *testing.T) {
-	for _, name := range []string{"TeamSettings", "ABC_12-a"} {
-		r := httptest.NewRequest("GET", "/ai/ui/"+name+"/__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", nil)
-		if !liteLLMPathAllowed(r) {
-			t.Fatal("valid case-sensitive Next.js directory refused")
-		}
-	}
-}
-
 func TestStaticCacheReuseAndBoundedEviction(t *testing.T) {
 	cache := &staticGzipCache{}
 	key := staticCacheKey{"asset.js", 100, "mtime"}
@@ -145,7 +133,7 @@ func (b *unreadStaticBody) Close() error           { b.closed = true; return nil
 
 func TestStaticUpstreamCacheStillChecksMetadata(t *testing.T) {
 	cache := &staticGzipCache{}
-	r := httptest.NewRequest("GET", "http://litellm.example.com/ai/_next/static/app.js", nil)
+	r := httptest.NewRequest("GET", "http://assets.example.com/ai/_next/static/app.js", nil)
 	r.Header.Set("Accept-Encoding", "gzip")
 	response := func(body io.ReadCloser, mtime string) *http.Response {
 		return &http.Response{Request: r, StatusCode: 200, ContentLength: 100, Header: http.Header{"Content-Type": {"text/javascript"}, "Last-Modified": {mtime}}, Body: body}
@@ -169,39 +157,5 @@ func TestStaticUpstreamCacheStillChecksMetadata(t *testing.T) {
 		if tc.hit && (err != nil || !body.closed) || !tc.hit && err == nil {
 			t.Fatal("upstream metadata cache boundary failed")
 		}
-	}
-}
-
-func TestLiteLLMStaticBodyTimeout(t *testing.T) {
-	finished := make(chan struct{})
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/javascript")
-		w.Header().Set("Content-Length", "100")
-		w.WriteHeader(200)
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-		close(finished)
-	}))
-	defer upstream.Close()
-	g, _, store := accessFixtureConfigured(t, false, nil, func(c *Config, _ map[string]any) { c.LiteLLMOrigin = upstream.URL })
-	backend, _ := browserRPCFixture(t, g, store)
-	sess := putBrowserSession(g, backend, "admin", "admin")
-	claims, _ := json.Marshal(map[string]any{"ctx": "admin", "tid": sess.TenantID, "sub": sess.AccountID, "perms": []string{"ai.providers.write"}})
-	sess.AccessToken = "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".fixture"
-	store.Put("admin", sess)
-	r := httptest.NewRequest("GET", "/ai/_next/static/stalled.js", nil)
-	r.Header.Set("Cookie", "auriga_litellm_session=admin")
-	r.Header.Set("Accept-Encoding", "gzip")
-	r = r.WithContext(context.WithValue(r.Context(), accessEntryKey{}, accessEntry{role: "relayAdmin", scheme: "http"}))
-	w := httptest.NewRecorder()
-	started := time.Now()
-	g.proxyLiteLLM(w, r, "relayAdmin", "static-timeout")
-	if w.Code != http.StatusBadGateway || time.Since(started) > staticBodyTimeout+3*time.Second {
-		t.Fatal("static body read escaped its deadline")
-	}
-	select {
-	case <-finished:
-	case <-time.After(time.Second):
-		t.Fatal("upstream request was not canceled")
 	}
 }

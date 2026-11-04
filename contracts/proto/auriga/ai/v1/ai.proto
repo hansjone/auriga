@@ -50,7 +50,7 @@ message BudgetAdmission {
   int64 max_output_tokens = 12;
   int64 reserved_tokens = 13;
   int64 reserved_micros = 14;
-  // effective quota 不设置=不限，0=禁止；不限仍必须配置正数绝对在途上限。
+  // effective quota 不设置=不限，0=禁止。显式在途限制独立于模型能力。
   optional int64 monthly_budget_micros = 15;
   optional int64 daily_tokens = 16;
   uint32 max_active_requests_per_subject = 17;
@@ -64,6 +64,9 @@ message BudgetAdmission {
   }
   google.protobuf.Timestamp admitted_at = 23;
   google.protobuf.Timestamp token_expires_at = 24;
+  // 仅经受信成员策略启用；不预设预算/流量额度，保幂等、归属和真实用量。
+  // 此时输入/输出及预占数仅为计量估计，不得作为拒绝/截断上游的上限。
+  bool metering_only = 25;
 }
 
 message UsageRecord {

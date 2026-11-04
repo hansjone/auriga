@@ -193,15 +193,42 @@ func verifyNASCollabBase(base string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer binary.Close()
-	cmd := exec.Command("/proc/self/fd/3", "collab-base", base)
-	cmd.ExtraFiles = []*os.File{binary}
+	defer func() { _ = binary.Close() }()
+	// Older NAS procfs refuses /proc/self/fd execution after setuid, even when
+	// the inherited executable descriptor is readable. Copy only this already
+	// running public executable into a root-owned exclusive temporary directory;
+	// never re-open a caller-selected tool or relax a private bundle's metadata.
+	dir, err := os.MkdirTemp("", "auriga-base-verifier-")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	tool := filepath.Join(dir, "verifier")
+	copy, err := os.OpenFile(tool, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
+	if err != nil {
+		return "", err
+	}
+	_, writeErr := io.Copy(copy, binary)
+	if writeErr == nil {
+		writeErr = copy.Chmod(0755)
+	}
+	closeErr := copy.Close()
+	if writeErr != nil {
+		return "", writeErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	if err := os.Chmod(dir, 0755); err != nil {
+		return "", err
+	}
+	cmd := exec.Command(tool, "collab-base", base)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 10001, Gid: 10001, Groups: []uint32{10001}}}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	raw, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("NAS base verifier failed: %s", strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("NAS base verifier failed: %w; %s", err, strings.TrimSpace(stderr.String()))
 	}
 	if len(raw) != 64 {
 		return "", fmt.Errorf("NAS base verifier output refused")
@@ -221,7 +248,7 @@ func checkNASCollabBase(base string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	set := nasMaterialSet(cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https")
+	set := nasBaseMaterialSet(base, cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https")
 	if raw, err := os.ReadFile(filepath.Join(base, "templates", "real-dsh.pb")); err == nil {
 		var spec nodev1.InstanceSpec
 		if proto.Unmarshal(raw, &spec) != nil {

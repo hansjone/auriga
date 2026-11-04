@@ -35,6 +35,7 @@ type Store struct {
 	activationActive  sync.WaitGroup
 	activationLocks   [4]chan struct{}
 	closeErr          error
+	offlineRecovery   bool
 }
 
 // Open creates or opens state.db under agentDir.
@@ -65,12 +66,16 @@ func Open(agentDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	return newStore(db, agentDir), nil
+}
+
+func newStore(db *bbolt.DB, agentDir string) *Store {
 	s := &Store{db: db, agentDir: agentDir, activationStop: make(chan struct{}), activationDone: make(chan struct{})}
 	for i := range s.activationLocks {
 		s.activationLocks[i] = make(chan struct{}, 1)
 		s.activationLocks[i] <- struct{}{}
 	}
-	return s, nil
+	return s
 }
 
 // Close rejects new activation qualifications, wakes queued callers and waits

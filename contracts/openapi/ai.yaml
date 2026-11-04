@@ -2914,6 +2914,1334 @@
         },
         "x-admin-only": true
       }
+    },
+    "/api/ai/v1/admin/relay/providers": {
+      "get": {
+        "operationId": "listRelayProviders",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayProviderPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createRelayProvider",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayProvider"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelayProviderInput"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/relay/providers/{id}": {
+      "put": {
+        "operationId": "updateRelayProvider",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayProvider"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelayProviderInput"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/relay/providers/{id}/keys": {
+      "post": {
+        "operationId": "setRelayProviderKey",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.credentials.rotate",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayProvider"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialInput"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/relay/pools": {
+      "get": {
+        "operationId": "listRelayPools",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayPoolPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "saveRelayPool",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable",
+          "iam.step_up_required",
+          "common.precondition_failed"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "*"
+              ]
+            },
+            "description": "仅创建，已有公开模型 ID 返回412；只接受单值星号。缺省保持原保存行为。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayPool"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed；公开模型 ID 已存在，未修改原配置。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelayPool"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600,
+        "description": "保存模型池；缺省为编辑或创建。If-None-Match: * 表示仅创建，已存在的租户内公开 ID 原子拒绝，不覆盖；该条件参与 Idempotency-Key 请求指纹。"
+      }
+    },
+    "/api/ai/v1/admin/relay/virtual-keys": {
+      "get": {
+        "operationId": "listRelayKeys",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayKeyPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      },
+      "post": {
+        "operationId": "issueRelayKey",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayKeyIssued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelayKeyInput"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/relay/virtual-keys/{id}": {
+      "put": {
+        "operationId": "updateRelayKey",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelayKeyInput"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/relay/logs": {
+      "get": {
+        "operationId": "queryRelayUsage",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.usage.admin",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "keyId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；凭据仅在明示的签发响应返回。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/relay/providers/{id}/models": {
+      "get": {
+        "operationId": "listRelayProviderModels",
+        "tags": [
+          "AI"
+        ],
+        "x-admin-only": true,
+        "x-permission": "ai.providers.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.rate_limited",
+          "common.unavailable"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；只返回上游真实模型 ID，不返回供应商凭据或原始响应。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayProviderModelPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "summary": "获取供应商的真实模型目录",
+        "description": "使用当前租户已保存的供应商地址及密钥向供应商读取模型目录；不接受客户端地址或密钥。失败时保留手动输入模型 ID 的能力。返回的目录不会自动创建公开模型。"
+      }
     }
   },
   "components": {
@@ -3030,7 +4358,12 @@
           "kind": {
             "type": "string",
             "enum": [
-              "openai_compatible"
+              "openai-compatible",
+              "openai",
+              "minimax",
+              "deepseek",
+              "anthropic",
+              "gemini"
             ]
           },
           "baseUrl": {
@@ -3626,7 +4959,22 @@
                   "type": "integer",
                   "format": "int64",
                   "minimum": 0,
-                  "maximum": 9007199254740991
+                  "maximum": 9007199254740991,
+                  "description": "Unix seconds; 0 denotes an unknown creation time and is not a creation timestamp."
+                },
+                "context_window": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 2,
+                  "maximum": 9007199254740991,
+                  "description": "Authenticated pool context capacity, when disclosed."
+                },
+                "max_output_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991,
+                  "description": "Authenticated pool output capacity; smaller than context_window when both are disclosed."
                 },
                 "owned_by": {
                   "type": "string",
@@ -4116,9 +5464,10 @@
           "maxActiveRequestsPerSubject": {
             "type": "integer",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 100,
-            "default": 2
+            "default": 2,
+            "description": "并发上限，0表示不限制。"
           },
           "maxInFlightPercent": {
             "type": "integer",
@@ -4145,7 +5494,7 @@
           "maxInFlightPercent"
         ],
         "additionalProperties": false,
-        "description": "部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。周期不限时对应正数绝对上限必填；unknown预占继续占用；0配额禁止。"
+        "description": "部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。未配置周期配额或绝对流量上限时不新增该限制；unknown预占继续占用；0周期配额禁止，并发0表示不限。"
       },
       "AssistantMessage": {
         "type": "object",
@@ -4173,6 +5522,520 @@
           "content"
         ],
         "additionalProperties": false
+      },
+      "RelayRoute": {
+        "type": "object",
+        "required": [
+          "providerId",
+          "model",
+          "weight"
+        ],
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "weight": {
+            "type": "number",
+            "format": "double",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayPool": {
+        "type": "object",
+        "required": [
+          "id",
+          "enabled",
+          "routes",
+          "contextWindow",
+          "maxOutputTokens",
+          "price"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "routes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/RelayRoute"
+            }
+          },
+          "contextWindow": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "上下文能力为0（未知）或至少2的安全整数，供客户端压缩与请求参数使用，不是中转裁限；可显式从上游目录更新，公开目录省略未知值。",
+            "not": {
+              "const": 1
+            }
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/RelayPoolCapabilities"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayPoolCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sourceProviderId",
+          "sourceModel",
+          "contextWindowMode",
+          "maxOutputTokensMode"
+        ],
+        "description": "管理端能力来源与发布策略，保存在模型池文档中；不参与调用请求裁剪或预算准入。无此配置的历史模型池保持现有显式能力值。新建默认继承首条正权重路由，可明确选择池内其他来源；不取全部路由或兜底的最小值。继承项依次取绑定来源的上游快照、管理员推荐值、未知0；manual使用模型池原字段作为显式覆盖。刷新成功后缺失字段清为未知快照，网络失败保旧；配置保存后发布给DSH与外部目录。",
+        "properties": {
+          "sourceProviderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourceModel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "contextWindowMode": {
+            "type": "string",
+            "enum": ["inherit", "manual"]
+          },
+          "maxOutputTokensMode": {
+            "type": "string",
+            "enum": ["inherit", "manual"]
+          },
+          "recommendedContextWindow": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "not": { "const": 1 },
+            "description": "管理员配置的推荐上下文，仅继承模式且上游未提供总上下文字段时使用；0或缺失为未知，不由输入上限推算。"
+          },
+          "recommendedMaxOutputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "管理员配置的推荐输出，仅继承模式且上游未提供输出字段时使用；0或缺失为未知。"
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/RelayPoolUpstreamCapabilities"
+          }
+        }
+      },
+      "RelayPoolUpstreamCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["providerId", "model"],
+        "description": "管理员最近一次成功获取的目录快照。供应商及真实模型ID仅用于绑定所选能力来源，绝不发布到公开目录；换来源或来源路由不存在时不能沿用其他模型的旧快照。",
+        "properties": {
+          "providerId": { "type": "string", "format": "uuid" },
+          "model": { "$ref": "#/components/schemas/RelayProviderModel" }
+        }
+      },
+      "RelayKeyInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "active",
+          "monthlyBudgetMicros",
+          "requestsPerMinute",
+          "models"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "monthlyBudgetMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "requestsPerMinute": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "models": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "maxInFlightTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1073741824,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "meteringOnly": {
+            "type": "boolean",
+            "description": "仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayKey": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "source",
+          "accountId",
+          "active",
+          "monthlyBudgetMicros",
+          "requestsPerMinute",
+          "models"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "member",
+              "external"
+            ]
+          },
+          "accountId": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "monthlyBudgetMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "requestsPerMinute": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "maxInFlightTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1073741824,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "meteringOnly": {
+            "type": "boolean",
+            "description": "仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。"
+          },
+          "policyOrigin": {
+            "type": "string",
+            "enum": [
+              "default",
+              "administrator",
+              "legacy"
+            ],
+            "description": "治理来源。ensure只更新default；旧无来源保留为legacy，管理员保存标administrator。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayKeyIssued": {
+        "type": "object",
+        "required": [
+          "key",
+          "secret"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/RelayKey"
+          },
+          "secret": {
+            "type": "string",
+            "writeOnly": false,
+            "description": "仅签发响应或受信成员身份桥返回；不存明文、不写日志。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayMemberEnsure": {
+        "type": "object",
+        "required": [
+          "tenantId",
+          "accountId",
+          "monthlyBudgetMicros",
+          "requestsPerMinute"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "monthlyBudgetMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "requestsPerMinute": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "maxInFlightTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 1073741824,
+            "description": "显式流量限制，0或未指定表示不限制。"
+          },
+          "meteringOnly": {
+            "type": "boolean",
+            "description": "仅成员可用。true为仅计量模式：保身份、模型权限与吊销，不设预算或流量限制；原预算0仍表示禁止，不能由0推断此模式。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayProvider": {
+        "type": "object",
+        "required": [
+          "id",
+          "configuration",
+          "hasCredential"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "configuration": {
+            "$ref": "#/components/schemas/RelayProviderInput"
+          },
+          "hasCredential": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayProviderPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelayProvider"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "后续页游标，绑定当前租户和资源。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayPoolPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelayPool"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "后续页游标，绑定当前租户和资源。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayKeyPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelayKey"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "后续页游标，绑定当前租户和资源。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelayProviderInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "kind",
+          "baseUrl",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "openai-compatible",
+              "openai",
+              "minimax",
+              "deepseek",
+              "anthropic",
+              "gemini"
+            ]
+          },
+          "baseUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "由受信管理者配置；默认禁止内网/重定向。显式部署的gateway端点例外另审，不能放宽实例出网。"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "description": "第一步供应商配置。网络期限与并发由中转服务固定安全上限控制，不接受尚未映射的高级参数。"
+      },
+      "RelayProviderModel": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "供应商返回的真实上游模型 ID，仅管理端目录使用。"
+          },
+          "contextWindow": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "供应商明确返回的总上下文 Token 上限；缺失表示未知，不由模型名称或输入输出上限相加推断。仅为目录元数据，不自动变更模型池或预算。"
+          },
+          "maxInputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "供应商明确返回的输入 Token 上限；与总上下文上限分别表达，缺失表示未知。"
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "供应商明确返回的输出 Token 上限；缺失表示未知。合法的同义字段或重复模型记录按维度取已知最小值；重复记录任一未知则该维度未知。"
+          }
+        }
+      },
+      "RelayProviderModelPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/RelayProviderModel"
+            }
+          }
+        }
       }
     }
   },

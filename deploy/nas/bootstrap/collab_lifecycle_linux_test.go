@@ -17,7 +17,7 @@ func TestNASCollabScriptLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(root)
+	defer func() { _ = os.RemoveAll(root) }()
 	if err := os.Chmod(root, 0755); err != nil {
 		t.Fatal(err)
 	}

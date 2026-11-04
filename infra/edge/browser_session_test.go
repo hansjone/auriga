@@ -71,6 +71,9 @@ func (s *browserRPCServer) IntrospectSession(ctx context.Context, request *iamv1
 		}
 	}
 	result := &iamv1.IntrospectSessionResponse{Active: true, AccessToken: row.AccessToken, AccessTokenExpiresAt: timestamppb.New(row.AccessTokenExpiresAt), Session: &iamv1.Session{SessionId: row.SessionID, AccountId: row.AccountID, TenantId: row.TenantID, Audience: request.Audience, CreatedAt: timestamppb.New(row.AuthTime), ExpiresAt: timestamppb.New(row.ExpiresAt), IdleExpiresAt: timestamppb.New(row.IdleExpiresAt), Mfa: row.MFA}}
+	if !row.StepUpAt.IsZero() {
+		result.Session.StepUpAt = timestamppb.New(row.StepUpAt)
+	}
 	switch s.mode {
 	case "sid":
 		result.Session.SessionId = "different"
@@ -96,6 +99,9 @@ func (s *browserRPCServer) TouchSession(_ context.Context, request *iamv1.TouchS
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.touches++
+	if s.mode == "touch-error" {
+		return nil, status.Error(codes.Unavailable, "connection reset cookie=touch-cookie password=sentinel-password ticket=sentinel-ticket")
+	}
 	if s.inactiveTouch {
 		return &iamv1.TouchSessionResponse{}, nil
 	}

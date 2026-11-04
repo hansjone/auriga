@@ -1,0 +1,109 @@
+.model-usage {
+  display: grid;
+  gap: 16px;
+}
+.model-usage header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.model-usage h1,
+.model-usage h2,
+.model-usage p {
+  margin: 0;
+}
+.model-usage p {
+  color: var(--el-text-color-secondary);
+}
+.usage-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.usage-filters label {
+  display: grid;
+  gap: 6px;
+}
+.model-usage input,
+.model-usage select {
+  font: inherit;
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  padding: 8px;
+}
+.usage-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 20px;
+  margin: 0;
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+}
+.usage-summary dt {
+  color: var(--el-text-color-secondary);
+}
+.usage-summary dd {
+  margin: 8px 0 0;
+  font-size: 20px;
+}
+.usage-summary dd span {
+  font-size: 13px;
+}
+.usage-table {
+  overflow-x: auto;
+}
+.usage-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.usage-table th,
+.usage-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--el-border-color);
+  overflow-wrap: anywhere;
+  min-width: 100px;
+}
+.model-usage form fieldset {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  padding: 20px;
+}
+.model-usage label {
+  display: grid;
+  gap: 6px;
+}
+.model-usage button {
+  font: inherit;
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.model-usage button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.model-usage td button + button {
+  margin-left: 8px;
+}
+.model-usage input[type='checkbox'] {
+  justify-self: start;
+}
+.model-usage aside {
+  border: 1px solid var(--el-color-warning);
+  border-radius: 12px;
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+}
+.model-usage [role='alert'] {
+  color: var(--el-color-danger);
+}

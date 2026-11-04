@@ -1,3 +1,4 @@
+import { logEvent } from '../observability/index.js';
 import { networkTiming } from './timing.js';
 /* global AbortSignal */
 import { randomUUID, createHash } from 'node:crypto';
@@ -804,6 +805,21 @@ export async function openConnectionRuntime(options) {
       );
       active();
       diagnostics.registered(registration.created);
+      const registrationContext = {
+        ...diagnostics.context(),
+        instance_id: process.env.AURIGA_INSTANCE_ID ?? null,
+        // The renderer does not export workspace spec generation. Never label
+        // the lifecycle generation as a workspace generation.
+        workspace_generation: null,
+        workspace_generation_source: 'not_exported_by_renderer',
+        device_id: registration.device,
+        node: registration.node,
+        realm: registration.realm,
+        tenant_id: registration.tenant,
+        created: registration.created,
+        storage_key: prepared.storageKey ?? null,
+      };
+      logEvent('INFO', 'Network registration accepted', registrationContext);
       const ledger = await run('ledger_restore', () =>
         loadConnectionLedger(
           /** @type {import('./host/store.js').LedgerStoreHandle} */ ({
@@ -935,8 +951,14 @@ export async function openConnectionRuntime(options) {
             throw new Error('bootstrap connection changed');
         };
         firstCurrent();
+        logEvent('INFO', 'Network initial commit started', registrationContext);
         await run('initial_commit', () =>
           ledger.initialize(output.identity, output.readyResult.producer_epoch),
+        );
+        logEvent(
+          'INFO',
+          'Network initial commit completed',
+          registrationContext,
         );
         active();
         firstCurrent();
@@ -1141,6 +1163,7 @@ export async function openConnectionRuntime(options) {
             : 'connecting',
       };
     },
+    consentAvailable: false,
     consentUI(/** @type {unknown} */ _context) {
       throw new Error('network consent unavailable');
     },

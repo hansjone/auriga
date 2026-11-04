@@ -61,6 +61,7 @@ export function createNetworkLifecycle(options) {
           emit,
           valid,
           attempt,
+          generation: expected,
           signal: abort.signal,
         });
         let failure = diagnostics.scope('identity_prepare');
@@ -229,6 +230,9 @@ export function createNetworkLifecycle(options) {
           reason,
         }
       );
+    },
+    get consentAvailable() {
+      return !disposed && authenticated && runtime?.consentAvailable === true;
     },
     consentUI(/** @type {unknown} */ context) {
       if (!runtime || !authenticated || disposed)

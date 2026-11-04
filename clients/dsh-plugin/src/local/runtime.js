@@ -10,16 +10,21 @@ import { createRefreshBroker } from '../ai/refresh-broker.js';
 import { createModelLifecycle } from '../ai/installation.js';
 import { createNetworkLifecycle } from '../network/lifecycle.js';
 import { createDeviceProvider } from '../network/device-provider.js';
+import {
+  deviceMemberName,
+  loginMemberName,
+  memberName,
+} from './member-profile.js';
 const random = () => randomBytes(32).toString('base64url');
 const accountName = (/** @type {any} */ saved) =>
   [
+    saved?.displayName,
     saved?.claims?.name,
     saved?.claims?.preferred_username,
     saved?.claims?.username,
-  ].find(
-    (value) =>
-      typeof value === 'string' && value.length > 0 && value.length <= 256,
-  );
+  ]
+    .map(memberName)
+    .find(Boolean);
 const equal = (/** @type {unknown} */ a, /** @type {unknown} */ b) =>
   typeof a === 'string' &&
   typeof b === 'string' &&
@@ -248,6 +253,34 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     broker,
     origin: config.platformOrigin,
   });
+  let profileRetryAt = 0;
+  async function refreshMemberName() {
+    if (closed || Date.now() < profileRetryAt) return;
+    profileRetryAt = Date.now() + 60000;
+    const saved = vault.snapshot().credential;
+    if (!saved) return;
+    const expected = generation;
+    try {
+      const name = await deviceMemberName(
+        platform,
+        await getAccess(),
+        saved.claims.sub,
+        AbortSignal.timeout(4000),
+      );
+      if (!name || closed || expected !== generation) return;
+      await vault.update((s) => {
+        if (
+          !closed &&
+          expected === generation &&
+          s.credential?.claims.sub === saved.claims.sub &&
+          s.credential?.claims.did === saved.claims.did
+        )
+          s.credential.displayName = name;
+      });
+    } catch {
+      // A directory outage affects presentation, never the login lifetime.
+    }
+  }
   /** @type {Promise<void>|undefined} */
   let networkClosing;
   async function getAccess() {
@@ -553,6 +586,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     attachNetwork: network.attach,
     consentUI: network.consentUI,
     messagingUI: network.messagingUI,
+    get consentAvailable() {
+      return network.consentAvailable;
+    },
     get networkStatus() {
       return network.status;
     },
@@ -566,6 +602,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     },
     status(/** @type {any} */ request) {
       const row = resolve(request);
+      if (row) void refreshMemberName();
       const saved = vault.snapshot().credential;
       const resumable =
         nativeRequests.has(request) &&
@@ -584,6 +621,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         connected: !!row && !!team && online,
         communication: row ? communication : 'idle',
         models: models.status,
+        capabilities: { consent: !!row && network.consentAvailable },
         network: row
           ? network.status
           : { available: false, connected: false, state: 'idle' },
@@ -827,8 +865,15 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         }
         check();
         const verified = await validateTokens(tokens);
+        const displayName = await loginMemberName(
+          platform,
+          row.jar,
+          verified.claims.sub,
+          row.controller.signal,
+        ).catch(() => undefined);
         const credential = {
           ...verified,
+          ...(displayName ? { displayName } : {}),
           loginTime: new Date().toISOString(),
         };
         check();

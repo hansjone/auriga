@@ -116,7 +116,7 @@ async function exerciseRealSettings(delayed) {
           ? {
               loggedIn: true,
               connected: true,
-              account: { subject: 'alice' },
+              account: { subject: 'alice', displayName: 'alice' },
               network: { connected: true, state: 'ready' },
               connection: localBoot(true).connection,
               csrf: 'native-csrf',
@@ -329,6 +329,51 @@ test('connection bootstrap without an explicit validated status cannot claim con
   }
 });
 
+for (const consent of [false, undefined])
+  test(
+    'R2 shell omits unsupported first-contact UI and never reads a snapshot: ' +
+      consent,
+    async () => {
+      let snapshots = 0;
+      const host = surfaceHost(
+        async (url) =>
+          response(
+            200,
+            new URL(url).pathname.endsWith('/status')
+              ? {
+                  loggedIn: true,
+                  connected: true,
+                  account: { subject: 'alice', displayName: 'Alice' },
+                  capabilities: { consent },
+                }
+              : localBoot(true),
+          ),
+        {
+          consentFetch() {
+            snapshots++;
+            throw Error('unsupported consent');
+          },
+        },
+      );
+      try {
+        const main = host.mount('main'),
+          settings = host.mount('settings.section');
+        await flush();
+        assert.equal(main.root.querySelector('.auriga-consent'), null);
+        assert.equal(settings.root.querySelector('.auriga-consent'), null);
+        assert.doesNotMatch(settings.root.textContent, /首联授权|暂时无法加载/);
+        assert.equal(snapshots, 0);
+        main.close();
+        settings.close();
+        host.dispose();
+        assert.equal(host.subscriptions.size, 0);
+        assert.equal(host.counts.timers.size, 0);
+      } finally {
+        host.close();
+      }
+    },
+  );
+
 test('consent children use independent hooks and the authenticated HTTP bridge without replacing the main panel', async () => {
   let snapshot = {
     policyRevision: 1,
@@ -358,6 +403,7 @@ test('consent children use independent hooks and the authenticated HTTP bridge w
               loggedIn: true,
               connected: true,
               account: { subject: 'alice' },
+              capabilities: { consent: true },
               csrf: 'native-csrf',
             }
           : localBoot(true),

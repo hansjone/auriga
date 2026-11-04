@@ -64,8 +64,16 @@ public final class WorkspaceManagedModels {
 
   public void reconcile(Map<String, Object> row, IssueManagedDeviceResponse response) {
     boolean hasCredential = enabled && !response.getModelCredential().isEmpty();
+    if (enabled && !hasCredential) {
+      org.slf4j.LoggerFactory.getLogger(getClass())
+          .info(
+              "Managed model capability instance={} managedCredentialVersion={} generation={} stage=credential reason=model_credential_not_issued",
+              row.get("id"),
+              row.get("managed_credential_version"),
+              row.get("generation"));
+    }
     if (!hasCredential && row.get("managed_model_credential") == null) return;
-    if (hasCredential && row.get("managed_model_credential") != null) return;
+    if (hasCredential && hasModelCatalog(row)) return;
     UUID id = (UUID) row.get("id");
     long version = ((Number) row.get("managed_credential_version")).longValue();
     byte[] material =
@@ -87,7 +95,10 @@ public final class WorkspaceManagedModels {
               || (boolean) current.get("deleted")
               || WorkspaceService.spec(current).getDesired() != DesiredState.DESIRED_STATE_RUNNING)
             return null;
-          if ((current.get("managed_model_credential") == null) == (material == null)) return null;
+          if (material == null && current.get("managed_model_credential") == null) return null;
+          // Refresh invalid material through the normal catalog and seal path.
+          // A valid catalog with unknown capabilities does not require rotation.
+          if (material != null && hasModelCatalog(current)) return null;
           store.jdbc.update(
               "UPDATE instance SET managed_model_credential=? WHERE tenant_id=? AND id=?",
               material,
@@ -102,7 +113,22 @@ public final class WorkspaceManagedModels {
         });
   }
 
+  private boolean hasModelCatalog(Map<String, Object> row) {
+    if (!(row.get("managed_model_credential") instanceof byte[] material)) return false;
+    byte[] plaintext =
+        crypto.decrypt(material, service.store.tenant() + "/managed-model/" + row.get("id"));
+    try {
+      return ManagedModelCatalog.hasCatalog(WorkspaceService.JSON.readTree(plaintext));
+    } finally {
+      Arrays.fill(plaintext, (byte) 0);
+    }
+  }
+
   private ObjectNode catalog(IssueManagedDeviceResponse response, Map<String, Object> row) {
+    long started = System.nanoTime();
+    String stage = "connect", reason = "transport";
+    int httpStatus = 0;
+    String upstreamTrace = "";
     try {
       var builder =
           HttpClient.newBuilder()
@@ -119,14 +145,25 @@ public final class WorkspaceManagedModels {
             .ifPresent(
                 c -> requestBuilder.header("traceparent", c.trace().child().toTraceparent()));
         var request = requestBuilder.build();
+        stage = "http";
         var reply =
             client.send(
                 request,
                 HttpResponse.BodyHandlers.limiting(
                     HttpResponse.BodyHandlers.ofByteArray(), 1 << 20));
+        httpStatus = reply.statusCode();
+        String observedTrace = reply.headers().firstValue("X-Trace-Id").orElse("");
+        if (observedTrace.matches("[a-f0-9]{32}")) upstreamTrace = observedTrace;
         byte[] raw = reply.body();
+        reason = "http_status";
         if (reply.statusCode() != 200) throw new IllegalArgumentException();
+        stage = "catalog";
+        reason = "invalid_json";
         var data = WorkspaceService.JSON.readTree(raw).path("data");
+        reason =
+            !data.isArray()
+                ? "invalid_catalog"
+                : data.isEmpty() ? "empty_catalog" : "catalog_too_large";
         if (!data.isArray() || data.isEmpty() || data.size() > 256)
           throw new IllegalArgumentException();
         var file = WorkspaceService.JSON.createObjectNode();
@@ -136,22 +173,36 @@ public final class WorkspaceManagedModels {
         file.put("credentialVersion", ((Number) row.get("managed_credential_version")).longValue());
         file.put("credential", response.getModelCredential());
         file.put("baseUrl", baseUrl);
-        var models = file.putArray("models");
-        Set<String> seen = new HashSet<>();
-        for (var model : data) {
-          String name = model.path("id").asString();
-          if (name.isBlank()
-              || name.length() > 200
-              || name.chars().anyMatch(Character::isISOControl)
-              || !seen.add(name)) throw new IllegalArgumentException();
-          models.addObject().put("id", name);
+        try {
+          file.set("models", ManagedModelCatalog.fromGateway(data));
+        } catch (IllegalArgumentException invalid) {
+          reason = invalid.getMessage();
+          throw invalid;
         }
         return file;
       }
     } catch (InterruptedException interrupted) {
+      ManagedModelDiagnostic.failure(
+          row,
+          stage,
+          "interrupted",
+          httpStatus,
+          started,
+          interrupted,
+          response.getModelCredential(),
+          upstreamTrace);
       Thread.currentThread().interrupt();
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     } catch (Exception unavailable) {
+      ManagedModelDiagnostic.failure(
+          row,
+          stage,
+          reason,
+          httpStatus,
+          started,
+          unavailable,
+          response.getModelCredential(),
+          upstreamTrace);
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     }
   }

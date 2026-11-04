@@ -4,19 +4,56 @@
   "description": "Workspace-only model material, HPKE-bound to the specification generation and written as a private 0600 file.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tenantId", "ownerId", "instanceId", "credentialVersion", "credential", "baseUrl", "models"],
+  "required": [
+    "tenantId",
+    "ownerId",
+    "instanceId",
+    "credentialVersion",
+    "credential",
+    "baseUrl",
+    "models"
+  ],
   "properties": {
     "tenantId": { "type": "string", "format": "uuid" },
     "ownerId": { "type": "string", "format": "uuid" },
     "instanceId": { "type": "string", "format": "uuid" },
-    "credentialVersion": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-    "credential": { "type": "string", "pattern": "^amc\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[A-Za-z0-9_-]{43}$" },
-    "baseUrl": { "type": "string", "format": "uri", "pattern": "^https?://[^/?#@]+/ai/v1$" },
+    "credentialVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "credential": {
+      "type": "string",
+      "pattern": "^amc\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[A-Za-z0-9_-]{43}$"
+    },
+    "baseUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://[^/?#@]+/ai/v1$"
+    },
     "models": {
-      "type": "array", "minItems": 1, "maxItems": 256,
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
       "items": {
-        "type": "object", "additionalProperties": false, "required": ["id"],
-        "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 200 } }
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "contextWindow": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 9007199254740991,
+            "description": "Optional upstream capability metadata; omitted when unknown, never zero or an invocation hard limit."
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Optional upstream capability metadata; omitted when unknown. If both values are known, must be smaller than contextWindow; verified by producer and consumers."
+          }
+        }
       }
     }
   }

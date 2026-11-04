@@ -47,7 +47,7 @@ func readyDockerWithPortMetadata(t *testing.T, endpoint string, bindings any, pu
 			for _, notify := range beforeInspectResponse {
 				notify()
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"State": map[string]any{"Running": true},
+			_ = json.NewEncoder(w).Encode(map[string]any{"State": map[string]any{"Running": true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": 42},
 				"Id": fixtureContainerID, "Image": fixtureConfigID, "Config": map[string]any{"Labels": map[string]string{"auriga.managed": "true", "auriga.instance": fixtureInstance.Load().(string), "auriga.generation": "7"}, "ExposedPorts": map[string]any{"7860/tcp": map[string]any{}, "8888/tcp": map[string]any{}}},
 				"HostConfig":      map[string]any{"PortBindings": bindings},
 				"NetworkSettings": map[string]any{"Ports": map[string]any{publishedKey: []any{map[string]string{"HostPort": port}}}}})

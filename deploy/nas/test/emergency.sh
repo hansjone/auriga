@@ -13,7 +13,7 @@ export AURIGA_DATA_ROOT="$TMP/srv/container/auriga-first" NAS_ROOT="$TMP/package
 export NAS_ALLOW_NONROOT=1
 unset NAS_INSTALLER_ACTIVE
 touch "$AURIGA_DATA_ROOT/.auriga-initialized"
-printf 'AURIGA_DATA_ROOT=%s\nAURIGA_INSTALL_MODE=host\nAURIGA_IMAGE_LITELLM=sha256:%064d\nAURIGA_ACCESS_FILE=%s/access.json\n' \
+printf 'AURIGA_DATA_ROOT=%s\nAURIGA_INSTALL_MODE=host\nAURIGA_IMAGE_OPERATOR=sha256:%064d\nAURIGA_ACCESS_FILE=%s/access.json\n' \
   "$AURIGA_DATA_ROOT" 1 "$TMP" >"$AURIGA_DATA_ROOT/stack.env"
 chmod 600 "$AURIGA_DATA_ROOT/stack.env"
 cat >"$TMP/bin/docker" <<'EOF'

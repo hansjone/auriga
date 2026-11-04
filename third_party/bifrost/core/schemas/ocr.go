@@ -1,0 +1,68 @@
+// Auriga modifications: trimmed relay core/providers; see third_party/bifrost/UPSTREAM.md.
+
+package schemas
+
+type OCRDocumentType string
+type OCRPage struct {
+	Index      int                `json:"index"`
+	Markdown   string             `json:"markdown"`
+	Images     []OCRPageImage     `json:"images,omitempty"`
+	Dimensions *OCRPageDimensions `json:"dimensions,omitempty"`
+}
+type BifrostOCRRequest struct {
+	Provider       ModelProvider  `json:"provider"`
+	Model          string         `json:"model"`
+	ID             *string        `json:"id,omitempty"`
+	Document       OCRDocument    `json:"document"`
+	Params         *OCRParameters `json:"params,omitempty"`
+	Fallbacks      []Fallback     `json:"fallbacks,omitempty"`
+	RawRequestBody []byte         `json:"-"`
+}
+type OCRParameters struct {
+	IncludeImageBase64       *bool                  `json:"include_image_base64,omitempty"`
+	Pages                    []int                  `json:"pages,omitempty"`
+	ImageLimit               *int                   `json:"image_limit,omitempty"`
+	ImageMinSize             *int                   `json:"image_min_size,omitempty"`
+	TableFormat              *string                `json:"table_format,omitempty"`
+	ExtractHeader            *bool                  `json:"extract_header,omitempty"`
+	ExtractFooter            *bool                  `json:"extract_footer,omitempty"`
+	BBoxAnnotationFormat     *string                `json:"bbox_annotation_format,omitempty"`
+	DocumentAnnotationFormat *string                `json:"document_annotation_format,omitempty"`
+	DocumentAnnotationPrompt *string                `json:"document_annotation_prompt,omitempty"`
+	ExtraParams              map[string]interface{} `json:"-"`
+}
+type OCRUsageInfo struct {
+	PagesProcessed int `json:"pages_processed"`
+	DocSizeBytes   int `json:"doc_size_bytes"`
+
+	Cost *BifrostCost `json:"cost,omitempty"`
+}
+type OCRPageDimensions struct {
+	DPI    int `json:"dpi"`
+	Height int `json:"height"`
+	Width  int `json:"width"`
+}
+type OCRPageImage struct {
+	ID           string  `json:"id"`
+	TopLeftX     float64 `json:"top_left_x"`
+	TopLeftY     float64 `json:"top_left_y"`
+	BottomRightX float64 `json:"bottom_right_x"`
+	BottomRightY float64 `json:"bottom_right_y"`
+	ImageBase64  *string `json:"image_base64,omitempty"`
+}
+type BifrostOCRResponse struct {
+	Model              string                     `json:"model"`
+	Pages              []OCRPage                  `json:"pages"`
+	UsageInfo          *OCRUsageInfo              `json:"usage_info,omitempty"`
+	DocumentAnnotation *string                    `json:"document_annotation,omitempty"`
+	ExtraFields        BifrostResponseExtraFields `json:"extra_fields"`
+}
+type OCRDocument struct {
+	Type        OCRDocumentType `json:"type"`
+	DocumentURL *string         `json:"document_url,omitempty"`
+	ImageURL    *string         `json:"image_url,omitempty"`
+}
+
+func (r *BifrostOCRRequest) GetRawRequestBody() []byte {
+	return r.RawRequestBody
+}

@@ -51,6 +51,13 @@ const runtime = await mode.create({
 
 ## 托管模式（managed）
 
+模型目录沿 DSH 0.2.1-rc.3 的公开 `settings`、`configEditor`、`llm.discoverModels` 接线。
+插件从平台材料初始化自己的提供商；renderer 不以命令行配置覆盖可编辑模型，旧平台请求头表达式经公开编辑器最小迁移。
+配置只保存 `apiKeyEnv: AURIGA_MANAGED_MODEL` 引用；服务端仅为本命名空间的受管路由解析私有材料，浏览器只能读取配置状态，个人提供商不得使用该引用。
+在原生“模型”设置编辑 Auriga，打开自定义设置，点击“获取可用模型”、勾选、“添加所选”并保存。获取只产生候选，不自动合并、轮询或改写原生草稿。
+原生添加保留已有模型名称与较低容量；已有模型容量按原生明细编辑。获取失败保留已存目录；调用始终由服务端核验权限、模型范围及预算。
+原生个人提供商、凭据与默认选择不受平台模型守卫影响；当前普通 connect 的生成仍要求完整可信计量端口，目录成功不作为生成已接通证据。
+
 环境变量见 `contracts/plugin/README.md` 第 3 节。必需：`AURIGA_INSTANCE_ID`、`AURIGA_OWNER_ID`、`AURIGA_PLATFORM_URL`、`AURIGA_IDENTITY_KEYS_FILE`、`AURIGA_INSTANCE_TOKEN_FILE`。
 
 Loader 行配置（节点代理渲染进 `cordis.patch.yml` 的 `auriga-dsh` 行）：

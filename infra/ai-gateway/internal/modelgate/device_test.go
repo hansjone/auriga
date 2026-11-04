@@ -3,8 +3,11 @@ package modelgate
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/litellm"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/bifrost"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/team"
 	iam "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
 	org "github.com/hansjone/auriga/infra/gen/auriga/org/v1"
@@ -225,13 +228,17 @@ func TestManagedModelKeyUsesExactOnlineAuthorityAndMemberAccounting(t *testing.T
 func TestManagedModelRelayForcesDesktopMemberUsageIdentity(t *testing.T) {
 	s, a, _ := controlFixture(t)
 	s.raw = "amc." + tenant + "." + account + "." + account + "." + device + "." + strings.Repeat("a", 43)
-	serviceKey := "sk-" + rand.Text()
+	serviceKey := "sk-bf-" + rand.Text()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			User     string            `json:"user"`
 			Metadata map[string]string `json:"metadata"`
 		}
-		if json.NewDecoder(r.Body).Decode(&body) != nil || body.User != tenant+":"+account || body.Metadata["account_id"] != account || body.Metadata["device_id"] != device || r.Header.Get("Authorization") != "Bearer "+serviceKey {
+		if r.URL.Path == "/internal/members/ensure" {
+			_ = json.NewEncoder(w).Encode(api.RelayKeyIssued{Key: api.RelayKey{Id: account, AccountId: account, Source: "member", Name: memberFixtureName(tenant, account), Active: true, MonthlyBudgetMicros: 10000000, RequestsPerMinute: 60, Models: []string{"*"}}, Secret: serviceKey})
+			return
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.User != tenant+":"+account || body.Metadata["account_id"] != account || body.Metadata["device_id"] != device || r.Header.Get("X-Bf-Vk") != serviceKey {
 			t.Error("managed usage or service key mismatch")
 		}
 		w.WriteHeader(http.StatusOK)
@@ -241,12 +248,12 @@ func TestManagedModelRelayForcesDesktopMemberUsageIdentity(t *testing.T) {
 	if err := os.WriteFile(key, []byte(serviceKey), 0600); err != nil {
 		t.Fatal(err)
 	}
-	handler, err := litellm.New(upstream.URL, key, func(ctx context.Context, raw string) (litellm.Principal, error) {
+	handler, err := bifrost.New(upstream.URL, key, bifrost.MemberPolicy{MonthlyBudgetMicros: 10000000, RequestsPerMinute: 60}, func(ctx context.Context, raw string) (bifrost.Principal, error) {
 		id, e := a.Check(ctx, raw)
 		if e != nil {
-			return litellm.Principal{}, e
+			return bifrost.Principal{}, e
 		}
-		return litellm.Principal{Tenant: id.Tenant(), Account: id.Account(), Device: id.Device(), Expires: id.ExpiresAt()}, nil
+		return bifrost.Principal{Tenant: id.Tenant(), Account: id.Account(), Device: id.Device(), Expires: id.ExpiresAt()}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -327,11 +334,16 @@ func TestDeviceAuthorityDoesNotFetchQuotas(t *testing.T) {
 	s, a, _ := controlFixture(t)
 	s.fail = "quota"
 	if _, err := a.Check(t.Context(), s.raw); err != nil {
-		t.Fatalf("LiteLLM member access depends on obsolete org model quotas: %v", err)
+		t.Fatalf("Bifrost member access depends on obsolete org model quotas: %v", err)
 	}
 	for _, call := range s.calls {
 		if call == "quota" {
 			t.Fatal("member access fetched obsolete org model quotas")
 		}
 	}
+}
+
+func memberFixtureName(tenant, account string) string {
+	raw, _ := json.Marshal([]string{tenant, account})
+	return fmt.Sprintf("auriga-member:%x", sha256.Sum256(raw))
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -50,8 +51,10 @@ func RunCLI(args []string, out, logs io.Writer) error {
 		return runJoin(args[1:], logs)
 	case "run":
 		return runAgent(args[1:], logs)
+	case "recover-runtime":
+		return recoverRuntime(args[1:], out, logs)
 	default:
-		return fmt.Errorf("unknown command %q (want join|run|--version)", args[0])
+		return fmt.Errorf("unknown command %q (want join|run|recover-runtime|--version)", args[0])
 	}
 }
 
@@ -159,14 +162,7 @@ func runAgent(args []string, logs io.Writer) error {
 		if err != nil {
 			return err
 		}
-		dockerCfg.EdgeContainer = surface.EdgeContainer
-		if surface.EdgeContainer != "" {
-			dockerCfg.PlatformHost = surface.Access.InstanceControl().DnsAlias
-			portal := surface.Access.PortalOrigin()
-			if portal.Scheme == "https" && net.ParseIP(portal.Host) == nil {
-				dockerCfg.PortalHost = portal.Host
-			}
-		}
+		dockerCfg = surface.dockerConfig(dockerCfg)
 	}
 	inner, err := runtime.SelectDriver(driverName, dockerCfg)
 	if err != nil {
@@ -195,8 +191,9 @@ func runAgent(args []string, logs io.Writer) error {
 			UIDs:       storage.NewUIDTable(cfg.AgentDir()),
 			Policy:     pol,
 			// The instance-facing HTTP entry, never the gRPC control address.
-			Access: surface.Access,
-			Chown:  storage.Lchown,
+			Access:           surface.Access,
+			ProxyBypassHosts: append([]string{dockerCfg.PlatformHost, dockerCfg.PortalHost}, dockerCfg.ManagedHosts...),
+			Chown:            storage.Lchown,
 		}
 		if mat, loadErr := identity.Load(cfg.AgentDir()); loadErr == nil {
 			prep.SealingPrivate = mat.SealingPrivate
@@ -247,6 +244,7 @@ func runAgent(args []string, logs io.Writer) error {
 		bridge.Sync(st)
 		statusSink(st)
 	}
+	rec.StartHealthChecks(ctx, 15*time.Second)
 
 	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot, "driver", driverName)
 	return sess.Run(ctx)
@@ -272,8 +270,30 @@ func artifactGCInterval() (time.Duration, error) {
 
 // instanceSurface keeps validated public and internal installation origins together.
 type instanceSurface struct {
-	Access        deploymentconfig.Config
-	EdgeContainer string
+	Access              deploymentconfig.Config
+	EdgeContainer       string
+	EgressContainer     string
+	ManagedPlatformHost string
+	ManagedIdentityHost string
+}
+
+func (s instanceSurface) dockerConfig(base runtime.DockerConfig) runtime.DockerConfig {
+	base.EdgeContainer = s.EdgeContainer
+	base.EgressContainer = s.EgressContainer
+	base.PlatformHost, base.PortalHost, base.ManagedHosts = "", "", nil
+	if s.EdgeContainer != "" {
+		base.PlatformHost = s.Access.InstanceControl().DnsAlias
+		portal := s.Access.PortalOrigin()
+		if portal.Scheme == "https" && net.ParseIP(portal.Host) == nil {
+			base.PortalHost = portal.Host
+		}
+		for _, host := range []string{s.ManagedPlatformHost, s.ManagedIdentityHost} {
+			if host != "" {
+				base.ManagedHosts = append(base.ManagedHosts, host)
+			}
+		}
+	}
+	return base
 }
 
 // instanceSurfaceFromEnv never derives trust from control URLs or legacy host-only variables.
@@ -295,7 +315,22 @@ func instanceSurfaceFromEnv() (instanceSurface, error) {
 	if err != nil {
 		return instanceSurface{}, fmt.Errorf("load deployment access: %w", err)
 	}
-	return instanceSurface{Access: access, EdgeContainer: access.InstanceControl().EdgeContainer}, nil
+	allowedOrigins := os.Getenv("AURIGA_LINKS_ALLOWED_ORIGINS")
+	managedHost, err := managedOriginHost(os.Getenv("AURIGA_AGENT_MANAGED_PLATFORM_ORIGIN"), allowedOrigins)
+	if err != nil {
+		return instanceSurface{}, err
+	}
+	// The receipt-checked static identity may use the exact approved access
+	// portal without a duplicate allowlist entry, as the NAS bootstrap does.
+	identityHost, err := managedIdentityHost(os.Getenv("AURIGA_AGENT_MANAGED_INSTALLATION_FILE"), allowedOrigins+","+access.PortalURL())
+	if err != nil {
+		return instanceSurface{}, err
+	}
+	egress := os.Getenv("AURIGA_AGENT_EGRESS_CONTAINER")
+	if egress != "" && egress != strings.TrimSuffix(access.InstanceControl().EdgeContainer, "-edge")+"-egress" {
+		return instanceSurface{}, fmt.Errorf("egress container must belong to the validated installation")
+	}
+	return instanceSurface{Access: access, EdgeContainer: access.InstanceControl().EdgeContainer, EgressContainer: egress, ManagedPlatformHost: managedHost, ManagedIdentityHost: identityHost}, nil
 }
 
 func ensureLayout(cfg config.Config) error {

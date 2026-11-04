@@ -18,11 +18,12 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 	}
 	t.Run("executable-boundary", testNASFixedInstallerExecutableBoundary)
 	t.Run("runtime-upgrade", testNASRuntimeUpgradeLifecycle)
+	t.Run("materials-upgrade", testNASMaterialsUpgradeLifecycle)
 	root, err := os.MkdirTemp("", "auriga-nas-installer-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(root)
+	defer func() { _ = os.RemoveAll(root) }()
 	if err := os.Chmod(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +135,9 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer func() {
-						os.Remove(pki)
+						if err := os.Remove(pki); err != nil {
+							t.Fatal(err)
+						}
 						if err := os.Rename(saved, pki); err != nil {
 							t.Error(err)
 						}
@@ -159,13 +162,19 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 			}
 			switch kind {
 			case "template-only":
-				os.Remove(filepath.Join(out, "iam-installation/bootstrap.receipt"))
+				if err := os.Remove(filepath.Join(out, "iam-installation/bootstrap.receipt")); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.WriteFile(filepath.Join(out, "templates/stale.pb"), []byte("stale"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			case "pki-link":
-				os.Remove(filepath.Join(out, "iam-installation/bootstrap.receipt"))
-				os.Rename(filepath.Join(out, "pki"), filepath.Join(out, "saved-pki"))
+				if err := os.Remove(filepath.Join(out, "iam-installation/bootstrap.receipt")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(filepath.Join(out, "pki"), filepath.Join(out, "saved-pki")); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.Symlink(filepath.Join(out, "saved-pki"), filepath.Join(out, "pki")); err != nil {
 					t.Fatal(err)
 				}
@@ -178,7 +187,9 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "missing-receipt":
-				os.Remove(filepath.Join(out, "iam-installation/bootstrap.receipt"))
+				if err := os.Remove(filepath.Join(out, "iam-installation/bootstrap.receipt")); err != nil {
+					t.Fatal(err)
+				}
 			case "source-ca-mode":
 				if err := os.Chmod(filepath.Join(out, "pki/ca.key"), 0o644); err != nil {
 					t.Fatal(err)
@@ -302,7 +313,7 @@ func nasSnapshot(t *testing.T, out string) string {
 		}
 		rel, _ := filepath.Rel(out, path)
 		s := st.Sys().(*syscall.Stat_t)
-		fmt.Fprintf(h, "%s:%d:%d:%d:%d\n", rel, s.Uid, s.Gid, st.Mode(), s.Nlink)
+		_, _ = fmt.Fprintf(h, "%s:%d:%d:%d:%d\n", rel, s.Uid, s.Gid, st.Mode(), s.Nlink)
 		if st.Mode().IsRegular() {
 			raw, err := os.ReadFile(path)
 			if err != nil {
@@ -327,7 +338,7 @@ func testNASFixedInstallerExecutableBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(root)
+	defer func() { _ = os.RemoveAll(root) }()
 	if err := os.Chmod(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +404,7 @@ func testNASFixedInstallerExecutableBoundary(t *testing.T) {
 		if err := os.Chmod(binary, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		defer os.Chmod(binary, 0o755)
+		defer func() { _ = os.Chmod(binary, 0o755) }()
 		if b, err := invoke(filepath.Join(root, "bad-binary-mode")); err == nil {
 			t.Fatalf("non-executable binary for fixed uid accepted: %s", b)
 		}

@@ -19,11 +19,14 @@ RUN corepack enable \
 FROM golang:1.27.3 AS gobuild
 WORKDIR /src/infra
 COPY infra/ ./
+COPY third_party/bifrost/core /src/third_party/bifrost/core
 WORKDIR /src/infra/edge
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-edge .
 WORKDIR /src/infra/ai-gateway
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-ai-gateway . \
   && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-network-broker github.com/nats-io/nats-server/v2
+WORKDIR /src/infra/egress
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-egress .
 WORKDIR /src/deploy/bootstrap
 COPY deploy/bootstrap/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-network-probe ./cmd/network-probe
@@ -32,6 +35,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-panel ./cmd/pa
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=gobuild /out/auriga-edge /auriga-edge
 COPY --from=gobuild /out/auriga-ai-gateway /auriga-ai-gateway
+COPY --from=gobuild /out/auriga-egress /auriga-egress
 COPY --from=gobuild /out/auriga-network-broker /auriga-network-broker
 COPY --from=gobuild /out/auriga-network-probe /auriga-network-probe
 COPY --from=gobuild /out/auriga-panel /auriga-panel

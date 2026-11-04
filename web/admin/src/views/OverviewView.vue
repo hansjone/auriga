@@ -144,7 +144,6 @@ onBeforeUnmount(() => {
         <RouterLink :to="card.path">{{ t('details') }}</RouterLink>
       </section>
     </div>
-    <a href="/ai/ui/">LiteLLM</a>
   </section>
 </template>
 

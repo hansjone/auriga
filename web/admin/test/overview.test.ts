@@ -44,7 +44,7 @@ describe('overview snapshots', () => {
       '暂无数据',
     );
     expect(wrapper.find('[data-summary="usage"]').exists()).toBe(false);
-    expect(wrapper.get('a[href="/ai/ui/"]').text()).toBe('LiteLLM');
+    expect(wrapper.find('a[href="/ai/ui/"]').exists()).toBe(false);
     expect(wrapper.text()).toContain('更新时间');
     wrapper.unmount();
   });

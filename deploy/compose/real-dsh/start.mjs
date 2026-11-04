@@ -7,6 +7,14 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { installedRuntime } from './runtime.mjs';
+
+const plugin = JSON.parse(readFileSync('/opt/auriga-dsh/package.json', 'utf8'));
+const runtime = installedRuntime(
+  '/opt/dsh',
+  JSON.parse(readFileSync('/opt/fixture/versions.json', 'utf8')),
+  plugin,
+);
 
 for (const key of [
   'AURIGA_INSTANCE_ID',
@@ -34,7 +42,6 @@ for (const dir of [workspace, cache, temp, process.env.DSH_HOME]) {
 const profile = join(process.env.DSH_HOME, 'profiles', 'web');
 const modules = join(profile, 'node_modules');
 mkdirSync(modules, { recursive: true });
-const plugin = JSON.parse(readFileSync('/opt/auriga-dsh/package.json', 'utf8'));
 writeFileSync(
   join(profile, 'package.json'),
   JSON.stringify(
@@ -58,7 +65,7 @@ if (!existsSync(link)) symlinkSync('/opt/auriga-dsh', link, 'dir');
 const child = spawn(
   process.execPath,
   [
-    '/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js',
+    runtime.bin,
     'web',
     // Rendered by the node agent: plugin row, listener (DSH refuses
     // `--host 0.0.0.0`, the webserver row binds instead), trustedHosts, MCP.
@@ -72,6 +79,7 @@ const child = spawn(
     stdio: 'inherit',
     env: {
       ...process.env,
+      DSH_VERSION: runtime.dshVersion,
       HOME: '/home/dsh',
       XDG_CACHE_HOME: cache,
       TMP: temp,

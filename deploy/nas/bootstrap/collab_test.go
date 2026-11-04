@@ -10,7 +10,6 @@ import (
 	"github.com/hansjone/auriga/deploy/bootstrap/collab"
 	"github.com/hansjone/auriga/deploy/bootstrap/collab/testfixture"
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
-	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 )
 
 func TestNASCollabProjectionModes(t *testing.T) {
@@ -32,11 +31,7 @@ func TestNASCollabProjectionModes(t *testing.T) {
 			if err := networkdeploy.Generate(filepath.Join(base, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(base, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "0.0.0.0:18443", BrokerHost: "0.0.0.0", BrokerURL: "tls://network-broker:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil {
 				t.Fatal(err)
 			}
-			ui, err := relayui.Resolve(cfg, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			writeNASConfig(base, raw, cfg, "192.0.2.138", 15000, "192.0.2.10", 512, ui)
+			writeNASConfig(base, raw, cfg, "192.0.2.138", 15000, "192.0.2.10", 512)
 			if err := writeNASCollab(out, base, input, cfg, strings.Replace(cfg.PortalURL(), "http://", "https://", 1)); err != nil {
 				t.Fatal(err)
 			}

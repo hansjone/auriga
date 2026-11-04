@@ -51,9 +51,7 @@ for (const broken of [false, true]) {
   test(`unified health step requires a complete fresh inventory despite legacy declaration: ${broken}`, async (t) => {
     const server = http.createServer((req, res) => {
       res.setHeader('content-type', 'application/json');
-      res.end(
-        req.url === '/providers' ? '{"items":[]}' : '{"status":"healthy"}',
-      );
+      res.end('{"items":[]}');
     });
     await new Promise((done) => server.listen(0, '127.0.0.1', done));
     t.after(
@@ -78,6 +76,7 @@ for (const broken of [false, true]) {
           command: [process.execPath, '-e', program],
         },
       },
+      { relayAdminRequest: async (url) => (await fetch(url)).json() },
     );
     assert.equal(report.items[0].status, broken ? 'FAIL' : 'PASS');
     if (!broken) assert.equal(report.items[0].inventory.complete, true);

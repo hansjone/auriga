@@ -289,6 +289,45 @@ runtime_directory() {
   fi
 }
 
+materials_upgrade() (
+  _materials_action=$1
+  _materials_expected=${2:-}
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    if [ -n "$_materials_expected" ]; then
+      sh "$NAS_ROOT/scripts/installer.sh" "materials-$_materials_action" "$_materials_expected"
+    else
+      sh "$NAS_ROOT/scripts/installer.sh" "materials-$_materials_action"
+    fi
+  else
+    set -- -action "$_materials_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/materials-upgrades" -access-file "$AURIGA_ACCESS_FILE"
+    [ -z "$_materials_expected" ] || set -- "$@" -expected-base-sha256 "$_materials_expected"
+    "$(bootstrap_binary)" materials-upgrade "$@"
+  fi
+)
+
+bifrost_directory() {
+  if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
+    materials_upgrade path
+  else
+    printf '%s' "$AURIGA_DATA_ROOT/config/materials"
+  fi
+}
+
+write_bifrost_override() {
+  _bifrost_enabled=$1
+  case "$_bifrost_enabled" in 0) return ;; 1) ;; *) die 'invalid materials Compose decision' ;; esac
+  _bifrost_yaml=$(printf '%s' "$AURIGA_DATA_ROOT/config/bifrost" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  cat <<EOF
+services:
+  edge:
+    volumes:
+      - '$_bifrost_yaml/edge.config.json:/etc/auriga/edge.config.json:ro'
+  ai-relay:
+    volumes:
+      - '$_bifrost_yaml/bifrost-runtime.json:/etc/auriga/bifrost-runtime.json:ro'
+EOF
+}
+
 write_runtime_override() {
   _runtime_path=$1
   case "$_runtime_path" in
@@ -310,6 +349,58 @@ services:
 EOF
 }
 
+write_collab_rotation_override() {
+  _rotation_path=$1
+  [ -n "$_rotation_path" ] || return 0
+  _rotation_version=${_rotation_path##*/}
+  case "$_rotation_version" in ''|*[!0-9]*|0*) die 'invalid privileged collab version' ;; esac
+  [ "$_rotation_path" = "$AURIGA_DATA_ROOT/config/collab-operations/installs/$_rotation_version" ] \
+    || die 'invalid privileged collab path'
+  _rotation_yaml=$(printf '%s' "$_rotation_path" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  cat <<EOF
+services:
+  collab:
+    volumes:
+      - '$_rotation_yaml/config:/etc/auriga/collab:ro'
+  network:
+    volumes:
+      - '$_rotation_yaml/network/protocol.key:/etc/auriga/network/protocol.key:ro'
+EOF
+}
+
+# Starting message consumers requires a checked snapshot. Stops/config/core up
+# retain the service definitions even when a publisher currently owns the lock.
+collab_snapshot_required() {
+  _snapshot_up=0; _snapshot_message=0
+  for _snapshot_arg do
+    case "$_snapshot_arg" in
+      up) _snapshot_up=1 ;;
+      collab-network|collab|collab-db|network|network-broker) _snapshot_message=1 ;;
+    esac
+  done
+  [ "$_snapshot_up" = 1 ] && [ "$_snapshot_message" = 1 ]
+}
+
+# Identity provisioning is a core dependency even when message rendering fails.
+# Reuse only the byte-exact static installation bound by the activation receipt;
+# never admit a rejected projection or turn message readiness into authentication.
+managed_identity_available() (
+  _identity_source="$AURIGA_DATA_ROOT/config/collab-source"
+  _identity_runtime="$AURIGA_DATA_ROOT/config/collab-runtime"
+  [ -f "$_identity_source/activation.receipt" ] || return 1
+  "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
+    -out "$_identity_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2 || return 1
+  for _identity_dir in "$_identity_runtime" "$_identity_runtime/platform"; do
+    [ -d "$_identity_dir" ] && [ ! -L "$_identity_dir" ] || return 1
+  done
+  [ "$(stat -c '%u:%g:%a' "$_identity_runtime")" = 0:0:700 ] || return 1
+  [ "$(stat -c '%u:%g:%a' "$_identity_runtime/platform")" = 10001:10001:700 ] || return 1
+  _identity_file="$_identity_runtime/platform/managed-network.json"
+  [ -f "$_identity_file" ] && [ ! -L "$_identity_file" ] \
+    && [ "$(stat -c '%u:%g:%a:%h' "$_identity_file")" = 10001:10001:600:1 ] || return 1
+  cmp -s "$_identity_source/network-platform/managed-network.json" "$_identity_file"
+)
+
 run_compose() (
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
     container_compose "$@"
@@ -318,10 +409,41 @@ run_compose() (
   _cc=$(compose_cmd)
   _runtime_private=$(installer_private_dir runtime-compose)
   trap 'rm -rf -- "$_runtime_private"' EXIT
+  if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
+    materials_upgrade check
+    write_bifrost_override 1 >"$_runtime_private/bifrost.yml"
+    set -- -f "$_runtime_private/bifrost.yml" "$@"
+  fi
   _runtime=$(runtime_directory)
   write_runtime_override "$_runtime" >"$_runtime_private/runtime.yml"
+  _rotation=
+  _collab_available=1
+  if [ "${NAS_COLLAB_CONFIG_DEGRADED:-0}" = 1 ]; then
+    _collab_available=0
+  elif [ -e "$AURIGA_DATA_ROOT/config/collab-operations" ] || [ -L "$AURIGA_DATA_ROOT/config/collab-operations" ]; then
+    if ! _rotation=$("$(bootstrap_binary)" collab-rotation path -data "$AURIGA_DATA_ROOT" -recipe "$NAS_ROOT"); then
+      _collab_available=0
+      printf '%s\n' 'message_network=degraded rotation_snapshot_unavailable; core Compose remains available' >&2
+    fi
+  fi
+  if [ "$_collab_available" = 0 ] && collab_snapshot_required "$@"; then
+    printf '%s\n' 'message_network=degraded refusing message startup without a checked rotation snapshot' >&2
+    return 1
+  fi
+  write_collab_rotation_override "$_rotation" >"$_runtime_private/rotation.yml"
+  if [ -s "$_runtime_private/rotation.yml" ]; then set -- -f "$_runtime_private/rotation.yml" "$@"; fi
   if [ -s "$_runtime_private/runtime.yml" ]; then set -- -f "$_runtime_private/runtime.yml" "$@"; fi
-  if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
+  if [ "${NAS_COLLAB_CONFIG_DEGRADED:-0}" != 1 ]; then
+    if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
+    case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in
+      true) set -- --profile collab-renew "$@" ;;
+      false) ;;
+      *) printf '%s\n' 'message_network=degraded invalid collab renewal flag' >&2
+         if collab_snapshot_required "$@"; then return 1; fi ;;
+    esac
+  elif managed_identity_available; then
+    set -- -f "$NAS_ROOT/managed-identity-compose.yml" "$@"
+  fi
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
     COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" \
@@ -356,14 +478,45 @@ services:
         required: true
 EOF
   _cc=$(compose_cmd)
+  write_bifrost_override "$(cat "$_private/bifrost.enabled")" >"$_private/bifrost.yml"
+  if [ -s "$_private/bifrost.yml" ]; then set -- -f "$_private/bifrost.yml" "$@"; fi
   _runtime=$(cat "$_private/runtime.path")
+  _rotation=$(cat "$_private/collab.rotation.path")
+  case "$(cat "$_private/collab.rotation.available")" in
+    1) ;;
+    0) if collab_snapshot_required "$@"; then
+         printf '%s\n' 'message_network=degraded refusing message startup without a checked rotation snapshot' >&2
+         return 1
+       fi ;;
+    *) die 'invalid privileged rotation availability decision' ;;
+  esac
+  write_collab_rotation_override "$_rotation" >"$_private/rotation.yml"
+  if [ -s "$_private/rotation.yml" ]; then set -- -f "$_private/rotation.yml" "$@"; fi
   write_runtime_override "$_runtime" >"$_private/runtime.yml"
   if [ -s "$_private/runtime.yml" ]; then set -- -f "$_private/runtime.yml" "$@"; fi
-  case "$(cat "$_private/collab.enabled")" in
+  _collab=$(cat "$_private/collab.enabled")
+  case "$_collab" in
     1) set -- -f "$NAS_ROOT/collab-compose.yml" "$@" ;;
-    0) ;;
+    0) # Rejected projections never enter core up, but fixed service names
+       # must remain available for shutdown even when the source check failed.
+       for _arg do
+         case "$_arg" in stop|down) _collab=1; set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; break ;; esac
+       done ;;
     *) die 'invalid privileged collab Compose decision' ;;
   esac
+  case "$(cat "$_private/managed.identity.enabled")" in
+    1) if [ "$_collab" = 0 ]; then set -- -f "$NAS_ROOT/managed-identity-compose.yml" "$@"; fi ;;
+    0) ;;
+    *) die 'invalid privileged managed identity decision' ;;
+  esac
+  if [ "$_collab" = 1 ]; then
+    case "${AURIGA_COLLAB_RENEW_ENABLED:-false}" in
+      true) set -- --profile collab-renew "$@" ;;
+      false) ;;
+      *) printf '%s\n' 'message_network=degraded invalid collab renewal flag' >&2
+         if collab_snapshot_required "$@"; then return 1; fi ;;
+    esac
+  fi
   # Only the fixed main file and generated env_file override have authority.
   # shellcheck disable=SC2086
   env COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" $_cc \
@@ -532,11 +685,16 @@ validate_nas_access() {
     -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
     -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
     -runtime-image "${AURIGA_RUNTIME_IMAGE-}" \
-    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}" \
-    -litellm-ui-origin "${AURIGA_LITELLM_UI_ORIGIN-}"
+    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}"
 }
 
 bootstrap_nas_materials() {
+  if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
+    # Explicit additive activation verifies the original byte seal, rather than
+    # feeding a legacy installation to the new first-install generator.
+    materials_upgrade check
+    return
+  fi
   _boot=$(bootstrap_binary)
   (umask 022; "$_boot" -out "$AURIGA_DATA_ROOT/config/materials" -access-file "$AURIGA_ACCESS_FILE" \
     -edge-peer-ip "${AURIGA_INTERNAL_EDGE_IP:?}" -internal-subnet "${AURIGA_INTERNAL_SUBNET:?}" \
@@ -545,36 +703,36 @@ bootstrap_nas_materials() {
     -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
     -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
     -runtime-image "${AURIGA_RUNTIME_IMAGE-}" \
-    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}" \
-    -litellm-ui-origin "${AURIGA_LITELLM_UI_ORIGIN-}")
+    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}")
 }
 
-install_litellm_materials() (
+install_bifrost_materials() (
   # A private runtime directory holds leaf bind sources. Installation originals
   # stay uid10001/0600, independent of service readers and receipt validation.
-  _source_dir="$AURIGA_DATA_ROOT/config/materials/litellm"
-  _runtime_dir="$AURIGA_DATA_ROOT/config/litellm"
-  [ -d "$_source_dir" ] && [ ! -L "$_source_dir" ] || die "invalid LiteLLM source directory"
+  _source_dir="$(bifrost_directory)/bifrost"
+  _runtime_dir="$AURIGA_DATA_ROOT/config/bifrost"
+  [ -d "$_source_dir" ] && [ ! -L "$_source_dir" ] || die "invalid Bifrost source directory"
   if [ -e "$_runtime_dir" ] || [ -L "$_runtime_dir" ]; then
-    [ -d "$_runtime_dir" ] && [ ! -L "$_runtime_dir" ] || die "invalid LiteLLM runtime directory"
-    [ "$(stat -c '%u:%g:%a' "$_runtime_dir")" = '0:0:700' ] || die "invalid LiteLLM runtime directory metadata"
+    [ -d "$_runtime_dir" ] && [ ! -L "$_runtime_dir" ] || die "invalid Bifrost runtime directory"
+    [ "$(stat -c '%u:%g:%a' "$_runtime_dir")" = '0:0:700' ] || die "invalid Bifrost runtime directory metadata"
   else
     (umask 077; mkdir "$_runtime_dir")
     chown_required 0:0 "$_runtime_dir"
     chmod 0700 "$_runtime_dir"
   fi
-  for _name in master salt team pg_password; do
+  for _name in admin_password member_password encryption_key pg_password pg_migration_password; do
     case "$_name" in
-      master|salt) _owner=10001:10003 ;;
-      team) _owner=10001:10001 ;;
-      pg_password) _owner=999:999 ;;
+      encryption_key) _owner=10001:10003 ;;
+      admin_password) _owner=10001:10005 ;;
+        member_password) _owner=10001:10006 ;;
+      pg_password|pg_migration_password) _owner=999:999 ;;
     esac
     _source="$_source_dir/$_name"; _target="$_runtime_dir/$_name"
-    [ -f "$_source" ] && [ ! -L "$_source" ] && [ "$(stat -c '%h' "$_source")" = 1 ] || die "invalid LiteLLM source leaf"
+    [ -f "$_source" ] && [ ! -L "$_source" ] && [ "$(stat -c '%h' "$_source")" = 1 ] || die "invalid Bifrost source leaf"
     if [ -e "$_target" ] || [ -L "$_target" ]; then
-      [ -f "$_target" ] && [ ! -L "$_target" ] || die "invalid LiteLLM runtime leaf"
-      [ "$(stat -c '%u:%g:%a:%h' "$_target")" = "$_owner:640:1" ] || die "invalid LiteLLM runtime leaf metadata"
-      cmp -s "$_source" "$_target" || die "LiteLLM runtime secret changed; refusing rotation"
+      [ -f "$_target" ] && [ ! -L "$_target" ] || die "invalid Bifrost runtime leaf"
+      [ "$(stat -c '%u:%g:%a:%h' "$_target")" = "$_owner:640:1" ] || die "invalid Bifrost runtime leaf metadata"
+      cmp -s "$_source" "$_target" || die "Bifrost runtime secret changed; refusing rotation"
     else
       _temporary=$(umask 077; mktemp "$_runtime_dir/.install.XXXXXX")
       trap 'rm -f -- "$_temporary"' EXIT
