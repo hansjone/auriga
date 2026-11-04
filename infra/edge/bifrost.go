@@ -120,7 +120,7 @@ func (g *Gateway) proxyExternalRelay(w http.ResponseWriter, r *http.Request, aud
 	}
 	if method == http.MethodPost {
 		var fields map[string]json.RawMessage
-		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAPIBodyBytes))
+		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRelayChatBodyBytes))
 		if d.Decode(&fields) != nil || fields == nil || d.Decode(new(any)) != io.EOF {
 			fail(400, "common.validation_failed")
 			return

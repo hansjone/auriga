@@ -113,7 +113,11 @@ func (g *Gateway) proxyDevice(w http.ResponseWriter, r *http.Request, audience, 
 		return
 	}
 	if r.Body != nil && r.Body != http.NoBody {
-		r.Body = http.MaxBytesReader(w, r.Body, maxAPIBodyBytes)
+		bodyLimit := int64(maxAPIBodyBytes)
+		if r.URL.Path == "/ai/v1/chat/completions" {
+			bodyLimit = maxRelayChatBodyBytes
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, bodyLimit)
 	}
 	proxy := newReverseProxy(target, transport, false)
 	base := proxy.Rewrite

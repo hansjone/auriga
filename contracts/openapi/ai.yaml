@@ -4966,14 +4966,14 @@
                   "type": "integer",
                   "format": "int64",
                   "minimum": 2,
-                  "maximum": 1048576,
+                  "maximum": 9007199254740991,
                   "description": "Authenticated pool context capacity, when disclosed."
                 },
                 "max_output_tokens": {
                   "type": "integer",
                   "format": "int64",
                   "minimum": 1,
-                  "maximum": 32768,
+                  "maximum": 9007199254740991,
                   "description": "Authenticated pool output capacity; smaller than context_window when both are disclosed."
                 },
                 "owned_by": {

@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-const maxAPIBodyBytes = 1 << 20       // 1 MiB — only /api/**
-const maxInstanceBodyBytes = 64 << 20 // 64 MiB, aligned with agent uploads.
+const maxAPIBodyBytes = 1 << 20        // 1 MiB — only /api/**
+const maxRelayChatBodyBytes = 32 << 20 // Aligned with the relay chat transport boundary.
+const maxInstanceBodyBytes = 64 << 20  // 64 MiB, aligned with agent uploads.
 
 // Gateway is the edge HTTP handler.
 type Gateway struct {
