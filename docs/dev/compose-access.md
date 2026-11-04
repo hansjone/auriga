@@ -76,6 +76,11 @@ docker compose --env-file var/compose.env up -d
 docker compose --env-file var/compose.env down
 ```
 
+`edge` 是边缘镜像的唯一构建服务，`egress` 使用同项目的同一份本地镜像；
+两者不从 registry 拉取这个本地标签。完整的 `build` 后 `up` 或 `up --build`
+会准备该镜像；若只启动 `egress`，先运行 `docker compose --env-file var/compose.env build edge`。
+这样保留 agent 对两者镜像身份相同的校验，而不是仅凭服务角色标签放行。
+
 使用 real 观察模式时仍须按下节启动观察器，不能仅按上述命令启动后声称真实心跳验收通过。
 省略 `--access-file` 仍生成原回环绑定的 domain M2 配方。
 直接调用 bootstrap 可用 `-access-file /absolute/path/access.json`；

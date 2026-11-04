@@ -93,9 +93,9 @@ services:
 
   egress:
     logging: *log-options
-    build:
-      context: ../..
-      dockerfile: deploy/compose/Dockerfile.edge
+    # Reuse the exact edge image; independent builds have different identities.
+    image: ${COMPOSE_PROJECT_NAME:-auriga-m2}-edge:latest
+    pull_policy: never
     container_name: ${COMPOSE_PROJECT_NAME:-auriga-m2}-egress
     env_file:
       - path: ./var/access.env
@@ -303,6 +303,8 @@ services:
 
   edge:
     logging: *log-options
+    image: ${COMPOSE_PROJECT_NAME:-auriga-m2}-edge:latest
+    pull_policy: never
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.edge
