@@ -519,7 +519,7 @@ it('new model selection inherits known values without taking a later fallback mi
 it('treats a cleared max output as unknown and explains how to fill it', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   expect(value(w, 'outputCapabilityMode')).toBe('manual');
   expect(w.get('[data-testid="output-guide"]').text()).toContain('32,768');
   const output = w.get('[name="maxOutputTokens"]');
