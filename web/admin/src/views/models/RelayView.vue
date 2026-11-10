@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { relayApi } from '../../admin/relayApi';
 import { useRelayI18n } from './relayMessages';
@@ -6,7 +6,12 @@ import { useRelayUi } from './relayUi';
 import './modelUsage.css';
 const { t } = useRelayI18n();
 const ui = useRelayUi(t);
-const counts = ref<{ providers: number; pools: number; keys: number }>();
+const counts = ref<{
+  providers: [number, number];
+  pools: [number, number];
+  keys: [number, number];
+  members: number;
+}>();
 const { loading, error } = ui;
 async function load() {
   counts.value = undefined;
@@ -19,9 +24,19 @@ async function load() {
   );
   if (data)
     counts.value = {
-      providers: data[0].items.filter((p) => p.configuration.enabled).length,
-      pools: data[1].items.filter((p) => p.enabled).length,
-      keys: data[2].items.filter((k) => k.active).length,
+      providers: [
+        data[0].items.filter((p) => p.configuration.enabled).length,
+        data[0].items.length,
+      ],
+      pools: [
+        data[1].items.filter((p) => p.enabled).length,
+        data[1].items.length,
+      ],
+      keys: [
+        data[2].items.filter((k) => k.source !== 'member' && k.active).length,
+        data[2].items.filter((k) => k.source !== 'member').length,
+      ],
+      members: data[2].items.filter((k) => k.source === 'member').length,
     };
 }
 onMounted(load);
@@ -32,29 +47,33 @@ onMounted(load);
       <h1>{{ t('relay') }}</h1>
       <button :disabled="loading" @click="load">{{ t('refresh') }}</button>
     </header>
-    <h2>{{ t('endpoint') }}</h2>
-    <code>/ai/v1</code>
-    <nav class="usage-filters">
-      <RouterLink to="/models/providers">{{ t('providers') }}</RouterLink
-      ><RouterLink to="/models/keys">{{ t('keys') }}</RouterLink
-      ><RouterLink to="/models/usage">{{ t('usage') }}</RouterLink>
-    </nav>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p v-if="error" class="relay-error" role="alert">{{ error }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
-    <dl v-if="counts" class="usage-summary">
-      <div>
-        <dt>{{ t('providers') }}</dt>
-        <dd>{{ counts.providers }}</dd>
-      </div>
-      <div>
-        <dt>{{ t('pools') }}</dt>
-        <dd>{{ counts.pools }}</dd>
-      </div>
-      <div>
-        <dt>{{ t('keys') }}</dt>
-        <dd>{{ counts.keys }}</dd>
-      </div>
-    </dl>
-    <p>{{ t('scope') }}</p>
+    <div v-if="counts" class="relay-cards">
+      <RouterLink to="/models/providers" class="relay-card">
+        <span>{{ t('providers') }}</span>
+        <strong>{{ counts.providers[0] }}</strong>
+        <small>{{ t('ofTotal', { total: counts.providers[1] }) }}</small>
+      </RouterLink>
+      <RouterLink to="/models/providers" class="relay-card">
+        <span>{{ t('pools') }}</span>
+        <strong>{{ counts.pools[0] }}</strong>
+        <small>{{ t('ofTotal', { total: counts.pools[1] }) }}</small>
+      </RouterLink>
+      <RouterLink to="/models/keys" class="relay-card">
+        <span>{{ t('externalKeys') }}</span>
+        <strong>{{ counts.keys[0] }}</strong>
+        <small
+          >{{ t('ofTotal', { total: counts.keys[1] }) }} ·
+          {{ t('memberKeyCount', { count: counts.members }) }}</small
+        >
+      </RouterLink>
+    </div>
+    <div class="relay-endpoint">
+      <h2>{{ t('endpoint') }}</h2>
+      <code>https://&lt;portal&gt;/ai/v1</code>
+      <p>{{ t('endpointHint') }}</p>
+    </div>
+    <p class="relay-footnote">{{ t('scope') }}</p>
   </section>
 </template>

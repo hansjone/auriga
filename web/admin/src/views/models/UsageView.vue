@@ -1,14 +1,45 @@
-﻿<script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+<script setup lang="ts">
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
+import { useRoute } from 'vue-router';
 import { isApiError } from '@auriga/shared';
 import { adminApi } from '../../admin/api';
-import { relayApi, type Usage } from '../../admin/relayApi';
+import { relayApi, type RelayKey, type Usage } from '../../admin/relayApi';
 import { requestStepUp } from '../../admin/stepUp';
 import { useRelayI18n } from './relayMessages';
 import UsageSummary from './UsageSummary.vue';
 import UsageRecords from './UsageRecords.vue';
+import { useMemberNames } from './relayFormat';
 import './modelUsage.css';
+import './relayManagement.css';
 const { t } = useRelayI18n();
+const route = useRoute();
+const members = useMemberNames();
+const MANUAL = '__manual';
+const keys = shallowRef<RelayKey[]>([]),
+  target = ref('');
+const memberKeys = computed(() =>
+  keys.value
+    .filter((k) => k.source === 'member')
+    .sort((a, b) =>
+      members.keyLabel(a).localeCompare(members.keyLabel(b), undefined),
+    ),
+);
+const externalKeys = computed(() =>
+  keys.value
+    .filter((k) => k.source !== 'member')
+    .sort((a, b) => a.name.localeCompare(b.name, undefined)),
+);
+const manual = computed(() => target.value === MANUAL);
+const lifetime = new globalThis.AbortController();
+onBeforeUnmount(() => lifetime.abort());
 const kind = ref<'accountId' | 'keyId'>('accountId'),
   identifier = ref(''),
   rows = shallowRef<Usage[]>([]),
@@ -35,8 +66,40 @@ onBeforeUnmount(() => {
   alive = false;
   reset();
 });
-onMounted(() => {
+watch(
+  target,
+  (value) => {
+    if (value === MANUAL) {
+      identifier.value = '';
+      return;
+    }
+    kind.value = 'keyId';
+    identifier.value = value;
+  },
+  { flush: 'sync' },
+);
+onMounted(async () => {
   rows.value = [];
+  const preset = typeof route.query.key === 'string' ? route.query.key : '';
+  await Promise.all([
+    relayApi
+      .keys(lifetime.signal)
+      .then((page) => {
+        if (alive) keys.value = page.items;
+      })
+      .catch(() => {
+        /* key directory unavailable: manual ID entry still works */
+      }),
+    members.load(lifetime.signal),
+  ]);
+  if (!alive) return;
+  if (preset) {
+    target.value = keys.value.some((k) => k.id === preset) ? preset : MANUAL;
+    kind.value = 'keyId';
+    identifier.value = preset;
+    await nextTick();
+    await query();
+  } else if (!keys.value.length) target.value = MANUAL;
 });
 async function query(cursor?: string) {
   if (loading.value) return;
@@ -99,34 +162,60 @@ async function verifyAndQuery() {
 </script>
 <template>
   <section class="model-usage">
-    <h1>{{ t('usage') }}</h1>
+    <header>
+      <h1>{{ t('usage') }}</h1>
+    </header>
     <form class="usage-filters" @submit.prevent="query()">
       <label
         >{{ t('selector')
-        }}<select v-model="kind" name="usageKind">
-          <option value="accountId">{{ t('member') }}</option>
-          <option value="keyId">{{ t('keys') }}</option>
+        }}<select v-model="target" name="usageTarget">
+          <option value="" disabled>{{ t('chooseTarget') }}</option>
+          <optgroup v-if="memberKeys.length" :label="t('memberKeys')">
+            <option v-for="k in memberKeys" :key="k.id" :value="k.id">
+              {{ members.keyLabel(k) }}
+            </option>
+          </optgroup>
+          <optgroup v-if="externalKeys.length" :label="t('externalKeys')">
+            <option v-for="k in externalKeys" :key="k.id" :value="k.id">
+              {{ k.name }}{{ k.active ? '' : ' · ' + t('inactive') }}
+            </option>
+          </optgroup>
+          <option :value="MANUAL">{{ t('manualTarget') }}</option>
         </select></label
-      ><label
-        >{{ t(kind === 'accountId' ? 'account' : 'keyId')
-        }}<input v-model="identifier" name="usageId" required /></label
-      ><button :disabled="loading" type="submit">{{ t('query') }}</button>
+      ><template v-if="manual"
+        ><label
+          >{{ t('selector')
+          }}<select v-model="kind" name="usageKind">
+            <option value="accountId">{{ t('member') }}</option>
+            <option value="keyId">{{ t('keys') }}</option>
+          </select></label
+        ><label class="usage-id"
+          >{{ t(kind === 'accountId' ? 'account' : 'keyId')
+          }}<input v-model="identifier" name="usageId" required /></label
+      ></template>
+      <button
+        class="relay-primary"
+        :disabled="loading || !identifier"
+        type="submit"
+      >
+        {{ t('query') }}
+      </button>
     </form>
-    <p>{{ t('queryNote') }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p v-if="error" class="relay-error" role="alert">{{ error }}</p>
     <button v-if="verify" :disabled="loading" @click="verifyAndQuery">
       {{ t('verify') }}</button
     ><template v-if="snapshot"
-      ><p data-testid="usage-snapshot">{{ t('snapshot') }}: {{ snapshot }}</p>
-      <UsageSummary :rows="rows" /><UsageRecords :rows="rows" /><button
-        v-if="next"
-        :disabled="loading"
-        @click="query(next)"
-      >
+      ><p data-testid="usage-snapshot">
+        {{ t('pageSummary', { count: rows.length }) }}
+      </p>
+      <UsageSummary :rows="rows" /><UsageRecords
+        :rows="rows"
+        :member-name="members.memberName"
+      /><button v-if="next" :disabled="loading" @click="query(next)">
         {{ t('next') }}
       </button></template
     >
-    <p>{{ t('scope') }}</p>
+    <p class="relay-footnote">{{ t('scope') }}</p>
   </section>
 </template>

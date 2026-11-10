@@ -1,5 +1,6 @@
 export { createAurigaI18n, messages, type Locale } from './i18n';
 export { default as Placeholder } from './Placeholder.vue';
+export { default as BrandMark } from './BrandMark.vue';
 export { pickLocalized } from './locale';
 
 export {

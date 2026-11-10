@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func TestPiAIChatShapeAndExplicitStoreRejection(t *testing.T) {
+func TestPiAIChatShapeDropsStoreOptOutAndRejectsStore(t *testing.T) {
 	calls := 0
 	upstream := memberServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -53,9 +53,10 @@ func TestPiAIChatShapeAndExplicitStoreRejection(t *testing.T) {
 		request.Header.Set("Authorization", "Bearer fixture")
 		response := httptest.NewRecorder()
 		h.ServeHTTP(response, request)
-		if store == "" {
+		if store != ",\"store\":true" {
+			// Absent, false and null are all accepted; the opt-out never reaches upstream.
 			if response.Code != 200 {
-				t.Fatalf("pi-ai request failed: %d", response.Code)
+				t.Fatalf("pi-ai request%s failed: %d", store, response.Code)
 			}
 			continue
 		}
@@ -67,7 +68,7 @@ func TestPiAIChatShapeAndExplicitStoreRejection(t *testing.T) {
 			t.Fatalf("store rejection must identify /store: status=%d", response.Code)
 		}
 	}
-	if calls != 1 {
-		t.Fatalf("upstream calls %d, want 1", calls)
+	if calls != 3 {
+		t.Fatalf("upstream calls %d, want 3", calls)
 	}
 }

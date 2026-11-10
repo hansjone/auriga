@@ -36,6 +36,7 @@ import { hasPermission } from '../admin/permissions';
 import { useCursorList } from '../admin/useCursorList';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import AdminDialog from '../admin/AdminDialog.vue';
 import '../admin/management.css';
 
 const { t, locale } = useAdminI18n();
@@ -617,147 +618,155 @@ async function confirm() {
         ></ElTable
       >
     </section>
-    <section v-if="selected && canRead" class="details">
-      <header class="head">
-        <h2>{{ text(selected.name) }}</h2>
-        <ElButton :disabled="disabled" @click="clearDetail">{{
-          t('close')
-        }}</ElButton>
-      </header>
-      <dl>
-        <dt>{{ t('id') }}</dt>
-        <dd>{{ selected.id }}</dd>
-        <dt>{{ t('roleKey') }}</dt>
-        <dd>{{ selected.key }}</dd>
-        <dt>{{ t('description') }}</dt>
-        <dd>{{ text(selected.description) || '—' }}</dd>
-        <dt>{{ t('rolePermissions') }}</dt>
-        <dd>{{ selected.permissions.join(', ') || t('noneSelected') }}</dd>
-      </dl>
-      <p v-if="selected.builtin" class="muted">{{ t('builtinReadOnly') }}</p>
-      <div v-if="canWrite && !selected.builtin" class="actions">
-        <ElButton
-          :disabled="disabled || !catalogReady"
-          @click="openEditor(selected)"
-          >{{ t('editRole') }}</ElButton
-        ><ElButton type="danger" :disabled="disabled" @click="deleteRole">{{
-          t('deleteRole')
-        }}</ElButton>
-      </div>
-      <h3>{{ t('roleBindings') }}</h3>
-      <p>{{ t('serviceReadOnly') }}</p>
-      <p v-if="!canGrant" class="muted">{{ t('grantPermissionRequired') }}</p>
-      <p v-if="bindingLoading" role="status">{{ t('loading') }}</p>
-      <p v-if="bindingError" role="alert" class="error">
-        {{ bindingError }}
-        <ElButton
-          :disabled="disabled || bindingLoading"
-          @click="retryBindings"
-          >{{ t('retry') }}</ElButton
-        >
-      </p>
-      <ElTable
-        :data="bindingItems"
-        :empty-text="bindingLoading || bindingError ? ' ' : t('empty')"
-        ><ElTableColumn :label="t('subjectType')"
-          ><template #default="{ row }">{{
-            subjectLabel(row.subject.type)
-          }}</template></ElTableColumn
-        ><ElTableColumn :label="t('bindingSubject')"
-          ><template #default="{ row }">{{
-            row.subject.id
-          }}</template></ElTableColumn
-        ><ElTableColumn
-          prop="grantedBy"
-          :label="t('grantedBy')"
-        /><ElTableColumn v-if="canGrant" :label="t('revokeRole')"
-          ><template #default="{ row }"
-            ><ElButton
-              v-if="row.subject.type !== 'service_account'"
-              :disabled="disabled || bindingLoading"
-              @click="revoke(row as RoleBinding)"
-              >{{ t('revokeRole') }}</ElButton
-            ></template
-          ></ElTableColumn
-        ></ElTable
-      >
-      <div class="pager">
-        <ElButton
-          :disabled="disabled || bindingLoading || !bindingHistory.length"
-          @click="bindings.previous"
-          >{{ t('previous') }}</ElButton
-        ><ElButton
-          :disabled="disabled || bindingLoading || !bindingNext"
-          @click="bindings.next"
-          >{{ t('next') }}</ElButton
-        >
-      </div>
-      <section v-if="canGrant" class="edit-form">
-        <ElSelect
-          v-model="subjectType"
-          :aria-label="t('subjectType')"
-          :options="subjectTypes"
-          :disabled="disabled"
-        />
-        <p v-if="!candidateRead">{{ t('candidateReadRequired') }}</p>
-        <template v-else
-          ><ElForm
-            :disabled="disabled || candidateLoading"
-            @submit.prevent="loadSubjects"
-            ><ElInput
-              v-if="subjectType === 'member'"
-              v-model="query"
-              :aria-label="t('subjectSearch')"
-              :placeholder="t('subjectSearch')"
-            /><ElButton native-type="submit">{{
-              t('loadSubjects')
-            }}</ElButton></ElForm
+    <AdminDialog
+      :open="!!selected && canRead"
+      :title="selected ? text(selected.name) : ''"
+      width="min(860px, 94vw)"
+      :locked="disabled"
+      @close="clearDetail"
+    >
+      <section v-if="selected && canRead" class="details">
+        <header class="head">
+          <h2>{{ text(selected.name) }}</h2>
+          <ElButton :disabled="disabled" @click="clearDetail">{{
+            t('close')
+          }}</ElButton>
+        </header>
+        <dl>
+          <dt>{{ t('id') }}</dt>
+          <dd>{{ selected.id }}</dd>
+          <dt>{{ t('roleKey') }}</dt>
+          <dd>{{ selected.key }}</dd>
+          <dt>{{ t('description') }}</dt>
+          <dd>{{ text(selected.description) || '—' }}</dd>
+          <dt>{{ t('rolePermissions') }}</dt>
+          <dd>{{ selected.permissions.join(', ') || t('noneSelected') }}</dd>
+        </dl>
+        <p v-if="selected.builtin" class="muted">{{ t('builtinReadOnly') }}</p>
+        <div v-if="canWrite && !selected.builtin" class="actions">
+          <ElButton
+            :disabled="disabled || !catalogReady"
+            @click="openEditor(selected)"
+            >{{ t('editRole') }}</ElButton
+          ><ElButton type="danger" :disabled="disabled" @click="deleteRole">{{
+            t('deleteRole')
+          }}</ElButton>
+        </div>
+        <h3>{{ t('roleBindings') }}</h3>
+        <p>{{ t('serviceReadOnly') }}</p>
+        <p v-if="!canGrant" class="muted">{{ t('grantPermissionRequired') }}</p>
+        <p v-if="bindingLoading" role="status">{{ t('loading') }}</p>
+        <p v-if="bindingError" role="alert" class="error">
+          {{ bindingError }}
+          <ElButton
+            :disabled="disabled || bindingLoading"
+            @click="retryBindings"
+            >{{ t('retry') }}</ElButton
           >
-          <p v-if="candidateLoading" role="status">{{ t('loading') }}</p>
-          <p v-if="candidateError" role="alert" class="error">
-            {{ candidateError }}
-          </p>
-          <ElSelect
-            v-model="subjectId"
-            :aria-label="t('chooseSubject')"
-            :placeholder="t('chooseSubject')"
-            :no-data-text="t('empty')"
-            :options="candidateOptions"
-            :disabled="disabled || candidateLoading || !!candidateError"
-            style="width: 100%"
-          />
-          <div class="pager">
-            <ElButton
-              :disabled="
-                disabled || candidateLoading || !candidateHistory.length
-              "
-              @click="
-                subjectId = '';
-                candidates.previous();
-              "
-              >{{ t('previous') }}</ElButton
-            ><ElButton
-              :disabled="disabled || candidateLoading || !candidateNext"
-              @click="
-                subjectId = '';
-                candidates.next();
-              "
-              >{{ t('next') }}</ElButton
-            ><ElButton
-              :disabled="
-                disabled ||
-                candidateLoading ||
-                !catalogReady ||
-                !subjectId ||
-                !!candidateError
-              "
-              @click="grant"
-              >{{ t('grantRole') }}</ElButton
-            >
-          </div></template
+        </p>
+        <ElTable
+          :data="bindingItems"
+          :empty-text="bindingLoading || bindingError ? ' ' : t('empty')"
+          ><ElTableColumn :label="t('subjectType')"
+            ><template #default="{ row }">{{
+              subjectLabel(row.subject.type)
+            }}</template></ElTableColumn
+          ><ElTableColumn :label="t('bindingSubject')"
+            ><template #default="{ row }">{{
+              row.subject.id
+            }}</template></ElTableColumn
+          ><ElTableColumn
+            prop="grantedBy"
+            :label="t('grantedBy')"
+          /><ElTableColumn v-if="canGrant" :label="t('revokeRole')"
+            ><template #default="{ row }"
+              ><ElButton
+                v-if="row.subject.type !== 'service_account'"
+                :disabled="disabled || bindingLoading"
+                @click="revoke(row as RoleBinding)"
+                >{{ t('revokeRole') }}</ElButton
+              ></template
+            ></ElTableColumn
+          ></ElTable
         >
+        <div class="pager">
+          <ElButton
+            :disabled="disabled || bindingLoading || !bindingHistory.length"
+            @click="bindings.previous"
+            >{{ t('previous') }}</ElButton
+          ><ElButton
+            :disabled="disabled || bindingLoading || !bindingNext"
+            @click="bindings.next"
+            >{{ t('next') }}</ElButton
+          >
+        </div>
+        <section v-if="canGrant" class="edit-form">
+          <ElSelect
+            v-model="subjectType"
+            :aria-label="t('subjectType')"
+            :options="subjectTypes"
+            :disabled="disabled"
+          />
+          <p v-if="!candidateRead">{{ t('candidateReadRequired') }}</p>
+          <template v-else
+            ><ElForm
+              :disabled="disabled || candidateLoading"
+              @submit.prevent="loadSubjects"
+              ><ElInput
+                v-if="subjectType === 'member'"
+                v-model="query"
+                :aria-label="t('subjectSearch')"
+                :placeholder="t('subjectSearch')"
+              /><ElButton native-type="submit">{{
+                t('loadSubjects')
+              }}</ElButton></ElForm
+            >
+            <p v-if="candidateLoading" role="status">{{ t('loading') }}</p>
+            <p v-if="candidateError" role="alert" class="error">
+              {{ candidateError }}
+            </p>
+            <ElSelect
+              v-model="subjectId"
+              :aria-label="t('chooseSubject')"
+              :placeholder="t('chooseSubject')"
+              :no-data-text="t('empty')"
+              :options="candidateOptions"
+              :disabled="disabled || candidateLoading || !!candidateError"
+              style="width: 100%"
+            />
+            <div class="pager">
+              <ElButton
+                :disabled="
+                  disabled || candidateLoading || !candidateHistory.length
+                "
+                @click="
+                  subjectId = '';
+                  candidates.previous();
+                "
+                >{{ t('previous') }}</ElButton
+              ><ElButton
+                :disabled="disabled || candidateLoading || !candidateNext"
+                @click="
+                  subjectId = '';
+                  candidates.next();
+                "
+                >{{ t('next') }}</ElButton
+              ><ElButton
+                :disabled="
+                  disabled ||
+                  candidateLoading ||
+                  !catalogReady ||
+                  !subjectId ||
+                  !!candidateError
+                "
+                @click="grant"
+                >{{ t('grantRole') }}</ElButton
+              >
+            </div></template
+          >
+        </section>
       </section>
-    </section>
+    </AdminDialog>
     <ElDialog
       :model-value="editor && canWrite"
       :title="t(editTarget ? 'editRole' : 'createRole')"

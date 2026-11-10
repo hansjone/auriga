@@ -26,6 +26,7 @@ import { orgAdminApi, type Group, type GroupInput } from '../admin/orgApi';
 import { useCursorList } from '../admin/useCursorList';
 import { useOrgActions, orgError } from '../admin/useOrgActions';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import AdminDialog from '../admin/AdminDialog.vue';
 import '../admin/management.css';
 
 const { t } = useAdminI18n();
@@ -323,151 +324,159 @@ function removeMember(member: Member) {
         ></ElTableColumn
       >
     </ElTable>
-    <section v-if="selected" class="details">
-      <header class="head">
-        <h2>{{ selected.name }}</h2>
-        <ElButton :disabled="disabled" @click="clearDetail">{{
-          t('close')
-        }}</ElButton>
-      </header>
-      <dl>
-        <dt>{{ t('id') }}</dt>
-        <dd>{{ selected.id }}</dd>
-        <dt>{{ t('description') }}</dt>
-        <dd>{{ selected.description || '—' }}</dd>
-        <dt>{{ t('parentGroup') }}</dt>
-        <dd>
-          {{
-            items.find((group) => group.id === selected?.parentId)?.name ||
-            selected.parentId ||
-            t('noParent')
-          }}
-        </dd>
-        <dt>{{ t('memberCount') }}</dt>
-        <dd>{{ selected.memberCount }}</dd>
-      </dl>
-      <p v-if="selected.source === 'mapped'" class="muted">
-        {{ t('mappedWarning') }}
-      </p>
-      <div v-if="writableGroup" class="actions">
-        <ElButton
-          :disabled="disabled || !!listError"
-          @click="openEditor(selected)"
-          >{{ t('editGroup') }}</ElButton
-        ><ElButton type="danger" :disabled="disabled" @click="removeGroup">{{
-          t('deleteGroup')
-        }}</ElButton>
-      </div>
-      <h3>{{ t('groupMembers') }}</h3>
-      <p v-if="membersLoading" role="status">{{ t('loading') }}</p>
-      <p v-if="membersError" class="error" role="alert">
-        {{ membersError }}
-        <ElButton
-          :disabled="disabled || membersLoading"
-          @click="members.refresh"
-          >{{ t('retry') }}</ElButton
-        >
-      </p>
-      <ElTable
-        :data="memberItems"
-        :empty-text="membersLoading || membersError ? ' ' : t('empty')"
-        ><ElTableColumn
-          prop="displayName"
-          :label="t('displayName')"
-        /><ElTableColumn prop="email" :label="t('email')" /><ElTableColumn
-          v-if="writableGroup"
-          :label="t('removeMember')"
-          ><template #default="{ row }"
-            ><ElButton
-              :disabled="disabled || membersLoading"
-              @click="removeMember(row as Member)"
-              >{{ t('removeMember') }}</ElButton
-            ></template
-          ></ElTableColumn
-        ></ElTable
-      >
-      <div class="pager">
-        <ElButton
-          :disabled="disabled || membersLoading || !memberHistory.length"
-          @click="members.previous"
-          >{{ t('previous') }}</ElButton
-        ><ElButton
-          :disabled="disabled || membersLoading || !memberNext"
-          @click="members.next"
-          >{{ t('next') }}</ElButton
-        >
-      </div>
-      <section v-if="writableGroup" class="edit-form">
-        <h3>{{ t('memberSelection') }}</h3>
-        <p v-if="!canPickMembers" class="muted">
-          {{ t('memberReadRequired') }}
+    <AdminDialog
+      :open="!!selected"
+      :title="selected?.name ?? ''"
+      width="min(820px, 94vw)"
+      :locked="disabled"
+      @close="clearDetail"
+    >
+      <section v-if="selected" class="details">
+        <header class="head">
+          <h2>{{ selected.name }}</h2>
+          <ElButton :disabled="disabled" @click="clearDetail">{{
+            t('close')
+          }}</ElButton>
+        </header>
+        <dl>
+          <dt>{{ t('id') }}</dt>
+          <dd>{{ selected.id }}</dd>
+          <dt>{{ t('description') }}</dt>
+          <dd>{{ selected.description || '—' }}</dd>
+          <dt>{{ t('parentGroup') }}</dt>
+          <dd>
+            {{
+              items.find((group) => group.id === selected?.parentId)?.name ||
+              selected.parentId ||
+              t('noParent')
+            }}
+          </dd>
+          <dt>{{ t('memberCount') }}</dt>
+          <dd>{{ selected.memberCount }}</dd>
+        </dl>
+        <p v-if="selected.source === 'mapped'" class="muted">
+          {{ t('mappedWarning') }}
         </p>
-        <template v-else>
-          <ElForm
-            :disabled="disabled || candidatesLoading"
-            @submit.prevent="searchMembers"
-            ><ElInput
-              v-model="memberQuery"
-              :aria-label="t('search')"
-              :placeholder="t('search')"
-            /><ElButton native-type="submit">{{
-              t('searchMembers')
-            }}</ElButton></ElForm
+        <div v-if="writableGroup" class="actions">
+          <ElButton
+            :disabled="disabled || !!listError"
+            @click="openEditor(selected)"
+            >{{ t('editGroup') }}</ElButton
+          ><ElButton type="danger" :disabled="disabled" @click="removeGroup">{{
+            t('deleteGroup')
+          }}</ElButton>
+        </div>
+        <h3>{{ t('groupMembers') }}</h3>
+        <p v-if="membersLoading" role="status">{{ t('loading') }}</p>
+        <p v-if="membersError" class="error" role="alert">
+          {{ membersError }}
+          <ElButton
+            :disabled="disabled || membersLoading"
+            @click="members.refresh"
+            >{{ t('retry') }}</ElButton
           >
-          <p v-if="candidatesLoading" role="status">{{ t('loading') }}</p>
-          <p v-if="candidatesError" class="error" role="alert">
-            {{ t('optionsFailed') }} {{ candidatesError }}
-            <ElButton
-              :disabled="disabled || candidatesLoading"
-              @click="searchMembers"
-              >{{ t('reloadOptions') }}</ElButton
-            >
+        </p>
+        <ElTable
+          :data="memberItems"
+          :empty-text="membersLoading || membersError ? ' ' : t('empty')"
+          ><ElTableColumn
+            prop="displayName"
+            :label="t('displayName')"
+          /><ElTableColumn prop="email" :label="t('email')" /><ElTableColumn
+            v-if="writableGroup"
+            :label="t('removeMember')"
+            ><template #default="{ row }"
+              ><ElButton
+                :disabled="disabled || membersLoading"
+                @click="removeMember(row as Member)"
+                >{{ t('removeMember') }}</ElButton
+              ></template
+            ></ElTableColumn
+          ></ElTable
+        >
+        <div class="pager">
+          <ElButton
+            :disabled="disabled || membersLoading || !memberHistory.length"
+            @click="members.previous"
+            >{{ t('previous') }}</ElButton
+          ><ElButton
+            :disabled="disabled || membersLoading || !memberNext"
+            @click="members.next"
+            >{{ t('next') }}</ElButton
+          >
+        </div>
+        <section v-if="writableGroup" class="edit-form">
+          <h3>{{ t('memberSelection') }}</h3>
+          <p v-if="!canPickMembers" class="muted">
+            {{ t('memberReadRequired') }}
           </p>
-          <ElSelect
-            v-model="candidateId"
-            :aria-label="t('selectMember')"
-            :no-data-text="t('empty')"
-            :placeholder="t('selectMember')"
-            :disabled="disabled || candidatesLoading || !!candidatesError"
-            style="width: 100%"
-            ><ElOption
-              v-for="member in candidateItems"
-              :key="member.id"
-              :value="member.id"
-              :disabled="member.groupIds.includes(selected.id)"
-              :label="`${member.displayName} (${member.email || member.id})`"
-          /></ElSelect>
-          <div class="pager">
-            <ElButton
-              :disabled="
-                disabled || candidatesLoading || !candidateHistory.length
-              "
-              @click="
-                candidateId = '';
-                candidates.previous();
-              "
-              >{{ t('previous') }}</ElButton
-            ><ElButton
-              :disabled="disabled || candidatesLoading || !candidateNext"
-              @click="
-                candidateId = '';
-                candidates.next();
-              "
-              >{{ t('next') }}</ElButton
-            ><ElButton
-              :disabled="
-                disabled ||
-                candidatesLoading ||
-                !!candidatesError ||
-                !candidateId
-              "
-              @click="addMember"
-              >{{ t('addMember') }}</ElButton
+          <template v-else>
+            <ElForm
+              :disabled="disabled || candidatesLoading"
+              @submit.prevent="searchMembers"
+              ><ElInput
+                v-model="memberQuery"
+                :aria-label="t('search')"
+                :placeholder="t('search')"
+              /><ElButton native-type="submit">{{
+                t('searchMembers')
+              }}</ElButton></ElForm
             >
-          </div>
-        </template>
+            <p v-if="candidatesLoading" role="status">{{ t('loading') }}</p>
+            <p v-if="candidatesError" class="error" role="alert">
+              {{ t('optionsFailed') }} {{ candidatesError }}
+              <ElButton
+                :disabled="disabled || candidatesLoading"
+                @click="searchMembers"
+                >{{ t('reloadOptions') }}</ElButton
+              >
+            </p>
+            <ElSelect
+              v-model="candidateId"
+              :aria-label="t('selectMember')"
+              :no-data-text="t('empty')"
+              :placeholder="t('selectMember')"
+              :disabled="disabled || candidatesLoading || !!candidatesError"
+              style="width: 100%"
+              ><ElOption
+                v-for="member in candidateItems"
+                :key="member.id"
+                :value="member.id"
+                :disabled="member.groupIds.includes(selected.id)"
+                :label="`${member.displayName} (${member.email || member.id})`"
+            /></ElSelect>
+            <div class="pager">
+              <ElButton
+                :disabled="
+                  disabled || candidatesLoading || !candidateHistory.length
+                "
+                @click="
+                  candidateId = '';
+                  candidates.previous();
+                "
+                >{{ t('previous') }}</ElButton
+              ><ElButton
+                :disabled="disabled || candidatesLoading || !candidateNext"
+                @click="
+                  candidateId = '';
+                  candidates.next();
+                "
+                >{{ t('next') }}</ElButton
+              ><ElButton
+                :disabled="
+                  disabled ||
+                  candidatesLoading ||
+                  !!candidatesError ||
+                  !candidateId
+                "
+                @click="addMember"
+                >{{ t('addMember') }}</ElButton
+              >
+            </div>
+          </template>
+        </section>
       </section>
-    </section>
+    </AdminDialog>
     <ElDialog
       :model-value="editor && canWrite"
       :title="t(editTarget ? 'editGroup' : 'newGroup')"

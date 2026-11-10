@@ -14,6 +14,7 @@ import { adminApi, type Node } from '../admin/api';
 import { useManagement } from '../admin/useManagement';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import AdminDialog from '../admin/AdminDialog.vue';
 import JoinMaterials from './nodes/JoinMaterials.vue';
 import NodeDiagnostics from './nodes/NodeDiagnostics.vue';
 import { nodesApi } from '../admin/nodesApi';
@@ -259,106 +260,116 @@ function drain() {
     <p v-if="detailLoading" role="status">{{ t('loading') }}</p>
     <p v-if="detailError" class="error" role="alert">{{ detailError }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
-    <section v-if="selected" class="details" :aria-label="t('details')">
-      <header class="head">
-        <h2>{{ selected.name }}</h2>
-        <ElButton :disabled="locked" @click="close">{{ t('close') }}</ElButton>
-      </header>
-      <dl>
-        <dt>{{ t('id') }}</dt>
-        <dd>{{ selected.id }}</dd>
-        <dt>{{ t('status') }}</dt>
-        <dd>{{ state(selected.status) }}</dd>
-        <dt>{{ t('hostname') }}</dt>
-        <dd>{{ selected.hostname }}</dd>
-        <dt>{{ t('platform') }}</dt>
-        <dd>{{ selected.os }} / {{ selected.arch }}</dd>
-        <dt>{{ t('drivers') }}</dt>
-        <dd>{{ selected.drivers.join(', ') }}</dd>
-        <dt>{{ t('capacity') }}</dt>
-        <dd>
-          {{ selected.capacity.cpuMillis ?? '—' }} /
-          {{ selected.capacity.memoryMb ?? '—' }} /
-          {{ selected.capacity.diskGb ?? '—' }} /
-          {{ selected.capacity.maxInstances ?? '—' }}
-        </dd>
-        <dt>{{ t('usage') }}</dt>
-        <dd>
-          {{ selected.usage?.instancesRunning ?? '—' }} /
-          {{ selected.usage?.instancesTotal ?? '—' }}
-        </dd>
-        <dt>{{ t('lastSeen') }}</dt>
-        <dd>{{ selected.lastSeenAt || '—' }}</dd>
-      </dl>
-      <NodeDiagnostics
-        :node="selected"
-        :can-write="canWrite"
-        :locked="locked || !!pollError"
-        @retire="retire"
-      />
-      <p v-if="!canWrite" class="muted">{{ t('readonly') }}</p>
-      <ElForm
-        label-position="top"
-        class="edit-form"
-        :disabled="!canWrite || locked || selected.status === 'revoked'"
-        @submit.prevent="save"
-      >
-        <ElFormItem :label="t('name')"
-          ><ElInput v-model="name" maxlength="64" :aria-label="t('name')"
-        /></ElFormItem>
-        <ElFormItem :label="t('schedulable')"
-          ><ElSwitch
-            v-model="schedulable"
-            :disabled="selected.status === 'draining'"
-            :aria-label="t('schedulable')"
-        /></ElFormItem>
-        <ElFormItem :label="t('labels')"
-          ><div>
-            <div
-              v-for="(label, index) in labels"
-              :key="index"
-              class="label-row"
-            >
-              <ElInput
-                v-model="label.key"
-                :aria-label="t('labelKey')"
-                :placeholder="t('labelKey')"
-              />
-              <ElInput
-                v-model="label.value"
-                :aria-label="t('labelValue')"
-                :placeholder="t('labelValue')"
-              />
-              <ElButton @click="labels.splice(index, 1)">{{
-                t('remove')
+    <AdminDialog
+      :open="!!selected"
+      :title="selected?.name ?? ''"
+      width="min(820px, 94vw)"
+      :locked="locked"
+      @close="close"
+    >
+      <section v-if="selected" class="details" :aria-label="t('details')">
+        <header class="head">
+          <h2>{{ selected.name }}</h2>
+          <ElButton :disabled="locked" @click="close">{{
+            t('close')
+          }}</ElButton>
+        </header>
+        <dl>
+          <dt>{{ t('id') }}</dt>
+          <dd>{{ selected.id }}</dd>
+          <dt>{{ t('status') }}</dt>
+          <dd>{{ state(selected.status) }}</dd>
+          <dt>{{ t('hostname') }}</dt>
+          <dd>{{ selected.hostname }}</dd>
+          <dt>{{ t('platform') }}</dt>
+          <dd>{{ selected.os }} / {{ selected.arch }}</dd>
+          <dt>{{ t('drivers') }}</dt>
+          <dd>{{ selected.drivers.join(', ') }}</dd>
+          <dt>{{ t('capacity') }}</dt>
+          <dd>
+            {{ selected.capacity.cpuMillis ?? '—' }} /
+            {{ selected.capacity.memoryMb ?? '—' }} /
+            {{ selected.capacity.diskGb ?? '—' }} /
+            {{ selected.capacity.maxInstances ?? '—' }}
+          </dd>
+          <dt>{{ t('usage') }}</dt>
+          <dd>
+            {{ selected.usage?.instancesRunning ?? '—' }} /
+            {{ selected.usage?.instancesTotal ?? '—' }}
+          </dd>
+          <dt>{{ t('lastSeen') }}</dt>
+          <dd>{{ selected.lastSeenAt || '—' }}</dd>
+        </dl>
+        <NodeDiagnostics
+          :node="selected"
+          :can-write="canWrite"
+          :locked="locked || !!pollError"
+          @retire="retire"
+        />
+        <p v-if="!canWrite" class="muted">{{ t('readonly') }}</p>
+        <ElForm
+          label-position="top"
+          class="edit-form"
+          :disabled="!canWrite || locked || selected.status === 'revoked'"
+          @submit.prevent="save"
+        >
+          <ElFormItem :label="t('name')"
+            ><ElInput v-model="name" maxlength="64" :aria-label="t('name')"
+          /></ElFormItem>
+          <ElFormItem :label="t('schedulable')"
+            ><ElSwitch
+              v-model="schedulable"
+              :disabled="selected.status === 'draining'"
+              :aria-label="t('schedulable')"
+          /></ElFormItem>
+          <ElFormItem :label="t('labels')"
+            ><div>
+              <div
+                v-for="(label, index) in labels"
+                :key="index"
+                class="label-row"
+              >
+                <ElInput
+                  v-model="label.key"
+                  :aria-label="t('labelKey')"
+                  :placeholder="t('labelKey')"
+                />
+                <ElInput
+                  v-model="label.value"
+                  :aria-label="t('labelValue')"
+                  :placeholder="t('labelValue')"
+                />
+                <ElButton @click="labels.splice(index, 1)">{{
+                  t('remove')
+                }}</ElButton>
+              </div>
+              <ElButton @click="labels.push({ key: '', value: '' })">{{
+                t('addLabel')
               }}</ElButton>
-            </div>
-            <ElButton @click="labels.push({ key: '', value: '' })">{{
-              t('addLabel')
-            }}</ElButton>
-          </div></ElFormItem
-        >
-        <ElButton
-          v-if="canWrite"
-          native-type="submit"
-          type="primary"
-          :disabled="!name.trim()"
-          >{{ t('save') }}</ElButton
-        >
-      </ElForm>
-      <div v-if="canWrite" class="actions">
-        <ElButton
-          type="warning"
-          :disabled="
-            locked ||
-            selected.status === 'draining' ||
-            selected.status === 'revoked'
-          "
-          @click="drain"
-          >{{ t('drain') }}</ElButton
-        >
-      </div>
-    </section>
+            </div></ElFormItem
+          >
+          <ElButton
+            v-if="canWrite"
+            native-type="submit"
+            type="primary"
+            :disabled="!name.trim()"
+            >{{ t('save') }}</ElButton
+          >
+        </ElForm>
+        <div v-if="canWrite" class="actions">
+          <ElButton
+            type="warning"
+            :disabled="
+              locked ||
+              selected.status === 'draining' ||
+              selected.status === 'revoked'
+            "
+            @click="drain"
+            >{{ t('drain') }}</ElButton
+          >
+        </div>
+      </section>
+    </AdminDialog>
     <JoinMaterials
       v-if="joinOpen && canWrite"
       id="node-join-materials"

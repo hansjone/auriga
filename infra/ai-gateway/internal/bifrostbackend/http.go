@@ -268,7 +268,7 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 		}
 		respond(w, out)
 	case len(parts) == 1 && parts[0] == "pools" && r.Method == http.MethodGet:
-		out, e := b.ListPools(r.Context(), tenant)
+		out, e := b.ListPools(r.Context(), tenant, page)
 		if e != nil {
 			return e
 		}
@@ -403,6 +403,12 @@ func urlQuery(r *http.Request) (map[string]string, error) {
 func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, key api.RelayKey) {
 	var fields map[string]json.RawMessage
 	if e := decode(w, r, &fields); e != nil || fields == nil {
+		reject(w, invalid)
+		return
+	}
+	// Edge and the member bridge already drop a store opt-out; repeat it so a
+	// direct caller gets the same contract. store:true stays invalid.
+	if !relaylimits.DropStoreOptOut(fields) {
 		reject(w, invalid)
 		return
 	}
@@ -578,5 +584,10 @@ func providerReject(w http.ResponseWriter, err error) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	if code == "context_length_exceeded" {
+		// OpenAI shape, so standard clients and DSH compaction recognise it.
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"type": "invalid_request_error", "code": code, "message": "context_length_exceeded: the input exceeds this model's context window; compact the conversation and retry"}})
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"type": "provider_error", "code": code, "message": code}})
 }

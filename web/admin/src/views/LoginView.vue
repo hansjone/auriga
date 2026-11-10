@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
+  BrandMark,
   ProviderSelect,
   StepContainer,
   type ClientStep,
@@ -60,6 +61,7 @@ async function selectProvider(provider: LoginProvider) {
 
 async function onSubmit(input: StepInput) {
   if (!tx.value) return;
+  error.value = '';
   try {
     tx.value = await iamApi.advanceLoginTransaction(tx.value.id, input);
   } catch (e) {
@@ -82,46 +84,50 @@ function onComplete(redirectTo: string) {
   void router.replace(redirectTo || '/overview');
 }
 
+function backToProviders() {
+  error.value = '';
+  tx.value = null;
+}
+
 const step = (): ClientStep | null =>
   (tx.value?.step as ClientStep | undefined) ?? null;
 </script>
 
 <template>
-  <section class="login-card auriga-glass">
-    <p class="brand">{{ t('brand') }} · {{ t('admin') }}</p>
-    <p v-if="loading" class="muted">{{ t('login.loading') }}</p>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+  <section class="auriga-login">
+    <header class="auriga-login-head">
+      <BrandMark :size="40" />
+      <div>
+        <p class="auriga-login-name">
+          {{ t('brand') }}
+          <small class="auriga-login-sub">{{ t('admin') }}</small>
+        </p>
+      </div>
+    </header>
+    <p v-if="error" class="auriga-login-error" role="alert">{{ error }}</p>
+    <p v-if="loading" class="auriga-login-status" role="status">
+      {{ t('login.loading') }}
+    </p>
     <ProviderSelect
-      v-if="!tx && !loading"
+      v-else-if="!tx"
       :providers="providers"
       @select="selectProvider"
     />
-    <StepContainer
-      v-else-if="step()"
-      :step="step()!"
-      @submit="onSubmit"
-      @retry="onRetry"
-      @complete="onComplete"
-    />
+    <template v-else-if="step()">
+      <StepContainer
+        :step="step()!"
+        @submit="onSubmit"
+        @retry="onRetry"
+        @complete="onComplete"
+      />
+      <button
+        v-if="providers.length > 1 && step()!.type !== 'complete'"
+        type="button"
+        class="auriga-login-back"
+        @click="backToProviders"
+      >
+        {{ t('login.back') }}
+      </button>
+    </template>
   </section>
 </template>
-
-<style scoped>
-.login-card {
-  width: min(380px, 100%);
-}
-.brand {
-  letter-spacing: 0.12em;
-  text-align: center;
-  font-size: 0.8rem;
-  margin-bottom: 1rem;
-}
-.muted {
-  color: var(--auriga-muted);
-  text-align: center;
-}
-.error {
-  color: #d27a7a;
-  text-align: center;
-}
-</style>

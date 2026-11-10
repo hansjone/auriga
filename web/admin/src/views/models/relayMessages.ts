@@ -1,4 +1,4 @@
-﻿import { useI18n } from 'vue-i18n';
+import { useI18n } from 'vue-i18n';
 const zh = {
   writeUncertain:
     '保存结果尚未确认。请先重试原保存，暂时不能修改或开始其他保存；离开页面前请先核对结果。',
@@ -70,7 +70,7 @@ const zh = {
   capabilityInherit: '继承上游（缺失时用推荐值）',
   capabilityManual: '手动覆盖',
   capabilityRecommendedContext: '推荐上下文（上游缺失时使用）',
-  capabilityRecommendedOutput: '推荐最大输出（上游缺失时使用）',
+  capabilityRecommendedOutput: '推荐最大输出（选填，上游缺失时使用）',
   capabilityOrigin_upstream: '当前来源：上游目录',
   capabilityOrigin_recommended: '当前来源：管理员推荐值',
   capabilityOrigin_manual: '当前来源：手动覆盖',
@@ -146,8 +146,11 @@ const zh = {
   addPool: '添加模型池',
   model: '上游真实模型 ID',
   poolId: '对外公开模型 ID / 别名',
-  context: '上下文能力（Token，0为未知）',
-  output: '最大输出能力（Token，0为未知）',
+  context: '上下文能力（Token，0为未知，未知时按 1,000,000 发布）',
+  output: '最大输出（Token，选填）',
+  outputPlaceholder: '留空 = 未知',
+  outputGuide:
+    '填模型官方的最大输出；不确定就留空，DSH 会按 32,768 请求。这是 DSH 每次请求的输出上限：填小会截断回答，填大上游会拒绝。',
   weight: '分配权重',
   addRoute: '添加池路由',
   remove: '移除路由',
@@ -156,12 +159,10 @@ const zh = {
   priceVersion: '价格版本',
   effectiveAt: '生效时间',
   poolNote:
-    '按权重分配请求；供应商不可用时自动尝试池内其他路由。停用的供应商不参与新请求。',
-  configureAuto: '配置 Auto 默认路由',
-  autoNote:
-    'Auriga 默认模型 ID 固定为 auto；请在现有池表单配置真实路由并保存。仅调整路由不需同步 DSH 目录；新增模型可在原生设置中手动获取并保存。已有会话与个人选择保留。',
+    '按权重分配请求；供应商不可用时自动尝试池内其他路由。ID 为 auto 的池即 DSH 默认模型，调整路由无需同步 DSH。',
+  defaultPool: '默认',
   createKey: '签发对外 Key',
-  budget: '每月预算（USD 微单位）',
+  budget: '每月预算（USD）',
   rpm: '每分钟请求上限',
   concurrency: '并发请求上限',
   inFlightTokens: '在途 Token 上限',
@@ -198,10 +199,11 @@ const zh = {
   close: '关闭编辑',
   endpoint: '调用入口',
   scope: '用量只包含经过平台中转站的调用。',
-  budgetNote: '0 表示零预算；金额采用整数微单位，1 USD = 1,000,000 微单位。',
+  budgetNote: '按美元填写，最小精度 0.000001；0 表示零预算，将禁止调用。',
   routes: '池内供应商',
   queryNote: '选择成员或 Key 后查询；变更条件会清除旧结果。',
   unknown: '未知',
+  unknownContext: '未知（按 1,000,000 发布）',
   permissionsLoading: '无法读取当前权限，请刷新重试。',
   active: '可用',
   inactive: '已禁用',
@@ -212,6 +214,17 @@ const zh = {
   limitNote:
     '流量参数0表示不限制，不自动填入RPM、并发或在途上限。对外Key仍按明确月预算执行；有预算的调用须提供max_tokens或max_completion_tokens。',
   snapshot: '已读取',
+  manualTarget: '手动输入 ID…',
+  memberKeys: '团队成员',
+  externalKeys: '对外 Key',
+  chooseTarget: '请选择',
+  pageSummary: '本页 {count} 条记录，按时间从新到旧',
+  copy: '复制',
+  copied: '已复制',
+  endpointHint:
+    '位于成员门户域名下，OpenAI 兼容：GET /ai/v1/models、POST /ai/v1/chat/completions，请求头 Authorization: Bearer <对外 Key>。',
+  ofTotal: '共 {total}',
+  memberKeyCount: '成员 {count}',
   apiRootNote:
     '填写 HTTPS 根地址，不附加 /v1；修改地址或种类会清除原密钥，须重新录入。',
 };
@@ -291,7 +304,8 @@ const en: Record<keyof typeof zh, string> = {
   capabilityInherit: 'Inherit upstream, then recommended values',
   capabilityManual: 'Manual override',
   capabilityRecommendedContext: 'Recommended context when upstream omits it',
-  capabilityRecommendedOutput: 'Recommended output when upstream omits it',
+  capabilityRecommendedOutput:
+    'Recommended output (optional, used when upstream omits it)',
   capabilityOrigin_upstream: 'Current source: upstream catalog',
   capabilityOrigin_recommended: 'Current source: administrator recommendation',
   capabilityOrigin_manual: 'Current source: manual override',
@@ -380,13 +394,16 @@ const en: Record<keyof typeof zh, string> = {
   addPool: 'Add model pool',
   model: 'Upstream model',
   poolId: 'Public model ID',
-  context: 'Context capability (tokens; 0 unknown)',
-  output: 'Output capability (tokens; 0 unknown)',
+  context: 'Context capability (tokens; 0 unknown, published as 1,000,000)',
+  output: 'Max output (tokens, optional)',
+  outputPlaceholder: 'Empty = unknown',
+  outputGuide:
+    "Enter the model's official max output; leave empty if unsure and DSH requests 32,768. DSH asks for this on every call: too small truncates replies, too large is rejected upstream.",
   weight: 'Weight',
   addRoute: 'Add route',
   remove: 'Remove route',
   createKey: 'Issue external key',
-  budget: 'Monthly budget (USD micros)',
+  budget: 'Monthly budget (USD)',
   rpm: 'Requests per minute',
   concurrency: 'Concurrent requests',
   inFlightTokens: 'In-flight token limit',
@@ -418,16 +435,15 @@ const en: Record<keyof typeof zh, string> = {
   close: 'Close editor',
   endpoint: 'API endpoint',
   unknown: 'Unknown',
+  unknownContext: 'Unknown (published as 1,000,000)',
   active: 'Active',
   priceInput: 'Input price per million tokens (USD micros)',
   priceOutput: 'Output price per million tokens (USD micros)',
   priceVersion: 'Price version',
   effectiveAt: 'Effective at',
   poolNote:
-    'Weighted requests fall back to other routes. Disabled providers receive no new requests.',
-  configureAuto: 'Configure Auto default routing',
-  autoNote:
-    'Auriga uses the stable model ID auto. Configure real routes and save in the existing pool form. Route changes need no DSH catalog sync; fetch and save newly published models in native settings. Existing sessions and personal choices are retained.',
+    'Weighted requests fall back to other routes. The pool with ID auto is the DSH default model; route changes need no DSH sync.',
+  defaultPool: 'Default',
   revokeNote: 'Revocation immediately blocks new requests using this key.',
   issuedNote:
     'Shown in this page only. Closing, refreshing or leaving clears the secret.',
@@ -436,7 +452,7 @@ const en: Record<keyof typeof zh, string> = {
   confirmIssue: 'Issue “{name}” with the selected budget, limits and models?',
   confirmRevoke: 'Revoke “{name}”? Existing holders will lose access.',
   scope: 'Only calls through the platform relay are included.',
-  budgetNote: 'Zero means no budget. 1 USD = 1,000,000 integer micros.',
+  budgetNote: 'Enter US dollars (precision 0.000001). Zero blocks calls.',
   routes: 'Pool providers',
   queryNote:
     'Select an account or key, then query. Changing filters clears the previous result.',
@@ -448,6 +464,17 @@ const en: Record<keyof typeof zh, string> = {
   limitNote:
     'Zero traffic values mean unlimited; no RPM, concurrency or in-flight limits are inserted. External keys retain explicit monthly budgets. Budgeted calls must provide max_tokens or max_completion_tokens.',
   snapshot: 'Loaded',
+  manualTarget: 'Enter an ID…',
+  memberKeys: 'Team members',
+  externalKeys: 'External keys',
+  chooseTarget: 'Select',
+  pageSummary: '{count} records on this page, newest first',
+  copy: 'Copy',
+  copied: 'Copied',
+  endpointHint:
+    'Served on the member portal host, OpenAI compatible: GET /ai/v1/models, POST /ai/v1/chat/completions with Authorization: Bearer <external key>.',
+  ofTotal: 'of {total}',
+  memberKeyCount: '{count} members',
   apiRootNote:
     'Use an HTTPS origin without /v1. Changing the origin or type clears the saved credential; enter it again.',
   inactive: 'Disabled',

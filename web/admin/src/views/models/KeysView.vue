@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import {
   computed,
   onBeforeUnmount,
@@ -14,9 +14,18 @@ import {
   type RelayPool,
 } from '../../admin/relayApi';
 import ActionConfirm from '../../admin/ActionConfirm.vue';
+import RelayWriteHint from './RelayWriteHint.vue';
+import AdminDialog from '../../admin/AdminDialog.vue';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
 import { useRelayWriteIntent, type RelayWriteAction } from './relayWriteIntent';
+import {
+  formatUsd,
+  microsFromUsd,
+  shortId,
+  usdFromMicros,
+  useMemberNames,
+} from './relayFormat';
 import './modelUsage.css';
 import './relayManagement.css';
 const { t } = useRelayI18n();
@@ -24,6 +33,8 @@ const ui = useRelayUi(t);
 const writeIntent = useRelayWriteIntent(ui);
 const { unresolved } = writeIntent;
 const { loading, busy, error, notice } = ui;
+const members = useMemberNames();
+const budgetUsd = ref<number | ''>(0);
 const keys = shallowRef<RelayKey[]>([]),
   pools = shallowRef<RelayPool[]>([]),
   editing = ref(false),
@@ -114,7 +125,10 @@ async function load(preserve = false) {
     pools.value = result[1].items;
   }
 }
-onMounted(() => load());
+onMounted(() => {
+  void load();
+  void members.load(ui.signal);
+});
 function edit(row?: RelayKey) {
   if (!canPrepare()) return;
   writeIntent.reset();
@@ -141,12 +155,21 @@ function edit(row?: RelayKey) {
         maxInFlightTokens: 0,
         models: [],
       };
+  budgetUsd.value = row ? usdFromMicros(row.monthlyBudgetMicros) : 0;
   allModels.value = row?.models.includes('*') ?? false;
   editing.value = true;
 }
 function input(): RelayKeyInput | undefined {
+  const budget = draft.value.meteringOnly
+    ? draft.value.monthlyBudgetMicros
+    : microsFromUsd(budgetUsd.value);
+  if (budget === null) {
+    error.value = t('invalid');
+    return;
+  }
   const body = {
     ...draft.value,
+    monthlyBudgetMicros: budget,
     models: allModels.value ? ['*'] : [...draft.value.models],
   };
   if (
@@ -215,7 +238,7 @@ function revoke(row: RelayKey) {
   pending.value = writeIntent.createAction(
     'ai.providers.write',
     t('confirmRevoke', {
-      name: row.source === 'member' ? row.accountId : row.name,
+      name: members.keyLabel(row),
     }),
     () => relayApi.updateKey(row.id, body, ui.signal),
     () => {
@@ -245,22 +268,11 @@ async function confirm() {
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
-    <div
-      v-if="unresolved"
-      class="relay-hint"
-      role="status"
-      data-testid="relay-write-uncertain"
-    >
-      <p>{{ t('writeUncertain') }}</p>
-      <button
-        type="button"
-        data-testid="retry-relay-write"
-        :disabled="busy || !!pending || !ui.can(unresolved.permission)"
-        @click="pending = unresolved"
-      >
-        {{ t('retryOriginalWrite') }}
-      </button>
-    </div>
+    <RelayWriteHint
+      v-if="unresolved && !editing"
+      :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+      @retry="pending = unresolved"
+    />
     <button
       data-testid="new-key"
       :disabled="
@@ -304,13 +316,21 @@ async function confirm() {
         </thead>
         <tbody>
           <tr v-for="row in keys" :key="row.id">
-            <td>{{ row.source === 'member' ? row.accountId : row.name }}</td>
-            <td>{{ row.id }}</td>
+            <td class="relay-strong">{{ members.keyLabel(row) }}</td>
+            <td class="relay-mono" :title="row.id">{{ shortId(row.id) }}</td>
             <td>{{ t(row.source === 'member' ? 'member' : 'external') }}</td>
-            <td>{{ t(row.active ? 'active' : 'inactive') }}</td>
+            <td>
+              <span
+                class="relay-badge"
+                :data-state="row.active ? 'on' : 'off'"
+                >{{ t(row.active ? 'active' : 'inactive') }}</span
+              >
+            </td>
             <td>
               {{
-                row.meteringOnly ? t('meteringOnly') : row.monthlyBudgetMicros
+                row.meteringOnly
+                  ? t('meteringOnly')
+                  : (formatUsd(row.monthlyBudgetMicros) ?? t('unknown'))
               }}
             </td>
             <td>
@@ -327,8 +347,12 @@ async function confirm() {
                   : row.models.join(', ')
               }}
             </td>
-            <td>
-              <button
+            <td class="relay-row-actions">
+              <RouterLink
+                data-testid="key-usage"
+                :to="{ path: '/models/usage', query: { key: row.id } }"
+                >{{ t('usage') }}</RouterLink
+              ><button
                 data-testid="edit-key"
                 :disabled="
                   busy ||
@@ -358,168 +382,186 @@ async function confirm() {
       </table>
     </div>
     <p>{{ t('externalKeyNote') }}</p>
-    <form v-if="editing" data-testid="key-form" @submit.prevent="ask">
-      <fieldset :disabled="busy || !!pending || !!unresolved">
-        <legend>{{ t(selected ? 'edit' : 'createKey') }}</legend>
-        <label
-          >{{ t('name')
-          }}<input
-            v-model="draft.name"
-            name="keyName"
-            :disabled="selected?.source === 'member'"
-            required
-            maxlength="128" /></label
-        ><label
-          ><input v-model="draft.active" name="keyActive" type="checkbox" />{{
-            t('enabled')
-          }}</label
-        ><label
-          v-if="selected?.source === 'member'"
-          class="relay-check relay-wide"
-        >
-          <input
-            v-model="draft.meteringOnly"
-            name="memberMeteringOnly"
-            type="checkbox"
-          />{{ t('meteringOnly') }}
-        </label>
-        <p v-if="selected?.source === 'member'" class="relay-wide">
-          {{ t('meteringOnlyNote') }}
-        </p>
-        <label
-          >{{ t('budget')
-          }}<input
-            v-model.number="draft.monthlyBudgetMicros"
-            name="keyBudget"
-            type="number"
-            min="0"
-            max="9007199254740991"
-            :disabled="draft.meteringOnly"
-            required
-        /></label>
-        <p>{{ t('budgetNote') }}</p>
-        <p
-          v-if="draft.monthlyBudgetMicros === 0 && !draft.meteringOnly"
-          class="relay-hint relay-wide"
-          role="note"
-        >
-          {{ t('keyZeroBudget') }}
-        </p>
-        <label
-          >{{ t('rpm')
-          }}<input
-            v-model.number="draft.requestsPerMinute"
-            name="keyRpm"
-            type="number"
-            min="0"
-            max="1000000"
-            :disabled="draft.meteringOnly"
-            required /></label
-        ><label
-          >{{ t('concurrency')
-          }}<input
-            v-model.number="draft.maxConcurrency"
-            name="keyConcurrency"
-            type="number"
-            min="0"
-            max="100"
-            :disabled="draft.meteringOnly"
-            required
-        /></label>
-        <label
-          >{{ t('inFlightTokens')
-          }}<input
-            v-model.number="draft.maxInFlightTokens"
-            name="keyInFlightTokens"
-            type="number"
-            min="0"
-            max="1073741824"
-            :disabled="draft.meteringOnly"
-            required
-        /></label>
-        <div class="relay-model-picker relay-wide">
-          <label class="relay-check"
-            ><input v-model="allModels" name="allModels" type="checkbox" />{{
-              t('keyAllFuture')
+    <AdminDialog
+      :open="editing"
+      :locked="busy || !!pending || !!unresolved"
+      :title="t(selected ? 'edit' : 'createKey')"
+      width="min(760px, 94vw)"
+      @close="editing = false"
+    >
+      <form v-if="editing" data-testid="key-form" @submit.prevent="ask">
+        <RelayWriteHint
+          v-if="unresolved"
+          :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+          @retry="pending = unresolved"
+        />
+        <fieldset :disabled="busy || !!pending || !!unresolved">
+          <legend>{{ t(selected ? 'edit' : 'createKey') }}</legend>
+          <label
+            >{{ t('name')
+            }}<input
+              v-model="draft.name"
+              name="keyName"
+              :disabled="selected?.source === 'member'"
+              required
+              maxlength="128" /></label
+          ><label
+            ><input v-model="draft.active" name="keyActive" type="checkbox" />{{
+              t('enabled')
             }}</label
+          ><label
+            v-if="selected?.source === 'member'"
+            class="relay-check relay-wide"
           >
-          <p>{{ t('keyAllFutureNote') }}</p>
-          <template v-if="!allModels">
-            <div class="relay-toolbar">
-              <label class="relay-search"
-                >{{ t('keySearch')
-                }}<input
-                  v-model="modelSearch"
-                  name="keyModelSearch"
-                  type="search" /></label
-              ><button
-                type="button"
-                data-testid="key-select-visible"
-                @click="selectVisibleModels"
-              >
-                {{ t('keySelectVisible') }}</button
-              ><button
-                type="button"
-                data-testid="key-clear-models"
-                @click="draft.models = []"
-              >
-                {{ t('keyClear') }}
-              </button>
-            </div>
-            <div
-              class="relay-model-chips"
-              :aria-label="t('keySelection', { count: selectedModels.length })"
+            <input
+              v-model="draft.meteringOnly"
+              name="memberMeteringOnly"
+              type="checkbox"
+            />{{ t('meteringOnly') }}
+          </label>
+          <p v-if="selected?.source === 'member'" class="relay-wide">
+            {{ t('meteringOnlyNote') }}
+          </p>
+          <label
+            >{{ t('budget')
+            }}<input
+              v-model.number="budgetUsd"
+              name="keyBudget"
+              type="number"
+              min="0"
+              step="0.000001"
+              max="9007199254.740991"
+              :disabled="draft.meteringOnly"
+              required
+          /></label>
+          <p>{{ t('budgetNote') }}</p>
+          <p
+            v-if="budgetUsd === 0 && !draft.meteringOnly"
+            class="relay-hint relay-wide"
+            role="note"
+          >
+            {{ t('keyZeroBudget') }}
+          </p>
+          <label
+            >{{ t('rpm')
+            }}<input
+              v-model.number="draft.requestsPerMinute"
+              name="keyRpm"
+              type="number"
+              min="0"
+              max="1000000"
+              :disabled="draft.meteringOnly"
+              required /></label
+          ><label
+            >{{ t('concurrency')
+            }}<input
+              v-model.number="draft.maxConcurrency"
+              name="keyConcurrency"
+              type="number"
+              min="0"
+              max="100"
+              :disabled="draft.meteringOnly"
+              required
+          /></label>
+          <label
+            >{{ t('inFlightTokens')
+            }}<input
+              v-model.number="draft.maxInFlightTokens"
+              name="keyInFlightTokens"
+              type="number"
+              min="0"
+              max="1073741824"
+              :disabled="draft.meteringOnly"
+              required
+          /></label>
+          <div class="relay-model-picker relay-wide">
+            <label class="relay-check"
+              ><input v-model="allModels" name="allModels" type="checkbox" />{{
+                t('keyAllFuture')
+              }}</label
             >
-              <span>{{
-                t('keySelection', { count: selectedModels.length })
-              }}</span
-              ><button
-                v-for="id in selectedModels"
-                :key="id"
-                type="button"
-                :aria-label="t('remove') + ' ' + id"
-                @click="removeModel(id)"
+            <p>{{ t('keyAllFutureNote') }}</p>
+            <template v-if="!allModels">
+              <div class="relay-toolbar">
+                <label class="relay-search"
+                  >{{ t('keySearch')
+                  }}<input
+                    v-model="modelSearch"
+                    name="keyModelSearch"
+                    type="search" /></label
+                ><button
+                  type="button"
+                  data-testid="key-select-visible"
+                  @click="selectVisibleModels"
+                >
+                  {{ t('keySelectVisible') }}</button
+                ><button
+                  type="button"
+                  data-testid="key-clear-models"
+                  @click="draft.models = []"
+                >
+                  {{ t('keyClear') }}
+                </button>
+              </div>
+              <div
+                class="relay-model-chips"
+                :aria-label="
+                  t('keySelection', { count: selectedModels.length })
+                "
               >
-                {{ id }} ×
-              </button>
-            </div>
-            <div
-              class="relay-model-options"
-              role="group"
-              :aria-label="t('models')"
-            >
-              <label
-                v-for="pool in visibleModels"
-                :key="pool.id"
-                class="relay-check"
-                ><input
-                  v-model="draft.models"
-                  name="keyModels"
-                  type="checkbox"
-                  :value="pool.id"
-                />{{ pool.id }}</label
+                <span>{{
+                  t('keySelection', { count: selectedModels.length })
+                }}</span
+                ><button
+                  v-for="id in selectedModels"
+                  :key="id"
+                  type="button"
+                  :aria-label="t('remove') + ' ' + id"
+                  @click="removeModel(id)"
+                >
+                  {{ id }} ×
+                </button>
+              </div>
+              <div
+                class="relay-model-options"
+                role="group"
+                :aria-label="t('models')"
               >
-              <p v-if="!visibleModels.length">{{ t('empty') }}</p>
-            </div>
-            <div v-if="historicalModels.length" class="relay-hint">
-              <p>{{ t('keyHistorical') }}</p>
-              <label
-                v-for="id in historicalModels"
-                :key="id"
-                class="relay-check"
-                ><input v-model="draft.models" type="checkbox" :value="id" />{{
-                  id
-                }}</label
-              >
-            </div>
-          </template>
-        </div>
-        <button type="submit">{{ t('save') }}</button
-        ><button type="button" @click="editing = false">
-          {{ t('close') }}
-        </button>
-      </fieldset>
-    </form>
+                <label
+                  v-for="pool in visibleModels"
+                  :key="pool.id"
+                  class="relay-check"
+                  ><input
+                    v-model="draft.models"
+                    name="keyModels"
+                    type="checkbox"
+                    :value="pool.id"
+                  />{{ pool.id }}</label
+                >
+                <p v-if="!visibleModels.length">{{ t('empty') }}</p>
+              </div>
+              <div v-if="historicalModels.length" class="relay-hint">
+                <p>{{ t('keyHistorical') }}</p>
+                <label
+                  v-for="id in historicalModels"
+                  :key="id"
+                  class="relay-check"
+                  ><input
+                    v-model="draft.models"
+                    type="checkbox"
+                    :value="id"
+                  />{{ id }}</label
+                >
+              </div>
+            </template>
+          </div>
+          <button type="submit">{{ t('save') }}</button
+          ><button type="button" @click="editing = false">
+            {{ t('close') }}
+          </button>
+        </fieldset>
+      </form>
+    </AdminDialog>
     <p>{{ t('revokeNote') }}</p>
     <p>{{ t('limitNote') }}</p>
     <ActionConfirm

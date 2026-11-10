@@ -194,8 +194,9 @@ watch(
         min="0"
         max="9007199254740991"
         :disabled="policy.maxOutputTokensMode === 'inherit'"
-        required
+        :placeholder="t('outputPlaceholder')"
       />
+      <small data-testid="output-guide">{{ t('outputGuide') }}</small>
       <small data-testid="output-effective">{{
         effectiveText('output')
       }}</small>

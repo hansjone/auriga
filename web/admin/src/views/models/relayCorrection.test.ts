@@ -1,7 +1,9 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ElDialog } from 'element-plus';
 import { ApiError, createAurigaI18n } from '@auriga/shared';
 import ProvidersView from './ProvidersView.vue';
+import { openAuto } from './autoPoolTestHelper';
 import KeysView from './KeysView.vue';
 import { relayApi, type RelayPool } from '../../admin/relayApi';
 import { adminApi } from '../../admin/api';
@@ -193,7 +195,7 @@ async function open(kind: Kind) {
     vi.mocked(relayApi.pools).mockResolvedValue({ items: [] });
     await w.get('header button').trigger('click');
     await flushPromises();
-    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await openAuto(w);
     await w
       .findAll('button')
       .find((b) => b.text() === '添加池路由')!
@@ -203,7 +205,7 @@ async function open(kind: Kind) {
     await w.get('[name="inputPrice"]').setValue('1');
     await w.get('[name="outputPrice"]').setValue('1');
   } else if (kind === 'pool-edit') {
-    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await openAuto(w);
   } else if (kind === 'key-create') {
     await w.get('[data-testid="new-key"]').trigger('click');
     await w.get('[name="keyName"]').setValue('External');
@@ -482,4 +484,36 @@ it('keeps an uncertain revoke as the same PUT instead of starting a different ke
   await flushPromises();
   expect(calls).toHaveLength(2);
   expect(calls[1]).toEqual(calls[0]);
+});
+it.each(['pool-create', 'provider-create', 'key-create'] as const)(
+  '%s: an unconfirmed write keeps its dialog open with the retry inside it',
+  async (kind) => {
+    rejectFirst = false;
+    firstFailure = new TypeError('synthetic transport detail');
+    const w = await open(kind);
+    await submit(w, kind);
+    const dialog = w.get('.admin-dialog');
+    expect(dialog.find('[data-testid="relay-write-uncertain"]').exists()).toBe(
+      true,
+    );
+    expect(w.findAll('[data-testid="retry-relay-write"]')).toHaveLength(1);
+    // The header close button and Escape both end in update:modelValue=false.
+    w.getComponent(ElDialog).vm.$emit('update:modelValue', false);
+    await flushPromises();
+    expect(w.find('.admin-dialog form').exists()).toBe(true);
+    expect(w.find('[data-testid="relay-write-uncertain"]').exists()).toBe(true);
+    await w.get('[data-testid="retry-relay-write"]').trigger('click');
+    await w.get('[data-testid="confirm-action"]').trigger('click');
+    await flushPromises();
+    expect(calls[1]).toEqual(calls[0]);
+  },
+);
+it('accepts micro-dollar budgets in the key form', async () => {
+  const w = await open('key-create');
+  const budget = w.get('[name="keyBudget"]');
+  expect(budget.attributes('step')).toBe('0.000001');
+  expect(Number(budget.attributes('max'))).toBeCloseTo(
+    Number.MAX_SAFE_INTEGER / 1_000_000,
+    6,
+  );
 });
