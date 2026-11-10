@@ -60,8 +60,8 @@ func TestPostgresUpstreamCapabilitiesPersistForMemberAndExternalDirectories(t *t
 			}
 			entry := response.Data[0]
 			if context == 0 {
-				if _, exists := entry["context_window"]; exists {
-					t.Fatal("unknown context invented", entry)
+				if entry["context_window"] != float64(UnknownContextWindow) {
+					t.Fatal("unknown context must use the high placeholder", entry)
 				}
 			} else if entry["context_window"] != float64(context) {
 				t.Fatal("member/external context differs", entry)

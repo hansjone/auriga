@@ -85,6 +85,13 @@ func (g *Gateway) proxyExternalRelay(w http.ResponseWriter, r *http.Request, aud
 	fail := func(status int, code string) {
 		writeProblem(w, problem(status, code, http.StatusText(status), "relay request rejected", rid))
 	}
+	// failField names the offending top-level field so an external client can
+	// fix its request without access to platform logs.
+	failField := func(field, detail string) {
+		p := problem(http.StatusBadRequest, "common.validation_failed", http.StatusText(http.StatusBadRequest), detail, rid)
+		p.Params = map[string]any{"field": "/" + field}
+		writeProblem(w, p)
+	}
 	entry, ok := r.Context().Value(accessEntryKey{}).(accessEntry)
 	if !ok || audience != "portal" || entry.role != "portal" {
 		fail(403, "common.forbidden")
@@ -125,13 +132,19 @@ func (g *Gateway) proxyExternalRelay(w http.ResponseWriter, r *http.Request, aud
 			fail(400, "common.validation_failed")
 			return
 		}
+		// Standard OpenAI clients send store:false; the relay never retains
+		// conversations, so the opt-out is dropped and a request to store refused.
+		if !dropStoreOptOut(fields) {
+			failField("store", "only store:false is accepted; the relay never stores conversations")
+			return
+		}
 		allowed := map[string]bool{}
 		for _, name := range []string{"model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "temperature", "top_p", "tools", "tool_choice", "response_format", "seed", "stop", "n", "presence_penalty", "frequency_penalty", "logit_bias", "logprobs", "top_logprobs", "parallel_tool_calls", "reasoning_effort", "service_tier", "user", "metadata"} {
 			allowed[name] = true
 		}
 		for name := range fields {
 			if !allowed[name] {
-				fail(400, "common.validation_failed")
+				failField(name, "unsupported chat completion parameter")
 				return
 			}
 		}
@@ -182,4 +195,19 @@ func relayResponse(response *http.Response) error {
 		return errors.New("relay redirect rejected")
 	}
 	return nil
+}
+
+// dropStoreOptOut mirrors relaylimits.DropStoreOptOut in the relay module: it
+// removes store:false or store:null and reports false for any other value.
+func dropStoreOptOut(fields map[string]json.RawMessage) bool {
+	raw, present := fields["store"]
+	if !present {
+		return true
+	}
+	value := bytes.TrimSpace(raw)
+	if !bytes.Equal(value, []byte("false")) && !bytes.Equal(value, []byte("null")) {
+		return false
+	}
+	delete(fields, "store")
+	return true
 }

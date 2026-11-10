@@ -148,14 +148,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, name := range []string{"model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "temperature", "top_p", "tools", "tool_choice", "response_format", "seed", "stop", "n", "presence_penalty", "frequency_penalty", "logit_bias", "logprobs", "top_logprobs", "parallel_tool_calls", "reasoning_effort", "service_tier", "user", "metadata"} {
 			allowed[name] = true
 		}
+		// store:false/null is a standard client opt-out and is dropped here; the
+		// relay never retains conversations, so a request to store is refused.
+		if !relaylimits.DropStoreOptOut(fields) {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": 400, "code": "common.validation_failed", "title": "Bad Request", "detail": "Only store:false is accepted; the relay never stores conversations", "params": map[string]string{"field": "/store"}})
+			return
+		}
 		for name := range fields {
 			if !allowed[name] {
-				if name == "store" {
-					w.Header().Set("Content-Type", "application/problem+json")
-					w.WriteHeader(http.StatusBadRequest)
-					_ = json.NewEncoder(w).Encode(map[string]any{"status": 400, "code": "common.validation_failed", "title": "Bad Request", "detail": "The store parameter is not supported", "params": map[string]string{"field": "/store"}})
-					return
-				}
 				reject(w, 400, "common.validation_failed")
 				return
 			}

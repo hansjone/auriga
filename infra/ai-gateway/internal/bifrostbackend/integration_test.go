@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,6 +45,9 @@ func testPostgresMemberKeyBudgetsRPMRevocationAndUsage(t *testing.T, tenant stri
 	member, _ := newID()
 	other, _ := newID()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if raw, _ := io.ReadAll(r.Body); bytes.Contains(raw, []byte(`"store"`)) {
+			t.Error("store reached the upstream provider")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"fixture","object":"chat.completion","created":1,"model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":"真实PG记录"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
 	}))
@@ -161,6 +165,13 @@ func testPostgresMemberKeyBudgetsRPMRevocationAndUsage(t *testing.T, tenant stri
 	}
 	if code, raw := request("POST", "/v1/chat/completions", chat, token, true, tenant); code != 200 {
 		t.Fatalf("member chat %d %s", code, raw)
+	}
+	// Standard clients send store:false; it is dropped, while a request to store is refused.
+	if code, raw := request("POST", "/v1/chat/completions", strings.Replace(chat, `"max_tokens":8`, `"max_tokens":8,"store":false`, 1), token, true, tenant); code != 200 {
+		t.Fatalf("store opt-out %d %s", code, raw)
+	}
+	if code, _ := request("POST", "/v1/chat/completions", strings.Replace(chat, `"max_tokens":8`, `"max_tokens":8,"store":true`, 1), token, true, tenant); code != 400 {
+		t.Fatalf("store request accepted: %d", code)
 	}
 	if code, raw := request("GET", "/api/logs?accountId="+member, "", "", true, tenant); code != 200 || !bytes.Contains(raw, []byte(`"inputTokens":3`)) || !bytes.Contains(raw, []byte(`"outputTokens":2`)) {
 		t.Fatalf("member usage %d %s", code, raw)

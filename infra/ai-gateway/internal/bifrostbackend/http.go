@@ -406,6 +406,12 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		reject(w, invalid)
 		return
 	}
+	// Edge and the member bridge already drop a store opt-out; repeat it so a
+	// direct caller gets the same contract. store:true stays invalid.
+	if !relaylimits.DropStoreOptOut(fields) {
+		reject(w, invalid)
+		return
+	}
 	allowed := []string{"model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "temperature", "top_p", "tools", "tool_choice", "response_format", "seed", "stop", "n", "presence_penalty", "frequency_penalty", "logit_bias", "logprobs", "top_logprobs", "parallel_tool_calls", "reasoning_effort", "service_tier", "user", "metadata"}
 	for name := range fields {
 		if !slices.Contains(allowed, name) {
@@ -578,5 +584,10 @@ func providerReject(w http.ResponseWriter, err error) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	if code == "context_length_exceeded" {
+		// OpenAI shape, so standard clients and DSH compaction recognise it.
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"type": "invalid_request_error", "code": code, "message": "context_length_exceeded: the input exceeds this model's context window; compact the conversation and retry"}})
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"type": "provider_error", "code": code, "message": code}})
 }

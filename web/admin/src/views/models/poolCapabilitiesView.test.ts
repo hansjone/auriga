@@ -515,3 +515,26 @@ it('new model selection inherits known values without taking a later fallback mi
   expect(value(w, 'contextWindow')).toBe('2000000');
   w.unmount();
 });
+
+it('treats a cleared max output as unknown and explains how to fill it', async () => {
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  await w.get('[data-testid="configure-auto"]').trigger('click');
+  expect(value(w, 'outputCapabilityMode')).toBe('manual');
+  expect(w.get('[data-testid="output-guide"]').text()).toContain('32,768');
+  const output = w.get('[name="maxOutputTokens"]');
+  expect(output.attributes('required')).toBeUndefined();
+  await output.setValue('');
+  await w.get('[name="recommendedMaxOutputTokens"]').setValue('8000');
+  await w.get('[name="recommendedMaxOutputTokens"]').setValue('');
+  await w.get('[data-testid="pool-form"]').trigger('submit');
+  await w.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(relayApi.savePool).toHaveBeenCalledTimes(1);
+  expect(persisted[0].maxOutputTokens).toBe(0);
+  expect(persisted[0].capabilities).toBeDefined();
+  expect(
+    Object.hasOwn(persisted[0].capabilities!, 'recommendedMaxOutputTokens'),
+  ).toBe(false);
+  w.unmount();
+});

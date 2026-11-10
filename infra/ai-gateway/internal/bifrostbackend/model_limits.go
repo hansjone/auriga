@@ -8,6 +8,10 @@ import (
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 )
 
+// UnknownContextWindow is the context capacity published for a pool whose real
+// window is unknown (many providers, including OpenAI, do not list it).
+const UnknownContextWindow = 1000000
+
 func publicModel(model api.RelayPool) map[string]any {
 	out := map[string]any{"id": model.Id, "object": "model", "created": 0, "owned_by": "auriga"}
 	resolved, err := resolvePoolCapabilities(model)
@@ -17,6 +21,11 @@ func publicModel(model api.RelayPool) map[string]any {
 	model = resolved
 	if model.ContextWindow >= 2 && model.ContextWindow <= maxInteger {
 		out["context_window"] = model.ContextWindow
+	} else if model.MaxOutputTokens < UnknownContextWindow {
+		// Unknown context is published as a high placeholder, never a low guess:
+		// the agent compacts on pressure near it and, below it, on the
+		// context_length_exceeded error the relay normalises from any provider.
+		out["context_window"] = int64(UnknownContextWindow)
 	}
 	if model.MaxOutputTokens > 0 && model.MaxOutputTokens <= maxInteger {
 		out["max_output_tokens"] = model.MaxOutputTokens
