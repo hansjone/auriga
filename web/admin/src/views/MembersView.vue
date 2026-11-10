@@ -7,6 +7,7 @@ import { adminApi } from '../admin/api';
 import { useManagement } from '../admin/useManagement';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import AdminDialog from '../admin/AdminDialog.vue';
 import MemberRoles from '../admin/MemberRoles.vue';
 import '../admin/management.css';
 
@@ -136,54 +137,62 @@ function setStatus(action: 'enable' | 'disable') {
     <p v-if="detailLoading" role="status">{{ t('loading') }}</p>
     <p v-if="detailError" class="error" role="alert">{{ detailError }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
-    <section v-if="selected" class="details" :aria-label="t('details')">
-      <header class="head">
-        <h2>{{ selected.displayName }}</h2>
-        <ElButton :disabled="pageLocked" @click="close">{{
-          t('close')
-        }}</ElButton>
-      </header>
-      <dl>
-        <dt>{{ t('id') }}</dt>
-        <dd>{{ selected.id }}</dd>
-        <dt>{{ t('email') }}</dt>
-        <dd>{{ selected.email || '—' }}</dd>
-        <dt>{{ t('type') }}</dt>
-        <dd>{{ state(selected.memberType) }}</dd>
-        <dt>{{ t('status') }}</dt>
-        <dd>{{ state(selected.status) }}</dd>
-        <dt>{{ t('roles') }}</dt>
-        <dd>{{ selected.roleKeys.join(', ') || '—' }}</dd>
-        <dt>{{ t('groups') }}</dt>
-        <dd>{{ selected.groupIds.join(', ') || '—' }}</dd>
-        <dt>{{ t('created') }}</dt>
-        <dd>{{ selected.createdAt }}</dd>
-      </dl>
-      <MemberRoles
-        :key="selected.id"
-        :member-id="selected.id"
-        :member-name="selected.displayName"
-        :member-status="selected.status"
-        :disabled="locked"
-        @locked="roleLocked = $event"
-        @updated="rolesUpdated"
-      />
-      <p v-if="!canWrite" class="muted">{{ t('readonly') }}</p>
-      <div v-if="canWrite" class="actions">
-        <ElButton
-          v-if="selected.status === 'active'"
-          type="warning"
-          :disabled="pageLocked"
-          @click="setStatus('disable')"
-          >{{ t('disable') }}</ElButton
-        ><ElButton
-          v-if="selected.status === 'disabled'"
-          :disabled="pageLocked"
-          @click="setStatus('enable')"
-          >{{ t('enable') }}</ElButton
-        >
-      </div>
-    </section>
+    <AdminDialog
+      :open="!!selected"
+      :title="selected?.displayName ?? ''"
+      width="min(760px, 94vw)"
+      :locked="pageLocked"
+      @close="close"
+    >
+      <section v-if="selected" class="details" :aria-label="t('details')">
+        <header class="head">
+          <h2>{{ selected.displayName }}</h2>
+          <ElButton :disabled="pageLocked" @click="close">{{
+            t('close')
+          }}</ElButton>
+        </header>
+        <dl>
+          <dt>{{ t('id') }}</dt>
+          <dd>{{ selected.id }}</dd>
+          <dt>{{ t('email') }}</dt>
+          <dd>{{ selected.email || '—' }}</dd>
+          <dt>{{ t('type') }}</dt>
+          <dd>{{ state(selected.memberType) }}</dd>
+          <dt>{{ t('status') }}</dt>
+          <dd>{{ state(selected.status) }}</dd>
+          <dt>{{ t('roles') }}</dt>
+          <dd>{{ selected.roleKeys.join(', ') || '—' }}</dd>
+          <dt>{{ t('groups') }}</dt>
+          <dd>{{ selected.groupIds.join(', ') || '—' }}</dd>
+          <dt>{{ t('created') }}</dt>
+          <dd>{{ selected.createdAt }}</dd>
+        </dl>
+        <MemberRoles
+          :key="selected.id"
+          :member-id="selected.id"
+          :member-name="selected.displayName"
+          :member-status="selected.status"
+          :disabled="locked"
+          @locked="roleLocked = $event"
+          @updated="rolesUpdated"
+        />
+        <p v-if="!canWrite" class="muted">{{ t('readonly') }}</p>
+        <div v-if="canWrite" class="actions">
+          <ElButton
+            v-if="selected.status === 'active'"
+            type="warning"
+            :disabled="pageLocked"
+            @click="setStatus('disable')"
+            >{{ t('disable') }}</ElButton
+          ><ElButton
+            v-if="selected.status === 'disabled'"
+            :disabled="pageLocked"
+            @click="setStatus('enable')"
+            >{{ t('enable') }}</ElButton
+          >
+        </div>
+      </section>
+    </AdminDialog>
     <ActionConfirm
       :message="pending?.message"
       :busy="busy"

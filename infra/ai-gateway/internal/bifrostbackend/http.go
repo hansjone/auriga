@@ -268,7 +268,7 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 		}
 		respond(w, out)
 	case len(parts) == 1 && parts[0] == "pools" && r.Method == http.MethodGet:
-		out, e := b.ListPools(r.Context(), tenant)
+		out, e := b.ListPools(r.Context(), tenant, page)
 		if e != nil {
 			return e
 		}

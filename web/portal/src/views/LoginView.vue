@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
+  BrandMark,
   ProviderSelect,
   StepContainer,
   type ClientStep,
@@ -86,48 +87,49 @@ function onComplete(redirectTo: string) {
   void router.replace(redirectTo || '/');
 }
 
+function backToProviders() {
+  error.value = '';
+  tx.value = null;
+}
+
 const step = (): ClientStep | null =>
   (tx.value?.step as ClientStep | undefined) ?? null;
 </script>
 
 <template>
-  <section class="login-card auriga-glass">
-    <p class="brand">{{ t('brand') }}</p>
-    <p v-if="loading" class="muted">{{ t('login.loading') }}</p>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+  <section class="auriga-login">
+    <header class="auriga-login-head">
+      <BrandMark :size="40" />
+      <div>
+        <p class="auriga-login-name">
+          {{ t('brand') }}
+        </p>
+      </div>
+    </header>
+    <p v-if="error" class="auriga-login-error" role="alert">{{ error }}</p>
+    <p v-if="loading" class="auriga-login-status" role="status">
+      {{ t('login.loading') }}
+    </p>
     <ProviderSelect
-      v-if="!tx && !loading"
+      v-else-if="!tx"
       :providers="providers"
       @select="selectProvider"
     />
-    <StepContainer
-      v-else-if="step()"
-      :step="step()!"
-      @submit="onSubmit"
-      @retry="onRetry"
-      @complete="onComplete"
-    />
+    <template v-else-if="step()">
+      <StepContainer
+        :step="step()!"
+        @submit="onSubmit"
+        @retry="onRetry"
+        @complete="onComplete"
+      />
+      <button
+        v-if="providers.length > 1 && step()!.type !== 'complete'"
+        type="button"
+        class="auriga-login-back"
+        @click="backToProviders"
+      >
+        {{ t('login.back') }}
+      </button>
+    </template>
   </section>
 </template>
-
-<style scoped>
-.login-card {
-  width: min(380px, 100%);
-  padding: 1.75rem;
-}
-.brand {
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  margin: 0 0 1.25rem;
-  text-align: center;
-}
-.muted {
-  color: var(--auriga-muted);
-  text-align: center;
-}
-.error {
-  color: #d27a7a;
-  text-align: center;
-}
-</style>

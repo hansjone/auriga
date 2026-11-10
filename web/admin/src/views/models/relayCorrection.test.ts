@@ -2,6 +2,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ApiError, createAurigaI18n } from '@auriga/shared';
 import ProvidersView from './ProvidersView.vue';
+import { openAuto } from './autoPoolTestHelper';
 import KeysView from './KeysView.vue';
 import { relayApi, type RelayPool } from '../../admin/relayApi';
 import { adminApi } from '../../admin/api';
@@ -193,7 +194,7 @@ async function open(kind: Kind) {
     vi.mocked(relayApi.pools).mockResolvedValue({ items: [] });
     await w.get('header button').trigger('click');
     await flushPromises();
-    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await openAuto(w);
     await w
       .findAll('button')
       .find((b) => b.text() === '添加池路由')!
@@ -203,7 +204,7 @@ async function open(kind: Kind) {
     await w.get('[name="inputPrice"]').setValue('1');
     await w.get('[name="outputPrice"]').setValue('1');
   } else if (kind === 'pool-edit') {
-    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await openAuto(w);
   } else if (kind === 'key-create') {
     await w.get('[data-testid="new-key"]').trigger('click');
     await w.get('[name="keyName"]').setValue('External');

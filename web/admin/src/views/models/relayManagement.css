@@ -1,36 +1,36 @@
 .relay-providers,
 .relay-keys {
-  --relay-surface: var(--el-fill-color-light);
+  --relay-surface: var(--admin-soft);
 }
 .relay-providers > h2 {
   margin-top: 12px;
 }
-.relay-providers > form fieldset,
-.relay-keys > form fieldset,
+.relay-providers form fieldset,
+.relay-keys form fieldset,
 .relay-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   gap: 16px;
 }
-.relay-providers > form legend,
-.relay-providers > form fieldset > p,
-.relay-providers > form .usage-filters,
-.relay-providers > form fieldset > details,
-.relay-keys > form fieldset > p,
+.relay-providers form legend,
+.relay-providers form fieldset > p,
+.relay-providers form .usage-filters,
+.relay-providers form fieldset > details,
+.relay-keys form fieldset > p,
 .relay-wide {
   grid-column: 1 / -1;
 }
-.relay-providers > form input:not([type='checkbox']),
-.relay-providers > form select,
+.relay-providers form input:not([type='checkbox']),
+.relay-providers form select,
 .relay-import input:not([type='checkbox']),
 .relay-import select,
-.relay-keys > form input:not([type='checkbox']) {
+.relay-keys form input:not([type='checkbox']) {
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
 }
-.relay-providers > form .usage-filters {
+.relay-providers form .usage-filters {
   padding: 16px;
   background: var(--relay-surface);
   border-radius: 8px;
@@ -45,7 +45,7 @@
 .relay-route-title {
   flex-basis: 100%;
 }
-.relay-providers > form .relay-route {
+.relay-providers form .relay-route {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(100px, 0.4fr);
   gap: 12px 16px;
@@ -59,7 +59,7 @@
   border-radius: 8px;
 }
 .relay-capability-editor small {
-  color: var(--el-text-color-secondary);
+  color: var(--auriga-muted);
 }
 .relay-capability-field {
   display: grid;
@@ -88,7 +88,7 @@
   font-size: 12px;
 }
 @media (max-width: 800px) {
-  .relay-providers > form .relay-route {
+  .relay-providers form .relay-route {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -106,7 +106,7 @@
   padding: 24px;
   border: 1px solid var(--el-color-primary);
   border-radius: 12px;
-  background: var(--el-bg-color);
+  background: var(--auriga-surface);
 }
 .relay-import header {
   gap: 16px;
@@ -117,7 +117,7 @@
 }
 .model-usage .relay-hint {
   padding: 12px 16px;
-  background: var(--el-color-warning-light-9);
+  background: rgba(230, 162, 60, 0.12);
   border-left: 3px solid var(--el-color-warning);
   color: var(--el-text-color-primary);
 }
@@ -133,7 +133,7 @@
 .relay-model-options {
   max-height: 340px;
   overflow-y: auto;
-  border: 1px solid var(--el-border-color);
+  border: 1px solid var(--auriga-border);
   border-radius: 8px;
 }
 .relay-model-options {
@@ -148,7 +148,7 @@
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--auriga-border);
 }
 .relay-catalog-row > span:first-of-type {
   flex: 1;
@@ -159,13 +159,13 @@
 .relay-import-table small {
   display: block;
   margin-top: 4px;
-  color: var(--el-text-color-secondary);
+  color: var(--auriga-muted);
 }
 .relay-capacity {
   font-size: 12px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  color: var(--el-text-color-secondary);
+  color: var(--auriga-muted);
 }
 .relay-import-table input {
   min-width: 110px !important;
@@ -177,9 +177,15 @@
   min-width: 200px;
 }
 .model-usage .relay-primary {
-  color: var(--el-color-white);
-  background: var(--el-color-primary);
-  border-color: var(--el-color-primary);
+  color: var(--auriga-on-accent, #fff);
+  background: var(--auriga-accent);
+  border-color: var(--auriga-accent);
+  font-weight: 600;
+}
+.model-usage .relay-primary:hover:not(:disabled) {
+  background: var(--auriga-accent);
+  border-color: var(--auriga-accent);
+  filter: brightness(1.08);
 }
 .relay-status-saved {
   color: var(--el-color-success);
@@ -216,8 +222,8 @@
   outline-offset: 2px;
 }
 @media (max-width: 800px) {
-  .relay-providers > form fieldset,
-  .relay-keys > form fieldset,
+  .relay-providers form fieldset,
+  .relay-keys form fieldset,
   .relay-form-grid,
   .relay-capability-editor,
   .relay-model-options {
@@ -226,4 +232,15 @@
   .relay-import {
     padding: 16px;
   }
+}
+.admin-dialog .model-usage button[type='submit'],
+.admin-dialog form button[type='submit'] {
+  color: var(--auriga-on-accent, #fff);
+  background: var(--auriga-accent);
+  border-color: var(--auriga-accent);
+  font-weight: 600;
+}
+.admin-dialog form button[type='submit']:hover:not(:disabled) {
+  background: var(--auriga-accent);
+  filter: brightness(1.08);
 }

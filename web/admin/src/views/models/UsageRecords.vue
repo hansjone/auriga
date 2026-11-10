@@ -5,7 +5,11 @@ import {
   unknownUsage,
   useModelUsageI18n,
 } from './modelUsageState';
-defineProps<{ rows: Usage[] }>();
+import { formatDateTime, shortId } from './relayFormat';
+defineProps<{
+  rows: Usage[];
+  memberName?: (accountId: string) => string;
+}>();
 const { t } = useModelUsageI18n();
 const tokens = (row: Usage, value: number | null) =>
   unknownUsage(row) || value === null || !Number.isSafeInteger(value)
@@ -42,9 +46,13 @@ const tokens = (row: Usage, value: number | null) =>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="row.requestId">
-          <td>{{ new Date(row.createdAt).toISOString() }}</td>
-          <td>{{ row.requestId }}</td>
-          <td>{{ row.accountId }}</td>
+          <td :title="row.createdAt">{{ formatDateTime(row.createdAt) }}</td>
+          <td class="relay-mono" :title="row.requestId">
+            {{ shortId(row.requestId) }}
+          </td>
+          <td :title="row.accountId">
+            {{ memberName ? memberName(row.accountId) : row.accountId }}
+          </td>
           <td>{{ row.modelId }}</td>
           <td>
             {{ t(row.outcome === 'failed' ? 'failedState' : row.outcome) }}

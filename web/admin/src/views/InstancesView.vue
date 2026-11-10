@@ -5,6 +5,7 @@ import { adminApi, type Instance } from '../admin/api';
 import { useManagement } from '../admin/useManagement';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import AdminDialog from '../admin/AdminDialog.vue';
 import '../admin/management.css';
 
 const { t, state } = useAdminI18n();
@@ -105,88 +106,98 @@ function toggleAlwaysOn() {
     <p v-if="detailLoading" role="status">{{ t('loading') }}</p>
     <p v-if="detailError" class="error" role="alert">{{ detailError }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
-    <section v-if="selected" class="details" :aria-label="t('details')">
-      <header class="head">
-        <h2>{{ selected.name }}</h2>
-        <ElButton :disabled="locked" @click="close">{{ t('close') }}</ElButton>
-      </header>
-      <p v-if="!canWrite" class="muted">
-        {{ t('readonly') }} · {{ t('projection') }}
-      </p>
-      <dl>
-        <dt>{{ t('id') }}</dt>
-        <dd>{{ selected.id }}</dd>
-        <dt>{{ t('owner') }}</dt>
-        <dd>{{ selected.ownerId }}</dd>
-        <dt>{{ t('node') }}</dt>
-        <dd>{{ selected.node?.name || '—' }} {{ selected.node?.id }}</dd>
-        <dt>{{ t('runtime') }}</dt>
-        <dd>{{ selected.runtime }}</dd>
-        <dt>{{ t('version') }}</dt>
-        <dd>{{ selected.dshVersion }}</dd>
-        <dt>{{ t('desired') }}</dt>
-        <dd>{{ state(selected.desired) }}</dd>
-        <dt>{{ t('phase') }}</dt>
-        <dd>{{ state(selected.phase) }}</dd>
-        <dt>{{ t('ready') }}</dt>
-        <dd>{{ t(selected.ready ? 'yes' : 'no') }}</dd>
-        <dt>{{ t('generation') }}</dt>
-        <dd>{{ selected.generation }} / {{ selected.observedGeneration }}</dd>
-        <dt>{{ t('pendingRestart') }}</dt>
-        <dd>{{ t(selected.pendingRestart ? 'yes' : 'no') }}</dd>
-        <dt>{{ t('reasons') }}</dt>
-        <dd>{{ selected.pendingRestartReasons?.join(', ') || '—' }}</dd>
-        <dt>{{ t('alwaysOn') }}</dt>
-        <dd>{{ t(selected.alwaysOn ? 'yes' : 'no') }}</dd>
-        <dt>{{ t('resources') }}</dt>
-        <dd>
-          {{ selected.resources.cpuMillis ?? '—' }} mCPU /
-          {{ selected.resources.memoryMb ?? '—' }} MiB /
-          {{ selected.resources.diskGb ?? '—' }} GiB
-        </dd>
-        <dt>{{ t('error') }}</dt>
-        <dd>
-          {{
-            selected.error
-              ? `${selected.error.code}: ${selected.error.message || ''}`
-              : '—'
-          }}
-        </dd>
-        <dt>{{ t('lastUpdated') }}</dt>
-        <dd>{{ selected.updatedAt }}</dd>
-      </dl>
-      <div v-if="canWrite" class="actions">
-        <ElButton
-          :disabled="
-            locked ||
-            selected.desired === 'running' ||
-            selected.phase === 'deleting'
-          "
-          @click="operate('start')"
-          >{{ t('start') }}</ElButton
-        >
-        <ElButton
-          :disabled="
-            locked ||
-            selected.desired === 'stopped' ||
-            selected.phase === 'deleting'
-          "
-          @click="operate('stop')"
-          >{{ t('stop') }}</ElButton
-        >
-        <ElButton
-          :disabled="locked || selected.phase === 'deleting'"
-          @click="operate('restart')"
-          >{{ t('restart') }}</ElButton
-        >
-        <ElButton
-          :disabled="locked || selected.phase === 'deleting'"
-          @click="toggleAlwaysOn"
-          >{{ t('alwaysOn') }}:
-          {{ t(selected.alwaysOn ? 'no' : 'yes') }}</ElButton
-        >
-      </div>
-    </section>
+    <AdminDialog
+      :open="!!selected"
+      :title="selected?.name ?? ''"
+      width="min(760px, 94vw)"
+      :locked="locked"
+      @close="close"
+    >
+      <section v-if="selected" class="details" :aria-label="t('details')">
+        <header class="head">
+          <h2>{{ selected.name }}</h2>
+          <ElButton :disabled="locked" @click="close">{{
+            t('close')
+          }}</ElButton>
+        </header>
+        <p v-if="!canWrite" class="muted">
+          {{ t('readonly') }} · {{ t('projection') }}
+        </p>
+        <dl>
+          <dt>{{ t('id') }}</dt>
+          <dd>{{ selected.id }}</dd>
+          <dt>{{ t('owner') }}</dt>
+          <dd>{{ selected.ownerId }}</dd>
+          <dt>{{ t('node') }}</dt>
+          <dd>{{ selected.node?.name || '—' }} {{ selected.node?.id }}</dd>
+          <dt>{{ t('runtime') }}</dt>
+          <dd>{{ selected.runtime }}</dd>
+          <dt>{{ t('version') }}</dt>
+          <dd>{{ selected.dshVersion }}</dd>
+          <dt>{{ t('desired') }}</dt>
+          <dd>{{ state(selected.desired) }}</dd>
+          <dt>{{ t('phase') }}</dt>
+          <dd>{{ state(selected.phase) }}</dd>
+          <dt>{{ t('ready') }}</dt>
+          <dd>{{ t(selected.ready ? 'yes' : 'no') }}</dd>
+          <dt>{{ t('generation') }}</dt>
+          <dd>{{ selected.generation }} / {{ selected.observedGeneration }}</dd>
+          <dt>{{ t('pendingRestart') }}</dt>
+          <dd>{{ t(selected.pendingRestart ? 'yes' : 'no') }}</dd>
+          <dt>{{ t('reasons') }}</dt>
+          <dd>{{ selected.pendingRestartReasons?.join(', ') || '—' }}</dd>
+          <dt>{{ t('alwaysOn') }}</dt>
+          <dd>{{ t(selected.alwaysOn ? 'yes' : 'no') }}</dd>
+          <dt>{{ t('resources') }}</dt>
+          <dd>
+            {{ selected.resources.cpuMillis ?? '—' }} mCPU /
+            {{ selected.resources.memoryMb ?? '—' }} MiB /
+            {{ selected.resources.diskGb ?? '—' }} GiB
+          </dd>
+          <dt>{{ t('error') }}</dt>
+          <dd>
+            {{
+              selected.error
+                ? `${selected.error.code}: ${selected.error.message || ''}`
+                : '—'
+            }}
+          </dd>
+          <dt>{{ t('lastUpdated') }}</dt>
+          <dd>{{ selected.updatedAt }}</dd>
+        </dl>
+        <div v-if="canWrite" class="actions">
+          <ElButton
+            :disabled="
+              locked ||
+              selected.desired === 'running' ||
+              selected.phase === 'deleting'
+            "
+            @click="operate('start')"
+            >{{ t('start') }}</ElButton
+          >
+          <ElButton
+            :disabled="
+              locked ||
+              selected.desired === 'stopped' ||
+              selected.phase === 'deleting'
+            "
+            @click="operate('stop')"
+            >{{ t('stop') }}</ElButton
+          >
+          <ElButton
+            :disabled="locked || selected.phase === 'deleting'"
+            @click="operate('restart')"
+            >{{ t('restart') }}</ElButton
+          >
+          <ElButton
+            :disabled="locked || selected.phase === 'deleting'"
+            @click="toggleAlwaysOn"
+            >{{ t('alwaysOn') }}:
+            {{ t(selected.alwaysOn ? 'no' : 'yes') }}</ElButton
+          >
+        </div>
+      </section>
+    </AdminDialog>
     <ActionConfirm
       :message="pending?.message"
       :busy="busy"

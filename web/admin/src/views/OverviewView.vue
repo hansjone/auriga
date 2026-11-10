@@ -150,21 +150,64 @@ onBeforeUnmount(() => {
 <style scoped>
 .overview-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  margin-bottom: 22px;
+}
+.overview-heading h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+.overview-heading p {
+  margin: 0;
+  color: var(--auriga-muted);
+  font-size: 13px;
 }
 .overview-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
 }
 .overview-card {
-  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 20px;
   border: 1px solid var(--auriga-border);
   border-radius: 12px;
+  background: var(--auriga-surface);
+}
+.overview-card h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--auriga-muted);
 }
 .overview-card strong {
-  font-size: 2rem;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.overview-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--auriga-muted);
+}
+.overview-card p[role='alert'] {
+  color: var(--auriga-danger);
+}
+.overview-card a {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 13px;
+  color: var(--auriga-accent);
+  text-decoration: none;
+}
+.overview-card a:hover {
+  text-decoration: underline;
 }
 </style>

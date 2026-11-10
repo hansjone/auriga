@@ -143,60 +143,107 @@ function onSubmit(e: { preventDefault: () => void }) {
 .form-step {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 .title {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 1.125rem;
   font-weight: 600;
   text-align: center;
+  letter-spacing: -0.01em;
 }
 .desc,
 .info,
 .help {
   margin: 0;
   color: var(--auriga-muted);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.desc {
+  margin-top: -0.5rem;
+  text-align: center;
 }
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.875rem;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  color: var(--auriga-muted);
 }
 .field input,
 .field select {
+  box-sizing: border-box;
+  width: 100%;
   height: 2.75rem;
   padding: 0 0.875rem;
-  border-radius: 13px;
+  border-radius: 12px;
   border: 1px solid var(--auriga-border);
-  background: rgba(8, 18, 28, 0.45);
+  background: var(--auriga-field-bg, rgba(4, 12, 20, 0.5));
   color: var(--auriga-text);
   font: inherit;
+  font-size: 0.9375rem;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+.field input::placeholder {
+  color: var(--auriga-muted);
+  opacity: 0.7;
+}
+.field input:hover,
+.field select:hover {
+  border-color: var(--auriga-border-strong, rgba(150, 182, 208, 0.32));
+}
+.field input:focus,
+.field select:focus {
+  border-color: var(--auriga-accent-line, #5b93bd);
 }
 .field input.otp {
-  letter-spacing: 0.3em;
+  letter-spacing: 0.4em;
   text-align: center;
+  font-size: 1.125rem;
   font-variant-numeric: tabular-nums;
 }
 .check {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  font-size: 0.875rem;
 }
 .error {
-  color: #d27a7a;
-  font-size: 0.875rem;
+  color: var(--auriga-danger, #e08c8c);
+  font-size: 0.8125rem;
   margin: 0;
 }
+p.error {
+  padding: 0.625rem 0.75rem;
+  border-radius: 10px;
+  background: var(--auriga-danger-soft, rgba(224, 140, 140, 0.1));
+  text-align: center;
+}
 .primary {
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
   height: 2.75rem;
   border: 0;
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--auriga-accent);
-  color: #dbe4ee;
+  color: var(--auriga-on-accent, #f1f6fa);
   font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
   cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.primary:hover {
+  filter: brightness(1.08);
+}
+.primary:active {
+  filter: brightness(0.95);
+}
+.primary:focus-visible {
+  outline: 2px solid var(--auriga-accent-line, #5b93bd);
+  outline-offset: 2px;
 }
 </style>

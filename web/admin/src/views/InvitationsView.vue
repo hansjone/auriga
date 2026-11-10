@@ -21,6 +21,7 @@ import {
 import { useCursorList } from '../admin/useCursorList';
 import { useOrgActions, orgError } from '../admin/useOrgActions';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import AdminDialog from '../admin/AdminDialog.vue';
 import { rolesApi, type Role } from '../admin/rolesApi';
 import { hasPermission } from '../admin/permissions';
 import '../admin/management.css';
@@ -361,61 +362,68 @@ async function copyResult(kind: 'code' | 'url') {
         >{{ t('next') }}</ElButton
       >
     </div>
-    <section v-if="creating && canWrite" class="details">
-      <h2>{{ t('newInvitation') }}</h2>
-      <p>{{ t('invitationDefaults') }}</p>
-      <ElForm
-        :disabled="locked || loading || rolesLoading"
-        label-position="top"
-        @submit.prevent="create"
-      >
-        <ElFormItem :label="t('type')"
-          ><ElSelect
-            v-model="memberType"
-            :aria-label="t('type')"
-            :options="
-              memberTypes.map((value) => ({ value, label: state(value) }))
-            "
-        /></ElFormItem>
-        <ElFormItem :label="t('initialRoles')"
-          ><ElSelect
-            v-model="roleIds"
-            multiple
-            :aria-label="t('initialRoles')"
-            :placeholder="t('initialRoles')"
-            :options="roleOptions"
-            :no-data-text="t('empty')"
-            :disabled="!rolesReady"
-        /></ElFormItem>
-        <p v-if="rolesLoading" role="status">{{ t('loading') }}</p>
-        <p v-if="rolesError" role="alert" class="error">{{ rolesError }}</p>
-        <ElButton
-          v-if="rolesError"
-          :disabled="locked || rolesLoading"
-          @click="loadRoles"
-          >{{ t('reloadOptions') }}</ElButton
+    <AdminDialog
+      :open="creating && canWrite"
+      :title="t('newInvitation')"
+      :locked="locked"
+      @close="creating = false"
+    >
+      <section v-if="creating && canWrite" class="details">
+        <h2>{{ t('newInvitation') }}</h2>
+        <p>{{ t('invitationDefaults') }}</p>
+        <ElForm
+          :disabled="locked || loading || rolesLoading"
+          label-position="top"
+          @submit.prevent="create"
         >
-        <ElFormItem :label="t('email')"
-          ><ElInput
-            v-model="email"
-            type="email"
-            :aria-label="t('email')"
-            :placeholder="t('optional')"
-        /></ElFormItem>
-        <ElFormItem :label="t('displayName')"
-          ><ElInput
-            v-model="displayName"
-            :aria-label="t('displayName')"
-            :placeholder="t('optional')"
-        /></ElFormItem>
-        <ElButton
-          native-type="submit"
-          type="primary"
-          :disabled="!rolesReady || rolesLoading"
-          >{{ t('newInvitation') }}</ElButton
-        ><ElButton @click="creating = false">{{ t('cancel') }}</ElButton>
-      </ElForm>
-    </section>
+          <ElFormItem :label="t('type')"
+            ><ElSelect
+              v-model="memberType"
+              :aria-label="t('type')"
+              :options="
+                memberTypes.map((value) => ({ value, label: state(value) }))
+              "
+          /></ElFormItem>
+          <ElFormItem :label="t('initialRoles')"
+            ><ElSelect
+              v-model="roleIds"
+              multiple
+              :aria-label="t('initialRoles')"
+              :placeholder="t('initialRoles')"
+              :options="roleOptions"
+              :no-data-text="t('empty')"
+              :disabled="!rolesReady"
+          /></ElFormItem>
+          <p v-if="rolesLoading" role="status">{{ t('loading') }}</p>
+          <p v-if="rolesError" role="alert" class="error">{{ rolesError }}</p>
+          <ElButton
+            v-if="rolesError"
+            :disabled="locked || rolesLoading"
+            @click="loadRoles"
+            >{{ t('reloadOptions') }}</ElButton
+          >
+          <ElFormItem :label="t('email')"
+            ><ElInput
+              v-model="email"
+              type="email"
+              :aria-label="t('email')"
+              :placeholder="t('optional')"
+          /></ElFormItem>
+          <ElFormItem :label="t('displayName')"
+            ><ElInput
+              v-model="displayName"
+              :aria-label="t('displayName')"
+              :placeholder="t('optional')"
+          /></ElFormItem>
+          <ElButton
+            native-type="submit"
+            type="primary"
+            :disabled="!rolesReady || rolesLoading"
+            >{{ t('newInvitation') }}</ElButton
+          ><ElButton @click="creating = false">{{ t('cancel') }}</ElButton>
+        </ElForm>
+      </section>
+    </AdminDialog>
     <ActionConfirm
       :message="pending?.message"
       :busy="busy"

@@ -15,6 +15,7 @@ import {
   type RelayPool,
 } from '../../admin/relayApi';
 import ActionConfirm from '../../admin/ActionConfirm.vue';
+import AdminDialog from '../../admin/AdminDialog.vue';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
 import { useRelayWriteIntent, type RelayWriteAction } from './relayWriteIntent';
@@ -50,7 +51,6 @@ const provider = ref<RelayProviderInput>({
   enabled: true,
 });
 const draft = ref<RelayPool>();
-const autoEditor = ref(false);
 const poolsReady = ref(false);
 const pending = shallowRef<RelayWriteAction>();
 function canPrepare() {
@@ -182,7 +182,6 @@ onBeforeUnmount(() => {
 });
 function close() {
   writeIntent.reset();
-  autoEditor.value = false;
   importProvider.value = '';
   importRunning.value = false;
   capabilityNotice.value = '';
@@ -223,26 +222,13 @@ function editProvider(row?: RelayProvider) {
 }
 function editPool(row?: RelayPool) {
   if (!canPrepare()) return;
-  if (row?.id === 'auto' && (!poolsReady.value || loading.value)) return;
+  // A failed or in-flight snapshot never proves that auto is absent.
+  if (!poolsReady.value || loading.value) return;
   close();
   selected.value = row?.id ?? '';
   draft.value = row ? globalThis.structuredClone(row) : freshPool();
   draft.value.capabilities ??= createCapabilityPolicy(draft.value, 'manual');
   editor.value = 'pool';
-}
-function editAutoPool() {
-  if (
-    !poolsReady.value ||
-    loading.value ||
-    busy.value ||
-    pending.value ||
-    unresolved.value ||
-    !ui.can('ai.providers.write')
-  )
-    return;
-  editPool(pools.value.find((pool) => pool.id === 'auto'));
-  autoEditor.value = true;
-  draft.value!.id = 'auto';
 }
 function editCredential(row: RelayProvider) {
   if (!canPrepare()) return;
@@ -442,6 +428,7 @@ async function confirm() {
       ><button
         data-testid="add-pool"
         :disabled="
+          !poolsReady ||
           loading ||
           busy ||
           !!pending ||
@@ -468,11 +455,19 @@ async function confirm() {
         </thead>
         <tbody>
           <tr v-for="row in providers" :key="row.id">
-            <td>{{ row.configuration.name }}</td>
+            <td class="relay-strong">{{ row.configuration.name }}</td>
             <td>{{ row.configuration.kind }}</td>
             <td>{{ row.configuration.baseUrl }}</td>
-            <td>{{ t(row.configuration.enabled ? 'enabled' : 'disabled') }}</td>
             <td>
+              <span
+                class="relay-badge"
+                :data-state="row.configuration.enabled ? 'on' : 'off'"
+                >{{
+                  t(row.configuration.enabled ? 'enabled' : 'disabled')
+                }}</span
+              >
+            </td>
+            <td :class="{ 'relay-error': !row.hasCredential }">
               {{
                 t(row.hasCredential ? 'credentialReady' : 'credentialMissing')
               }}
@@ -520,103 +515,108 @@ async function confirm() {
         </tbody>
       </table>
     </div>
-    <ModelImportPanel
-      v-if="importProvider"
-      :key="importSession"
-      :providers="providers"
-      :pools="pools"
-      :provider-id="importProvider"
-      :permissions="ui.permissions.value"
+    <AdminDialog
+      :open="!!importProvider"
+      :title="t('importModels')"
+      width="min(1100px, 94vw)"
       @close="close"
-      @imported="load"
-      @access="accessChanged"
-      @running="importRunning = $event"
-    />
-    <form
-      v-if="editor === 'provider'"
-      data-testid="save-provider"
-      @submit.prevent="askProvider"
     >
-      <fieldset :disabled="busy || !!pending || !!unresolved">
-        <legend>{{ t(selected ? 'edit' : 'addProvider') }}</legend>
-        <label
-          >{{ t('name')
-          }}<input
-            v-model="provider.name"
-            name="providerName"
-            required
-            maxlength="128" /></label
-        ><label
-          >{{ t('kind')
-          }}<select v-model="provider.kind" name="providerKind">
-            <option
-              v-for="kind in [
-                'openai-compatible',
-                'openai',
-                'minimax',
-                'deepseek',
-                'anthropic',
-                'gemini',
-              ] as const"
-              :key="kind"
-              :value="kind"
-            >
-              {{ kind }}
-            </option>
-          </select></label
-        ><label
-          >{{ t('url')
-          }}<input
-            v-model="provider.baseUrl"
-            name="providerUrl"
-            type="url"
-            required
-        /></label>
-        <p>{{ t('apiRootNote') }}</p>
-        <label
-          ><input
-            v-model="provider.enabled"
-            name="providerEnabled"
-            type="checkbox"
-          />{{ t('enabled') }}</label
-        ><button type="submit">{{ t('save') }}</button
-        ><button type="button" @click="close">{{ t('close') }}</button>
-      </fieldset>
-    </form>
-    <form v-if="editor === 'credential'" @submit.prevent="askCredential">
-      <fieldset :disabled="busy || !!pending || !!unresolved">
-        <legend>{{ t('credential') }} · {{ provider.name }}</legend>
-        <p>{{ t('secretNote') }}</p>
-        <label
-          >{{ t('secret')
-          }}<input
-            v-model="secret"
-            name="providerSecret"
-            type="password"
-            data-sensitive
-            autocomplete="new-password"
-            required /></label
-        ><button type="submit">{{ t('save') }}</button
-        ><button type="button" @click="close">{{ t('close') }}</button>
-      </fieldset>
-    </form>
+      <ModelImportPanel
+        v-if="importProvider"
+        :key="importSession"
+        :providers="providers"
+        :pools="pools"
+        :provider-id="importProvider"
+        :permissions="ui.permissions.value"
+        @close="close"
+        @imported="load"
+        @access="accessChanged"
+        @running="importRunning = $event"
+      />
+    </AdminDialog>
+    <AdminDialog
+      :open="editor === 'provider'"
+      :title="t(selected ? 'edit' : 'addProvider')"
+      @close="close"
+    >
+      <form
+        v-if="editor === 'provider'"
+        data-testid="save-provider"
+        @submit.prevent="askProvider"
+      >
+        <fieldset :disabled="busy || !!pending || !!unresolved">
+          <legend>{{ t(selected ? 'edit' : 'addProvider') }}</legend>
+          <label
+            >{{ t('name')
+            }}<input
+              v-model="provider.name"
+              name="providerName"
+              required
+              maxlength="128" /></label
+          ><label
+            >{{ t('kind')
+            }}<select v-model="provider.kind" name="providerKind">
+              <option
+                v-for="kind in [
+                  'openai-compatible',
+                  'openai',
+                  'minimax',
+                  'deepseek',
+                  'anthropic',
+                  'gemini',
+                ] as const"
+                :key="kind"
+                :value="kind"
+              >
+                {{ kind }}
+              </option>
+            </select></label
+          ><label
+            >{{ t('url')
+            }}<input
+              v-model="provider.baseUrl"
+              name="providerUrl"
+              type="url"
+              required
+          /></label>
+          <p>{{ t('apiRootNote') }}</p>
+          <label
+            ><input
+              v-model="provider.enabled"
+              name="providerEnabled"
+              type="checkbox"
+            />{{ t('enabled') }}</label
+          ><button type="submit">{{ t('save') }}</button
+          ><button type="button" @click="close">{{ t('close') }}</button>
+        </fieldset>
+      </form>
+    </AdminDialog>
+    <AdminDialog
+      :open="editor === 'credential'"
+      :title="t('credential') + ' · ' + provider.name"
+      width="520px"
+      @close="close"
+    >
+      <form v-if="editor === 'credential'" @submit.prevent="askCredential">
+        <fieldset :disabled="busy || !!pending || !!unresolved">
+          <legend>{{ t('credential') }} · {{ provider.name }}</legend>
+          <p>{{ t('secretNote') }}</p>
+          <label
+            >{{ t('secret')
+            }}<input
+              v-model="secret"
+              name="providerSecret"
+              type="password"
+              data-sensitive
+              autocomplete="new-password"
+              required /></label
+          ><button type="submit">{{ t('save') }}</button
+          ><button type="button" @click="close">{{ t('close') }}</button>
+        </fieldset>
+      </form>
+    </AdminDialog>
     <h2>{{ t('pools') }}</h2>
     <p>{{ t('poolNote') }}</p>
-    <button
-      data-testid="configure-auto"
-      :disabled="
-        !poolsReady ||
-        loading ||
-        busy ||
-        !!pending ||
-        !!unresolved ||
-        !ui.can('ai.providers.write')
-      "
-      @click="editAutoPool"
-    >
-      {{ t('configureAuto') }}
-    </button>
-    <p>{{ t('autoNote') }}</p>
     <label class="relay-search"
       >{{ t('publicSearch')
       }}<input
@@ -638,9 +638,22 @@ async function confirm() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="pool in visiblePools" :key="pool.id">
-            <td>{{ pool.id }}</td>
-            <td>{{ t(pool.enabled ? 'enabled' : 'disabled') }}</td>
+          <tr v-for="pool in visiblePools" :key="pool.id" :data-pool="pool.id">
+            <td class="relay-strong">
+              {{ pool.id
+              }}<span
+                v-if="pool.id === 'auto'"
+                class="relay-badge relay-default"
+                >{{ t('defaultPool') }}</span
+              >
+            </td>
+            <td>
+              <span
+                class="relay-badge"
+                :data-state="pool.enabled ? 'on' : 'off'"
+                >{{ t(pool.enabled ? 'enabled' : 'disabled') }}</span
+              >
+            </td>
             <td>
               <div
                 v-for="route in pool.routes"
@@ -674,7 +687,8 @@ async function confirm() {
                   !!pending ||
                   !!unresolved ||
                   !ui.can('ai.providers.write') ||
-                  (pool.id === 'auto' && (!poolsReady || loading))
+                  !poolsReady ||
+                  loading
                 "
                 @click="editPool(pool)"
               >
@@ -685,161 +699,170 @@ async function confirm() {
         </tbody>
       </table>
     </div>
-    <form
-      v-if="editor === 'pool' && draft"
-      data-testid="pool-form"
-      @submit.prevent="askPool"
+    <AdminDialog
+      :open="editor === 'pool' && !!draft"
+      :title="
+        t(selected ? 'edit' : 'addPool') + (draft?.id ? ' · ' + draft.id : '')
+      "
+      width="min(920px, 94vw)"
+      @close="close"
     >
-      <fieldset :disabled="busy || !!pending || !!unresolved">
-        <legend>{{ t('pools') }}</legend>
-        <p>{{ t('aliasNote') }}</p>
-        <label
-          >{{ t('poolId')
-          }}<input
-            v-model="draft.id"
-            name="poolId"
-            :disabled="!!selected || autoEditor"
-            pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
-            required /></label
-        ><label
-          ><input
-            v-model="draft.enabled"
-            name="poolEnabled"
-            type="checkbox"
-          />{{ t('enabled') }}</label
-        >
-        <PoolCapabilitiesEditor
-          v-model="draft"
-          :providers="providers"
-          :catalogs="catalogs"
-          @refresh="applyCapabilities"
-        />
-        <p v-if="capabilityNotice" class="relay-wide" role="status">
-          {{ capabilityNotice }}
-        </p>
-        <div
-          v-for="(route, index) in draft.routes"
-          :key="index"
-          class="usage-filters relay-route"
-        >
-          <strong class="relay-route-title">{{
-            t('routeNumber', { number: index + 1 })
-          }}</strong>
+      <form
+        v-if="editor === 'pool' && draft"
+        data-testid="pool-form"
+        @submit.prevent="askPool"
+      >
+        <fieldset :disabled="busy || !!pending || !!unresolved">
+          <legend>{{ t('pools') }}</legend>
+          <p>{{ t('aliasNote') }}</p>
           <label
-            >{{ t('providers')
-            }}<select
-              v-model="route.providerId"
-              :name="'routeProvider' + index"
-              required
-              @change="providerChanged(index)"
-            >
-              <option disabled value="">{{ t('providers') }}</option>
-              <option v-for="p in providers" :key="p.id" :value="p.id">
-                {{ p.configuration.name }}
-              </option>
-            </select></label
+            >{{ t('poolId')
+            }}<input
+              v-model="draft.id"
+              name="poolId"
+              :disabled="!!selected"
+              pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+              required /></label
           ><label
-            >{{ t('model')
-            }}<input
-              v-model="route.model"
-              :name="'routeModel' + index"
-              :list="'route-model-catalog-' + index"
-              required
-              maxlength="256"
-              @change="modelChanged(route.model)"
-            />
-            <datalist :id="'route-model-catalog-' + index">
-              <option
-                v-for="model in catalogs[route.providerId]?.items ?? []"
-                :key="model.id"
-                :value="model.id"
+            ><input
+              v-model="draft.enabled"
+              name="poolEnabled"
+              type="checkbox"
+            />{{ t('enabled') }}</label
+          >
+          <PoolCapabilitiesEditor
+            v-model="draft"
+            :providers="providers"
+            :catalogs="catalogs"
+            @refresh="applyCapabilities"
+          />
+          <p v-if="capabilityNotice" class="relay-wide" role="status">
+            {{ capabilityNotice }}
+          </p>
+          <div
+            v-for="(route, index) in draft.routes"
+            :key="index"
+            class="usage-filters relay-route"
+          >
+            <strong class="relay-route-title">{{
+              t('routeNumber', { number: index + 1 })
+            }}</strong>
+            <label
+              >{{ t('providers')
+              }}<select
+                v-model="route.providerId"
+                :name="'routeProvider' + index"
+                required
+                @change="providerChanged(index)"
+              >
+                <option disabled value="">{{ t('providers') }}</option>
+                <option v-for="p in providers" :key="p.id" :value="p.id">
+                  {{ p.configuration.name }}
+                </option>
+              </select></label
+            ><label
+              >{{ t('model')
+              }}<input
+                v-model="route.model"
+                :name="'routeModel' + index"
+                :list="'route-model-catalog-' + index"
+                required
+                maxlength="256"
+                @change="modelChanged(route.model)"
               />
-            </datalist>
-          </label>
-          <label
-            >{{ t('weight')
-            }}<input
-              v-model.number="route.weight"
-              :name="'routeWeight' + index"
-              type="number"
-              min="0"
-              max="1000"
-              step="any"
-              required
-          /></label>
-          <div class="relay-route-actions">
-            <button
-              type="button"
-              :data-testid="'fetch-provider-models-' + index"
-              :disabled="
-                !route.providerId || catalogs[route.providerId]?.loading
+              <datalist :id="'route-model-catalog-' + index">
+                <option
+                  v-for="model in catalogs[route.providerId]?.items ?? []"
+                  :key="model.id"
+                  :value="model.id"
+                />
+              </datalist>
+            </label>
+            <label
+              >{{ t('weight')
+              }}<input
+                v-model.number="route.weight"
+                :name="'routeWeight' + index"
+                type="number"
+                min="0"
+                max="1000"
+                step="any"
+                required
+            /></label>
+            <div class="relay-route-actions">
+              <button
+                type="button"
+                :data-testid="'fetch-provider-models-' + index"
+                :disabled="
+                  !route.providerId || catalogs[route.providerId]?.loading
+                "
+                @click="fetchModels(route.providerId)"
+              >
+                {{
+                  t(
+                    catalogs[route.providerId]?.loading
+                      ? 'loading'
+                      : 'fetchModels',
+                  )
+                }}
+              </button>
+              <button type="button" @click="draft.routes.splice(index, 1)">
+                {{ t('remove') }}
+              </button>
+              <p v-if="route.model && draft.id" data-testid="model-mapping">
+                {{ route.model }} → {{ draft.id }}
+              </p>
+            </div>
+            <p class="relay-route-hint">{{ t('catalogHint') }}</p>
+            <p v-if="catalogs[route.providerId]?.error" role="alert">
+              {{ catalogs[route.providerId]?.error }}
+            </p>
+            <p
+              v-else-if="
+                catalogs[route.providerId] &&
+                !catalogs[route.providerId]?.loading &&
+                !catalogs[route.providerId]?.items.length
               "
-              @click="fetchModels(route.providerId)"
             >
-              {{
-                t(
-                  catalogs[route.providerId]?.loading
-                    ? 'loading'
-                    : 'fetchModels',
-                )
-              }}
-            </button>
-            <button type="button" @click="draft.routes.splice(index, 1)">
-              {{ t('remove') }}
-            </button>
-            <p v-if="route.model && draft.id" data-testid="model-mapping">
-              {{ route.model }} → {{ draft.id }}
+              {{ t('catalogEmpty') }}
             </p>
           </div>
-          <p class="relay-route-hint">{{ t('catalogHint') }}</p>
-          <p v-if="catalogs[route.providerId]?.error" role="alert">
-            {{ catalogs[route.providerId]?.error }}
-          </p>
-          <p
-            v-else-if="
-              catalogs[route.providerId] &&
-              !catalogs[route.providerId]?.loading &&
-              !catalogs[route.providerId]?.items.length
-            "
+          <button
+            type="button"
+            :disabled="draft.routes.length >= 8"
+            @click="draft.routes.push({ providerId: '', model: '', weight: 1 })"
           >
-            {{ t('catalogEmpty') }}
-          </p>
-        </div>
-        <button
-          type="button"
-          :disabled="draft.routes.length >= 8"
-          @click="draft.routes.push({ providerId: '', model: '', weight: 1 })"
-        >
-          {{ t('addRoute') }}</button
-        ><label
-          >{{ t('priceInput')
-          }}<input
-            v-model.number="draft.price.inputMicrosPerMillionTokens"
-            name="inputPrice"
-            type="number"
-            min="1"
-            max="9007199254740991"
-            required /></label
-        ><label
-          >{{ t('priceOutput')
-          }}<input
-            v-model.number="draft.price.outputMicrosPerMillionTokens"
-            name="outputPrice"
-            type="number"
-            min="1"
-            max="9007199254740991"
-            required
-        /></label>
-        <p class="relay-wide">{{ t('priceNote') }}</p>
-        <button
-          type="submit"
-          data-testid="save-pool"
-          :disabled="catalogLoading"
-        >
-          {{ t('save') }}</button
-        ><button type="button" @click="close">{{ t('close') }}</button>
-      </fieldset>
-    </form>
+            {{ t('addRoute') }}</button
+          ><label
+            >{{ t('priceInput')
+            }}<input
+              v-model.number="draft.price.inputMicrosPerMillionTokens"
+              name="inputPrice"
+              type="number"
+              min="1"
+              max="9007199254740991"
+              required /></label
+          ><label
+            >{{ t('priceOutput')
+            }}<input
+              v-model.number="draft.price.outputMicrosPerMillionTokens"
+              name="outputPrice"
+              type="number"
+              min="1"
+              max="9007199254740991"
+              required
+          /></label>
+          <p class="relay-wide">{{ t('priceNote') }}</p>
+          <button
+            type="submit"
+            data-testid="save-pool"
+            :disabled="catalogLoading"
+          >
+            {{ t('save') }}</button
+          ><button type="button" @click="close">{{ t('close') }}</button>
+        </fieldset>
+      </form>
+    </AdminDialog>
     <p>{{ t('limitNote') }}</p>
     <ActionConfirm
       :message="pending?.message"

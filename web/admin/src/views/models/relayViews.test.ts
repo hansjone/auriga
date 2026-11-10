@@ -1,11 +1,13 @@
-﻿import { mount, flushPromises } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createAurigaI18n } from '@auriga/shared';
 import ProvidersView from './ProvidersView.vue';
+import { openAuto } from './autoPoolTestHelper';
 import KeysView from './KeysView.vue';
 import UsageView from './UsageView.vue';
 import { relayApi } from '../../admin/relayApi';
 import { adminApi } from '../../admin/api';
+import { orgApi } from '../../api';
 vi.mock('../../admin/relayApi', () => ({
   relayApi: {
     providers: vi.fn(),
@@ -22,6 +24,9 @@ vi.mock('../../admin/relayApi', () => ({
   },
 }));
 vi.mock('../../admin/api', () => ({ adminApi: { membership: vi.fn() } }));
+vi.mock('../../api', () => ({ orgApi: { listMembers: vi.fn() } }));
+const routeQuery: Record<string, string> = {};
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: routeQuery }) }));
 const perms = [
   'ai.providers.read',
   'ai.providers.write',
@@ -41,6 +46,10 @@ const p = {
 const global = {
   plugins: [createAurigaI18n('zh-CN')],
   stubs: {
+    RouterLink: {
+      props: ['to'],
+      template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
+    },
     ActionConfirm: {
       props: ['message', 'busy'],
       emits: ['confirm', 'cancel'],
@@ -57,7 +66,10 @@ beforeEach(() => {
   vi.mocked(relayApi.pools).mockResolvedValue({ items: [] });
   vi.mocked(relayApi.keys).mockResolvedValue({ items: [] });
 });
-afterEach(() => vi.resetAllMocks());
+afterEach(() => {
+  vi.resetAllMocks();
+  for (const key of Object.keys(routeQuery)) delete routeQuery[key];
+});
 it('rejects context one before confirmation while retaining zero as unknown', async () => {
   const auto = {
     id: 'auto',
@@ -76,7 +88,7 @@ it('rejects context one before confirmation while retaining zero as unknown', as
   vi.mocked(relayApi.pools).mockResolvedValue({ items: [auto] });
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   await w.get('[data-testid="pool-form"]').trigger('submit');
   expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
   expect(relayApi.savePool).not.toHaveBeenCalled();
@@ -159,7 +171,7 @@ it('saves different models from the same provider in auto and identifies an exac
   vi.mocked(relayApi.pools).mockResolvedValue({ items: [auto] });
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   await w.get('[data-testid="pool-form"]').trigger('submit');
   expect(w.find('[data-testid="confirm-action"]').exists()).toBe(true);
   await w.get('[data-testid="confirm-action"]').trigger('click');
@@ -177,7 +189,7 @@ it('saves different models from the same provider in auto and identifies an exac
     expect.any(String),
     expect.any(AbortSignal),
   );
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   await w.get('[name="routeModel1"]').setValue('first');
   await w.get('[data-testid="pool-form"]').trigger('submit');
   expect(w.text()).toContain('第 2 条路由');
@@ -185,15 +197,16 @@ it('saves different models from the same provider in auto and identifies an exac
   expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
   w.unmount();
 });
-it('opens a fixed auto ID in the existing pool form without publishing a fake pool', async () => {
+it('creates auto through the regular pool form without publishing a fake pool', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  expect(w.find('[data-testid="configure-auto"]').exists()).toBe(false);
+  expect(w.text()).toContain('ID 为 auto 的池即 DSH 默认模型');
+  await openAuto(w);
   const id = w.get('[name="poolId"]').element as HTMLInputElement;
-  expect(id.value).toBe('auto');
-  expect(id.disabled).toBe(true);
+  expect(id.value).toBe('');
+  expect(id.disabled).toBe(false);
   expect(relayApi.savePool).not.toHaveBeenCalled();
-  expect(w.text()).toContain('已有会话与个人选择保留');
   w.unmount();
 });
 
@@ -217,7 +230,7 @@ it('auto entry edits the current auto routes while retaining legacy pools', asyn
   });
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   expect(w.text()).toContain('legacy');
   expect(
     (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
@@ -244,7 +257,7 @@ it('auto entry edits the current auto routes while retaining legacy pools', asyn
   w.unmount();
 });
 
-it('keeps Auto disabled until a successful current pool snapshot is available', async () => {
+it('keeps pool editing disabled until a successful current pool snapshot is available', async () => {
   let complete!: (value: Awaited<ReturnType<typeof relayApi.pools>>) => void;
   vi.mocked(relayApi.pools).mockReturnValue(
     new Promise((resolve) => {
@@ -253,7 +266,7 @@ it('keeps Auto disabled until a successful current pool snapshot is available', 
   );
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  const button = w.get('[data-testid="configure-auto"]');
+  const button = w.get('[data-testid="add-pool"]');
   expect((button.element as HTMLButtonElement).disabled).toBe(true);
   await button.trigger('click');
   expect(w.find('[name="poolId"]').exists()).toBe(false);
@@ -277,7 +290,7 @@ it('keeps Auto disabled until a successful current pool snapshot is available', 
   });
   await flushPromises();
   expect(w.find('[name="poolId"]').exists()).toBe(false);
-  await button.trigger('click');
+  await openAuto(w);
   expect(
     (w.get('[name="contextWindow"]').element as HTMLInputElement).value,
   ).toBe('64000');
@@ -290,7 +303,7 @@ it('never treats a failed pool snapshot as proof that auto is absent', async () 
   vi.mocked(relayApi.pools).mockRejectedValue(new Error('offline-fixture'));
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  const button = w.get('[data-testid="configure-auto"]');
+  const button = w.get('[data-testid="add-pool"]');
   expect((button.element as HTMLButtonElement).disabled).toBe(true);
   await button.trigger('click');
   expect(w.find('[name="poolId"]').exists()).toBe(false);
@@ -302,15 +315,15 @@ it('never treats a failed pool snapshot as proof that auto is absent', async () 
 it('invalidates an Auto draft before reloading, and a failed reload never leaves a saveable stale draft', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
+  await w.get('[name="poolId"]').setValue('auto');
   expect(w.find('[name="poolId"]').exists()).toBe(true);
   vi.mocked(relayApi.pools).mockRejectedValue(new Error('reload-fixture'));
   await w.findAll('header button')[0]!.trigger('click');
   await flushPromises();
   expect(w.find('[data-testid="pool-form"]').exists()).toBe(false);
   expect(
-    (w.get('[data-testid="configure-auto"]').element as HTMLButtonElement)
-      .disabled,
+    (w.get('[data-testid="add-pool"]').element as HTMLButtonElement).disabled,
   ).toBe(true);
   expect(relayApi.savePool).not.toHaveBeenCalled();
   w.unmount();
@@ -323,7 +336,8 @@ it('creates a genuinely absent Auto through create-only protection and never fal
   });
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
+  await w.get('[name="poolId"]').setValue('auto');
   await w
     .findAll('button')
     .find((button) => button.text() === '添加池路由')!
@@ -426,6 +440,7 @@ it('does not query usage until an explicit identity is selected and clears stale
   const w = mount(UsageView, { global });
   await flushPromises();
   expect(relayApi.usage).not.toHaveBeenCalled();
+  await w.get('[name="usageTarget"]').setValue('__manual');
   await w.get('[name="usageId"]').setValue(p.id);
   vi.mocked(relayApi.usage).mockResolvedValue({ items: [] });
   await w.get('form').trigger('submit');
@@ -480,14 +495,14 @@ it('preserves member concurrency and in-flight limits when editing a budget', as
   await flushPromises();
   await w.get('[data-testid="edit-key"]').trigger('click');
   expect(w.get('[name="keyName"]').attributes('disabled')).toBeDefined();
-  await w.get('[name="keyBudget"]').setValue('200');
+  await w.get('[name="keyBudget"]').setValue('2.5');
   await w.get('[data-testid="key-form"]').trigger('submit');
   await w.get('[data-testid="confirm-action"]').trigger('click');
   await flushPromises();
   expect(relayApi.updateKey).toHaveBeenCalledWith(
     member.id,
     expect.objectContaining({
-      monthlyBudgetMicros: 200,
+      monthlyBudgetMicros: 2_500_000,
       maxConcurrency: 8,
       maxInFlightTokens: 33554432,
     }),
@@ -734,5 +749,104 @@ it('explicitly refreshes larger upstream capabilities and rejects zero prices be
   await w.get('[data-testid="pool-form"]').trigger('submit');
   expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
   expect(relayApi.savePool).not.toHaveBeenCalled();
+  w.unmount();
+});
+
+it('offers relay keys by member name and queries the selected key', async () => {
+  const member = {
+    id: p.id,
+    name: 'auriga-member:fixture',
+    source: 'member' as const,
+    accountId: p.id,
+    active: true,
+    models: ['*'],
+    monthlyBudgetMicros: 0,
+    requestsPerMinute: 0,
+  };
+  vi.mocked(relayApi.keys).mockResolvedValue({ items: [member] });
+  vi.mocked(orgApi.listMembers).mockResolvedValue({
+    items: [{ id: p.id, displayName: '张三' }],
+  } as unknown as Awaited<ReturnType<typeof orgApi.listMembers>>);
+  vi.mocked(relayApi.usage).mockResolvedValue({ items: [] });
+  const w = mount(UsageView, { global });
+  await flushPromises();
+  expect(w.get('[name="usageTarget"]').text()).toContain('张三');
+  expect(w.find('[name="usageId"]').exists()).toBe(false);
+  await w.get('[name="usageTarget"]').setValue(p.id);
+  await w.get('form').trigger('submit');
+  await flushPromises();
+  expect(relayApi.usage).toHaveBeenCalledWith(
+    'keyId',
+    p.id,
+    undefined,
+    expect.any(AbortSignal),
+  );
+  expect(w.get('[data-testid="usage-snapshot"]').text()).toContain('0');
+  w.unmount();
+});
+it('queries usage immediately for a key linked from the key list', async () => {
+  routeQuery.key = p.id;
+  vi.mocked(relayApi.usage).mockResolvedValue({ items: [] });
+  const w = mount(UsageView, { global });
+  await flushPromises();
+  expect(relayApi.usage).toHaveBeenCalledWith(
+    'keyId',
+    p.id,
+    undefined,
+    expect.any(AbortSignal),
+  );
+  w.unmount();
+});
+it('shows key budgets in dollars and links each key to its usage', async () => {
+  const key = {
+    id: 'key',
+    name: 'partner',
+    source: 'external' as const,
+    accountId: '',
+    active: true,
+    models: ['*'],
+    monthlyBudgetMicros: 12_500_000,
+    requestsPerMinute: 60,
+  };
+  vi.mocked(relayApi.keys).mockResolvedValue({ items: [key] });
+  const w = mount(KeysView, { global });
+  await flushPromises();
+  expect(w.text()).toContain('$12.50');
+  expect(w.get('[data-testid="key-usage"]').attributes('data-to')).toContain(
+    '"key":"key"',
+  );
+  await w.get('[data-testid="edit-key"]').trigger('click');
+  expect((w.get('[name="keyBudget"]').element as HTMLInputElement).value).toBe(
+    '12.5',
+  );
+  w.unmount();
+});
+
+it('marks the auto pool as the default model', async () => {
+  vi.mocked(relayApi.pools).mockResolvedValue({
+    items: [
+      {
+        id: 'auto',
+        enabled: true,
+        contextWindow: 0,
+        maxOutputTokens: 0,
+        routes: [{ providerId: p.id, model: 'real', weight: 1 }],
+        price: {
+          currency: 'USD',
+          inputMicrosPerMillionTokens: 1,
+          outputMicrosPerMillionTokens: 1,
+          version: 'v1',
+          effectiveAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    ],
+  });
+  const w = mount(ProvidersView, { global });
+  await flushPromises();
+  expect(w.get('tr[data-pool="auto"]').text()).toContain('默认');
+  await openAuto(w);
+  const id = w.get('[name="poolId"]').element as HTMLInputElement;
+  expect(id.value).toBe('auto');
+  expect(id.disabled).toBe(true);
   w.unmount();
 });

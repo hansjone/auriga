@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createAurigaI18n } from '@auriga/shared';
 import ProvidersView from './ProvidersView.vue';
+import { openAuto } from './autoPoolTestHelper';
 import { relayApi, type RelayPool } from '../../admin/relayApi';
 import { adminApi } from '../../admin/api';
 vi.mock('../../admin/relayApi', () => ({
@@ -81,7 +82,7 @@ it('separates refreshing upstream data from adopting upstream priority, then per
   const w = mount(ProvidersView, { global });
   try {
     await flushPromises();
-    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await openAuto(w);
     expect(w.get('[data-testid="apply-capabilities"]').text()).toBe(
       '刷新上游数据',
     );
@@ -120,7 +121,7 @@ it('separates refreshing upstream data from adopting upstream priority, then per
     await w.get('[data-testid="pool-form"]').trigger('submit');
     await w.get('[data-testid="confirm-action"]').trigger('click');
     await flushPromises();
-    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await openAuto(w);
     expect(value(w, 'contextCapabilityMode')).toBe('inherit');
     expect(w.get('[data-testid="context-effective"]').text()).toContain(
       '当前来源：上游目录',
@@ -159,7 +160,7 @@ it.each([
     const w = mount(ProvidersView, { global });
     try {
       await flushPromises();
-      await w.get('[data-testid="configure-auto"]').trigger('click');
+      await openAuto(w);
       await w.get('[data-testid="apply-capabilities"]').trigger('click');
       await flushPromises();
       const missingDimension =
@@ -196,7 +197,7 @@ it.each([
       expect(persisted[0].capabilities?.recommendedContextWindow).toBe(
         recommendedContext,
       );
-      await w.get('[data-testid="configure-auto"]').trigger('click');
+      await openAuto(w);
       expect([value(w, 'contextWindow'), value(w, 'maxOutputTokens')]).toEqual([
         context,
         output,
@@ -238,7 +239,7 @@ it.each([undefined, 0, 750000])(
     const w = mount(ProvidersView, { global });
     try {
       await flushPromises();
-      await w.get('[data-testid="configure-auto"]').trigger('click');
+      await openAuto(w);
       await w.get('[data-testid="apply-capabilities"]').trigger('click');
       await flushPromises();
       await w.get('[name="contextCapabilityMode"]').setValue('inherit');
@@ -262,7 +263,7 @@ it('does not change manual policy or values after an upstream refresh failure', 
   const w = mount(ProvidersView, { global });
   try {
     await flushPromises();
-    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await openAuto(w);
     await w.get('[data-testid="apply-capabilities"]').trigger('click');
     await flushPromises();
     expect(value(w, 'contextCapabilityMode')).toBe('manual');
@@ -307,7 +308,7 @@ it('blocks confirmation while a capability refresh is pending, then saves the vi
   const w = mount(ProvidersView, { global });
   try {
     await flushPromises();
-    await w.get('[data-testid="configure-auto"]').trigger('click');
+    await openAuto(w);
     await w.get('[data-testid="apply-capabilities"]').trigger('click');
     expect(
       (
@@ -346,7 +347,7 @@ it('blocks confirmation while a capability refresh is pending, then saves the vi
 it('does not start a refresh after save confirmation has frozen its visible values', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   await w.get('[data-testid="pool-form"]').trigger('submit');
   expect(w.find('[data-testid="confirm-action"]').exists()).toBe(true);
   await w.get('[data-testid="apply-capabilities"]').trigger('click');
@@ -372,7 +373,7 @@ it('ignores a refresh that arrives after closing and opening another pool', asyn
   );
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   await w.get('[data-testid="apply-capabilities"]').trigger('click');
   await w
     .findAll('button')
@@ -391,7 +392,7 @@ it('ignores a refresh that arrives after closing and opening another pool', asyn
 it('keeps old explicit values, refreshes only inherited fields and persists them through save and reopen', async () => {
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   expect(value(w, 'contextCapabilityMode')).toBe('manual');
   expect(value(w, 'contextWindow')).toBe('1000000');
   expect(value(w, 'capabilitySourceRoute')).toBe(
@@ -426,7 +427,7 @@ it('keeps old explicit values, refreshes only inherited fields and persists them
   expect(persisted[0].capabilities?.upstream?.model.maxOutputTokens).toBe(
     256000,
   );
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   expect([value(w, 'contextWindow'), value(w, 'maxOutputTokens')]).toEqual([
     '900000',
     '256000',
@@ -453,7 +454,7 @@ it('retains the previous snapshot on refresh failure and clears it when switchin
   persisted = [pool];
   const w = mount(ProvidersView, { global });
   await flushPromises();
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   vi.mocked(relayApi.providerModels).mockRejectedValue(
     new Error('synthetic network failure'),
   );
@@ -476,7 +477,7 @@ it('retains the previous snapshot on refresh failure and clears it when switchin
   await flushPromises();
   expect(persisted[0].capabilities?.upstream).toBeUndefined();
   expect(persisted[0].capabilities?.sourceModel).toBe('small');
-  await w.get('[data-testid="configure-auto"]').trigger('click');
+  await openAuto(w);
   await w
     .findAll('button')
     .find((button) => button.text() === '移除路由')!

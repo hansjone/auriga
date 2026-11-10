@@ -40,13 +40,14 @@ func (l *Ledger) GetReservation(ctx context.Context, ref Ref) (*Reservation, err
 
 // ListUsage is an owner-scoped read port. Its caller must independently enforce
 // usage permission and derive tenant/owner from verified identity, never params.
-// Cursor is a stable (recorded_at,request_id) key, bound to tenant and owner.
+// Records are returned newest first; the cursor is a stable (recorded_at,request_id)
+// key bound to tenant and owner, and the next page continues strictly older.
 func (l *Ledger) ListUsage(ctx context.Context, tenant, owner string, limit int, cursor string) (*api.UsagePage, error) {
 	if !identifiers.ValidUUID(tenant) || !identifiers.ValidUUID(owner) || limit < 1 || limit > 200 || len(cursor) > 512 {
 		return nil, failure("common.validation_failed")
 	}
-	start := time.Unix(0, 0).UTC()
-	id := "00000000-0000-0000-8000-000000000000"
+	var start time.Time
+	id := ""
 	if cursor != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(cursor)
 		parts := strings.Split(string(raw), "|")
@@ -61,7 +62,13 @@ func (l *Ledger) ListUsage(ctx context.Context, tenant, owner string, limit int,
 	}
 	page := &api.UsagePage{Items: []api.Usage{}}
 	err := l.store.Transaction(ctx, tenant, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT document,recorded_at,request_id::text FROM ai.budget_usage WHERE tenant_id=$1 AND subject=$2 AND (recorded_at,request_id)>($3,$4::uuid) ORDER BY recorded_at,request_id LIMIT $5`, tenant, owner, start, id, limit+1)
+		var rows pgx.Rows
+		var err error
+		if id == "" {
+			rows, err = tx.Query(ctx, `SELECT document,recorded_at,request_id::text FROM ai.budget_usage WHERE tenant_id=$1 AND subject=$2 ORDER BY recorded_at DESC,request_id DESC LIMIT $3`, tenant, owner, limit+1)
+		} else {
+			rows, err = tx.Query(ctx, `SELECT document,recorded_at,request_id::text FROM ai.budget_usage WHERE tenant_id=$1 AND subject=$2 AND (recorded_at,request_id)<($3,$4::uuid) ORDER BY recorded_at DESC,request_id DESC LIMIT $5`, tenant, owner, start, id, limit+1)
+		}
 		if err != nil {
 			return err
 		}

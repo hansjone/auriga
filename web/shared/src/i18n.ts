@@ -58,7 +58,7 @@ export const messages = {
     brand: 'Auriga',
     login: {
       title: '登录',
-      chooseProvider: '选择身份源',
+      chooseProvider: '选择登录方式',
       continue: '继续',
       back: '返回',
       loading: '加载中…',
