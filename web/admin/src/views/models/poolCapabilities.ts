@@ -161,6 +161,23 @@ export function applyCapabilityPolicy(pool: RelayPool) {
       known(policy.recommendedMaxOutputTokens) ??
       0;
 }
+/**
+ * Capability numbers are optional: an emptied number input (v-model.number
+ * yields '') means unknown. Pools store unknown as 0 and recommendations omit it.
+ */
+export function normalizeBlankCapabilities(pool: RelayPool) {
+  const blank = (value: unknown) =>
+    value === '' || value === null || value === undefined;
+  if (blank(pool.contextWindow)) pool.contextWindow = 0;
+  if (blank(pool.maxOutputTokens)) pool.maxOutputTokens = 0;
+  const policy = pool.capabilities;
+  if (!policy) return;
+  if (blank(policy.recommendedContextWindow))
+    delete policy.recommendedContextWindow;
+  if (blank(policy.recommendedMaxOutputTokens))
+    delete policy.recommendedMaxOutputTokens;
+}
+
 export function validCapabilityPolicy(pool: RelayPool) {
   const policy = pool.capabilities;
   if (!policy) return true;

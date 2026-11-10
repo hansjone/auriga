@@ -1,4 +1,4 @@
-﻿import { useI18n } from 'vue-i18n';
+import { useI18n } from 'vue-i18n';
 const zh = {
   writeUncertain:
     '保存结果尚未确认。请先重试原保存，暂时不能修改或开始其他保存；离开页面前请先核对结果。',
@@ -70,7 +70,7 @@ const zh = {
   capabilityInherit: '继承上游（缺失时用推荐值）',
   capabilityManual: '手动覆盖',
   capabilityRecommendedContext: '推荐上下文（上游缺失时使用）',
-  capabilityRecommendedOutput: '推荐最大输出（上游缺失时使用）',
+  capabilityRecommendedOutput: '推荐最大输出（选填，上游缺失时使用）',
   capabilityOrigin_upstream: '当前来源：上游目录',
   capabilityOrigin_recommended: '当前来源：管理员推荐值',
   capabilityOrigin_manual: '当前来源：手动覆盖',
@@ -146,8 +146,11 @@ const zh = {
   addPool: '添加模型池',
   model: '上游真实模型 ID',
   poolId: '对外公开模型 ID / 别名',
-  context: '上下文能力（Token，0为未知）',
-  output: '最大输出能力（Token，0为未知）',
+  context: '上下文能力（Token，0为未知，未知时按 1,000,000 发布）',
+  output: '最大输出（Token，选填）',
+  outputPlaceholder: '留空 = 未知',
+  outputGuide:
+    '填模型官方的最大输出；不确定就留空，DSH 会按 32,768 请求。这是 DSH 每次请求的输出上限：填小会截断回答，填大上游会拒绝。',
   weight: '分配权重',
   addRoute: '添加池路由',
   remove: '移除路由',
@@ -202,6 +205,7 @@ const zh = {
   routes: '池内供应商',
   queryNote: '选择成员或 Key 后查询；变更条件会清除旧结果。',
   unknown: '未知',
+  unknownContext: '未知（按 1,000,000 发布）',
   permissionsLoading: '无法读取当前权限，请刷新重试。',
   active: '可用',
   inactive: '已禁用',
@@ -291,7 +295,8 @@ const en: Record<keyof typeof zh, string> = {
   capabilityInherit: 'Inherit upstream, then recommended values',
   capabilityManual: 'Manual override',
   capabilityRecommendedContext: 'Recommended context when upstream omits it',
-  capabilityRecommendedOutput: 'Recommended output when upstream omits it',
+  capabilityRecommendedOutput:
+    'Recommended output (optional, used when upstream omits it)',
   capabilityOrigin_upstream: 'Current source: upstream catalog',
   capabilityOrigin_recommended: 'Current source: administrator recommendation',
   capabilityOrigin_manual: 'Current source: manual override',
@@ -380,8 +385,11 @@ const en: Record<keyof typeof zh, string> = {
   addPool: 'Add model pool',
   model: 'Upstream model',
   poolId: 'Public model ID',
-  context: 'Context capability (tokens; 0 unknown)',
-  output: 'Output capability (tokens; 0 unknown)',
+  context: 'Context capability (tokens; 0 unknown, published as 1,000,000)',
+  output: 'Max output (tokens, optional)',
+  outputPlaceholder: 'Empty = unknown',
+  outputGuide:
+    "Enter the model's official max output; leave empty if unsure and DSH requests 32,768. DSH asks for this on every call: too small truncates replies, too large is rejected upstream.",
   weight: 'Weight',
   addRoute: 'Add route',
   remove: 'Remove route',
@@ -418,6 +426,7 @@ const en: Record<keyof typeof zh, string> = {
   close: 'Close editor',
   endpoint: 'API endpoint',
   unknown: 'Unknown',
+  unknownContext: 'Unknown (published as 1,000,000)',
   active: 'Active',
   priceInput: 'Input price per million tokens (USD micros)',
   priceOutput: 'Output price per million tokens (USD micros)',

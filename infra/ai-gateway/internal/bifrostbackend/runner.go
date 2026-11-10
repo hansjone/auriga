@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -269,8 +270,51 @@ func providerFailure(f *schemas.BifrostError) *ProviderFailure {
 				out.Code = *f.Error.Code
 			}
 		}
+		// Providers word context overflow differently (DeepSeek reports it as
+		// invalid_request_error, MiniMax with its own code). Normalise every
+		// variant to the OpenAI code so the agent compacts and retries; the
+		// upstream text is only classified here, never retained or returned.
+		// The provider's 4xx status is preserved; agents match the code/text.
+		if out.Status >= 400 && out.Status < 500 && out.Code != "rate_limit_exceeded" && contextOverflow(f.Error) {
+			out.Code = "context_length_exceeded"
+			out.Reason = "context_length_exceeded"
+		}
 	}
 	return out
+}
+
+// Overflow wording of OpenAI-compatible providers, aligned with the patterns
+// DSH (pi-ai and dsh-llm) recognises; rate limiting is excluded explicitly.
+var (
+	overflowWording = regexp.MustCompile(`(?i)` + strings.Join([]string{
+		`context[\s_-](?:length|window)[\s_-](?:exceed(?:ed|s)?|overflow(?:ed)?|limit[\s_-]exceeded)`,
+		`model_context_window_exceeded`,
+		`exceeds (?:the )?context window`,
+		`(?:maximum|max) (?:allowed |supported )?context (?:length|window)`,
+		`context window exceeds limit`,
+		`prompt (?:is )?too long`,
+		`request_too_large`,
+		`input token count.*exceeds the maximum`,
+		`maximum prompt length is \d+`,
+		`reduce the length of the messages`,
+		`exceeded model token limit`,
+		`greater than the context length`,
+		`exceeds the available context size`,
+		`range of input length should be`,
+		`(?:input|prompt|request|messages?)\b.{0,40}\b(?:exceed(?:s|ed)?|is longer than|is larger than)\b.{0,40}\bcontext\b`,
+	}, "|"))
+	notOverflowWording = regexp.MustCompile(`(?i)rate limit|too many requests|throttl`)
+)
+
+func contextOverflow(e *schemas.ErrorField) bool {
+	text := e.Message
+	if e.Code != nil {
+		text += " " + *e.Code
+	}
+	if e.Type != nil {
+		text += " " + *e.Type
+	}
+	return overflowWording.MatchString(text) && !notOverflowWording.MatchString(text)
 }
 func providerKind(kind string) string {
 	if kind == "openai-compatible" {

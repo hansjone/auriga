@@ -24,6 +24,7 @@ import ModelImportPanel from './ModelImportPanel.vue';
 import PoolCapabilitiesEditor from './PoolCapabilitiesEditor.vue';
 import {
   createCapabilityPolicy,
+  normalizeBlankCapabilities,
   reconcileCapabilitySource,
   validCapabilityPolicy,
   type CatalogState,
@@ -293,6 +294,7 @@ function askPool() {
   if (draft.value.id === 'auto' && (!poolsReady.value || loading.value)) return;
   const createOnly = draft.value.id === 'auto' && !selected.value;
   const body = JSON.parse(JSON.stringify(draft.value)) as RelayPool;
+  normalizeBlankCapabilities(body);
   body.routes.forEach((route) => {
     route.model = route.model.trim();
   });
@@ -657,7 +659,7 @@ async function confirm() {
               {{
                 pool.contextWindow
                   ? pool.contextWindow.toLocaleString()
-                  : t('unknown')
+                  : t('unknownContext')
               }}
               /
               {{
