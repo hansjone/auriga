@@ -22,6 +22,7 @@ import { useRelayWriteIntent, type RelayWriteAction } from './relayWriteIntent';
 import './modelUsage.css';
 import './relayManagement.css';
 import ModelImportPanel from './ModelImportPanel.vue';
+import RelayWriteHint from './RelayWriteHint.vue';
 import PoolCapabilitiesEditor from './PoolCapabilitiesEditor.vue';
 import {
   createCapabilityPolicy,
@@ -181,6 +182,13 @@ onBeforeUnmount(() => {
   secret.value = '';
   pending.value = undefined;
 });
+// An open editor hides the page behind its modal: the uncertain-write notice
+// moves into the dialog, and the dialog cannot be dismissed (which would reset
+// the write intent) while a write runs, awaits confirmation or is unresolved.
+const dialogOpen = computed(() => !!importProvider.value || !!editor.value);
+const dialogLocked = computed(
+  () => busy.value || !!pending.value || !!unresolved.value,
+);
 function close() {
   writeIntent.reset();
   importProvider.value = '';
@@ -397,22 +405,11 @@ async function confirm() {
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
-    <div
-      v-if="unresolved"
-      class="relay-hint"
-      role="status"
-      data-testid="relay-write-uncertain"
-    >
-      <p>{{ t('writeUncertain') }}</p>
-      <button
-        type="button"
-        data-testid="retry-relay-write"
-        :disabled="busy || !!pending || !ui.can(unresolved.permission)"
-        @click="pending = unresolved"
-      >
-        {{ t('retryOriginalWrite') }}
-      </button>
-    </div>
+    <RelayWriteHint
+      v-if="unresolved && !dialogOpen"
+      :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+      @retry="pending = unresolved"
+    />
     <p>{{ t('providersIntro') }}</p>
     <div class="usage-filters">
       <button
@@ -519,6 +516,7 @@ async function confirm() {
     </div>
     <AdminDialog
       :open="!!importProvider"
+      :locked="importRunning || dialogLocked"
       :title="t('importModels')"
       width="min(1100px, 94vw)"
       @close="close"
@@ -538,6 +536,7 @@ async function confirm() {
     </AdminDialog>
     <AdminDialog
       :open="editor === 'provider'"
+      :locked="dialogLocked"
       :title="t(selected ? 'edit' : 'addProvider')"
       @close="close"
     >
@@ -546,6 +545,11 @@ async function confirm() {
         data-testid="save-provider"
         @submit.prevent="askProvider"
       >
+        <RelayWriteHint
+          v-if="unresolved"
+          :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+          @retry="pending = unresolved"
+        />
         <fieldset :disabled="busy || !!pending || !!unresolved">
           <legend>{{ t(selected ? 'edit' : 'addProvider') }}</legend>
           <label
@@ -595,11 +599,17 @@ async function confirm() {
     </AdminDialog>
     <AdminDialog
       :open="editor === 'credential'"
+      :locked="dialogLocked"
       :title="t('credential') + ' · ' + provider.name"
       width="520px"
       @close="close"
     >
       <form v-if="editor === 'credential'" @submit.prevent="askCredential">
+        <RelayWriteHint
+          v-if="unresolved"
+          :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+          @retry="pending = unresolved"
+        />
         <fieldset :disabled="busy || !!pending || !!unresolved">
           <legend>{{ t('credential') }} · {{ provider.name }}</legend>
           <p>{{ t('secretNote') }}</p>
@@ -703,6 +713,7 @@ async function confirm() {
     </div>
     <AdminDialog
       :open="editor === 'pool' && !!draft"
+      :locked="dialogLocked"
       :title="
         t(selected ? 'edit' : 'addPool') + (draft?.id ? ' · ' + draft.id : '')
       "
@@ -714,6 +725,11 @@ async function confirm() {
         data-testid="pool-form"
         @submit.prevent="askPool"
       >
+        <RelayWriteHint
+          v-if="unresolved"
+          :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+          @retry="pending = unresolved"
+        />
         <fieldset :disabled="busy || !!pending || !!unresolved">
           <legend>{{ t('pools') }}</legend>
           <p>{{ t('aliasNote') }}</p>

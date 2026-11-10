@@ -14,7 +14,7 @@ HTTP 部署保留支持；HTTPS 验证走 JVM 信任库，不跳过证书检查�
 
 独立的 `workspace.instance.managed_model_credential` 保存加密 JSON；每次规格生成重新以节点公钥和规格代次封装。
 agent 解封后核对 tenant、成员、实例及材料结构，写 `/run/auriga/model-credential.json`（0600，随元数据只读挂载）。
-renderer 生成 DSH 公开 `llm-pi-ai` 行的 `auriga-managed` OpenAI Chat Completions 提供方，设置 `compat.supportsStore:false`。中转站对 `store` 的规则：`false`/`null` 是标准 OpenAI 客户端（如未配 compat 的外部 DSH）的不留存声明，在入口删除后转发，上游永远收不到该字段；`true` 等其他值要求留存对话，中转站做不到，返回 400 并在 `params.field` 指明 `/store`。
+renderer 生成 DSH 公开 `llm-pi-ai` 行的 `auriga-managed` OpenAI Chat Completions 提供方，设置 `compat.supportsStore:false`。中转站对 `store` 的规则：`false`/`null` 是标准 OpenAI 客户端（如未配 compat 的外部 DSH）的不留存声明，在入口删除后转发，上游永远收不到该字段；`true` 等其他值要求留存对话，中转站做不到，返回 400 `common.validation_failed`；对外入口（edge）与成员通道在 `params.field` 指明 `/store`，中转后端被直连时只返回错误码。
 配置只保存公开凭据引用 `apiKeyEnv: AURIGA_MANAGED_MODEL`，不使用 `headers.Authorization` 表达式。插件通过公开凭据服务，仅为持有受管路由的 `llm-pi-ai` 服务端作用域按操作读取唯一私有文件；不写全局环境变量或用户凭据存储。旧版 `model-keys.json` 副本会被删除。
 渲染层不覆盖原生 `credentials` 行或其存储位置；用户已有个人 Key、`credentials/set` 和 OAuth record 更新继续使用用户可写的原生凭据文件。
 `llm-pi-ai` 与凭据路径不能通过实例 Profile patch 覆盖；任意 `Profile.model_providers` 仍拒绝。缺材料删除私有模型文件，Key 改变影响渲染摘要并走受管材料重启。

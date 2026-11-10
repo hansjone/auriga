@@ -14,6 +14,7 @@ import {
   type RelayPool,
 } from '../../admin/relayApi';
 import ActionConfirm from '../../admin/ActionConfirm.vue';
+import RelayWriteHint from './RelayWriteHint.vue';
 import AdminDialog from '../../admin/AdminDialog.vue';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
@@ -267,22 +268,11 @@ async function confirm() {
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
-    <div
-      v-if="unresolved"
-      class="relay-hint"
-      role="status"
-      data-testid="relay-write-uncertain"
-    >
-      <p>{{ t('writeUncertain') }}</p>
-      <button
-        type="button"
-        data-testid="retry-relay-write"
-        :disabled="busy || !!pending || !ui.can(unresolved.permission)"
-        @click="pending = unresolved"
-      >
-        {{ t('retryOriginalWrite') }}
-      </button>
-    </div>
+    <RelayWriteHint
+      v-if="unresolved && !editing"
+      :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+      @retry="pending = unresolved"
+    />
     <button
       data-testid="new-key"
       :disabled="
@@ -394,11 +384,17 @@ async function confirm() {
     <p>{{ t('externalKeyNote') }}</p>
     <AdminDialog
       :open="editing"
+      :locked="busy || !!pending || !!unresolved"
       :title="t(selected ? 'edit' : 'createKey')"
       width="min(760px, 94vw)"
       @close="editing = false"
     >
       <form v-if="editing" data-testid="key-form" @submit.prevent="ask">
+        <RelayWriteHint
+          v-if="unresolved"
+          :disabled="busy || !!pending || !ui.can(unresolved.permission)"
+          @retry="pending = unresolved"
+        />
         <fieldset :disabled="busy || !!pending || !!unresolved">
           <legend>{{ t(selected ? 'edit' : 'createKey') }}</legend>
           <label
@@ -433,8 +429,8 @@ async function confirm() {
               name="keyBudget"
               type="number"
               min="0"
-              step="0.01"
-              max="9007199254"
+              step="0.000001"
+              max="9007199254.740991"
               :disabled="draft.meteringOnly"
               required
           /></label>

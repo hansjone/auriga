@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -89,6 +90,10 @@ func (g *Gateway) proxyExternalRelay(w http.ResponseWriter, r *http.Request, aud
 	// fix its request without access to platform logs.
 	failField := func(field, detail string) {
 		p := problem(http.StatusBadRequest, "common.validation_failed", http.StatusText(http.StatusBadRequest), detail, rid)
+		// The name comes from client JSON: echo only a short plain identifier.
+		if !relayFieldName.MatchString(field) {
+			field = "unknown"
+		}
 		p.Params = map[string]any{"field": "/" + field}
 		writeProblem(w, p)
 	}
@@ -196,6 +201,8 @@ func relayResponse(response *http.Response) error {
 	}
 	return nil
 }
+
+var relayFieldName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 // dropStoreOptOut mirrors relaylimits.DropStoreOptOut in the relay module: it
 // removes store:false or store:null and reports false for any other value.

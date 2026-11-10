@@ -58,7 +58,7 @@ func TestExternalRelayDropsStoreOptOut(t *testing.T) {
 			t.Fatal("chat fields were lost")
 		}
 	}
-	for extra, field := range map[string]string{`,"store":true`: "/store", `,"store":"false"`: "/store", `,"api_base":"http://evil"`: "/api_base"} {
+	for extra, field := range map[string]string{`,"store":true`: "/store", `,"store":"false"`: "/store", `,"api_base":"http://evil"`: "/api_base", `,"<script>x":1`: "/unknown"} {
 		code, p := send(extra)
 		if code != 400 || p.Code != "common.validation_failed" || p.Params["field"] != field {
 			t.Fatalf("%s: %d %+v", extra, code, p)
