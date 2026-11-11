@@ -17,8 +17,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * upstream.
  */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnExpression(
-    "${auriga.services.ops.enabled:true} && ${auriga.ops.runtime.enabled:false}")
+@ConditionalOnExpression("${auriga.ops.runtime.enabled:false}")
 public class OpsRuntimeConfiguration {
   @Bean
   OpsRuntimeStore opsRuntimeStore(Environment env) throws Exception {

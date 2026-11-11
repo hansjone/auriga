@@ -88,12 +88,16 @@ class OpsRuntimeHttpTest {
         HttpRequest.newBuilder(
             URI.create("http://127.0.0.1:" + port + "/api/workspace/v1/admin/ops" + path));
     if (token != null) builder.header("Authorization", "Bearer " + token);
-    if (ticket != null) builder.header("X-Auriga-Download", ticket);
-    builder.header("Content-Type", "application/json");
+    if (ticket != null) builder.header("X-Download-Unused", ticket);
+    builder.header(
+        "Content-Type",
+        path.endsWith("/download") ? "application/x-www-form-urlencoded" : "application/json");
     builder.method(
         method,
         body == null
-            ? HttpRequest.BodyPublishers.noBody()
+            ? (ticket == null
+                ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofString("csrf=test&ticket=" + ticket))
             : HttpRequest.BodyPublishers.ofString(body));
     try (var client = HttpClient.newHttpClient()) {
       return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
@@ -146,12 +150,20 @@ class OpsRuntimeHttpTest {
     assertEquals("no-store", issued.headers().firstValue("Cache-Control").orElseThrow());
     String ticket = OpsRuntimeStore.JSON.readTree(issued.body()).path("token").asString();
     assertEquals(
-        403, request("GET", "/backups/" + id + "/download", "stale", null, ticket).statusCode());
-    var downloaded = request("GET", "/backups/" + id + "/download", "admin", null, ticket);
+        403, request("POST", "/backups/" + id + "/download", "stale", null, ticket).statusCode());
+    var downloaded = request("POST", "/backups/" + id + "/download", "admin", null, ticket);
     assertEquals(200, downloaded.statusCode());
     assertEquals("PGDMP-example", downloaded.body());
     assertEquals("no-store", downloaded.headers().firstValue("Cache-Control").orElseThrow());
     assertEquals(
-        403, request("GET", "/backups/" + id + "/download", "admin", null, ticket).statusCode());
+        403, request("POST", "/backups/" + id + "/download", "admin", null, ticket).statusCode());
+    var audit = store.read().path("audit");
+    assertEquals("completed", audit.get(audit.size() - 1).path("result").asString());
+    assertEquals(403, request("DELETE", "/backups/" + id, "stale", null, null).statusCode());
+    assertEquals(
+        403, request("DELETE", "/backups/" + id, "no-permission", null, null).statusCode());
+    assertEquals(202, request("DELETE", "/backups/" + id, "admin", null, null).statusCode());
+    assertEquals(
+        404, request("POST", "/backups/" + id + "/tickets", "admin", null, null).statusCode());
   }
 }

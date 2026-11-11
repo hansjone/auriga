@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
+import tarfile
+import io
 import unittest
 import uuid
 
@@ -40,23 +42,43 @@ class PostgresArchiveTest(unittest.TestCase):
                     time.sleep(0.5)
                 else:
                     self.fail('Temporary PostgreSQL was not ready')
-                run(['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'postgres', '-c', 'CREATE TABLE ops_fixture(value int); INSERT INTO ops_fixture VALUES (42)'])
+                run(['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'postgres', '-c', 'CREATE ROLE ops_fixture_role LOGIN; CREATE TABLE ops_fixture(value int); INSERT INTO ops_fixture VALUES (42); ALTER TABLE ops_fixture OWNER TO ops_fixture_role'])
+                run(['exec', '-T', 'postgres', 'createdb', '-U', 'postgres', 'bifrost'])
+                run(['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'bifrost', '-c', 'CREATE TABLE relay_fixture(value int); INSERT INTO relay_fixture VALUES (84)'])
                 directory = folder / 'state'
                 directory.mkdir()
                 tenant = str(uuid.uuid4())
-                settings = {'compose': compose, 'database': 'postgres', 'databaseUser': 'postgres', 'tenantId': tenant}
+                settings = {'compose': compose, 'databases': ['postgres', 'bifrost'], 'databaseUser': 'postgres', 'tenantId': tenant}
                 worker.write(directory, {'plan': {'enabled': True, 'intervalHours': 24, 'nextAt': '2020-01-01T00:00:00Z'}}, settings)
                 worker.tick(directory, settings)
                 result = worker.read(directory)['backups'][0]
                 self.assertEqual('succeeded', result['status'])
-                archive = directory / 'backups' / (result['id'] + '.dump')
+                archive = directory / 'backups' / (result['id'] + '.tar')
                 content = archive.read_bytes()
                 self.assertEqual(len(content), result['sizeBytes'])
                 self.assertEqual(hashlib.sha256(content).hexdigest(), result['sha256'])
+                self.assertEqual(['postgres', 'bifrost'], result['databases'])
+                self.assertTrue(result['includesRoles'])
+                with tarfile.open(fileobj=io.BytesIO(content)) as bundle:
+                    self.assertEqual(['postgres.dump', 'bifrost.dump', 'roles.sql'], bundle.getnames())
+                    primary = bundle.extractfile('postgres.dump').read()
+                    relay = bundle.extractfile('bifrost.dump').read()
+                    roles = bundle.extractfile('roles.sql').read()
+                self.assertNotIn(b'PASSWORD', roles.upper())
+                run(['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'postgres', '-c', 'ALTER TABLE ops_fixture OWNER TO postgres; DROP ROLE ops_fixture_role'])
+                # The target bootstrap role already exists in a fresh cluster.
+                roles = roles.replace(b'CREATE ROLE postgres;', b'')
+                run(['exec', '-T', 'postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], input=roles)
+                run(['exec', '-T', 'postgres', 'createdb', '-U', 'postgres', 'restored_relay'])
+                run(['exec', '-T', 'postgres', 'pg_restore', '--exit-on-error', '-U', 'postgres', '-d', 'restored_relay'], input=relay)
                 run(['exec', '-T', 'postgres', 'createdb', '-U', 'postgres', 'restored'])
-                run(['exec', '-T', 'postgres', 'pg_restore', '--exit-on-error', '-U', 'postgres', '-d', 'restored'], input=content)
+                run(['exec', '-T', 'postgres', 'pg_restore', '--exit-on-error', '-U', 'postgres', '-d', 'restored'], input=primary)
                 restored = run(['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'restored', '-Atc', 'SELECT value FROM ops_fixture'])
                 self.assertEqual(b'42', restored.stdout.strip())
+                relay_value = run(['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'restored_relay', '-Atc', 'SELECT value FROM relay_fixture'])
+                self.assertEqual(b'84', relay_value.stdout.strip())
+                owner = run(['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'restored', '-Atc', "SELECT tableowner FROM pg_tables WHERE tablename='ops_fixture'"])
+                self.assertEqual(b'ops_fixture_role', owner.stdout.strip())
                 worker.tick(directory, settings)
                 self.assertEqual(1, len(worker.read(directory)['backups']))
             finally:

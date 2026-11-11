@@ -75,10 +75,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get: operations['downloadOpsBackup'];
+    get?: never;
+    put?: never;
+    post: operations['downloadOpsBackup'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/ops/backups/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
     put?: never;
     post?: never;
-    delete?: never;
+    delete: operations['deleteOpsBackup'];
     options?: never;
     head?: never;
     patch?: never;
@@ -129,6 +147,9 @@ export interface components {
       intervalHours: number;
       /** Format: int64 */
       revision: number;
+      retentionCount?: number;
+      retentionDays?: number;
+      minFreeMiB?: number;
     };
     OpsBackupPlan: components['schemas']['OpsBackupPlanInput'] & {
       /** Format: date-time */
@@ -147,16 +168,38 @@ export interface components {
       reason?: string;
       /** Format: int64 */
       sizeBytes?: number;
+      format?: string;
+      databases?: string[];
+      includesRoles?: boolean;
+      /** Format: date-time */
+      deleteRequestedAt?: string;
     };
     OpsBackupStatus: {
       plan: components['schemas']['OpsBackupPlan'];
       items: components['schemas']['OpsBackupItem'][];
       worker: components['schemas']['OpsUpgradeInventory'] | null;
+      alerts?: string[];
+      audit?: components['schemas']['OpsBackupAudit'][];
     };
     OpsBackupTicket: {
       token: string;
       /** Format: date-time */
       expiresAt: string;
+      /** @description Echo of the verified browser CSRF nonce, for the native streaming form. Never log. */
+      csrf?: string;
+    };
+    OpsBackupDownloadInput: {
+      ticket: string;
+      csrf: string;
+    };
+    OpsBackupAudit: {
+      at?: string;
+      actor?: string;
+      session?: string;
+      backupId?: string;
+      action?: string;
+      result?: string;
+      bytes?: number;
     };
   };
   responses: never;
@@ -304,15 +347,17 @@ export interface operations {
   downloadOpsBackup: {
     parameters: {
       query?: never;
-      header: {
-        'X-Auriga-Download': string;
-      };
+      header?: never;
       path: {
         id: string;
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/x-www-form-urlencoded': components['schemas']['OpsBackupDownloadInput'];
+      };
+    };
     responses: {
       /** @description Single use, session-bound archive. No cache. */
       200: {
@@ -322,6 +367,26 @@ export interface operations {
         content: {
           'application/octet-stream': string;
         };
+      };
+    };
+  };
+  deleteOpsBackup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deletion queued for the host worker. Immediately revokes download access. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

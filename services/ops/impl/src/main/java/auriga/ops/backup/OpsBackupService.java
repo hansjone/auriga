@@ -32,13 +32,37 @@ public final class OpsBackupService {
             ? state.path("backups")
             : OpsRuntimeStore.JSON.createArrayNode());
     result.set("worker", state.path("inventory"));
+    result.set("alerts", state.withArray("alerts"));
+    result.set("audit", state.withArray("audit"));
+    for (JsonNode item : result.path("items")) {
+      ((ObjectNode) item).remove("key");
+      ((ObjectNode) item).remove("actor");
+    }
     return result;
   }
 
   public ObjectNode configure(AurigaPrincipal actor, boolean enabled, int interval, long revision) {
+    return configure(actor, enabled, interval, revision, 7, 30, 1024);
+  }
+
+  public ObjectNode configure(
+      AurigaPrincipal actor,
+      boolean enabled,
+      int interval,
+      long revision,
+      int retentionCount,
+      int retentionDays,
+      int minFreeMiB) {
     operations.installation(actor);
-    if (interval < 1 || interval > 720 || revision < 0)
-      throw new AurigaException(VALIDATION_FAILED);
+    if (interval < 1
+        || interval > 720
+        || revision < 0
+        || retentionCount < 1
+        || retentionCount > 365
+        || retentionDays < 1
+        || retentionDays > 3650
+        || minFreeMiB < 64
+        || minFreeMiB > 1048576) throw new AurigaException(VALIDATION_FAILED);
     return operations.store.change(
         state -> {
           ObjectNode previous = plan(state);
@@ -48,6 +72,9 @@ public final class OpsBackupService {
           value.put("enabled", enabled);
           value.put("intervalHours", interval);
           value.put("revision", revision + 1);
+          value.put("retentionCount", retentionCount);
+          value.put("retentionDays", retentionDays);
+          value.put("minFreeMiB", minFreeMiB);
           value.put("nextAt", operations.clock.instant().plusSeconds(interval * 3600L).toString());
           value.put("actor", actor.subject());
           state.set("plan", value);
@@ -56,11 +83,22 @@ public final class OpsBackupService {
   }
 
   private ObjectNode plan(ObjectNode state) {
-    if (state.path("plan").isObject()) return (ObjectNode) state.path("plan").deepCopy();
-    ObjectNode value = OpsRuntimeStore.JSON.createObjectNode();
+    ObjectNode value =
+        state.path("plan").isObject()
+            ? (ObjectNode) state.path("plan").deepCopy()
+            : OpsRuntimeStore.JSON.createObjectNode();
+    if (value.has("revision")) {
+      if (!value.has("retentionCount")) value.put("retentionCount", 7);
+      if (!value.has("retentionDays")) value.put("retentionDays", 30);
+      if (!value.has("minFreeMiB")) value.put("minFreeMiB", 1024);
+      return value;
+    }
     value.put("enabled", false);
     value.put("intervalHours", 24);
     value.put("revision", 0);
+    value.put("retentionCount", 7);
+    value.put("retentionDays", 30);
+    value.put("minFreeMiB", 1024);
     return value;
   }
 
@@ -78,7 +116,7 @@ public final class OpsBackupService {
           for (JsonNode previous : backups)
             if (Set.of("queued", "running").contains(previous.path("status").asString()))
               throw new AurigaException(CONFLICT);
-          if (backups.size() >= 1000) throw new AurigaException(RATE_LIMITED);
+          if (backups.size() > 1000) throw new AurigaException(RATE_LIMITED);
           ObjectNode request = OpsRuntimeStore.JSON.createObjectNode();
           request.put("id", UuidV7.next().toString());
           request.put("actor", actor.subject());
@@ -112,6 +150,7 @@ public final class OpsBackupService {
           record.put("backupId", id.toString());
           record.put("expiresAt", expires);
           tickets.add(record);
+          appendAudit(state, actor, id, "ticket_issued", "granted", 0);
           ObjectNode response = OpsRuntimeStore.JSON.createObjectNode();
           response.put("token", secret);
           response.put("expiresAt", expires);
@@ -125,7 +164,7 @@ public final class OpsBackupService {
     Path archive =
         operations.store.change(
             state -> {
-              completed(state, id);
+              ObjectNode item = completed(state, id);
               ArrayNode tickets = state.withArray("tickets");
               for (int i = 0; i < tickets.size(); i++) {
                 JsonNode ticket = tickets.get(i);
@@ -136,7 +175,13 @@ public final class OpsBackupService {
                     && Instant.parse(ticket.path("expiresAt").asString())
                         .isAfter(operations.clock.instant())) {
                   tickets.remove(i);
-                  return operations.store.root().resolve("backups").resolve(id + ".dump");
+                  appendAudit(state, actor, id, "download", "started", 0);
+                  return operations
+                      .store
+                      .root()
+                      .resolve("backups")
+                      .resolve(
+                          id + (item.path("format").asString().equals("tar") ? ".tar" : ".dump"));
                 }
               }
               throw new AurigaException(FORBIDDEN);
@@ -145,16 +190,100 @@ public final class OpsBackupService {
     try {
       if (Files.isSymbolicLink(archive.getParent()))
         throw new IOException("Symlink backup directory");
-      return Files.newInputStream(archive, LinkOption.NOFOLLOW_LINKS);
+      long expected = Files.size(archive);
+      InputStream input = Files.newInputStream(archive, LinkOption.NOFOLLOW_LINKS);
+      return new FilterInputStream(input) {
+        long bytes;
+        boolean closed, failed;
+
+        public int read() throws IOException {
+          try {
+            int count = in.read();
+            if (count >= 0) bytes++;
+            return count;
+          } catch (IOException e) {
+            failed = true;
+            throw e;
+          }
+        }
+
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+          try {
+            int count = in.read(buffer, offset, length);
+            if (count > 0) bytes += count;
+            return count;
+          } catch (IOException e) {
+            failed = true;
+            throw e;
+          }
+        }
+
+        public void close() throws IOException {
+          if (closed) return;
+          closed = true;
+          try {
+            super.close();
+          } catch (IOException e) {
+            failed = true;
+            throw e;
+          } finally {
+            recordAudit(actor, id, failed || bytes != expected ? "failed" : "completed", bytes);
+          }
+        }
+      };
     } catch (IOException e) {
+      recordAudit(actor, id, "failed", 0);
       throw new AurigaException(UNAVAILABLE);
     }
   }
 
-  private void completed(ObjectNode state, UUID id) {
+  public String filename(AurigaPrincipal actor, UUID id) {
+    operations.installation(actor);
+    return id
+        + (completed(operations.store.read(), id).path("format").asString().equals("tar")
+            ? ".tar"
+            : ".dump");
+  }
+
+  public void delete(AurigaPrincipal actor, UUID id) {
+    operations.installation(actor);
+    operations.store.change(
+        state -> {
+          ObjectNode item = completed(state, id);
+          item.put("deleteRequestedAt", operations.clock.instant().toString());
+          appendAudit(state, actor, id, "delete_requested", "queued", 0);
+          return null;
+        });
+  }
+
+  private void recordAudit(AurigaPrincipal actor, UUID id, String result, long bytes) {
+    operations.store.change(
+        state -> {
+          appendAudit(state, actor, id, "download", result, bytes);
+          return null;
+        });
+  }
+
+  private void appendAudit(
+      ObjectNode state, AurigaPrincipal actor, UUID id, String action, String result, long bytes) {
+    ArrayNode audit = state.withArray("audit");
+    while (audit.size() >= 1000) audit.remove(0);
+    audit
+        .addObject()
+        .put("at", operations.clock.instant().toString())
+        .put("actor", actor.subject())
+        .put("session", actor.sessionId())
+        .put("backupId", id.toString())
+        .put("action", action)
+        .put("result", result)
+        .put("bytes", bytes);
+  }
+
+  private ObjectNode completed(ObjectNode state, UUID id) {
     for (JsonNode item : state.path("backups"))
       if (item.path("id").asString().equals(id.toString())
-          && item.path("status").asString().equals("succeeded")) return;
+          && !item.has("deleteRequestedAt")
+          && item.path("status").asString().equals("succeeded")) return (ObjectNode) item;
     throw new AurigaException(NOT_FOUND);
   }
 

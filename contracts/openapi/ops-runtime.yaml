@@ -132,7 +132,7 @@ paths:
           type: string
           format: uuid
   /admin/ops/backups/{id}/download:
-    get:
+    post:
       tags:
       - ops-runtime
       operationId: downloadOpsBackup
@@ -141,12 +141,6 @@ paths:
       x-step-up-required: true
       parameters:
       - *id002
-      - in: header
-        name: X-Auriga-Download
-        required: true
-        schema:
-          type: string
-          pattern: ^[A-Za-z0-9_-]{43}$
       responses:
         '200':
           description: Single use, session-bound archive. No cache.
@@ -155,6 +149,31 @@ paths:
               schema:
                 type: string
                 format: binary
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OpsBackupDownloadInput'
+  /admin/ops/backups/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    delete:
+      tags:
+      - ops-runtime
+      operationId: deleteOpsBackup
+      x-admin-only: true
+      x-permission: ops.backups.write
+      x-step-up-required: true
+      responses:
+        '202':
+          description: Deletion queued for the host worker. Immediately revokes download
+            access.
 components:
   securitySchemes:
     bearerAuth:
@@ -273,6 +292,18 @@ components:
           type: integer
           format: int64
           minimum: 0
+        retentionCount:
+          type: integer
+          minimum: 1
+          maximum: 365
+        retentionDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+        minFreeMiB:
+          type: integer
+          minimum: 64
+          maximum: 1048576
       required:
       - enabled
       - intervalHours
@@ -312,6 +343,17 @@ components:
           type: integer
           format: int64
           minimum: 0
+        format:
+          type: string
+        databases:
+          type: array
+          items:
+            type: string
+        includesRoles:
+          type: boolean
+        deleteRequestedAt:
+          type: string
+          format: date-time
       required:
       - id
       - status
@@ -329,6 +371,14 @@ components:
           oneOf:
           - $ref: '#/components/schemas/OpsUpgradeInventory'
           - type: 'null'
+        alerts:
+          type: array
+          items:
+            type: string
+        audit:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpsBackupAudit'
       required:
       - plan
       - items
@@ -341,6 +391,38 @@ components:
         expiresAt:
           type: string
           format: date-time
+        csrf:
+          type: string
+          description: Echo of the verified browser CSRF nonce, for the native streaming
+            form. Never log.
       required:
       - token
       - expiresAt
+    OpsBackupDownloadInput:
+      type: object
+      properties:
+        ticket:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+        csrf:
+          type: string
+      required:
+      - ticket
+      - csrf
+    OpsBackupAudit:
+      type: object
+      properties:
+        at:
+          type: string
+        actor:
+          type: string
+        session:
+          type: string
+        backupId:
+          type: string
+        action:
+          type: string
+        result:
+          type: string
+        bytes:
+          type: integer

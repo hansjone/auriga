@@ -62,17 +62,17 @@ class RuntimeWorkerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             settings = {'compose': ['docker', 'compose'], 'database': 'auriga', 'databaseUser': 'auriga_bootstrap'}
-            def dump(command, **kwargs):
+            def dump(settings, identifier, arguments, output, folder):
+                kwargs = {'output': output}
                 self.assertNotIn('shell', kwargs)
-                self.assertIn('pg_dump', command)
-                kwargs['stdout'].write(b'PGDMP-test-archive')
-                return type('Result', (), {'returncode': 0})()
-            with patch.object(worker.subprocess, 'run', side_effect=dump):
+                output = kwargs['output']
+                output.write(b'PGDMP-test-archive' if arguments[0] == 'pg_dump' else b'CREATE ROLE fixture;')
+            with patch.object(worker, 'dump_component', side_effect=dump):
                 result = worker.backup(root, settings, '01900000-0000-7000-8000-000000000001')
             self.assertEqual('succeeded', result['status'])
-            self.assertEqual(18, result['sizeBytes'])
+            self.assertGreater(result['sizeBytes'], 18)
             self.assertEqual(64, len(result['sha256']))
-            with patch.object(worker.subprocess, 'run', return_value=type('Result', (), {'returncode': 1})()):
+            with patch.object(worker, 'dump_component', side_effect=OSError('pg_dump_failed')):
                 result = worker.backup(root, settings, '01900000-0000-7000-8000-000000000002')
             self.assertEqual('failed', result['status'])
             self.assertFalse((root / 'backups/01900000-0000-7000-8000-000000000002.dump').exists())
@@ -94,11 +94,11 @@ class RuntimeWorkerTest(unittest.TestCase):
     def test_approved_upgrade_uses_fixed_deployer_and_reports_failure_or_unknown(self):
         image = 'example.com/runtime@sha256:' + 'a' * 64
         settings = {'nasRoot': '/approved/nas', 'targets': {'approved': {'bundle': '/approved/bundle', 'image': image}}}
-        with patch.object(worker.subprocess, 'run', return_value=type('Result', (), {'returncode': 73})()) as run:
+        with patch.object(worker.subprocess, 'Popen', return_value=type('Result', (), {'returncode': 73, 'wait': lambda self, **kwargs: None})()) as run:
             receipt = worker.upgrade(settings, {'targetId': 'approved', 'command': 'ignored'})
         self.assertEqual('deployment_failed', receipt['reason'])
         self.assertEqual(['sh', '/approved/nas/scripts/runtime-upgrade.sh', '/approved/bundle', image], run.call_args.args[0])
-        with patch.object(worker.subprocess, 'run', side_effect=subprocess.TimeoutExpired('deployment', 900)):
+        with patch.object(worker.subprocess, 'Popen', side_effect=OSError('unavailable')):
             receipt = worker.upgrade(settings, {'targetId': 'approved'})
         self.assertEqual('deployment_outcome_unknown', receipt['reason'])
 

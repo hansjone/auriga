@@ -7,7 +7,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 @RestController
 @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
-    "${auriga.services.ops.enabled:true} && ${auriga.ops.runtime.enabled:false}")
+    "${auriga.ops.runtime.enabled:false}")
 @AdminOnly
 @RequestMapping("/api/workspace/v1/admin/ops/upgrades")
 public class OpsUpgradeController {

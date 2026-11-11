@@ -1,4 +1,3 @@
-import { createApiClient, readAccessMode } from '@auriga/shared';
 import { apiClient } from '../api';
 import type { components } from './runtimeContract';
 type S = components['schemas'];
@@ -30,37 +29,37 @@ export const opsRuntimeApi = {
       undefined,
       { signal },
     );
-    let archive: Blob | undefined;
-    const reader = createApiClient({
-      getAdminAccessMode: () => readAccessMode(),
-      onUnauthenticated: () => apiClient.resetSession(),
-      fetch: async (input, init) => {
-        const response = await globalThis.fetch(input, init);
-        if (
-          response.ok &&
-          response.headers
-            .get('content-type')
-            ?.includes('application/octet-stream')
-        ) {
-          archive = await response.blob();
-          return new Response('null', {
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-        return response;
-      },
-    });
-    await reader.get(`${base}/backups/${encodeURIComponent(id)}/download`, {
-      signal,
-      cache: 'no-store',
-      headers: { 'X-Auriga-Download': ticket.token },
-    });
-    if (!archive || signal.aborted) throw new Error('Archive unavailable');
-    const url = URL.createObjectURL(archive);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${id}.dump`;
-    link.click();
-    globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (signal.aborted || !ticket.csrf)
+      throw new Error('Download authorization unavailable');
+    const frame = document.createElement('iframe');
+    frame.hidden = true;
+    frame.name = 'ops-download-' + globalThis.crypto.randomUUID();
+    frame.title = 'Database archive download';
+    document.body.append(frame);
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = `${base}/backups/${encodeURIComponent(id)}/download`;
+    form.target = frame.name;
+    form.hidden = true;
+    for (const [name, value] of Object.entries({
+      ticket: ticket.token,
+      csrf: ticket.csrf,
+    })) {
+      const field = document.createElement('input');
+      field.type = 'hidden';
+      field.name = name;
+      field.value = value;
+      form.append(field);
+    }
+    document.body.append(form);
+    try {
+      form.submit();
+    } finally {
+      form.remove();
+    }
+    // Attachments are owned by the browser's download manager. Keep its frame
+    // for this page's lifetime; removing it early can abort slow downloads.
   },
+  remove: (id: string, signal: AbortSignal) =>
+    apiClient.delete(`${base}/backups/${encodeURIComponent(id)}`, { signal }),
 };

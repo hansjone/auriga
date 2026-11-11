@@ -16,6 +16,7 @@ vi.mock('../src/admin/opsRuntimeApi', () => ({
     plan: vi.fn(),
     trigger: vi.fn(),
     download: vi.fn(),
+    remove: vi.fn(),
   },
 }));
 const wrappers: ReturnType<typeof mount>[] = [];
@@ -106,7 +107,33 @@ describe('runtime backend workflows', () => {
     w.getComponent(ActionConfirm).vm.$emit('confirm');
     await flushPromises();
     expect(opsRuntimeApi.plan).toHaveBeenCalledWith(
-      { enabled: false, intervalHours: 1, revision: 3 },
+      {
+        enabled: false,
+        intervalHours: 1,
+        revision: 3,
+        retentionCount: 7,
+        retentionDays: 30,
+        minFreeMiB: 1024,
+      },
+      expect.any(AbortSignal),
+    );
+  });
+  it('validates retention and requires confirmation before deleting an archive', async () => {
+    const w = render(BackupsView);
+    await flushPromises();
+    await w.get('[data-testid="retention-count"]').setValue('0');
+    await w.get('[data-testid="save-backup-plan"]').trigger('click');
+    expect(opsRuntimeApi.plan).not.toHaveBeenCalled();
+    const button = w.findAll('button').find((b) => b.text() === '删除备份');
+    await button!.trigger('click');
+    expect(opsRuntimeApi.remove).not.toHaveBeenCalled();
+    expect(w.getComponent(ActionConfirm).props('message')).toContain(
+      '永久删除',
+    );
+    w.getComponent(ActionConfirm).vm.$emit('confirm');
+    await flushPromises();
+    expect(opsRuntimeApi.remove).toHaveBeenCalledWith(
+      backupStatus.items[0].id,
       expect.any(AbortSignal),
     );
   });

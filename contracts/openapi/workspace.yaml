@@ -24,6 +24,8 @@ tags:
   - name: instance-api
   - name: connect
 paths:
+  /admin/ops/backups/{id}:
+    $ref: 'ops-runtime.yaml#/paths/~1admin~1ops~1backups~1{id}'
   /admin/ops/upgrades:
     $ref: 'ops-runtime.yaml#/paths/~1admin~1ops~1upgrades'
   /admin/ops/backups:

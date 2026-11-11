@@ -49,6 +49,26 @@ class OpsOperationsTest {
   }
 
   @Test
+  void deletionRevokesTicketsAndDownloadAuditRecordsOutcome() throws Exception {
+    UUID first = complete();
+    UUID second = complete();
+    String token = backups.ticket(admin, first).path("token").asString();
+    assertThrows(AurigaException.class, () -> backups.download(admin, second, token));
+    try (var input = backups.download(admin, first, token)) {
+      input.readAllBytes();
+    }
+    var audit = backups.status(admin).path("audit");
+    assertEquals("completed", audit.get(audit.size() - 1).path("result").asString());
+    assertEquals(5, audit.get(audit.size() - 1).path("bytes").asLong());
+    String blocked = backups.ticket(admin, first).path("token").asString();
+    backups.delete(admin, first);
+    assertThrows(AurigaException.class, () -> backups.download(admin, first, blocked));
+    assertThrows(AurigaException.class, () -> backups.configure(admin, true, 24, 0, 0, 30, 1024));
+    assertThrows(AurigaException.class, () -> backups.configure(admin, true, 24, 0, 7, 0, 1024));
+    assertThrows(AurigaException.class, () -> backups.configure(admin, true, 24, 0, 7, 30, 63));
+  }
+
+  @Test
   void installationCannotBeReboundToAnotherTenant() {
     assertThrows(
         IllegalStateException.class, () -> new OpsUpgradeService(store, UUID.randomUUID(), clock));
@@ -165,7 +185,7 @@ class OpsOperationsTest {
 
   @Test
   void controllerRequiresPermissionAdminAndRecentVerification() throws Exception {
-    var method = OpsBackupController.class.getMethod("ticket", UUID.class);
+    var method = OpsBackupController.class.getMethod("ticket", UUID.class, String.class);
     var rules = AuthorizationRules.of(method, OpsBackupController.class);
     assertThrows(AurigaException.class, () -> rules.check(admin, clock));
     var stale =

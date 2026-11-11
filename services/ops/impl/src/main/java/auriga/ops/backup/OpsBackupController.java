@@ -10,7 +10,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 @RestController
 @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
-    "${auriga.services.ops.enabled:true} && ${auriga.ops.runtime.enabled:false}")
+    "${auriga.ops.runtime.enabled:false}")
 @AdminOnly
 @RequestMapping("/api/workspace/v1/admin/ops/backups")
 public class OpsBackupController {
@@ -35,7 +35,10 @@ public class OpsBackupController {
         OpsUpgradeController.actor(),
         body.getEnabled(),
         body.getIntervalHours(),
-        body.getRevision());
+        body.getRevision(),
+        body.getRetentionCount() == null ? 7 : body.getRetentionCount(),
+        body.getRetentionDays() == null ? 30 : body.getRetentionDays(),
+        body.getMinFreeMiB() == null ? 1024 : body.getMinFreeMiB());
   }
 
   @PostMapping
@@ -48,22 +51,33 @@ public class OpsBackupController {
   @PostMapping("/{id}/tickets")
   @RequiresPermission("ops.backups.download")
   @RequiresRecentStepUp
-  public ResponseEntity<ObjectNode> ticket(@PathVariable UUID id) {
-    return ResponseEntity.ok()
-        .cacheControl(CacheControl.noStore())
-        .body(service.ticket(OpsUpgradeController.actor(), id));
+  public ResponseEntity<ObjectNode> ticket(
+      @PathVariable UUID id,
+      @RequestHeader(value = "X-Auriga-CSRF", required = false) String csrf) {
+    ObjectNode response = service.ticket(OpsUpgradeController.actor(), id);
+    response.put("csrf", csrf == null ? "" : csrf);
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(response);
   }
 
-  @GetMapping("/{id}/download")
+  @PostMapping(value = "/{id}/download", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
   @RequiresPermission("ops.backups.download")
   @RequiresRecentStepUp
   public ResponseEntity<InputStreamResource> download(
-      @PathVariable UUID id, @RequestHeader("X-Auriga-Download") String ticket) {
+      @PathVariable UUID id, @RequestParam("ticket") String ticket) {
+    String filename = service.filename(OpsUpgradeController.actor(), id);
     return ResponseEntity.ok()
         .cacheControl(CacheControl.noStore())
-        .header("Content-Disposition", "attachment; filename=\"" + id + ".dump\"")
+        .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
         .header("X-Content-Type-Options", "nosniff")
         .contentType(MediaType.APPLICATION_OCTET_STREAM)
         .body(new InputStreamResource(service.download(OpsUpgradeController.actor(), id, ticket)));
+  }
+
+  @DeleteMapping("/{id}")
+  @RequiresPermission("ops.backups.write")
+  @RequiresRecentStepUp
+  public ResponseEntity<Void> delete(@PathVariable UUID id) {
+    service.delete(OpsUpgradeController.actor(), id);
+    return ResponseEntity.accepted().build();
   }
 }

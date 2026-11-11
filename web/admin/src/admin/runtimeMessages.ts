@@ -1,7 +1,17 @@
 export const runtimeZh = {
+  opsRetentionCount: '最多保留（份）',
+  opsRetentionDays: '最长保留（天）',
+  opsFreeMiB: '最低剩余空间（MiB）',
+  opsDelete: '删除备份',
+  opsDeleteConfirm: '确认永久删除备份？授权立即撤销，文件由执行器清理。',
+  opsCoverage: '覆盖范围',
+  opsLegacy: '旧版单库归档',
+  opsAudit: '下载与删除审计',
+  opsStorageAlert: '备份存储告警，请检查磁盘与保留清理结果。',
+
   opsActualImages: '实际运行镜像',
   opsImageId: '实际镜像摘要',
-  opsSetup: '如未启用，请由运维配置部署 worker。',
+  opsSetup: '长任务执行中请等待回执后刷新；首次使用须由运维启用执行器。',
   opsTarget: '批准的升级目标',
   opsRegister: '登记升级',
   opsUpgradeConfirm: '确认登记升级？部署流程会重建相关服务，可能短暂中断。',
@@ -17,7 +27,8 @@ export const runtimeZh = {
   opsNext: '下次计划',
   opsBytes: '字节数',
   opsBackupNow: '立即备份',
-  opsPlanInvalid: '备份间隔须为 1–720 小时的整数。',
+  opsPlanInvalid:
+    '间隔须为 1–720 小时；保留 1–365 份、1–3650 天；剩余空间阈值 64–1048576 MiB。',
   opsPlanConfirm: '确认修改 PG 备份计划？',
   opsBackupConfirm: '确认触发 PG 备份？备份将消耗数据库和磁盘资源。',
   opsDownloadConfirm:
@@ -37,13 +48,13 @@ export const runtimeZh = {
     'PG 备份计划、执行器与结果存储尚未接入，暂不能手动触发或下载备份。',
   backupScope: '备份范围',
   backupScopeText:
-    '数据库逻辑备份不包含成员卷、资源包、总部工作区和部署密钥；这些数据须按存储方案分别备份。',
+    '新归档包含 auriga、bifrost 库及无口令角色定义，覆盖清单见结果表；不包含成员卷、资源包、总部工作区和部署密钥。角色口令须由原有密钥管理恢复。',
   backupRestore: '恢复前检查',
   backupRestoreText:
     '由运维人员确认目标库与维护窗口，先备份当前数据。在隔离的空库中用 pg_restore 验证归档、角色和扩展，再按部署流程恢复。恢复后检查迁移版本、登录、资源与实例状态。此页不执行恢复。',
   backupDownload: '下载与保存',
   backupDownloadText:
-    '从部署环境的受控备份存储获取归档和校验和，校验后离线保存。未取得备份清单与恢复验证记录前，不应视为可恢复。',
+    '由浏览器下载管理器流式保存，请查看浏览器下载结果并刷新审计。校验 SHA-256 后离线加密保存；恢复能力须经隔离演练验证。',
   lifecycleScope:
     '策略对云端实例生效。活动上报缺失或过期时不授权回收；常驻实例仍受账号状态和配额约束。',
   lifecycleIdle: '闲置回收（分钟）',
@@ -59,9 +70,21 @@ export const runtimeZh = {
     '在节点页发起排空：停止调度并迁移实例；请先确认其他节点有可用容量。排空会影响正在运行的实例。',
 };
 export const runtimeEn: Record<keyof typeof runtimeZh, string> = {
+  opsRetentionCount: 'Maximum copies',
+  opsRetentionDays: 'Maximum age (days)',
+  opsFreeMiB: 'Minimum free space (MiB)',
+  opsDelete: 'Delete backup',
+  opsDeleteConfirm:
+    'Permanently delete this backup? Download access is revoked immediately; the worker removes files.',
+  opsCoverage: 'Coverage',
+  opsLegacy: 'Legacy single database',
+  opsAudit: 'Download and deletion audit',
+  opsStorageAlert:
+    'Backup storage alert. Check disk space and retention cleanup.',
   opsActualImages: 'Running images',
   opsImageId: 'Actual image digest',
-  opsSetup: 'If disabled, ask operations to configure the deployment worker.',
+  opsSetup:
+    'Wait for running tasks before refreshing; initial use requires the host worker.',
   opsTarget: 'Approved upgrade target',
   opsRegister: 'Register upgrade',
   opsUpgradeConfirm:
@@ -78,7 +101,8 @@ export const runtimeEn: Record<keyof typeof runtimeZh, string> = {
   opsNext: 'Next scheduled',
   opsBytes: 'Bytes',
   opsBackupNow: 'Back up now',
-  opsPlanInvalid: 'Backup interval must be an integer from 1 to 720 hours.',
+  opsPlanInvalid:
+    'Use 1–720 hours, 1–365 copies, 1–3650 days and 64–1048576 MiB free-space reserve.',
   opsPlanConfirm: 'Change the PG backup schedule?',
   opsBackupConfirm:
     'Trigger a PG backup? This uses database and disk resources.',
@@ -100,7 +124,7 @@ export const runtimeEn: Record<keyof typeof runtimeZh, string> = {
     'PG backup schedules, execution and result storage are not connected. Manual backup and download are unavailable.',
   backupScope: 'Backup scope',
   backupScopeText:
-    'Logical database backups exclude member volumes, resource archives, headquarters workspaces and deployment keys. Back them up separately using the storage procedure.',
+    'New archives include configured auriga/bifrost databases and roles without passwords; check the coverage column. Member volumes, resource archives, headquarters workspaces and deployment keys require separate backups.',
   backupRestore: 'Before restoring',
   backupRestoreText:
     'Operations staff must confirm the target database and maintenance window and back up current data. Validate the archive, roles and extensions with pg_restore in an isolated empty database, then follow the deployment restore procedure. Verify migrations, login, resources and instances afterward. This page does not execute restores.',

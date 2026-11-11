@@ -9,7 +9,6 @@
     "-f",
     "/srv/packages/deploy-nas/docker-compose.yml"
   ],
-  "database": "auriga",
   "databaseUser": "auriga_bootstrap",
   "ownerUid": 10001,
   "ownerGid": 10001,
@@ -21,5 +20,6 @@
       "bundle": "/srv/releases/approved-public-bundle",
       "image": "example.com/auriga-runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
-  }
+  },
+  "databases": ["auriga", "bifrost"]
 }

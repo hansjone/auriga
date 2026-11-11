@@ -49,6 +49,10 @@ public final class OpsUpgradeService {
         state.path("upgrades").isArray()
             ? state.path("upgrades")
             : OpsRuntimeStore.JSON.createArrayNode());
+    for (JsonNode item : response.path("requests")) {
+      ((ObjectNode) item).remove("key");
+      ((ObjectNode) item).remove("actor");
+    }
     return response;
   }
 
