@@ -1,6 +1,8 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { Buffer } from 'node:buffer';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -30,7 +32,20 @@ for (const credential of [
 ])
   test(`message outage preserves model admission only with ${credential} managed identity`, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), 'auriga-degraded-'));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    const cleanups = [() => rm(directory, { recursive: true, force: true })];
+    t.after(async () => {
+      const errors = [];
+      for (const cleanup of cleanups.toReversed()) {
+        try {
+          await cleanup();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1)
+        throw new AggregateError(errors, 'managed fixture cleanup failed');
+    });
     const tenantId = '00000000-0000-4000-8000-000000000001';
     const deviceId = '00000000-0000-4000-8000-000000000004';
     const origin = 'https://platform.example.com';
@@ -187,7 +202,13 @@ for (const credential of [
       },
     };
     const keys = makeIdentityKeys();
-    t.after(() => rm(dirname(keys.keyFile), { recursive: true, force: true }));
+    cleanups.push(() =>
+      rm(dirname(keys.keyFile), { recursive: true, force: true }),
+    );
+    cleanups.push(async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    });
     const runtime = await createManaged({
       env: {
         AURIGA_MODE: 'managed',
@@ -209,14 +230,11 @@ for (const credential of [
       startHeartbeat: false,
     });
     const dispose = runtime.apply(ctx);
-    t.after(async () => {
-      await dispose();
-      await runtime.close();
-      for (const effect of effects.reverse())
-        if (typeof effect === 'function') await effect();
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
-    });
+    cleanups.push(
+      ...effects.filter((effect) => typeof effect === 'function'),
+      () => runtime.close(),
+      dispose,
+    );
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     if (credential.startsWith('closing-')) {
       await pendingRequest;
@@ -322,6 +340,35 @@ for (const credential of [
       assert.equal(modelCalls, 1, 'signed browser identity remains mandatory');
     }
   });
+
+test('directory cleanup failure leaves no managed fixture listener', () => {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      new URL('./fixtures/managed-cleanup-failure.mjs', import.meta.url).href,
+      '--test',
+      '--test-name-pattern=message outage.*rejected',
+      fileURLToPath(import.meta.url),
+    ],
+    { encoding: 'utf8', timeout: 10000, env },
+  );
+  assert.equal(result.error, undefined, result.stdout + result.stderr);
+  assert.equal(
+    result.status,
+    1,
+    'injected cleanup error must still fail the child',
+  );
+  assert.match(result.stdout, /ENOTEMPTY/);
+  assert.match(result.stdout, /managed_cleanup_before_remove \[\]/);
+  assert.match(result.stdout, /managed_cleanup_after_hooks \[\]/);
+  assert.doesNotMatch(
+    result.stdout,
+    /managed fixture must release timers and TCP handles/,
+  );
+});
 
 after(async () => {
   // Native TCP destruction may finish after server.close's callback on Windows.
