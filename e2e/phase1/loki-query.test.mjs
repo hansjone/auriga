@@ -40,3 +40,20 @@ test('remote Loki transport rejects failures, invalid JSON, excess output and sh
   for (const timeout of [0, -1, 60001, 0.5, '30000'])
     await assert.rejects(queryLoki([process.execPath], url, timeout));
 });
+
+test('startup trace URL validates ID and selects the entire chain in time order', async () => {
+  const { startupTraceUrl } = await import('./loki-query.mjs');
+  const id = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const url = startupTraceUrl(id, {
+    start: '2026-11-01T00:00:00Z',
+    end: '2026-11-01T01:00:00Z',
+  });
+  assert.equal(
+    url.searchParams.get('query'),
+    '{job=~"auriga-nas|auriga-plugin|auriga-compose"} | json | trace_id="' + id + '"',
+  );
+  assert.equal(url.searchParams.get('direction'), 'forward');
+  assert.equal(url.searchParams.get('start'), '2026-11-01T00:00:00Z');
+  for (const bad of ['', '0'.repeat(32), id + '"', 'x'.repeat(32)])
+    assert.throws(() => startupTraceUrl(bad));
+});

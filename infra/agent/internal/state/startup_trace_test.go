@@ -1,6 +1,7 @@
 package state
 
 import (
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 	"testing"
@@ -67,7 +68,7 @@ func TestStartupCauseReloadReplayAndTerminalBoundary(t *testing.T) {
 	if err := store.PutDesiredWithTrace(spec, "invalid"); err != nil {
 		t.Fatal("invalid observation rejected business spec", err)
 	}
-	if store.StartupParent(spec.InstanceId, 8) != "" {
+	if !telemetry.Valid(store.StartupParent(spec.InstanceId, 8)) {
 		t.Fatal("invalid parent persisted")
 	}
 	if !store.StartupComplete(spec.InstanceId, 7) {
@@ -121,5 +122,37 @@ func TestStartupCompletionAdvancesWithoutDiscardingNewerCause(t *testing.T) {
 	}
 	if !store.StartupComplete("legacy-complete", 8) {
 		t.Fatal("completion without old observation dropped its watermark")
+	}
+}
+
+func TestStartupTimingAndGeneratedCauseSurviveReload(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := &nodev1.InstanceSpec{InstanceId: "generated-a", Generation: 7, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING}
+	if err := store.PutDesiredWithTrace(spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	parent := store.StartupParent(spec.InstanceId, 7)
+	started, origin := store.StartupTiming(spec.InstanceId, 7)
+	if !telemetry.Valid(parent) || started.IsZero() || origin != "generated" {
+		t.Fatal(parent, started, origin)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	if err := store.PutDesiredWithTrace(spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, origin := store.StartupTiming(spec.InstanceId, 7)
+	if store.StartupParent(spec.InstanceId, 7) != parent || !started.Equal(reloaded) || origin != "generated" {
+		t.Fatal("replay/reload reset observation")
 	}
 }

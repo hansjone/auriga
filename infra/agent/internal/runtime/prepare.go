@@ -16,6 +16,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 	"google.golang.org/protobuf/proto"
@@ -196,7 +197,7 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		}
 		s.Env = env
 	}
-	p.log().Info("pulling image and creating container", "instance_id", s.InstanceID)
+	telemetry.Log(ctx, slog.LevelInfo, "pulling image and creating container")
 	if err := p.Inner.Ensure(ctx, s, r); err != nil {
 		return err
 	}
@@ -235,7 +236,7 @@ func (p *Preparing) fetchArtifacts(ctx context.Context, full *nodev1.InstanceSpe
 		if pl == nil || pl.Url == "" || pl.Digest == "" {
 			continue
 		}
-		p.log().Info("fetching plugin artifact", "instance_id", full.InstanceId, "plugin", pl.Name)
+		telemetry.Log(ctx, slog.LevelInfo, "fetching plugin artifact", "plugin", pl.Name)
 		if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, pl.Url, pl.Digest, 0); err != nil {
 			return fmt.Errorf("plugin %s: %w", pl.Name, err)
 		}
@@ -245,7 +246,7 @@ func (p *Preparing) fetchArtifacts(ctx context.Context, full *nodev1.InstanceSpe
 		if dsh.Url == "" {
 			return fmt.Errorf("dsh runtime: missing archive locator")
 		}
-		p.log().Info("fetching dsh runtime artifact", "instance_id", full.InstanceId)
+		telemetry.Log(ctx, slog.LevelInfo, "fetching dsh runtime artifact")
 		if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, dsh.Url, dsh.Digest, 0); err != nil {
 			return fmt.Errorf("dsh runtime: %w", err)
 		}

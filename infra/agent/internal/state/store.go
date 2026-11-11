@@ -2,6 +2,7 @@
 package state
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -161,11 +162,25 @@ func (s *Store) PutDesiredWithTrace(spec *nodev1.InstanceSpec, parent string) er
 		// this independent observation record is monotonic across receiver overlap.
 		changed := spec.Generation > previous.Generation
 		if changed {
-			previous = startupObservation{Generation: spec.Generation, Parent: parent, CompletedGeneration: previous.CompletedGeneration, Complete: spec.Generation <= previous.CompletedGeneration}
+			origin := "propagated"
+			if parent == "" {
+				parent = telemetry.Current(telemetry.Start(context.Background(), "", spec.InstanceId, spec.Generation, nil)).Value
+				origin = "generated"
+			}
+			previous = startupObservation{Generation: spec.Generation, Parent: parent, Origin: origin, StartedAt: time.Now(), CompletedGeneration: previous.CompletedGeneration, Complete: spec.Generation <= previous.CompletedGeneration}
 		} else if spec.Generation == previous.Generation && !previous.Complete && parent != "" && (!telemetry.Valid(previous.Parent) || previous.Parent[3:35] == parent[3:35]) {
 			// A redelivery is a new dispatch span of the SAME operation. A different
 			// trace cannot rebind a generation or resurrect a completed startup.
 			previous.Parent = parent
+			changed = true
+		}
+		if spec.Generation == previous.Generation && !previous.Complete && !telemetry.Valid(previous.Parent) {
+			previous.Parent = telemetry.Current(telemetry.Start(context.Background(), "", spec.InstanceId, spec.Generation, nil)).Value
+			previous.Origin = "generated"
+			changed = true
+		}
+		if spec.Generation == previous.Generation && !previous.Complete && previous.StartedAt.IsZero() {
+			previous.StartedAt = time.Now()
 			changed = true
 		}
 		if changed {
@@ -182,10 +197,12 @@ func (s *Store) PutDesiredWithTrace(spec *nodev1.InstanceSpec, parent string) er
 }
 
 type startupObservation struct {
-	Generation          int64  `json:"generation"`
-	Parent              string `json:"parent,omitempty"`
-	Complete            bool   `json:"complete,omitempty"`
-	CompletedGeneration int64  `json:"completed_generation,omitempty"`
+	StartedAt           time.Time `json:"started_at,omitempty"`
+	Origin              string    `json:"origin,omitempty"`
+	Generation          int64     `json:"generation"`
+	Parent              string    `json:"parent,omitempty"`
+	Complete            bool      `json:"complete,omitempty"`
+	CompletedGeneration int64     `json:"completed_generation,omitempty"`
 }
 
 func (s *Store) StartupParent(instanceID string, generation int64) string {
@@ -328,4 +345,16 @@ func (s *Store) ListActual() ([]ActualRecord, error) {
 		})
 	})
 	return out, err
+}
+
+// StartupTiming returns observation data only; completed generations have no active clock.
+func (s *Store) StartupTiming(id string, generation int64) (time.Time, string) {
+	var observation startupObservation
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		return json.Unmarshal(tx.Bucket(bucketStartup).Get([]byte(id)), &observation)
+	})
+	if observation.Generation == generation && !observation.Complete && generation > observation.CompletedGeneration {
+		return observation.StartedAt, observation.Origin
+	}
+	return time.Time{}, ""
 }

@@ -31,6 +31,7 @@ func waitInstanceHealth(ctx context.Context, endpoint string) error {
 	ctx = telemetry.Child(ctx)
 	started := time.Now()
 	attempts := 0
+	listening := false
 	last := observer.HealthResult{Category: "not_attempted"}
 	failure := func(cause error) error {
 		err := &healthWaitError{cause: cause, last: last, attempts: attempts, elapsed: time.Since(started)}
@@ -56,12 +57,20 @@ func waitInstanceHealth(ctx context.Context, endpoint string) error {
 		if err := ctx.Err(); err != nil {
 			return failure(err)
 		}
+		if attempts == 0 {
+			telemetry.Stage(ctx, "first_health_attempt")
+		}
 		result := observer.ProbeHealth(ctx, client, target)
+		if !listening && result.HTTPStatus > 0 {
+			listening = true
+			telemetry.Stage(ctx, "listen_detected", "http_status", result.HTTPStatus)
+		}
 		attempts++
 		if ctx.Err() == nil || attempts == 1 {
 			last = result
 		}
 		if result.Ready {
+			telemetry.Stage(ctx, "plugin_healthy")
 			telemetry.Log(ctx, slog.LevelInfo, "instance health ready", "attempts", attempts, "elapsed_ms", time.Since(started).Milliseconds(), "health_response", result.Response, "health_span_id", result.SpanID)
 			return ctx.Err()
 		}
