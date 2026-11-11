@@ -1627,10 +1627,16 @@ for (const error of [
       };
       await assert.rejects(f.connections[1].ticket());
       await f.runtime.close();
-      const isRevoked =
-        error.status === 401 || error.code === 'network.revoked';
+      const isRevoked = error.code === 'network.revoked';
       assert.equal(revoked, isRevoked ? 1 : 0);
-      assert.equal(closedReason, isRevoked ? 'revoked' : 'forbidden');
+      assert.equal(
+        closedReason,
+        isRevoked
+          ? 'revoked'
+          : error.status === 403
+            ? 'forbidden'
+            : 'unavailable',
+      );
     },
   );
 

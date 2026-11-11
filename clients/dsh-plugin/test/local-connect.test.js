@@ -412,7 +412,7 @@ for (const status of [403, 401])
         assert.ok(Date.now() < deadline, 'network denial handled');
         await setImmediate();
       }
-      if (status === 403) {
+      {
         assert.ok(
           runtime.resolve(request),
           'native session survives a network-only denial',
@@ -422,10 +422,10 @@ for (const status of [403, 401])
           runtime.vault.snapshot().credential.accessToken,
           credential.accessToken,
         );
-        assert.equal(runtime.networkStatus.reason, 'forbidden');
-      } else {
-        assert.equal(runtime.resolve(request), null);
-        assert.equal(runtime.modelStatus.reauthenticationRequired, true);
+        assert.equal(
+          runtime.networkStatus.reason,
+          status === 403 ? 'forbidden' : 'unavailable',
+        );
       }
     },
   );

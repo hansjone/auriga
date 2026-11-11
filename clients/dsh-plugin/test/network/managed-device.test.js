@@ -40,7 +40,7 @@ async function fixture(t, change = (x) => x) {
   const value = change(material());
   await writeFile(file, JSON.stringify(value), { mode: 0o600 });
   const calls = [];
-  let requestHook;
+  let requestHook, verifyHook;
   let lifecycleInput,
     invalid = false;
   const network = createManagedNetwork({
@@ -58,7 +58,10 @@ async function fixture(t, change = (x) => x) {
           calls.push({ path, options });
           await requestHook?.();
           if (invalid)
-            throw Object.assign(new Error('revoked'), { status: 403 });
+            throw Object.assign(new Error('revoked'), {
+              status: 403,
+              code: 'network.revoked',
+            });
           return {
             access_token: 'device-access',
             token_type: 'Bearer',
@@ -67,6 +70,7 @@ async function fixture(t, change = (x) => x) {
           };
         },
         async verifyDevice(_token, expected) {
+          await verifyHook?.();
           return {
             ...expected,
             exp: Math.floor(Date.now() / 1000) + 300,
@@ -107,6 +111,9 @@ async function fixture(t, change = (x) => x) {
     },
     revoke() {
       invalid = true;
+    },
+    verify(fn) {
+      verifyHook = fn;
     },
     intercept(fn) {
       requestHook = fn;
@@ -333,4 +340,78 @@ test('missing optional managed credential starts no network tools and accepts la
   await f.network.refresh(true);
   assert.ok(f.input);
   assert.equal(f.calls.filter((x) => x === 'login').length, 1);
+});
+
+for (const point of ['grant401', 'jwks403', 'jwks503', 'edge403'])
+  test(
+    'temporary managed denial recovers with identical material: ' + point,
+    async (t) => {
+      t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
+      const f = await fixture(t);
+      await f.network.refresh();
+      const fail = () => {
+        throw Object.assign(new Error('SECRET-canary'), {
+          status: point === 'grant401' ? 401 : point === 'jwks503' ? 503 : 403,
+        });
+      };
+      if (point.startsWith('jwks')) f.verify(fail);
+      else f.intercept(fail);
+      await f.network.refresh(true);
+      assert.equal(f.network.sessionAvailable, false);
+      assert.equal(f.network.status.connected, false);
+      assert.equal(f.network.status.reason, 'unavailable');
+      assert.throws(() => f.network.messagingUI({}), /unavailable/);
+      const count = f.calls.filter((x) => typeof x === 'object').length;
+      await f.network.refresh();
+      assert.equal(f.calls.filter((x) => typeof x === 'object').length, count);
+      f.verify(undefined);
+      f.intercept(undefined);
+      t.mock.timers.tick(1001);
+      await f.network.refresh();
+      assert.equal(f.network.sessionAvailable, true);
+      assert.equal(f.network.status.connected, true);
+    },
+  );
+
+test('authoritative managed revocation never retries identical material', async (t) => {
+  const f = await fixture(t);
+  await f.network.refresh();
+  f.revoke();
+  await f.network.refresh(true);
+  const count = f.calls.length;
+  for (let i = 0; i < 5; i++) await f.network.refresh(true);
+  assert.equal(f.calls.length, count);
+  assert.equal(f.network.sessionAvailable, false);
+});
+
+test('temporary renewal initiated by lifecycle resumes that lifecycle after grant recovers', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
+  const f = await fixture(t);
+  await f.network.refresh();
+  const initial = f.input;
+  t.mock.timers.tick(271000);
+  f.intercept(() => {
+    throw Object.assign(new Error('temporary'), { status: 401 });
+  });
+  await assert.rejects(initial.getAccess(), (error) => error.status === 401);
+  assert.equal(f.network.sessionAvailable, false);
+  f.intercept(undefined);
+  await f.network.refresh();
+  assert.equal(f.network.sessionAvailable, true);
+  assert.equal(f.input, initial);
+  assert.equal(f.calls.filter((x) => x === 'login').length, 2);
+});
+test('JWKS cannot revoke material by returning a revocation-looking error', async (t) => {
+  const f = await fixture(t);
+  f.verify(() => {
+    throw Object.assign(new Error('key service'), {
+      status: 403,
+      code: 'network.revoked',
+    });
+  });
+  await f.network.refresh();
+  assert.equal(f.network.sessionAvailable, false);
+  f.verify(undefined);
+  await f.network.refresh(true);
+  assert.equal(f.network.sessionAvailable, true);
 });

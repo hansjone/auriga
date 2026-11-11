@@ -122,14 +122,17 @@ for (const point of ['prepare', 'start'])
         lifecycle.login();
         try {
           await until(() => lifecycle.status.state !== 'connecting');
-          const expected =
-            error.status === 401 || error.code === 'network.revoked';
+          const expected = error.code === 'network.revoked';
           assert.equal(revoked, expected ? 1 : 0);
           assert.equal(
             lifecycle.status.state,
             expected ? 'idle' : 'unavailable',
           );
-          if (!expected) assert.equal(lifecycle.status.reason, 'forbidden');
+          if (!expected)
+            assert.equal(
+              lifecycle.status.reason,
+              error.status === 403 ? 'forbidden' : 'unavailable',
+            );
         } finally {
           await lifecycle.close();
         }
@@ -421,3 +424,62 @@ test('closing never waits for an uncooperative obsolete prepare response', async
   await turn();
   assert.deepEqual(calls, []);
 });
+
+for (const kind of ['device-connection', 'legacy'])
+  for (const error of [
+    { status: 401 },
+    { status: 403 },
+    { status: 403, code: 'network.unauthorized' },
+  ])
+    test(
+      'temporary lifecycle denial retries and restores messaging ' +
+        kind +
+        JSON.stringify(error),
+      async (t) => {
+        let attempts = 0,
+          revoked = 0;
+        const lifecycle = createNetworkLifecycle({
+          directory: 'unused',
+          ctx: {},
+          getAccess: async () => 'native',
+          authorizeLocal: async () => false,
+          backoff: { baseMs: 20, maxMs: 20 },
+          defaultProvider: {
+            ...(kind === 'device-connection' ? { kind } : {}),
+            async prepare() {
+              if (++attempts === 1) throw error;
+              return {};
+            },
+          },
+          onRevoked() {
+            revoked++;
+          },
+          async open() {
+            return {
+              status: { connected: true },
+              async start() {},
+              async close() {},
+              messagingUI() {
+                return 'ready';
+              },
+            };
+          },
+        });
+        t.after(() => lifecycle.close());
+        lifecycle.login();
+        await until(() => lifecycle.status.state === 'unavailable');
+        assert.throws(() => lifecycle.messagingUI({}), /unavailable/);
+        assert.equal(revoked, 0);
+        await new Promise((resolve) => {
+          const timer = setInterval(() => {
+            if (lifecycle.status.connected) {
+              clearInterval(timer);
+              resolve();
+            }
+          }, 5);
+          t.after(() => clearInterval(timer));
+        });
+        assert.equal(attempts, 2);
+        assert.equal(lifecycle.messagingUI({}), 'ready');
+      },
+    );

@@ -16,7 +16,7 @@ export class DeviceControlUnavailable extends Error {}
  * @param {unknown} error */
 export function isDeviceRevocationError(error) {
   const value = /** @type {{status?:number,code?:string}|null} */ (error);
-  return value?.status === 401 || value?.code === 'network.revoked';
+  return value?.code === 'network.revoked';
 }
 /** @param {string} ticket */
 function ingressFor(ticket) {

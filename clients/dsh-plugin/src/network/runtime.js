@@ -19,11 +19,7 @@ import { openConnectionRuntime } from './connection-runtime.js';
 /** @param {unknown} error */
 export function isRevocationError(error) {
   const value = /** @type {{status?:number,code?:string}|null} */ (error);
-  return (
-    value?.status === 401 ||
-    value?.status === 403 ||
-    ['network.revoked', 'network.unauthorized'].includes(value?.code ?? '')
-  );
+  return value?.code === 'network.revoked';
 }
 
 /** Stream bounded records rather than applying the wire JSON value budget to
@@ -749,6 +745,8 @@ export async function openNetworkRuntime(options) {
           if (isRevocationError(error)) {
             options.onRevoked?.();
             void close('revoked').catch(() => {});
+          } else if ([401, 403].includes(/** @type {any} */ (error)?.status)) {
+            void close('unavailable').catch(() => {});
           }
           throw error;
         }
