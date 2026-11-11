@@ -49,6 +49,23 @@ class OpsOperationsTest {
   }
 
   @Test
+  void retentionMustCoverIntervalAndManualCapacityMatchesWorker() {
+    assertThrows(AurigaException.class, () -> backups.configure(admin, true, 720, 0, 7, 29, 1024));
+    assertThrows(AurigaException.class, () -> backups.configure(admin, false, 25, 0, 7, 1, 1024));
+    assertThrows(
+        AurigaException.class, () -> backups.configure(admin, true, 24, 0, 7, 30, 1024, 0));
+    assertThrows(
+        AurigaException.class, () -> backups.configure(admin, true, 24, 0, 7, 30, 1024, 8));
+    assertEquals(1, backups.configure(admin, true, 720, 0, 7, 30, 1024).path("revision").asInt());
+    store.change(
+        s -> {
+          for (int i = 0; i < 1000; i++) s.withArray("backups").addObject().put("status", "failed");
+          return null;
+        });
+    assertThrows(AurigaException.class, () -> backups.trigger(admin, "capacity-request-001"));
+  }
+
+  @Test
   void deletionRevokesTicketsAndDownloadAuditRecordsOutcome() throws Exception {
     UUID first = complete();
     UUID second = complete();

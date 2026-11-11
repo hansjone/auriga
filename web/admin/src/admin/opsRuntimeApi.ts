@@ -23,7 +23,7 @@ export const opsRuntimeApi = {
       signal,
       headers: { 'Idempotency-Key': key },
     }),
-  async download(id: string, signal: AbortSignal) {
+  async download(id: string, signal: AbortSignal, onFailure?: () => void) {
     const ticket = await apiClient.post<S['OpsBackupTicket']>(
       `${base}/backups/${encodeURIComponent(id)}/tickets`,
       undefined,
@@ -35,6 +35,27 @@ export const opsRuntimeApi = {
     frame.hidden = true;
     frame.name = 'ops-download-' + globalThis.crypto.randomUUID();
     frame.title = 'Database archive download';
+    const detach = () => {
+      frame.removeEventListener('load', loaded);
+      frame.removeEventListener('error', failed);
+      signal.removeEventListener('abort', detach);
+    };
+    const failed = () => {
+      detach();
+      frame.remove();
+      if (!signal.aborted) onFailure?.();
+    };
+    const loaded = () => {
+      try {
+        if (frame.contentDocument?.URL === 'about:blank') return;
+      } catch {
+        // An inaccessible error/redirect document must not be read or echoed.
+      }
+      failed(); // An attachment never renders a document in the frame.
+    };
+    frame.addEventListener('load', loaded);
+    frame.addEventListener('error', failed);
+    signal.addEventListener('abort', detach, { once: true });
     document.body.append(frame);
     const form = document.createElement('form');
     form.method = 'POST';
@@ -54,6 +75,10 @@ export const opsRuntimeApi = {
     document.body.append(form);
     try {
       form.submit();
+    } catch (error) {
+      detach();
+      frame.remove();
+      throw error;
     } finally {
       form.remove();
     }

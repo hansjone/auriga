@@ -142,6 +142,7 @@ export interface components {
       available: components['schemas']['OpsUpgradeTarget'][];
       requests: components['schemas']['OpsUpgradeItem'][];
     };
+    /** @description Retention days times 24 must be at least intervalHours; minimumSuccesses must not exceed retentionCount. Automatic cleanup keeps at least the latest minimumSuccesses successful backups (default one), even if expired. Explicit manual deletion is a separate administrator action. */
     OpsBackupPlanInput: {
       enabled: boolean;
       intervalHours: number;
@@ -150,6 +151,11 @@ export interface components {
       retentionCount?: number;
       retentionDays?: number;
       minFreeMiB?: number;
+      /**
+       * @description At most retentionCount. Automatic retention always keeps this many latest successful backups, regardless of age.
+       * @default 1
+       */
+      minimumSuccesses: number;
     };
     OpsBackupPlan: components['schemas']['OpsBackupPlanInput'] & {
       /** Format: date-time */
@@ -173,6 +179,10 @@ export interface components {
       includesRoles?: boolean;
       /** Format: date-time */
       deleteRequestedAt?: string;
+      /** @description Prior database task cancellation is unconfirmed; no new backup starts until recovered. */
+      cancelPending?: boolean;
+      /** @description Optional databases confirmed absent; currently only legacy installations without bifrost. */
+      skippedDatabases?: string[];
     };
     OpsBackupStatus: {
       plan: components['schemas']['OpsBackupPlan'];

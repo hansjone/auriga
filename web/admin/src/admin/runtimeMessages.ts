@@ -1,4 +1,11 @@
 export const runtimeZh = {
+  opsMinimumSuccesses: '保底成功备份（份）',
+  opsRetentionFloor:
+    '自动清理至少保留最近 {count} 份成功备份；显式手动删除不受此保底限制。',
+  opsSkippedDatabases: '未安装，已跳过',
+  opsDownloadFailed: '下载未成功开始或被服务器拒绝，请刷新会话和审计后重试。',
+  opsDownloadSubmitted:
+    '下载已交给浏览器，请核对下载结果；若没有开始或中途失败，请刷新审计后重试。',
   opsRetentionCount: '最多保留（份）',
   opsRetentionDays: '最长保留（天）',
   opsFreeMiB: '最低剩余空间（MiB）',
@@ -28,7 +35,7 @@ export const runtimeZh = {
   opsBytes: '字节数',
   opsBackupNow: '立即备份',
   opsPlanInvalid:
-    '间隔须为 1–720 小时；保留 1–365 份、1–3650 天；剩余空间阈值 64–1048576 MiB。',
+    '保底数量须在 1 与保留份数之间；保留天数须覆盖备份间隔（天数×24≥小时数）；间隔 1–720 小时，保留 1–365 份、1–3650 天，空间阈值 64–1048576 MiB。',
   opsPlanConfirm: '确认修改 PG 备份计划？',
   opsBackupConfirm: '确认触发 PG 备份？备份将消耗数据库和磁盘资源。',
   opsDownloadConfirm:
@@ -70,6 +77,14 @@ export const runtimeZh = {
     '在节点页发起排空：停止调度并迁移实例；请先确认其他节点有可用容量。排空会影响正在运行的实例。',
 };
 export const runtimeEn: Record<keyof typeof runtimeZh, string> = {
+  opsMinimumSuccesses: 'Minimum successful backups',
+  opsRetentionFloor:
+    'Automatic cleanup keeps at least the latest {count} successful backups. Explicit manual deletion can remove it.',
+  opsSkippedDatabases: 'Not installed; skipped',
+  opsDownloadFailed:
+    'The download did not start or was rejected. Refresh the session and audit before retrying.',
+  opsDownloadSubmitted:
+    'Submitted to the browser. Check its download result; refresh the audit before retrying a failed or missing download.',
   opsRetentionCount: 'Maximum copies',
   opsRetentionDays: 'Maximum age (days)',
   opsFreeMiB: 'Minimum free space (MiB)',
@@ -102,7 +117,7 @@ export const runtimeEn: Record<keyof typeof runtimeZh, string> = {
   opsBytes: 'Bytes',
   opsBackupNow: 'Back up now',
   opsPlanInvalid:
-    'Use 1–720 hours, 1–365 copies, 1–3650 days and 64–1048576 MiB free-space reserve.',
+    'Minimum successes must be between one and maximum copies. Retention days × 24 must cover the backup interval. Use 1–720 hours, 1–365 copies, 1–3650 days and 64–1048576 MiB reserve.',
   opsPlanConfirm: 'Change the PG backup schedule?',
   opsBackupConfirm:
     'Trigger a PG backup? This uses database and disk resources.',

@@ -30,7 +30,9 @@ const enabled = ref(false),
   invalid = ref('');
 const retentionCount = ref('7'),
   retentionDays = ref('30'),
-  minFreeMiB = ref('1024');
+  minFreeMiB = ref('1024'),
+  minimumSuccesses = ref('1');
+const downloadFeedback = ref('');
 watch(value, (current) => {
   if (current) {
     enabled.value = current.plan.enabled;
@@ -38,6 +40,7 @@ watch(value, (current) => {
     retentionCount.value = String(current.plan.retentionCount ?? 7);
     retentionDays.value = String(current.plan.retentionDays ?? 30);
     minFreeMiB.value = String(current.plan.minFreeMiB ?? 1024);
+    minimumSuccesses.value = String(current.plan.minimumSuccesses ?? 1);
   }
 });
 function askPlan() {
@@ -46,8 +49,11 @@ function askPlan() {
     !/^\d+$/.test(interval.value) ||
     Number(interval.value) < 1 ||
     Number(interval.value) > 720 ||
+    Number(retentionDays.value) * 24 < Number(interval.value) ||
+    Number(minimumSuccesses.value) > Number(retentionCount.value) ||
     ![
       [retentionCount.value, 1, 365],
+      [minimumSuccesses.value, 1, 365],
       [retentionDays.value, 1, 3650],
       [minFreeMiB.value, 64, 1048576],
     ].every(
@@ -68,9 +74,10 @@ function askPlan() {
     retentionCount: Number(retentionCount.value),
     retentionDays: Number(retentionDays.value),
     minFreeMiB: Number(minFreeMiB.value),
+    minimumSuccesses: Number(minimumSuccesses.value),
   };
   ask(
-    `${t('opsPlanConfirm')} ${t(enabled.value ? 'opsPlanEnabled' : 'opsPlanDisabled')} · ${t('opsInterval')}: ${plan.intervalHours}; ${t('opsRetentionCount')}: ${plan.retentionCount}; ${t('opsRetentionDays')}: ${plan.retentionDays}; ${t('opsFreeMiB')}: ${plan.minFreeMiB}`,
+    `${t('opsPlanConfirm')} ${t(enabled.value ? 'opsPlanEnabled' : 'opsPlanDisabled')} · ${t('opsInterval')}: ${plan.intervalHours}; ${t('opsRetentionCount')}: ${plan.retentionCount}; ${t('opsRetentionDays')}: ${plan.retentionDays}; ${t('opsFreeMiB')}: ${plan.minFreeMiB}; ${t('opsMinimumSuccesses')}: ${plan.minimumSuccesses}`,
     'ops.backups.write',
     (signal) => opsRuntimeApi.plan(plan, signal),
   );
@@ -82,9 +89,14 @@ function trigger() {
   );
 }
 function download(id: string) {
-  ask(t('opsDownloadConfirm'), 'ops.backups.download', (signal) =>
-    opsRuntimeApi.download(id, signal),
-  );
+  downloadFeedback.value = '';
+  ask(t('opsDownloadConfirm'), 'ops.backups.download', async (signal) => {
+    await opsRuntimeApi.download(id, signal, () => {
+      downloadFeedback.value = t('opsDownloadFailed');
+    });
+    if (!signal.aborted && !downloadFeedback.value)
+      downloadFeedback.value = t('opsDownloadSubmitted');
+  });
 }
 function remove(id: string) {
   ask(t('opsDeleteConfirm') + ' ' + id, 'ops.backups.write', (signal) =>
@@ -105,8 +117,19 @@ onMounted(load);
     </p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="invalid" role="alert" class="error">{{ invalid }}</p>
+    <p
+      v-if="downloadFeedback"
+      data-testid="download-feedback"
+      :role="downloadFeedback === t('opsDownloadFailed') ? 'alert' : 'status'"
+      :class="{ error: downloadFeedback === t('opsDownloadFailed') }"
+    >
+      {{ downloadFeedback }}
+    </p>
     <section v-if="value" class="details">
       <h2>{{ t('opsBackupPlan') }}</h2>
+      <p class="muted">
+        {{ t('opsRetentionFloor', { count: Number(minimumSuccesses) || 1 }) }}
+      </p>
       <p>
         {{ t('lastUpdated') }}: {{ value.worker?.reportedAt || t('unknown') }}
       </p>
@@ -133,6 +156,15 @@ onMounted(load);
           "
       /></label>
       <div class="label-row">
+        <label
+          >{{ t('opsMinimumSuccesses')
+          }}<ElInput
+            v-model="minimumSuccesses"
+            data-testid="minimum-successes"
+            :disabled="
+              busy || !!pending || !permissions.includes('ops.backups.write')
+            "
+        /></label>
         <label
           >{{ t('opsRetentionCount')
           }}<ElInput
@@ -222,7 +254,11 @@ onMounted(load);
         ><ElTableColumn :label="t('opsCoverage')"
           ><template #default="{ row }"
             >{{ row.databases?.join(', ') || t('opsLegacy') }}
-            {{ row.includesRoles ? '+ roles' : '' }}</template
+            {{ row.includesRoles ? '+ roles' : '' }}
+            <span v-if="row.skippedDatabases?.length"
+              >{{ t('opsSkippedDatabases') }}:
+              {{ row.skippedDatabases.join(', ') }}</span
+            ></template
           ></ElTableColumn
         >
         <ElTableColumn :label="t('opsDelete')"

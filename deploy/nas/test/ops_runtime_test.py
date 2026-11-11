@@ -15,6 +15,11 @@ spec.loader.exec_module(worker)
 
 
 class RuntimeWorkerTest(unittest.TestCase):
+    def setUp(self):
+        probe = patch.object(worker, 'database_exists', return_value=True)
+        probe.start()
+        self.addCleanup(probe.stop)
+
     def test_managed_instance_inventory_is_tenant_scoped_and_has_no_secrets(self):
         tenant = '00000000-0000-0000-0000-000000000001'
         def container(identifier, owner):

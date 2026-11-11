@@ -81,6 +81,15 @@ class PostgresArchiveTest(unittest.TestCase):
                 self.assertEqual(b'ops_fixture_role', owner.stdout.strip())
                 worker.tick(directory, settings)
                 self.assertEqual(1, len(worker.read(directory)['backups']))
+                self.assertTrue(worker.cancel_dump(settings, result['id']))
+                # A cluster initialized before bifrost was added must still back up
+                # its primary database and roles, with explicit missing coverage.
+                run(['exec', '-T', 'postgres', 'dropdb', '-U', 'postgres', 'bifrost'])
+                legacy = worker.backup(directory, settings, str(uuid.uuid4()))
+                self.assertEqual('succeeded', legacy['status'])
+                self.assertEqual(['postgres'], legacy['databases'])
+                self.assertEqual(['bifrost'], legacy['skippedDatabases'])
+                self.assertTrue(legacy['includesRoles'])
             finally:
                 run(['down', '--volumes', '--remove-orphans'])
 

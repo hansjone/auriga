@@ -38,7 +38,8 @@ public class OpsBackupController {
         body.getRevision(),
         body.getRetentionCount() == null ? 7 : body.getRetentionCount(),
         body.getRetentionDays() == null ? 30 : body.getRetentionDays(),
-        body.getMinFreeMiB() == null ? 1024 : body.getMinFreeMiB());
+        body.getMinFreeMiB() == null ? 1024 : body.getMinFreeMiB(),
+        body.getMinimumSuccesses() == null ? 1 : body.getMinimumSuccesses());
   }
 
   @PostMapping

@@ -34,6 +34,7 @@ public final class OpsBackupService {
     result.set("worker", state.path("inventory"));
     result.set("alerts", state.withArray("alerts"));
     result.set("audit", state.withArray("audit"));
+    for (JsonNode event : result.path("audit")) ((ObjectNode) event).remove("session");
     for (JsonNode item : result.path("items")) {
       ((ObjectNode) item).remove("key");
       ((ObjectNode) item).remove("actor");
@@ -53,6 +54,19 @@ public final class OpsBackupService {
       int retentionCount,
       int retentionDays,
       int minFreeMiB) {
+    return configure(
+        actor, enabled, interval, revision, retentionCount, retentionDays, minFreeMiB, 1);
+  }
+
+  public ObjectNode configure(
+      AurigaPrincipal actor,
+      boolean enabled,
+      int interval,
+      long revision,
+      int retentionCount,
+      int retentionDays,
+      int minFreeMiB,
+      int minimumSuccesses) {
     operations.installation(actor);
     if (interval < 1
         || interval > 720
@@ -61,6 +75,9 @@ public final class OpsBackupService {
         || retentionCount > 365
         || retentionDays < 1
         || retentionDays > 3650
+        || retentionDays * 24 < interval
+        || minimumSuccesses < 1
+        || minimumSuccesses > retentionCount
         || minFreeMiB < 64
         || minFreeMiB > 1048576) throw new AurigaException(VALIDATION_FAILED);
     return operations.store.change(
@@ -75,6 +92,7 @@ public final class OpsBackupService {
           value.put("retentionCount", retentionCount);
           value.put("retentionDays", retentionDays);
           value.put("minFreeMiB", minFreeMiB);
+          value.put("minimumSuccesses", minimumSuccesses);
           value.put("nextAt", operations.clock.instant().plusSeconds(interval * 3600L).toString());
           value.put("actor", actor.subject());
           state.set("plan", value);
@@ -91,6 +109,7 @@ public final class OpsBackupService {
       if (!value.has("retentionCount")) value.put("retentionCount", 7);
       if (!value.has("retentionDays")) value.put("retentionDays", 30);
       if (!value.has("minFreeMiB")) value.put("minFreeMiB", 1024);
+      if (!value.has("minimumSuccesses")) value.put("minimumSuccesses", 1);
       return value;
     }
     value.put("enabled", false);
@@ -99,6 +118,7 @@ public final class OpsBackupService {
     value.put("retentionCount", 7);
     value.put("retentionDays", 30);
     value.put("minFreeMiB", 1024);
+    value.put("minimumSuccesses", 1);
     return value;
   }
 
@@ -114,9 +134,10 @@ public final class OpsBackupService {
               return (ObjectNode) previous.deepCopy();
           operations.requireWorker(state);
           for (JsonNode previous : backups)
-            if (Set.of("queued", "running").contains(previous.path("status").asString()))
+            if (Set.of("queued", "running").contains(previous.path("status").asString())
+                || previous.path("cancelPending").asBoolean(false))
               throw new AurigaException(CONFLICT);
-          if (backups.size() > 1000) throw new AurigaException(RATE_LIMITED);
+          if (backups.size() >= 1000) throw new AurigaException(RATE_LIMITED);
           ObjectNode request = OpsRuntimeStore.JSON.createObjectNode();
           request.put("id", UuidV7.next().toString());
           request.put("actor", actor.subject());

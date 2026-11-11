@@ -150,8 +150,22 @@ def stop(process):
 
 def cancel_dump(settings, identifier):
     application = 'auriga_ops_' + uuid.UUID(identifier).hex
-    sql = "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name='" + application + "' AND pid<>pg_backend_pid()"
-    subprocess.run(settings['compose'] + ['exec', '-T', 'postgres', 'psql', '--no-password', '-U', settings['databaseUser'], '-d', 'postgres', '-c', sql], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+    sql = "SELECT COALESCE(bool_and(pg_terminate_backend(pid,5000)),true) FROM pg_stat_activity WHERE application_name='" + application + "' AND pid<>pg_backend_pid()"
+    try:
+        result = subprocess.run(settings['compose'] + ['exec', '-T', 'postgres', 'psql', '--no-password', '-U', settings['databaseUser'], '-d', 'postgres', '-Atc', sql], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        return result.returncode == 0 and result.stdout.strip() == 't'
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def database_exists(settings, name):
+    # Only bifrost is optional for installations initialized before it was added.
+    if name != 'bifrost':
+        return True
+    result = subprocess.run(settings['compose'] + ['exec', '-T', 'postgres', 'psql', '--no-password', '-U', settings['databaseUser'], '-d', 'postgres', '-Atc', "SELECT 1 FROM pg_database WHERE datname='bifrost'"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise OSError('pg_database_probe_failed')
+    return result.stdout.strip() == '1'
 
 
 def free_bytes(folder):
@@ -178,9 +192,13 @@ def dump_component(settings, identifier, arguments, output, folder):
                 output.write(chunk)
         if process.wait(timeout=30) != 0:
             raise OSError('pg_dump_failed')
-    except BaseException:
-        stop(process)
-        cancel_dump(settings, identifier)
+    except BaseException as error:
+        try:
+            stop(process)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        if not cancel_dump(settings, identifier):
+            raise OSError('pg_cancel_failed') from error
         raise
     finally:
         process.stdout.close()
@@ -201,6 +219,10 @@ def backup(root, settings, identifier):
             databases = settings.get('databases', [settings.get('database', 'auriga'), 'bifrost'])
             if not databases or len(set(databases)) != len(databases) or not all(re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,62}', name) for name in databases):
                 raise ValueError('Invalid databases')
+            skipped = [name for name in databases if not database_exists(settings, name)]
+            databases = [name for name in databases if name not in skipped]
+            if not databases:
+                return {'status': 'failed', 'reason': 'pg_database_missing'}
             with tempfile.TemporaryDirectory(prefix='.' + identifier + '-', dir=folder) as work:
                 with directory(work, {}) as working:
                     with temporary.open('xb') as output:
@@ -241,9 +263,10 @@ def backup(root, settings, identifier):
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-            return {'status': 'succeeded', 'sizeBytes': stat.st_size, 'sha256': digest.hexdigest(), 'format': 'tar', 'databases': databases, 'includesRoles': True}
+            return {'status': 'succeeded', 'sizeBytes': stat.st_size, 'sha256': digest.hexdigest(), 'format': 'tar', 'databases': databases, 'includesRoles': True, 'skippedDatabases': skipped}
         except (OSError, TimeoutError, subprocess.SubprocessError) as error:
-            return {'status': 'failed', 'reason': 'backup_storage_low' if str(error) == 'backup_storage_low' else 'pg_dump_failed'}
+            reason = str(error) if str(error) in ('backup_storage_low', 'pg_cancel_failed', 'pg_database_probe_failed') else ('pg_dump_timeout' if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)) else 'pg_dump_failed')
+            return {'status': 'failed', 'reason': reason, 'cancelPending': reason == 'pg_cancel_failed'}
         finally:
             if temporary.exists() or temporary.is_symlink():
                 temporary.unlink()
@@ -252,10 +275,15 @@ def backup(root, settings, identifier):
 def retain(root, state):
     plan = state.get('plan', {})
     count, days = plan.get('retentionCount', 7), plan.get('retentionDays', 30)
+    minimum = plan.get('minimumSuccesses', 1)
     if not 1 <= count <= 365 or not 1 <= days <= 3650:
         raise ValueError('Invalid retention')
-    terminal = [item for item in state.get('backups', []) if item['status'] not in ('queued', 'running')]
-    terminal.sort(key=lambda item: item['createdAt'], reverse=True)
+    if not 1 <= minimum <= count or days * 24 < plan.get('intervalHours', 24):
+        state.setdefault('alerts', []).append('backup_policy_invalid')
+        return  # A legacy invalid plan must not delete data before the operator corrects it.
+    terminal = [item for item in state.get('backups', []) if item['status'] not in ('queued', 'running') and not item.get('cancelPending')]
+    terminal.sort(key=lambda item: datetime.fromisoformat(item['createdAt'].replace('Z', '+00:00')), reverse=True)
+    protected = {item['id'] for item in [entry for entry in terminal if entry['status'] == 'succeeded' and not entry.get('deleteRequestedAt')][:minimum]}
     successes, failures = 0, 0
     for item in terminal:
         if item['status'] == 'succeeded':
@@ -281,7 +309,7 @@ def retain(root, state):
             state.setdefault('alerts', []).append('backup_retention_blocked')
             continue
         expired = datetime.fromisoformat(item['createdAt'].replace('Z', '+00:00')) < now() - timedelta(days=days)
-        if not (item.get('deleteRequestedAt') or over_count or expired):
+        if item['id'] in protected or not (item.get('deleteRequestedAt') or over_count or expired):
             continue
         try:
             path = root / 'backups'
@@ -301,7 +329,7 @@ def schedule(state):
     if len(backups) >= 1000:
         state.setdefault('alerts', []).append('backup_history_full')
         return
-    if not plan.get('enabled') or any(item['status'] in ('queued', 'running') for item in backups):
+    if not plan.get('enabled') or any(item['status'] in ('queued', 'running') or item.get('cancelPending') for item in backups):
         return
     interval = plan.get('intervalHours', 24)
     if not isinstance(interval, int) or not 1 <= interval <= 720:
@@ -322,6 +350,10 @@ def tick_anchored(root, settings):
         # An interrupted prior tick must remain an explicit failure, never a replay.
         observed = inventory(settings)
         with locked(root, 'state.lock', settings):
+            interrupted = [item['id'] for item in read(root).get('backups', []) if item['status'] == 'running' or item.get('cancelPending')]
+        # Docker/PG can be stalled: do not hold the API's state lock during cancellation.
+        cancelled = {identifier: cancel_dump(settings, identifier) for identifier in interrupted}
+        with locked(root, 'state.lock', settings):
             state = read(root)
             tenant = str(uuid.UUID(settings['tenantId']))
             if state.get('tenantId', tenant) != tenant:
@@ -330,9 +362,14 @@ def tick_anchored(root, settings):
             state['alerts'] = []
             for kind in ['upgrades', 'backups']:
                 for item in state.get(kind, []):
-                    if item['status'] == 'running':
-                        if kind == 'backups':
-                            cancel_dump(settings, item['id'])
+                    if kind == 'backups' and item['id'] in cancelled:
+                        if cancelled[item['id']]:
+                            item.pop('cancelPending', None)
+                            item.update(status='failed', reason='worker_interrupted', finishedAt=stamp())
+                        else:
+                            item.update(status='failed', reason='pg_cancel_failed', cancelPending=True, finishedAt=stamp())
+                            state['alerts'].append('backup_cancel_failed')
+                    elif item['status'] == 'running':
                         item.update(status='failed', reason='worker_interrupted', finishedAt=stamp())
             state['inventory'] = observed
             state['available'] = [{'id': key, 'label': value['label'], 'image': value['image']} for key, value in settings.get('targets', {}).items()]
@@ -340,6 +377,8 @@ def tick_anchored(root, settings):
             schedule(state)
             work = []
             for kind in ['upgrades', 'backups']:
+                if kind == 'backups' and any(item.get('cancelPending') for item in state.get('backups', [])):
+                    continue
                 for item in state.get(kind, []):
                     if item['status'] == 'queued':
                         item.update(status='running', startedAt=stamp())
@@ -355,6 +394,8 @@ def tick_anchored(root, settings):
                         entry.update(receipt, finishedAt=stamp())
                 if receipt.get('reason') == 'backup_storage_low':
                     state.setdefault('alerts', []).append('backup_storage_low')
+                if receipt.get('cancelPending'):
+                    state.setdefault('alerts', []).append('backup_cancel_failed')
                 retain(root, state)
                 # Report actual containers after deployment, not requested images.
                 try:

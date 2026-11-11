@@ -13,6 +13,11 @@ spec.loader.exec_module(worker)
 
 @unittest.skipUnless(os.name == 'posix', 'Linux host worker')
 class ReviewRegressionTest(unittest.TestCase):
+    def setUp(self):
+        probe = patch.object(worker, 'database_exists', return_value=True)
+        probe.start()
+        self.addCleanup(probe.stop)
+
     def test_failed_attempts_do_not_evict_last_successful_archive(self):
         with tempfile.TemporaryDirectory() as temporary:
             good = {'id':'01900000-0000-7000-8000-000000000001', 'status':'succeeded', 'createdAt':'2026-11-11T00:00:00Z'}

@@ -22,7 +22,7 @@ vi.mock('../src/admin/opsRuntimeApi', () => ({
 const wrappers: ReturnType<typeof mount>[] = [];
 let permissions: string[];
 const backupStatus = {
-  plan: { enabled: false, intervalHours: 24, revision: 3 },
+  plan: { enabled: false, intervalHours: 24, revision: 3, minimumSuccesses: 1 },
   items: [
     {
       id: '01900000-0000-7000-8000-000000000001',
@@ -83,6 +83,55 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 describe('runtime backend workflows', () => {
+  it('makes a native download rejection visible on the page', async () => {
+    vi.mocked(opsRuntimeApi.download).mockImplementation(
+      async (_id, _signal, failed) => {
+        failed?.();
+      },
+    );
+    const w = render(BackupsView);
+    await flushPromises();
+    await w
+      .findAll('button')
+      .find((b) => b.text() === '下载与保存')!
+      .trigger('click');
+    w.getComponent(ActionConfirm).vm.$emit('confirm');
+    await flushPromises();
+    expect(w.get('[data-testid="download-feedback"]').attributes('role')).toBe(
+      'alert',
+    );
+    expect(w.text()).toContain('下载未成功开始');
+  });
+
+  it('shows the missing optional database in archive coverage', async () => {
+    vi.mocked(opsRuntimeApi.backups).mockResolvedValue({
+      ...backupStatus,
+      items: [
+        {
+          ...backupStatus.items[0],
+          databases: ['auriga'],
+          skippedDatabases: ['bifrost'],
+          includesRoles: true,
+        },
+      ],
+    });
+    const w = render(BackupsView);
+    await flushPromises();
+    expect(w.text()).toContain('未安装，已跳过: bifrost');
+  });
+
+  it('rejects a retention age shorter than the backup interval', async () => {
+    const w = render(BackupsView);
+    await flushPromises();
+    await w.get('[data-testid="backup-interval"]').setValue('720');
+    await w.get('[data-testid="retention-days"]').setValue('29');
+    await w.get('[data-testid="save-backup-plan"]').trigger('click');
+    expect(w.text()).toContain('保留天数');
+    expect(w.text()).toContain('最近 1 份');
+    expect(opsRuntimeApi.plan).not.toHaveBeenCalled();
+    expect(w.getComponent(ActionConfirm).props('message')).toBeUndefined();
+  });
+
   it('requires read permission before requesting backup metadata', async () => {
     permissions = [];
     const w = render(BackupsView);
@@ -114,6 +163,7 @@ describe('runtime backend workflows', () => {
         retentionCount: 7,
         retentionDays: 30,
         minFreeMiB: 1024,
+        minimumSuccesses: 1,
       },
       expect.any(AbortSignal),
     );
@@ -172,6 +222,7 @@ describe('runtime backend workflows', () => {
     expect(opsRuntimeApi.download).toHaveBeenCalledWith(
       backupStatus.items[0].id,
       expect.any(AbortSignal),
+      expect.any(Function),
     );
   });
   it('shows actual image IDs and only queues an approved target after confirmation', async () => {

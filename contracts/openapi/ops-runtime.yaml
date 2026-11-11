@@ -304,10 +304,21 @@ components:
           type: integer
           minimum: 64
           maximum: 1048576
+        minimumSuccesses:
+          type: integer
+          minimum: 1
+          maximum: 365
+          default: 1
+          description: At most retentionCount. Automatic retention always keeps this
+            many latest successful backups, regardless of age.
       required:
       - enabled
       - intervalHours
       - revision
+      description: Retention days times 24 must be at least intervalHours; minimumSuccesses
+        must not exceed retentionCount. Automatic cleanup keeps at least the latest
+        minimumSuccesses successful backups (default one), even if expired. Explicit
+        manual deletion is a separate administrator action.
     OpsBackupPlan:
       allOf:
       - $ref: '#/components/schemas/OpsBackupPlanInput'
@@ -354,6 +365,16 @@ components:
         deleteRequestedAt:
           type: string
           format: date-time
+        cancelPending:
+          type: boolean
+          description: Prior database task cancellation is unconfirmed; no new backup
+            starts until recovered.
+        skippedDatabases:
+          type: array
+          items:
+            type: string
+          description: Optional databases confirmed absent; currently only legacy
+            installations without bifrost.
       required:
       - id
       - status
