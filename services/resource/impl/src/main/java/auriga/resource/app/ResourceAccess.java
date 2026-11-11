@@ -40,6 +40,66 @@ public final class ResourceAccess {
     return resolve(principal, UPLOAD);
   }
 
+  public Reader administrator(AurigaPrincipal principal, String permission) {
+    if (principal == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    if (principal.type() != PrincipalType.USER
+        || principal.context() != auriga.common.security.TokenContext.ADMIN)
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    return resolve(principal, permission);
+  }
+
+  public Reader memberWriter(AurigaPrincipal principal, String permission) {
+    if (principal == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    if (principal.type() != PrincipalType.USER
+        || (principal.context() != auriga.common.security.TokenContext.ADMIN
+            && principal.context() != auriga.common.security.TokenContext.PORTAL))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    return resolve(principal, permission);
+  }
+
+  public Reader owner(AurigaPrincipal principal) {
+    var reader = administrator(principal, "resource.levels.admin");
+    if (!member(reader.tenant(), reader.account()).getRoleKeysList().contains("owner"))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    return reader;
+  }
+
+  public Reader target(UUID tenant, UUID account) {
+    return target(tenant, account, READ);
+  }
+
+  public Reader target(UUID tenant, UUID account, String permission) {
+    try {
+      var member = member(tenant, account);
+      var permissions = inputs.permissions(tenant, account);
+      if (!member.getTenantId().equals(tenant.toString())
+          || !member.getAccountId().equals(account.toString())
+          || member.getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
+          || permissions.getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
+          || !permissions.getPermissionsList().contains(permission)
+          || (member.getMemberType() != MemberType.MEMBER_TYPE_MEMBER
+              && member.getMemberType() != MemberType.MEMBER_TYPE_EXTERNAL)
+          || member.getMemberType() != permissions.getMemberType())
+        throw new AurigaException(CommonErrors.FORBIDDEN);
+      return new Reader(
+          tenant,
+          account,
+          member.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL,
+          member.getGroupIdsList().stream()
+              .map(UUID::fromString)
+              .collect(Collectors.toUnmodifiableSet()),
+          inputs.allowPersonalPlugins(tenant));
+    } catch (AurigaException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
+  }
+
+  public boolean groupExists(UUID tenant, UUID group) {
+    return inputs.groupExists(tenant, group);
+  }
+
   private Reader resolve(AurigaPrincipal principal, String permission) {
     if (principal == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     if (!principal.tenantId().equals(TenantContext.require())

@@ -4,9 +4,13 @@ import auriga.common.persistence.TenantTransactionManager;
 import auriga.common.security.*;
 import auriga.resource.api.ResourceAccessInputs;
 import auriga.resource.app.*;
+import auriga.resource.objectstore.*;
 import auriga.resource.persistence.ResourceStore;
+import auriga.resource.persistence.ResourceWorkflowStore;
+import auriga.resource.web.ResourceAdministrationController;
 import auriga.resource.web.ResourceController;
 import auriga.resource.web.ResourceMetadataController;
+import auriga.resource.web.ResourceWorkflowController;
 import auriga.resource.web.model.PackagePage;
 import auriga.resource.web.model.Version;
 import auriga.resource.web.model.VersionPage;
@@ -27,9 +31,18 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 @Configuration(proxyBeanMethods = false)
+@org.springframework.scheduling.annotation.EnableScheduling
 @ConditionalOnExpression(
     "${auriga.services.resource.enabled:true} && ('${auriga.service.schema:}' == 'resource' || ${auriga.platform.combined:false})")
-@Import({ResourceController.class, ResourceMetadataController.class})
+@Import({
+  ResourceController.class,
+  ResourceMetadataController.class,
+  ResourceAdministrationController.class,
+  ResourceWorkflowController.class,
+  auriga.resource.web.ResourceDistributionController.class,
+  auriga.resource.web.ResourceNodeDownloadController.class,
+  auriga.resource.web.ResourceRevocationController.class
+})
 public class ResourceRuntimeConfiguration {
   @Bean
   org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer resourceJsonModels() {
@@ -87,6 +100,113 @@ public class ResourceRuntimeConfiguration {
     return new ResourceCommands(store, access, clock);
   }
 
+  private DataSource resourceSource(ListableBeanFactory beans) {
+    return beans.containsBean("resourceDataSource")
+        ? beans.getBean("resourceDataSource", DataSource.class)
+        : beans.getBean(DataSource.class);
+  }
+
+  @Bean
+  ResourceWorkflowStore resourceWorkflowStore(ListableBeanFactory beans) {
+    return new ResourceWorkflowStore(new JdbcTemplate(resourceSource(beans)));
+  }
+
+  @Bean(destroyMethod = "close")
+  @ConditionalOnProperty("auriga.resource.object-directory")
+  @ConditionalOnMissingBean(ObjectStore.class)
+  ObjectStore resourceObjects(Environment env, Clock clock) {
+    return new LocalObjectStore(
+        java.nio.file.Path.of(env.getRequiredProperty("auriga.resource.object-directory")),
+        clock,
+        java.time.Duration.ofHours(24));
+  }
+
+  @Bean
+  @ConditionalOnProperty({
+    "auriga.resource.release-key-file",
+    "auriga.resource.revocation-key-file"
+  })
+  @ConditionalOnMissingBean(ResourceSigning.class)
+  ResourceSigning resourceSigning(Environment env) {
+    return new ResourceSigning(
+        env.getRequiredProperty("auriga.resource.release-kid"),
+        ResourceSigning.load(
+            java.nio.file.Path.of(env.getRequiredProperty("auriga.resource.release-key-file"))),
+        env.getRequiredProperty("auriga.resource.revocation-kid"),
+        ResourceSigning.load(
+            java.nio.file.Path.of(env.getRequiredProperty("auriga.resource.revocation-key-file"))));
+  }
+
+  @Bean
+  ResourceWorkflow resourceWorkflow(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      ObjectProvider<ObjectStore> objects,
+      ObjectProvider<ResourceSigning> signing,
+      ListableBeanFactory beans,
+      Clock clock) {
+    var events =
+        new auriga.common.events.OutboxEventPublisher(
+            new JdbcTemplate(resourceSource(beans)),
+            "resource",
+            "resource",
+            new auriga.common.events.EventSchemas(),
+            tools.jackson.databind.json.JsonMapper.builder().build(),
+            clock,
+            () -> {});
+    return new ResourceWorkflow(
+        store, db, access, () -> required(objects), () -> required(signing), events, clock);
+  }
+
+  @Bean
+  ResourceDistributions resourceDistributions(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      ResourceWorkflow workflow,
+      ObjectProvider<auriga.resource.api.ResourceWorkspace> workspace,
+      ObjectProvider<ResourceSigning> signing,
+      ObjectProvider<ObjectStore> objects,
+      Environment env,
+      ResourceCursor cursors,
+      ListableBeanFactory beans,
+      Clock clock) {
+    var events =
+        new auriga.common.events.OutboxEventPublisher(
+            new JdbcTemplate(resourceSource(beans)),
+            "resource",
+            "resource",
+            new auriga.common.events.EventSchemas(),
+            tools.jackson.databind.json.JsonMapper.builder().build(),
+            clock,
+            () -> {});
+    return new ResourceDistributions(
+        store,
+        db,
+        access,
+        workflow,
+        workspace::getIfAvailable,
+        () -> required(signing),
+        () -> required(objects),
+        () -> env.getRequiredProperty("auriga.resource.download-base-url"),
+        cursors,
+        events,
+        clock);
+  }
+
+  static <T> T required(ObjectProvider<T> provider) {
+    var value = provider.getIfAvailable();
+    if (value == null)
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+    return value;
+  }
+
+  @Bean
+  jakarta.servlet.MultipartConfigElement resourceMultipart() {
+    return new jakarta.servlet.MultipartConfigElement("", 67108864, 67239936, 0);
+  }
+
   @Bean
   @Order(4)
   @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -96,7 +216,7 @@ public class ResourceRuntimeConfiguration {
       ProblemSecurityHandlers handlers,
       ObjectProvider<RequestMappingHandlerMapping> mappings)
       throws Exception {
-    http.securityMatcher("/api/resource/**");
+    http.securityMatcher("/api/resource/**", "/internal/resource/**");
     return AurigaWebSecurity.build(
         http,
         decoder,

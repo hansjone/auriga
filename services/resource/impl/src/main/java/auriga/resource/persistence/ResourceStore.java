@@ -48,6 +48,22 @@ public final class ResourceStore {
     return writes.execute(status -> action.get());
   }
 
+  public boolean hasVersions(Reader reader, UUID id) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM resource.resource_version WHERE tenant_id=:tenant AND package_id=:id)",
+            Map.of("tenant", reader.tenant(), "id", id),
+            Boolean.class));
+  }
+
+  public boolean hasGovernedVersions(Reader reader, UUID id) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM resource.resource_version WHERE tenant_id=:tenant AND package_id=:id AND state NOT IN ('draft','rejected'))",
+            Map.of("tenant", reader.tenant(), "id", id),
+            Boolean.class));
+  }
+
   public void lockCreation(Reader r, String key) {
     // Hash collisions merely serialize unrelated keys; the unique scope remains exact in SQL.
     jdbc.query(
@@ -263,6 +279,44 @@ public final class ResourceStore {
             this::versionRow)
         .stream()
         .findFirst();
+  }
+
+  private String governanceWhere(Reader r, String phase) {
+    // An explicit review permission reveals shared pending metadata only; private packages
+    // never enter the governance queue, including private L3 drafts.
+    return visible(r)
+        + " AND p.visibility <> 'private' AND "
+        + (phase.equals("review")
+            ? "v.state='pending_review'"
+            : "v.state IN ('approved','published','deprecated','withdrawn')");
+  }
+
+  public UUID governanceCeiling(Reader r, String phase) {
+    return jdbc
+        .query(
+            "SELECT v.id FROM resource.resource_version v JOIN resource.resource_package p "
+                + "ON p.tenant_id=v.tenant_id AND p.id=v.package_id WHERE "
+                + governanceWhere(r, phase)
+                + " ORDER BY v.id DESC LIMIT 1",
+            params(r),
+            (rs, n) -> rs.getObject("id", UUID.class))
+        .stream()
+        .findFirst()
+        .orElse(new UUID(0, 0));
+  }
+
+  public List<Version> governance(Reader r, String phase, UUID after, UUID ceiling, int limit) {
+    var args = params(r);
+    args.put("after", after);
+    args.put("ceiling", ceiling);
+    args.put("limit", limit);
+    return jdbc.query(
+        "SELECT v.* FROM resource.resource_version v JOIN resource.resource_package p "
+            + "ON p.tenant_id=v.tenant_id AND p.id=v.package_id WHERE "
+            + governanceWhere(r, phase)
+            + " AND v.id>:after AND v.id<=:ceiling ORDER BY v.id LIMIT :limit",
+        args,
+        this::versionRow);
   }
 
   private ModelPackage packageRow(ResultSet rs, int row) throws SQLException {

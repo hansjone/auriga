@@ -208,7 +208,11 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
         } else {
           const p = catalog.permissions[o['x-permission']];
           assert(p, o.operationId);
-          assert.equal(Boolean(o['x-admin-only']), p.adminOnly, o.operationId);
+          assert.equal(
+            Boolean(o['x-admin-only']),
+            p.adminOnly || (service === 'resource' && url.includes('/admin/')),
+            o.operationId,
+          );
         }
         for (const code of o['x-error-codes'])
           assert(
@@ -223,9 +227,9 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 48);
+  assert.equal(count, 57);
   assert(ids.has('listRelayProviderModels'));
-  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 23);
+  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 27);
   for (const [key, p] of Object.entries(catalog.permissions)) {
     assert(p.description.en && p.description['zh-CN'], key);
     assert.equal(typeof p.adminOnly, 'boolean');
