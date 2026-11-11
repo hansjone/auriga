@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { createManagedNetwork } from '../../src/network/managed-device.js';
+import { createPlatform } from '../../src/local/platform.js';
 
 const ids = {
   tenantId: '00000000-0000-4000-8000-000000000001',
@@ -33,7 +34,7 @@ const material = () => ({
   network: installation(),
 });
 
-async function fixture(t, change = (x) => x) {
+async function fixture(t, change = (x) => x, realRequest = false) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-managed-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'device.json');
@@ -48,7 +49,8 @@ async function fixture(t, change = (x) => x) {
     file,
     ...ids,
     ctx: {},
-    createPlatform() {
+    createPlatform(config) {
+      const platform = realRequest ? createPlatform(config) : undefined;
       return {
         async request(path, options) {
           if (path.startsWith('/api/iam/v1/network/systems'))
@@ -56,6 +58,7 @@ async function fixture(t, change = (x) => x) {
               items: [{ ownerUserId: ids.ownerId, ownerDisplayName: 'Alice' }],
             };
           calls.push({ path, options });
+          if (platform) return platform.request(path, options);
           await requestHook?.();
           if (invalid)
             throw Object.assign(new Error('revoked'), {
@@ -133,6 +136,55 @@ test('managed credential uses the common device provider and lifecycle, never in
   assert.equal(exchange.options.token, undefined);
   f.network.attach({ prepare() {} });
   assert.ok(f.calls.includes('attach'));
+});
+
+for (const code of ['network.revoked', 'common.forbidden'])
+  test(
+    'managed grant reads response body code through platform request: ' + code,
+    async (t) => {
+      t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
+      const originalFetch = globalThis.fetch;
+      t.after(() => {
+        globalThis.fetch = originalFetch;
+      });
+      let denied = true;
+      globalThis.fetch = async (url) => {
+        assert.equal(new URL(url).pathname, '/oauth2/token');
+        return denied
+          ? Response.json({ code }, { status: 403 })
+          : Response.json({
+              access_token: 'device-access',
+              token_type: 'Bearer',
+              scope: 'auriga.connect',
+              expires_in: 300,
+            });
+      };
+      const f = await fixture(t, (x) => x, true);
+      await f.network.refresh();
+      assert.equal(f.network.sessionAvailable, false);
+      assert.equal(f.network.sessionRevoked, code === 'network.revoked');
+      const count = f.calls.length;
+      denied = false;
+      t.mock.timers.tick(31000);
+      await f.network.refresh();
+      assert.equal(f.network.sessionAvailable, code !== 'network.revoked');
+      if (code === 'network.revoked') {
+        for (let i = 0; i < 5; i++) await f.network.refresh(true);
+        assert.equal(f.calls.length, count);
+      }
+    },
+  );
+
+test('material expired before startup is terminal without a grant request', async (t) => {
+  const f = await fixture(t, (value) => ({
+    ...value,
+    expiresAt: '2000-01-01T00:00:00Z',
+  }));
+  await f.network.refresh();
+  assert.equal(f.network.sessionAvailable, false);
+  assert.equal(f.network.sessionRevoked, true);
+  for (let i = 0; i < 5; i++) await f.network.refresh(true);
+  assert.equal(f.calls.length, 0);
 });
 
 test('R7 instance admission requires a live verified managed credential, not message readiness', async (t) => {

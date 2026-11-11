@@ -97,8 +97,7 @@ export function createManagedNetwork(options) {
       !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(
         value.expiresAt,
       ) ||
-      !Number.isFinite(Date.parse(value.expiresAt)) ||
-      Date.parse(value.expiresAt) <= Date.now()
+      !Number.isFinite(Date.parse(value.expiresAt))
     )
       throw new Error('invalid managed credential binding');
     const config = platformConfig({
@@ -153,6 +152,10 @@ export function createManagedNetwork(options) {
           if (next !== raw) displayName = undefined;
           raw = next;
           rejected = '';
+          if (materialUntil <= Date.now()) {
+            rejected = raw;
+            return;
+          }
           const expected = generation;
           const platform = (options.createPlatform ?? createPlatform)(config);
           let pending;
@@ -348,6 +351,9 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    get sessionRevoked() {
+      return !!raw && (raw === rejected || materialUntil <= Date.now());
+    },
     get sessionAvailable() {
       return (
         !closed &&

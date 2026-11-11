@@ -506,6 +506,7 @@ export async function createManaged(options = {}) {
       disposeSession = installManagedSessionGuard(
         server,
         () => network?.sessionAvailable === true,
+        () => network?.sessionRevoked === true,
       );
       disposeDoor = door.install(server);
       disposeSettingsOwnership = installManagedSettingsOwnership(ctx);

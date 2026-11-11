@@ -18,7 +18,13 @@ import {
 // Exercise the production managed mode, file binding, ES256 verification,
 // health route and both identity guards. Only remote IAM/message/model services
 // and the host's model handler are fixtures; no real DSH, PG or model is started.
-for (const credential of ['valid', 'rejected', 'bad-signature'])
+for (const credential of [
+  'valid',
+  'rejected',
+  'revoked',
+  'expired',
+  'bad-signature',
+])
   test(`message outage preserves model admission only with ${credential} managed identity`, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), 'auriga-degraded-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
@@ -35,7 +41,9 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
         ownerId: OWNER_ID,
         deviceId,
         credential: 'a'.repeat(43),
-        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        expiresAt: new Date(
+          Date.now() + (credential === 'expired' ? -1000 : 600000),
+        ).toISOString(),
         platformOrigin: origin,
         issuer: origin,
         network: {
@@ -80,7 +88,8 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
     const accessToken = jwt + '.' + signature.toString('base64url');
     let exchanges = 0,
       messageCalls = 0,
-      modelCalls = 0;
+      modelCalls = 0,
+      recovered = false;
     t.mock.method(globalThis, 'fetch', async (input) => {
       const url = new URL(input);
       assert.equal(url.origin, origin);
@@ -88,8 +97,17 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
         new Response(JSON.stringify(body), { status });
       if (url.pathname === '/oauth2/token') {
         exchanges++;
-        return credential === 'rejected'
-          ? response({ code: 'common.forbidden' }, 403)
+        return (credential === 'rejected' && !recovered) ||
+          credential === 'revoked'
+          ? response(
+              {
+                code:
+                  credential === 'revoked'
+                    ? 'network.revoked'
+                    : 'common.forbidden',
+              },
+              403,
+            )
           : response({
               access_token: accessToken,
               token_type: 'Bearer',
@@ -191,13 +209,19 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
             path,
             method,
             agent: false,
-            headers: authenticated ? { 'Auriga-Identity': token } : {},
+            headers: {
+              'accept-language': 'zh-CN',
+              ...(authenticated ? { 'Auriga-Identity': token } : {}),
+            },
           },
           (res) => {
             let body = '';
             res.on('data', (chunk) => (body += chunk));
             res.on('end', () =>
-              resolve({ status: res.statusCode, body: JSON.parse(body) }),
+              resolve({
+                status: res.statusCode,
+                body: path === '/' ? body : JSON.parse(body),
+              }),
             );
           },
         );
@@ -211,7 +235,9 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
       if (
         credential === 'valid'
           ? health.body.ready && messageCalls > 0
-          : exchanges > 0
+          : credential === 'expired'
+            ? runtime.networkStatus.reason === 'revoked'
+            : exchanges > 0
       )
         break;
       await delay(10);
@@ -222,6 +248,41 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
     const prompt = await request('/api/session/prompt');
     assert.equal(prompt.status, credential === 'valid' ? 200 : 401);
     assert.equal(modelCalls, credential === 'valid' ? 1 : 0);
+    if (credential !== 'valid') {
+      const index = await request('/');
+      assert.equal(index.status, 401);
+      assert.match(
+        index.body,
+        credential === 'revoked' || credential === 'expired'
+          ? /实例会话已失效，请从门户重新进入/
+          : /连接中断，正在重试/,
+      );
+    }
+    if (credential === 'rejected') {
+      recovered = true;
+      const deadline = Date.now() + 5000;
+      do {
+        health = await request('/_auriga/health', false);
+        if (health.body.ready) break;
+        await delay(10);
+      } while (Date.now() < deadline);
+      assert.equal(
+        health.body.ready,
+        true,
+        'same managed material automatically recovers',
+      );
+      assert.equal((await request('/api/session/prompt')).status, 200);
+    }
+    if (credential === 'revoked' || credential === 'expired') {
+      const before = exchanges;
+      await delay(1100);
+      assert.equal(
+        exchanges,
+        before,
+        'permanent rejection does not retry grant',
+      );
+      if (credential === 'expired') assert.equal(exchanges, 0);
+    }
     if (credential === 'valid') {
       assert.ok(messageCalls > 0, 'real message registration must fail first');
       assert.equal(prompt.body.choices[0].message.content, 'model-ok');

@@ -4,15 +4,26 @@ import { sendProblem } from './problem.js';
  * not keep a revoked/expired managed device usable. Message readiness is separate.
  * @param {import('node:http').Server} server
  * @param {()=>boolean} available
+ * @param {()=>boolean} [revoked] Proven material revocation or expiry only.
  */
-export function installManagedSessionGuard(server, available) {
+export function installManagedSessionGuard(
+  server,
+  available,
+  revoked = () => false,
+) {
   const original = server.emit;
   /** @type {Set<import('node:net').Socket>} */
   const sockets = new Set();
-  const message = (/** @type {any} */ req) =>
-    String(req.headers?.['accept-language'] ?? '').startsWith('zh')
-      ? '实例会话已失效，请从门户重新进入'
-      : 'Instance session has expired. Re-enter from the portal.';
+  const message = (/** @type {any} */ req) => {
+    const chinese = String(req.headers?.['accept-language'] ?? '').startsWith(
+      'zh',
+    );
+    if (revoked())
+      return chinese
+        ? '实例会话已失效，请从门户重新进入'
+        : 'Instance session has expired. Re-enter from the portal.';
+    return chinese ? '连接中断，正在重试' : 'Connection interrupted. Retrying.';
+  };
   const guarded = function (
     /** @type {string|symbol} */ event,
     /** @type {any[]} */ ...args
