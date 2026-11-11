@@ -5,8 +5,11 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strings"
 )
+
+var resourceUploadPath = regexp.MustCompile(`^/api/resource/v1/packages/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/versions$`)
 
 // Resource is a platform service and uses the same protected hop as IAM.
 func (c Config) parseResourceUpstream() (*url.URL, error) {

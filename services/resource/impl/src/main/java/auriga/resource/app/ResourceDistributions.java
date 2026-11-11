@@ -144,7 +144,7 @@ public final class ResourceDistributions {
                 v,
                 version.get("digest").toString(),
                 revision,
-                clock.instant());
+                clock.instant().plusSeconds(300));
           }
           for (var plugin : snapshot.plugins())
             if (plugin.hasResourceEnvelope()) {
@@ -153,8 +153,17 @@ public final class ResourceDistributions {
                   v = UUID.fromString(envelope.getVersionId());
               if (!packages.contains(p))
                 storeGrant(
-                    UuidV7.next(), snapshot, p, v, plugin.getDigest(), revision, clock.instant());
+                    UuidV7.next(),
+                    snapshot,
+                    p,
+                    v,
+                    plugin.getDigest(),
+                    revision,
+                    clock.instant().plusSeconds(300));
             }
+          var currentRevocations = db.revocations();
+          if (currentRevocations != null)
+            db.enqueueRevocations(currentRevocations.path("revision").asLong());
           var data = new HashMap<String, Object>();
           data.put("distributionId", id.toString());
           data.put("instanceId", instance.toString());
@@ -237,6 +246,7 @@ public final class ResourceDistributions {
     var old = db.revocations();
     var now = clock.instant();
     if (old != null
+        && !db.needsRevocationSignature()
         && Instant.parse(old.path("expiresAt").asString()).isAfter(now.plusSeconds(43200)))
       return old;
     long revision = old == null ? 1 : old.path("revision").asLong() + 1;
@@ -246,12 +256,13 @@ public final class ResourceDistributions {
             .put("schemaVersion", 1)
             .put("tenantId", TenantContext.require().toString())
             .put("revision", revision)
-            .put("issuedAt", now.toString())
-            .put("expiresAt", now.plusSeconds(86400).toString());
+            .put("issuedAt", ResourceSigning.time(now))
+            .put("expiresAt", ResourceSigning.time(now.plusSeconds(86400)));
     out.set("revokedKids", old == null ? JSON.createArrayNode() : old.get("revokedKids"));
     out.set("revokedArtifacts", old == null ? JSON.createArrayNode() : old.get("revokedArtifacts"));
     out = signing.get().sign(out, true);
     db.saveRevocations(out);
+    db.enqueueRevocations(revision);
     new auriga.common.audit.OutboxAuditLogger(events)
         .record(
             auriga.common.audit.AuditEntry.builder("resource.revocations.renew")
@@ -286,6 +297,22 @@ public final class ResourceDistributions {
     return envelope;
   }
 
+  JsonNode memberEnvelope(ResourceAccess.Reader reader, UUID p, UUID v) {
+    var pack = workflow.pkg(reader, p, false, false);
+    var row = db.version(p, v);
+    long high =
+        number(
+            db.row(
+                "SELECT release_high_water FROM resource.resource_package WHERE tenant_id=:tenant AND id=:id",
+                db.args("id", p)),
+            "release_high_water");
+    if (!pack.getEnabled()
+        || row.get("release_sequence") == null
+        || number(row, "release_sequence") != high)
+      throw new AurigaException(CommonErrors.NOT_FOUND);
+    return activeEnvelope(p, v, row, false);
+  }
+
   private String downloadBase() {
     String value = base.get();
     try {
@@ -307,10 +334,13 @@ public final class ResourceDistributions {
       ResourceWorkspace.Snapshot snapshot, UUID p, UUID v, String digest, long revision) {
     var rows =
         db.rows(
-            "SELECT id FROM resource.resource_download WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg AND version_id=:version AND selection_revision=:rev ORDER BY id LIMIT 1",
+            "SELECT id,expires_at FROM resource.resource_download WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg AND version_id=:version AND selection_revision=:rev ORDER BY id LIMIT 1",
             db.args("instance", snapshot.instance(), "pkg", p, "version", v, "rev", revision));
     UUID id = rows.isEmpty() ? UuidV7.next() : (UUID) rows.getFirst().get("id");
-    var expiry = clock.instant().plusSeconds(300);
+    var expiry =
+        rows.isEmpty()
+            ? clock.instant().plusSeconds(300)
+            : ((java.sql.Timestamp) rows.getFirst().get("expires_at")).toInstant();
     storeGrant(id, snapshot, p, v, digest, revision, expiry);
     return JSON.createObjectNode()
         .put("downloadId", id.toString())
@@ -362,8 +392,16 @@ public final class ResourceDistributions {
     try {
       db.lock("distribution/" + instance);
       row = db.distribution(id);
+      if (row.get("state").equals("superseded")) return;
       var snapshot = workspace().snapshot(TenantContext.require(), instance);
       long revision = number(row, "selection_revision");
+      if (snapshot.selectionRevision() > revision) {
+        if (Set.of("requested", "resolved", "applying").contains(row.get("state")))
+          db.update(
+              "UPDATE resource.resource_distribution SET state='superseded',revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
+              db.args("id", id));
+        return;
+      }
       if (!snapshot.owner().equals(row.get("owner_id")))
         throw new AurigaException(CommonErrors.FORBIDDEN);
       var owner = access.target(TenantContext.require(), snapshot.owner());
@@ -438,7 +476,7 @@ public final class ResourceDistributions {
           || !Objects.equals(row.get("observed_generation"), snapshot.observedGeneration())
           || !Objects.equals(row.get("ready"), snapshot.ready()))
         db.update(
-            "UPDATE resource.resource_distribution SET state=:state,generation=:gen,observed_generation=:observed,ready=:ready,error_code=:error,revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
+            "UPDATE resource.resource_distribution SET state=:state,generation=:gen,observed_generation=:observed,ready=:ready,error_code=:error,applied_generation=CASE WHEN :state='applied' THEN :gen ELSE applied_generation END,revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
             db.args(
                 "id",
                 id,
@@ -535,30 +573,44 @@ public final class ResourceDistributions {
   }
 
   public void propagate() {
-    var list = db.revocations();
-    if (list == null) return;
-    for (var row :
-        db.rows(
-            "SELECT DISTINCT instance_id FROM resource.resource_distribution WHERE tenant_id=:tenant",
-            db.args()))
+    var pending =
+        resources.write(
+            () -> {
+              if (db.revocations() == null) return List.<Map<String, Object>>of();
+              revocations();
+              return db.rows(
+                  "SELECT instance_id FROM resource.resource_revocation_delivery WHERE tenant_id=:tenant AND completed_revision<revision ORDER BY instance_id",
+                  db.args());
+            });
+    for (var row : pending) {
       try {
-        workspace()
-            .revoke(
-                TenantContext.require(),
-                (UUID) row.get("instance_id"),
-                ResourceProtocol.revocations(list));
-      } catch (AurigaException e) {
-        if (e.errorCode() != CommonErrors.NOT_FOUND) throw e;
+        resources.writeIndependent(
+            () -> {
+              UUID instance = (UUID) row.get("instance_id");
+              db.lock("revocation-delivery/" + instance);
+              if (db.rows(
+                      "SELECT instance_id FROM resource.resource_revocation_delivery WHERE tenant_id=:tenant AND instance_id=:instance AND completed_revision<revision FOR UPDATE",
+                      db.args("instance", instance))
+                  .isEmpty()) return false;
+              var list = db.revocations();
+              if (list == null || db.needsRevocationSignature())
+                throw new AurigaException(CommonErrors.UNAVAILABLE);
+              workspace()
+                  .revoke(TenantContext.require(), instance, ResourceProtocol.revocations(list));
+              db.update(
+                  "UPDATE resource.resource_revocation_delivery SET completed_revision=:rev WHERE tenant_id=:tenant AND instance_id=:instance AND revision<=:rev",
+                  db.args("instance", instance, "rev", list.path("revision").asLong()));
+              return true;
+            });
+      } catch (RuntimeException e) {
+        retry(e);
       }
+    }
   }
 
   public void propagateNow() {
     try {
-      resources.write(
-          () -> {
-            propagate();
-            return true;
-          });
+      propagate();
     } catch (RuntimeException e) {
       org.slf4j.LoggerFactory.getLogger(getClass())
           .warn("Resource revocation propagation will retry");
@@ -590,13 +642,10 @@ public final class ResourceDistributions {
                   } catch (RuntimeException e) {
                     retry(e);
                   }
-                if (!candidates.isEmpty() || resources.write(() -> db.revocations() != null))
-                  resources.write(
-                      () -> {
-                        revocations();
-                        propagate();
-                        return true;
-                      });
+                if (!candidates.isEmpty() || resources.write(() -> db.revocations() != null)) {
+                  resources.write(this::revocations);
+                  propagate();
+                }
                 if (!candidates.isEmpty()) objects.get().cleanupExpiredStaging(tenant);
               });
         } catch (RuntimeException e) {
@@ -688,6 +737,14 @@ public final class ResourceDistributions {
                   var previous = db.replay(node, op, key, id.toString(), clock.instant());
                   if (previous.isPresent()) return previous.get();
                   var snapshot = workspace().snapshot(tenant, (UUID) row.get("instance_id"));
+                  storeGrant(
+                      id,
+                      snapshot,
+                      (UUID) row.get("package_id"),
+                      (UUID) row.get("version_id"),
+                      row.get("digest").toString(),
+                      number(row, "selection_revision"),
+                      clock.instant().plusSeconds(300));
                   var result =
                       grant(
                           snapshot,

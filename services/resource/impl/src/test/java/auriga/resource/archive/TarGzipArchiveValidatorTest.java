@@ -643,6 +643,19 @@ class TarGzipArchiveValidatorTest {
     }
 
     @Override
+    public java.util.List<GarbageCandidate> expiredObjects(java.time.Instant cutoff) {
+      throw new AssertionError("Validator cannot collect");
+    }
+
+    @Override
+    public boolean deleteExpired(
+        GarbageCandidate candidate,
+        java.time.Instant cutoff,
+        java.util.function.BooleanSupplier unreferenced) {
+      throw new AssertionError("Validator cannot delete");
+    }
+
+    @Override
     public int cleanupExpiredStaging(UUID t) {
       throw new AssertionError("Validator cannot clean");
     }

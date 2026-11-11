@@ -81,7 +81,9 @@ public final class ResourceProtocol {
             .setIssuedAt(
                 Timestamp.newBuilder().setSeconds(time.getEpochSecond()).setNanos(time.getNano()))
             .build();
-    var signed = signing.sign((tools.jackson.databind.node.ObjectNode) s, false).path("signature");
+    var legacyBody = ((tools.jackson.databind.node.ObjectNode) s).deepCopy();
+    legacyBody.put("issuedAt", ResourceSigning.time(time));
+    var signed = signing.sign(legacyBody, false).path("signature");
     return PluginRef.newBuilder()
         .setName(legacy.getName())
         .setVersion(legacy.getVersion())

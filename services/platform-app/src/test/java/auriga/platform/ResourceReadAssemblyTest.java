@@ -46,6 +46,7 @@ import tools.jackson.databind.json.JsonMapper;
       "auriga.platform.combined=true",
       "auriga.services.resource.enabled=true",
       "auriga.services.workspace.enabled=false",
+      "auriga.resource.reconcile-ms=3600000",
       "server.address=127.0.0.1",
       "auriga.logging.json=false",
       "auriga.grpc.server.enabled=false",
@@ -58,7 +59,10 @@ class ResourceReadAssemblyTest {
   static final UUID T2 = UUID.fromString("00000000-0000-0000-0000-000000000002");
   static final UUID ALICE = id(10), BOB = id(11), EXTERNAL = id(12), GROUP = id(13), ROLE = id(14);
   static final ECKey KEY = key();
+  static final Map<String, java.security.PublicKey> RESOURCE_KEYS = new HashMap<>();
   static final JsonMapper JSON = JsonMapper.builder().build();
+  final java.util.concurrent.atomic.AtomicInteger revokeFailures =
+      new java.util.concurrent.atomic.AtomicInteger();
   static final String ISSUER = "https://auth.example.com";
 
   @Value("${local.server.port}")
@@ -130,11 +134,12 @@ class ResourceReadAssemblyTest {
     @Bean
     auriga.resource.app.ResourceSigning resourceSigning() throws Exception {
       var generator = java.security.KeyPairGenerator.getInstance("Ed25519");
+      var release = generator.generateKeyPair();
+      var revoke = generator.generateKeyPair();
+      RESOURCE_KEYS.put("release-test", release.getPublic());
+      RESOURCE_KEYS.put("revoke-test", revoke.getPublic());
       return new auriga.resource.app.ResourceSigning(
-          "release-test",
-          generator.generateKeyPair().getPrivate(),
-          "revoke-test",
-          generator.generateKeyPair().getPrivate());
+          "release-test", release.getPrivate(), "revoke-test", revoke.getPrivate());
     }
 
     @Bean
@@ -193,7 +198,7 @@ class ResourceReadAssemblyTest {
             PostgresExtension.database(getClass()).dataSource().getConnection(), true);
     admin = new JdbcTemplate(adminConnection);
     admin.execute(
-        "TRUNCATE resource.outbox_event, resource.resource_operation, resource.resource_distribution, resource.resource_download, resource.resource_revocations, resource.resource_package_creation, resource.resource_package_group, resource.resource_package, resource.resource_version CASCADE");
+        "TRUNCATE resource.resource_revoked_artifact, resource.resource_revocation_delivery, resource.outbox_event, resource.resource_operation, resource.resource_distribution, resource.resource_download, resource.resource_revocations, resource.resource_package_creation, resource.resource_package_group, resource.resource_package, resource.resource_version CASCADE");
     admin.execute(
         "DELETE FROM org.role_binding; DELETE FROM org.group_member; DELETE FROM org.member; DELETE FROM org.role WHERE builtin=false; DELETE FROM org.\"group\"");
     admin.update(
@@ -485,6 +490,7 @@ class ResourceReadAssemblyTest {
         workflowRequest(adminBase + "/publications", BOB, "{\"reason\":\"Publish\"}", "\"3\"", 201);
     assertEquals(1, published.path("releaseSequence").asLong());
     var envelope = published.path("resourceEnvelope");
+    verifyResourceSignature(envelope);
     assertEquals(digest, envelope.path("statement").path("digest").asString());
     assertTrue(
         Duration.between(
@@ -492,6 +498,7 @@ class ResourceReadAssemblyTest {
                     Instant.parse(envelope.path("notAfter").asString()))
                 .compareTo(Duration.ofHours(24))
             <= 0);
+    workflowMemberDownloadsAndReports(pkg, UUID.fromString(id), digest, archive);
     var workspace = workflowWorkspace();
     UUID instance = id(990), node = id(991);
     var distribution =
@@ -592,7 +599,18 @@ class ResourceReadAssemblyTest {
         "UPDATE resource.resource_version SET envelope=CAST(? AS jsonb) WHERE id=?",
         shortSigned.toString(),
         UUID.fromString(id));
+    var grantExpiry =
+        admin.queryForObject(
+            "SELECT expires_at FROM resource.resource_download WHERE id=?",
+            java.sql.Timestamp.class,
+            UUID.fromString(spec.getPlugins(0).getDownloadId()));
     var refreshing = workflowGet(distributionPath);
+    assertEquals(
+        grantExpiry,
+        admin.queryForObject(
+            "SELECT expires_at FROM resource.resource_download WHERE id=?",
+            java.sql.Timestamp.class,
+            UUID.fromString(spec.getPlugins(0).getDownloadId())));
     assertEquals("applying", refreshing.path("state").asString());
     assertEquals(3, refreshing.path("generation").asLong());
     var refreshed =
@@ -648,6 +666,19 @@ class ResourceReadAssemblyTest {
     assertEquals(
         404,
         request("/" + pkg + "/versions/" + id + "/content", token(T1, BOB, true)).statusCode());
+    TenantContext.run(
+        T1,
+        () ->
+            workspace.inventory(
+                node,
+                auriga.contracts.node.v1.InstanceStatus.newBuilder()
+                    .setInstanceId(instance.toString())
+                    .setPhase(auriga.contracts.node.v1.InstancePhase.INSTANCE_PHASE_RUNNING)
+                    .setObservedGeneration(4)
+                    .setReady(true)
+                    .build()));
+    assertEquals("applied", workflowGet(distributionPath).path("state").asString());
+    revokeFailures.set(1);
     workflowRequest(
         adminBase + "/withdrawals",
         BOB,
@@ -668,6 +699,56 @@ class ResourceReadAssemblyTest {
         () ->
             downloads.download(
                 T1, node, UUID.fromString(spec.getPlugins(0).getDownloadId()), false));
+    assertEquals(
+        1,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_revocation_delivery WHERE tenant_id=? AND completed_revision<revision",
+            Integer.class,
+            T1));
+    // Refresh may learn the list before the explicit retry. It must still stop the instance.
+    workflowGet(distributionPath);
+    var stoppedAfterRefresh =
+        workspace.store.in(
+            T1,
+            () -> auriga.workspace.app.WorkspaceService.spec(workspace.store.instance(instance)));
+    assertEquals(
+        auriga.contracts.node.v1.DesiredState.DESIRED_STATE_STOPPED,
+        stoppedAfterRefresh.getDesired());
+    assertFalse(stoppedAfterRefresh.getPlugins(0).getEnabled());
+    try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+      var first = pool.submit(downloads::tick);
+      var second = pool.submit(downloads::tick);
+      first.get(20, java.util.concurrent.TimeUnit.SECONDS);
+      second.get(20, java.util.concurrent.TimeUnit.SECONDS);
+    }
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_revocation_delivery WHERE tenant_id=? AND completed_revision<revision",
+            Integer.class,
+            T1));
+    verifyResourceSignature(workflowGet("/api/resource/v1/revocations"));
+    var beforeRepeat =
+        admin.queryForObject(
+            "SELECT revision FROM resource.resource_revocations WHERE tenant_id=?", Long.class, T1);
+    workflowRequest(
+        adminBase + "/withdrawals",
+        BOB,
+        "{\"mode\":\"malicious\",\"reason\":\"Already revoked\"}",
+        "\"6\"",
+        200);
+    assertEquals(
+        beforeRepeat,
+        admin.queryForObject(
+            "SELECT revision FROM resource.resource_revocations WHERE tenant_id=?",
+            Long.class,
+            T1));
+    assertEquals(
+        1,
+        admin.queryForObject(
+            "SELECT jsonb_array_length(document->'revokedArtifacts') FROM resource.resource_revocations WHERE tenant_id=?",
+            Integer.class,
+            T1));
     // Withdrawal forbids new downloads but an administrator can still remove the installed version.
     var removal =
         workflowRequest(
@@ -687,6 +768,9 @@ class ResourceReadAssemblyTest {
         workflowGet("/api/resource/v1/distributions/" + removal.path("id").asString())
             .path("state")
             .asString());
+    assertEquals("superseded", workflowGet(distributionPath).path("state").asString());
+    workflowSupersededHistory(
+        distributionPath, UUID.fromString(distribution.path("id").asString()));
     var stopped =
         workspace.store.in(
             T1,
@@ -695,6 +779,267 @@ class ResourceReadAssemblyTest {
     assertTrue(
         stopped.getResourceRevocations(0).getRevokedArtifactsList().stream()
             .anyMatch(a -> a.getVersionId().equals(id)));
+  }
+
+  void workflowSupersededHistory(String path, UUID distribution) throws Exception {
+    for (String previous : List.of("requested", "resolved", "applying", "applied", "failed")) {
+      boolean applied = previous.equals("applied"), failed = previous.equals("failed");
+      admin.update(
+          "UPDATE resource.resource_distribution SET state=?,generation=?,observed_generation=?,ready=?,error_code=?,applied_generation=4 WHERE id=?",
+          previous,
+          applied ? 4 : 5,
+          applied ? 4 : 5,
+          applied,
+          failed ? "workspace.apply_failed" : null,
+          distribution);
+      var observed = workflowGet(path);
+      String expected = applied || failed ? previous : "superseded";
+      assertEquals(expected, observed.path("state").asString(), previous);
+      assertEquals(applied ? 4 : 5, observed.path("generation").asLong());
+      assertEquals(applied ? 4 : 5, observed.path("observedGeneration").asLong());
+      assertEquals(4, observed.path("appliedGeneration").asLong());
+      if (failed) assertEquals("workspace.apply_failed", observed.path("errorCode").asString());
+      else assertFalse(observed.has("errorCode"));
+      assertEquals(observed, workflowGet(path));
+    }
+  }
+
+  void verifyResourceSignature(JsonNode signed) throws Exception {
+    var body = (tools.jackson.databind.node.ObjectNode) signed.deepCopy();
+    body.remove("signature");
+    var verifier = java.security.Signature.getInstance("Ed25519");
+    verifier.initVerify(RESOURCE_KEYS.get(signed.path("signature").path("kid").asString()));
+    verifier.update(
+        auriga.resource.app.ResourceSigning.canonical(body).getBytes(StandardCharsets.UTF_8));
+    assertTrue(
+        verifier.verify(
+            Base64.getUrlDecoder().decode(signed.path("signature").path("value").asString())));
+  }
+
+  @Test
+  void workflowUploadRejectsUnsafeArchivesAndChecksConflictsBeforeObjectCommit() throws Exception {
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['resource.packages.read','resource.packages.upload'] WHERE id=?",
+        ROLE);
+    UUID pkg = resource(198, "l3", "tenant", ALICE, T1, false);
+    admin.update("UPDATE resource.resource_package SET name='example-plugin' WHERE id=?", pkg);
+    var store = context.getBean(auriga.resource.objectstore.ObjectStore.class);
+    int before = store.expiredObjects(Instant.now().plusSeconds(10)).size();
+    for (String mode : List.of("escape", "link", "duplicate", "bomb"))
+      uploadArchive(pkg, workflowArchive(mode), "\"1\"", 400);
+    assertEquals(before, store.expiredObjects(Instant.now().plusSeconds(10)).size());
+    uploadArchive(pkg, workflowArchive("valid"), "\"1\"", 201);
+    int committed = store.expiredObjects(Instant.now().plusSeconds(10)).size();
+    uploadArchive(pkg, workflowArchive("variant"), "\"1\"", 412);
+    uploadArchive(pkg, workflowArchive("variant"), "\"2\"", 409);
+    assertEquals(committed, store.expiredObjects(Instant.now().plusSeconds(10)).size());
+  }
+
+  byte[] workflowArchive(String mode) throws Exception {
+    var bytes = new java.io.ByteArrayOutputStream();
+    try (var gzip =
+            new org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream(bytes);
+        var tar = new org.apache.commons.compress.archivers.tar.TarArchiveOutputStream(gzip)) {
+      byte[] manifest =
+          "{\"name\":\"example-plugin\",\"version\":\"1.0.0\"}".getBytes(StandardCharsets.UTF_8);
+      var entry =
+          new org.apache.commons.compress.archivers.tar.TarArchiveEntry("package/package.json");
+      entry.setSize(manifest.length);
+      tar.putArchiveEntry(entry);
+      tar.write(manifest);
+      tar.closeArchiveEntry();
+      if (!mode.equals("valid")) {
+        String name =
+            mode.equals("escape")
+                ? "../escape"
+                : mode.equals("duplicate") ? "package/package.json" : "package/extra";
+        byte[] data = mode.equals("bomb") ? new byte[4 * 1024 * 1024] : manifest;
+        var extra =
+            mode.equals("link")
+                ? new org.apache.commons.compress.archivers.tar.TarArchiveEntry(
+                    name, org.apache.commons.compress.archivers.tar.TarConstants.LF_SYMLINK)
+                : new org.apache.commons.compress.archivers.tar.TarArchiveEntry(name);
+        if (mode.equals("link")) extra.setLinkName("../escape");
+        else extra.setSize(data.length);
+        tar.putArchiveEntry(extra);
+        if (!mode.equals("link")) tar.write(data);
+        tar.closeArchiveEntry();
+      }
+    }
+    return bytes.toByteArray();
+  }
+
+  void uploadArchive(UUID pkg, byte[] archive, String etag, int expected) throws Exception {
+    String digest =
+        "sha256:"
+            + HexFormat.of()
+                .formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(archive));
+    String metadata =
+        "{\"version\":\"1.0.0\",\"expectedDigest\":\""
+            + digest
+            + "\",\"manifest\":{\"name\":\"example-plugin\",\"dshVersionRange\":\"*\",\"os\":\"any\",\"arch\":\"any\"}}";
+    var body = new java.io.ByteArrayOutputStream();
+    body.write(
+        ("--upload-test\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n"
+                + metadata
+                + "\r\n--upload-test\r\nContent-Disposition: form-data; name=\"archive\"; filename=\"plugin.tgz\"\r\nContent-Type: application/gzip\r\n\r\n")
+            .getBytes(StandardCharsets.UTF_8));
+    body.write(archive);
+    body.write("\r\n--upload-test--\r\n".getBytes(StandardCharsets.UTF_8));
+    var response =
+        http.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + port
+                            + "/api/resource/v1/packages/"
+                            + pkg
+                            + "/versions"))
+                .header("Authorization", "Bearer " + workflowToken(ALICE))
+                .header("If-Match", etag)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .header("Content-Type", "multipart/form-data; boundary=upload-test")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(expected, response.statusCode(), response.body());
+  }
+
+  void workflowMemberDownloadsAndReports(UUID pkg, UUID version, String digest, byte[] archive)
+      throws Exception {
+    UUID client = id(995);
+    var identity =
+        JSON.createObjectNode()
+            .put("clientId", client.toString())
+            .put("packageId", pkg.toString())
+            .put("versionId", version.toString())
+            .put("digest", digest);
+    String tickets = "/api/resource/v1/member/download-tickets";
+    String ticketKey = UUID.randomUUID().toString();
+    var ticket = workflowRequest(tickets, ALICE, identity.toString(), "\"0\"", 201, ticketKey);
+    workflowRequest(tickets, ALICE, identity.toString(), "\"0\"", 409, ticketKey);
+    String plaintext = ticket.path("ticket").asString();
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_operation WHERE response::text LIKE ?",
+            Integer.class,
+            "%" + plaintext + "%"));
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_member_ticket t WHERE to_jsonb(t)::text LIKE ?",
+            Integer.class,
+            "%" + plaintext + "%"));
+    assertEquals(
+        1,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_member_ticket WHERE ticket_hash=?",
+            Integer.class,
+            auriga.resource.app.ResourceWorkflow.hash(plaintext)));
+    assertEquals(version.toString(), ticket.path("resourceEnvelope").path("versionId").asString());
+    assertTrue(
+        Duration.between(Instant.now(), Instant.parse(ticket.path("expiresAt").asString()))
+                .compareTo(Duration.ofSeconds(60))
+            <= 0);
+    var consume =
+        JSON.createObjectNode()
+            .put("clientId", client.toString())
+            .put("ticket", ticket.path("ticket").asString());
+    assertEquals(404, memberDownload(BOB, consume, false).statusCode());
+    var bytes = memberDownload(ALICE, consume, false);
+    assertEquals(200, bytes.statusCode(), new String(bytes.body(), StandardCharsets.UTF_8));
+    assertArrayEquals(archive, bytes.body());
+    assertEquals(409, memberDownload(ALICE, consume, false).statusCode());
+    var concurrent = workflowRequest(tickets, ALICE, identity.toString(), "\"0\"", 201);
+    consume.put("ticket", concurrent.path("ticket").asString());
+    assertEquals(400, memberDownload(ALICE, consume, true).statusCode());
+    try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+      var first = pool.submit(() -> memberDownload(ALICE, consume, false).statusCode());
+      var second = pool.submit(() -> memberDownload(ALICE, consume, false).statusCode());
+      assertEquals(
+          Set.of(200, 409),
+          Set.of(
+              first.get(20, java.util.concurrent.TimeUnit.SECONDS),
+              second.get(20, java.util.concurrent.TimeUnit.SECONDS)));
+    }
+    var expired = workflowRequest(tickets, ALICE, identity.toString(), "\"0\"", 201);
+    consume.put("ticket", expired.path("ticket").asString());
+    admin.update(
+        "UPDATE resource.resource_member_ticket SET expires_at=now()-interval '1 second' WHERE consumed_at IS NULL");
+    assertEquals(404, memberDownload(ALICE, consume, false).statusCode());
+    // A device credential is also accepted, and is restricted to its own did.
+    var device =
+        http.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + tickets))
+                .header("Authorization", "Bearer " + workflowToken(ALICE, client))
+                .header("Content-Type", "application/json")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .POST(HttpRequest.BodyPublishers.ofString(identity.toString()))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(201, device.statusCode(), device.body());
+    var wrongClient =
+        http.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + tickets))
+                .header("Authorization", "Bearer " + workflowToken(ALICE, id(996)))
+                .header("Content-Type", "application/json")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .POST(HttpRequest.BodyPublishers.ofString(identity.toString()))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(404, wrongClient.statusCode());
+    var select = identity.deepCopy().put("action", "install");
+    String path = "/api/resource/v1/member/installations";
+    String key = UUID.randomUUID().toString();
+    var installation = workflowRequest(path, ALICE, select.toString(), "\"0\"", 202, key);
+    assertEquals("applying", installation.path("state").asString());
+    assertEquals("member", installation.path("reportSource").asString());
+    assertEquals(installation, workflowRequest(path, ALICE, select.toString(), "\"0\"", 202, key));
+    workflowRequest(path, ALICE, select.toString(), "\"0\"", 412);
+    var report = identity.deepCopy().put("installationRevision", 1).put("state", "applied");
+    workflowRequest(
+        "/api/resource/v1/member/installation-reports", ALICE, report.toString(), "\"1\"", 200);
+    select.put("action", "disable");
+    var pendingDisable = workflowRequest(path, ALICE, select.toString(), "\"1\"", 202);
+    assertFalse(pendingDisable.has("reportedRevision"));
+    workflowRequest(
+        "/api/resource/v1/member/installation-reports", ALICE, report.toString(), "\"1\"", 409);
+    admin.update("UPDATE resource.resource_package SET level='l1' WHERE id=?", pkg);
+    workflowRequest(path, ALICE, select.toString(), "\"2\"", 403);
+    select.put("action", "remove");
+    workflowRequest(path, ALICE, select.toString(), "\"2\"", 403);
+    admin.update("UPDATE resource.resource_package SET level='l2' WHERE id=?", pkg);
+    workflowRequest(path, ALICE, select.toString(), "\"2\"", 403);
+    select.put("action", "enable");
+    workflowRequest(path, ALICE, select.toString(), "\"2\"", 202);
+    select.put("action", "disable");
+    workflowRequest(path, ALICE, select.toString(), "\"3\"", 202);
+    admin.update("UPDATE resource.resource_package SET level='l3' WHERE id=?", pkg);
+    select.put("action", "remove");
+    workflowRequest(path, ALICE, select.toString(), "\"4\"", 202);
+    assertEquals(
+        1L,
+        admin.queryForObject(
+            "SELECT high_water FROM resource.resource_member_installation WHERE tenant_id=? AND member_id=? AND client_id=? AND package_id=?",
+            Long.class,
+            T1,
+            ALICE,
+            client,
+            pkg));
+    assertTrue(workflowGet(path + "?clientId=" + client).path("items").isEmpty());
+  }
+
+  HttpResponse<byte[]> memberDownload(UUID account, JsonNode body, boolean range) throws Exception {
+    var request =
+        HttpRequest.newBuilder(
+                URI.create("http://127.0.0.1:" + port + "/api/resource/v1/member/downloads"))
+            .header("Authorization", "Bearer " + workflowToken(account))
+            .header("Content-Type", "application/json")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .POST(HttpRequest.BodyPublishers.ofString(body.toString()));
+    if (range) request.header("Range", "bytes=0-1");
+    return http.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
   }
 
   JsonNode workflowGet(String path) throws Exception {
@@ -818,6 +1163,7 @@ class ResourceReadAssemblyTest {
         new auriga.workspace.persistence.WorkspaceStore(
             new JdbcTemplate(roles.runtime().dataSource()),
             new TenantTransactionManager(roles.runtime().dataSource()));
+    store.register(T1, "tenant", T1);
     var inputs =
         new auriga.workspace.api.WorkspaceInputs() {
           public auriga.contracts.org.v1.Member member(UUID tenant, UUID owner) {
@@ -855,7 +1201,22 @@ class ResourceReadAssemblyTest {
     var port = new PlatformResourceWorkspace(service, inputs, null);
     ((org.springframework.context.ConfigurableApplicationContext) context)
         .getBeanFactory()
-        .registerSingleton("workflowResourceWorkspace", port);
+        .registerSingleton(
+            "workflowResourceWorkspace",
+            java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(),
+                new Class<?>[] {auriga.resource.api.ResourceWorkspace.class},
+                (proxy, method, args) -> {
+                  if (method.getName().equals("revoke")
+                      && revokeFailures.getAndUpdate(n -> Math.max(0, n - 1)) > 0)
+                    throw new auriga.common.error.AurigaException(
+                        auriga.common.error.CommonErrors.UNAVAILABLE);
+                  try {
+                    return method.invoke(port, args);
+                  } catch (java.lang.reflect.InvocationTargetException e) {
+                    throw e.getCause();
+                  }
+                }));
     byte[] sealing =
         new org.bouncycastle.crypto.params.X25519PrivateKeyParameters(new SecureRandom())
             .generatePublicKey()
@@ -887,6 +1248,10 @@ class ResourceReadAssemblyTest {
   }
 
   String workflowToken(UUID account) throws Exception {
+    return workflowToken(account, null);
+  }
+
+  String workflowToken(UUID account, UUID device) throws Exception {
     Instant now = Instant.now();
     var claims =
         new JWTClaimsSet.Builder()
@@ -894,9 +1259,10 @@ class ResourceReadAssemblyTest {
             .audience("auriga")
             .subject(account.toString())
             .claim("tid", T1.toString())
-            .claim("ptyp", "user")
-            .claim("ctx", "admin")
-            .claim("sid", UUID.randomUUID().toString())
+            .claim("ptyp", device == null ? "user" : "device")
+            .claim("ctx", device == null ? "admin" : "device")
+            .claim("did", device == null ? null : device.toString())
+            .claim("sid", device == null ? UUID.randomUUID().toString() : null)
             .claim("mtyp", "member")
             .claim("stepup_time", now.getEpochSecond())
             .claim(

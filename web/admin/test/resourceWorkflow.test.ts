@@ -135,22 +135,54 @@ it('prevents authors from preparing their own review', async () => {
   expect(view.find('[data-testid="approve"]').exists()).toBe(false);
   view.unmount();
 });
-it('allows emergency revocation after ordinary withdrawal without offering another ordinary withdrawal', async () => {
+it('hides withdrawal actions after the version has been maliciously revoked', async () => {
   membership();
   const withdrawn = { ...version, state: 'withdrawn' as const, revision: 5 };
   vi.spyOn(resourceApi, 'governance').mockResolvedValue({ items: [withdrawn] });
   vi.spyOn(resourceApi, 'governanceDetail').mockResolvedValue({
     ...detail,
     version: withdrawn,
+    revoked: true,
   });
   const view = open('published');
   await flushPromises();
   await view.get('[data-testid="detail"]').trigger('click');
   await flushPromises();
-  expect(view.findAll('button').some((b) => b.text() === '下架')).toBe(false);
-  expect(view.text()).toContain('紧急撤销并停止受影响实例');
+  expect(view.find('.market-danger').exists()).toBe(false);
   view.unmount();
 });
+
+it('allows emergency revocation of an ordinarily withdrawn version', async () => {
+  membership();
+  const withdrawn = { ...version, state: 'withdrawn' as const, revision: 5 };
+  vi.spyOn(resourceApi, 'governance').mockResolvedValue({ items: [withdrawn] });
+  vi.spyOn(resourceApi, 'governanceDetail').mockResolvedValue({
+    ...detail,
+    version: withdrawn,
+    revoked: false,
+  });
+  const revoke = vi
+    .spyOn(resourceApi, 'withdraw')
+    .mockResolvedValue({ ...withdrawn, revision: 6 });
+  const view = open('published');
+  await flushPromises();
+  await view.get('[data-testid="detail"]').trigger('click');
+  await flushPromises();
+  await view.get('[data-testid="reason"]').setValue('Confirmed unsafe archive');
+  await view.get('.market-danger').trigger('click');
+  await view.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(revoke).toHaveBeenCalledWith(
+    'p1',
+    'v1',
+    'malicious',
+    'Confirmed unsafe archive',
+    '"5"',
+    expect.any(String),
+  );
+  view.unmount();
+});
+
 it('shows actual pending generations without inventing a successful application', async () => {
   membership();
   vi.spyOn(resourceApi, 'distributions').mockResolvedValue({
@@ -268,5 +300,81 @@ it('labels a recovered private personal draft as unreviewed before confirming it
     '"1"',
     expect.any(String),
   );
+  view.unmount();
+});
+
+it('keeps distinct historical versions visible with their reported distribution outcomes', async () => {
+  membership();
+  vi.spyOn(resourceApi, 'distributions').mockResolvedValue({
+    items: [
+      {
+        id: 'old',
+        instanceId: 'instance',
+        ownerId: 'owner',
+        selectionRevision: 1,
+        revision: 2,
+        state: 'applied',
+        generation: 2,
+        observedGeneration: 2,
+        ready: true,
+        selections: [
+          {
+            packageId: 'plugin-package',
+            versionId: 'old-version',
+            action: 'install',
+          },
+        ],
+      },
+      {
+        id: 'new',
+        instanceId: 'instance',
+        ownerId: 'owner',
+        selectionRevision: 2,
+        revision: 1,
+        state: 'applying',
+        generation: 3,
+        observedGeneration: 2,
+        ready: false,
+        selections: [
+          {
+            packageId: 'plugin-package',
+            versionId: 'new-version',
+            action: 'install',
+          },
+        ],
+      },
+    ],
+  });
+  const view = open('distribution');
+  await flushPromises();
+  const rows = view.findAll('tbody tr');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]!.text()).toContain('old-version');
+  expect(rows[1]!.text()).toContain('new-version');
+  expect(rows[0]!.text()).not.toContain('resource.distribution_denied');
+  view.unmount();
+});
+
+it('labels a superseded pending selection without a denial error', async () => {
+  membership();
+  vi.spyOn(resourceApi, 'distributions').mockResolvedValue({
+    items: [
+      {
+        id: 'superseded',
+        instanceId: 'instance',
+        ownerId: 'owner',
+        selectionRevision: 1,
+        revision: 2,
+        state: 'superseded',
+        generation: 2,
+        observedGeneration: 1,
+        ready: false,
+      },
+    ],
+  });
+  const view = open('distribution');
+  await flushPromises();
+  expect(view.text()).toContain('\u5df2\u53d6\u4ee3');
+  expect(view.text()).not.toContain('resource.distribution_denied');
   view.unmount();
 });

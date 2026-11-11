@@ -41,7 +41,8 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
   ResourceWorkflowController.class,
   auriga.resource.web.ResourceDistributionController.class,
   auriga.resource.web.ResourceNodeDownloadController.class,
-  auriga.resource.web.ResourceRevocationController.class
+  auriga.resource.web.ResourceRevocationController.class,
+  auriga.resource.web.ResourceMemberController.class
 })
 public class ResourceRuntimeConfiguration {
   @Bean
@@ -160,6 +161,28 @@ public class ResourceRuntimeConfiguration {
   }
 
   @Bean
+  ResourceMembers resourceMembers(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      ResourceWorkflow workflow,
+      ResourceDistributions distributions,
+      ObjectProvider<ObjectStore> objects,
+      Clock clock) {
+    return new ResourceMembers(
+        store, db, access, workflow, distributions, () -> required(objects), clock);
+  }
+
+  @Bean
+  ResourceGarbageCollector resourceGarbageCollector(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ObjectProvider<ObjectStore> objects,
+      Clock clock) {
+    return new ResourceGarbageCollector(store, db, objects::getIfAvailable, clock);
+  }
+
+  @Bean
   ResourceDistributions resourceDistributions(
       ResourceStore store,
       ResourceWorkflowStore db,
@@ -203,8 +226,15 @@ public class ResourceRuntimeConfiguration {
   }
 
   @Bean
-  jakarta.servlet.MultipartConfigElement resourceMultipart() {
-    return new jakarta.servlet.MultipartConfigElement("", 67108864, 67239936, 0);
+  auriga.resource.web.ResourceMultipartDirectory resourceMultipartDirectory()
+      throws java.io.IOException {
+    return new auriga.resource.web.ResourceMultipartDirectory();
+  }
+
+  @Bean
+  jakarta.servlet.MultipartConfigElement resourceMultipart(
+      auriga.resource.web.ResourceMultipartDirectory directory) {
+    return new jakarta.servlet.MultipartConfigElement(directory.location(), 67108864, 67239936, 0);
   }
 
   @Bean
