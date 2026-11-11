@@ -89,6 +89,35 @@ public final class ResourceQueries {
         });
   }
 
+  public VersionPage governance(AurigaPrincipal actor, String phase, int limit, String cursor) {
+    checkLimit(limit);
+    if (!"review".equals(phase) && !"published".equals(phase))
+      throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    var reader =
+        access.administrator(
+            actor,
+            phase.equals("review") ? "resource.versions.review" : "resource.versions.publish");
+    String scope = "admin/" + phase;
+    var decoded = cursors.decode(cursor, reader, scope, limit);
+    return store.read(
+        () -> {
+          var position =
+              decoded == null ? cursors.initial(store.governanceCeiling(reader, phase)) : decoded;
+          var rows =
+              store.governance(reader, phase, position.after(), position.ceiling(), limit + 1);
+          var page = new VersionPage(rows.stream().limit(limit).toList());
+          if (rows.size() > limit)
+            page.nextCursor(
+                cursors.encode(
+                    reader,
+                    scope,
+                    limit,
+                    new ResourceCursor.Position(
+                        rows.get(limit - 1).getId(), position.ceiling(), position.expires())));
+          return page;
+        });
+  }
+
   private static void checkLimit(int limit) {
     if (limit < 1 || limit > 200) throw new AurigaException(CommonErrors.VALIDATION_FAILED);
   }

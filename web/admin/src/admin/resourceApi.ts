@@ -15,6 +15,13 @@ function query(cursor?: string) {
   return params;
 }
 export const resourceApi = {
+  governance: (phase: 'review' | 'published', cursor?: string) =>
+    apiClient.get<VersionPage>(
+      `/api/resource/v1/admin/${phase}?${query(cursor)}`,
+      {
+        cache: 'no-store',
+      },
+    ),
   list: (cursor?: string) =>
     apiClient.get<PackagePage>(`${base}?${query(cursor)}`, {
       cache: 'no-store',

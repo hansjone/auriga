@@ -265,6 +265,44 @@ public final class ResourceStore {
         .findFirst();
   }
 
+  private String governanceWhere(Reader r, String phase) {
+    // An explicit review permission reveals shared pending metadata only; private packages
+    // never enter the governance queue, including private L3 drafts.
+    return visible(r)
+        + " AND p.visibility <> 'private' AND "
+        + (phase.equals("review")
+            ? "v.state='pending_review'"
+            : "v.state IN ('published','deprecated','withdrawn')");
+  }
+
+  public UUID governanceCeiling(Reader r, String phase) {
+    return jdbc
+        .query(
+            "SELECT v.id FROM resource.resource_version v JOIN resource.resource_package p "
+                + "ON p.tenant_id=v.tenant_id AND p.id=v.package_id WHERE "
+                + governanceWhere(r, phase)
+                + " ORDER BY v.id DESC LIMIT 1",
+            params(r),
+            (rs, n) -> rs.getObject("id", UUID.class))
+        .stream()
+        .findFirst()
+        .orElse(new UUID(0, 0));
+  }
+
+  public List<Version> governance(Reader r, String phase, UUID after, UUID ceiling, int limit) {
+    var args = params(r);
+    args.put("after", after);
+    args.put("ceiling", ceiling);
+    args.put("limit", limit);
+    return jdbc.query(
+        "SELECT v.* FROM resource.resource_version v JOIN resource.resource_package p "
+            + "ON p.tenant_id=v.tenant_id AND p.id=v.package_id WHERE "
+            + governanceWhere(r, phase)
+            + " AND v.id>:after AND v.id<=:ceiling ORDER BY v.id LIMIT :limit",
+        args,
+        this::versionRow);
+  }
+
   private ModelPackage packageRow(ResultSet rs, int row) throws SQLException {
     var groups = new LinkedHashSet<UUID>();
     var array = rs.getArray("group_ids");

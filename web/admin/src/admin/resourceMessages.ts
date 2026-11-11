@@ -1,4 +1,26 @@
 export const resourceZh = {
+  marketreview: '资源审核',
+  marketpublished: '已发布资源',
+  marketdistribution: '资源分发',
+  marketNavigation: '资源治理',
+  marketDirectory: '资源目录',
+  marketLoadFailed: '加载失败，请刷新重试。',
+  marketScope: '仅显示当前可见范围内的共享插件版本，不含私人包。',
+  marketReviewMissing:
+    '审核证据与审核操作尚未接入，当前仅可查看待审版本元数据。',
+  marketPublishMissing: '签名、发布、下架、紧急撤销及等级管理尚未接入。',
+  marketDistributionMissing:
+    '分发策略与节点回报尚未接入，暂无可核实的分发结果。',
+  marketEvidenceMissing: '版本变更、归档文件清单、权限声明与审核记录尚未接入。',
+  marketPackage: '资源编号',
+  marketVersion: '版本',
+  marketCreated: '创建时间',
+  marketDigest: '摘要',
+  marketSize: '字节数',
+  marketRevision: '修订号',
+  marketPrevious: '上一页',
+  marketNext: '下一页',
+
   resourceIntentExpired:
     '当前创建意图已超过 24 小时，不能安全重放。请先检查正式资源列表与管理员记录，确认结果后再重新进入页面。',
   identityProviders: '身份源',
@@ -126,6 +148,31 @@ export const resourceZh = {
     '待办、健康与总部入口等待正式汇总接线；当前没有可核实的汇总统计。',
 };
 export const resourceEn = {
+  marketreview: 'Resource review',
+  marketpublished: 'Published resources',
+  marketdistribution: 'Resource distribution',
+  marketNavigation: 'Resource governance',
+  marketDirectory: 'Resource directory',
+  marketLoadFailed: 'Loading failed. Refresh to retry.',
+  marketScope:
+    'Shared plugin versions within your current visibility only; private packages excluded.',
+  marketReviewMissing:
+    'Review evidence and decisions are not connected. Pending version metadata is read-only.',
+  marketPublishMissing:
+    'Signing, publication, withdrawal, emergency revocation and level administration are not connected.',
+  marketDistributionMissing:
+    'Distribution policies and node observations are not connected. No verified results are available.',
+  marketEvidenceMissing:
+    'Version changes, archive files, permissions and review history are not connected.',
+  marketPackage: 'Package ID',
+  marketVersion: 'Version',
+  marketCreated: 'Created',
+  marketDigest: 'Digest',
+  marketSize: 'Bytes',
+  marketRevision: 'Revision',
+  marketPrevious: 'Previous',
+  marketNext: 'Next',
+
   resourceIntentExpired:
     'This creation intent is older than 24 hours and cannot safely be replayed. Check the official catalog and administrator records before reopening the page.',
   identityProviders: 'Identity providers',

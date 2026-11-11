@@ -20,6 +20,296 @@
     }
   ],
   "paths": {
+  "/api/resource/v1/admin/review": {
+      "get": {
+        "operationId": "listMarketAdminReview",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Shared plugin version metadata only; private packages excluded. Requires a live admin session, recent verification, explicit permission and package ACL.",
+        "x-permission": "resource.versions.review",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/resource/v1/admin/published": {
+      "get": {
+        "operationId": "listMarketAdminPublished",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Shared plugin version metadata only; private packages excluded. Requires a live admin session, recent verification, explicit permission and package ACL.",
+        "x-permission": "resource.versions.publish",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
     "/api/resource/v1/packages": {
       "get": {
         "operationId": "listResourcePackages",

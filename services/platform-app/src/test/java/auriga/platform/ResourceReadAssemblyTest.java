@@ -1503,4 +1503,92 @@ class ResourceReadAssemblyTest {
           futures.get(1).get(30, java.util.concurrent.TimeUnit.SECONDS));
     }
   }
+
+  String governanceToken(String ctx) throws Exception {
+    var claims =
+        new JWTClaimsSet.Builder(SignedJWT.parse(token(T1, ALICE, true)).getJWTClaimsSet())
+            .claim("ctx", ctx)
+            .claim("stepup_time", Instant.now().getEpochSecond())
+            .claim("perms", List.of("resource.versions.review", "resource.versions.publish"))
+            .build();
+    var signed =
+        new SignedJWT(
+            new JWSHeader.Builder(JWSAlgorithm.ES256)
+                .type(new JOSEObjectType("at+jwt"))
+                .keyID(KEY.getKeyID())
+                .build(),
+            claims);
+    signed.sign(new ECDSASigner(KEY));
+    return signed.serialize();
+  }
+
+  HttpResponse<String> governanceRequest(String path, String bearer) throws Exception {
+    return http.send(
+        HttpRequest.newBuilder(
+                URI.create("http://127.0.0.1:" + port + "/api/resource/v1/admin/" + path))
+            .timeout(Duration.ofSeconds(30))
+            .header("Authorization", "Bearer " + bearer)
+            .GET()
+            .build(),
+        HttpResponse.BodyHandlers.ofString());
+  }
+
+  @Test
+  void governanceReadsSharedPendingVersionsWithoutLeakingPrivateOrOtherTenants() throws Exception {
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['resource.versions.review','resource.versions.publish'] WHERE id=?",
+        ROLE);
+    var shared = resource(800, "l3", "tenant", BOB, T1, false);
+    var pending = version(801, shared, BOB, "pending_review");
+    version(802, shared, BOB, "draft");
+    var published = version(803, shared, BOB, "published");
+    version(804, resource(805, "l4", "private", ALICE, T1, false), ALICE, "pending_review");
+    version(806, resource(807, "l3", "private", BOB, T1, false), BOB, "pending_review");
+    version(808, resource(809, "l3", "tenant", id(15), T2, false), id(15), "pending_review");
+    String bearer = governanceToken("admin");
+    var unverified =
+        new SignedJWT(
+            new JWSHeader.Builder(JWSAlgorithm.ES256)
+                .type(new JOSEObjectType("at+jwt"))
+                .keyID(KEY.getKeyID())
+                .build(),
+            new JWTClaimsSet.Builder(SignedJWT.parse(bearer).getJWTClaimsSet())
+                .claim("stepup_time", null)
+                .build());
+    unverified.sign(new ECDSASigner(KEY));
+    failure(governanceRequest("review", unverified.serialize()), 403, "iam.step_up_required");
+    var review = governanceRequest("review", bearer);
+    assertEquals(List.of(pending.toString()), ids(result(review, 200)));
+    assertEquals("no-store", review.headers().firstValue("cache-control").orElse(""));
+    assertEquals(
+        List.of(published.toString()), ids(result(governanceRequest("published", bearer), 200)));
+    failure(governanceRequest("review", governanceToken("portal")), 403, "common.forbidden");
+    failure(governanceRequest("review", token(T1, ALICE, true)), 403, "common.forbidden");
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['resource.packages.read'] WHERE id=?", ROLE);
+    failure(governanceRequest("review", bearer), 403, "common.forbidden");
+  }
+
+  @Test
+  void governanceCursorIsScopedAndRechecksVisibility() throws Exception {
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['resource.versions.review','resource.versions.publish'] WHERE id=?",
+        ROLE);
+    var shared = resource(820, "l3", "tenant", BOB, T1, false);
+    var firstId = version(821, shared, BOB, "pending_review");
+    version(822, shared, BOB, "pending_review");
+    String bearer = governanceToken("admin");
+    var first = result(governanceRequest("review?limit=1", bearer), 200);
+    assertEquals(List.of(firstId.toString()), ids(first));
+    String next = cursor(first);
+    assertEquals(
+        1, ids(result(governanceRequest("review?limit=1&cursor=" + next, bearer), 200)).size());
+    failure(
+        governanceRequest("published?limit=1&cursor=" + next, bearer),
+        400,
+        "common.validation_failed");
+    admin.update("UPDATE resource.resource_package SET visibility='private' WHERE id=?", shared);
+    assertTrue(
+        ids(result(governanceRequest("review?limit=1&cursor=" + next, bearer), 200)).isEmpty());
+  }
 }
