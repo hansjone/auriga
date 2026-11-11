@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import AuditView from './views/AuditView.vue';
 import LoginView from './views/LoginView.vue';
 import AdminLayout from './layouts/AdminLayout.vue';
 import MembersView from './views/MembersView.vue';
@@ -20,6 +21,7 @@ import UsageView from './views/models/UsageView.vue';
 import { navigation } from './admin/navigation';
 
 const existing = new Set([
+  '/audit',
   '/overview',
   '/models/providers',
   '/settings',
@@ -55,6 +57,7 @@ export const router = createRouter({
       children: [
         { path: '', redirect: '/overview' },
         { path: 'overview', component: OverviewView },
+        { path: 'audit', component: AuditView },
         { path: 'resources', component: ResourcesView },
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },

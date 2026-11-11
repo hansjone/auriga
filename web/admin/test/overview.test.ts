@@ -18,9 +18,9 @@ describe('overview snapshots', () => {
     expect(
       router.resolve('/overview').matched.at(-1)?.components?.default,
     ).toBe(OverviewView);
-    expect(router.resolve('/audit').matched.at(-1)?.components?.default).toBe(
-      WorkflowUnavailableView,
-    );
+    expect(
+      router.resolve('/ops/alerts').matched.at(-1)?.components?.default,
+    ).toBe(WorkflowUnavailableView);
   });
   it('reads every page and leaves independent failures unknown', async () => {
     vi.spyOn(orgApi, 'listMembers')
