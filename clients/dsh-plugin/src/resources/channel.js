@@ -32,8 +32,13 @@ export function resourcePath(path) {
 
 /** Native authentication gates fixed reads and renderer-bound distribution writes.
  * Browser credentials never cross this boundary.
- * @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any, fetchImpl?: typeof fetch}} options */
-export function createResourceHandler({ auth, current, fetchImpl = fetch }) {
+ * @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any, memberHandler?:(runtime:any,req:any,res:any)=>Promise<any>, fetchImpl?: typeof fetch}} options */
+export function createResourceHandler({
+  auth,
+  current,
+  memberHandler,
+  fetchImpl = fetch,
+}) {
   /** @param {any} req @param {any} res */
   return async (req, res) => {
     /** @param {number} status @param {unknown} [body] */
@@ -47,6 +52,12 @@ export function createResourceHandler({ auth, current, fetchImpl = fetch }) {
     };
     const rejection = auth.requestRejection(req);
     if (rejection !== undefined) return send(rejection);
+    if (req.url?.startsWith(prefix + '/local/')) {
+      const runtime = current();
+      if (!runtime || !memberHandler) return send(503);
+      if (!runtime.resolve(req)) return send(401);
+      return memberHandler(runtime, req, res);
+    }
     const write = req.method === 'POST';
     if (req.method !== 'GET' && !write) return send(405);
     let path;
@@ -184,7 +195,7 @@ export function createResourceHandler({ auth, current, fetchImpl = fetch }) {
   };
 }
 
-/** @param {any} ctx @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any}} options */
+/** @param {any} ctx @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any,memberHandler?:(runtime:any,req:any,res:any)=>Promise<any>}} options */
 export function installResourceChannel(ctx, options) {
   if (
     typeof ctx.effect !== 'function' ||

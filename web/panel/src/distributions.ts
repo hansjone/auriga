@@ -72,7 +72,12 @@ export function createDistributionClient(context: PanelContext) {
     } catch {
       throw new ResourceError('unavailable');
     }
-    if (!response.ok)
+    if (!response.ok) {
+      if (response.status === 403) {
+        const problem = await response.json().catch(() => ({}));
+        if (problem?.code === 'iam.step_up_required')
+          throw new ResourceError('stepup');
+      }
       throw new ResourceError(
         response.status === 401
           ? 'auth'
@@ -84,6 +89,7 @@ export function createDistributionClient(context: PanelContext) {
                 ? 'limited'
                 : 'unavailable',
       );
+    }
     if (!response.headers.get('content-type')?.startsWith('application/json'))
       throw new ResourceError('invalid');
     let row: Distribution;
@@ -99,9 +105,14 @@ export function createDistributionClient(context: PanelContext) {
       row.ownerId !== identity.ownerId ||
       !counter(row.revision) ||
       !counter(row.selectionRevision) ||
-      !['requested', 'resolved', 'applying', 'applied', 'failed'].includes(
-        row.state,
-      ) ||
+      ![
+        'requested',
+        'resolved',
+        'applying',
+        'applied',
+        'failed',
+        'superseded',
+      ].includes(row.state) ||
       (row.generation !== undefined && !generation(row.generation)) ||
       (row.observedGeneration !== undefined &&
         !generation(row.observedGeneration)) ||

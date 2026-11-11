@@ -16,10 +16,26 @@ export interface PanelContext {
   listInstalled?: () => Promise<unknown>;
   resourceIdentity?: { tenantId: string; ownerId: string; instanceId: string };
   resourceDistributionAvailable?: boolean;
+  memberResources?: {
+    list: (signal: AbortSignal) => Promise<unknown>;
+    apply: (
+      input: import('./members').MemberInput,
+      signal: AbortSignal,
+    ) => Promise<unknown>;
+  };
 }
 
 export type Failure =
-  'unavailable' | 'auth' | 'forbidden' | 'missing' | 'limited' | 'invalid';
+  | 'unavailable'
+  | 'auth'
+  | 'forbidden'
+  | 'missing'
+  | 'limited'
+  | 'invalid'
+  | 'verification'
+  | 'setup'
+  | 'conflict'
+  | 'stepup';
 export class ResourceError extends Error {
   constructor(public readonly reason: Failure) {
     super(reason);
@@ -118,6 +134,7 @@ export type InstalledResource =
       name: string;
       enabled: boolean | 'conditional';
       phase: string | null;
+      version?: string;
       preset?: string;
       unavailable?: false;
     }
@@ -141,6 +158,33 @@ export async function readInstalledResources(
   )
     throw new ResourceError('invalid');
   const result: InstalledResource[] = [];
+  const versions = new Map<string, string | undefined>();
+  let bundleRows = 0;
+  if (value.bundles !== undefined) {
+    if (!Array.isArray(value.bundles) || value.bundles.length > 10000)
+      throw new ResourceError('invalid');
+    for (const bundle of value.bundles) {
+      if (
+        !record(bundle) ||
+        !shortText(bundle.name, 214) ||
+        (bundle.version !== undefined && !shortText(bundle.version, 128)) ||
+        !Array.isArray(bundle.rows) ||
+        bundle.rows.length > 10000
+      )
+        throw new ResourceError('invalid');
+      for (const row of bundle.rows) {
+        if (++bundleRows > 10000) throw new ResourceError('invalid');
+        if (!record(row) || !shortText(row.moduleName, 1024))
+          throw new ResourceError('invalid');
+        versions.set(
+          row.moduleName,
+          versions.has(row.moduleName)
+            ? undefined
+            : (bundle.version as string | undefined),
+        );
+      }
+    }
+  }
   function append(row: unknown, preset?: string) {
     if (
       !record(row) ||
@@ -167,6 +211,7 @@ export async function readInstalledResources(
       name: row.moduleName,
       enabled: row.enabled as boolean | 'conditional',
       phase: row.fiberPhase as string | null,
+      version: versions.get(row.moduleName),
       preset,
     });
   }

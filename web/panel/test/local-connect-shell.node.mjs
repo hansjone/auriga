@@ -313,6 +313,57 @@ test('local connection state drives the real shell entry and endpoint/acceptance
     }
   }
 });
+test('desktop resource port uses current local CSRF and keeps member credentials out of browser requests', async () => {
+  const calls = [];
+  let loggedIn = true;
+  const host = surfaceHost(async (url, init) => {
+    const path = new URL(url).pathname;
+    calls.push({ path, init });
+    if (path.endsWith('/local-login/status'))
+      return response(200, { loggedIn, csrf: 'test-csrf' });
+    if (path.includes('/resources/local/')) return response(200, { ok: true });
+    return response(200, {
+      ...localBoot(true),
+      memberResourcesAvailable: true,
+    });
+  });
+  try {
+    const main = host.mount('main');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    const port = panel.context.memberResources;
+    assert(port);
+    await port.list();
+    const input = {
+      packageId: 'package',
+      versionId: 'version',
+      action: 'install',
+      key: 'intent',
+    };
+    await port.apply(input);
+    const post = calls.find(({ path }) =>
+      path.endsWith('/resources/local/actions'),
+    );
+    assert.equal(post.init.method, 'POST');
+    assert.equal(post.init.headers['X-Auriga-CSRF'], 'test-csrf');
+    assert.deepEqual(JSON.parse(post.init.body), input);
+    assert.equal(post.init.redirect, 'error');
+    assert.equal(post.init.credentials, 'same-origin');
+    assert.equal(post.init.headers.authorization, undefined);
+    loggedIn = false;
+    await assert.rejects(port.apply(input), { reason: 'auth' });
+    assert.equal(
+      calls.filter(({ path }) => path.endsWith('/resources/local/actions'))
+        .length,
+      1,
+    );
+    main.close();
+    host.dispose();
+    assert.equal(host.counts.timers.size, 0);
+  } finally {
+    host.close();
+  }
+});
 test('connection bootstrap without an explicit validated status cannot claim connected', async () => {
   const value = localBoot(true);
   delete value.connection;

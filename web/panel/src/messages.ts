@@ -14,30 +14,35 @@ export const messages = {
     details: '查看详情',
     back: '返回资源市场',
     versions: '版本',
-    author: '作者 ID',
+    author: '资源所有者 ID',
+    review: '审核状态',
     unreviewed: '未审核',
     installOrUpdate: '安装／更新',
+    memberConfirm: '确认在当前 DSH 执行此操作？',
+    memberWorking: '正在下载、验证或应用资源…',
+    memberRestart: '已保存，等待 DSH 重启后核对实际状态；尚未回报已生效。',
+    memberInstallHint:
+      '安装前验证平台签名、撤销清单和发行序号；只有本机应用成功才回报已生效。',
+    memberLocalVersion: '本机已核验版本',
+    memberReport: '成员安装回报',
+    memberOffline: '平台暂时不可达；显示本机清单，安装回报等待同步。',
+    member_applying: '应用中',
+    member_applied: '已生效',
+    member_failed: '失败',
+    verification: '资源签名、有效期、摘要或撤销校验失败，未安装。',
+    setup: '无法读取受保护的资源信任配置或本机清单，请检查部署配置。',
+    conflict: '资源选择或修订已变化，请刷新后确认操作。',
+    stepup: '平台要求近期身份验证，请先在平台完成身份验证后重试。',
     managedDistributionUnavailable:
-      '当前托管凭据尚未接入成员分发，暂不能安装、启停或卸载。平台管理的 L0/L1 仍由平台下发。',
+      '托管资源由平台分发，本页展示本机状态；不通过桌面成员接口变更云端实例。L0/L1 仍由平台管理。',
     action_enable: '启用',
     action_disable: '关闭',
     action_remove: '卸载',
     action_install: '安装',
     confirm: '确认',
     cancel: '取消',
-    distribution_confirm:
-      '确认向当前托管实例下发此版本？执行结果以节点回报为准。',
-    managedDistributionHint:
-      '由平台向当前托管实例分发；L0/L1 由平台管理。权限声明未知，操作前请联系管理员确认。',
-    distribution_requested: '已下发，等待平台处理',
-    distribution_resolved: '已解析，等待节点应用',
-    distribution_applying: '应用中',
-    distribution_applied: '已生效（节点就绪且代数一致）',
-    distribution_failed: '分发失败，请联系管理员查看详情',
     distribution_unknown:
       '请求结果未知。重试将复用本次操作标识，不另建分发意图。',
-    distribution_refresh: '刷新分发状态',
-    distribution_retry: '重试本次下发',
     permissions: '权限声明',
     permissionsUnavailable: '暂时无法读取权限声明，请联系管理员确认。',
     level: '资源级别',
@@ -61,7 +66,7 @@ export const messages = {
     failed: '失败',
     unloading: '正在停止',
     versionEmpty: '当前没有可见版本。',
-    installHint: '尚未接通安装状态与操作服务，暂不提供安装、启停及配置。',
+    installHint: '当前显示宿主配置的插件；连接平台后可管理市场资源。',
     mineHint:
       '暂时无法读取本机安装清单。这里不会把未知状态显示为未安装，也不会从市场推断已安装资源。',
     managed: '当前托管环境尚未开放资源访问，请等待平台接通。',
@@ -100,31 +105,41 @@ export const messages = {
     details: 'View details',
     back: 'Back to market',
     versions: 'Versions',
-    author: 'Author ID',
+    author: 'Resource owner ID',
+    review: 'Review status',
     unreviewed: 'Unreviewed',
     installOrUpdate: 'Install / update',
+    memberConfirm: 'Apply this operation to the current DSH?',
+    memberWorking: 'Downloading, verifying or applying the resource…',
+    memberRestart:
+      'Saved; awaiting DSH restart and observation. Applied has not been reported.',
+    memberInstallHint:
+      'Platform signatures, revocations and release sequence are verified before installation. Applied is reported only after local success.',
+    memberLocalVersion: 'Verified local version',
+    memberReport: 'Member installation report',
+    memberOffline:
+      'The platform is unavailable. Showing the local manifest; reports await synchronization.',
+    member_applying: 'Applying',
+    member_applied: 'Applied',
+    member_failed: 'Failed',
+    verification:
+      'Signature, expiry, digest or revocation verification failed. The resource was not installed.',
+    setup:
+      'Protected resource trust configuration or the local manifest is unavailable. Check the deployment configuration.',
+    conflict:
+      'The resource selection or revision changed. Refresh before confirming an operation.',
+    stepup:
+      'The platform requires recent identity verification. Complete it on the platform before retrying.',
     managedDistributionUnavailable:
-      'Member distribution credentials are not connected. Install, enable, disable and uninstall are unavailable. The platform continues to manage L0/L1.',
+      'Managed resources are distributed by the platform. This page shows local status; desktop member operations do not modify cloud instances. L0/L1 remain platform managed.',
     action_enable: 'Enable',
     action_disable: 'Disable',
     action_remove: 'Uninstall',
     action_install: 'Install',
     confirm: 'Confirm',
     cancel: 'Cancel',
-    distribution_confirm:
-      'Distribute this version to the current managed instance? The node reports the application result.',
-    managedDistributionHint:
-      'The platform distributes to this managed instance; L0/L1 are platform managed. Permission declarations are unknown. Confirm them with your administrator before proceeding.',
-    distribution_requested: 'Dispatched; waiting for platform processing',
-    distribution_resolved: 'Resolved; waiting for node application',
-    distribution_applying: 'Applying',
-    distribution_applied: 'Applied (node ready and generation matched)',
-    distribution_failed:
-      'Distribution failed. Contact your administrator for details.',
     distribution_unknown:
       'The request outcome is unknown. Retry reuses this operation identifier.',
-    distribution_refresh: 'Refresh distribution status',
-    distribution_retry: 'Retry this distribution',
     permissions: 'Permissions',
     permissionsUnavailable:
       'Permission declarations are unavailable. Contact your administrator.',
@@ -151,7 +166,7 @@ export const messages = {
     unloading: 'Unloading',
     versionEmpty: 'No versions are visible.',
     installHint:
-      'Installation status and operations are not connected. Install, enable, disable and configuration are unavailable.',
+      'Showing host-configured plugins. Connect to the platform to manage market resources.',
     mineHint:
       'The local installation inventory is unavailable. Unknown status is not treated as uninstalled, and market entries do not imply local installations.',
     managed:

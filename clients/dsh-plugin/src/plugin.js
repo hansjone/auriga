@@ -19,6 +19,7 @@ import { installSettings } from './settings/host.js';
 import { installNetworkDiagnosticSink } from './network/diagnostics.js';
 import { installObservability, logEvent } from './observability/index.js';
 import { installResourceChannel } from './resources/channel.js';
+import { createMemberRoutes } from './resources/member-routes.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -31,7 +32,7 @@ export async function apply(ctx, config) {
   installNetworkDiagnosticSink(ctx);
   installObservability(ctx);
   const mode = selectMode();
-  let binding, profileOwner;
+  let binding, profileOwner, memberResources;
   // Preferences select Auriga surfaces; DSH owns local admission independently.
   let configured = true;
   let admission;
@@ -87,6 +88,10 @@ export async function apply(ctx, config) {
       installResourceChannel(ctx, {
         auth: admission.nativeAuth,
         current: () => current()?.runtime,
+        memberHandler: (runtime, req, res) =>
+          memberResources
+            ? memberResources.handle(runtime, req, res)
+            : Promise.resolve(res.writeHead(503).end()),
       });
       ctx.effect(
         () => () => admission?.dispose(),
@@ -119,6 +124,7 @@ export async function apply(ctx, config) {
             handler(req, res) {
               return createLocalSurfaceHandler({
                 mode: configured ? 'connect' : 'standalone',
+                memberResourcesAvailable: !!memberResources,
                 auth: admission?.nativeAuth ?? ctx.connection,
                 ...(configured ? { runtime: gate } : {}),
               })(req, res);
@@ -145,6 +151,21 @@ export async function apply(ctx, config) {
           throw new Error(
             'auriga-dsh: host profile directory required for persistent state',
           );
+        const resources = createMemberRoutes({
+          directory: profile.dir,
+          ctx: profileCtx,
+          trustFile: process.env.AURIGA_RESOURCE_TRUST_FILE,
+          current: () => binding?.runtime,
+          sameOrigin: (req, write) => admission.sameOrigin(req, write),
+        });
+        memberResources = resources;
+        profileCtx.effect(
+          () => () => {
+            if (memberResources === resources) memberResources = undefined;
+            return resources.close();
+          },
+          'auriga-dsh: member resource lifetime',
+        );
         const loading = settings.getStore(profile.dir).then((store) => {
           if (profileOwner !== owner) return null;
           configured = !!store.snapshot().platformOrigin;

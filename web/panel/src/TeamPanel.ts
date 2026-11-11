@@ -1,13 +1,15 @@
 import { messages } from './messages';
 import style from './panel.css?inline';
 import {
-  allowedActions,
-  canDistribute,
-  createDistributionClient,
-  distributionPhase,
-  type Action,
-  type Distribution,
-} from './distributions';
+  readMembers,
+  applyMember,
+  memberActions,
+  memberFailure,
+  memberState,
+  type MemberItem,
+  type MemberIdentity,
+  type MemberInput,
+} from './members';
 import {
   canReadResources,
   createResourceReader,
@@ -37,18 +39,25 @@ export class AurigaTeamPanel extends HTMLElement {
   private epoch = 0;
   private controller?: AbortController;
   private retryAction?: () => void;
-  private confirmation?: { action: Action; versionId: string };
-  private operation?: {
+  private memberRows?: MemberItem[];
+  private memberIdentity?: MemberIdentity;
+  private memberOffline = false;
+  private memberError?: Failure;
+  private memberRead = 0;
+  private memberReadAbort?: AbortController;
+  private memberAbort?: AbortController;
+  private memberConfirm?: {
     packageId: string;
     versionId: string;
-    action: Action;
-    key: string;
+    action: MemberInput['action'];
+    label: string;
+  };
+  private memberOperation?: {
+    input: MemberInput;
     pending: boolean;
-    row?: Distribution;
-    distributionId?: string;
+    row?: MemberItem;
     failure?: Failure;
   };
-  private operationAbort?: AbortController;
   private root: HTMLElement;
   constructor() {
     super();
@@ -71,15 +80,21 @@ export class AurigaTeamPanel extends HTMLElement {
       previous.protocol !== value?.protocol ||
       previous.fetch !== value?.fetch ||
       previous.listInstalled !== value?.listInstalled ||
+      previous.memberResources !== value?.memberResources ||
       previous.resourceDistributionAvailable !==
         value?.resourceDistributionAvailable ||
       JSON.stringify(previous.resourceIdentity) !==
         JSON.stringify(value?.resourceIdentity) ||
       previous.apiBase !== value?.apiBase;
     if (changed) {
-      this.operationAbort?.abort();
-      this.operation = undefined;
-      this.confirmation = undefined;
+      this.memberRead++;
+      this.memberReadAbort?.abort();
+      this.memberAbort?.abort();
+      this.memberRows = undefined;
+      this.memberIdentity = undefined;
+      this.memberConfirm = undefined;
+      this.memberOperation = undefined;
+      this.memberError = undefined;
       this.cancel();
       this.clearData();
       this.installed = undefined;
@@ -88,6 +103,7 @@ export class AurigaTeamPanel extends HTMLElement {
       this.retryAction = undefined;
     }
     if (this.isConnected) {
+      if (changed && value?.memberResources) void this.loadMembers();
       if (changed && this.tab === 'market') this.loadPackages();
       if (changed && this.tab === 'mine') this.loadInstalled();
       this.render();
@@ -103,10 +119,13 @@ export class AurigaTeamPanel extends HTMLElement {
     this.render();
     if (this.tab === 'market' && !this.loaded) this.loadPackages();
     if (this.tab === 'mine') this.loadInstalled();
+    if (this.context?.memberResources) void this.loadMembers();
   }
   disconnectedCallback() {
     this.cancel();
-    this.operationAbort?.abort();
+    this.memberRead++;
+    this.memberReadAbort?.abort();
+    this.memberAbort?.abort();
   }
   cancel() {
     this.epoch++;
@@ -258,13 +277,17 @@ export class AurigaTeamPanel extends HTMLElement {
     this.versions = [];
     this.failure = undefined;
     this.retryAction = undefined;
-    this.confirmation = undefined;
+    this.memberConfirm = undefined;
     if (value === 'market' && !this.loaded) this.loadPackages();
     if (value === 'mine') this.loadInstalled();
     this.render();
   }
 
   private loadInstalled() {
+    if (this.context?.memberResources) {
+      void this.loadMembers();
+      return;
+    }
     this.installed = undefined;
     void this.run(
       () => readInstalledResources(this.context),
@@ -275,78 +298,27 @@ export class AurigaTeamPanel extends HTMLElement {
       true,
     );
   }
-
-  private async runDistribution(action?: Action, versionId?: string) {
-    if (!canDistribute(this.context) || this.operation?.pending) return;
-    let operation = this.operation;
-    if (action && versionId && this.detail) {
-      if (
-        operation &&
-        (!operation.row ||
-          !['applied', 'failed'].includes(distributionPhase(operation.row)))
-      )
-        return;
-      const key = globalThis.crypto?.randomUUID?.();
-      if (!key) return;
-      operation = {
-        packageId: this.detail.id,
-        versionId,
-        action,
-        key,
-        pending: false,
-      };
-      this.operation = operation;
-    }
-    if (!operation) return;
-    const own = operation,
-      controller = new AbortController();
-    this.operationAbort = controller;
-    this.confirmation = undefined;
-    own.pending = true;
-    own.failure = undefined;
-    this.render();
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  private async loadMembers() {
+    const context = this.context;
+    if (!context?.memberResources) return;
+    this.memberReadAbort?.abort();
+    const signal = new AbortController();
+    this.memberReadAbort = signal;
+    const request = ++this.memberRead;
     try {
-      const client = createDistributionClient(this.context!);
-      const row = await Promise.race([
-        own.distributionId
-          ? client.status(own.distributionId, controller.signal)
-          : client.request(
-              own.packageId,
-              own.versionId,
-              own.action,
-              own.key,
-              controller.signal,
-            ),
-        new Promise<never>((_, reject) => {
-          controller.signal.addEventListener(
-            'abort',
-            () => reject(new ResourceError('unavailable')),
-            { once: true },
-          );
-          timer = setTimeout(() => {
-            controller.abort();
-            reject(new ResourceError('unavailable'));
-          }, 15000);
-        }),
-      ]);
-      if (own !== this.operation) return;
-      if (
-        own.row &&
-        (row.revision < own.row.revision ||
-          row.selectionRevision !== own.row.selectionRevision)
-      )
-        throw new ResourceError('invalid');
-      own.row = row;
-      own.distributionId = row.id;
+      const data = await readMembers(context, signal.signal);
+      if (request !== this.memberRead) return;
+      this.memberRows = data.items;
+      this.memberIdentity = data.identity;
+      this.memberOffline = data.offline;
+      this.memberError = undefined;
     } catch (error) {
-      if (own !== this.operation) return;
-      own.failure =
-        error instanceof ResourceError ? error.reason : 'unavailable';
-      if (own.failure === 'auth') {
+      if (request !== this.memberRead) return;
+      this.memberError = memberFailure(error);
+      this.memberRows = undefined;
+      if (this.memberError === 'auth') {
+        this.cancel();
         this.clearData();
-        this.installed = undefined;
-        own.row = undefined;
         this.dispatchEvent(
           new CustomEvent('auriga-auth-required', {
             bubbles: true,
@@ -355,43 +327,178 @@ export class AurigaTeamPanel extends HTMLElement {
         );
       }
     } finally {
+      if (request === this.memberRead && this.isConnected) this.render();
+    }
+  }
+  private memberBlocked() {
+    const op = this.memberOperation;
+    return (
+      !!op && (op.pending || !op.row || memberState(op.row) === 'applying')
+    );
+  }
+  private async runMember(retry = false) {
+    const context = this.context,
+      identity = this.memberIdentity;
+    if (!context?.memberResources || !identity || this.memberOperation?.pending)
+      return;
+    if (!retry) {
+      if (!this.memberConfirm || this.memberBlocked()) return;
+      const bytes = new Uint8Array(16);
+      globalThis.crypto.getRandomValues(bytes);
+      const key = [...bytes]
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+      const { packageId, versionId, action } = this.memberConfirm;
+      this.memberOperation = {
+        input: { packageId, versionId, action, key },
+        pending: false,
+      };
+    }
+    const own = this.memberOperation;
+    if (!own) return;
+    this.memberConfirm = undefined;
+    own.pending = true;
+    own.failure = undefined;
+    const controller = new AbortController();
+    this.memberAbort = controller;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    this.render();
+    try {
+      const row = await Promise.race([
+        applyMember(context, own.input, identity, controller.signal),
+        new Promise<never>((_, reject) => {
+          controller.signal.addEventListener(
+            'abort',
+            () => reject(new ResourceError('unavailable')),
+            { once: true },
+          );
+          timer = setTimeout(() => controller.abort(), 30000);
+        }),
+      ]);
+      if (own !== this.memberOperation) return;
+      own.row = row;
+      await this.loadMembers();
+    } catch (error) {
+      if (own !== this.memberOperation) return;
+      own.failure = memberFailure(error);
+      if (own.failure === 'auth')
+        this.dispatchEvent(
+          new CustomEvent('auriga-auth-required', {
+            bubbles: true,
+            composed: true,
+          }),
+        );
+    } finally {
       clearTimeout(timer);
       controller.abort();
       own.pending = false;
-      if (own === this.operation && this.isConnected) this.render();
+      if (own === this.memberOperation && this.isConnected) this.render();
     }
   }
-
-  private distributionStatus(section: HTMLElement) {
-    const own = this.operation,
-      text = this.text;
-    if (!own) return;
-    const card = this.element('article', undefined, 'notice');
-    card.setAttribute('role', own.failure ? 'alert' : 'status');
-    card.append(
-      this.element(
-        'p',
-        own.failure
-          ? text[own.failure]
-          : own.pending
-            ? text.loading
-            : own.row
-              ? text[`distribution_${distributionPhase(own.row)}`]
-              : text.distribution_unknown,
-      ),
-    );
-    if (own.failure && !own.distributionId)
-      card.append(this.element('p', text.distribution_unknown));
-    card.append(
-      this.button(
-        own.distributionId
-          ? text.distribution_refresh
-          : text.distribution_retry,
-        () => void this.runDistribution(),
-        own.pending,
-      ),
-    );
-    section.append(card);
+  private memberNotice(section: HTMLElement) {
+    const text = this.text;
+    if (this.memberConfirm) {
+      const confirm = this.element('div', undefined, 'notice');
+      confirm.setAttribute('role', 'group');
+      confirm.append(
+        this.element('p', text.memberConfirm + ' ' + this.memberConfirm.label),
+        this.button(text.confirm, () => void this.runMember()),
+        this.button(text.cancel, () => {
+          this.memberConfirm = undefined;
+          this.render();
+        }),
+      );
+      section.append(confirm);
+    }
+    const op = this.memberOperation;
+    if (op) {
+      const notice = this.element('div', undefined, 'notice');
+      notice.setAttribute('role', op.failure ? 'alert' : 'status');
+      notice.append(
+        this.element(
+          'p',
+          op.failure
+            ? text[op.failure]
+            : op.pending
+              ? text.memberWorking
+              : op.row?.restartRequired
+                ? text.memberRestart
+                : op.row
+                  ? text[`member_${memberState(op.row)}`]
+                  : text.distribution_unknown,
+        ),
+      );
+      if (op.failure && op.failure === 'unavailable')
+        notice.append(this.element('p', text.distribution_unknown));
+      if (!op.pending)
+        notice.append(this.button(text.retry, () => void this.runMember(true)));
+      section.append(notice);
+    }
+  }
+  private memberCards(section: HTMLElement) {
+    const text = this.text;
+    section.append(this.button(text.refresh, () => void this.loadMembers()));
+    if (this.memberError) {
+      const error = this.element('p', text[this.memberError], 'notice');
+      error.setAttribute('role', 'alert');
+      section.append(error);
+    }
+    if (!this.memberRows && !this.memberError)
+      section.append(this.element('p', text.loading));
+    if (this.memberOffline)
+      section.append(this.element('p', text.memberOffline, 'notice'));
+    if (!this.memberRows?.length && !this.memberError)
+      section.append(this.element('p', text.localEmpty));
+    const cards = this.element('div', undefined, 'cards');
+    for (const item of this.memberRows ?? []) {
+      const card = this.element('article', undefined, 'card');
+      card.append(
+        this.element('h3', item.name),
+        this.element(
+          'p',
+          text.memberLocalVersion + ' · ' + (item.localVersion ?? text.unknown),
+        ),
+        this.element('p', text.versions + ' · ' + item.version),
+        this.element('p', text.level + ' · ' + item.level.toUpperCase()),
+        this.element(
+          'p',
+          text.memberReport + ' · ' + text[`member_${memberState(item)}`],
+        ),
+        this.element(
+          'p',
+          text.localEnabled +
+            ' · ' +
+            (item.localEnabled ? text.enabled : text.disabled),
+        ),
+      );
+      if (item.level === 'l4') card.append(this.element('p', text.unreviewed));
+      if (item.restartRequired)
+        card.append(this.element('p', text.memberRestart, 'notice'));
+      const actions: MemberInput['action'][] =
+        item.level === 'l1'
+          ? ['enable']
+          : item.level === 'l2'
+            ? ['enable', 'disable']
+            : ['enable', 'disable', 'remove'];
+      for (const action of actions)
+        card.append(
+          this.button(
+            text[`action_${action}`],
+            () => {
+              this.memberConfirm = {
+                packageId: item.packageId,
+                versionId: item.versionId,
+                action,
+                label: item.name + ' ' + item.version,
+              };
+              this.render();
+            },
+            this.memberBlocked() || item.state === 'applying',
+          ),
+        );
+      cards.append(card);
+    }
+    section.append(cards);
   }
 
   private element<K extends keyof HTMLElementTagNameMap>(
@@ -451,8 +558,12 @@ export class AurigaTeamPanel extends HTMLElement {
     this.root.append(tabs);
     const section = this.element('section');
     this.root.append(section);
-    this.distributionStatus(section);
+    if (this.context?.memberResources) this.memberNotice(section);
     if (this.tab === 'mine') {
+      if (this.context?.memberResources) {
+        this.memberCards(section);
+        return;
+      }
       section.setAttribute('aria-busy', String(this.busy));
       section.append(
         this.button(text.refresh, () => this.loadInstalled(), this.busy),
@@ -507,15 +618,13 @@ export class AurigaTeamPanel extends HTMLElement {
                     ]
                   : text.unknown),
             ),
-            this.element('p', text.versions + ' · ' + text.unknown),
+            this.element(
+              'p',
+              text.versions + ' · ' + (item.version ?? text.unknown),
+            ),
           );
           if (item.preset)
             card.append(this.element('p', text.preset + ' · ' + item.preset));
-          for (const action of ['install', 'update', 'uninstall'] as const) {
-            const button = this.button(text[action], () => {}, true);
-            button.title = text.installHint;
-            card.append(button);
-          }
           cards.append(card);
         }
         section.append(cards);
@@ -628,6 +737,7 @@ export class AurigaTeamPanel extends HTMLElement {
         [text.availability, item.enabled ? text.enabled : text.disabled],
         [text.defaultVersion, item.defaultVersionId ?? text.noDefault],
         [text.installState, text.unknown],
+        [text.review, item.level === 'l4' ? text.unreviewed : text.unknown],
         [text.permissions, text.permissionsUnavailable],
       ])
         list.append(this.element('dt', label), this.element('dd', value));
@@ -640,57 +750,26 @@ export class AurigaTeamPanel extends HTMLElement {
           this.element('span', text[version.state]),
           this.element('p', text.digest + ' · ' + version.digest, 'muted'),
         );
-        if (canDistribute(this.context)) {
-          const permitted = allowedActions(
-            item,
-            this.context!.resourceIdentity!,
-          );
-          for (const action of permitted) {
-            if (
-              ['install', 'enable'].includes(action) &&
-              version.state !== 'published'
-            )
-              continue;
-            const label =
-              action === 'install'
-                ? text.installOrUpdate
-                : text[`action_${action}`];
-            row.append(
-              this.button(
-                label,
-                () => {
-                  this.confirmation = { action, versionId: version.id };
-                  this.render();
-                },
-                this.busy ||
-                  !!(
-                    this.operation &&
-                    (this.operation.pending ||
-                      !this.operation.row ||
-                      !['applied', 'failed'].includes(
-                        distributionPhase(this.operation.row),
-                      ))
-                  ),
-              ),
-            );
-          }
-          if (this.confirmation?.versionId === version.id) {
-            const action = this.confirmation.action;
-            const confirm = this.element('div', undefined, 'notice');
-            confirm.setAttribute('role', 'group');
-            confirm.append(
-              this.element('p', text.distribution_confirm),
-              this.button(
-                text.confirm,
-                () => void this.runDistribution(action, version.id),
-              ),
-              this.button(text.cancel, () => {
-                this.confirmation = undefined;
+        if (
+          this.context?.memberResources &&
+          this.memberIdentity &&
+          memberActions(item, this.memberIdentity).includes('install')
+        ) {
+          row.append(
+            this.button(
+              text.installOrUpdate,
+              () => {
+                this.memberConfirm = {
+                  packageId: item.id,
+                  versionId: version.id,
+                  action: 'install',
+                  label: item.name + ' ' + version.version,
+                };
                 this.render();
-              }),
-            );
-            row.append(confirm);
-          }
+              },
+              this.memberBlocked() || this.memberOffline,
+            ),
+          );
         }
         versions.append(row);
       }
@@ -699,8 +778,8 @@ export class AurigaTeamPanel extends HTMLElement {
         list,
         this.element(
           'p',
-          canDistribute(this.context)
-            ? text.managedDistributionHint
+          this.context?.memberResources
+            ? text.memberInstallHint
             : this.context?.mode === 'managed'
               ? text.managedDistributionUnavailable
               : text.installHint,

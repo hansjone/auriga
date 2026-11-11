@@ -309,6 +309,7 @@ window.__ModuleLoader__.load({
           entry: localURL(panel.entry).href,
           integrity: panel.integrity,
           connection: body.connection,
+          memberResourcesAvailable: body.memberResourcesAvailable === true,
           fetch:
             body.mode === 'connect'
               ? makeFetch({ fetchBase: localURL('auriga/resources/').href })
@@ -748,11 +749,91 @@ window.__ModuleLoader__.load({
         const listInstalled = async () => {
           try {
             const result = await ctx.get?.('remote')?.pluginInventory?.list();
-            if (result?.ok === true) return result.value;
+            if (result?.ok === true) {
+              try {
+                const bundles = await ctx
+                  .get?.('remote')
+                  ?.pluginManager?.listBundles?.();
+                if (bundles?.ok === true && Array.isArray(bundles.value))
+                  return {
+                    ...result.value,
+                    bundles: bundles.value.map((row) => ({
+                      name: row.name,
+                      version: row.version,
+                      rows: row.rows?.map((entry) => ({
+                        moduleName: entry.moduleName,
+                      })),
+                    })),
+                  };
+              } catch {
+                /* Public inventory remains usable when management metadata is unavailable. */
+              }
+              return result.value;
+            }
           } catch {
             /* Host errors must not cross the panel boundary. */
           }
           throw failure();
+        };
+        const memberRequest = async (action, input, signal) => {
+          let csrf;
+          if (input !== undefined) {
+            const status = await fetch(localURL('auriga/local-login/status'), {
+              signal,
+              credentials: 'same-origin',
+              redirect: 'error',
+              cache: 'no-store',
+            });
+            if (!status.ok) throw failure('auth');
+            const state = await status.json();
+            if (!state.loggedIn || !state.csrf) throw failure('auth');
+            csrf = state.csrf;
+          }
+          const response = await fetch(
+            localURL('auriga/resources/local/' + action),
+            {
+              signal,
+              credentials: 'same-origin',
+              redirect: 'error',
+              cache: 'no-store',
+              ...(input === undefined
+                ? {}
+                : {
+                    method: 'POST',
+                    headers: {
+                      'content-type': 'application/json',
+                      'X-Auriga-CSRF': csrf,
+                    },
+                    body: JSON.stringify(input),
+                  }),
+            },
+          );
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const code = body.code;
+            const reason = [
+              'resource.signature_invalid',
+              'resource.digest_mismatch',
+            ].includes(code)
+              ? 'verification'
+              : code === 'resource.storage_unavailable'
+                ? 'setup'
+                : ['common.conflict', 'common.precondition_failed'].includes(
+                      code,
+                    )
+                  ? 'conflict'
+                  : response.status === 401
+                    ? 'auth'
+                    : response.status === 403
+                      ? 'forbidden'
+                      : 'unavailable';
+            throw Object.assign(failure(reason), { reason });
+          }
+          return body;
+        };
+        const memberResources = {
+          list: (signal) => memberRequest('installations', undefined, signal),
+          apply: (input, signal) => memberRequest('actions', input, signal),
         };
         let disposed = false;
         const cleanups = [];
@@ -1469,6 +1550,10 @@ window.__ModuleLoader__.load({
               apiBase: '',
               fetch: boot.fetch,
               listInstalled,
+              memberResources:
+                boot.mode === 'connect' && boot.memberResourcesAvailable
+                  ? memberResources
+                  : undefined,
               resourceIdentity: boot.resourceIdentity,
               resourceDistributionAvailable: boot.resourceDistributionAvailable,
             };

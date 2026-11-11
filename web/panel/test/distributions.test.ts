@@ -189,6 +189,35 @@ describe('member distributions', () => {
       h.fetch.mock.calls.filter(([p]) => p.endsWith('/distributions')),
     ).toHaveLength(1);
   });
+  it('surfaces step-up without replay and accepts the terminal superseded state', async () => {
+    const h = host({ state: 'superseded' });
+    expect(
+      (await createDistributionClient(h.context).status(id(6), signal)).state,
+    ).toBe('superseded');
+    expect(distributionPhase({ ...row, state: 'superseded' } as never)).toBe(
+      'superseded',
+    );
+    h.fetch.mockImplementation(async (path) =>
+      path.endsWith('/distributions')
+        ? Response.json({ code: 'iam.step_up_required' }, { status: 403 })
+        : Response.json(path.includes('/versions/') ? version : pack),
+    );
+    await expect(
+      createDistributionClient(h.context).request(
+        pack.id,
+        version.id,
+        'install',
+        'stepup-key',
+        signal,
+      ),
+    ).rejects.toThrow('stepup');
+    expect(
+      h.fetch.mock.calls.filter(
+        ([path, init]) =>
+          path.endsWith('/distributions') && init?.method === 'POST',
+      ),
+    ).toHaveLength(1);
+  });
 });
 it.each(['l1', 'cross-tenant', 'withdrawn'])(
   'rejects a fresh %s decision before sending a distribution',

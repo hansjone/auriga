@@ -1,6 +1,7 @@
 ﻿import { createHash, verify } from 'node:crypto';
 import { canonicalize, parseStrictJson } from '../network/trust/jcs.js';
 import { TextDecoder } from 'node:util';
+import { integerToken } from './json.js';
 
 /** @typedef {import('../generated/resource-signatures.js').ResourceEnvelope} Envelope */
 /** @typedef {{releaseSequence: number, versionId: string, digest: string}} HighWater */
@@ -50,8 +51,8 @@ function parseEnvelope(wire) {
         /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/.exec(
           source.slice(i),
         );
-      if (!token || !Number.isSafeInteger(Number(token[0]))) invalid();
-      normalized += JSON.stringify(Number(token[0]));
+      if (!token) invalid();
+      normalized += JSON.stringify(integerToken(token[0]));
       i += token[0].length - 1;
     } else normalized += c;
   }

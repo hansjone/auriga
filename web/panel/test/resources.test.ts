@@ -435,7 +435,7 @@ it('reads a managed catalogue through the supplied host channel', async () => {
   expect(wrapper.text()).toContain('Example plugin');
   expect(host).toHaveBeenCalledTimes(1);
 });
-it('shows native inventory while the platform is offline and keeps operations disabled', async () => {
+it('shows native inventory while the platform is offline and does not offer unmanaged mutations', async () => {
   const host = vi.fn().mockRejectedValue(new Error('offline'));
   const listInstalled = vi.fn().mockResolvedValue({
     entries: [
@@ -457,7 +457,7 @@ it('shows native inventory while the platform is offline and keeps operations di
     const button = wrapper
       .findAll('button')
       .find((item) => item.text() === label);
-    expect(button?.element?.hasAttribute('disabled')).toBe(true);
+    expect(button).toBeUndefined();
   }
   expect(host).toHaveBeenCalledTimes(1);
 });
@@ -563,103 +563,58 @@ it('labels personal L4 resources as unreviewed without inferring approval from p
   expect(wrapper.text()).toContain('Unreviewed');
   expect(wrapper.text()).toContain('Permission declarations are unavailable');
 });
-it('confirms a managed distribution and only shows applied after the node generation matches', async () => {
-  const instanceId = '01900000-0000-7000-8000-000000000009';
-  const distId = '01900000-0000-7000-8000-000000000008';
-  let observed = 2;
-  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
-    if (path.includes('/distributions'))
-      return json(
-        {
-          id: distId,
-          instanceId,
-          ownerId: plugin.ownerId,
-          revision: observed,
-          selectionRevision: 1,
-          state: init?.method === 'POST' ? 'requested' : 'applied',
-          generation: 3,
-          observedGeneration: observed,
-          ready: true,
-        },
-        init?.method === 'POST' ? 202 : 200,
-      );
-    if (path.endsWith('/versions/' + versionId)) return json(version);
-    if (path.includes('/versions')) return json({ items: [version] });
-    return json(
-      path.includes(packageId)
-        ? { ...plugin, level: 'l3' }
-        : { items: [{ ...plugin, level: 'l3' }] },
-    );
-  });
+it('keeps cloud operations platform-owned even when an older host advertises member distribution', async () => {
+  const fetch = vi.fn(async (path: string) =>
+    json(
+      path.includes('/versions')
+        ? { items: [version] }
+        : path.includes(packageId)
+          ? plugin
+          : { items: [plugin] },
+    ),
+  );
   const wrapper = render({
     ...connect(fetch),
     mode: 'managed',
     resourceDistributionAvailable: true,
     resourceIdentity: {
-      instanceId,
+      instanceId: versionId,
       tenantId: plugin.tenantId,
       ownerId: plugin.ownerId,
     },
   });
   await flushPromises();
   await click(wrapper, 'View details');
-  await click(wrapper, 'Install / update');
-  expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(
-    false,
+  expect(wrapper.text()).toContain(
+    'Managed resources are distributed by the platform',
   );
-  await click(wrapper, 'Cancel');
-  expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(
-    false,
-  );
-  await click(wrapper, 'Install / update');
-  await click(wrapper, 'Confirm');
-  expect(wrapper.text()).toContain('Dispatched');
-  await click(wrapper, 'Refresh distribution status');
-  expect(wrapper.text()).toContain('Applying');
-  expect(wrapper.text()).not.toContain('Applied (node');
-  observed = 3;
-  await click(wrapper, 'Refresh distribution status');
-  expect(wrapper.text()).toContain('Applied (node ready');
   expect(
-    fetch.mock.calls.filter(([, init]) => init?.method === 'POST'),
-  ).toHaveLength(1);
+    wrapper
+      .findAll('button')
+      .some((button) => button.text() === 'Install / update'),
+  ).toBe(false);
 });
-
-it('keeps uncertain managed writes bound to the same intent key when manually retried', async () => {
-  const instanceId = '01900000-0000-7000-8000-000000000009';
-  const keys: string[] = [];
-  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
-    if (init?.method === 'POST') {
-      keys.push(new Headers(init.headers).get('Idempotency-Key')!);
-      throw new Error('private-transport-error');
-    }
-    if (path.endsWith('/versions/' + versionId)) return json(version);
-    if (path.includes('/versions')) return json({ items: [version] });
-    return json(
-      path.includes(packageId)
-        ? { ...plugin, level: 'l3' }
-        : { items: [{ ...plugin, level: 'l3' }] },
-    );
-  });
+it('cloud inventory remains available independently of platform distribution writes', async () => {
   const wrapper = render({
-    ...connect(fetch),
+    ...connect(async () => json({ items: [] })),
     mode: 'managed',
-    resourceDistributionAvailable: true,
-    resourceIdentity: {
-      instanceId,
-      tenantId: plugin.tenantId,
-      ownerId: plugin.ownerId,
-    },
+    listInstalled: async () => ({
+      entries: [
+        {
+          entryId: 'configured',
+          moduleName: 'platform-plugin',
+          enabled: true,
+          fiberPhase: 'active',
+        },
+      ],
+    }),
   });
   await flushPromises();
-  await click(wrapper, 'View details');
-  await click(wrapper, 'Install / update');
-  await click(wrapper, 'Confirm');
-  expect(wrapper.text()).toContain('request outcome is unknown');
-  expect(wrapper.text()).not.toContain('private-transport-error');
-  await click(wrapper, 'Retry this distribution');
-  expect(keys).toHaveLength(2);
-  expect(keys[0]).toBe(keys[1]);
+  await click(wrapper, 'My resources');
+  expect(wrapper.text()).toContain('platform-plugin');
+  expect(
+    wrapper.findAll('button').some((button) => button.text() === 'Uninstall'),
+  ).toBe(false);
 });
 it('keeps normal device-backed managed operations unavailable without claiming a successful writer grant', async () => {
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
@@ -685,7 +640,7 @@ it('keeps normal device-backed managed operations unavailable without claiming a
   await flushPromises();
   await click(wrapper, 'View details');
   expect(wrapper.text()).toContain(
-    'Member distribution credentials are not connected',
+    'Managed resources are distributed by the platform',
   );
   expect(
     wrapper
@@ -738,4 +693,79 @@ it('limits the member market to enabled published defaults and published version
   await click(wrapper, 'View details');
   expect(wrapper.text()).toContain(version.version);
   expect(wrapper.text()).not.toContain('draft-version');
+});
+it('uses the desktop server port to install, show the verified version and report state, and disable', async () => {
+  const clientId = '01900000-0000-7000-8000-000000000009';
+  const identity = {
+    clientId,
+    tenantId: plugin.tenantId,
+    ownerId: plugin.ownerId,
+  };
+  let row: Record<string, unknown> | undefined;
+  const apply = vi.fn(
+    async (input: {
+      packageId: string;
+      versionId: string;
+      action: string;
+      key: string;
+    }) => {
+      expect(input).not.toHaveProperty('clientId');
+      expect(input).not.toHaveProperty('tenantId');
+      const revision = (Number(row?.revision) || 0) + 1;
+      row = {
+        clientId,
+        packageId,
+        versionId,
+        digest: version.digest,
+        releaseSequence: 1,
+        level: 'l2',
+        desired: input.action === 'disable' ? 'disabled' : 'enabled',
+        state: 'applied',
+        revision,
+        reportedRevision: revision,
+        reportSource: 'member',
+        name: plugin.name,
+        version: version.version,
+        localVersion: version.version,
+        localEnabled: input.action !== 'disable',
+        restartRequired: false,
+        syncPending: false,
+      };
+      return row;
+    },
+  );
+  const wrapper = render({
+    ...connect(async (path) =>
+      json(
+        path.includes('/versions')
+          ? { items: [version] }
+          : path.includes(packageId)
+            ? plugin
+            : { items: [plugin] },
+      ),
+    ),
+    memberResources: {
+      list: async () => ({
+        identity,
+        items: row ? [row] : [],
+        reportSource: 'member',
+        offline: false,
+      }),
+      apply,
+    },
+  });
+  await flushPromises();
+  await click(wrapper, 'View details');
+  await click(wrapper, 'Install / update');
+  expect(apply).not.toHaveBeenCalled();
+  await click(wrapper, 'Confirm');
+  expect(apply).toHaveBeenCalledTimes(1);
+  await click(wrapper, 'My resources');
+  expect(wrapper.text()).toContain('Verified local version');
+  expect(wrapper.text()).toContain('1.0.0');
+  expect(wrapper.text()).toContain('Member installation report');
+  await click(wrapper, 'Disable');
+  await click(wrapper, 'Confirm');
+  expect(apply).toHaveBeenCalledTimes(2);
+  expect(apply.mock.calls[1][0].action).toBe('disable');
 });
