@@ -1,3 +1,4 @@
+import DevicesView from './views/DevicesView.vue';
 import { createRouter, createWebHistory } from 'vue-router';
 import LoginView from './views/LoginView.vue';
 import AdminLayout from './layouts/AdminLayout.vue';
@@ -20,6 +21,7 @@ import UsageView from './views/models/UsageView.vue';
 import { navigation } from './admin/navigation';
 
 const existing = new Set([
+  '/runtime/devices',
   '/overview',
   '/models/providers',
   '/settings',
@@ -57,6 +59,7 @@ export const router = createRouter({
         { path: 'overview', component: OverviewView },
         { path: 'resources', component: ResourcesView },
         { path: 'members', component: MembersView },
+        { path: 'runtime/devices', component: DevicesView },
         { path: 'nodes', component: NodesView },
         { path: 'instances', component: InstancesView },
         { path: 'groups', component: GroupsView },

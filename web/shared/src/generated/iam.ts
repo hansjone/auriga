@@ -1,4 +1,44 @@
 export interface paths {
+  '/admin/devices': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List tenant field terminals */
+    get: operations['listAdminDevices'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/devices/{deviceId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deviceId: string;
+      };
+      cookie?: never;
+    };
+    /** Read field terminal */
+    get: operations['getAdminDevice'];
+    put?: never;
+    post?: never;
+    /**
+     * Revoke terminal credentials and network node
+     * @description Requires recent step-up. Idempotent; committed revocation is authoritative for device access and refresh. Read the terminal afterwards to confirm.
+     */
+    delete: operations['revokeAdminDevice'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/network/register': {
     parameters: {
       query?: never;
@@ -1022,6 +1062,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    AdminDevicesDevice: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      accountId: string;
+      memberName: string;
+      name: string;
+      platform?: string;
+      clientVersion?: string;
+      createdAt?: string;
+      lastSeenAt?: string;
+      revokedAt?: string;
+      networkNode?: string;
+      /** @enum {string} */
+      accessMode: 'native_tx' | 'manual' | 'unknown';
+      /** @enum {string} */
+      status: 'active' | 'revoked';
+      /**
+       * @description Unknown until authoritative edge telemetry is available; lastSeenAt is historical activity only
+       * @enum {string}
+       */
+      online: 'unknown' | 'online' | 'offline';
+    };
     AdminCsrfTokenRegistration: {
       /** @description 每tab由crypto.getRandomValues生成32字节、规范无填充base64url。服务端校格式不能证明熵，客户端必须使用安全随机源。 */
       token: string;
@@ -1351,23 +1414,6 @@ export interface components {
       /** Format: date-time */
       createdAt: string;
     };
-    /** Network register request */
-    'register.schema': Record<string, never>;
-    /**
-     * Network register result
-     * @description Authenticated HTTPS registration result, not a signed network frame or authorization token. created describes only this call's final committed transaction; never replay a historical true. See README.md#https-register-initialization for the one-use initialization boundary.
-     */
-    'register-result.schema': {
-      /** Format: uuid */
-      tenant: string;
-      realm: string;
-      node: string;
-      /** Format: uuid */
-      device: string;
-      systemAddress: string;
-      /** @description true only if this call actually INSERTed the authenticated device's new node in its final committed transaction. An existing node, idempotent retry or concurrent loser returns false; transaction retries cannot retain true from a rolled-back attempt. Only the current authenticated HTTPS request generation may consume true once, after fully verified signed READY confirms incarnation and the complete ledger is atomically committed. Never persist as reusable initialization permission. */
-      created: boolean;
-    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;
@@ -1398,6 +1444,23 @@ export interface components {
       /** @description 字段级错误（validation_failed 时）。 */
       errors?: components['schemas']['FieldError'][];
       traceId?: string;
+    };
+    /** Network register request */
+    'register.schema': Record<string, never>;
+    /**
+     * Network register result
+     * @description Authenticated HTTPS registration result, not a signed network frame or authorization token. created describes only this call's final committed transaction; never replay a historical true. See README.md#https-register-initialization for the one-use initialization boundary.
+     */
+    'register-result.schema': {
+      /** Format: uuid */
+      tenant: string;
+      realm: string;
+      node: string;
+      /** Format: uuid */
+      device: string;
+      systemAddress: string;
+      /** @description true only if this call actually INSERTed the authenticated device's new node in its final committed transaction. An existing node, idempotent retry or concurrent loser returns false; transaction retries cannot retain true from a rolled-back attempt. Only the current authenticated HTTPS request generation may consume true once, after fully verified signed READY confirms incarnation and the complete ledger is atomically committed. Never persist as reusable initialization permission. */
+      created: boolean;
     };
     /** Network ticket request */
     'ticket-request.schema': {
@@ -1678,6 +1741,24 @@ export interface components {
     };
   };
   responses: {
+    /** @description 没有权限（common.forbidden 或更具体的码）。 */
+    Forbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 资源不存在（common.not_found）。 */
+    NotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
     /** @description 请求无效（common.validation_failed 等）。 */
     BadRequest: {
       headers: {
@@ -1696,28 +1777,10 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 没有权限（common.forbidden 或更具体的码）。 */
-    Forbidden: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
     /** @description 太频繁（common.rate_limited）。 */
     RateLimited: {
       headers: {
         'Retry-After': components['headers']['RetryAfter'];
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 资源不存在（common.not_found）。 */
-    NotFound: {
-      headers: {
         [name: string]: unknown;
       };
       content: {
@@ -1768,6 +1831,78 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  listAdminDevices: {
+    parameters: {
+      query?: {
+        member?: string;
+        online?: 'unknown' | 'online' | 'offline';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Field terminals; online telemetry is currently unavailable and returned as unknown */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['AdminDevicesDevice'][];
+          };
+        };
+      };
+      403: components['responses']['Forbidden'];
+    };
+  };
+  getAdminDevice: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deviceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Terminal */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AdminDevicesDevice'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  revokeAdminDevice: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deviceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
   registerNetworkClient: {
     parameters: {
       query?: never;
