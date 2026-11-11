@@ -66,7 +66,7 @@ async function fixture(
             };
           calls.push({ path, options });
           if (platform) return platform.request(path, options);
-          await requestHook?.();
+          await requestHook?.(options);
           if (invalid)
             throw Object.assign(new Error('revoked'), {
               status: 403,
@@ -144,6 +144,36 @@ test('managed credential uses the common device provider and lifecycle, never in
   assert.equal(exchange.options.token, undefined);
   f.network.attach({ prepare() {} });
   assert.ok(f.calls.includes('attach'));
+});
+
+test('close cancels an in-flight grant and releases its referenced timeout', async (t) => {
+  const f = await fixture(t);
+  let entered;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let requestTimer;
+  f.intercept(
+    (options) =>
+      new Promise((resolve, reject) => {
+        const stop = () => {
+          clearTimeout(requestTimer);
+          reject(new Error('grant interrupted'));
+        };
+        requestTimer = setTimeout(stop, 60000);
+        t.after(stop);
+        options.signal?.addEventListener('abort', stop, { once: true });
+        entered();
+      }),
+  );
+  const refreshing = f.network.refresh();
+  await started;
+  assert.ok(process.getActiveResourcesInfo().includes('Timeout'));
+  await f.network.close();
+  assert.equal(process.getActiveResourcesInfo().includes('Timeout'), false);
+  await refreshing;
+  assert.equal(f.network.sessionAvailable, false);
+  assert.equal(f.calls.includes('login'), false);
 });
 
 for (const result of ['accepted', 'unavailable', 'revoked'])
@@ -410,6 +440,10 @@ test('managed renewal reuses the current lifecycle and file removal revokes its 
 
 test('managed refresh coalesces slow exchanges and close fences their late results', async (t) => {
   const f = await fixture(t);
+  let verifications = 0;
+  f.verify(() => {
+    verifications++;
+  });
   let enter, release;
   const entered = new Promise((r) => {
     enter = r;
@@ -430,6 +464,35 @@ test('managed refresh coalesces slow exchanges and close fences their late resul
   assert.equal(f.input, undefined);
   assert.equal(f.calls.filter((x) => typeof x === 'object').length, 1);
   assert.equal(f.calls.includes('login'), false);
+  assert.equal(
+    verifications,
+    0,
+    'a late grant must not start a JWKS request after close',
+  );
+});
+
+test('all concurrent close callers wait for the same lifecycle cleanup', async (t) => {
+  let release;
+  const stopped = new Promise((resolve) => {
+    release = resolve;
+  });
+  const f = await fixture(
+    t,
+    (x) => x,
+    false,
+    () => ({ login() {}, close: () => stopped }),
+  );
+  await f.network.refresh();
+  const first = f.network.close();
+  let completed = false;
+  const second = f.network.close().then(() => {
+    completed = true;
+  });
+  t.after(release);
+  await Promise.resolve();
+  assert.equal(completed, false);
+  release();
+  await Promise.all([first, second]);
 });
 
 for (const field of [

@@ -45,6 +45,11 @@ export function createManagedNetwork(options) {
   let profileRetryAt = 0;
   let materialUntil = 0;
   let interrupted = false;
+  /** @type {AbortController|undefined} */
+  let controller;
+  let retiring = Promise.resolve();
+  /** @type {Promise<void>|undefined} */
+  let closing;
   /** @type {(renew?:boolean)=>Promise<{accessToken:string,claims:any}>} */
   let getDevice = async () => {
     throw new Error('managed credential unavailable');
@@ -110,15 +115,18 @@ export function createManagedNetwork(options) {
     return { value, config };
   }
 
-  async function retire() {
+  function retire() {
     generation++;
+    controller?.abort();
+    controller = undefined;
     access = undefined;
     profileRetryAt = 0;
     interrupted = false;
     const previous = lifecycle;
     lifecycle = undefined;
     detach = undefined;
-    await previous?.close();
+    retiring = Promise.allSettled([retiring, previous?.close()]).then(() => {});
+    return retiring;
   }
 
   /** @param {boolean} [force] */
@@ -157,7 +165,11 @@ export function createManagedNetwork(options) {
             return;
           }
           const expected = generation;
-          const platform = (options.createPlatform ?? createPlatform)(config);
+          controller = new AbortController();
+          const signal = controller.signal;
+          const platform = (options.createPlatform ?? createPlatform)(config, {
+            signal,
+          });
           let pending;
           getDevice = async (renew = false) => {
             if (
@@ -179,6 +191,7 @@ export function createManagedNetwork(options) {
             pending ??= (async () => {
               const response = await platform
                 .request('/oauth2/token', {
+                  signal,
                   method: 'POST',
                   form: true,
                   body: {
@@ -205,6 +218,7 @@ export function createManagedNetwork(options) {
                   }
                   throw error;
                 });
+              signal.throwIfAborted();
               if (
                 response.token_type !== 'Bearer' ||
                 response.scope !== 'auriga.connect' ||
@@ -316,12 +330,18 @@ export function createManagedNetwork(options) {
           profileRetryAt = Date.now() + 60000;
           const expected = generation;
           const { config } = validate(next);
-          const platform = (options.createPlatform ?? createPlatform)(config);
+          const signal = controller?.signal;
+          const platform = (options.createPlatform ?? createPlatform)(config, {
+            signal,
+          });
           void deviceMemberName(
             platform,
             access.accessToken,
             options.ownerId,
-            AbortSignal.timeout(4000),
+            AbortSignal.any([
+              ...(signal ? [signal] : []),
+              AbortSignal.timeout(4000),
+            ]),
           )
             .then((name) => {
               if (!closed && expected === generation) displayName = name;
@@ -423,12 +443,13 @@ export function createManagedNetwork(options) {
       if (!lifecycle) throw new Error('managed network unavailable');
       return lifecycle.messagingUI(context);
     },
-    async close() {
-      if (closed) return;
+    close() {
+      if (closing) return closing;
       closed = true;
       clearInterval(timer);
       // Retire immediately, even if an exchange/verification response is pending.
-      await retire();
+      closing = retire();
+      return closing;
     },
   };
 }
