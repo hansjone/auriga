@@ -62,6 +62,9 @@ function snapshot(f) {
       : null,
     versions: readdirSync(join(f.root, 'versions')).sort(),
     launcher: existsSync(join(f.root, 'bin')) ? launcher(f.root) : null,
+    rollbackCmd: existsSync(join(f.root, 'bin', 'rollback.cmd'))
+      ? text(join(f.root, 'bin', 'rollback.cmd'))
+      : null,
     txn: existsSync(join(f.root, 'txn.json')),
     profile: profileManifest(f.dataHome),
     plugin: pluginVersion(f.dataHome),
@@ -176,6 +179,7 @@ test('components with equal versions but different content get different ids and
 const POINTS = [
   'after-backup',
   'after-apply',
+  'launcher-file',
   'after-launchers',
   'after-install-json',
   'after-current-txt',
@@ -698,4 +702,157 @@ test('launch environment: own data home, bundled node and pnpm first on PATH', (
   assert.equal(parts[1], dirname(nodeBin(dir)));
   assert.equal(parts[2], 'base');
   assert.equal(env.Foo, '1');
+});
+
+// ------------------------------------------------- launchers and data directory
+
+test('entry points exist at every moment of a launcher change (also after a crash in the middle)', (t) => {
+  const f = fixture(t);
+  installA(f);
+  const entries = ['auriga-desktop.cmd', 'rollback.cmd'];
+  const present = () =>
+    entries.every((name) => existsSync(join(f.root, 'bin', name)));
+  const seen = [];
+  const b = buildPayload(f.base, { name: 'b', pluginVersion: '1.1.0' });
+  assert.throws(
+    () =>
+      install({
+        payload: b.dir,
+        root: f.root,
+        dataHome: f.dataHome,
+        smoke: noSmoke,
+        fault(p) {
+          seen.push([p, present()]);
+          if (p === 'launcher-file') throw new CrashError('crash mid-way');
+        },
+      }),
+    CrashError,
+  );
+  assert.ok(seen.length > 0);
+  assert.deepEqual(
+    seen.filter(([, ok]) => !ok),
+    [],
+  );
+  // Crashed with the first launcher already new and the second still old:
+  // every entry point still exists and recover() puts the old set back.
+  assert.match(launcher(f.root), /rem b/);
+  assert.ok(present());
+  recover(f.root);
+  assert.ok(present());
+  assert.match(launcher(f.root), /rem a/);
+  assert.equal(text(join(f.root, 'bin', 'rollback.cmd')), 'rem rollback a');
+});
+
+test('a different data directory is refused for an existing installation', (t) => {
+  const f = fixture(t);
+  const a = installA(f);
+  const before = snapshot(f);
+  const other = join(f.base, 'elsewhere');
+  const b = buildPayload(f.base, { name: 'b', pluginVersion: '1.1.0' });
+  assert.throws(
+    () =>
+      install({
+        payload: b.dir,
+        root: f.root,
+        dataHome: other,
+        smoke: noSmoke,
+      }),
+    /already uses the data directory.*moving data is not supported/,
+  );
+  assert.deepEqual(snapshot(f), before);
+  assert.equal(existsSync(other), false);
+  assert.equal(readState(f.root).current, a.id);
+  // The same directory written differently is fine.
+  const again = install({
+    payload: b.dir,
+    root: f.root,
+    dataHome: join(f.dataHome, '..', 'home'),
+    smoke: noSmoke,
+  });
+  assert.equal(again.upgraded, true);
+});
+
+// --------------------------------------------- distributed upstream/pnpm files
+
+const TREE_TAMPER = [
+  [
+    'a modified upstream DSH file',
+    (p) =>
+      writeFileSync(
+        join(p.dir, 'upstream/app/node_modules/@deepseek-ai/dsh/index.js'),
+        'process.exit(0) // tampered',
+      ),
+  ],
+  [
+    'an extra file in the upstream tree',
+    (p) => writeFileSync(join(p.dir, 'upstream/app/node_modules/evil.js'), 'x'),
+  ],
+  [
+    'a removed upstream file',
+    (p) =>
+      rmSync(
+        join(p.dir, 'upstream/app/node_modules/@deepseek-ai/dsh/package.json'),
+      ),
+  ],
+  [
+    'a modified pnpm file',
+    (p) =>
+      writeFileSync(
+        join(p.dir, 'tools/pnpm/node_modules/pnpm/package.json'),
+        '{"name":"pnpm","version":"11.28.5","x":1}',
+      ),
+  ],
+  [
+    'an extra file in the pnpm tree',
+    (p) => writeFileSync(join(p.dir, 'tools/pnpm/node_modules/evil.js'), 'x'),
+  ],
+];
+
+for (const [name, mutate] of TREE_TAMPER) {
+  test(`install rejects ${name} and leaves nothing behind`, (t) => {
+    const f = fixture(t);
+    const rebuilt = buildPayload(f.base, { name: 'a' });
+    mutate(rebuilt);
+    assert.throws(
+      () =>
+        install({
+          payload: rebuilt.dir,
+          root: f.root,
+          dataHome: f.dataHome,
+          smoke: noSmoke,
+        }),
+      /distributed files differ from the manifest|upstream dsh package missing/,
+    );
+    assert.equal(existsSync(join(f.root, 'install.json')), false);
+    const versions = join(f.root, 'versions');
+    assert.deepEqual(existsSync(versions) ? readdirSync(versions) : [], []);
+  });
+}
+
+test('an upstream file changed after installation is replaced when the package is installed again', (t) => {
+  const f = fixture(t);
+  const a = put(f, { name: 'a' });
+  writeFileSync(
+    join(
+      f.root,
+      'versions',
+      a.id,
+      'upstream/app/node_modules/@deepseek-ai/dsh/package.json',
+    ),
+    '{"version":"0.2.1-rc.3","tampered":true}',
+  );
+  put(f, { name: 'a' });
+  assert.equal(
+    JSON.parse(
+      text(
+        join(
+          f.root,
+          'versions',
+          a.id,
+          'upstream/app/node_modules/@deepseek-ai/dsh/package.json',
+        ),
+      ),
+    ).tampered,
+    undefined,
+  );
 });

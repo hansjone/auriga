@@ -11,9 +11,11 @@ import { dirname, join } from 'node:path';
 import {
   PRODUCT,
   computeId,
+  PINNED_TREES,
   isPinnedPath,
   listFiles,
   sha256File,
+  treeDigest,
 } from '../runtime/verify.mjs';
 
 const put = (dir, path, content) => {
@@ -53,6 +55,7 @@ export function buildPayload(base, options = {}) {
     'upstream/app/node_modules/@deepseek-ai/dsh/package.json',
     JSON.stringify({ name: '@deepseek-ai/dsh', version: dshVersion }),
   );
+  put(dir, 'upstream/app/node_modules/@deepseek-ai/dsh/index.js', 'module');
   put(dir, 'tools/pnpm/package.json', '{}');
   put(
     dir,
@@ -73,6 +76,7 @@ export function buildPayload(base, options = {}) {
   put(dir, 'auriga/plugin/node_modules/@nats-io/nats-core/package.json', '{}');
   put(dir, 'auriga/runtime/core.mjs', coreContent);
   put(dir, 'auriga/launcher/auriga-desktop.cmd', `rem ${name}`);
+  put(dir, 'auriga/launcher/rollback.cmd', `rem rollback ${name}`);
   put(dir, 'licenses/NOTICE.txt', 'notice');
   const files = listFiles(dir)
     .filter((f) => f !== 'manifest.json' && !isPinnedPath(f))
@@ -102,6 +106,7 @@ export function buildPayload(base, options = {}) {
       enginesDsh,
       tgzSha256: sha256File(join(dir, 'auriga/plugin/auriga-dsh.tgz')),
     },
+    trees: PINNED_TREES.map((p) => treeDigest(dir, p.slice(0, -1))),
     files,
   };
   manifest.id = computeId(manifest);

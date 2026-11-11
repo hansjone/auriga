@@ -52,8 +52,8 @@ const DATA_MARKER = '.auriga-desktop';
 const OWNED_ENTRIES = [
   'versions',
   'bin',
-  'bin.new',
-  'bin.old',
+  'bin.prev',
+  'bin.prev.partial',
   'current.txt',
   'install.json',
   'shell.json',
@@ -316,24 +316,46 @@ export function defaultSmoke(dir, dataHome) {
 
 const txnFile = (root) => join(root, 'txn.json');
 
-function swapLaunchers(root, dir) {
+/**
+ * Launchers are never swapped as a directory: that would leave a window with
+ * no entry points. They are version-independent scripts that read current.txt,
+ * so each file is replaced atomically on its own and the old set is kept in
+ * bin.prev until the change is final.
+ */
+function writeLaunchers(root, dir, fault) {
   const source = join(dir, 'auriga', 'launcher');
   if (!existsSync(source)) return;
-  rmSync(join(root, 'bin.new'), { recursive: true, force: true });
-  rmSync(join(root, 'bin.old'), { recursive: true, force: true });
-  copyTree(source, join(root, 'bin.new'));
-  if (existsSync(join(root, 'bin')))
-    renameSync(join(root, 'bin'), join(root, 'bin.old'));
-  renameSync(join(root, 'bin.new'), join(root, 'bin'));
+  const bin = join(root, 'bin');
+  const prev = join(root, 'bin.prev');
+  mkdirSync(bin, { recursive: true });
+  rmSync(`${prev}.partial`, { recursive: true, force: true });
+  rmSync(prev, { recursive: true, force: true });
+  mkdirSync(`${prev}.partial`);
+  for (const name of readdirSync(bin))
+    cpSync(join(bin, name), join(`${prev}.partial`, name));
+  renameSync(`${prev}.partial`, prev);
+  for (const name of readdirSync(source)) {
+    writeAtomic(join(bin, name), readFileSync(join(source, name)));
+    fault('launcher-file');
+  }
+}
+
+function restoreLaunchers(root) {
+  const prev = join(root, 'bin.prev');
+  rmSync(`${prev}.partial`, { recursive: true, force: true });
+  if (!existsSync(prev)) return;
+  const bin = join(root, 'bin');
+  const old = new Set(readdirSync(prev));
+  for (const name of existsSync(bin) ? readdirSync(bin) : [])
+    if (!old.has(name)) rmSync(join(bin, name), { force: true });
+  mkdirSync(bin, { recursive: true });
+  for (const name of old)
+    writeAtomic(join(bin, name), readFileSync(join(prev, name)));
 }
 
 /** Put everything back as it was before the transaction started. */
 function abort(root, dataHome, txn) {
-  if (existsSync(join(root, 'bin.old'))) {
-    rmSync(join(root, 'bin'), { recursive: true, force: true });
-    renameSync(join(root, 'bin.old'), join(root, 'bin'));
-  }
-  rmSync(join(root, 'bin.new'), { recursive: true, force: true });
+  restoreLaunchers(root);
   if (txn.profileExisted) restoreProfile(dataHome, txn.label);
   else rmSync(profileDir(dataHome), { recursive: true, force: true });
   if (txn.from) writeState(root, { dataHome, ...txn.from });
@@ -342,13 +364,15 @@ function abort(root, dataHome, txn) {
     rmSync(join(root, 'current.txt'), { force: true });
     rmSync(join(root, 'bin'), { recursive: true, force: true });
   }
+  rmSync(join(root, 'bin.prev'), { recursive: true, force: true });
   if (txn.freshVersion)
     rmSync(versionDir(root, txn.to), { recursive: true, force: true });
   rmSync(txnFile(root), { force: true });
 }
 
 function finish(root) {
-  rmSync(join(root, 'bin.old'), { recursive: true, force: true });
+  rmSync(join(root, 'bin.prev'), { recursive: true, force: true });
+  rmSync(join(root, 'bin.prev.partial'), { recursive: true, force: true });
   rmSync(txnFile(root), { force: true });
   try {
     const state = readState(root);
@@ -420,7 +444,7 @@ function transition({
     apply();
     fault('after-apply');
     writeJsonAtomic(txnFile(root), { ...txn, phase: 'commit' });
-    swapLaunchers(root, target);
+    writeLaunchers(root, target, fault);
     fault('after-launchers');
     const previous =
       from && from.current !== toId ? from.current : (from?.previous ?? null);
@@ -456,8 +480,18 @@ export function install({
   root = resolve(root);
   dataHome = resolve(dataHome);
   assertLayout(root, dataHome);
+  // An existing installation keeps its data directory: moving data is not
+  // supported, so a different one is refused before anything changes.
+  const existing = existsSync(join(root, 'install.json'))
+    ? readState(root)
+    : null;
+  if (existing && norm(existing.dataHome) !== norm(dataHome))
+    throw new Error(
+      `this installation already uses the data directory ${existing.dataHome}; ` +
+        'moving data is not supported, uninstall first or keep the same directory',
+    );
   // Verify before anything is copied into place or executed.
-  const manifest = verifyPackage(payload);
+  const manifest = verifyPackage(payload, { trees: false });
   mkdirSync(join(root, 'versions'), { recursive: true });
   writeFileSync(
     join(root, INSTALL_MARKER),

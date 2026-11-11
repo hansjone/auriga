@@ -4,7 +4,16 @@
  * file is copied into place).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { Buffer } from 'node:buffer';
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { satisfiesMin } from './semver-lite.mjs';
 
@@ -20,7 +29,36 @@ export const isPinnedPath = (path) =>
   PINNED_TREES.some((prefix) => path.startsWith(prefix));
 
 export function sha256File(file) {
-  return createHash('sha256').update(readFileSync(file)).digest('hex');
+  const hash = createHash('sha256');
+  const fd = openSync(file, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(1 << 20);
+    for (;;) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      if (read === 0) break;
+      hash.update(buffer.subarray(0, read));
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * Digest over every file below a pinned tree (path, size, content hash), so
+ * the distributed upstream DSH and pnpm files themselves are checked, not
+ * only the lock file that describes them.
+ */
+export function treeDigest(payload, root) {
+  const base = join(payload, ...root.split('/'));
+  const files = listFiles(base);
+  const hash = createHash('sha256');
+  for (const f of files) {
+    const full = join(base, f);
+    hash.update(`${f}	${statSync(full).size}	${sha256File(full)}
+`);
+  }
+  return { root, files: files.length, sha256: hash.digest('hex') };
 }
 
 /** All files below dir as sorted posix-style relative paths. */
@@ -55,6 +93,7 @@ export function computeId(manifest) {
       manifest.upstream.nodeZipSha256,
     ],
     pnpm: [manifest.pnpm.version, manifest.pnpm.integrity],
+    trees: (manifest.trees ?? []).map((t) => [t.root, t.files, t.sha256]),
     plugin: [manifest.plugin.version, manifest.plugin.tgzSha256],
   });
   const digest = createHash('sha256').update(material).digest('hex');
@@ -77,7 +116,7 @@ const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
  * Verify a package directory against its manifest. Throws on the first
  * problem; returns the parsed manifest.
  */
-export function verifyPackage(payload) {
+export function verifyPackage(payload, { trees = true } = {}) {
   const manifestFile = join(payload, 'manifest.json');
   if (!existsSync(manifestFile)) throw new Error('manifest.json missing');
   let manifest;
@@ -93,7 +132,11 @@ export function verifyPackage(payload) {
     !Array.isArray(manifest.files) ||
     !manifest.upstream ||
     !manifest.plugin ||
-    !manifest.pnpm
+    !manifest.pnpm ||
+    !Array.isArray(manifest.trees) ||
+    PINNED_TREES.some(
+      (p) => !manifest.trees.some((t) => t.root === p.slice(0, -1)),
+    )
   )
     throw new Error('manifest is malformed');
   if (computeId(manifest) !== manifest.id)
@@ -115,6 +158,18 @@ export function verifyPackage(payload) {
   for (const path of listFiles(payload)) {
     if (path === 'manifest.json' || isPinnedPath(path)) continue;
     if (!listed.has(path)) throw new Error(`unlisted file in package: ${path}`);
+  }
+
+  if (trees) {
+    for (const t of manifest.trees) {
+      if (!PINNED_TREES.includes(t.root + '/'))
+        throw new Error(`unexpected tree in manifest: ${t.root}`);
+      const actual = treeDigest(payload, t.root);
+      if (actual.files !== t.files || actual.sha256 !== t.sha256)
+        throw new Error(
+          `distributed files differ from the manifest: ${t.root} (${actual.files} files, expected ${t.files})`,
+        );
+    }
   }
 
   const dshPkg = join(

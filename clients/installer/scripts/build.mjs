@@ -24,7 +24,12 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
-import { computeId, isPinnedPath } from '../runtime/verify.mjs';
+import {
+  PINNED_TREES,
+  computeId,
+  isPinnedPath,
+  treeDigest,
+} from '../runtime/verify.mjs';
 import { sha256File, assertNoSecrets, listFiles } from './lib/files.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -390,6 +395,8 @@ export async function build(args) {
       enginesDsh: pluginPkg.engines.dsh,
       tgzSha256: sha256File(tgz),
     },
+    // Digests of the distributed upstream DSH and pnpm trees (not only their locks).
+    trees: PINNED_TREES.map((p) => treeDigest(payload, p.slice(0, -1))),
     files: ours.map((f) => ({
       path: f,
       size: statSync(join(payload, f)).size,
