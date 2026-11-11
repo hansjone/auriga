@@ -27,7 +27,8 @@ public class CredentialAdminController {
           sources,
       org.springframework.beans.factory.ObjectProvider<
               auriga.workspace.api.ManagedCredentialRotation>
-          rotations) {
+          rotations,
+      auriga.iam.api.CredentialInstallationScope installation) {
     inventory =
         new CredentialInventory(
             store,
@@ -35,7 +36,8 @@ public class CredentialAdminController {
             clock,
             audit,
             () -> sources.orderedStream().toList(),
-            rotations::getIfAvailable);
+            rotations::getIfAvailable,
+            installation);
   }
 
   @GetMapping

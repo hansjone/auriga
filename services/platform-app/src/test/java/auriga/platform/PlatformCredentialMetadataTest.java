@@ -15,6 +15,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class PlatformCredentialMetadataTest {
   @TempDir Path directory;
+  final UUID installation = UUID.randomUUID();
 
   @Test
   void onlyMetadataLeavesPrivateKeyAndManifestSources() throws Exception {
@@ -32,8 +33,11 @@ class PlatformCredentialMetadataTest {
             .withProperty("auriga.credentials.panel-manifest-file", panel.toString());
     var source =
         new PlatformCredentialMetadataConfiguration.Source(
-            env, mock(ObjectProvider.class), mock(ObjectProvider.class));
-    var result = TenantContext.call(TenantContext.PLATFORM_TENANT, source::snapshot);
+            env,
+            mock(ObjectProvider.class),
+            mock(ObjectProvider.class),
+            new auriga.iam.api.CredentialInstallationScope(installation));
+    var result = TenantContext.call(installation, source::snapshot);
     assertEquals(2, result.entries().size());
     assertFalse(result.toString().contains("must-not-leak"));
     assertTrue(result.gaps().stream().anyMatch(g -> g.source().equals("network-keyset")));
@@ -69,9 +73,9 @@ class PlatformCredentialMetadataTest {
                 .withProperty("auriga.credentials.identity-keyset-file", identity.toString())
                 .withProperty("auriga.credentials.panel-manifest-file", panel.toString()),
             mock(ObjectProvider.class),
-            mock(ObjectProvider.class));
-    assertEquals(
-        2, TenantContext.call(TenantContext.PLATFORM_TENANT, source::snapshot).entries().size());
+            mock(ObjectProvider.class),
+            new auriga.iam.api.CredentialInstallationScope(installation));
+    assertEquals(2, TenantContext.call(installation, source::snapshot).entries().size());
     var result = TenantContext.call(UUID.randomUUID(), source::snapshot);
     assertTrue(result.entries().isEmpty());
     assertEquals(3, result.gaps().size());

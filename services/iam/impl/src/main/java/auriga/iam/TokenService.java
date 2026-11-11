@@ -16,6 +16,7 @@ public final class TokenService
           String, auriga.iam.api.CredentialMetadataSource.Entry>
       credentialMetadata = new java.util.concurrent.ConcurrentHashMap<>();
   private final SigningKeys keys;
+  private final CredentialInstallationScope installation;
   private final ContractSchemas schemas;
   private final PermissionResolver permissions;
   private final Clock clock;
@@ -48,7 +49,20 @@ public final class TokenService
       String issuer,
       Map<String, String> internalSecretHashes,
       List<String> allowedOrigins) {
+    this(keys, schemas, permissions, clock, issuer, internalSecretHashes, allowedOrigins, null);
+  }
+
+  public TokenService(
+      SigningKeys keys,
+      ContractSchemas schemas,
+      PermissionResolver permissions,
+      Clock clock,
+      String issuer,
+      Map<String, String> internalSecretHashes,
+      List<String> allowedOrigins,
+      CredentialInstallationScope installation) {
     this.keys = keys;
+    this.installation = installation;
     this.schemas = schemas;
     this.permissions = permissions;
     this.clock = clock;
@@ -358,10 +372,11 @@ public final class TokenService
 
   @Override
   public auriga.iam.api.CredentialMetadataSource.Snapshot snapshot() {
-    if (!auriga.common.context.TenantContext.require().equals(SigningKeys.PLATFORM))
+    if (installation == null
+        || !installation.permits(auriga.common.context.TenantContext.require()))
       return new auriga.iam.api.CredentialMetadataSource.Snapshot(
           List.of(),
-          List.of(new auriga.iam.api.CredentialMetadataSource.Gap(name(), "not_configured")));
+          List.of(new auriga.iam.api.CredentialMetadataSource.Gap(name(), "installation_scope")));
     var entries =
         internalSecrets.keySet().stream()
             .map(credentialMetadata::get)

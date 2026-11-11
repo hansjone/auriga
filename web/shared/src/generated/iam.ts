@@ -1079,6 +1079,8 @@ export interface components {
         | 'instance_deleted';
       source?: string;
       versionLabel?: string;
+      /** @description Instance absent in workspace; status still reflects the IAM credential */
+      instanceDeleted?: boolean;
       /**
        * Format: int64
        * @description Authoritative workspace version scheduled for issuance
@@ -1103,7 +1105,8 @@ export interface components {
         | 'issued_at_unavailable'
         | 'validity_unavailable'
         | 'key_validity_unavailable'
-        | 'unavailable';
+        | 'unavailable'
+        | 'installation_scope';
     };
     CredentialList: {
       items: components['schemas']['CredentialMetadata'][];

@@ -16,6 +16,7 @@ public final class CredentialInventory {
   private final IamManagedDevices managed;
   private final Clock clock;
   private final AuditLogger audit;
+  private final auriga.iam.api.CredentialInstallationScope installation;
   private final java.util.function.Supplier<List<auriga.iam.api.CredentialMetadataSource>> sources;
   private final java.util.function.Supplier<auriga.workspace.api.ManagedCredentialRotation>
       rotations;
@@ -27,10 +28,22 @@ public final class CredentialInventory {
       AuditLogger audit,
       java.util.function.Supplier<List<auriga.iam.api.CredentialMetadataSource>> sources,
       java.util.function.Supplier<auriga.workspace.api.ManagedCredentialRotation> rotations) {
+    this(store, managed, clock, audit, sources, rotations, null);
+  }
+
+  public CredentialInventory(
+      IamStore store,
+      IamManagedDevices managed,
+      Clock clock,
+      AuditLogger audit,
+      java.util.function.Supplier<List<auriga.iam.api.CredentialMetadataSource>> sources,
+      java.util.function.Supplier<auriga.workspace.api.ManagedCredentialRotation> rotations,
+      auriga.iam.api.CredentialInstallationScope installation) {
     this.store = store;
     this.managed = managed;
     this.clock = clock;
     this.audit = audit;
+    this.installation = installation;
     this.sources = sources;
     this.rotations = rotations;
   }
@@ -45,7 +58,7 @@ public final class CredentialInventory {
     List<ObjectNode> items = new ArrayList<>();
     if (type == null || type.equals("managed"))
       items.addAll(store.tx(() -> store.all("managed_device").stream().map(this::device).toList()));
-    boolean platform = TenantContext.require().equals(SigningKeys.PLATFORM);
+    boolean platform = installation != null && installation.permits(TenantContext.require());
     if (platform && (type == null || type.equals("signing")))
       items.addAll(
           store.isolated(
@@ -62,7 +75,8 @@ public final class CredentialInventory {
     var availableSources = sources.get();
     for (var source : availableSources) {
       if (!platform && source.name().equals("iam-service-issuance")) {
-        gaps.add(new auriga.iam.api.CredentialMetadataSource.Gap(source.name(), "not_configured"));
+        gaps.add(
+            new auriga.iam.api.CredentialMetadataSource.Gap(source.name(), "installation_scope"));
         continue;
       }
       try {
@@ -116,8 +130,7 @@ public final class CredentialInventory {
         for (var item : managedItems) {
           Long current = versions.get(UUID.fromString(item.path("id").asString()));
           if (current == null) {
-            item.put("status", "instance_deleted");
-            item.put("expiringSoon", false);
+            item.put("instanceDeleted", true);
           } else if (current > item.path("version").asLong())
             item.put("replacementVersion", current);
         }
@@ -131,10 +144,16 @@ public final class CredentialInventory {
           new auriga.iam.api.CredentialMetadataSource.Gap("platform-keysets", "not_configured"));
     if (!platform && (type == null || type.equals("signing")))
       gaps.add(
-          new auriga.iam.api.CredentialMetadataSource.Gap("iam-signing-keys", "not_configured"));
+          new auriga.iam.api.CredentialMetadataSource.Gap(
+              "iam-signing-keys", "installation_scope"));
     var filtered =
         items.stream()
-            .filter(r -> status == null || status.equals(r.path("status").asString()))
+            .filter(
+                r ->
+                    status == null
+                        || (status.equals("instance_deleted")
+                            ? r.path("instanceDeleted").asBoolean()
+                            : status.equals(r.path("status").asString())))
             .filter(r -> !expiring || r.path("expiringSoon").asBoolean())
             .sorted(Comparator.comparing(r -> r.path("id").asString()))
             .toList();
@@ -218,12 +237,13 @@ public final class CredentialInventory {
         rotation
             .currentVersions(tenant, List.of(UUID.fromString(instance)))
             .get(UUID.fromString(instance));
-    if (current == null) {
-      initial.put("status", "instance_deleted");
-      initial.put("expiringSoon", false);
+    if (current == null && initial.path("status").asString().equals("revoked")) {
+      initial.put("instanceDeleted", true);
       return initial;
     }
-    if (initial.path("status").asString().equals("revoked") && current > version) {
+    if (initial.path("status").asString().equals("revoked")
+        && current != null
+        && current > version) {
       initial.put("replacementVersion", current);
       return initial;
     }
@@ -250,6 +270,10 @@ public final class CredentialInventory {
               }
               return device(store.get("managed_device", instance, false));
             });
+    if (current == null) {
+      result.put("instanceDeleted", true);
+      return result;
+    }
     try {
       long replacement = rotation.rotate(tenant, UUID.fromString(instance), version);
       if (replacement <= version || replacement > 9007199254740991L)
@@ -268,8 +292,7 @@ public final class CredentialInventory {
       return result;
     } catch (RuntimeException failure) {
       if (failure instanceof AurigaException e && e.errorCode().code().equals("common.not_found")) {
-        result.put("status", "instance_deleted");
-        result.put("expiringSoon", false);
+        result.put("instanceDeleted", true);
         return result;
       }
       store.tx(

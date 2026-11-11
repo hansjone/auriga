@@ -150,12 +150,14 @@ it('allows completing reissuance after revocation committed but workspace was un
 it('labels deleted instances and never offers reissuance', async () => {
   const w = setup();
   vi.mocked(credentialsApi.list).mockResolvedValue({
-    items: [{ ...row, status: 'instance_deleted' }],
+    items: [{ ...row, status: 'revoked', instanceDeleted: true }],
     serviceMetadataAvailable: false,
     sourceGaps: [],
   });
   await flushPromises();
-  expect(w.text()).toContain('\u5b9e\u4f8b\u5df2\u5220\u9664');
+  expect(w.get('[data-testid="instance-deleted"]').text()).toBe(
+    '\u5b9e\u4f8b\u5df2\u5220\u9664',
+  );
   expect(w.get('[data-testid="revoke"]').attributes('disabled')).toBeDefined();
   expect(credentialsApi.revoke).not.toHaveBeenCalled();
   w.unmount();
@@ -176,5 +178,35 @@ it('keeps rows when recent verification is incomplete instead of reporting lost 
   await flushPromises();
   expect(w.text()).toContain('device-1');
   expect(w.text()).toContain('\u8eab\u4efd\u9a8c\u8bc1\u672a\u5b8c\u6210');
+  w.unmount();
+});
+
+it('shows IAM state for a deleted instance and permits revoke only', async () => {
+  const w = setup();
+  vi.mocked(credentialsApi.list).mockResolvedValue({
+    items: [{ ...row, instanceDeleted: true }],
+    serviceMetadataAvailable: false,
+    sourceGaps: [{ source: 'identity-header', reason: 'installation_scope' }],
+  });
+  vi.mocked(credentialsApi.revoke).mockResolvedValue({
+    ...row,
+    status: 'revoked',
+    instanceDeleted: true,
+  });
+  await flushPromises();
+  expect(w.text()).toContain('\u6709\u6548');
+  expect(w.get('[data-testid="instance-deleted"]').text()).toBe(
+    '\u5b9e\u4f8b\u5df2\u5220\u9664',
+  );
+  expect(w.text()).toContain(
+    '\u4ec5\u5b89\u88c5\u7ba1\u7406\u5458\u53ef\u89c1',
+  );
+  expect(w.get('[data-testid="revoke"]').text()).toContain(
+    '\u4ec5\u540a\u9500',
+  );
+  await w.get('[data-testid="revoke"]').trigger('click');
+  await w.get('[data-testid="confirm"]').trigger('click');
+  await flushPromises();
+  expect(w.text()).toContain('\u4e0d\u518d\u91cd\u7b7e');
   w.unmount();
 });

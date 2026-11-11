@@ -131,6 +131,26 @@ class CredentialReissueEndToEndTest {
 
   @Test
   void revokedCredentialCannotExchangeAndUpgradedWorkspaceVersionIssuesNewMaterial() {
+    prepareWorkspace();
+    TenantContext.run(
+        tenant,
+        () -> {
+          var first = managed.issue(request(1));
+          var inventory =
+              new CredentialInventory(
+                  store, managed, clock, mock(AuditLogger.class), List::of, () -> rotation);
+          assertEquals(
+              2, inventory.revoke(instance.toString(), 1).path("replacementVersion").asLong());
+          var error = assertThrows(AurigaException.class, () -> exchange(first));
+          assertEquals("network.revoked", error.errorCode().code());
+          assertEquals(2, rotation.currentVersion(tenant, instance));
+          var next = managed.issue(request(2));
+          assertNotEquals(first.getCredential(), next.getCredential());
+          assertNotNull(exchange(next).get("access_token"));
+        });
+  }
+
+  void prepareWorkspace() {
     var inputs = mock(auriga.workspace.api.WorkspaceInputs.class);
     when(inputs.member(any(), any()))
         .thenReturn(
@@ -168,18 +188,38 @@ class CredentialReissueEndToEndTest {
                           .toByteArray(),
                       new byte[32],
                       new byte[32]));
+        });
+  }
+
+  @Test
+  void deletedInstanceCredentialRemainsVisibleAndCanBeRevokedWithoutReissue() {
+    prepareWorkspace();
+    TenantContext.run(
+        tenant,
+        () -> {
           var first = managed.issue(request(1));
+          assertNotNull(exchange(first).get("access_token"));
+          workspace.tx(
+              () ->
+                  workspace.jdbc.update(
+                      "UPDATE instance SET deleted=true WHERE tenant_id=? AND id=?",
+                      tenant,
+                      instance));
+          var audit = mock(AuditLogger.class);
           var inventory =
-              new CredentialInventory(
-                  store, managed, clock, mock(AuditLogger.class), List::of, () -> rotation);
+              new CredentialInventory(store, managed, clock, audit, List::of, () -> rotation);
+          var row = inventory.list("managed", null, false).path("items").get(0);
+          assertTrue(row.path("instanceDeleted").asBoolean());
+          assertEquals("active", row.path("status").asString());
+          var revoked = inventory.revoke(instance.toString(), 1);
+          assertTrue(revoked.path("instanceDeleted").asBoolean());
+          assertEquals("revoked", revoked.path("status").asString());
+          assertFalse(revoked.has("replacementVersion"));
           assertEquals(
-              2, inventory.revoke(instance.toString(), 1).path("replacementVersion").asLong());
-          var error = assertThrows(AurigaException.class, () -> exchange(first));
-          assertEquals("network.revoked", error.errorCode().code());
-          assertEquals(2, rotation.currentVersion(tenant, instance));
-          var next = managed.issue(request(2));
-          assertNotEquals(first.getCredential(), next.getCredential());
-          assertNotNull(exchange(next).get("access_token"));
+              "network.revoked",
+              assertThrows(AurigaException.class, () -> exchange(first)).errorCode().code());
+          inventory.revoke(instance.toString(), 1);
+          verify(audit, times(1)).record(any());
         });
   }
 

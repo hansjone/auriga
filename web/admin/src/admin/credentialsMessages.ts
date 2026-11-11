@@ -1,4 +1,7 @@
 export const credentialsZh = {
+  credentialRevokeOnly: '仅吊销',
+  credentialRevokedOnly: '已吊销，实例已删除，不再重签',
+  credentialConfirmRevokeOnly: '仅吊销此凭据？实例已删除，不会重新签发。',
   credentialVerification: '身份验证未完成，请重试',
   credentialUnverifiedNote: '文件来源仅为未验签的元数据投影。',
   credentialTitle: '平台凭据',
@@ -38,6 +41,7 @@ export const credentialsZh = {
     'platform-keysets': '平台密钥清单',
   },
   credentialReasons: {
+    installation_scope: '仅安装管理员可见',
     not_configured: '未配置元数据来源',
     not_reported: '尚无本进程签发记录',
     issued_at_unavailable: '来源未记录签发时间',
@@ -55,6 +59,10 @@ export const credentialsZh = {
   },
 };
 export const credentialsEn = {
+  credentialRevokeOnly: 'Revoke only',
+  credentialRevokedOnly: 'Revoked; deleted instance will not be reissued',
+  credentialConfirmRevokeOnly:
+    'Revoke this credential only? The deleted instance will not be reissued.',
   credentialVerification: 'Identity verification incomplete; retry',
   credentialUnverifiedNote:
     'File sources are metadata projections without signature verification.',
@@ -95,6 +103,7 @@ export const credentialsEn = {
     'platform-keysets': 'Platform keysets',
   },
   credentialReasons: {
+    installation_scope: 'Visible to installation administrators only',
     not_configured: 'Metadata source is not configured',
     not_reported: 'No issuance recorded in this process yet',
     issued_at_unavailable: 'Source does not record issuance time',

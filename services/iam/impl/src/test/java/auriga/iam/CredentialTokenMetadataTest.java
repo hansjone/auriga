@@ -16,6 +16,7 @@ class CredentialTokenMetadataTest {
     when(keys.current())
         .thenReturn(new ECKeyGenerator(Curve.P_256).keyID("public-version").generate());
     String secret = Secrets.random();
+    UUID installation = UUID.randomUUID();
     var tokens =
         new TokenService(
             keys,
@@ -23,9 +24,11 @@ class CredentialTokenMetadataTest {
             (t, s, c) -> Set.of(),
             Clock.systemUTC(),
             "https://portal.example.com",
-            Map.of("edge", Secrets.hash(secret)));
+            Map.of("edge", Secrets.hash(secret)),
+            List.of(),
+            new auriga.iam.api.CredentialInstallationScope(installation));
     java.util.function.Supplier<auriga.iam.api.CredentialMetadataSource.Snapshot> snapshot =
-        () -> auriga.common.context.TenantContext.call(SigningKeys.PLATFORM, tokens::snapshot);
+        () -> auriga.common.context.TenantContext.call(installation, tokens::snapshot);
     assertTrue(snapshot.get().entries().isEmpty());
     assertEquals("not_reported", snapshot.get().gaps().getFirst().reason());
     assertThrows(

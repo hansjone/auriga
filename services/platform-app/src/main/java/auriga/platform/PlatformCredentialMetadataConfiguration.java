@@ -22,20 +22,24 @@ public class PlatformCredentialMetadataConfiguration {
   CredentialMetadataSource platformCredentialMetadata(
       Environment env,
       ObjectProvider<NetworkKeyOperations> operations,
-      ObjectProvider<NetworkKeySettings> settings) {
-    return new Source(env, operations, settings);
+      ObjectProvider<NetworkKeySettings> settings,
+      auriga.iam.api.CredentialInstallationScope installation) {
+    return new Source(env, operations, settings, installation);
   }
 
   static final class Source implements CredentialMetadataSource {
     private final Environment env;
+    private final auriga.iam.api.CredentialInstallationScope installation;
     private final ObjectProvider<NetworkKeyOperations> operations;
     private final ObjectProvider<NetworkKeySettings> settings;
 
     Source(
         Environment env,
         ObjectProvider<NetworkKeyOperations> operations,
-        ObjectProvider<NetworkKeySettings> settings) {
+        ObjectProvider<NetworkKeySettings> settings,
+        auriga.iam.api.CredentialInstallationScope installation) {
       this.env = env;
+      this.installation = installation;
       this.operations = operations;
       this.settings = settings;
     }
@@ -78,7 +82,7 @@ public class PlatformCredentialMetadataConfiguration {
               throw new IllegalArgumentException();
             network(signed, entries);
             String root = signed.path("root_auth").path("kid").asString("");
-            if (!root.isEmpty() && TenantContext.require().equals(TenantContext.PLATFORM_TENANT)) {
+            if (!root.isEmpty() && installation.permits(TenantContext.require())) {
               entries.add(
                   new Entry(
                       "network-root:" + root,
@@ -95,8 +99,8 @@ public class PlatformCredentialMetadataConfiguration {
       read(
           "identity-header",
           () -> {
-            if (!TenantContext.require().equals(TenantContext.PLATFORM_TENANT)) {
-              gaps.add(new Gap("identity-header", "not_configured"));
+            if (!installation.permits(TenantContext.require())) {
+              gaps.add(new Gap("identity-header", "installation_scope"));
               return;
             }
             var keys = file(env.getProperty("auriga.credentials.identity-keyset-file"));
@@ -125,8 +129,8 @@ public class PlatformCredentialMetadataConfiguration {
       read(
           "panel-manifest",
           () -> {
-            if (!TenantContext.require().equals(TenantContext.PLATFORM_TENANT)) {
-              gaps.add(new Gap("panel-manifest", "not_configured"));
+            if (!installation.permits(TenantContext.require())) {
+              gaps.add(new Gap("panel-manifest", "installation_scope"));
               return;
             }
             var manifest = file(env.getProperty("auriga.credentials.panel-manifest-file"));

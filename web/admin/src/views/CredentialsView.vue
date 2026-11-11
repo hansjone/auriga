@@ -83,7 +83,7 @@ function ask(id: string) {
       row.id === id &&
       row.type === 'managed' &&
       !row.replacementVersion &&
-      row.status !== 'instance_deleted',
+      !(row.instanceDeleted && row.status === 'revoked'),
   );
 }
 async function confirm() {
@@ -97,12 +97,11 @@ async function confirm() {
     const result = await credentialsApi.revoke(row.instanceId, row.version);
     succeeded = true;
     if (alive)
-      notice.value =
-        result.status === 'instance_deleted'
-          ? t('credentialStates.instance_deleted')
-          : t('credentialRevoked', {
-              version: result.replacementVersion ?? '',
-            });
+      notice.value = result.instanceDeleted
+        ? t('credentialRevokedOnly')
+        : t('credentialRevoked', {
+            version: result.replacementVersion ?? '',
+          });
   } catch (e) {
     if (alive) {
       error.value = failure(e);
@@ -214,10 +213,17 @@ onMounted(load);
             ></template
           ></ElTableColumn
         >
-        <ElTableColumn :label="t('credentialStatus')" width="100"
-          ><template #default="{ row }">{{
-            row.status ? t(`credentialStates.${row.status}`) : ''
-          }}</template></ElTableColumn
+        <ElTableColumn :label="t('credentialStatus')" width="120"
+          ><template #default="{ row }">
+            {{ row.status ? t(`credentialStates.${row.status}`) : '' }}
+            <div
+              v-if="row.instanceDeleted"
+              class="muted"
+              data-testid="instance-deleted"
+            >
+              {{ t('credentialStates.instance_deleted') }}
+            </div>
+          </template></ElTableColumn
         >
         <ElTableColumn :label="t('credentialIssued')" min-width="180"
           ><template #default="{ row }">{{
@@ -239,10 +245,16 @@ onMounted(load);
                 busy ||
                 !!pending ||
                 !!row.replacementVersion ||
-                row.status === 'instance_deleted'
+                (row.instanceDeleted && row.status === 'revoked')
               "
               @click="ask(row.id)"
-              >{{ t('credentialRevoke') }}</ElButton
+              >{{
+                t(
+                  row.instanceDeleted
+                    ? 'credentialRevokeOnly'
+                    : 'credentialRevoke',
+                )
+              }}</ElButton
             ></template
           ></ElTableColumn
         >
@@ -268,7 +280,15 @@ onMounted(load);
       </aside>
     </template>
     <ActionConfirm
-      :message="pending ? t('credentialConfirm') : undefined"
+      :message="
+        pending
+          ? t(
+              pending.instanceDeleted
+                ? 'credentialConfirmRevokeOnly'
+                : 'credentialConfirm',
+            )
+          : undefined
+      "
       :busy="busy"
       @confirm="confirm"
       @cancel="pending = undefined"
