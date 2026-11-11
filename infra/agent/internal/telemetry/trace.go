@@ -79,7 +79,10 @@ func Log(ctx context.Context, level slog.Level, message string, fields ...any) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	attrs := []any{"instance_id", s.Instance, "generation", s.Generation, "trace.origin", s.Origin}
+	attrs := []any{"instance_id", s.Instance, "generation", s.Generation}
+	if s.Origin != "" {
+		attrs = append(attrs, "trace.origin", s.Origin)
+	}
 	if Valid(s.Value) {
 		attrs = append(attrs, "trace_id", s.Value[3:35], "span_id", s.Value[36:52], "parent_span_id", s.Parent)
 	}

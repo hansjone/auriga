@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -149,7 +150,8 @@ func (s *Store) PutDesiredWithTrace(spec *nodev1.InstanceSpec, parent string) er
 	if err != nil {
 		return err
 	}
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	var replaced string
+	err = s.db.Update(func(tx *bbolt.Tx) error {
 		var previous startupObservation
 		_ = json.Unmarshal(tx.Bucket(bucketStartup).Get([]byte(spec.InstanceId)), &previous)
 		if previous.Complete && previous.Generation > previous.CompletedGeneration {
@@ -160,7 +162,7 @@ func (s *Store) PutDesiredWithTrace(spec *nodev1.InstanceSpec, parent string) er
 		}
 		// The desired write below retains its existing business semantics. Only
 		// this independent observation record is monotonic across receiver overlap.
-		changed := spec.Generation > previous.Generation
+		changed := spec.Generation > 0 && spec.Generation > previous.Generation
 		if changed {
 			origin := "propagated"
 			if parent == "" {
@@ -168,18 +170,22 @@ func (s *Store) PutDesiredWithTrace(spec *nodev1.InstanceSpec, parent string) er
 				origin = "generated"
 			}
 			previous = startupObservation{Generation: spec.Generation, Parent: parent, Origin: origin, StartedAt: time.Now(), CompletedGeneration: previous.CompletedGeneration, Complete: spec.Generation <= previous.CompletedGeneration}
-		} else if spec.Generation == previous.Generation && !previous.Complete && parent != "" && (!telemetry.Valid(previous.Parent) || previous.Parent[3:35] == parent[3:35]) {
-			// A redelivery is a new dispatch span of the SAME operation. A different
-			// trace cannot rebind a generation or resurrect a completed startup.
+		} else if spec.Generation > 0 && spec.Generation == previous.Generation && !previous.Complete && parent != "" && (previous.Origin == "generated" || !telemetry.Valid(previous.Parent) || previous.Parent[3:35] == parent[3:35]) {
+			// The first real dispatch may replace a locally generated fallback.
+			// Once propagated, a different trace cannot rebind this generation.
+			if previous.Origin == "generated" && telemetry.Valid(previous.Parent) {
+				replaced = previous.Parent[3:35]
+			}
 			previous.Parent = parent
+			previous.Origin = "propagated"
 			changed = true
 		}
-		if spec.Generation == previous.Generation && !previous.Complete && !telemetry.Valid(previous.Parent) {
+		if spec.Generation > 0 && spec.Generation == previous.Generation && !previous.Complete && !telemetry.Valid(previous.Parent) {
 			previous.Parent = telemetry.Current(telemetry.Start(context.Background(), "", spec.InstanceId, spec.Generation, nil)).Value
 			previous.Origin = "generated"
 			changed = true
 		}
-		if spec.Generation == previous.Generation && !previous.Complete && previous.StartedAt.IsZero() {
+		if spec.Generation > 0 && spec.Generation == previous.Generation && !previous.Complete && previous.StartedAt.IsZero() {
 			previous.StartedAt = time.Now()
 			changed = true
 		}
@@ -194,6 +200,11 @@ func (s *Store) PutDesiredWithTrace(spec *nodev1.InstanceSpec, parent string) er
 		}
 		return tx.Bucket(bucketDesired).Put([]byte(spec.InstanceId), raw)
 	})
+	if err == nil && replaced != "" {
+		ctx := telemetry.Start(context.Background(), parent, spec.InstanceId, spec.Generation, nil)
+		telemetry.Log(ctx, slog.LevelInfo, "startup trace linked", "previous_trace_id", replaced)
+	}
+	return err
 }
 
 type startupObservation struct {

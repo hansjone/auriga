@@ -36,3 +36,18 @@ func TestStartupStagesShareClockAndOrigin(t *testing.T) {
 		cumulative = event["cumulative_ms"].(float64)
 	}
 }
+
+func TestParentOnlyLogOmitsUnknownOrigin(t *testing.T) {
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(old)
+	Log(WithParent(context.Background(), ""), slog.LevelInfo, "no startup")
+	var event map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &event); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := event["trace.origin"]; exists {
+		t.Fatal("unknown origin was serialized", event)
+	}
+}

@@ -10,6 +10,7 @@ Auriga 使用现有 W3C `traceparent`，日志字段为 `trace_id`、`service`�
 新建或由 stopped 改为 running 时，workspace 把有效 W3C 上下文与当前 generation
 同事务写入 `instance.startup_traceparent`；它不属于 InstanceSpec、身份或渲染摘要。
 容器创建时由 agent 单独注入有效的 `TRACEPARENT` 环境变量，不接受 profile 覆盖。
+该变量在容器生命周期内对容器进程与 inspect 可见，仅用于关联，不是凭据或授权依据。
 DSH 原生进程日志当前没有公开 trace 接口，不能据此声称每条 DSH 日志已关联。
 同一次尚未完成启动的托管材料衍生 generation 显式继承。dispatch 在独立线程建立
 子 span，以 ApplySpec 的可选 `traceparent` 下发；agent 把 spec 与观测数据原子存入
@@ -23,6 +24,8 @@ Go/插件使用 `span_id/parent_span_id`。探测的
 同代数重发不会复活已完成因果，无变更 open 不重新绑定。尚未完成启动的同代后台
 健康恢复继续原 trace；已完成后的独立维护使用新 trace。缺失或非法分发 trace 时，
 agent 生成有效 ID 并持久化，日志包含 `trace.origin=generated`，正常继承为 `propagated`。
+未完成同代首次收到有效的平台 trace 时可替换 generated 回退值，提交后记录一次
+`startup trace linked`，以 `previous_trace_id` 连接旧段；已有 propagated trace 不被其他 trace 覆盖。
 旧 agent 可忽略新增字段，旧状态无历史因果；非法或重复 HTTP trace 安全重建，不拒绝业务。
 健康失败记录分类、HTTP 状态、尝试/耗时、脱敏运输异常，以及健康契约四个公开字段的
 诊断投影；任意响应正文、头、身份材料不写日志，不能从 ready=false 推断凭据原因。

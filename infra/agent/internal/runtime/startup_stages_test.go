@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 )
 
@@ -18,7 +19,14 @@ func TestDockerStartupStagesAndContainerTrace(t *testing.T) {
 	var logs bytes.Buffer
 	ctx := telemetry.Start(context.Background(), "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", spec.InstanceId, spec.Generation, slog.New(slog.NewJSONHandler(&logs, nil)))
 	ctx = telemetry.WithStartup(ctx, time.Now(), "propagated")
-	if err := executeRelease(ctx, d, spec, t.TempDir(), t.TempDir()); err != nil {
+	home, meta := t.TempDir(), t.TempDir()
+	if err := d.Activation.Activate(ctx, spec, func(ctx context.Context) error {
+		s := &runtime.Spec{Full: spec, InstanceID: spec.InstanceId, Generation: spec.Generation, Image: spec.Dsh.Image, HomeBind: home, MetaBind: meta, HostUID: 200001, ListenPort: 7860, Env: map[string]string{"TRACEPARENT": "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"}}
+		if err := d.Ensure(ctx, s, nil); err != nil {
+			return err
+		}
+		return d.Start(ctx, spec.InstanceId)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	decoder := json.NewDecoder(&logs)
@@ -43,17 +51,20 @@ func TestDockerStartupStagesAndContainerTrace(t *testing.T) {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	found := false
+	count := 0
 	for _, c := range e.containers {
-		config, _ := c["Config"].(map[string]any)
-		env, _ := config["Env"].([]any)
+		env, _ := c["Env"].([]any)
 		for _, v := range env {
-			if strings.HasPrefix(v.(string), "TRACEPARENT=00-4bf92f3577b34da6a3ce929d0e0e4736-") {
-				found = true
+			if strings.HasPrefix(v.(string), "TRACEPARENT=") {
+				count++
+				if v != "TRACEPARENT="+telemetry.Current(ctx).Value {
+					t.Fatal("spec overrode trusted trace", v)
+				}
 			}
 		}
 	}
-	if !found {
-		t.Fatal("container missing startup trace")
+	if count != 1 {
+		t.Fatalf("container TRACEPARENT count=%d", count)
 	}
+	t.Log("validated top-level Env: exactly one trusted TRACEPARENT overrides spec")
 }

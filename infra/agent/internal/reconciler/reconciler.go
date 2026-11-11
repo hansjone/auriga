@@ -641,7 +641,9 @@ func (r *Reconciler) startupContext(ctx context.Context, parent, id string, gene
 	ctx = telemetry.Start(ctx, parent, id, generation, r.Log)
 	if !r.Store.StartupComplete(id, generation) && generation > 0 {
 		started, origin := r.Store.StartupTiming(id, generation)
-		ctx = telemetry.WithStartup(ctx, started, origin)
+		if !started.IsZero() {
+			ctx = telemetry.WithStartup(ctx, started, origin)
+		}
 	}
 	return ctx
 }

@@ -95,3 +95,28 @@ func TestStartupStagesTimeoutThenSameGenerationRecovery(t *testing.T) {
 		t.Fatal("maintenance reused completed startup")
 	}
 }
+
+func TestStartupContextWithoutMatchingTimingEmitsNoStages(t *testing.T) {
+	store, err := state.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	spec := &nodev1.InstanceSpec{InstanceId: "new-generation", Generation: 8, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING}
+	if err := store.PutDesiredWithTrace(spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	r := New(store, runtime.NewFake(), slog.New(slog.NewJSONHandler(&logs, nil)), 1)
+	defer r.Close()
+	ctx := r.startupContext(context.Background(), "", spec.InstanceId, 7)
+	telemetry.Stage(ctx, "ready")
+	if logs.Len() != 0 {
+		t.Fatal("stale execution created unowned stages", logs.String())
+	}
+	ctx = r.startupContext(context.Background(), store.StartupParent(spec.InstanceId, 8), spec.InstanceId, 8)
+	telemetry.Stage(ctx, "accepted")
+	if logs.Len() == 0 {
+		t.Fatal("current startup lost its clock")
+	}
+}
