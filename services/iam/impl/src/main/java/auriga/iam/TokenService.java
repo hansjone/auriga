@@ -344,7 +344,7 @@ public final class TokenService
             "service:" + service,
             "service",
             "iam-service-issuance",
-            claims.path("jti").asString(),
+            Instant.ofEpochSecond(claims.path("iat").asLong()).toString(),
             Instant.ofEpochSecond(claims.path("iat").asLong()),
             Instant.ofEpochSecond(claims.path("exp").asLong()),
             "active"));
@@ -358,6 +358,10 @@ public final class TokenService
 
   @Override
   public auriga.iam.api.CredentialMetadataSource.Snapshot snapshot() {
+    if (!auriga.common.context.TenantContext.require().equals(SigningKeys.PLATFORM))
+      return new auriga.iam.api.CredentialMetadataSource.Snapshot(
+          List.of(),
+          List.of(new auriga.iam.api.CredentialMetadataSource.Gap(name(), "not_configured")));
     var entries =
         internalSecrets.keySet().stream()
             .map(credentialMetadata::get)

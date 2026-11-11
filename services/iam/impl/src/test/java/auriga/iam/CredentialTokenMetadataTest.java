@@ -24,23 +24,28 @@ class CredentialTokenMetadataTest {
             Clock.systemUTC(),
             "https://portal.example.com",
             Map.of("edge", Secrets.hash(secret)));
-    assertTrue(tokens.snapshot().entries().isEmpty());
-    assertEquals("not_reported", tokens.snapshot().gaps().getFirst().reason());
+    java.util.function.Supplier<auriga.iam.api.CredentialMetadataSource.Snapshot> snapshot =
+        () -> auriga.common.context.TenantContext.call(SigningKeys.PLATFORM, tokens::snapshot);
+    assertTrue(snapshot.get().entries().isEmpty());
+    assertEquals("not_reported", snapshot.get().gaps().getFirst().reason());
     assertThrows(
         auriga.common.error.AurigaException.class, () -> tokens.issue("edge", Secrets.random()));
-    assertTrue(tokens.snapshot().entries().isEmpty());
+    assertTrue(snapshot.get().entries().isEmpty());
     String jwt = tokens.issue("edge", secret);
-    var entry = tokens.snapshot().entries().getFirst();
-    assertEquals(
-        com.nimbusds.jwt.SignedJWT.parse(jwt).getJWTClaimsSet().getJWTID(), entry.versionLabel());
+    var entry = snapshot.get().entries().getFirst();
+    assertEquals(entry.issuedAt().toString(), entry.versionLabel());
     assertEquals(
         com.nimbusds.jwt.SignedJWT.parse(jwt).getJWTClaimsSet().getExpirationTime().toInstant(),
         entry.expiresAt());
     assertEquals("service:edge", entry.id());
     assertNotNull(entry.issuedAt());
     assertTrue(entry.expiresAt().isAfter(entry.issuedAt()));
-    assertFalse(tokens.snapshot().toString().contains(jwt));
-    assertFalse(tokens.snapshot().toString().contains(secret));
-    assertFalse(tokens.snapshot().toString().contains(Secrets.hash(secret)));
+    assertTrue(
+        auriga.common.context.TenantContext.call(UUID.randomUUID(), tokens::snapshot)
+            .entries()
+            .isEmpty());
+    assertFalse(snapshot.get().toString().contains(jwt));
+    assertFalse(snapshot.get().toString().contains(secret));
+    assertFalse(snapshot.get().toString().contains(Secrets.hash(secret)));
   }
 }

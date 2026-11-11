@@ -1070,7 +1070,13 @@ export interface components {
       /** @enum {string} */
       type: 'managed' | 'signing' | 'service' | 'node' | 'keyset';
       /** @enum {string} */
-      status: 'active' | 'revoked' | 'expired' | 'next' | 'retiring';
+      status:
+        | 'active'
+        | 'revoked'
+        | 'expired'
+        | 'next'
+        | 'retiring'
+        | 'instance_deleted';
       source?: string;
       versionLabel?: string;
       /**
@@ -1855,7 +1861,13 @@ export interface operations {
     parameters: {
       query?: {
         type?: 'managed' | 'signing' | 'service' | 'node' | 'keyset';
-        status?: 'active' | 'revoked' | 'expired' | 'next' | 'retiring';
+        status?:
+          | 'active'
+          | 'revoked'
+          | 'expired'
+          | 'next'
+          | 'retiring'
+          | 'instance_deleted';
         expiringSoon?: boolean;
       };
       header?: never;

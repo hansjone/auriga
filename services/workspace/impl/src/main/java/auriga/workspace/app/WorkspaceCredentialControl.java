@@ -23,12 +23,29 @@ public final class WorkspaceCredentialControl
   }
 
   @Override
-  public long currentVersion(UUID tenant, UUID instance) {
+  public Map<UUID, Long> currentVersions(UUID tenant, Collection<UUID> instances) {
     tenant(tenant);
+    if (instances.isEmpty()) return Map.of();
     return service.store.tx(
-        () ->
-            ((Number) service.store.instance(instance).get("managed_credential_version"))
-                .longValue());
+        () -> {
+          var result = new HashMap<UUID, Long>();
+          var wanted = Set.copyOf(instances);
+          service.store.jdbc.query(
+              "SELECT id,managed_credential_version FROM instance WHERE tenant_id=? AND NOT deleted",
+              r -> {
+                UUID id = r.getObject("id", UUID.class);
+                if (wanted.contains(id)) result.put(id, r.getLong("managed_credential_version"));
+              },
+              tenant);
+          return Map.copyOf(result);
+        });
+  }
+
+  @Override
+  public long currentVersion(UUID tenant, UUID instance) {
+    var version = currentVersions(tenant, List.of(instance)).get(instance);
+    if (version == null) throw new AurigaException(CommonErrors.NOT_FOUND);
+    return version;
   }
 
   @Override

@@ -28,6 +28,8 @@ onBeforeUnmount(() => {
   alive = false;
 });
 function failure(e: unknown) {
+  if (isApiError(e) && e.problem.code === 'iam.step_up_required')
+    return t('credentialVerification');
   return isApiError(e) && e.status === 403 ? t('forbidden') : t('failed');
 }
 function typeName(value: string) {
@@ -77,7 +79,11 @@ async function load() {
 function ask(id: string) {
   if (!allowed.value || busy.value || loading.value || pending.value) return;
   pending.value = rows.value.find(
-    (row) => row.id === id && row.type === 'managed' && !row.replacementVersion,
+    (row) =>
+      row.id === id &&
+      row.type === 'managed' &&
+      !row.replacementVersion &&
+      row.status !== 'instance_deleted',
   );
 }
 async function confirm() {
@@ -91,13 +97,20 @@ async function confirm() {
     const result = await credentialsApi.revoke(row.instanceId, row.version);
     succeeded = true;
     if (alive)
-      notice.value = t('credentialRevoked', {
-        version: result.replacementVersion ?? '',
-      });
+      notice.value =
+        result.status === 'instance_deleted'
+          ? t('credentialStates.instance_deleted')
+          : t('credentialRevoked', {
+              version: result.replacementVersion ?? '',
+            });
   } catch (e) {
     if (alive) {
       error.value = failure(e);
-      if (isApiError(e) && e.status === 403) {
+      if (
+        isApiError(e) &&
+        e.status === 403 &&
+        e.problem.code !== 'iam.step_up_required'
+      ) {
         rows.value = [];
         allowed.value = false;
       }
@@ -149,6 +162,7 @@ onMounted(load);
               'expired',
               'next',
               'retiring',
+              'instance_deleted',
             ]"
             :key="value"
             :value="value"
@@ -221,7 +235,11 @@ onMounted(load);
               v-if="row.type === 'managed'"
               data-testid="revoke"
               :disabled="
-                loading || busy || !!pending || !!row.replacementVersion
+                loading ||
+                busy ||
+                !!pending ||
+                !!row.replacementVersion ||
+                row.status === 'instance_deleted'
               "
               @click="ask(row.id)"
               >{{ t('credentialRevoke') }}</ElButton
@@ -229,6 +247,18 @@ onMounted(load);
           ></ElTableColumn
         >
       </ElTable>
+      <p
+        v-if="
+          rows.some((row) =>
+            ['identity-header', 'panel-manifest', 'network-keyset'].includes(
+              row.source ?? '',
+            ),
+          )
+        "
+        class="muted"
+      >
+        {{ t('credentialUnverifiedNote') }}
+      </p>
       <aside v-if="gaps.length" class="muted" data-testid="source-gaps">
         <h2>{{ t('credentialGap') }}</h2>
         <p v-for="gap in gaps" :key="gap.source + gap.reason">

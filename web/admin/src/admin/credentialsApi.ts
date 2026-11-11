@@ -1,4 +1,4 @@
-﻿import type { IAMComponents } from '@auriga/shared';
+import type { IAMComponents } from '@auriga/shared';
 import { apiClient } from '../api';
 export type Credential = IAMComponents['schemas']['CredentialMetadata'];
 export type CredentialGap = IAMComponents['schemas']['CredentialSourceGap'];

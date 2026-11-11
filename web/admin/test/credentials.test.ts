@@ -1,3 +1,4 @@
+import { ApiError } from '@auriga/shared';
 import { mount, flushPromises } from '@vue/test-utils';
 import { afterEach, expect, it, vi } from 'vitest';
 import ElementPlus from 'element-plus';
@@ -143,5 +144,37 @@ it('allows completing reissuance after revocation committed but workspace was un
   await flushPromises();
   expect(credentialsApi.revoke).toHaveBeenCalledTimes(2);
   expect(w.text()).toContain('3');
+  w.unmount();
+});
+
+it('labels deleted instances and never offers reissuance', async () => {
+  const w = setup();
+  vi.mocked(credentialsApi.list).mockResolvedValue({
+    items: [{ ...row, status: 'instance_deleted' }],
+    serviceMetadataAvailable: false,
+    sourceGaps: [],
+  });
+  await flushPromises();
+  expect(w.text()).toContain('\u5b9e\u4f8b\u5df2\u5220\u9664');
+  expect(w.get('[data-testid="revoke"]').attributes('disabled')).toBeDefined();
+  expect(credentialsApi.revoke).not.toHaveBeenCalled();
+  w.unmount();
+});
+
+it('keeps rows when recent verification is incomplete instead of reporting lost permission', async () => {
+  const w = setup();
+  await flushPromises();
+  vi.mocked(credentialsApi.revoke).mockRejectedValue(
+    new ApiError({
+      title: 'step up',
+      status: 403,
+      code: 'iam.step_up_required',
+    }),
+  );
+  await w.get('[data-testid="revoke"]').trigger('click');
+  await w.get('[data-testid="confirm"]').trigger('click');
+  await flushPromises();
+  expect(w.text()).toContain('device-1');
+  expect(w.text()).toContain('\u8eab\u4efd\u9a8c\u8bc1\u672a\u5b8c\u6210');
   w.unmount();
 });

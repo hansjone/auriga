@@ -138,4 +138,63 @@ class WorkspaceCredentialControlTest {
     assertFalse(own.toString().contains("sealing"));
     assertEquals(0, TenantContext.call(other, control::snapshot).entries().size());
   }
+
+  @Test
+  void deletedAndForeignInstancesAreAbsentFromBatchWithoutLocks() throws Exception {
+    // A separate transaction retains an update lock: a metadata read must not wait for it.
+    var ready = new java.util.concurrent.CountDownLatch(1);
+    var release = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+      var writer =
+          executor.submit(
+              () ->
+                  TenantContext.run(
+                      tenant,
+                      () ->
+                          store.tx(
+                              () -> {
+                                store.instance(instance);
+                                ready.countDown();
+                                try {
+                                  if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                                    throw new IllegalStateException();
+                                } catch (InterruptedException e) {
+                                  Thread.currentThread().interrupt();
+                                  throw new IllegalStateException(e);
+                                }
+                                return null;
+                              })));
+      try {
+        assertTrue(ready.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(3),
+            () ->
+                assertEquals(
+                    Map.of(instance, 1L),
+                    TenantContext.call(
+                        tenant,
+                        () ->
+                            control.currentVersions(
+                                tenant, List.of(instance, UUID.randomUUID())))));
+      } finally {
+        release.countDown();
+        writer.get(5, java.util.concurrent.TimeUnit.SECONDS);
+      }
+    }
+    TenantContext.run(
+        tenant,
+        () ->
+            store.tx(
+                () ->
+                    store.jdbc.update(
+                        "UPDATE instance SET deleted=true WHERE tenant_id=? AND id=?",
+                        tenant,
+                        instance)));
+    assertTrue(
+        TenantContext.call(tenant, () -> control.currentVersions(tenant, List.of(instance)))
+            .isEmpty());
+    assertTrue(
+        TenantContext.call(other, () -> control.currentVersions(other, List.of(instance)))
+            .isEmpty());
+  }
 }

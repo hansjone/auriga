@@ -41,7 +41,7 @@ paths:
       x-permission: iam.keys.write
       parameters:
         - { name: type, in: query, schema: { type: string, enum: [managed, signing, service, node, keyset] } }
-        - { name: status, in: query, schema: { type: string, enum: [active, revoked, expired, next, retiring] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, revoked, expired, next, retiring, instance_deleted] } }
         - { name: expiringSoon, in: query, schema: { type: boolean, default: false } }
       responses:
         '200':
@@ -1196,7 +1196,7 @@ components:
       properties:
         id: { type: string }
         type: { type: string, enum: [managed, signing, service, node, keyset] }
-        status: { type: string, enum: [active, revoked, expired, next, retiring] }
+        status: { type: string, enum: [active, revoked, expired, next, retiring, instance_deleted] }
         source: { type: string }
         versionLabel: { type: string }
         replacementVersion: { type: integer, format: int64, minimum: 1, maximum: 9007199254740991, description: Authoritative workspace version scheduled for issuance }

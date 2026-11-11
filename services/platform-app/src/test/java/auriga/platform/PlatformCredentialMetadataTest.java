@@ -33,7 +33,7 @@ class PlatformCredentialMetadataTest {
     var source =
         new PlatformCredentialMetadataConfiguration.Source(
             env, mock(ObjectProvider.class), mock(ObjectProvider.class));
-    var result = TenantContext.call(UUID.randomUUID(), source::snapshot);
+    var result = TenantContext.call(TenantContext.PLATFORM_TENANT, source::snapshot);
     assertEquals(2, result.entries().size());
     assertFalse(result.toString().contains("must-not-leak"));
     assertTrue(result.gaps().stream().anyMatch(g -> g.source().equals("network-keyset")));
@@ -53,5 +53,27 @@ class PlatformCredentialMetadataTest {
     assertEquals("42:k1", entries.get(1).versionLabel());
     assertEquals("retiring", entries.get(1).status());
     assertFalse(entries.toString().contains("must-not-leak"));
+  }
+
+  @Test
+  void tenantCannotReadIdentityOrPanelInstallationFiles() throws Exception {
+    var identity = directory.resolve("restricted-identity.json");
+    Files.writeString(identity, "{\"keys\":[{\"kid\":\"restricted-key\",\"state\":\"CURRENT\"}]}");
+    var panel = directory.resolve("restricted-panel.json");
+    Files.writeString(
+        panel,
+        "{\"signature\":{\"kid\":\"restricted-panel\"},\"issuedAt\":\"2026-01-01T00:00:00Z\",\"expiresAt\":\"2026-02-01T00:00:00Z\"}");
+    var source =
+        new PlatformCredentialMetadataConfiguration.Source(
+            new MockEnvironment()
+                .withProperty("auriga.credentials.identity-keyset-file", identity.toString())
+                .withProperty("auriga.credentials.panel-manifest-file", panel.toString()),
+            mock(ObjectProvider.class),
+            mock(ObjectProvider.class));
+    assertEquals(
+        2, TenantContext.call(TenantContext.PLATFORM_TENANT, source::snapshot).entries().size());
+    var result = TenantContext.call(UUID.randomUUID(), source::snapshot);
+    assertTrue(result.entries().isEmpty());
+    assertEquals(3, result.gaps().size());
   }
 }

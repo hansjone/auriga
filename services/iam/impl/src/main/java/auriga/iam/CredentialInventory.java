@@ -40,11 +40,13 @@ public final class CredentialInventory {
         type == null || Set.of("managed", "signing", "service", "node", "keyset").contains(type));
     IamError.validate(
         status == null
-            || Set.of("active", "revoked", "expired", "next", "retiring").contains(status));
+            || Set.of("active", "revoked", "expired", "next", "retiring", "instance_deleted")
+                .contains(status));
     List<ObjectNode> items = new ArrayList<>();
     if (type == null || type.equals("managed"))
       items.addAll(store.tx(() -> store.all("managed_device").stream().map(this::device).toList()));
-    if (type == null || type.equals("signing"))
+    boolean platform = TenantContext.require().equals(SigningKeys.PLATFORM);
+    if (platform && (type == null || type.equals("signing")))
       items.addAll(
           store.isolated(
               SigningKeys.PLATFORM,
@@ -59,11 +61,20 @@ public final class CredentialInventory {
     boolean nodeAvailable = false;
     var availableSources = sources.get();
     for (var source : availableSources) {
+      if (!platform && source.name().equals("iam-service-issuance")) {
+        gaps.add(new auriga.iam.api.CredentialMetadataSource.Gap(source.name(), "not_configured"));
+        continue;
+      }
       try {
         var snapshot = source.snapshot();
         if (source.name().equals("workspace-node-certificates")) nodeAvailable = true;
         gaps.addAll(snapshot.gaps());
         for (var entry : snapshot.entries()) {
+          if (!platform
+              && (entry.type().equals("service")
+                  || entry.type().equals("signing")
+                  || Set.of("identity-header", "panel-manifest", "network-root")
+                      .contains(entry.source()))) continue;
           if (entry.type().equals("service")) serviceAvailable = true;
           if (entry.type().equals("node")) nodeAvailable = true;
           if (type != null && !type.equals(entry.type())) continue;
@@ -93,24 +104,34 @@ public final class CredentialInventory {
       }
     }
     var rotation = rotations.get();
-    for (var item : items)
-      if (item.path("type").asString().equals("managed")) {
-        try {
-          if (rotation == null) throw new IllegalStateException();
-          long current =
-              rotation.currentVersion(
-                  TenantContext.require(), UUID.fromString(item.path("id").asString()));
-          if (current > item.path("version").asLong()) item.put("replacementVersion", current);
-        } catch (RuntimeException unavailable) {
-          if (gaps.stream().noneMatch(g -> g.source().equals("workspace-rotation")))
-            gaps.add(
-                new auriga.iam.api.CredentialMetadataSource.Gap(
-                    "workspace-rotation", "unavailable"));
+    var managedItems =
+        items.stream().filter(i -> i.path("type").asString().equals("managed")).toList();
+    if (!managedItems.isEmpty()) {
+      try {
+        if (rotation == null) throw new IllegalStateException();
+        var versions =
+            rotation.currentVersions(
+                TenantContext.require(),
+                managedItems.stream().map(i -> UUID.fromString(i.path("id").asString())).toList());
+        for (var item : managedItems) {
+          Long current = versions.get(UUID.fromString(item.path("id").asString()));
+          if (current == null) {
+            item.put("status", "instance_deleted");
+            item.put("expiringSoon", false);
+          } else if (current > item.path("version").asLong())
+            item.put("replacementVersion", current);
         }
+      } catch (RuntimeException unavailable) {
+        gaps.add(
+            new auriga.iam.api.CredentialMetadataSource.Gap("workspace-rotation", "unavailable"));
       }
+    }
     if (availableSources.isEmpty())
       gaps.add(
           new auriga.iam.api.CredentialMetadataSource.Gap("platform-keysets", "not_configured"));
+    if (!platform && (type == null || type.equals("signing")))
+      gaps.add(
+          new auriga.iam.api.CredentialMetadataSource.Gap("iam-signing-keys", "not_configured"));
     var filtered =
         items.stream()
             .filter(r -> status == null || status.equals(r.path("status").asString()))
@@ -184,6 +205,28 @@ public final class CredentialInventory {
     var rotation = rotations.get();
     if (rotation == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
     UUID tenant = TenantContext.require();
+    var initial =
+        store.tx(
+            () -> {
+              var row = store.get("managed_device", instance, false);
+              IamError.require(row != null, "not_found", 404);
+              if (row.path("version").asLong() != version)
+                throw new AurigaException(CommonErrors.CONFLICT);
+              return device(row);
+            });
+    Long current =
+        rotation
+            .currentVersions(tenant, List.of(UUID.fromString(instance)))
+            .get(UUID.fromString(instance));
+    if (current == null) {
+      initial.put("status", "instance_deleted");
+      initial.put("expiringSoon", false);
+      return initial;
+    }
+    if (initial.path("status").asString().equals("revoked") && current > version) {
+      initial.put("replacementVersion", current);
+      return initial;
+    }
     var result =
         store.tx(
             () -> {
@@ -192,20 +235,57 @@ public final class CredentialInventory {
               IamError.require(row != null, "not_found", 404);
               if (row.path("version").asLong() != version)
                 throw new AurigaException(CommonErrors.CONFLICT);
-              managed.revoke(
-                  RevokeManagedDeviceRequest.newBuilder()
-                      .setTenantId(TenantContext.require().toString())
-                      .setInstanceId(instance)
-                      .setCredentialVersion(version)
-                      .build());
-              audit.record(
-                  AuditEntry.builder("iam.credential.revoke").target("instance", instance).build());
+              if (!row.path("revoked").asBoolean()) {
+                managed.revoke(
+                    RevokeManagedDeviceRequest.newBuilder()
+                        .setTenantId(tenant.toString())
+                        .setInstanceId(instance)
+                        .setCredentialVersion(version)
+                        .build());
+                audit.record(
+                    AuditEntry.builder("iam.credential.revoke")
+                        .target("instance", instance)
+                        .detail("version", version)
+                        .build());
+              }
               return device(store.get("managed_device", instance, false));
             });
-    long replacement = rotation.rotate(tenant, UUID.fromString(instance), version);
-    if (replacement <= version || replacement > 9007199254740991L)
-      throw new AurigaException(CommonErrors.UNAVAILABLE);
-    result.put("replacementVersion", replacement);
-    return result;
+    try {
+      long replacement = rotation.rotate(tenant, UUID.fromString(instance), version);
+      if (replacement <= version || replacement > 9007199254740991L)
+        throw new AurigaException(CommonErrors.UNAVAILABLE);
+      result.put("replacementVersion", replacement);
+      store.tx(
+          () -> {
+            audit.record(
+                AuditEntry.builder("iam.credential.reissue")
+                    .target("instance", instance)
+                    .detail("version", version)
+                    .detail("replacementVersion", replacement)
+                    .build());
+            return null;
+          });
+      return result;
+    } catch (RuntimeException failure) {
+      if (failure instanceof AurigaException e && e.errorCode().code().equals("common.not_found")) {
+        result.put("status", "instance_deleted");
+        result.put("expiringSoon", false);
+        return result;
+      }
+      store.tx(
+          () -> {
+            audit.record(
+                AuditEntry.builder("iam.credential.reissue")
+                    .target("instance", instance)
+                    .detail("version", version)
+                    .failure(
+                        failure instanceof AurigaException e
+                            ? e.errorCode().code()
+                            : "common.unavailable")
+                    .build());
+            return null;
+          });
+      throw failure;
+    }
   }
 }

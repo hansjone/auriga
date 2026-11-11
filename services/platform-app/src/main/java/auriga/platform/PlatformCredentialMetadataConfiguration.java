@@ -78,7 +78,7 @@ public class PlatformCredentialMetadataConfiguration {
               throw new IllegalArgumentException();
             network(signed, entries);
             String root = signed.path("root_auth").path("kid").asString("");
-            if (!root.isEmpty())
+            if (!root.isEmpty() && TenantContext.require().equals(TenantContext.PLATFORM_TENANT)) {
               entries.add(
                   new Entry(
                       "network-root:" + root,
@@ -88,12 +88,17 @@ public class PlatformCredentialMetadataConfiguration {
                       null,
                       null,
                       "active"));
-            gaps.add(new Gap("network-root", "validity_unavailable"));
+              gaps.add(new Gap("network-root", "validity_unavailable"));
+            }
           },
           gaps);
       read(
           "identity-header",
           () -> {
+            if (!TenantContext.require().equals(TenantContext.PLATFORM_TENANT)) {
+              gaps.add(new Gap("identity-header", "not_configured"));
+              return;
+            }
             var keys = file(env.getProperty("auriga.credentials.identity-keyset-file"));
             if (keys == null) {
               gaps.add(new Gap("identity-header", "not_configured"));
@@ -120,6 +125,10 @@ public class PlatformCredentialMetadataConfiguration {
       read(
           "panel-manifest",
           () -> {
+            if (!TenantContext.require().equals(TenantContext.PLATFORM_TENANT)) {
+              gaps.add(new Gap("panel-manifest", "not_configured"));
+              return;
+            }
             var manifest = file(env.getProperty("auriga.credentials.panel-manifest-file"));
             if (manifest == null) {
               gaps.add(new Gap("panel-manifest", "not_configured"));

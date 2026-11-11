@@ -1,4 +1,6 @@
 export const credentialsZh = {
+  credentialVerification: '身份验证未完成，请重试',
+  credentialUnverifiedNote: '文件来源仅为未验签的元数据投影。',
   credentialTitle: '平台凭据',
   credentialType: '类型',
   credentialAll: '全部',
@@ -44,6 +46,7 @@ export const credentialsZh = {
     unavailable: '暂时无法读取，请重试',
   },
   credentialStates: {
+    instance_deleted: '实例已删除',
     active: '有效',
     revoked: '已吊销',
     expired: '已到期',
@@ -52,6 +55,9 @@ export const credentialsZh = {
   },
 };
 export const credentialsEn = {
+  credentialVerification: 'Identity verification incomplete; retry',
+  credentialUnverifiedNote:
+    'File sources are metadata projections without signature verification.',
   credentialTitle: 'Platform credentials',
   credentialType: 'Type',
   credentialAll: 'All',
@@ -98,6 +104,7 @@ export const credentialsEn = {
     unavailable: 'Source unavailable; retry later',
   },
   credentialStates: {
+    instance_deleted: 'Instance deleted',
     active: 'Active',
     revoked: 'Revoked',
     expired: 'Expired',

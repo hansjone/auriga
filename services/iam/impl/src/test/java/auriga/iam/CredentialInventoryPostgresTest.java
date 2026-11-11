@@ -45,7 +45,8 @@ class CredentialInventoryPostgresTest {
 
   @BeforeEach
   void seed() {
-    when(rotation.currentVersion(any(), any())).thenReturn(2L);
+    when(rotation.currentVersions(any(), anyCollection()))
+        .thenAnswer(c -> tenant.equals(c.getArgument(0)) ? Map.of(instance, 2L) : Map.of());
     when(rotation.rotate(any(), any(), anyLong())).thenReturn(3L);
     store.tenant(
         tenant,
@@ -178,7 +179,7 @@ class CredentialInventoryPostgresTest {
                 null));
     var result =
         store.tenant(
-            tenant,
+            SigningKeys.PLATFORM,
             () ->
                 new CredentialInventory(store, managed, clock, audit, List::of, () -> rotation)
                     .list("signing", "retiring", true));
@@ -299,7 +300,7 @@ class CredentialInventoryPostgresTest {
             });
     var result = TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 2));
     assertEquals(3, result.path("replacementVersion").asLong());
-    when(rotation.currentVersion(any(), any())).thenReturn(3L);
+    when(rotation.currentVersions(any(), anyCollection())).thenReturn(Map.of(instance, 3L));
     assertEquals(
         3,
         TenantContext.call(tenant, () -> inventory.list("managed", null, false))
@@ -332,7 +333,8 @@ class CredentialInventoryPostgresTest {
     var inventory =
         new CredentialInventory(
             store, managed, clock, audit, () -> List.of(source), () -> rotation);
-    var result = TenantContext.call(tenant, () -> inventory.list("service", null, true));
+    var result =
+        TenantContext.call(SigningKeys.PLATFORM, () -> inventory.list("service", null, true));
     assertEquals(1, result.path("items").size());
     assertEquals("v1", result.path("items").get(0).path("versionLabel").asString());
     assertEquals("identity-header", result.path("sourceGaps").get(0).path("source").asString());
@@ -370,5 +372,57 @@ class CredentialInventoryPostgresTest {
         TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 2))
             .path("replacementVersion")
             .asLong());
+  }
+
+  @Test
+  void deletedInstanceIsTerminalAndNeverRevokesOrAuditsOnRetry() {
+    when(rotation.currentVersions(any(), anyCollection())).thenReturn(Map.of());
+    var inventory = new CredentialInventory(store, managed, clock, audit, List::of, () -> rotation);
+    var list = TenantContext.call(tenant, () -> inventory.list("managed", null, false));
+    assertEquals("instance_deleted", list.path("items").get(0).path("status").asString());
+    assertFalse(list.path("sourceGaps").toString().contains("workspace-rotation"));
+    for (int i = 0; i < 2; i++)
+      assertEquals(
+          "instance_deleted",
+          TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 2))
+              .path("status")
+              .asString());
+    verifyNoInteractions(managed, audit);
+    verify(rotation, never()).rotate(any(), any(), anyLong());
+    verify(rotation, times(3)).currentVersions(eq(tenant), anyCollection());
+  }
+
+  @Test
+  void nonPlatformTenantCannotReadInstallationSources() {
+    String kid = UUID.randomUUID().toString();
+    store.isolated(
+        SigningKeys.PLATFORM,
+        () ->
+            store.insert(
+                "signing_key",
+                kid,
+                Json.object(
+                    "kid", kid, "state", "current", "publishedAt", clock.instant().toString()),
+                null));
+    var source = mock(auriga.iam.api.CredentialMetadataSource.class);
+    when(source.name()).thenReturn("iam-service-issuance");
+    var inventory =
+        new CredentialInventory(
+            store, managed, clock, audit, () -> List.of(source), () -> rotation);
+    var result = TenantContext.call(tenant, () -> inventory.list("signing", null, false));
+    assertTrue(result.path("items").isEmpty());
+    verify(source, never()).snapshot();
+  }
+
+  @Test
+  void concurrentDeletionAfterPreflightReturnsTerminalState() {
+    var inventory = new CredentialInventory(store, managed, clock, audit, List::of, () -> rotation);
+    when(rotation.rotate(any(), any(), anyLong()))
+        .thenThrow(new AurigaException(auriga.common.error.CommonErrors.NOT_FOUND));
+    assertEquals(
+        "instance_deleted",
+        TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 2))
+            .path("status")
+            .asString());
   }
 }
