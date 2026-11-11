@@ -138,7 +138,7 @@ class OrgPolicyIntegrityTest {
             store.tenant(
                 TENANT,
                 () -> {
-                  svc.putPolicy(key, OrgJson.object("unknown", true), 1L);
+                  authorizedPut(key, OrgJson.object("unknown", true), 1L);
                   throw new IllegalStateException("rollback");
                 }));
     assertEquals(before, get(key));
@@ -166,8 +166,7 @@ class OrgPolicyIntegrityTest {
     assertEquals(expected, result);
     boolean secondCommitted = expected.equals("committed");
     assertEquals(secondCommitted ? 3 : 2, get(key).path("version").asLong());
-    assertEquals(
-        secondCommitted ? "second" : "first", get(key).path("value").path("writer").asString());
+    assertEquals(secondCommitted ? "second" : "first", marker(key, get(key).path("value")));
     assertEquals(0, eventCount());
   }
 
@@ -292,7 +291,7 @@ class OrgPolicyIntegrityTest {
 
   private static String race(String key, boolean repeatableRead, boolean withEtag)
       throws Exception {
-    String sibling = key.equals("login") ? "egress" : "login";
+    String sibling = key.equals("login") ? "workspace" : "login";
     put(sibling, OrgJson.object("rollback", "before"), 1L);
     var firstWritten = new CountDownLatch(1);
     var releaseFirst = new CountDownLatch(1);
@@ -309,7 +308,7 @@ class OrgPolicyIntegrityTest {
                       TENANT,
                       () -> {
                         store.jdbc().execute("SET LOCAL statement_timeout='12s'");
-                        svc.putPolicy(key, OrgJson.object("writer", "first"), 1L);
+                        authorizedPut(key, OrgJson.object("writer", "first"), 1L);
                         firstWritten.countDown();
                         await(releaseFirst);
                         return "committed";
@@ -339,9 +338,9 @@ class OrgPolicyIntegrityTest {
                                       .update(
                                           "UPDATE policy SET value='{\"rollback\":\"after\"}'::jsonb WHERE tenant_id=? AND key=?",
                                           TENANT,
-                                          key.equals("login") ? "egress" : "login");
+                                          key.equals("login") ? "workspace" : "login");
                                   secondStarted.countDown();
-                                  svc.putPolicy(
+                                  authorizedPut(
                                       key,
                                       OrgJson.object("writer", "second"),
                                       withEtag ? 1L : null);
@@ -373,12 +372,45 @@ class OrgPolicyIntegrityTest {
     }
   }
 
+  private static ObjectNode authorizedPut(String key, JsonNode value, Long etag) {
+    var principal =
+        new auriga.common.security.AurigaPrincipal(
+            "00000000-0000-4000-8000-000000000001",
+            TENANT,
+            auriga.common.security.PrincipalType.USER,
+            auriga.common.security.TokenContext.ADMIN,
+            "session",
+            null,
+            "member",
+            List.of(),
+            java.util.Set.of("org.policies.write"),
+            java.time.Instant.now(),
+            java.time.Instant.now(),
+            "token");
+    JsonNode input =
+        key.equals("egress")
+            ? (value.has("writer")
+                ? OrgJson.object(
+                    "allowDomains", List.of(value.path("writer").asString() + ".example.com"))
+                : OrgJson.object())
+            : value;
+    return auriga.common.context.RequestContext.start("policy-test", null)
+        .withPrincipal(principal)
+        .call(() -> svc.putPolicy(key, input, etag));
+  }
+
+  private static String marker(String key, JsonNode value) {
+    return key.equals("egress")
+        ? value.path("allowDomains").path(0).asString().split("\\.")[0]
+        : value.path("writer").asString();
+  }
+
   private static ObjectNode get(String key) {
     return TenantContext.call(TENANT, () -> svc.getPolicy(key));
   }
 
   private static ObjectNode put(String key, JsonNode value, Long etag) {
-    return TenantContext.call(TENANT, () -> svc.putPolicy(key, value, etag));
+    return TenantContext.call(TENANT, () -> authorizedPut(key, value, etag));
   }
 
   private static int eventCount() {

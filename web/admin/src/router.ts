@@ -1,3 +1,5 @@
+import EntriesView from './views/security/EntriesView.vue';
+import EgressView from './views/security/EgressView.vue';
 import { createRouter, createWebHistory } from 'vue-router';
 import LoginView from './views/LoginView.vue';
 import AdminLayout from './layouts/AdminLayout.vue';
@@ -20,6 +22,8 @@ import UsageView from './views/models/UsageView.vue';
 import { navigation } from './admin/navigation';
 
 const existing = new Set([
+  '/security/entries',
+  '/security/egress',
   '/overview',
   '/models/providers',
   '/settings',
@@ -55,6 +59,8 @@ export const router = createRouter({
       children: [
         { path: '', redirect: '/overview' },
         { path: 'overview', component: OverviewView },
+        { path: 'security/entries', component: EntriesView },
+        { path: 'security/egress', component: EgressView },
         { path: 'resources', component: ResourcesView },
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },

@@ -1026,6 +1026,23 @@ public final class OrgService {
 
   // ---- policies ----
 
+  public ObjectNode securityEntries() {
+    if (deploymentAccess == null
+        || !TenantContext.require().toString().equals(deploymentAccess.tenantId()))
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    return OrgJson.object(
+        "mode",
+        deploymentAccess.mode(),
+        "portalOrigin",
+        deploymentAccess.portalUrl(),
+        "adminOrigin",
+        deploymentAccess.adminUrl(),
+        "instanceParentDomain",
+        deploymentAccess.instanceParentDomain(),
+        "ingressKind",
+        deploymentAccess.ingressKind());
+  }
+
   public ObjectNode getPolicy(String key) {
     return store.tx(
         () -> {
@@ -1058,6 +1075,12 @@ public final class OrgService {
   }
 
   public ObjectNode putPolicy(String key, JsonNode value, Long ifMatch) {
+    if (key.equals("egress")) {
+      new AuthorizationRules(
+              Set.of("org.policies.write"), true, java.time.Duration.ofMinutes(10), true)
+          .check(AuthorizationRules.currentPrincipal().orElse(null), clock);
+      EgressPolicyValidation.validate(value);
+    }
     return store.tx(
         () -> {
           OrgError.require(Set.of("workspace", "egress", "login").contains(key), "conflict", 409);

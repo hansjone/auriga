@@ -24,6 +24,26 @@ tags:
   - name: quotas
   - name: invitations
 paths:
+  /admin/security/entries:
+    get:
+      operationId: adminSecNetEntries
+      summary: Read validated installation entry configuration
+      tags: [policies]
+      x-admin-only: true
+      x-permission: org.policies.read
+      responses:
+        '200':
+          description: Configured origins; does not attest live TLS or reachability.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSecNetEntries' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '503':
+          description: Installation configuration unavailable
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+
   /me:
     get:
       tags: [me]
@@ -801,6 +821,17 @@ components:
   securitySchemes:
     bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
   schemas:
+    AdminSecNetEntries:
+      type: object
+      additionalProperties: false
+      required: [mode, portalOrigin, adminOrigin, instanceParentDomain, ingressKind]
+      properties:
+        mode: { type: string, enum: [domain, ip] }
+        portalOrigin: { type: string, format: uri }
+        adminOrigin: { type: string, format: uri }
+        instanceParentDomain: { type: string }
+        ingressKind: { type: string, enum: [direct, trusted_proxy] }
+
     Tenant:
       type: object
       properties:
