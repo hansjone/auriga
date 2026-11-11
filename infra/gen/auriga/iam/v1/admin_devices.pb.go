@@ -21,26 +21,26 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type ReadAdminDeviceBindingsRequest struct {
+type ReadBindingsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ReadAdminDeviceBindingsRequest) Reset() {
-	*x = ReadAdminDeviceBindingsRequest{}
+func (x *ReadBindingsRequest) Reset() {
+	*x = ReadBindingsRequest{}
 	mi := &file_auriga_iam_v1_admin_devices_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ReadAdminDeviceBindingsRequest) String() string {
+func (x *ReadBindingsRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ReadAdminDeviceBindingsRequest) ProtoMessage() {}
+func (*ReadBindingsRequest) ProtoMessage() {}
 
-func (x *ReadAdminDeviceBindingsRequest) ProtoReflect() protoreflect.Message {
+func (x *ReadBindingsRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_auriga_iam_v1_admin_devices_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -52,8 +52,8 @@ func (x *ReadAdminDeviceBindingsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReadAdminDeviceBindingsRequest.ProtoReflect.Descriptor instead.
-func (*ReadAdminDeviceBindingsRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ReadBindingsRequest.ProtoReflect.Descriptor instead.
+func (*ReadBindingsRequest) Descriptor() ([]byte, []int) {
 	return file_auriga_iam_v1_admin_devices_proto_rawDescGZIP(), []int{0}
 }
 
@@ -133,27 +133,27 @@ func (x *AdminDeviceConnectionBinding) GetIngress() string {
 	return ""
 }
 
-type ReadAdminDeviceBindingsResponse struct {
+type ReadBindingsResponse struct {
 	state         protoimpl.MessageState          `protogen:"open.v1"`
 	Items         []*AdminDeviceConnectionBinding `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ReadAdminDeviceBindingsResponse) Reset() {
-	*x = ReadAdminDeviceBindingsResponse{}
+func (x *ReadBindingsResponse) Reset() {
+	*x = ReadBindingsResponse{}
 	mi := &file_auriga_iam_v1_admin_devices_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ReadAdminDeviceBindingsResponse) String() string {
+func (x *ReadBindingsResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ReadAdminDeviceBindingsResponse) ProtoMessage() {}
+func (*ReadBindingsResponse) ProtoMessage() {}
 
-func (x *ReadAdminDeviceBindingsResponse) ProtoReflect() protoreflect.Message {
+func (x *ReadBindingsResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_auriga_iam_v1_admin_devices_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -165,12 +165,12 @@ func (x *ReadAdminDeviceBindingsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReadAdminDeviceBindingsResponse.ProtoReflect.Descriptor instead.
-func (*ReadAdminDeviceBindingsResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ReadBindingsResponse.ProtoReflect.Descriptor instead.
+func (*ReadBindingsResponse) Descriptor() ([]byte, []int) {
 	return file_auriga_iam_v1_admin_devices_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ReadAdminDeviceBindingsResponse) GetItems() []*AdminDeviceConnectionBinding {
+func (x *ReadBindingsResponse) GetItems() []*AdminDeviceConnectionBinding {
 	if x != nil {
 		return x.Items
 	}
@@ -181,18 +181,18 @@ var File_auriga_iam_v1_admin_devices_proto protoreflect.FileDescriptor
 
 const file_auriga_iam_v1_admin_devices_proto_rawDesc = "" +
 	"\n" +
-	"!auriga/iam/v1/admin_devices.proto\x12\rauriga.iam.v1\" \n" +
-	"\x1eReadAdminDeviceBindingsRequest\"\xa4\x01\n" +
+	"!auriga/iam/v1/admin_devices.proto\x12\rauriga.iam.v1\"\x15\n" +
+	"\x13ReadBindingsRequest\"\xa4\x01\n" +
 	"\x1cAdminDeviceConnectionBinding\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x1b\n" +
 	"\tclient_id\x18\x03 \x01(\tR\bclientId\x12\x18\n" +
 	"\aaccount\x18\x04 \x01(\tR\aaccount\x12\x18\n" +
-	"\aingress\x18\x05 \x01(\tR\aingress\"d\n" +
-	"\x1fReadAdminDeviceBindingsResponse\x12A\n" +
-	"\x05items\x18\x01 \x03(\v2+.auriga.iam.v1.AdminDeviceConnectionBindingR\x05items2\x8b\x01\n" +
-	"\x1aAdminDeviceBindingsService\x12m\n" +
-	"\fReadBindings\x12-.auriga.iam.v1.ReadAdminDeviceBindingsRequest\x1a..auriga.iam.v1.ReadAdminDeviceBindingsResponseBU\n" +
+	"\aingress\x18\x05 \x01(\tR\aingress\"Y\n" +
+	"\x14ReadBindingsResponse\x12A\n" +
+	"\x05items\x18\x01 \x03(\v2+.auriga.iam.v1.AdminDeviceConnectionBindingR\x05items2u\n" +
+	"\x1aAdminDeviceBindingsService\x12W\n" +
+	"\fReadBindings\x12\".auriga.iam.v1.ReadBindingsRequest\x1a#.auriga.iam.v1.ReadBindingsResponseBU\n" +
 	"\x17auriga.contracts.iam.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1b\x06proto3"
 
 var (
@@ -209,14 +209,14 @@ func file_auriga_iam_v1_admin_devices_proto_rawDescGZIP() []byte {
 
 var file_auriga_iam_v1_admin_devices_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_auriga_iam_v1_admin_devices_proto_goTypes = []any{
-	(*ReadAdminDeviceBindingsRequest)(nil),  // 0: auriga.iam.v1.ReadAdminDeviceBindingsRequest
-	(*AdminDeviceConnectionBinding)(nil),    // 1: auriga.iam.v1.AdminDeviceConnectionBinding
-	(*ReadAdminDeviceBindingsResponse)(nil), // 2: auriga.iam.v1.ReadAdminDeviceBindingsResponse
+	(*ReadBindingsRequest)(nil),          // 0: auriga.iam.v1.ReadBindingsRequest
+	(*AdminDeviceConnectionBinding)(nil), // 1: auriga.iam.v1.AdminDeviceConnectionBinding
+	(*ReadBindingsResponse)(nil),         // 2: auriga.iam.v1.ReadBindingsResponse
 }
 var file_auriga_iam_v1_admin_devices_proto_depIdxs = []int32{
-	1, // 0: auriga.iam.v1.ReadAdminDeviceBindingsResponse.items:type_name -> auriga.iam.v1.AdminDeviceConnectionBinding
-	0, // 1: auriga.iam.v1.AdminDeviceBindingsService.ReadBindings:input_type -> auriga.iam.v1.ReadAdminDeviceBindingsRequest
-	2, // 2: auriga.iam.v1.AdminDeviceBindingsService.ReadBindings:output_type -> auriga.iam.v1.ReadAdminDeviceBindingsResponse
+	1, // 0: auriga.iam.v1.ReadBindingsResponse.items:type_name -> auriga.iam.v1.AdminDeviceConnectionBinding
+	0, // 1: auriga.iam.v1.AdminDeviceBindingsService.ReadBindings:input_type -> auriga.iam.v1.ReadBindingsRequest
+	2, // 2: auriga.iam.v1.AdminDeviceBindingsService.ReadBindings:output_type -> auriga.iam.v1.ReadBindingsResponse
 	2, // [2:3] is the sub-list for method output_type
 	1, // [1:2] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name

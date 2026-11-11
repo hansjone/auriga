@@ -173,7 +173,7 @@ func (c *iamRPC) ReadDeviceBindings(ctx context.Context, tenant string) ([]devic
 		return nil, err
 	}
 	defer cancel()
-	response, err := iamv1.NewAdminDeviceBindingsServiceClient(c.conn).ReadBindings(ctx, &iamv1.ReadAdminDeviceBindingsRequest{})
+	response, err := iamv1.NewAdminDeviceBindingsServiceClient(c.conn).ReadBindings(ctx, &iamv1.ReadBindingsRequest{})
 	if err != nil {
 		return nil, errIAMUnavailable
 	}

@@ -16,8 +16,7 @@ class AdminDeviceBindingsAuthTest {
     Runnable read =
         () ->
             service.readBindings(
-                ReadAdminDeviceBindingsRequest.getDefaultInstance(),
-                new IamGrpcDevicesSpringTest.Capture<>());
+                ReadBindingsRequest.getDefaultInstance(), new IamGrpcDevicesSpringTest.Capture<>());
     assertEquals(
         "common.unauthenticated",
         assertThrows(AurigaException.class, read::run).errorCode().code());
@@ -47,8 +46,8 @@ class AdminDeviceBindingsAuthTest {
         "svc:edge",
         identity.tenant,
         () -> {
-          var result = new IamGrpcDevicesSpringTest.Capture<ReadAdminDeviceBindingsResponse>();
-          service.readBindings(ReadAdminDeviceBindingsRequest.getDefaultInstance(), result);
+          var result = new IamGrpcDevicesSpringTest.Capture<ReadBindingsResponse>();
+          service.readBindings(ReadBindingsRequest.getDefaultInstance(), result);
           assertTrue(result.completed);
           assertEquals(0, result.values.getFirst().getItemsCount());
           return null;

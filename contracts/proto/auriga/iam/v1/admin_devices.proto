@@ -8,9 +8,9 @@ option java_package = "auriga.contracts.iam.v1";
 
 // Only svc:edge with internal JWT, delegated tenant and the existing mTLS channel.
 service AdminDeviceBindingsService {
-  rpc ReadBindings(ReadAdminDeviceBindingsRequest) returns (ReadAdminDeviceBindingsResponse);
+  rpc ReadBindings(ReadBindingsRequest) returns (ReadBindingsResponse);
 }
-message ReadAdminDeviceBindingsRequest {}
+message ReadBindingsRequest {}
 message AdminDeviceConnectionBinding {
   string device = 1;
   string server_id = 2;
@@ -18,6 +18,6 @@ message AdminDeviceConnectionBinding {
   string account = 4;
   string ingress = 5;
 }
-message ReadAdminDeviceBindingsResponse {
+message ReadBindingsResponse {
   repeated AdminDeviceConnectionBinding items = 1;
 }

@@ -89,7 +89,8 @@ paths:
                 required: [id, credentialRevoked, disconnectStatus]
                 properties:
                   id: { type: string, format: uuid }
-                  credentialRevoked: { type: boolean, const: true }
+                  # Preserve the true-only boolean while avoiding a Boolean enum in the pinned Java generator.
+                  credentialRevoked: { type: boolean, not: { const: false } }
                   disconnectStatus: { type: string, const: pending }
 
         '403': { $ref: './common.yaml#/components/responses/Forbidden' }

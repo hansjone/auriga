@@ -110,8 +110,8 @@ type csrfRPCServer struct {
 	session *iamv1.Session
 }
 
-func (s *csrfRPCServer) ReadBindings(context.Context, *iamv1.ReadAdminDeviceBindingsRequest) (*iamv1.ReadAdminDeviceBindingsResponse, error) {
-	return &iamv1.ReadAdminDeviceBindingsResponse{Items: []*iamv1.AdminDeviceConnectionBinding{{Device: "device", ServerId: "server", ClientId: "7", Account: "CLIENTS", Ingress: "ingress"}}}, nil
+func (s *csrfRPCServer) ReadBindings(context.Context, *iamv1.ReadBindingsRequest) (*iamv1.ReadBindingsResponse, error) {
+	return &iamv1.ReadBindingsResponse{Items: []*iamv1.AdminDeviceConnectionBinding{{Device: "device", ServerId: "server", ClientId: "7", Account: "CLIENTS", Ingress: "ingress"}}}, nil
 }
 
 func (s *csrfRPCServer) VerifyAdminSessionCsrf(ctx context.Context, req *iamv1.VerifyAdminSessionCsrfRequest) (*iamv1.VerifyAdminSessionCsrfResponse, error) {

@@ -18,8 +18,7 @@ public class IamGrpcAdminDevices
   @Override
   @AuthenticatedOnly
   public void readBindings(
-      ReadAdminDeviceBindingsRequest request,
-      StreamObserver<ReadAdminDeviceBindingsResponse> observer) {
+      ReadBindingsRequest request, StreamObserver<ReadBindingsResponse> observer) {
     var principal =
         AuthorizationRules.currentPrincipal()
             .orElseThrow(() -> new AurigaException(CommonErrors.UNAUTHENTICATED));
@@ -27,7 +26,7 @@ public class IamGrpcAdminDevices
       throw new AurigaException(CommonErrors.FORBIDDEN);
     if (TenantContext.current().filter(t -> !TenantContext.PLATFORM_TENANT.equals(t)).isEmpty())
       throw new AurigaException(CommonErrors.FORBIDDEN);
-    var response = ReadAdminDeviceBindingsResponse.newBuilder();
+    var response = ReadBindingsResponse.newBuilder();
     for (var row : devices.connectionBindings().path("items"))
       response.addItems(
           AdminDeviceConnectionBinding.newBuilder()

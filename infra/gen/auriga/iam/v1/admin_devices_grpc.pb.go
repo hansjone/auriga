@@ -28,7 +28,7 @@ const (
 //
 // Only svc:edge with internal JWT, delegated tenant and the existing mTLS channel.
 type AdminDeviceBindingsServiceClient interface {
-	ReadBindings(ctx context.Context, in *ReadAdminDeviceBindingsRequest, opts ...grpc.CallOption) (*ReadAdminDeviceBindingsResponse, error)
+	ReadBindings(ctx context.Context, in *ReadBindingsRequest, opts ...grpc.CallOption) (*ReadBindingsResponse, error)
 }
 
 type adminDeviceBindingsServiceClient struct {
@@ -39,9 +39,9 @@ func NewAdminDeviceBindingsServiceClient(cc grpc.ClientConnInterface) AdminDevic
 	return &adminDeviceBindingsServiceClient{cc}
 }
 
-func (c *adminDeviceBindingsServiceClient) ReadBindings(ctx context.Context, in *ReadAdminDeviceBindingsRequest, opts ...grpc.CallOption) (*ReadAdminDeviceBindingsResponse, error) {
+func (c *adminDeviceBindingsServiceClient) ReadBindings(ctx context.Context, in *ReadBindingsRequest, opts ...grpc.CallOption) (*ReadBindingsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ReadAdminDeviceBindingsResponse)
+	out := new(ReadBindingsResponse)
 	err := c.cc.Invoke(ctx, AdminDeviceBindingsService_ReadBindings_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func (c *adminDeviceBindingsServiceClient) ReadBindings(ctx context.Context, in 
 //
 // Only svc:edge with internal JWT, delegated tenant and the existing mTLS channel.
 type AdminDeviceBindingsServiceServer interface {
-	ReadBindings(context.Context, *ReadAdminDeviceBindingsRequest) (*ReadAdminDeviceBindingsResponse, error)
+	ReadBindings(context.Context, *ReadBindingsRequest) (*ReadBindingsResponse, error)
 	mustEmbedUnimplementedAdminDeviceBindingsServiceServer()
 }
 
@@ -66,7 +66,7 @@ type AdminDeviceBindingsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAdminDeviceBindingsServiceServer struct{}
 
-func (UnimplementedAdminDeviceBindingsServiceServer) ReadBindings(context.Context, *ReadAdminDeviceBindingsRequest) (*ReadAdminDeviceBindingsResponse, error) {
+func (UnimplementedAdminDeviceBindingsServiceServer) ReadBindings(context.Context, *ReadBindingsRequest) (*ReadBindingsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReadBindings not implemented")
 }
 func (UnimplementedAdminDeviceBindingsServiceServer) mustEmbedUnimplementedAdminDeviceBindingsServiceServer() {
@@ -92,7 +92,7 @@ func RegisterAdminDeviceBindingsServiceServer(s grpc.ServiceRegistrar, srv Admin
 }
 
 func _AdminDeviceBindingsService_ReadBindings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReadAdminDeviceBindingsRequest)
+	in := new(ReadBindingsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func _AdminDeviceBindingsService_ReadBindings_Handler(srv interface{}, ctx conte
 		FullMethod: AdminDeviceBindingsService_ReadBindings_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AdminDeviceBindingsServiceServer).ReadBindings(ctx, req.(*ReadAdminDeviceBindingsRequest))
+		return srv.(AdminDeviceBindingsServiceServer).ReadBindings(ctx, req.(*ReadBindingsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

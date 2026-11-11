@@ -1908,8 +1908,7 @@ export interface operations {
           'application/json': {
             /** Format: uuid */
             id: string;
-            /** @constant */
-            credentialRevoked: true;
+            credentialRevoked: boolean;
             /** @constant */
             disconnectStatus: 'pending';
           };
