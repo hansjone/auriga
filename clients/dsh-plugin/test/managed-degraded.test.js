@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { Buffer } from 'node:buffer';
@@ -24,6 +24,9 @@ for (const credential of [
   'revoked',
   'expired',
   'bad-signature',
+  'closing-grant',
+  'closing-jwks',
+  'closing-profile',
 ])
   test(`message outage preserves model admission only with ${credential} managed identity`, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), 'auriga-degraded-'));
@@ -90,9 +93,30 @@ for (const credential of [
       messageCalls = 0,
       modelCalls = 0,
       recovered = false;
-    t.mock.method(globalThis, 'fetch', async (input) => {
+    let entered;
+    const pendingRequest = new Promise((resolve) => {
+      entered = resolve;
+    });
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
       const url = new URL(input);
       assert.equal(url.origin, origin);
+      const heldPath = {
+        'closing-grant': '/oauth2/token',
+        'closing-jwks': '/oauth2/jwks',
+        'closing-profile': '/api/iam/v1/network/systems',
+      }[credential];
+      if (heldPath && url.pathname === heldPath) {
+        return new Promise((resolve, reject) => {
+          const stop = () => {
+            clearTimeout(timer);
+            reject(new Error('fixture request aborted'));
+          };
+          const timer = setTimeout(stop, 60000);
+          t.after(stop);
+          init.signal.addEventListener('abort', stop, { once: true });
+          entered();
+        });
+      }
       const response = (body, status = 200) =>
         new Response(JSON.stringify(body), { status });
       if (url.pathname === '/oauth2/token') {
@@ -186,14 +210,22 @@ for (const credential of [
     });
     const dispose = runtime.apply(ctx);
     t.after(async () => {
-      dispose();
-      runtime.close();
+      await dispose();
+      await runtime.close();
       for (const effect of effects.reverse())
         if (typeof effect === 'function') await effect();
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    if (credential.startsWith('closing-')) {
+      await pendingRequest;
+      assert.ok(process.getActiveResourcesInfo().includes('Timeout'));
+      await dispose();
+      await runtime.close();
+      assert.equal(process.getActiveResourcesInfo().includes('Timeout'), false);
+      return;
+    }
     const request = (path, authenticated = true) =>
       new Promise((resolve, reject) => {
         const method = path === '/api/session/prompt' ? 'POST' : 'GET';
@@ -290,3 +322,21 @@ for (const credential of [
       assert.equal(modelCalls, 1, 'signed browser identity remains mandatory');
     }
   });
+
+after(async () => {
+  // Native TCP destruction may finish after server.close's callback on Windows.
+  const remainingResources = () =>
+    process
+      .getActiveResourcesInfo()
+      .filter((type) =>
+        ['Timeout', 'TCPWrap', 'TCPSocketWrap', 'TCPServerWrap'].includes(type),
+      );
+  const deadline = Date.now() + 1000;
+  while (remainingResources().length && Date.now() < deadline) await delay(5);
+  const remaining = remainingResources();
+  assert.deepEqual(
+    remaining,
+    [],
+    'managed fixture must release timers and TCP handles',
+  );
+});
