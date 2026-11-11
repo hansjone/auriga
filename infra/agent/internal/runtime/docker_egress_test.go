@@ -22,7 +22,30 @@ func (f *edgeRecoveryFixture) egressInspect() map[string]any {
 		networks["auriga-net-recovery-test"] = map[string]any{"NetworkID": network, "Aliases": []string{alias}}
 	}
 	result := map[string]any{"Id": f.egressID, "Image": fixtureConfigID, "Config": config, "State": state, "HostConfig": host, "NetworkSettings": map[string]any{"Networks": networks}}
+	policyMount := map[string]any{"Type": "volume", "Name": "test_egress-policies", "Destination": "/var/auriga-egress/policies", "RW": false}
+	reportMount := map[string]any{"Type": "volume", "Name": "test_egress-reports", "Destination": "/var/auriga-egress/reports", "RW": true}
+	result["Mounts"] = []any{policyMount, reportMount}
 	switch f.failure {
+	case "egress-legacy":
+		delete(result, "Mounts")
+	case "egress-reversed-volumes":
+		result["Mounts"] = []any{reportMount, policyMount}
+	case "egress-policy-writable":
+		policyMount["RW"] = true
+	case "egress-report-readonly":
+		reportMount["RW"] = false
+	case "egress-foreign-volume":
+		policyMount["Name"] = "other_egress-policies"
+	case "egress-bind-volume":
+		policyMount["Type"] = "bind"
+	case "egress-wrong-destination":
+		policyMount["Destination"] = "/etc/auriga"
+	case "egress-duplicate-volume":
+		result["Mounts"] = []any{policyMount, policyMount}
+	case "egress-extra-volume":
+		result["Mounts"] = []any{policyMount, reportMount, map[string]any{"Type": "volume", "Name": "test_extra", "Destination": "/extra", "RW": true}}
+	case "egress-partial-volume":
+		result["Mounts"] = []any{policyMount}
 	case "egress-image":
 		result["Image"] = "sha256:other"
 	case "egress-project":
@@ -101,8 +124,22 @@ func TestDockerEgressJoinsIsolatedNetworkAndRecoversWithoutRestart(t *testing.T)
 	}
 }
 
+func TestDockerEgressLegacyWithoutPolicyMountsStillStarts(t *testing.T) {
+	f := egressRecovery(t, "egress-legacy")
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDockerEgressPolicyMountOrderDoesNotAffectStartup(t *testing.T) {
+	f := egressRecovery(t, "egress-reversed-volumes")
+	if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDockerEgressRejectsUntrustedIdentityBeforeAnyMutation(t *testing.T) {
-	for _, failure := range []string{"missing", "image", "project", "owner", "role", "user", "command", "arguments", "privileged", "writable", "caps", "extra-caps", "security", "host", "container-network", "stopped", "unhealthy", "pid", "started-at", "mount", "published", "alias", "network"} {
+	for _, failure := range []string{"missing", "image", "project", "owner", "role", "user", "command", "arguments", "privileged", "writable", "caps", "extra-caps", "security", "host", "container-network", "stopped", "unhealthy", "pid", "started-at", "mount", "published", "alias", "network", "policy-writable", "report-readonly", "foreign-volume", "bind-volume", "wrong-destination", "duplicate-volume", "extra-volume", "partial-volume"} {
 		t.Run(failure, func(t *testing.T) {
 			f := egressRecovery(t, "egress-"+failure)
 			if failure == "alias" || failure == "network" {

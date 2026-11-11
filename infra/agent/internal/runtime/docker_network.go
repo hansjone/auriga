@@ -303,13 +303,48 @@ func (d *Docker) trustedEgress(ctx context.Context, edge map[string]any, require
 		labels["auriga.role"] != "egress" || labels["auriga.egress.for-edge"] != d.EdgeContainer || labels["com.docker.compose.project"] != project ||
 		cfg["User"] != "65532:65532" || host["ReadonlyRootfs"] != true || host["Privileged"] != false ||
 		!sameStrings(cfg["Entrypoint"], []string{"/auriga-egress"}) || !sameStrings(cfg["Cmd"], []string{"--listen", "0.0.0.0:3128"}) ||
-		len(mounts) != 0 || len(ports) != 0 || len(capAdd) != 0 ||
+		!trustedEgressMounts(mounts, project) || len(ports) != 0 || len(capAdd) != 0 ||
 		mode == "" || mode == "host" || mode == "none" || strings.HasPrefix(mode, "container:") ||
 		!containsString(host["CapDrop"], "ALL") || !containsString(host["SecurityOpt"], "no-new-privileges:true") ||
 		(requireRunning && (state["Running"] != true || health["Status"] != "healthy")) {
 		return "", nil, fmt.Errorf("docker: configured egress identity or isolation mismatch")
 	}
 	return id, insp, nil
+}
+
+func trustedEgressMounts(mounts []any, project string) bool {
+	// Older deployments have no platform policy volumes. New deployments may
+	// expose only the same project's read-only policy and writable report volumes.
+	if len(mounts) == 0 {
+		return true
+	}
+	if len(mounts) != 2 {
+		return false
+	}
+	seen := make(map[string]bool, 2)
+	for _, value := range mounts {
+		mount, _ := value.(map[string]any)
+		name, _ := mount["Name"].(string)
+		writable := false
+		switch name {
+		case project + "_egress-policies":
+			if mount["Destination"] != "/var/auriga-egress/policies" {
+				return false
+			}
+		case project + "_egress-reports":
+			if mount["Destination"] != "/var/auriga-egress/reports" {
+				return false
+			}
+			writable = true
+		default:
+			return false
+		}
+		if mount["Type"] != "volume" || mount["RW"] != writable || seen[name] {
+			return false
+		}
+		seen[name] = true
+	}
+	return true
 }
 
 func containsString(value any, want string) bool {
