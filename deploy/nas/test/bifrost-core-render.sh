@@ -81,15 +81,16 @@ cp "$1/edge.config.json" "$2/edge/edge.config.json"
 EOF
 sh "$temp/scripts/render.sh" --core-only
 # Upgrade rendering creates isolated credentials and preserves them on rerender.
-for name in pg_audit_owner_password pg_audit_app_password; do
+for name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
  [ "$(/usr/bin/stat -c '%a' "$temp/data/secrets/$name")" = 600 ]
  cp "$temp/data/secrets/$name" "$temp/$name.original"
 done
+grep -q '^AURIGA_AUDIT_NATS_URL=nats://bifrost_audit:' "$temp/data/config/bifrost-audit.env"
 grep -q '^AURIGA_AUDIT_ENABLED=true$' "$temp/data/config/platform.env"
 grep -q '^AURIGA_AUDIT_DB_USER=auriga_audit_app$' "$temp/data/config/platform.env"
 grep -q '__PG_AUDIT_' "$temp/data/config/postgres/audit.sql" && exit 1
 sh "$temp/scripts/render.sh" --core-only
-for name in pg_audit_owner_password pg_audit_app_password; do
+for name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
  cmp "$temp/data/secrets/$name" "$temp/$name.original"
 done
 printf 'PASS audit_upgrade_credentials_are_created_and_preserved\n'

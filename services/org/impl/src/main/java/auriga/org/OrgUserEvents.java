@@ -9,9 +9,11 @@ import tools.jackson.databind.node.ObjectNode;
 
 final class OrgUserEvents {
   private final EventPublisher events;
+  private final OrgAudit audit;
 
   OrgUserEvents(EventPublisher events) {
     this.events = events;
+    this.audit = new OrgAudit(events);
   }
 
   void created(ObjectNode member, String via, UUID invitationId, UUID actorId) {
@@ -21,6 +23,11 @@ final class OrgUserEvents {
     if (invitationId != null) data.put("invitationId", invitationId.toString());
     data.put("actorId", actorId == null ? null : actorId.toString());
     events.publish("user.created", member.path("id").asString(), data);
+    audit.record(
+        "org.member.create",
+        "member",
+        member.path("id").asString(),
+        "invitation".equals(via) ? UUID.fromString(member.path("id").asString()) : actorId);
   }
 
   void updated(ObjectNode member, List<String> changed, UUID actorId) {
@@ -29,6 +36,7 @@ final class OrgUserEvents {
     data.put("changed", changed);
     data.put("actorId", actorId == null ? null : actorId.toString());
     events.publish("user.updated", member.path("id").asString(), data);
+    audit.record("org.member.update", "member", member.path("id").asString(), actorId);
   }
 
   void disabled(UUID userId, String reason, UUID actorId) {
@@ -37,6 +45,7 @@ final class OrgUserEvents {
     if (reason != null) data.put("reason", reason);
     data.put("actorId", actorId == null ? null : actorId.toString());
     events.publish("user.disabled", userId.toString(), data);
+    audit.record("org.member.disable", "member", userId, actorId);
   }
 
   void enabled(UUID userId, UUID actorId) {
@@ -44,6 +53,7 @@ final class OrgUserEvents {
     data.put("userId", userId.toString());
     data.put("actorId", actorId == null ? null : actorId.toString());
     events.publish("user.enabled", userId.toString(), data);
+    audit.record("org.member.enable", "member", userId, actorId);
   }
 
   void offboarded(UUID userId, UUID handoverTo, String reason, UUID actorId) {
@@ -53,6 +63,7 @@ final class OrgUserEvents {
     if (reason != null) data.put("reason", reason);
     data.put("actorId", actorId == null ? null : actorId.toString());
     events.publish("user.offboarded", userId.toString(), data);
+    audit.record("org.member.offboard", "member", userId, actorId);
   }
 
   void permissionsChanged(UUID userId, List<String> roleKeys, UUID actorId) {

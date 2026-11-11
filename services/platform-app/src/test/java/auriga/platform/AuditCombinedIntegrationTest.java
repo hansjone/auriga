@@ -253,4 +253,312 @@ class AuditCombinedIntegrationTest {
           assertFalse(svc.listPermissions().toString().contains("audit.events.read"));
         });
   }
+
+  @Test
+  void relayBusinessAudit() throws Exception {
+    var database = PostgresExtension.database(AuditCombinedIntegrationTest.class);
+    var dsn =
+        database
+                .jdbcUrl()
+                .split(java.util.regex.Pattern.quote("?"))[0]
+                .replace("jdbc:", "")
+                .replace("postgresql://", "postgresql://postgres@")
+            + "?sslmode=disable";
+    var log = java.nio.file.Path.of("target/relay-audit-go.log");
+    var command =
+        new ProcessBuilder(
+                "go",
+                "test",
+                "-v",
+                "-count=1",
+                "-timeout=180s",
+                "-run",
+                "TestRelayAudit",
+                "./internal/bifrostbackend")
+            .directory(java.nio.file.Path.of("../../infra/ai-gateway").toFile())
+            .redirectErrorStream(true)
+            .redirectOutput(log.toFile());
+    command.environment().put("AURIGA_AI_TEST_PG_DSN", dsn);
+    command
+        .environment()
+        .put("AURIGA_AUDIT_TEST_NATS_URL", context.getBean(Connection.class).getConnectedUrl());
+    command
+        .environment()
+        .put("AURIGA_AUDIT_TEST_URL", "http://127.0.0.1:" + port + "/api/audit/v1/admin/events");
+    command.environment().put("AURIGA_AUDIT_TEST_BEARER", token("admin", true));
+    command.environment().put("GOMAXPROCS", "2");
+    var process = command.start();
+    try {
+      assertTrue(
+          process.waitFor(240, java.util.concurrent.TimeUnit.SECONDS),
+          "Go audit integration timeout");
+      assertEquals(0, process.exitValue(), java.nio.file.Files.readString(log));
+    } finally {
+      if (process.isAlive()) {
+        process.descendants().forEach(p -> p.destroyForcibly());
+        process.destroyForcibly();
+      }
+    }
+  }
+
+  static final UUID BUSINESS_ACTOR = UUID.fromString("01900000-0000-7000-8000-000000000001");
+
+  <T> T business(java.util.function.Supplier<T> operation) {
+    var principal =
+        new AurigaPrincipal(
+            BUSINESS_ACTOR.toString(),
+            TENANT,
+            PrincipalType.USER,
+            TokenContext.ADMIN,
+            UUID.randomUUID().toString(),
+            null,
+            "member",
+            List.of("owner"),
+            Set.of("audit.events.read"),
+            Instant.now(),
+            Instant.now(),
+            "business-audit");
+    return TenantContext.call(
+        TENANT,
+        () ->
+            RequestContext.start(
+                    "business-audit", "00-12345678901234567890123456789012-1234567890123456-01")
+                .withClient("192.0.2.20", "fixture")
+                .withPrincipal(principal)
+                .call(operation::get));
+  }
+
+  OrgService businessOrg(UUID target) {
+    var orgStore = new OrgStore(new JdbcTemplate(orgSource), orgTx);
+    orgStore.tx(
+        () -> {
+          for (UUID id : List.of(BUSINESS_ACTOR, target))
+            if (orgStore.member(id).isEmpty())
+              orgStore.insertMember(
+                  new OrgStore.MemberRow(
+                      id,
+                      "fixture",
+                      "alice@example.com",
+                      "member",
+                      "active",
+                      1,
+                      Instant.now(),
+                      null,
+                      null));
+          orgStore
+              .jdbc()
+              .update(
+                  "INSERT INTO org.role_binding(id,tenant_id,role_id,subject_type,subject_id,created_at) SELECT ?,?,id,'member',?,now() FROM org.role WHERE tenant_id=? AND key='owner' ON CONFLICT DO NOTHING",
+                  UuidV7.next(),
+                  TENANT,
+                  BUSINESS_ACTOR,
+                  TENANT);
+          return null;
+        });
+    try {
+      var access =
+          auriga.contracts.deploymentconfig.DeploymentAccess.load(
+              java.nio.file.Files.readString(
+                      java.nio.file.Path.of(
+                          "../../contracts/deployment/fixtures/domain-proxy.json"))
+                  .replace("019a0000-0000-7000-8000-000000000001", TENANT.toString())
+                  .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      return new OrgService(orgStore, orgEvents, Clock.systemUTC(), access);
+    } catch (java.io.IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
+  }
+
+  void awaitBusinessAudit(String action, String target) throws Exception {
+    long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+    String response = "";
+    do {
+      var result = get("?action=" + action + "&q=" + target, token("admin", true));
+      assertEquals(200, result.statusCode(), result.body());
+      response = result.body();
+      var items = JSON.readTree(response).path("items");
+      if (!items.isEmpty()) {
+        assertEquals(1, items.size(), response);
+        var record = items.get(0);
+        assertEquals(target, record.path("target").path("id").asString());
+        assertEquals(BUSINESS_ACTOR.toString(), record.path("actor").path("id").asString());
+        assertEquals("192.0.2.20", record.path("actor").path("ip").asString());
+        assertEquals("12345678901234567890123456789012", record.path("traceId").asString());
+        assertEquals("success", record.path("result").asString());
+        assertFalse(response.contains("must-not-appear"));
+        return;
+      }
+      Thread.sleep(50);
+    } while (System.nanoTime() < deadline);
+    fail("Business audit missing for " + action + ": " + response);
+  }
+
+  @Test
+  void memberBusinessOperationBecomesQueryable() throws Exception {
+    UUID target = UuidV7.next();
+    business(
+        () -> {
+          businessOrg(target).updateMember(target, "password=must-not-appear", null, null, 1L);
+          return null;
+        });
+    awaitBusinessAudit("org.member.update", target.toString());
+  }
+
+  @Test
+  void invitationBusinessOperationsBecomeQueryableWithoutInvitationCode() throws Exception {
+    UUID newcomer = UuidV7.next();
+    var invitation =
+        business(
+            () -> {
+              var org = businessOrg(UuidV7.next());
+              var created =
+                  org.createInvitation(
+                      null,
+                      "secret=must-not-appear",
+                      "member",
+                      List.of(),
+                      List.of(),
+                      List.of(),
+                      Instant.now().plusSeconds(600),
+                      3);
+              var code = created.path("code").asString();
+              org.redeemInvitation(code, newcomer, "alice", "alice@example.com", null);
+              org.redeemInvitation(code, newcomer, "alice", "alice@example.com", null);
+              org.revokeInvitation(UUID.fromString(created.path("id").asString()));
+              return created;
+            });
+    for (String action : List.of("create", "redeem", "revoke"))
+      awaitBusinessAudit("org.invitation." + action, invitation.path("id").asString());
+    awaitBusinessAudit("org.member.create", newcomer.toString());
+    var exported = get("/export?q=" + invitation.path("id").asString(), token("admin", true));
+    assertFalse(exported.body().contains(invitation.path("code").asString()));
+  }
+
+  @Test
+  void roleAndBindingBusinessOperationsBecomeQueryable() throws Exception {
+    var ids =
+        business(
+            () -> {
+              UUID member = UuidV7.next();
+              var org = businessOrg(member);
+              var name = JSON.createObjectNode().put("en", "Fixture").put("zh", "Fixture");
+              UUID role =
+                  UUID.fromString(
+                      org.createRole("audit-" + member, name, null, List.of())
+                          .path("id")
+                          .asString());
+              org.updateRole(role, name.deepCopy().put("en", "Updated"), null, null);
+              UUID binding =
+                  UUID.fromString(
+                      org.createRoleBinding(role, "member", member).path("id").asString());
+              org.deleteRoleBinding(binding);
+              org.deleteRole(role);
+              return List.of(role, binding);
+            });
+    for (String action : List.of("create", "update", "delete"))
+      awaitBusinessAudit("org.role." + action, ids.get(0).toString());
+    for (String action : List.of("create", "delete"))
+      awaitBusinessAudit("org.role_binding." + action, ids.get(1).toString());
+  }
+
+  @Test
+  void iamSecurityBusinessOperationsBecomeQueryable() throws Exception {
+    var ids =
+        business(
+            () -> {
+              var source = context.getBean("iamDataSource", DataSource.class);
+              var iam =
+                  new auriga.iam.IamStore(
+                      new JdbcTemplate(source),
+                      context.getBean("iamTransactionManager", TenantTransactionManager.class));
+              var events = context.getBean("iamEventPublisher", EventPublisher.class);
+              byte[] encryption = new byte[32];
+              new java.security.SecureRandom().nextBytes(encryption);
+              var accounts =
+                  new auriga.iam.TeamAccounts(
+                      iam,
+                      new auriga.iam.Secrets(Base64.getEncoder().encodeToString(encryption)),
+                      Clock.systemUTC(),
+                      events);
+              iam.tx(
+                  () -> {
+                    if (iam.get("account", BUSINESS_ACTOR.toString(), false) == null)
+                      iam.insert(
+                          "account",
+                          BUSINESS_ACTOR.toString(),
+                          JSON.createObjectNode()
+                              .put("status", "active")
+                              .put("memberType", "member"),
+                          null);
+                    return null;
+                  });
+              var enrollment =
+                  iam.tx(() -> accounts.beginTotpEnrollment(BUSINESS_ACTOR, "example.com"));
+              String secret = enrollment.path("secret").asString();
+              String code = auriga.iam.Totp.code(secret, Instant.now().getEpochSecond() / 30);
+              iam.tx(
+                  () -> {
+                    accounts.confirmTotpEnrollment(
+                        BUSINESS_ACTOR, enrollment.path("enrollmentId").asString(), code);
+                    accounts.deleteTotp(BUSINESS_ACTOR, false);
+                    return null;
+                  });
+              var sessions =
+                  new auriga.iam.SessionManager(
+                      iam,
+                      org.mockito.Mockito.mock(auriga.iam.SessionKv.class),
+                      org.mockito.Mockito.mock(auriga.iam.TokenService.class),
+                      Clock.systemUTC(),
+                      events,
+                      new auriga.common.audit.OutboxAuditLogger(events));
+              UUID provider = UuidV7.next();
+              iam.tx(
+                  () ->
+                      iam.insert(
+                          "idp_provider",
+                          provider.toString(),
+                          JSON.createObjectNode()
+                              .put("enabled", true)
+                              .put("connectorType", "team-account"),
+                          null));
+              var issued =
+                  iam.tx(
+                      () ->
+                          sessions.create(
+                              BUSINESS_ACTOR,
+                              provider,
+                              "admin",
+                              false,
+                              Duration.ofHours(1),
+                              Duration.ofMinutes(30)));
+              sessions.stepUp(issued.session());
+              UUID device = UuidV7.next();
+              iam.tx(
+                  () ->
+                      iam.insert(
+                          "device",
+                          device.toString(),
+                          JSON.createObjectNode()
+                              .put("accountId", BUSINESS_ACTOR.toString())
+                              .put("revoked", false),
+                          null));
+              var revoke =
+                  auriga.contracts.iam.v1.RevokeSessionsRequest.newBuilder()
+                      .setTenantId(TENANT.toString())
+                      .setAccountId(BUSINESS_ACTOR.toString())
+                      .setIncludeDevices(true)
+                      .setReason(auriga.contracts.iam.v1.RevokeReason.REVOKE_REASON_ADMIN)
+                      .build();
+              sessions.revoke(revoke);
+              sessions.revoke(revoke);
+              return List.of(
+                  issued.session().path("sessionId").asString(), device.toString(), secret);
+            });
+    awaitBusinessAudit("iam.mfa.totp.add", BUSINESS_ACTOR.toString());
+    awaitBusinessAudit("iam.mfa.totp.remove", BUSINESS_ACTOR.toString());
+    awaitBusinessAudit("iam.session.step_up", ids.get(0));
+    awaitBusinessAudit("iam.device.revoke", ids.get(1));
+    assertFalse(
+        get("/export?action=iam.mfa.totp.add", token("admin", true)).body().contains(ids.get(2)));
+  }
 }

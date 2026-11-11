@@ -56,6 +56,8 @@ services:
     group_add: ['10005', '10006', '999']
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
+    environment:
+      AURIGA_AUDIT_NATS_URL: nats://bifrost_audit:e2e_nats_audit@nats:4222
     read_only: true
     tmpfs: ['/tmp:rw,noexec,nosuid,size=64m']
     secrets:
@@ -69,6 +71,8 @@ services:
     volumes:
       - ./var/access.json:/etc/auriga/access.json:ro
     depends_on:
+      nats:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     networks: [default]

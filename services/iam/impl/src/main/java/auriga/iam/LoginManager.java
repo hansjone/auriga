@@ -786,7 +786,8 @@ public final class LoginManager {
             mfa,
             "client",
             client(tx)));
-    audit.record(
+    IamAudit.record(
+        audit,
         AuditEntry.builder("iam.identity.login")
             .actor(new AuditEntry.Actor("user", accountId))
             .target("account", accountId)
@@ -852,7 +853,8 @@ public final class LoginManager {
             code,
             "client",
             client(tx)));
-    audit.record(
+    IamAudit.record(
+        audit,
         AuditEntry.builder("iam.identity.login")
             .target("login_tx", tx.path("id").asString())
             .failure(code)

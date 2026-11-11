@@ -19,6 +19,15 @@ accounts {
     jetstream: enabled
     users: [
       {
+        # This publisher cannot read business streams, sessions or other services' audit subjects.
+        user: bifrost_audit
+        password: "__NATS_AUDIT_PASSWORD__"
+        permissions: {
+          publish: { allow: ["auriga.audit.ai-gateway"] }
+          subscribe: { allow: ["_INBOX.>"] }
+        }
+      }
+      {
         # Combined platform: business/audit streams and sessions KV, no arbitrary stream deletion.
         user: platform
         password: "__NATS_PLATFORM_PASSWORD__"

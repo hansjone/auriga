@@ -178,6 +178,9 @@ services:
     <<: *cap_drop_all
     user: '10003:10003'
     group_add: ['10005', '10006', '999']
+    env_file:
+      - path: ${AURIGA_DATA_ROOT}/config/bifrost-audit.env
+        required: true
     read_only: true
     tmpfs: ['/tmp:rw,noexec,nosuid,size=64m']
     secrets:
@@ -191,6 +194,8 @@ services:
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
     depends_on:
+      nats:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     networks: [internal, publish]

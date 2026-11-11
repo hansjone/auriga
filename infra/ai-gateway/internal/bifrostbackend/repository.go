@@ -14,12 +14,14 @@ import (
 	"errors"
 	"math"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/audit"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/budget"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/identifiers"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
@@ -209,8 +211,20 @@ func (b *Backend) EnsureMember(ctx context.Context, m api.RelayMemberEnsure) (ap
 		return out, e
 	}
 	if e = b.db.Transaction(ctx, m.TenantId, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `INSERT INTO ai.relay_key(tenant_id,id,name,document) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id,id) DO UPDATE SET document=ai.relay_key.document || jsonb_build_object('meteringOnly',EXCLUDED.document->'meteringOnly','monthlyBudgetMicros',EXCLUDED.document->'monthlyBudgetMicros','requestsPerMinute',EXCLUDED.document->'requestsPerMinute','maxConcurrency',EXCLUDED.document->'maxConcurrency','maxInFlightTokens',EXCLUDED.document->'maxInFlightTokens') WHERE ai.relay_key.document->>'policyOrigin'='default'`, m.TenantId, m.AccountId, k.Name, raw)
-		return e
+		var created bool
+		e := tx.QueryRow(ctx, `INSERT INTO ai.relay_key(tenant_id,id,name,document) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id,id) DO UPDATE SET document=ai.relay_key.document || jsonb_build_object('meteringOnly',EXCLUDED.document->'meteringOnly','monthlyBudgetMicros',EXCLUDED.document->'monthlyBudgetMicros','requestsPerMinute',EXCLUDED.document->'requestsPerMinute','maxConcurrency',EXCLUDED.document->'maxConcurrency','maxInFlightTokens',EXCLUDED.document->'maxInFlightTokens') WHERE ai.relay_key.document->>'policyOrigin'='default' AND ROW(ai.relay_key.document->'meteringOnly',ai.relay_key.document->'monthlyBudgetMicros',ai.relay_key.document->'requestsPerMinute',ai.relay_key.document->'maxConcurrency',ai.relay_key.document->'maxInFlightTokens') IS DISTINCT FROM ROW(EXCLUDED.document->'meteringOnly',EXCLUDED.document->'monthlyBudgetMicros',EXCLUDED.document->'requestsPerMinute',EXCLUDED.document->'maxConcurrency',EXCLUDED.document->'maxInFlightTokens') RETURNING (xmax=0)`, m.TenantId, m.AccountId, k.Name, raw).Scan(&created)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return nil
+		}
+		if e != nil {
+			return e
+		}
+		action := "ai.relay_key.budget.update"
+		if created {
+			action = "ai.relay_key.create"
+		}
+		return audit.Record(ctx, tx, m.TenantId, action, "relay_key", m.AccountId)
+
 	}); e != nil {
 		return out, e
 	}
@@ -253,6 +267,7 @@ func (b *Backend) SaveKey(ctx context.Context, tenant, id string, input api.Rela
 				return denied
 			}
 		}
+		previous := k
 		if k.Source != "member" && strings.HasPrefix(input.Name, "auriga-member:") {
 			return invalid
 		}
@@ -280,13 +295,31 @@ func (b *Backend) SaveKey(ctx context.Context, tenant, id string, input api.Rela
 		if err != nil {
 			return err
 		}
+		out.Key = k
+		if !create && reflect.DeepEqual(k, previous) {
+			return nil
+		}
 		if create {
 			_, err = tx.Exec(ctx, `INSERT INTO ai.relay_key(tenant_id,id,name,document) VALUES($1,$2,$3,$4)`, tenant, id, k.Name, raw)
 		} else {
 			_, err = tx.Exec(ctx, `UPDATE ai.relay_key SET name=$3,document=$4 WHERE tenant_id=$1 AND id=$2`, tenant, id, k.Name, raw)
 		}
-		out.Key = k
-		return err
+		if err != nil {
+			return err
+		}
+		action := "ai.relay_key.update"
+		if create {
+			action = "ai.relay_key.create"
+		} else if previous.Active && !k.Active {
+			action = "ai.relay_key.revoke"
+		}
+		if err = audit.Record(ctx, tx, tenant, action, "relay_key", id); err != nil {
+			return err
+		}
+		if !create && (previous.MonthlyBudgetMicros != k.MonthlyBudgetMicros || previous.GetMeteringOnly() != k.GetMeteringOnly()) {
+			return audit.Record(ctx, tx, tenant, "ai.relay_key.budget.update", "relay_key", id)
+		}
+		return nil
 	})
 	if e != nil {
 		return out, e
@@ -351,6 +384,7 @@ func (b *Backend) SaveProvider(ctx context.Context, tenant, id string, p api.Rel
 	}
 	e = b.db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
 		var sealed []byte
+		revokedCredential := false
 		if !create {
 			var raw []byte
 			if err := tx.QueryRow(ctx, `SELECT document,secret FROM ai.relay_provider WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenant, id).Scan(&raw, &sealed); err != nil {
@@ -366,6 +400,7 @@ func (b *Backend) SaveProvider(ctx context.Context, tenant, id string, p api.Rel
 			if secret != nil {
 				p = previous
 			} else if p.BaseUrl != previous.BaseUrl || p.Kind != previous.Kind {
+				revokedCredential = len(sealed) > 0
 				sealed = nil
 			}
 		}
@@ -389,7 +424,16 @@ func (b *Backend) SaveProvider(ctx context.Context, tenant, id string, p api.Rel
 			_, err = tx.Exec(ctx, `UPDATE ai.relay_provider SET document=$3,secret=$4 WHERE tenant_id=$1 AND id=$2`, tenant, id, raw, sealed)
 		}
 		out = api.RelayProvider{Id: id, Configuration: p, HasCredential: len(sealed) > 0}
-		return err
+		if err != nil {
+			return err
+		}
+		if secret != nil {
+			return audit.Record(ctx, tx, tenant, "ai.credential.rotate", "provider", id)
+		}
+		if revokedCredential {
+			return audit.Record(ctx, tx, tenant, "ai.credential.revoke", "provider", id)
+		}
+		return nil
 	})
 	return out, e
 }

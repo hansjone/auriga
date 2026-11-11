@@ -30,6 +30,7 @@ public final class OrgService {
   private final OrgStore store;
   private final M3Permissions m3Permissions;
   private final OrgUserEvents userEvents;
+  private final OrgAudit audit;
   private final Clock clock;
   private final DeploymentAccess deploymentAccess;
   private final SecureRandom random = new SecureRandom();
@@ -49,6 +50,7 @@ public final class OrgService {
                 ? OrgIds.DEFAULT_TENANT
                 : UUID.fromString(deploymentAccess.tenantId()));
     this.userEvents = new OrgUserEvents(events);
+    this.audit = new OrgAudit(events);
     this.clock = clock;
     this.deploymentAccess = deploymentAccess;
   }
@@ -590,6 +592,14 @@ public final class OrgService {
                       (rs, i) -> (UUID) rs.getObject(1),
                       store.tenantId(),
                       groupId);
+          var removedBindings =
+              store
+                  .jdbc()
+                  .query(
+                      "SELECT id FROM role_binding WHERE tenant_id=? AND subject_type='group' AND subject_id=?",
+                      (rs, i) -> (UUID) rs.getObject(1),
+                      store.tenantId(),
+                      groupId);
           store
               .jdbc()
               .update(
@@ -613,6 +623,8 @@ public final class OrgService {
               .update(
                   "DELETE FROM \"group\" WHERE tenant_id=? AND id=?", store.tenantId(), groupId);
           UUID actor = actorId();
+          for (UUID binding : removedBindings)
+            audit.record("org.role_binding.delete", "role_binding", binding, actor);
           for (UUID m : members) {
             ObjectNode json = toMemberJson(store.member(m).orElseThrow());
             userEvents.updated(json, List.of("groupIds"), actor);
@@ -792,6 +804,7 @@ public final class OrgService {
               description == null ? null : text(description, "zh"),
               permissions.toArray(String[]::new),
               java.sql.Timestamp.from(clock.instant()));
+          audit.record("org.role.create", "role", id, actorId());
           return getRole(id);
         });
   }
@@ -841,6 +854,7 @@ public final class OrgService {
           for (UUID a : affected) {
             if (a != null) userEvents.permissionsChanged(a, roleKeysOf(a), actor);
           }
+          audit.record("org.role.update", "role", roleId, actor);
           return getRole(roleId);
         });
   }
@@ -863,6 +877,14 @@ public final class OrgService {
                       (rs, i) -> (UUID) rs.getObject(1),
                       store.tenantId(),
                       roleId);
+          var removedBindings =
+              store
+                  .jdbc()
+                  .query(
+                      "SELECT id FROM role_binding WHERE tenant_id=? AND role_id=?",
+                      (rs, i) -> (UUID) rs.getObject(1),
+                      store.tenantId(),
+                      roleId);
           store
               .jdbc()
               .update(
@@ -876,6 +898,9 @@ public final class OrgService {
           for (UUID a : affected) {
             if (a != null) userEvents.permissionsChanged(a, roleKeysOf(a), actor);
           }
+          for (UUID binding : removedBindings)
+            audit.record("org.role_binding.delete", "role_binding", binding, actor);
+          audit.record("org.role.delete", "role", roleId, actor);
           return null;
         });
   }
@@ -979,6 +1004,7 @@ public final class OrgService {
                       (rs, i) -> bindingJson(rs, null),
                       store.tenantId(),
                       id);
+          audit.record("org.role_binding.create", "role_binding", id, actor);
           return rows.getFirst();
         });
   }
@@ -1025,6 +1051,7 @@ public final class OrgService {
                         sid);
             for (UUID m : members) userEvents.permissionsChanged(m, roleKeysOf(m), actor);
           }
+          audit.record("org.role_binding.delete", "role_binding", bindingId, actor);
           return null;
         });
   }
@@ -1410,6 +1437,7 @@ public final class OrgService {
               auriga.common.web.LinkOrigins.currentOr(deploymentAccess.portalUrl())
                   + "/invite/"
                   + code);
+          audit.record("org.invitation.create", "invitation", id, actor);
           return inv;
         });
   }
@@ -1467,6 +1495,7 @@ public final class OrgService {
                       store.tenantId(),
                       invitationId);
           OrgError.require(n > 0, "not_found", 404);
+          audit.record("org.invitation.revoke", "invitation", invitationId, actorId());
           return null;
         });
   }
@@ -1622,17 +1651,21 @@ public final class OrgService {
                   }
 
                   for (UUID roleId : roleIds) {
-                    store
-                        .jdbc()
-                        .update(
-                            "INSERT INTO role_binding (id, tenant_id, role_id, subject_type, subject_id, granted_by, created_at)"
-                                + " VALUES (?,?,?,'member',?,?,?) ON CONFLICT DO NOTHING",
-                            UuidV7.next(),
-                            store.tenantId(),
-                            roleId,
-                            accountId,
-                            inv.get("created_by"),
-                            java.sql.Timestamp.from(clock.instant()));
+                    UUID bindingId = UuidV7.next();
+                    int inserted =
+                        store
+                            .jdbc()
+                            .update(
+                                "INSERT INTO role_binding (id, tenant_id, role_id, subject_type, subject_id, granted_by, created_at)"
+                                    + " VALUES (?,?,?,'member',?,?,?) ON CONFLICT DO NOTHING",
+                                bindingId,
+                                store.tenantId(),
+                                roleId,
+                                accountId,
+                                inv.get("created_by"),
+                                java.sql.Timestamp.from(clock.instant()));
+                    if (inserted > 0)
+                      audit.record("org.role_binding.create", "role_binding", bindingId, accountId);
                   }
                   for (UUID groupId : groupIds) {
                     store
@@ -1672,6 +1705,7 @@ public final class OrgService {
                   if (created)
                     userEvents.created(
                         member, "invitation", invitationId, (UUID) inv.get("created_by"));
+                  audit.record("org.invitation.redeem", "invitation", invitationId, accountId);
                   return member;
                 }));
   }

@@ -24,7 +24,7 @@ func TestNASNATSPolicy(t *testing.T) {
 	}
 	dir := t.TempDir()
 	text := string(raw)
-	for _, name := range []string{"SYS", "PLATFORM", "ROUTES_RW", "EDGE"} {
+	for _, name := range []string{"SYS", "PLATFORM", "ROUTES_RW", "EDGE", "AUDIT"} {
 		text = strings.ReplaceAll(text, "__NATS_"+name+"_PASSWORD__", "test-only-password")
 	}
 	text = strings.Replace(text, "store_dir: /data", "store_dir: "+strconv.Quote(filepath.Join(dir, "js")), 1)
@@ -71,6 +71,24 @@ func TestNASNATSPolicy(t *testing.T) {
 	for name, subject := range map[string]string{"AURIGA_EVENTS": "auriga.evt.>", "AURIGA_AUDIT": "auriga.audit.>"} {
 		if _, err := platform.CreateStream(ctx, jetstream.StreamConfig{Name: name, Subjects: []string{subject}}); err != nil {
 			t.Fatalf("platform first-boot stream %s: %v", name, err)
+		}
+	}
+
+	auditConn, auditJS, auditErrors := connect("bifrost_audit")
+	if _, err := auditJS.Publish(ctx, "auriga.audit.ai-gateway", []byte("audit")); err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range []string{"auriga.audit.org", "auriga.evt.user.created", "$JS.API.STREAM.DELETE.AURIGA_AUDIT"} {
+		if _, err := auditConn.Request(subject, []byte("{}"), 300*time.Millisecond); err == nil {
+			t.Fatalf("audit publisher accessed %s", subject)
+		}
+		select {
+		case err := <-auditErrors:
+			if !strings.Contains(strings.ToLower(err.Error()), "permissions violation") {
+				t.Fatal(err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("no ACL rejection for %s", subject)
 		}
 	}
 	// Java ensureStreams lists names on both first boot and restart.

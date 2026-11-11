@@ -262,6 +262,7 @@ public final class TeamAccounts {
             "added",
             "actorId",
             accountId.toString()));
+    IamAudit.mfa(events, accountId.toString(), "totp", "add");
   }
 
   public void deleteTotp(UUID accountId, boolean requireRemainingMfa) {
@@ -280,6 +281,7 @@ public final class TeamAccounts {
             "removed",
             "actorId",
             accountId.toString()));
+    IamAudit.mfa(events, accountId.toString(), "totp", "remove");
   }
 
   public UUID accountIdFor(String providerId, String username) {

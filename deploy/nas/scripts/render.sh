@@ -73,7 +73,7 @@ escape_sed() {
 }
 
 # Existing installations gain new audit-only credentials; never rotate an existing secret.
-for _audit_name in pg_audit_owner_password pg_audit_app_password; do
+for _audit_name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
   _audit_path="$SECRETS/$_audit_name"
   [ ! -L "$_audit_path" ] || die "audit secret symlink refused"
   if [ ! -e "$_audit_path" ]; then
@@ -84,6 +84,7 @@ for _audit_name in pg_audit_owner_password pg_audit_app_password; do
 done
 PG_AUDIT_OWNER=$(read_secret pg_audit_owner_password)
 PG_AUDIT_APP=$(read_secret pg_audit_app_password)
+NATS_AUDIT=$(read_secret nats_audit_password)
 
 PG_BOOT=$(read_secret pg_bootstrap_password)
 PG_IAM=$(read_secret pg_iam_password)
@@ -135,9 +136,14 @@ sed \
   -e "s|__NATS_PLATFORM_PASSWORD__|$(escape_sed "$NATS_PLATFORM")|g" \
   -e "s|__NATS_ROUTES_RW_PASSWORD__|$(escape_sed "$NATS_ROUTES_RW")|g" \
   -e "s|__NATS_EDGE_PASSWORD__|$(escape_sed "$NATS_EDGE")|g" \
+  -e "s|__NATS_AUDIT_PASSWORD__|$(escape_sed "$NATS_AUDIT")|g" \
   "$NAS_ROOT/nats/nats.conf.tmpl" >"$CONFIG/nats/nats.conf"
 chmod 0600 "$CONFIG/nats/nats.conf"
 chown_required 65532:65532 "$CONFIG/nats/nats.conf"
+
+printf 'AURIGA_AUDIT_NATS_URL=nats://bifrost_audit:%s@nats:4222\n' "$NATS_AUDIT" >"$CONFIG/bifrost-audit.env"
+chmod 0600 "$CONFIG/bifrost-audit.env"
+chown_required 10003:10003 "$CONFIG/bifrost-audit.env"
 
 cat >"$CONFIG/platform.env" <<EOF
 SPRING_PROFILES_ACTIVE=$PROFILES

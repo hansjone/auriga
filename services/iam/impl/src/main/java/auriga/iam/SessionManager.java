@@ -199,6 +199,14 @@ public final class SessionManager implements Sessions {
           locked.put("mfa", true);
           locked.put("stepUpAt", clock.instant().toString());
           refresh(locked);
+          IamAudit.record(
+              audit,
+              IamAudit.entry(
+                      "iam.session.step_up",
+                      "session",
+                      locked.path("sessionId").asString(),
+                      locked.path("accountId").asString())
+                  .build());
           return null;
         });
   }
@@ -262,9 +270,13 @@ public final class SessionManager implements Sessions {
             .map(p -> p.subject())
             .orElse(null));
     events.publish("identity.session_revoked", row.path("accountId").asString(), data);
-    audit.record(
-        AuditEntry.builder("iam.session.revoke")
-            .target("session", row.path("sessionId").asString())
+    IamAudit.record(
+        audit,
+        IamAudit.entry(
+                "iam.session.revoke",
+                "session",
+                row.path("sessionId").asString(),
+                row.path("accountId").asString())
             .detail("reason", reason)
             .build());
   }
@@ -476,11 +488,25 @@ public final class SessionManager implements Sessions {
             }
           if (request.getIncludeDevices())
             for (ObjectNode device : store.all("device"))
-              if (device.path("accountId").asString().equals(request.getAccountId())) {
-                device.put("revoked", true);
-                store.save("device", device);
-              }
+              if (device.path("accountId").asString().equals(request.getAccountId()))
+                revokeDevice(device);
           return RevokeSessionsResponse.newBuilder().setRevoked(count).build();
         });
+  }
+
+  // Callers hold their normal IAM business transaction (and session-before-device lock order).
+  void revokeDevice(ObjectNode snapshot) {
+    var device = store.byId("device", snapshot.path("id").asString(), true);
+    if (device == null || device.path("revoked").asBoolean()) return;
+    device.put("revoked", true);
+    store.save("device", device);
+    IamAudit.record(
+        audit,
+        IamAudit.entry(
+                "iam.device.revoke",
+                "device",
+                device.path("id").asString(),
+                device.path("accountId").asString())
+            .build());
   }
 }
