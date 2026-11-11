@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compare, satisfiesMin } from '../scripts/lib/semver-lite.mjs';
+import { compare, satisfiesMin } from '../runtime/semver-lite.mjs';
 
 test('prerelease ordering follows semver', () => {
   assert.equal(compare('0.2.1-rc.3', '0.2.1-rc.10'), -1);

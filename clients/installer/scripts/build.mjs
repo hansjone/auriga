@@ -23,7 +23,8 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
-import { satisfiesMin } from './lib/semver-lite.mjs';
+import { satisfiesMin } from '../runtime/semver-lite.mjs';
+import { computeId, isPinnedPath } from '../runtime/verify.mjs';
 import { sha256File, assertNoSecrets, listFiles } from './lib/files.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -82,6 +83,26 @@ const NOTICE = [
   'endorsed by DeepSeek. Node.js is bundled under its own licence (LICENSE.node.txt).',
   '',
 ].join('\r\n');
+
+/**
+ * Secret scan over everything we ship, including the expanded plugin tarball.
+ * Skipped: registry-pinned third-party trees and the official Node binary
+ * (pinned by checksum). Our own files are never skipped, whatever their size.
+ */
+export function scanForSecrets(stage, tgz, work) {
+  const thirdParty = (p) =>
+    p.startsWith('/payload/upstream/app/node_modules/') ||
+    p.startsWith('/payload/tools/pnpm/node_modules/') ||
+    p.startsWith('/payload/upstream/node/') ||
+    (p.startsWith('/payload/auriga/plugin/node_modules/') &&
+      !p.startsWith('/payload/auriga/plugin/node_modules/auriga-dsh/'));
+  assertNoSecrets(stage, thirdParty);
+  const expanded = join(work, 'plugin-tgz-scan');
+  rmSync(expanded, { recursive: true, force: true });
+  mkdirSync(expanded, { recursive: true });
+  run(TAR, ['-xf', tgz, '-C', expanded]);
+  assertNoSecrets(expanded, () => false);
+}
 
 function dirSize(dir) {
   let total = 0;
@@ -176,10 +197,10 @@ export async function build(args) {
     throw new Error(
       `plugin ${pluginPkg.name}@${pluginPkg.version} requires dsh ${pluginPkg.engines?.dsh}, upstream is ${dshVersion}`,
     );
-  const id = `${pluginPkg.version}-dsh${dshVersion}`;
+  const bundleName = `${pluginPkg.version}-dsh${dshVersion}`;
 
   // 2. Stage the payload.
-  const stage = join(out, `auriga-desktop-${id}-win-x64`);
+  const stage = join(out, `auriga-desktop-${bundleName}-win-x64`);
   rmSync(stage, { recursive: true, force: true });
   const payload = join(stage, 'payload');
   mkdirSync(payload, { recursive: true });
@@ -339,15 +360,10 @@ export async function build(args) {
     cpSync(join(installerDir, 'windows', f), join(stage, f));
 
   // 5. Manifest: component versions and checksums (upstream tree is pinned by the lock).
-  const ours = listFiles(payload).filter(
-    (f) =>
-      !f.startsWith('upstream/app/node_modules/') &&
-      !f.startsWith('auriga/plugin/node_modules/') &&
-      !f.startsWith('tools/pnpm/node_modules/'),
-  );
+  const ours = listFiles(payload).filter((f) => !isPinnedPath(f));
   const manifest = {
     schema: 1,
-    id,
+    id: '',
     bundleVersion: pluginPkg.version,
     product: 'Auriga Desktop',
     target: 'win-x64',
@@ -380,11 +396,13 @@ export async function build(args) {
       sha256: sha256File(join(payload, f)),
     })),
   };
+  const id = computeId(manifest);
+  manifest.id = id;
   writeFileSync(
     join(payload, 'manifest.json'),
     JSON.stringify(manifest, null, 2) + '\n',
   );
-  assertNoSecrets(stage, (p) => p.includes('/node_modules/'));
+  scanForSecrets(stage, tgz, work);
 
   // 6. Zip.
   let zip = null;

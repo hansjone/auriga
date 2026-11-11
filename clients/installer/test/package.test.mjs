@@ -11,7 +11,10 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { satisfiesMin } from '../scripts/lib/semver-lite.mjs';
+import { satisfiesMin } from '../runtime/semver-lite.mjs';
+import { computeId, isPinnedPath, verifyPackage } from '../runtime/verify.mjs';
+import { scanForSecrets } from '../scripts/build.mjs';
+import { spawnSync } from 'node:child_process';
 import { findSecrets, listFiles, sha256File } from '../scripts/lib/files.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -97,10 +100,18 @@ test(
   () => {
     const payload = join(stage, 'payload');
     const manifest = readJson(join(payload, 'manifest.json'));
-    assert.equal(
+    assert.equal(manifest.id, computeId(manifest));
+    assert.match(
       manifest.id,
-      `${manifest.plugin.version}-dsh${manifest.upstream.version}`,
+      new RegExp(
+        `^${manifest.plugin.version}-dsh${manifest.upstream.version}-[0-9a-f]{12}$`.replace(
+          /\./g,
+          '\\.',
+        ),
+      ),
     );
+    // The install-time verification accepts the built package as is.
+    verifyPackage(payload);
     assert.equal(manifest.target, 'win-x64');
     for (const required of [
       'upstream/node/node.exe',
@@ -124,12 +135,7 @@ test(
       assert.equal(sha256File(join(payload, f.path)), f.sha256, f.path);
     const listed = new Set(manifest.files.map((f) => f.path));
     const unlisted = listFiles(payload).filter(
-      (p) =>
-        p !== 'manifest.json' &&
-        !p.startsWith('upstream/app/node_modules/') &&
-        !p.startsWith('auriga/plugin/node_modules/') &&
-        !p.startsWith('tools/pnpm/node_modules/') &&
-        !listed.has(p),
+      (p) => p !== 'manifest.json' && !isPinnedPath(p) && !listed.has(p),
     );
     assert.deepEqual(unlisted, []);
 
@@ -219,4 +225,61 @@ test(
 test('built package: no secrets in our files', { skip: !stage }, () => {
   const hits = findSecrets(stage, (p) => p.includes('/node_modules/'));
   assert.deepEqual(hits, []);
+});
+
+// ---------------------------------------------------------- scan policy
+
+const token = (n) => ['Bearer', 'z'.repeat(n)].join(' ');
+
+test('secret scan does not skip large files of ours', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'auriga-scan-'));
+  try {
+    writeFileSync(
+      join(dir, 'big.js'),
+      'a'.repeat(3 * 1024 * 1024) + ' ' + token(40),
+    );
+    assert.match(findSecrets(dir).join(' | '), /big\.js: matches/);
+    const tooBig = findSecrets(dir, () => false, 1024).join(' | ');
+    assert.match(tooBig, /too large to scan/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('build scan covers our plugin files and the expanded plugin tarball', () => {
+  const base = mkdtempSync(join(tmpdir(), 'auriga-scan-'));
+  try {
+    const stage = join(base, 'stage');
+    const plugin = join(stage, 'payload/auriga/plugin/node_modules');
+    mkdirSync(join(plugin, 'auriga-dsh/src'), { recursive: true });
+    mkdirSync(join(plugin, 'ws'), { recursive: true });
+    // A third-party dependency may contain anything: pinned elsewhere.
+    writeFileSync(join(plugin, 'ws/sample.js'), token(40));
+    writeFileSync(join(plugin, 'auriga-dsh/src/ok.js'), 'export {}');
+    const pack = join(base, 'pack');
+    mkdirSync(join(pack, 'package'), { recursive: true });
+    writeFileSync(join(pack, 'package/index.js'), 'export {}');
+    const tgz = join(base, 'plugin.tgz');
+    const tar =
+      process.platform === 'win32'
+        ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+        : 'tar';
+    const made = spawnSync(tar, ['-czf', tgz, '-C', pack, 'package']);
+    assert.equal(made.status, 0, 'tar available');
+    const work = join(base, 'work');
+    mkdirSync(work);
+    scanForSecrets(stage, tgz, work);
+
+    // Secret inside our plugin directory: rejected.
+    writeFileSync(join(plugin, 'auriga-dsh/src/leak.js'), token(40));
+    assert.throws(() => scanForSecrets(stage, tgz, work), /leak\.js/);
+    rmSync(join(plugin, 'auriga-dsh/src/leak.js'));
+
+    // Secret only inside the tarball: rejected.
+    writeFileSync(join(pack, 'package/leak.js'), token(40));
+    spawnSync(tar, ['-czf', tgz, '-C', pack, 'package']);
+    assert.throws(() => scanForSecrets(stage, tgz, work), /leak\.js/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });

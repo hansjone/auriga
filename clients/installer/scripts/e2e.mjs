@@ -476,6 +476,28 @@ try {
     existsSync(join(dataHome, 'sessions', 'e2e-session.json')),
     'uninstall keeps user data by default',
   );
+
+  // 9. layout guard: a data folder inside the install folder is refused
+  if (newPkg) {
+    const guarded = join(sandbox, 'guarded');
+    const refused = run('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      join(newPkg, 'install.ps1'),
+      '-InstallDir',
+      guarded,
+      '-DataHome',
+      join(guarded, 'home'),
+    ]);
+    check(
+      refused.status !== 0 &&
+        !existsSync(guarded) &&
+        /inside the install directory/.test(refused.stdout + refused.stderr),
+      'install refuses a data folder inside the install folder',
+    );
+  }
   writeFileSync(
     join(sandbox, 'result.json'),
     JSON.stringify({ ok: true, steps }, null, 2),

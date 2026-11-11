@@ -1,24 +1,8 @@
-import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { listFiles } from '../../runtime/verify.mjs';
 
-export function sha256File(file) {
-  return createHash('sha256').update(readFileSync(file)).digest('hex');
-}
-
-/** All files below dir as sorted posix-style relative paths. */
-export function listFiles(dir) {
-  const out = [];
-  const walk = (current) => {
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const full = join(current, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else out.push(relative(dir, full).split(sep).join('/'));
-    }
-  };
-  walk(dir);
-  return out.sort();
-}
+export { sha256File, listFiles } from '../../runtime/verify.mjs';
 
 const FORBIDDEN_NAMES =
   /(^|\/)(\.env(\..*)?|.*\.pem|.*\.key|id_rsa|credentials?\.json|.*\.p12|.*\.pfx)$/i;
@@ -31,7 +15,11 @@ const SECRET_PATTERNS = [
 ];
 
 /** Throws when staged files that we own look like they contain secrets. */
-export function findSecrets(dir, skip = () => false) {
+export function findSecrets(
+  dir,
+  skip = () => false,
+  maxBytes = 256 * 1024 * 1024,
+) {
   const hits = [];
   for (const file of listFiles(dir)) {
     if (skip(`/${file}`)) continue;
@@ -39,7 +27,11 @@ export function findSecrets(dir, skip = () => false) {
       hits.push(`${file}: forbidden file name`);
       continue;
     }
-    if (statSize(join(dir, file)) > 2 * 1024 * 1024) continue;
+    // Our own files are never skipped for size: too large to scan is a failure.
+    if (statSync(join(dir, file)).size > maxBytes) {
+      hits.push(`${file}: too large to scan (${maxBytes} bytes limit)`);
+      continue;
+    }
     const text = readFileSync(join(dir, file), 'latin1');
     for (const pattern of SECRET_PATTERNS)
       if (pattern.test(text)) hits.push(`${file}: matches ${pattern}`);
@@ -47,12 +39,8 @@ export function findSecrets(dir, skip = () => false) {
   return hits;
 }
 
-function statSize(file) {
-  return statSync(file).size;
-}
-
-export function assertNoSecrets(dir, skip) {
-  const hits = findSecrets(dir, skip);
+export function assertNoSecrets(dir, skip, maxBytes) {
+  const hits = findSecrets(dir, skip, maxBytes);
   if (hits.length > 0)
     throw new Error(`secrets found in package:\n${hits.join('\n')}`);
 }
