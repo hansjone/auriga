@@ -10,19 +10,32 @@
         "categories": {
           "type": "array",
           "maxItems": 0,
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "allowDomains": {
           "type": "array",
           "maxItems": 256,
           "uniqueItems": true,
-          "items": { "type": "string", "maxLength": 255 }
+          "items": {
+            "type": "string",
+            "maxLength": 255
+          }
         },
         "denyDomains": {
           "type": "array",
           "maxItems": 256,
           "uniqueItems": true,
-          "items": { "type": "string", "maxLength": 255 }
+          "items": {
+            "type": "string",
+            "maxLength": 255
+          }
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["open", "allowlist"],
+          "default": "open"
         }
       }
     },
@@ -31,10 +44,21 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "tenantId", "version", "value"],
       "properties": {
-        "schemaVersion": { "type": "integer", "const": 1 },
-        "tenantId": { "type": "string", "format": "uuid" },
-        "version": { "type": "integer", "minimum": 1 },
-        "value": { "$ref": "#/$defs/Value" }
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "value": {
+          "$ref": "#/$defs/Value"
+        }
       }
     },
     "Report": {
@@ -50,13 +74,34 @@
         "reportedAt"
       ],
       "properties": {
-        "tenantId": { "type": "string", "format": "uuid" },
-        "version": { "type": "integer", "minimum": 1 },
-        "nodeId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
-        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "result": { "type": "string", "enum": ["applied", "failed"] },
-        "appliedVersion": { "type": "integer", "minimum": 0 },
-        "reportedAt": { "type": "string", "format": "date-time" }
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "nodeId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "result": {
+          "type": "string",
+          "enum": ["applied", "failed"]
+        },
+        "appliedVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reportedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       }
     }
   },

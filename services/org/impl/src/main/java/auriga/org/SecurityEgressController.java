@@ -25,7 +25,7 @@ public class SecurityEgressController {
   public ObjectNode status() {
     var out = distribution.status();
     var entries = org.securityEntries();
-    for (var field : new String[] {"relayPublicUrl", "relayBackendOrigin", "relayDefaultExit"})
+    for (var field : new String[] {"relayPublicUrl"})
       if (entries.has(field)) out.set(field, entries.get(field));
     return out;
   }

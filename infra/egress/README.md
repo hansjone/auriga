@@ -1,27 +1,34 @@
 # 实例出网策略
 
-Compose 与 NAS 的共享出口通过两个独立命名卷接收本安装租户的策略。平台独占写入策略卷，出口只读；出口独占写入状态/回报卷，平台只读并将回报存入 Org 数据库。实例不挂载这两个卷，也没有新增网络管理端口。
+升级和冷启动默认沿用原有公网出网行为，仅执行环境拒绝列表与地址边界。管理员从未保存的 v1 空种子不会触发收紧下发，页面显示“未配置，沿用默认出网”。platform 未启动、无安装租户或暂时不可用，不影响出口健康检查和 agent 启动；已有状态则继续执行最后应用的策略。
 
-首次部署前，请在管理台 `/security/egress` 核对允许域名。**允许列表为空会拒绝全部实例出网**，包括初始数据库中的空策略。策略更新会关闭现有 CONNECT 隧道，客户端需重新连接。
+在管理台 `/security/egress` 选择模式并确认保存：
 
-平台配置（两套 Compose 已接入）：
+- `open`：允许公网目标，平台拒绝项优先。恢复默认操作清空平台允许与拒绝项。
+- `allowlist`：仅允许列表内域名；空列表明确拒绝全部，页面会再次提示。
+- 旧格式无模式时，非空允许列表保持白名单，否则开放。`*.example.com` 不包含根域。
+
+无论采用哪种模式，部署环境拒绝列表、私网、回环、链路本地、CGNAT、元数据与非公网 IPv6 都不能放开。每次连接校验解析结果并固定拨号 IP。应用新版本只关闭新策略拒绝的连接，仍被允许的流式连接保留。
+
+Compose/NAS 通过两个命名卷通信。平台独占写策略卷，出口独占写状态/回报卷，另一方只读；实例不挂载这两个卷，也不发布网络管理端口。两种镜像均设置相同卷目录 UID，因此出口不依赖平台先启动。
+
+平台配置：
 
 - `AURIGA_EGRESS_POLICY_DIRECTORY=/var/auriga-egress/policies`
 - `AURIGA_EGRESS_REPORT_DIRECTORY=/var/auriga-egress/reports`
 - `AURIGA_EGRESS_NODE_ID=egress-primary`
-- `AURIGA_SECURITY_EDGE_CONFIG_FILE=/etc/auriga/edge.config.json`：仅投影中转入口/后端地址，不返回凭据。
+- `AURIGA_SECURITY_EDGE_CONFIG_FILE=/etc/auriga/edge.config.json`：仅投影中转公网入口。
 
 出口配置：
 
 - `AURIGA_EGRESS_POLICY_FILE=/var/auriga-egress/policies/policy.json`
 - `AURIGA_EGRESS_STATE_FILE=/var/auriga-egress/reports/state.json`
 - `AURIGA_EGRESS_REPORT_FILE=/var/auriga-egress/reports/report.json`
-- `AURIGA_EGRESS_NODE_ID` 必须与平台配置一致。
+- `AURIGA_EGRESS_NODE_ID` 与平台一致。
+- 可选 `AURIGA_EGRESS_TENANT_ID`：绑定安装租户的 UUID，拒绝不符的首份快照和缓存状态；不配置时仍依赖私有只读卷与首次租户固定。
 
-策略格式由 `contracts/deployment/egress.schema.json` 定义。出口每 2 秒读取策略，拒绝版本回退、同版本换内容、租户变化和未知字段；先持久化版本，再应用和回报。冷启动在获得策略之前拒绝出网，重启恢复本安装已有的策略与版本底线。勿跨安装复用状态卷。
+出口每 2 秒拉取策略，拒绝版本回退、同版本换内容、租户变化和未知字段。状态先持久化，再应用与回报。变化时立即回报，未变化时每 30 秒心跳；平台以 90 秒判断过期。发布和回报导入分事务，不一致回报保留真实下发记录并显示失败。
 
-仅支持精确域名与 `*.example.com` 子域匹配；通配符不包含根域。拒绝项优先。分类尚无注册表，只接受空数组。无论允许列表如何设置，环境拒绝列表、私网、回环、链路本地、CGNAT、元数据地址等原有边界均继续生效；每次连接重新检查解析结果并固定拨号 IP。
+旧保存值由兼容投影保留有效规则、忽略不支持项并显示警告；管理员保存后确认当前规则。V3 提升旧保存版本，未配置种子不变。契约见 `contracts/deployment/egress.schema.json` 与 `admin-sec-net.md`。
 
-管理台分别展示保存、下发和生效版本。`effective` 仅代表相同版本的节点成功回报，30 秒未更新后为 `stale`；刷新页面获取新回报。失败或未知不能当作生效。中转默认上游出口为部署配置的直连，提供商单独设置的代理仍以中转站配置为准，不受实例策略管理。
-
-本通道只支持单宿主、单安装租户、单共享出口节点。多节点分发、浏览器 TLS 证书到期观测和公网出口探测需另接可信观测源。未设置策略文件的独立启动模式保持原有公网代理行为。
+仅支持单宿主、固定安装租户、单共享出口。勿跨安装复用状态卷。Bifrost 保留原有代理环境与提供商配置，实例策略不管理中转上游出口。TLS 到期、实际公网出口与多节点分发需另接可信能力。

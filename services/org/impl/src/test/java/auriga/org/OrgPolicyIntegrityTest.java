@@ -162,7 +162,11 @@ class OrgPolicyIntegrityTest {
       throws Exception {
     String result = race(key, repeatableRead, withEtag);
     String expected =
-        repeatableRead ? "common.conflict" : withEtag ? "org.precondition_failed" : "committed";
+        key.equals("egress") && !withEtag
+            ? "org.precondition_required"
+            : repeatableRead
+                ? "common.conflict"
+                : withEtag ? "org.precondition_failed" : "committed";
     assertEquals(expected, result);
     boolean secondCommitted = expected.equals("committed");
     assertEquals(secondCommitted ? 3 : 2, get(key).path("version").asLong());

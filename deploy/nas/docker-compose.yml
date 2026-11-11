@@ -156,13 +156,6 @@ services:
     pids_limit: 256
 
   bifrost:
-    environment:
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      ALL_PROXY: ""
-      http_proxy: ""
-      https_proxy: ""
-      all_proxy: ""
     image: ${AURIGA_IMAGE_BIFROST}
     <<: *cap_drop_all
     user: '10003:10003'
@@ -482,9 +475,6 @@ services:
     user: '65532:65532'
     restart: unless-stopped
     read_only: true
-    depends_on:
-      platform:
-        condition: service_started
     volumes:
       - egress-policies:/var/auriga-egress/policies:ro
       - egress-reports:/var/auriga-egress/reports
@@ -495,6 +485,7 @@ services:
       AURIGA_EGRESS_STATE_FILE: /var/auriga-egress/reports/state.json
       AURIGA_EGRESS_REPORT_FILE: /var/auriga-egress/reports/report.json
       AURIGA_EGRESS_NODE_ID: egress-primary
+      AURIGA_EGRESS_TENANT_ID: ${AURIGA_EGRESS_TENANT_ID:-}
       AURIGA_EGRESS_DNS_SERVER: ${AURIGA_EGRESS_DNS_SERVER:-}
       AURIGA_EGRESS_DENY_HOSTS: ${AURIGA_NAS_PORTAL_HOST:?sealed portal host required},${AURIGA_NAS_ADMIN_HOST:?sealed admin host required}
     # The only non-internal attachment is an egress-only bridge, with no host

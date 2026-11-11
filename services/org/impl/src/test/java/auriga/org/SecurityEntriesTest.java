@@ -101,13 +101,26 @@ class SecurityEntriesTest {
     var svc = new OrgService(null, mock(EventPublisher.class), Clock.systemUTC(), access, file);
     var value = TenantContext.call(UUID.fromString(access.tenantId()), svc::securityEntries);
     assertEquals(access.portalUrl() + "/ai/v1", value.path("relayPublicUrl").asString());
-    assertEquals("http://bifrost:8080", value.path("relayBackendOrigin").asString());
+    assertFalse(value.has("relayBackendOrigin"));
+    assertFalse(value.has("relayDefaultExit"));
     assertFalse(value.toString().contains("do-not-expose"));
     java.nio.file.Files.writeString(
         file, "{\"relay\":{\"origin\":\"http://user:secret@bifrost:8080\"}}");
     assertFalse(
         TenantContext.call(UUID.fromString(access.tenantId()), svc::securityEntries)
             .has("relayBackendOrigin"));
+  }
+
+  @Test
+  void egressRequiresIfMatchEvenWithRecentAdminIdentity() {
+    var actor = principal(TokenContext.ADMIN, Set.of("org.policies.write"), Instant.now());
+    RequestContext.start("test", null)
+        .withPrincipal(actor)
+        .run(
+            () ->
+                error(
+                    "org.precondition_required",
+                    () -> service(null).putPolicy("egress", OrgJson.object(), null)));
   }
 
   @Test

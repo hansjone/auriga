@@ -39,13 +39,6 @@ services:
       dockerfile: deploy/compose/Dockerfile.bifrost
     user: '10003:10003'
     group_add: ['10005', '10006', '999']
-    environment:
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      ALL_PROXY: ""
-      http_proxy: ""
-      https_proxy: ""
-      all_proxy: ""
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     read_only: true
@@ -118,12 +111,10 @@ services:
       AURIGA_EGRESS_STATE_FILE: /var/auriga-egress/reports/state.json
       AURIGA_EGRESS_REPORT_FILE: /var/auriga-egress/reports/report.json
       AURIGA_EGRESS_NODE_ID: egress-primary
+      AURIGA_EGRESS_TENANT_ID: ${AURIGA_EGRESS_TENANT_ID:-}
       AURIGA_EGRESS_DNS_SERVER: ${AURIGA_EGRESS_DNS_SERVER:-}
     cap_drop: [ALL]
     read_only: true
-    depends_on:
-      platform:
-        condition: service_started
     volumes:
       - egress-policies:/var/auriga-egress/policies:ro
       - egress-reports:/var/auriga-egress/reports

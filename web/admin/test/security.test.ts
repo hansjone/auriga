@@ -193,6 +193,48 @@ describe('security pages', () => {
     expect(wrapper.text()).toContain('\u6743\u9650');
     wrapper.unmount();
   });
+  it('shows an untouched installation as default egress', async () => {
+    vi.mocked(securityApi.status).mockResolvedValue({
+      savedVersion: '1',
+      phase: 'unconfigured',
+      nodeId: 'egress-primary',
+    } as never);
+    const wrapper = mount(EgressView, options());
+    await flushPromises();
+    expect(wrapper.get('[data-testid="egress-phase"]').text()).toContain(
+      '\u672a\u914d\u7f6e\uff0c\u6cbf\u7528\u9ed8\u8ba4\u51fa\u7f51',
+    );
+    wrapper.unmount();
+  });
+  it('restores the environment default only after confirmation', async () => {
+    const wrapper = mount(EgressView, options());
+    await flushPromises();
+    await wrapper.get('[data-testid="restore-default"]').trigger('click');
+    expect(securityApi.save).not.toHaveBeenCalled();
+    await wrapper.findComponent(ActionConfirm).vm.$emit('confirm');
+    await flushPromises();
+    expect(securityApi.save).toHaveBeenCalledWith(
+      { mode: 'open', categories: [], allowDomains: [], denyDomains: [] },
+      '"2"',
+      expect.anything(),
+    );
+    wrapper.unmount();
+  });
+  it('warns about adjusted legacy values and unbound node reports', async () => {
+    vi.mocked(securityApi.status).mockResolvedValue({
+      savedVersion: '2',
+      phase: 'failed',
+      nodeId: 'egress-primary',
+      legacyAdjusted: true,
+      reportError: 'invalid_report',
+    } as never);
+    const wrapper = mount(EgressView, options());
+    await flushPromises();
+    expect(wrapper.text()).toContain('\u65e7\u7b56\u7565');
+    expect(wrapper.text()).toContain('\u56de\u62a5\u4e0d\u4e00\u81f4');
+    expect(wrapper.text()).not.toContain('http://bifrost');
+    wrapper.unmount();
+  });
   it('renders configured entries and no TLS health claims', async () => {
     vi.mocked(securityApi.entries).mockResolvedValue({
       mode: 'ip',

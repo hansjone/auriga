@@ -1068,9 +1068,7 @@ public final class OrgService {
               && url.getRawQuery() == null
               && url.getRawFragment() == null
               && (url.getPath().isEmpty() || url.getPath().equals("/"))) {
-            out.put("relayBackendOrigin", origin);
             out.put("relayPublicUrl", deploymentAccess.portalUrl() + "/ai/v1");
-            out.put("relayDefaultExit", "direct");
           }
         }
       } catch (java.io.IOException | IllegalArgumentException ignored) {
@@ -1097,12 +1095,12 @@ public final class OrgService {
                                 "version",
                                 rs.getLong("version"),
                                 "value",
-                                OrgJson.read(rs.getString("value")),
+                                OrgJson.MAPPER.readTree(rs.getString("value")),
                                 "updatedAt",
                                 rs.getTimestamp("updated_at").toInstant().toString());
                         UUID by = (UUID) rs.getObject("updated_by");
                         if (by != null) n.put("updatedBy", by.toString());
-                        return n;
+                        return key.equals("egress") ? EgressPolicyCompatibility.project(n) : n;
                       },
                       store.tenantId(),
                       key);
@@ -1116,8 +1114,11 @@ public final class OrgService {
       new AuthorizationRules(
               Set.of("org.policies.write"), true, java.time.Duration.ofMinutes(10), true)
           .check(AuthorizationRules.currentPrincipal().orElse(null), clock);
+      OrgError.require(ifMatch != null, "precondition_required", 428);
       EgressPolicyValidation.validate(value);
     }
+    JsonNode checkedValue =
+        key.equals("egress") ? EgressPolicyCompatibility.canonical(value) : value;
     return store.tx(
         () -> {
           OrgError.require(Set.of("workspace", "egress", "login").contains(key), "conflict", 409);
@@ -1133,7 +1134,7 @@ public final class OrgService {
           if (ifMatch != null)
             OrgError.require(
                 existing.path("version").asLong() == ifMatch, "precondition_failed", 412);
-          if (key.equals("workspace")) validateWorkspacePolicy(value);
+          if (key.equals("workspace")) validateWorkspacePolicy(checkedValue);
           long version = existing.path("version").asLong() + 1;
           store
               .jdbc()
@@ -1141,7 +1142,7 @@ public final class OrgService {
                   "UPDATE policy SET version=?, value=?::jsonb, updated_at=?, updated_by=?"
                       + " WHERE tenant_id=? AND key=?",
                   version,
-                  value.toString(),
+                  checkedValue.toString(),
                   java.sql.Timestamp.from(clock.instant()),
                   actorId(),
                   store.tenantId(),

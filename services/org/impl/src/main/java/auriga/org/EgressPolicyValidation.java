@@ -15,7 +15,15 @@ final class EgressPolicyValidation {
     value
         .propertyNames()
         .forEach(
-            name -> require(Set.of("categories", "allowDomains", "denyDomains").contains(name)));
+            name ->
+                require(
+                    Set.of("mode", "categories", "allowDomains", "denyDomains").contains(name)));
+    if (value.has("mode"))
+      require(
+          value.path("mode").isString()
+              && Set.of("open", "allowlist").contains(value.path("mode").asString()));
+    if (value.path("mode").asString("").equals("open") && value.has("allowDomains"))
+      require(value.path("allowDomains").isArray() && value.path("allowDomains").isEmpty());
     for (String field : Set.of("categories", "allowDomains", "denyDomains")) {
       JsonNode items = value.get(field);
       if (items == null) continue;

@@ -31,7 +31,6 @@ func TestPolicyCONNECTAndRevocation(t *testing.T) {
 		}
 	}()
 	s, dial := proxyFixture(t, upstream.Addr().String())
-	s.RequirePolicy()
 	server := httptest.NewServer(s)
 	t.Cleanup(server.Close)
 	connect := func(host string) (net.Conn, int) {
@@ -53,7 +52,7 @@ func TestPolicyCONNECTAndRevocation(t *testing.T) {
 	}
 	c, status := connect("api.example.com")
 	_ = c.Close()
-	if status != 403 {
+	if status != 200 {
 		t.Fatal(status)
 	}
 	s.ApplyPolicy(policy.Value{AllowDomains: []string{"*.example.com"}, DenyDomains: []string{"blocked.example.com"}})
@@ -76,14 +75,47 @@ func TestPolicyCONNECTAndRevocation(t *testing.T) {
 			t.Fatal(host, code)
 		}
 	}
+	// An unrelated policy change must preserve an already allowed stream.
+	s.ApplyPolicy(policy.Value{AllowDomains: []string{"*.example.com"}, DenyDomains: []string{"blocked.example.com", "other.example.org"}})
+	if _, err = c.Write([]byte("retained")); err != nil {
+		t.Fatal(err)
+	}
+	response = make([]byte, len("retained"))
+	if _, err = io.ReadFull(c, response); err != nil || string(response) != "retained" {
+		t.Fatal(err)
+	}
+	// Clearing the platform policy restores the previous public egress default.
 	s.ApplyPolicy(policy.Value{})
+	open, code := connect("other.example.org")
+	_ = open.Close()
+	if code != 200 {
+		t.Fatal(code)
+	}
+	if _, err = c.Write([]byte("open")); err != nil {
+		t.Fatal(err)
+	}
+	response = make([]byte, len("open"))
+	if _, err = io.ReadFull(c, response); err != nil || string(response) != "open" {
+		t.Fatal(err)
+	}
+	// Only the newly denied host is revoked.
+	s.ApplyPolicy(policy.Value{DenyDomains: []string{"api.example.com"}})
 	var b [1]byte
 	_, err = c.Read(b[:])
 	if err == nil {
 		t.Fatal("old tunnel survived revocation")
 	}
-	if len(dial.targets()) != 1 {
+	if len(dial.targets()) != 3 {
 		t.Fatal(dial.targets())
+	}
+}
+
+func TestHealthDoesNotDependOnPlatformPolicy(t *testing.T) {
+	s := New()
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatal(w.Code)
 	}
 }
 

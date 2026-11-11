@@ -55,8 +55,7 @@ func runContext(ctx context.Context, args []string, out, logs io.Writer) error {
 	var policyWorker sync.WaitGroup
 	defer func() { cancelPolicy(); policyWorker.Wait() }()
 	if source := os.Getenv("AURIGA_EGRESS_POLICY_FILE"); source != "" {
-		server.RequirePolicy()
-		runner, policyErr := policy.New(source, os.Getenv("AURIGA_EGRESS_STATE_FILE"), os.Getenv("AURIGA_EGRESS_REPORT_FILE"), os.Getenv("AURIGA_EGRESS_NODE_ID"), server)
+		runner, policyErr := policy.New(source, os.Getenv("AURIGA_EGRESS_STATE_FILE"), os.Getenv("AURIGA_EGRESS_REPORT_FILE"), os.Getenv("AURIGA_EGRESS_NODE_ID"), server, os.Getenv("AURIGA_EGRESS_TENANT_ID"))
 		if policyErr != nil {
 			return policyErr
 		}

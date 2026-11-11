@@ -58,6 +58,16 @@ class OrgEgressDistributionTest {
   void persistsVersionBoundReportAndRejectsForgery() throws Exception {
     var policies = java.nio.file.Files.createDirectory(directory.resolve("policies"));
     var reports = java.nio.file.Files.createDirectory(directory.resolve("reports"));
+    store.tenant(
+        TENANT,
+        () -> {
+          store
+              .jdbc()
+              .update(
+                  "UPDATE policy SET value='{\"mode\":\"open\"}'::jsonb WHERE tenant_id=? AND key='egress'",
+                  TENANT);
+          return null;
+        });
     var channel =
         new OrgEgressDistribution(
             svc, Clock.systemUTC(), TENANT, "egress-primary", policies, reports);
@@ -100,9 +110,8 @@ class OrgEgressDistributionTest {
     report.put("result", "failed");
     report.put("reportedAt", java.time.Instant.now().toString());
     java.nio.file.Files.writeString(reports.resolve("report.json"), report.toString());
-    assertThrows(RuntimeException.class, restarted::reconcile);
-    assertEquals(
-        "effective", TenantContext.call(TENANT, restarted::status).path("phase").asString());
+    assertDoesNotThrow(restarted::reconcile);
+    assertEquals("failed", TenantContext.call(TENANT, restarted::status).path("phase").asString());
     store.tenant(
         TENANT,
         () -> {
@@ -140,7 +149,7 @@ class OrgEgressDistributionTest {
     var later =
         new OrgEgressDistribution(
             svc,
-            Clock.offset(Clock.systemUTC(), java.time.Duration.ofSeconds(40)),
+            Clock.offset(Clock.systemUTC(), java.time.Duration.ofSeconds(100)),
             TENANT,
             "egress-primary",
             policies,
@@ -164,7 +173,9 @@ class OrgEgressDistributionTest {
                   ? "another-node"
                   : java.time.Instant.now().plusSeconds(60).toString());
       java.nio.file.Files.writeString(reports.resolve("report.json"), forged.toString());
-      assertThrows(RuntimeException.class, restarted::reconcile);
+      assertDoesNotThrow(restarted::reconcile);
+      assertEquals(
+          "failed", TenantContext.call(TENANT, restarted::status).path("phase").asString());
     }
     store.tenant(
         TENANT,

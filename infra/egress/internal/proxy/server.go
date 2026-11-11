@@ -36,54 +36,43 @@ type Server struct {
 	live        map[*tunnel]struct{}
 	deniedHosts []string
 	tunnels     sync.WaitGroup
-	managed     bool
-	policyReady bool
-	generation  uint64
 	policy      policy.Value
 }
 
-// RequirePolicy closes the cold-start path until a durable policy is loaded.
-func (s *Server) RequirePolicy() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.managed = true
-	s.policyReady = false
-}
-
-// ApplyPolicy is called only after policy validation and durable state commit.
-// Closing existing tunnels makes a deny update effective for existing traffic.
+// ApplyPolicy revokes only tunnels whose targets are no longer allowed.
+// Deployment host and address restrictions are enforced independently below.
 func (s *Server) ApplyPolicy(value policy.Value) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.managed = true
-	s.policyReady = true
-	s.generation++
-	s.policy = policy.Value{AllowDomains: append([]string(nil), value.AllowDomains...), DenyDomains: append([]string(nil), value.DenyDomains...)}
+	s.policy = policy.Value{Mode: policy.EffectiveMode(value), AllowDomains: append([]string(nil), value.AllowDomains...), DenyDomains: append([]string(nil), value.DenyDomains...)}
 	for t := range s.live {
-		t.close()
+		if !s.allowedLocked(t.host) {
+			t.close()
+		}
 	}
 }
 
-func (s *Server) allowed(host string) (uint64, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.managed {
-		return s.generation, true
-	}
-	if !s.policyReady {
-		return s.generation, false
-	}
+func (s *Server) allowedLocked(host string) bool {
 	for _, pattern := range s.policy.DenyDomains {
 		if policy.Match(pattern, host) {
-			return s.generation, false
+			return false
 		}
+	}
+	if policy.EffectiveMode(s.policy) == "open" {
+		return true
 	}
 	for _, pattern := range s.policy.AllowDomains {
 		if policy.Match(pattern, host) {
-			return s.generation, true
+			return true
 		}
 	}
-	return s.generation, false
+	return false
+}
+
+func (s *Server) allowed(host string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.allowedLocked(host)
 }
 
 // SetDeniedHosts installs trusted deployment origins before serving. Public
@@ -166,13 +155,6 @@ func (s *Server) closeTunnels() {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && r.URL.Path == "/health" && r.URL.RawQuery == "" {
-		s.mu.Lock()
-		ready := !s.managed || s.policyReady
-		s.mu.Unlock()
-		if !ready {
-			http.Error(w, "policy not ready", http.StatusServiceUnavailable)
-			return
-		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -195,8 +177,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	generation, allowed := s.allowed(host)
-	if !allowed {
+	if !s.allowed(host) {
 		http.Error(w, "target denied", http.StatusForbidden)
 		return
 	}
@@ -231,9 +212,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = client.Close() }()
-	t := &tunnel{client: client, upstream: upstream, deadline: time.Now().Add(tunnelLifetime)}
+	t := &tunnel{host: host, client: client, upstream: upstream, deadline: time.Now().Add(tunnelLifetime)}
 	s.mu.Lock()
-	if s.closed || s.generation != generation {
+	if s.closed || !s.allowedLocked(host) {
 		s.mu.Unlock()
 		return
 	}
@@ -272,6 +253,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type tunnel struct {
+	host             string
 	client, upstream net.Conn
 	deadline         time.Time
 	mu               sync.Mutex

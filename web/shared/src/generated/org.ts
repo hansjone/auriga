@@ -374,6 +374,7 @@ export interface paths {
       cookie?: never;
     };
     get: operations['getPolicy'];
+    /** @description Egress writes require If-Match; missing preconditions return 428. Other policy keys retain their existing behavior. */
     put: operations['putPolicy'];
     post?: never;
     delete?: never;
@@ -518,12 +519,13 @@ export interface components {
       ingressKind: 'direct' | 'trusted_proxy';
       /** Format: uri */
       relayPublicUrl?: string;
-      /** Format: uri */
-      relayBackendOrigin?: string;
-      /** @enum {string} */
-      relayDefaultExit?: 'direct';
     };
     AdminSecNetEgress: {
+      /** @enum {string} */
+      mode?: 'open' | 'allowlist';
+      legacyAdjusted?: boolean;
+      /** @enum {string} */
+      reportError?: 'invalid_report' | 'policy_version_regression';
       savedVersion: string;
       distributedVersion?: string;
       appliedVersion?: string;
@@ -536,13 +538,15 @@ export interface components {
       result?: 'applied' | 'failed';
       /** @enum {string} */
       phase:
-        'saved' | 'distributed' | 'effective' | 'failed' | 'stale' | 'disabled';
+        | 'unconfigured'
+        | 'saved'
+        | 'distributed'
+        | 'effective'
+        | 'failed'
+        | 'stale'
+        | 'disabled';
       /** Format: uri */
       relayPublicUrl?: string;
-      /** Format: uri */
-      relayBackendOrigin?: string;
-      /** @enum {string} */
-      relayDefaultExit?: 'direct';
     };
     Tenant: {
       id: components['schemas']['Uuid'];
@@ -665,6 +669,11 @@ export interface components {
     };
     /** @description 策略键 egress。解析到内网地址的目标一律拒绝，不能通过策略放开。 */
     EgressPolicy: {
+      /**
+       * @description Open preserves public egress subject to deny rules and deployment protections; allowlist requires a match. Missing mode uses allowlist only when allowDomains is nonempty.
+       * @enum {string}
+       */
+      mode?: 'open' | 'allowlist';
       /** @description 允许的分类（分类清单由 egress 维护，例如 package_registries、code_hosting、model_providers、search）。 */
       categories?: string[];
       /** @description 额外允许的域名，支持 `*.example.com`。 */
@@ -685,6 +694,10 @@ export interface components {
       | components['schemas']['EgressPolicy']
       | components['schemas']['LoginPolicy'];
     Policy: {
+      /** @description Egress only; false for an untouched installation seed. */
+      configured?: boolean;
+      /** @description Egress only; unsupported legacy values were omitted from the read projection. */
+      legacyAdjusted?: boolean;
       key: components['schemas']['PolicyKey'];
       version: number;
       value: components['schemas']['PolicyValue'];
@@ -1694,6 +1707,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       412: components['responses']['PreconditionFailed'];
+      /** @description Egress write requires If-Match (org.precondition_required) */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   getDefaultQuota: {

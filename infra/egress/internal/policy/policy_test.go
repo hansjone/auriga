@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMaximumDomainListsFitChannel(t *testing.T) {
@@ -32,6 +33,90 @@ func TestMaximumDomainListsFitChannel(t *testing.T) {
 	}
 	if err = runner.Sync(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHeartbeatIsBoundedAndTenantBindingIsEnforced(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "policy.json")
+	report := filepath.Join(dir, "report.json")
+	state := filepath.Join(dir, "state.json")
+	raw := []byte(`{"schemaVersion":1,"tenantId":"00000000-0000-0000-0000-000000000001","version":1,"value":{"mode":"open","categories":[],"allowDomains":[],"denyDomains":[]}}`)
+	if err := os.WriteFile(source, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &applied{}
+	runner, err := New(source, state, report, "egress-primary", a, "00000000-0000-0000-0000-000000000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	runner.now = func() time.Time { return now }
+	if err = runner.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Second)
+	if err = runner.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Fatal("unchanged heartbeat rewrote the report")
+	}
+	now = now.Add(30 * time.Second)
+	if err = runner.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	third, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) == string(third) {
+		t.Fatal("heartbeat was never renewed")
+	}
+	if _, err = New(source, state, report, "egress-primary", &applied{}, "00000000-0000-0000-0000-000000000002"); err == nil {
+		t.Fatal("foreign cached tenant accepted")
+	}
+	other := strings.Replace(string(raw), "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", 1)
+	if err = os.WriteFile(source, []byte(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if runner.Sync() == nil || a.calls != 1 {
+		t.Fatal("foreign first or subsequent policy was applied")
+	}
+	bound, err := New(source, filepath.Join(dir, "empty-state.json"), report, "egress-primary", &applied{}, "00000000-0000-0000-0000-000000000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound.Sync() == nil {
+		t.Fatal("foreign first snapshot was accepted")
+	}
+}
+
+func TestOldSeedStateUsesPublicDefaultWhenPlatformIsUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	state := filepath.Join(dir, "state.json")
+	raw := []byte(`{"schemaVersion":1,"tenantId":"00000000-0000-0000-0000-000000000001","version":1,"value":{"categories":[],"allowDomains":[],"denyDomains":[]}}`)
+	if err := os.WriteFile(state, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &applied{}
+	runner, err := New(filepath.Join(dir, "absent-policy.json"), state, filepath.Join(dir, "report.json"), "egress-primary", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.calls != 1 || EffectiveMode(a.value) != "open" {
+		t.Fatal("old empty seed narrowed egress", a.value)
+	}
+	if runner.Sync() == nil || a.calls != 1 || EffectiveMode(a.value) != "open" {
+		t.Fatal("platform outage changed the default")
 	}
 }
 

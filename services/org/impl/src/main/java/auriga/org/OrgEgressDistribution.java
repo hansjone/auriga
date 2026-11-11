@@ -40,61 +40,90 @@ public final class OrgEgressDistribution {
 
   public void reconcile() {
     if (tenant == null || policies == null || reports == null) return;
-    org.store()
-        .tenant(
-            tenant,
-            () -> {
-              var store = org.store();
-              store.lockGroupHierarchy();
-              var policy = org.getPolicy("egress");
-              long version = policy.path("version").asLong();
-              var value = policy.path("value");
-              EgressPolicyValidation.validate(value);
-              // Stable field order is part of the content digest; do not hash a jsonb rendering.
-              var normalized = OrgJson.object();
-              for (var key : new String[] {"categories", "allowDomains", "denyDomains"})
-                normalized.set(
-                    key, value.has(key) ? value.get(key) : OrgJson.MAPPER.createArrayNode());
-              String snapshot =
-                  OrgJson.object(
-                          "schemaVersion",
-                          1,
-                          "tenantId",
-                          tenant.toString(),
-                          "version",
-                          version,
-                          "value",
-                          normalized)
-                      .toString();
-              String digest = OrgService.hashCode(snapshot);
-              var previous =
+    Delivery delivery =
+        org.store()
+            .tenant(
+                tenant,
+                () -> {
+                  var store = org.store();
+                  store.lockGroupHierarchy();
+                  var policy = org.getPolicy("egress");
+                  if (!policy.path("configured").asBoolean()) return null;
+                  long version = policy.path("version").asLong();
+                  var value = policy.path("value");
+                  EgressPolicyValidation.validate(value);
+                  // Stable field order is part of the content digest; do not hash a jsonb
+                  // rendering.
+                  var normalized = OrgJson.object("mode", value.path("mode").asString());
+                  for (var key : new String[] {"categories", "allowDomains", "denyDomains"})
+                    normalized.set(
+                        key, value.has(key) ? value.get(key) : OrgJson.MAPPER.createArrayNode());
+                  String snapshot =
+                      OrgJson.object(
+                              "schemaVersion",
+                              1,
+                              "tenantId",
+                              tenant.toString(),
+                              "version",
+                              version,
+                              "value",
+                              normalized)
+                          .toString();
+                  String digest = OrgService.hashCode(snapshot);
+                  var previous =
+                      store
+                          .jdbc()
+                          .queryForList(
+                              "SELECT version,digest FROM egress_policy_delivery WHERE tenant_id=? ORDER BY version DESC LIMIT 1",
+                              tenant);
+                  if (!previous.isEmpty()) {
+                    long last = ((Number) previous.getFirst().get("version")).longValue();
+                    if (last > version
+                        || (last == version && !digest.equals(previous.getFirst().get("digest"))))
+                      throw new IllegalStateException("Non-monotonic egress policy");
+                  }
+                  // Publish before committing the delivery marker. Crash recovery rewrites the same
+                  // bytes.
+                  writeSnapshot(snapshot);
                   store
                       .jdbc()
-                      .queryForList(
-                          "SELECT version,digest FROM egress_policy_delivery WHERE tenant_id=? ORDER BY version DESC LIMIT 1",
-                          tenant);
-              if (!previous.isEmpty()) {
-                long last = ((Number) previous.getFirst().get("version")).longValue();
-                if (last > version
-                    || (last == version && !digest.equals(previous.getFirst().get("digest"))))
-                  throw new IllegalStateException("Non-monotonic egress policy");
-              }
-              // Publish before committing the delivery marker. Crash recovery rewrites the same
-              // bytes.
-              writeSnapshot(snapshot);
-              store
-                  .jdbc()
-                  .update(
-                      "INSERT INTO egress_policy_delivery(id,tenant_id,version,digest,published_at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id,version) DO NOTHING",
-                      UUID.randomUUID(),
-                      tenant,
-                      version,
-                      digest,
-                      Timestamp.from(clock.instant()));
-              importReport(version, digest);
-              return null;
-            });
+                      .update(
+                          "INSERT INTO egress_policy_delivery(id,tenant_id,version,digest,published_at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id,version) DO NOTHING",
+                          UUID.randomUUID(),
+                          tenant,
+                          version,
+                          digest,
+                          Timestamp.from(clock.instant()));
+                  return new Delivery(version, digest);
+                });
+    if (delivery == null) return;
+    // A bad heartbeat must never roll back a successfully published candidate.
+    try {
+      org.store()
+          .tenant(
+              tenant,
+              () -> {
+                importReport(delivery.version(), delivery.digest());
+                return null;
+              });
+    } catch (RuntimeException error) {
+      org.store()
+          .tenant(
+              tenant,
+              () -> {
+                org.store()
+                    .jdbc()
+                    .update(
+                        "UPDATE egress_policy_delivery SET report_error='invalid_report',report_error_at=? WHERE tenant_id=? AND version=?",
+                        Timestamp.from(clock.instant()),
+                        tenant,
+                        delivery.version());
+                return null;
+              });
+    }
   }
+
+  private record Delivery(long version, String digest) {}
 
   private void writeSnapshot(String snapshot) {
     try {
@@ -139,18 +168,19 @@ public final class OrgEgressDistribution {
           || report.size() != fields.size()
           || !report.propertyNames().stream().allMatch(fields::contains)
           || !report.path("version").isIntegralNumber()
+          || !report.path("version").canConvertToLong()
           || report.path("version").asLong() != version
           || !tenant.toString().equals(report.path("tenantId").asString())
           || !node.equals(report.path("nodeId").asString())
           || !digest.equals(report.path("digest").asString())
           || !Set.of("applied", "failed").contains(report.path("result").asString())
-          || !report.path("appliedVersion").isIntegralNumber())
+          || !report.path("appliedVersion").isIntegralNumber()
+          || !report.path("appliedVersion").canConvertToLong())
         throw new IllegalStateException("Unbound egress report");
       long applied = report.path("appliedVersion").asLong();
       String result = report.path("result").asString();
       Instant at = Instant.parse(report.path("reportedAt").asString());
       if (applied < 0
-          || applied > version
           || (result.equals("applied") && applied != version)
           || at.isAfter(clock.instant().plusSeconds(5)))
         throw new IllegalStateException("Invalid egress result");
@@ -169,6 +199,13 @@ public final class OrgEgressDistribution {
               applied,
               Timestamp.from(at),
               Timestamp.from(clock.instant()));
+      org.store()
+          .jdbc()
+          .update(
+              "UPDATE egress_policy_delivery SET report_error=NULL,report_error_at=NULL WHERE tenant_id=? AND version=? AND (report_error_at IS NULL OR report_error_at<?)",
+              tenant,
+              version,
+              Timestamp.from(at));
     } catch (IOException error) {
       throw new UncheckedIOException(error);
     }
@@ -180,10 +217,17 @@ public final class OrgEgressDistribution {
     return org.store()
         .tx(
             () -> {
-              long saved = org.getPolicy("egress").path("version").asLong();
+              var policy = org.getPolicy("egress");
+              long saved = policy.path("version").asLong();
               var out =
                   OrgJson.object(
                       "savedVersion", Long.toString(saved), "phase", "saved", "nodeId", node);
+              out.put("mode", policy.path("value").path("mode").asString());
+              out.put("legacyAdjusted", policy.path("legacyAdjusted").asBoolean());
+              if (!policy.path("configured").asBoolean()) {
+                out.put("phase", "unconfigured");
+                return out;
+              }
               if (policies == null || reports == null) {
                 out.put("phase", "disabled");
                 return out;
@@ -192,7 +236,7 @@ public final class OrgEgressDistribution {
                   org.store()
                       .jdbc()
                       .queryForList(
-                          "SELECT version,published_at FROM egress_policy_delivery WHERE tenant_id=? ORDER BY version DESC LIMIT 1",
+                          "SELECT version,published_at,report_error FROM egress_policy_delivery WHERE tenant_id=? ORDER BY version DESC LIMIT 1",
                           tenant);
               if (!delivery.isEmpty()) {
                 var row = delivery.getFirst();
@@ -220,10 +264,22 @@ public final class OrgEgressDistribution {
                       "phase",
                       row.get("result").equals("failed")
                           ? "failed"
-                          : Duration.between(at, clock.instant()).compareTo(Duration.ofSeconds(30))
+                          : Duration.between(at, clock.instant()).compareTo(Duration.ofSeconds(90))
                                   > 0
                               ? "stale"
                               : "effective");
+                }
+              }
+              if (!delivery.isEmpty()) {
+                var row = delivery.getFirst();
+                if (row.get("report_error") != null
+                    || ((Number) row.get("version")).longValue() > saved) {
+                  out.put("phase", "failed");
+                  out.put(
+                      "reportError",
+                      row.get("report_error") != null
+                          ? row.get("report_error").toString()
+                          : "policy_version_regression");
                 }
               }
               return out;

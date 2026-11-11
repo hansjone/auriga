@@ -27,7 +27,25 @@ var node = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 // Both 256-item domain lists, including maximum length DNS names, fit this bound.
 const maxSnapshotBytes = 256 * 1024
 
+// Missing mode is compatible with previously persisted snapshots: nonempty allow
+// lists retain allowlist semantics; an empty list restores the public default.
+func EffectiveMode(value Value) string {
+	if value.Mode != "" {
+		return value.Mode
+	}
+	if len(value.AllowDomains) > 0 {
+		return "allowlist"
+	}
+	return "open"
+}
+
 func Validate(value Value) error {
+	if value.Mode != "" && value.Mode != "open" && value.Mode != "allowlist" {
+		return errors.New("invalid policy mode")
+	}
+	if value.Mode == "open" && len(value.AllowDomains) > 0 {
+		return errors.New("open mode cannot contain an allow list")
+	}
 	if len(value.Categories) != 0 {
 		return errors.New("unsupported egress category")
 	}
@@ -71,13 +89,27 @@ type Runner struct {
 	apply                         Applier
 	current                       Snapshot
 	digest                        string
+	expectedTenant                string
+	now                           func() time.Time
+	lastReport                    Report
+	lastReportAt                  time.Time
 }
 
-func New(source, state, report, nodeID string, apply Applier) (*Runner, error) {
+func New(source, state, report, nodeID string, apply Applier, expectedTenant ...string) (*Runner, error) {
 	if source == "" || state == "" || report == "" || !node.MatchString(nodeID) || source == state || source == report || state == report {
 		return nil, errors.New("invalid policy channel configuration")
 	}
-	r := &Runner{source: source, state: state, report: report, nodeID: nodeID, apply: apply}
+	if len(expectedTenant) > 1 {
+		return nil, errors.New("too many installation identities")
+	}
+	identity := ""
+	if len(expectedTenant) == 1 {
+		identity = expectedTenant[0]
+	}
+	if identity != "" && !tenant.MatchString(identity) {
+		return nil, errors.New("invalid installation tenant")
+	}
+	r := &Runner{source: source, state: state, report: report, nodeID: nodeID, apply: apply, expectedTenant: identity, now: time.Now}
 	raw, err := read(state)
 	if errors.Is(err, os.ErrNotExist) {
 		return r, nil
@@ -88,6 +120,9 @@ func New(source, state, report, nodeID string, apply Applier) (*Runner, error) {
 	snapshot, err := decode(raw)
 	if err != nil {
 		return nil, err
+	}
+	if identity != "" && snapshot.TenantId != identity {
+		return nil, errors.New("state tenant mismatch")
 	}
 	r.current = snapshot
 	r.digest = hash(raw)
@@ -160,6 +195,9 @@ func (r *Runner) Sync() error {
 	if err != nil {
 		return err
 	}
+	if r.expectedTenant != "" && s.TenantId != r.expectedTenant {
+		return errors.New("policy tenant mismatch")
+	}
 	digest := hash(raw)
 	result := "applied"
 	if r.current.Version > 0 && (s.TenantId != r.current.TenantId || s.Version < r.current.Version || (s.Version == r.current.Version && digest != r.digest)) {
@@ -182,12 +220,23 @@ func (r *Runner) Sync() error {
 }
 
 func (r *Runner) writeReport(s Snapshot, digest, result string) error {
-	report := Report{TenantId: s.TenantId, Version: s.Version, NodeId: r.nodeID, Digest: digest, Result: result, AppliedVersion: r.current.Version, ReportedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	encoded, err := json.Marshal(report)
+	now := r.now()
+	report := Report{TenantId: s.TenantId, Version: s.Version, NodeId: r.nodeID, Digest: digest, Result: result, AppliedVersion: r.current.Version}
+	if report == r.lastReport && now.Sub(r.lastReportAt) < 30*time.Second {
+		return nil
+	}
+	encodedReport := report
+	encodedReport.ReportedAt = now.UTC().Format(time.RFC3339Nano)
+	encoded, err := json.Marshal(encodedReport)
 	if err != nil {
 		return err
 	}
-	return atomic(r.report, encoded)
+	if err = atomic(r.report, encoded); err != nil {
+		return err
+	}
+	r.lastReport = report
+	r.lastReportAt = now
+	return nil
 }
 
 func (r *Runner) Run(ctx context.Context, interval time.Duration, onError func(error)) {

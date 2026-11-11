@@ -5,6 +5,7 @@ type Value struct {
 	Categories   []string `json:"categories"`
 	AllowDomains []string `json:"allowDomains"`
 	DenyDomains  []string `json:"denyDomains"`
+	Mode         string   `json:"mode"`
 }
 
 type Snapshot struct {

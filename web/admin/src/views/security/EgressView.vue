@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
-import { ElButton, ElInput, ElForm, ElFormItem } from 'element-plus';
+import {
+  ElButton,
+  ElInput,
+  ElForm,
+  ElFormItem,
+  ElRadioGroup,
+  ElRadioButton,
+} from 'element-plus';
 import {
   securityApi,
   type EgressValue,
@@ -26,9 +33,11 @@ const loading = ref(false),
   uncertain = ref(false),
   unsupported = ref(false);
 const pending = shallowRef<EgressValue>();
+const mode = ref<'open' | 'allowlist'>('open');
 const status = shallowRef<EgressStatus>();
 const phase = computed(() => {
   const keys = {
+    unconfigured: 'securityUnconfigured',
     saved: 'securitySaved',
     distributed: 'securityDistributed',
     effective: 'securityEffective',
@@ -37,6 +46,15 @@ const phase = computed(() => {
     disabled: 'securityDisabled',
   } as const;
   return status.value ? t(keys[status.value.phase]) : t('unavailable');
+});
+const confirmation = computed(() => {
+  const value = pending.value;
+  if (!value) return undefined;
+  if (value.mode === 'allowlist' && !value.allowDomains?.length)
+    return t('securityDenyAllConfirm');
+  if (value.mode === 'open' && !value.denyDomains?.length)
+    return t('securityRestoreConfirm');
+  return t('securityConfirm');
 });
 let alive = true;
 const abort = new globalThis.AbortController();
@@ -89,8 +107,11 @@ async function load() {
     unsupported.value =
       result.data.key !== 'egress' ||
       Object.keys(value).some(
-        (key) => !['categories', 'allowDomains', 'denyDomains'].includes(key),
+        (key) =>
+          !['mode', 'categories', 'allowDomains', 'denyDomains'].includes(key),
       ) ||
+      (value.mode !== undefined &&
+        !['open', 'allowlist'].includes(value.mode)) ||
       (value.categories !== undefined &&
         (!Array.isArray(value.categories) || value.categories.length > 0)) ||
       [value.allowDomains, value.denyDomains].some(
@@ -99,6 +120,8 @@ async function load() {
           (!Array.isArray(list) ||
             list.some((item) => typeof item !== 'string')),
       );
+    mode.value =
+      value.mode ?? (value.allowDomains?.length ? 'allowlist' : 'open');
     allow.value = Array.isArray(value.allowDomains)
       ? value.allowDomains.join('\n')
       : '';
@@ -137,7 +160,7 @@ async function load() {
     if (alive) loading.value = false;
   }
 }
-function confirm() {
+function confirm(restore = false) {
   if (locked.value) return;
   const split = (value: string) =>
     value
@@ -145,9 +168,11 @@ function confirm() {
       .map((v) => v.trim())
       .filter(Boolean);
   pending.value = {
+    mode: restore ? 'open' : mode.value,
     categories: [],
-    allowDomains: split(allow.value),
-    denyDomains: split(deny.value),
+    allowDomains:
+      !restore && mode.value === 'allowlist' ? split(allow.value) : [],
+    denyDomains: restore ? [] : split(deny.value),
   };
 }
 async function save() {
@@ -169,6 +194,12 @@ async function save() {
     const saved = await securityApi.save(value, version, abort.signal);
     if (!alive) return;
     policy.value = saved;
+    const savedValue = saved.value as EgressValue;
+    mode.value =
+      savedValue.mode ??
+      (savedValue.allowDomains?.length ? 'allowlist' : 'open');
+    allow.value = savedValue.allowDomains?.join('\n') ?? '';
+    deny.value = savedValue.denyDomains?.join('\n') ?? '';
     notice.value = t('securitySaved');
     status.value = {
       savedVersion: String(saved.version),
@@ -225,24 +256,38 @@ onMounted(load);
         <dd>{{ status?.reportedAt ?? t('unknown') }}</dd>
       </dl>
       <p class="muted">{{ t('securityEmptyAllow') }}</p>
+      <p v-if="status?.legacyAdjusted" role="alert">
+        {{ t('securityLegacy') }}
+      </p>
+      <p v-if="status?.reportError" role="alert">
+        {{ t('securityReportInvalid') }}
+      </p>
       <dl>
         <dt>{{ t('securityRelay') }}</dt>
         <dd>{{ status?.relayPublicUrl ?? t('unknown') }}</dd>
-        <dt>{{ t('securityUpstream') }}</dt>
-        <dd>{{ status?.relayBackendOrigin ?? t('unknown') }}</dd>
         <dt>{{ t('securityExit') }}</dt>
-        <dd>
-          {{
-            status?.relayDefaultExit === 'direct'
-              ? t('securityDirect')
-              : t('unknown')
-          }}
-        </dd>
+        <dd>{{ t('securityExitUnobserved') }}</dd>
       </dl>
       <p v-if="unsupported" role="alert">{{ t('securityUnsupported') }}</p>
       <p v-if="!canWrite">{{ t('readonly') }}</p>
-      <ElForm class="edit-form" label-position="top" @submit.prevent="confirm">
-        <ElFormItem :label="t('securityAllow')"
+      <ElForm
+        class="edit-form"
+        label-position="top"
+        @submit.prevent="confirm()"
+      >
+        <ElFormItem :label="t('securityMode')">
+          <ElRadioGroup
+            v-model="mode"
+            data-testid="egress-mode"
+            :disabled="locked"
+          >
+            <ElRadioButton value="open">{{ t('securityOpen') }}</ElRadioButton>
+            <ElRadioButton value="allowlist">{{
+              t('securityAllowlist')
+            }}</ElRadioButton>
+          </ElRadioGroup>
+        </ElFormItem>
+        <ElFormItem v-if="mode === 'allowlist'" :label="t('securityAllow')"
           ><ElInput
             v-model="allow"
             type="textarea"
@@ -257,13 +302,19 @@ onMounted(load);
           data-testid="save-policy"
           type="primary"
           :disabled="locked"
-          @click="confirm"
+          @click="confirm()"
           >{{ t('save') }}</ElButton
+        >
+        <ElButton
+          data-testid="restore-default"
+          :disabled="locked"
+          @click="confirm(true)"
+          >{{ t('securityRestore') }}</ElButton
         >
       </ElForm>
     </div>
     <ActionConfirm
-      :message="pending ? t('securityConfirm') : undefined"
+      :message="confirmation"
       :busy="busy"
       @confirm="save"
       @cancel="pending = undefined"
