@@ -192,6 +192,13 @@ services:
       AURIGA_ORG_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_ORG_DB_USER: auriga_org
       AURIGA_ORG_DB_PASSWORD: e2e_org_only
+      AURIGA_OPS_ENABLED: 'true'
+      AURIGA_OPS_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
+      AURIGA_OPS_DB_USER: auriga_ops_app
+      AURIGA_OPS_DB_PASSWORD: e2e_ops_app
+      AURIGA_OPS_MIGRATION_USER: auriga_ops_owner
+      AURIGA_OPS_MIGRATION_PASSWORD: e2e_ops_owner
+      AURIGA_OPS_NOTIFICATION_KEY: ${AURIGA_OPS_NOTIFICATION_KEY}
       AURIGA_WORKSPACE_ENABLED: 'true'
       AURIGA_WORKSPACE_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_WORKSPACE_DB_USER: auriga_workspace_app
