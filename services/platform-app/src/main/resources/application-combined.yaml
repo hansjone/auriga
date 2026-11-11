@@ -46,7 +46,7 @@ auriga:
     audit:
       enabled: false
     ops:
-      enabled: false
+      enabled: ${AURIGA_OPS_RUNTIME_ENABLED:false}
   resource:
     cursor-signing-key: ${AURIGA_RESOURCE_CURSOR_SIGNING_KEY:}
   iam:

@@ -1,4 +1,27 @@
 export const runtimeZh = {
+  opsActualImages: '实际运行镜像',
+  opsImageId: '实际镜像摘要',
+  opsSetup: '如未启用，请由运维配置部署 worker。',
+  opsTarget: '批准的升级目标',
+  opsRegister: '登记升级',
+  opsUpgradeConfirm: '确认登记升级？部署流程会重建相关服务，可能短暂中断。',
+  opsUpgradeScope:
+    '目标来自运维批准目录。登记只进入队列；以部署回执及实际镜像为准。下表显示最近 50 条。',
+  opsReceipts: '部署回执',
+  opsCreated: '登记时间',
+  opsFinished: '完成时间',
+  opsBackupPlan: 'PG 备份计划',
+  opsPlanEnabled: '启用定时备份',
+  opsPlanDisabled: '关闭定时备份',
+  opsInterval: '间隔（小时）',
+  opsNext: '下次计划',
+  opsBytes: '字节数',
+  opsBackupNow: '立即备份',
+  opsPlanInvalid: '备份间隔须为 1–720 小时的整数。',
+  opsPlanConfirm: '确认修改 PG 备份计划？',
+  opsBackupConfirm: '确认触发 PG 备份？备份将消耗数据库和磁盘资源。',
+  opsDownloadConfirm:
+    '确认下载数据库归档？需近期验证，授权仅限本会话一次使用、60 秒有效。',
   opsUpgrades: '版本与升级',
   opsBackups: '备份与恢复',
   opsLifecycle: '生命周期',
@@ -36,6 +59,32 @@ export const runtimeZh = {
     '在节点页发起排空：停止调度并迁移实例；请先确认其他节点有可用容量。排空会影响正在运行的实例。',
 };
 export const runtimeEn: Record<keyof typeof runtimeZh, string> = {
+  opsActualImages: 'Running images',
+  opsImageId: 'Actual image digest',
+  opsSetup: 'If disabled, ask operations to configure the deployment worker.',
+  opsTarget: 'Approved upgrade target',
+  opsRegister: 'Register upgrade',
+  opsUpgradeConfirm:
+    'Register this upgrade? Deployment may recreate services and briefly interrupt availability.',
+  opsUpgradeScope:
+    'Targets come from the approved deployment catalog. Registration only queues work; verify the receipt and actual images. The latest 50 receipts are shown.',
+  opsReceipts: 'Deployment receipts',
+  opsCreated: 'Requested at',
+  opsFinished: 'Completed at',
+  opsBackupPlan: 'PG backup schedule',
+  opsPlanEnabled: 'Enable scheduled backups',
+  opsPlanDisabled: 'Disable scheduled backups',
+  opsInterval: 'Interval (hours)',
+  opsNext: 'Next scheduled',
+  opsBytes: 'Bytes',
+  opsBackupNow: 'Back up now',
+  opsPlanInvalid: 'Backup interval must be an integer from 1 to 720 hours.',
+  opsPlanConfirm: 'Change the PG backup schedule?',
+  opsBackupConfirm:
+    'Trigger a PG backup? This uses database and disk resources.',
+  opsDownloadConfirm:
+    'Download the database archive? Recent verification is required. The grant is single-use, bound to this session, and expires in 60 seconds.',
+
   opsUpgrades: 'Versions and upgrades',
   opsBackups: 'Backup and restore',
   opsLifecycle: 'Lifecycle',

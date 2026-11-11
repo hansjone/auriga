@@ -187,13 +187,12 @@ describe('runtime operations', () => {
     const w = render(UpgradesView);
     await flushPromises();
     expect(w.text()).toContain('1.2.3');
-    expect(w.text()).toContain('升级登记尚未接入');
+    expect(w.text()).toContain('实际运行镜像');
     expect(adminApi.instances).not.toHaveBeenCalled();
   });
-  it('states the backup integration gap without inventing backup results', () => {
+  it('shows recovery instructions without inventing backup results', () => {
     const w = render(BackupsView);
-    expect(w.text()).toContain('尚未接入');
-    expect(w.findAll('button')).toHaveLength(0);
+    expect(w.find('[data-testid="trigger-backup"]').exists()).toBe(false);
     expect(w.text()).toContain('pg_restore');
   });
 });

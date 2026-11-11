@@ -1,0 +1,346 @@
+openapi: 3.1.0
+info:
+  title: Auriga runtime operations
+  version: 1.0.0
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+  description: Installation-local deployment receipts and PG backups. Administrators
+    in the configured installation tenant only. Upgrade execution stays in the host
+    deployment worker. No restore endpoint.
+servers:
+- url: /api/workspace/v1
+security:
+- bearerAuth: []
+tags:
+- name: ops-runtime
+paths:
+  /admin/ops/upgrades:
+    get:
+      tags:
+      - ops-runtime
+      operationId: getOpsUpgrades
+      x-admin-only: true
+      x-permission: ops.upgrades.read
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsUpgradeStatus'
+    post:
+      tags:
+      - ops-runtime
+      operationId: registerOpsUpgrade
+      x-admin-only: true
+      x-permission: ops.upgrades.write
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsUpgradeItem'
+      x-step-up-required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpsUpgradeInput'
+      parameters:
+      - &id001
+        in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{16,100}$
+  /admin/ops/backups:
+    get:
+      tags:
+      - ops-runtime
+      operationId: getOpsBackups
+      x-admin-only: true
+      x-permission: ops.backups.read
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsBackupStatus'
+    post:
+      tags:
+      - ops-runtime
+      operationId: triggerOpsBackup
+      x-admin-only: true
+      x-permission: ops.backups.write
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsBackupItem'
+      x-step-up-required: true
+      parameters:
+      - *id001
+  /admin/ops/backups/plan:
+    put:
+      tags:
+      - ops-runtime
+      operationId: configureOpsBackup
+      x-admin-only: true
+      x-permission: ops.backups.write
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsBackupPlan'
+      x-step-up-required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpsBackupPlanInput'
+  /admin/ops/backups/{id}/tickets:
+    post:
+      tags:
+      - ops-runtime
+      operationId: issueOpsBackupTicket
+      x-admin-only: true
+      x-permission: ops.backups.download
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsBackupTicket'
+      x-step-up-required: true
+      parameters:
+      - &id002
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /admin/ops/backups/{id}/download:
+    get:
+      tags:
+      - ops-runtime
+      operationId: downloadOpsBackup
+      x-admin-only: true
+      x-permission: ops.backups.download
+      x-step-up-required: true
+      parameters:
+      - *id002
+      - in: header
+        name: X-Auriga-Download
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+      responses:
+        '200':
+          description: Single use, session-bound archive. No cache.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    OpsUpgradeInput:
+      type: object
+      properties:
+        targetId:
+          type: string
+          pattern: ^[A-Za-z0-9._-]{1,80}$
+      required:
+      - targetId
+    OpsUpgradeTarget:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        image:
+          type: string
+      required:
+      - id
+      - label
+      - image
+    OpsUpgradeItem:
+      type: object
+      properties:
+        id:
+          type: string
+        targetId:
+          type: string
+        actor:
+          type: string
+        key:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+        startedAt:
+          type: string
+        finishedAt:
+          type: string
+        reason:
+          type: string
+        exitCode:
+          type: integer
+      required:
+      - id
+      - targetId
+      - status
+      - createdAt
+    OpsUpgradeInventory:
+      type: object
+      properties:
+        reportedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              image:
+                type: string
+              imageId:
+                type: string
+              state:
+                type: string
+              version:
+                type: string
+            required:
+            - name
+            - image
+            - imageId
+            - state
+            - version
+      required:
+      - reportedAt
+      - items
+    OpsUpgradeStatus:
+      type: object
+      properties:
+        inventory:
+          oneOf:
+          - $ref: '#/components/schemas/OpsUpgradeInventory'
+          - type: 'null'
+        available:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpsUpgradeTarget'
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpsUpgradeItem'
+      required:
+      - inventory
+      - available
+      - requests
+    OpsBackupPlanInput:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        intervalHours:
+          type: integer
+          minimum: 1
+          maximum: 720
+        revision:
+          type: integer
+          format: int64
+          minimum: 0
+      required:
+      - enabled
+      - intervalHours
+      - revision
+    OpsBackupPlan:
+      allOf:
+      - $ref: '#/components/schemas/OpsBackupPlanInput'
+      - type: object
+        properties:
+          nextAt:
+            type: string
+            format: date-time
+          actor:
+            type: string
+    OpsBackupItem:
+      type: object
+      properties:
+        id:
+          type: string
+        actor:
+          type: string
+        key:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+        startedAt:
+          type: string
+        finishedAt:
+          type: string
+        sha256:
+          type: string
+        reason:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+      required:
+      - id
+      - status
+      - createdAt
+    OpsBackupStatus:
+      type: object
+      properties:
+        plan:
+          $ref: '#/components/schemas/OpsBackupPlan'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpsBackupItem'
+        worker:
+          oneOf:
+          - $ref: '#/components/schemas/OpsUpgradeInventory'
+          - type: 'null'
+      required:
+      - plan
+      - items
+      - worker
+    OpsBackupTicket:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+      - token
+      - expiresAt

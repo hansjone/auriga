@@ -1,0 +1,25 @@
+{
+  "compose": [
+    "docker",
+    "compose",
+    "--project-name",
+    "auriga-nas-test",
+    "--env-file",
+    "/srv/container/auriga-test/stack.env",
+    "-f",
+    "/srv/packages/deploy-nas/docker-compose.yml"
+  ],
+  "database": "auriga",
+  "databaseUser": "auriga_bootstrap",
+  "ownerUid": 10001,
+  "ownerGid": 10001,
+  "tenantId": "01900000-0000-7000-8000-000000000001",
+  "nasRoot": "/srv/packages/deploy-nas",
+  "targets": {
+    "approved-release": {
+      "label": "Approved release",
+      "bundle": "/srv/releases/approved-public-bundle",
+      "image": "example.com/auriga-runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+}

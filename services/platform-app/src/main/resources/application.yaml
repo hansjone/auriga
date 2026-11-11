@@ -9,3 +9,10 @@ management:
     web:
       exposure:
         include: health
+
+auriga:
+  ops:
+    runtime:
+      enabled: ${AURIGA_OPS_RUNTIME_ENABLED:false}
+      directory: ${AURIGA_OPS_RUNTIME_DIRECTORY:/var/auriga-ops}
+      tenant-id: ${AURIGA_OPS_TENANT_ID:}
