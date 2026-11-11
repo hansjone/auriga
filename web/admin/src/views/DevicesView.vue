@@ -57,7 +57,7 @@ const connection = (d: AdminDevice) =>
       ? 'devicesOnlineValue'
       : d.online === 'offline'
         ? 'devicesOfflineValue'
-        : 'devicesUnknown',
+        : 'devicesStateUnknown',
   );
 function revoke() {
   const device = selected.value;
@@ -92,7 +92,7 @@ onMounted(() => void load());
         <ElOption :label="t('devicesAll')" value="" />
         <ElOption :label="t('devicesOnlineValue')" value="online" />
         <ElOption :label="t('devicesOfflineValue')" value="offline" />
-        <ElOption :label="t('devicesUnknown')" value="unknown" />
+        <ElOption :label="t('devicesStateUnknown')" value="unknown" />
       </ElSelect>
       <ElButton :disabled="locked" @click="load(true)">{{
         t('refresh')
@@ -122,6 +122,11 @@ onMounted(() => void load());
       <ElTableColumn :label="t('devicesOnline')"
         ><template #default="{ row }">{{
           connection(row as AdminDevice)
+        }}</template></ElTableColumn
+      >
+      <ElTableColumn :label="t('devicesHeartbeat')"
+        ><template #default="{ row }">{{
+          row.lastHeartbeatAt || '—'
         }}</template></ElTableColumn
       >
       <ElTableColumn :label="t('devicesActivity')"
@@ -168,7 +173,7 @@ onMounted(() => void load());
           <dt>{{ t('devicesOnline') }}</dt>
           <dd>{{ connection(selected) }}</dd>
           <dt>{{ t('devicesHeartbeat') }}</dt>
-          <dd>{{ t('devicesUnknown') }}</dd>
+          <dd>{{ selected.lastHeartbeatAt || t('unknown') }}</dd>
           <dt>{{ t('devicesActivity') }}</dt>
           <dd>{{ selected.lastSeenAt || t('unknown') }}</dd>
           <dt>{{ t('devicesNode') }}</dt>

@@ -222,6 +222,9 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			return
 		}
 	}
+	if iam {
+		transport = g.devicesTransport(transport)
+	}
 	proxy := newReverseProxy(target, transport, true)
 	if target == g.collabURL {
 		proxy.ModifyResponse = func(resp *http.Response) error {

@@ -2,6 +2,18 @@
 import { devicesApi } from '../src/admin/devicesApi';
 import { apiClient } from '../src/api';
 describe('devices API', () => {
+  it('requires an offline read-back after credential revocation', async () => {
+    vi.spyOn(apiClient, 'delete').mockResolvedValue(undefined);
+    vi.spyOn(apiClient, 'get').mockResolvedValue({
+      id: 'device',
+      status: 'revoked',
+      online: 'unknown',
+    });
+    await expect(devicesApi.revoke('device')).rejects.toThrow(
+      'Revocation not confirmed',
+    );
+    vi.restoreAllMocks();
+  });
   it('does not report success when read-back still shows active access', async () => {
     vi.spyOn(apiClient, 'delete').mockResolvedValue(undefined);
     vi.spyOn(apiClient, 'get').mockResolvedValue({
@@ -14,9 +26,11 @@ describe('devices API', () => {
     vi.restoreAllMocks();
   });
   it('encodes filters and reads back after revoke', async () => {
-    const get = vi
-      .spyOn(apiClient, 'get')
-      .mockResolvedValue({ id: 'device', status: 'revoked' });
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({
+      id: 'device',
+      status: 'revoked',
+      online: 'offline',
+    });
     const del = vi.spyOn(apiClient, 'delete').mockResolvedValue(undefined);
     await devicesApi.list('member /', 'unknown');
     expect(get).toHaveBeenCalledWith(
@@ -62,6 +76,32 @@ function page() {
   return wrapper;
 }
 describe('field terminals page', () => {
+  it('renders authoritative heartbeat and reports monitoring outages as unknown', async () => {
+    vi.spyOn(adminApi, 'membership').mockResolvedValue({
+      permissions: ['iam.network.manage'],
+    } as never);
+    vi.spyOn(devicesApi, 'list').mockResolvedValue({
+      items: [
+        {
+          ...device,
+          online: 'online',
+          lastHeartbeatAt: '2026-11-11T12:00:00Z',
+        },
+      ],
+    });
+    const view = page();
+    await flushPromises();
+    expect(view.text()).toContain('2026-11-11T12:00:00Z');
+    expect(view.text()).toContain('在线');
+    vi.mocked(devicesApi.list).mockResolvedValue({ items: [device] });
+    await view
+      .findAll('button')
+      .find((button) => button.text() === '刷新')!
+      .trigger('click');
+    await flushPromises();
+    expect(view.text()).toContain('状态未知');
+    expect(view.text()).not.toContain('2026-11-11T12:00:00Z');
+  });
   it('rejects missing permissions before listing', async () => {
     vi.spyOn(adminApi, 'membership').mockResolvedValue({
       permissions: [],
@@ -91,7 +131,7 @@ describe('field terminals page', () => {
     vi.spyOn(devicesApi, 'get').mockResolvedValue(device);
     const revoke = vi
       .spyOn(devicesApi, 'revoke')
-      .mockResolvedValue({ ...device, status: 'revoked' });
+      .mockResolvedValue({ ...device, status: 'revoked', online: 'offline' });
     const view = page();
     await flushPromises();
     const details = view.findAll('button').find((b) => b.text() === '详情');

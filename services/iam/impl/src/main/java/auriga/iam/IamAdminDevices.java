@@ -47,6 +47,39 @@ public class IamAdminDevices {
     return store.tx(() -> view(require(id, false)));
   }
 
+  /** Authenticated edge delegation only; never exposes tickets or device credentials. */
+  public ObjectNode connectionBindings() {
+    return store.tx(
+        () -> {
+          var rows =
+              store
+                  .networkJdbc()
+                  .query(
+                      "SELECT i.lookup_key,i.data::text FROM iam.network_ingress i JOIN iam.device d ON d.tenant_id=i.tenant_id AND d.id::text=i.data->>'device'"
+                          + " WHERE i.tenant_id=? AND d.data->>'kind'='dsh_connect' AND d.data->>'scope'='auriga.connect'"
+                          + " AND COALESCE(d.data->>'deviceType','')<>'managed' ORDER BY i.id LIMIT 10001",
+                      (rs, index) -> {
+                        var data = Json.read(rs.getString(2));
+                        return Json.object(
+                            "device",
+                            data.path("device").asString(),
+                            "serverId",
+                            data.path("serverId").asString(),
+                            "clientId",
+                            data.path("clientId").asString(),
+                            "account",
+                            data.path("account").asString(),
+                            "ingress",
+                            rs.getString(1));
+                      },
+                      TenantContext.require());
+          if (rows.size() > 10000)
+            throw new auriga.common.error.AurigaException(
+                auriga.common.error.CommonErrors.UNAVAILABLE);
+          return Json.object("items", rows);
+        });
+  }
+
   public ObjectNode revoke(String id) {
     return store.tx(
         () -> {

@@ -114,9 +114,29 @@ class AdminDevicesPostgresTest {
           assertEquals(1, devices.list("alice", null).path("items").size());
           assertEquals(0, devices.list(null, "online").path("items").size());
           assertEquals("1", devices.get(id).path("networkNode").asString());
+          store.tx(
+              () ->
+                  store.insert(
+                      "network_ingress",
+                      "a".repeat(26),
+                      Json.object(
+                          "device",
+                          id,
+                          "serverId",
+                          "N" + "A".repeat(55),
+                          "clientId",
+                          "1",
+                          "account",
+                          "CLIENTS",
+                          "userNkey",
+                          "not-for-the-browser"),
+                      null));
+          assertEquals(1, devices.connectionBindings().path("items").size());
+          assertFalse(devices.connectionBindings().path("items").get(0).has("userNkey"));
           assertFalse(devices.get(id).has("refreshHash"));
           assertEquals("active", devices.get(id).path("status").asString());
           assertEquals("revoked", devices.revoke(id).path("status").asString());
+          assertEquals(1, devices.connectionBindings().path("items").size());
           assertTrue(store.tx(() -> store.get("device", id, false)).path("revoked").asBoolean());
           assertTrue(
               store.tx(
@@ -157,6 +177,7 @@ class AdminDevicesPostgresTest {
         UUID.randomUUID(),
         () -> {
           assertEquals(0, devices.list(null, null).path("items").size());
+          assertEquals(0, devices.connectionBindings().path("items").size());
           var e = assertThrows(AurigaException.class, () -> devices.revoke(id));
           assertEquals("common.not_found", e.errorCode().code());
         });

@@ -19,7 +19,7 @@ export const devicesApi = {
   async revoke(id: string) {
     await apiClient.delete<void>(`${base}/${encodeURIComponent(id)}`);
     const device = await this.get(id);
-    if (device.status !== 'revoked')
+    if (device.status !== 'revoked' || device.online !== 'offline')
       throw new Error('Revocation not confirmed');
     return device;
   },

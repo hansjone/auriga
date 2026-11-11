@@ -32,6 +32,29 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /admin/devices/connection-bindings:
+    get:
+      tags: [device]
+      operationId: getAdminDevicesConnectionBindings
+      summary: Edge-only delegated device connection bindings
+      description: The public edge denies this path. Uses the already authenticated administrator delegation on the IAM hop. Never contains credential or ticket material.
+      x-admin-only: true
+      x-permission: iam.network.manage
+      x-internal: true
+      responses:
+        '200':
+          description: Tenant field terminal bindings including revoked connections pending closure
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 10000
+                    items:
+                      $ref: '#/components/schemas/AdminDevicesConnectionBinding'
   /admin/devices:
     get:
       tags: [device]
@@ -44,7 +67,7 @@ paths:
         - { name: online, in: query, schema: { type: string, enum: [unknown, online, offline] } }
       responses:
         '200':
-          description: Field terminals; online telemetry is currently unavailable and returned as unknown
+          description: Field terminals with authoritative edge connection state; unknown on monitoring failure
           content:
             application/json:
               schema:
@@ -1187,6 +1210,15 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    AdminDevicesConnectionBinding:
+      type: object
+      required: [device, serverId, clientId, account, ingress]
+      properties:
+        device: { type: string, format: uuid }
+        serverId: { type: string }
+        clientId: { type: string }
+        account: { type: string }
+        ingress: { type: string }
     AdminDevicesDevice:
       type: object
       required: [id, accountId, memberName, name, status, online, accessMode]
@@ -1199,11 +1231,12 @@ components:
         clientVersion: { type: string }
         createdAt: { type: string }
         lastSeenAt: { type: string }
+        lastHeartbeatAt: { type: string, format: date-time, description: Actual client PING/PONG observed on the edge WSS connection; absent until observed }
         revokedAt: { type: string }
         networkNode: { type: string }
         accessMode: { type: string, enum: [native_tx, manual, unknown] }
         status: { type: string, enum: [active, revoked] }
-        online: { type: string, enum: [unknown, online, offline], description: Unknown until authoritative edge telemetry is available; lastSeenAt is historical activity only }
+        online: { type: string, enum: [unknown, online, offline], description: Authoritative broker connection snapshot; unknown on edge monitoring outage; lastSeenAt is activity rather than heartbeat }
     AdminCsrfTokenRegistration:
       type: object
       properties:

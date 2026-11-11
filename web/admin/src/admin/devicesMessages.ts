@@ -1,5 +1,6 @@
 ﻿export const devicesZh = {
   devicesTitle: '现场终端',
+  devicesStateUnknown: '状态未知',
   devicesMember: '所属成员',
   devicesMemberFilter: '成员名称或编号',
   devicesName: '终端',
@@ -22,10 +23,11 @@
   devicesRevokeConfirm: '撤销 {name} 的接入？该终端凭据将失效。',
   devicesSaved: '已读回：终端接入已撤销。',
   devicesRevokedAt: '撤销时间',
-  devicesTelemetry: '在线状态与心跳尚未接入；最近活动仅为历史记录。',
+  devicesTelemetry: '在线状态来自连接快照；监控不可用时显示状态未知。',
 };
 export const devicesEn = {
   devicesTitle: 'Field terminals',
+  devicesStateUnknown: 'Status unknown',
   devicesMember: 'Member',
   devicesMemberFilter: 'Member name or ID',
   devicesName: 'Terminal',
@@ -50,5 +52,5 @@ export const devicesEn = {
   devicesSaved: 'Read back: terminal access revoked.',
   devicesRevokedAt: 'Revoked at',
   devicesTelemetry:
-    'Online status and heartbeat are not connected; last activity is historical only.',
+    'Online status comes from the current connection snapshot; monitoring outages show status unknown.',
 };

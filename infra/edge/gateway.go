@@ -56,6 +56,9 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	if err := cfg.DevicePresence.validate(); err != nil {
+		return nil, err
+	}
 	limit := cfg.Static.GzipCacheBytes
 	if limit == 0 {
 		limit = defaultStaticCacheBytes
@@ -521,7 +524,11 @@ func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.U
 		r = r.WithContext(ctx)
 	}
 
-	proxy := newReverseProxy(target, apiProxyTransport, true)
+	transport := apiProxyTransport
+	if target == g.iamURL {
+		transport = g.devicesTransport(transport)
+	}
+	proxy := newReverseProxy(target, transport, true)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
