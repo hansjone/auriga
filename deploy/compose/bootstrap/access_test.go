@@ -78,6 +78,9 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	for _, file := range []string{"network/edge-presence.pem", "network/edge-presence.key", "network/edge-presence.password"} {
 		read(file)
 	}
+	if strings.TrimSpace(string(read("iam-installation/ops.key"))) == strings.TrimSpace(string(read("network/edge-presence.password"))) {
+		t.Fatal("ops notification key must be independent of Broker credentials")
+	}
 	if edge.Upstreams["network-submit"] != "https://172.29.240.1:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] { // gitleaks:allow disposable M2 network
 		t.Fatal("submit must use an independent HTTPS listener and trust material")
 	}

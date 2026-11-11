@@ -1,6 +1,24 @@
 ﻿import { describe, it, expect, vi } from 'vitest';
 import { devicesApi } from '../src/admin/devicesApi';
 import { apiClient } from '../src/api';
+import { router } from '../src/router';
+import AlertsView from '../src/views/ops/AlertsView.vue';
+import NotificationsView from '../src/views/ops/NotificationsView.vue';
+import DevicesView from '../src/views/DevicesView.vue';
+
+describe('merged administration routes', () => {
+  it('resolves devices and both operations pages to their implemented views', () => {
+    for (const [path, view] of [
+      ['/runtime/devices', DevicesView],
+      ['/ops/alerts', AlertsView],
+      ['/ops/notifications', NotificationsView],
+    ] as const) {
+      expect(router.resolve(path).matched.at(-1)?.components?.default).toBe(
+        view,
+      );
+    }
+  });
+});
 describe('devices API', () => {
   it('preserves the acknowledged revocation when read-back is temporarily unavailable', async () => {
     const previous = {
@@ -74,7 +92,6 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { afterEach } from 'vitest';
 import ElementPlus from 'element-plus';
 import { ApiError, createAurigaI18n } from '@auriga/shared';
-import DevicesView from '../src/views/DevicesView.vue';
 import { adminApi } from '../src/admin/api';
 let wrapper: VueWrapper | undefined;
 afterEach(() => {
