@@ -5,7 +5,15 @@ import path from 'node:path';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const output = path.join(root, 'services/contracts/target/bundled');
 mkdirSync(output, { recursive: true });
-for (const service of ['iam', 'org', 'workspace', 'ai', 'resource', 'audit']) {
+for (const service of [
+  'iam',
+  'org',
+  'workspace',
+  'ai',
+  'resource',
+  'audit',
+  'ops',
+]) {
   const destination = path.join(output, service + '.json');
   const result = spawnSync(
     process.execPath,

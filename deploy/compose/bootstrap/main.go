@@ -152,6 +152,9 @@ func main() {
 		if err := networkdeploy.CheckCertificates(filepath.Join(*out, "network"), time.Now(), os.Stderr); err != nil {
 			fatalf("%v", err)
 		}
+		if err := writeComposeOpsKey(*out); err != nil {
+			fatalf("%v", err)
+		}
 		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
 		return
 	}

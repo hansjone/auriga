@@ -30,6 +30,12 @@ auriga:
       password: ${AURIGA_RESOURCE_DB_PASSWORD:}
       migration-username: ${AURIGA_RESOURCE_MIGRATION_USER:auriga_resource_owner}
       migration-password: ${AURIGA_RESOURCE_MIGRATION_PASSWORD:}
+    ops:
+      jdbc-url: ${AURIGA_OPS_JDBC_URL:}
+      username: ${AURIGA_OPS_DB_USER:auriga_ops_app}
+      password: ${AURIGA_OPS_DB_PASSWORD:}
+      migration-username: ${AURIGA_OPS_MIGRATION_USER:auriga_ops_owner}
+      migration-password: ${AURIGA_OPS_MIGRATION_PASSWORD:}
   services:
     iam:
       enabled: true
@@ -46,13 +52,17 @@ auriga:
     audit:
       enabled: ${AURIGA_AUDIT_ENABLED:false}
     ops:
-      enabled: false
+      enabled: ${AURIGA_OPS_ENABLED:false}
   audit:
     jdbc-url: ${AURIGA_AUDIT_JDBC_URL:}
     username: ${AURIGA_AUDIT_DB_USER:auriga_audit_app}
     password: ${AURIGA_AUDIT_DB_PASSWORD:}
     migration-username: ${AURIGA_AUDIT_MIGRATION_USER:auriga_audit_owner}
     migration-password: ${AURIGA_AUDIT_MIGRATION_PASSWORD:}
+  ops:
+    notification-key: ${AURIGA_OPS_NOTIFICATION_KEY:}
+  errors:
+    message-bundles: [messages/ops-errors]
   resource:
     cursor-signing-key: ${AURIGA_RESOURCE_CURSOR_SIGNING_KEY:}
   iam:

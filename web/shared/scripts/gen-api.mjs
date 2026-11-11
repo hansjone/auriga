@@ -45,3 +45,16 @@ await writeFile(
       singleQuote: true,
     })),
 );
+
+// Ops is consumed by the admin application only.
+await writeFile(
+  new URL('../../admin/src/admin/opsSchema.ts', import.meta.url),
+  await format(
+    astToString(
+      await openapiTS(
+        new URL('../../../contracts/openapi/ops.yaml', import.meta.url),
+      ),
+    ),
+    { parser: 'typescript', singleQuote: true },
+  ),
+);

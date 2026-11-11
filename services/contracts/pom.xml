@@ -277,6 +277,16 @@
             </configuration>
           </execution>
           <execution>
+            <id>ops-http</id>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <inputSpec>${project.build.directory}/bundled/ops.json</inputSpec>
+              <output>${project.build.directory}/generated-sources/openapi/ops</output>
+              <apiPackage>auriga.ops.web.api</apiPackage>
+              <modelPackage>auriga.ops.web.model</modelPackage>
+            </configuration>
+          </execution>
+          <execution>
             <id>ai-go-models</id>
             <goals><goal>generate</goal></goals>
             <configuration>
