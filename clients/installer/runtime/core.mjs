@@ -18,16 +18,17 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 export const PROFILE = 'auriga';
 const PLUGIN = 'auriga-dsh';
-const BUNDLES = [
-  '@deepseek-ai/dsh-base',
-  '@deepseek-ai/dsh-web-app',
-  PLUGIN,
-];
+const CLIENT_ID = 'auriga-dsh';
+const PROVIDER_ID = 'discover';
+// The profile points at a tarball inside itself so the bundled pnpm can
+// reinstall the plugin (it is not on the npm registry) without breaking it.
+const PLUGIN_SPEC = 'file:./.auriga/auriga-dsh.tgz';
+const BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', PLUGIN];
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 const writeJson = (file, value) =>
@@ -53,7 +54,14 @@ export function profileDir(dataHome) {
 
 /** Resolve the upstream `dsh` bin script inside a version directory. */
 export function dshBin(dir) {
-  const pkgDir = join(dir, 'upstream', 'app', 'node_modules', '@deepseek-ai', 'dsh');
+  const pkgDir = join(
+    dir,
+    'upstream',
+    'app',
+    'node_modules',
+    '@deepseek-ai',
+    'dsh',
+  );
   const pkg = readJson(join(pkgDir, 'package.json'));
   const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.dsh;
   if (!bin) throw new Error('upstream dsh package declares no dsh bin');
@@ -61,7 +69,12 @@ export function dshBin(dir) {
 }
 
 export function nodeBin(dir) {
-  return join(dir, 'upstream', 'node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
+  return join(
+    dir,
+    'upstream',
+    'node',
+    process.platform === 'win32' ? 'node.exe' : 'bin/node',
+  );
 }
 
 /** Seed profile manifest and (only when absent) the patch with the platform address. */
@@ -74,9 +87,9 @@ function seedProfile(dataHome, { platformOrigin }) {
   for (const b of BUNDLES) if (!bundles.includes(b)) bundles.push(b);
   writeJson(manifestFile, {
     ...existing,
-    name: existing.name ?? 'auriga-dsh-profile',
+    name: existing.name ?? 'auriga-desktop-profile',
     private: true,
-    dependencies: { ...existing.dependencies, [PLUGIN]: '*' },
+    dependencies: { ...existing.dependencies, [PLUGIN]: PLUGIN_SPEC },
     dsh: { ...existing.dsh, profile: { ...existing.dsh?.profile, bundles } },
   });
   const patch = join(dir, 'cordis.patch.yml');
@@ -85,7 +98,10 @@ function seedProfile(dataHome, { platformOrigin }) {
     if (platformOrigin) {
       const origin = new URL(platformOrigin).origin;
       rows.push(
-        `  config: {"connect":{"platformOrigin":${JSON.stringify(origin)}}}`,
+        // The loader row must be complete: with only platformOrigin the plugin
+        // rejects the config (issuer/clientId/providerId required) and the
+        // login runtime never starts.
+        `  config: ${JSON.stringify({ connect: { platformOrigin: origin, issuer: origin, clientId: CLIENT_ID, providerId: PROVIDER_ID } })}`,
       );
     } else {
       rows.push('  config: {}');
@@ -109,6 +125,15 @@ function syncPlugin(dir, dataHome, backupLabel) {
     cpSync(join(profile, 'package.json'), join(backup, 'package.json'));
     if (existsSync(modules))
       cpSync(modules, join(backup, 'node_modules'), { recursive: true });
+    if (existsSync(join(profile, '.auriga')))
+      cpSync(join(profile, '.auriga'), join(backup, '.auriga'), {
+        recursive: true,
+      });
+  }
+  const tarball = join(dir, 'auriga', 'plugin', 'auriga-dsh.tgz');
+  if (existsSync(tarball)) {
+    mkdirSync(join(profile, '.auriga'), { recursive: true });
+    cpSync(tarball, join(profile, '.auriga', 'auriga-dsh.tgz'));
   }
   const source = join(dir, 'auriga', 'plugin', 'node_modules');
   mkdirSync(modules, { recursive: true });
@@ -135,6 +160,10 @@ function restoreBackup(dataHome, label) {
   const profile = profileDir(dataHome);
   rmSync(join(profile, 'node_modules'), { recursive: true, force: true });
   cpSync(join(backup, 'package.json'), join(profile, 'package.json'));
+  if (existsSync(join(backup, '.auriga')))
+    cpSync(join(backup, '.auriga'), join(profile, '.auriga'), {
+      recursive: true,
+    });
   if (existsSync(join(backup, 'node_modules')))
     cpSync(join(backup, 'node_modules'), join(profile, 'node_modules'), {
       recursive: true,
@@ -142,8 +171,18 @@ function restoreBackup(dataHome, label) {
   return true;
 }
 
-export function launchEnv(dataHome, base = process.env) {
-  return { ...base, DSH_HOME: dataHome };
+/** Environment for upstream DSH: own data home; bundled node and pnpm first on PATH. */
+export function launchEnv(dir, dataHome, base = process.env) {
+  const pathKey =
+    Object.keys(base).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const extra = [join(dir, 'tools', 'bin'), dirname(nodeBin(dir))];
+  return {
+    ...base,
+    DSH_HOME: dataHome,
+    // Keep the pnpm package store (plugin manager) with the user data, not the system.
+    npm_config_store_dir: join(dataHome, 'pnpm-store'),
+    [pathKey]: [...extra, base[pathKey]].filter(Boolean).join(delimiter),
+  };
 }
 
 /** Default smoke check: the upstream CLI must load the profile with the plugin row. */
@@ -151,7 +190,7 @@ export function defaultSmoke(dir, dataHome) {
   const result = spawnSync(
     nodeBin(dir),
     [dshBin(dir), '--profile', PROFILE, '--dump-config'],
-    { env: launchEnv(dataHome), encoding: 'utf8', timeout: 120000 },
+    { env: launchEnv(dir, dataHome), encoding: 'utf8', timeout: 120000 },
   );
   if (result.status !== 0)
     throw new Error(
@@ -199,7 +238,8 @@ export function install({
   writeState(root, {
     dataHome,
     current: id,
-    previous: previous && previous !== id ? previous : (state?.previous ?? null),
+    previous:
+      previous && previous !== id ? previous : (state?.previous ?? null),
   });
   installLaunchers(root, target);
   pruneVersions(root);
@@ -227,7 +267,8 @@ export function rollback({ root, smoke = defaultSmoke }) {
   const state = readState(root);
   if (!state?.previous) throw new Error('no previous version to roll back to');
   const dir = versionDir(root, state.previous);
-  if (!existsSync(dir)) throw new Error(`previous version missing: ${state.previous}`);
+  if (!existsSync(dir))
+    throw new Error(`previous version missing: ${state.previous}`);
   if (!restoreBackup(state.dataHome, state.previous))
     syncPlugin(dir, state.dataHome, null);
   smoke(dir, state.dataHome);
@@ -262,7 +303,7 @@ export function launch({ root, args = [], env = process.env }) {
   const child = spawnSync(
     nodeBin(dir),
     [dshBin(dir), '--profile', PROFILE, ...args],
-    { stdio: 'inherit', env: launchEnv(state.dataHome, env) },
+    { stdio: 'inherit', env: launchEnv(dir, state.dataHome, env) },
   );
   return child.status ?? 1;
 }

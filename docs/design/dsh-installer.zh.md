@@ -1,4 +1,4 @@
-# DSH 可安装包设计（内置 Auriga 插件、统一依赖环境）
+# Auriga Desktop 安装包设计（基于 DSH，内置 Auriga 插件、统一依赖环境）
 
 状态：设计 + Windows 首版原型（任务 DSH-PKG）。路线图依据：`docs/plan/roadmap.zh.md` M4（D1 Windows 安装包、D2 Linux 安装包、P3 插件连接模式）。
 
@@ -22,7 +22,7 @@ npm 版实测体量：隔离目录 `npm install @deepseek-ai/dsh@0.2.1-rc.3`，`
 ### 1.2 许可证与再分发
 
 - `LICENSE`（上游仓库与 npm 元数据）均为 MIT：允许再分发、预置插件，须保留版权与许可文本。我们的包保留 `@deepseek-ai/dsh` 包内的 LICENSE，且不 fork、不改源码。
-- `BRAND_GUIDELINES.md`：“DeepSeek Harness”是注册商标，**不要在项目名里直接使用全称**，推荐用缩写 **DSH** 命名；不得暗示官方背书。结论：产品名用 “Auriga DSH”，不用 “DeepSeek Harness”；安装包不带上游品牌素材（图标、桌面版安装器）。**品牌名最终由用户决定**。
+- `BRAND_GUIDELINES.md`：“DeepSeek Harness”是注册商标，**不要在项目名里直接使用全称**，推荐用缩写 **DSH** 命名；不得暗示官方背书。结论：产品名 **Auriga Desktop**（用户已定），不用 “DeepSeek Harness”；安装包不带上游品牌素材（图标、桌面版安装器），包内 `licensesNOTICE.txt` 注明基于开源 DSH、非 DeepSeek 官方产品，并保留上游 MIT 许可文本（`LICENSE.dsh.txt`）。
 - 桌面版安装程序是上游签名二进制，再分发它在 MIT 范围内可行，但我们没有得到它的离线下载渠道（见 2.A），原型不采用。
 
 ### 1.3 插件预装机制（不改上游即可首启启用）
@@ -37,6 +37,7 @@ npm 版实测体量：隔离目录 `npm install @deepseek-ai/dsh@0.2.1-rc.3`，`
 - 运行 DSH 本体只需 Node（`engines`：22.19+/24+）；桌面版用 Electron 内置 Node 24.21 并带 pnpm 11.28.5。
 - git/python 不是基础依赖：python 只在 office 技能运行时（桌面版 `primary-runtime` 离线自带）按需使用；git 用于“从 GitHub 装插件”前的检查。基础包不预装 git/python，缺失时相关功能明确失败。
 - 本机开发机 Node 22.19.0 在 PATH（可作构建机），但**成员机器不能假设有 Node**，所以包内自带 Node。
+- **包内 Node 选 24.21.0（与上游桌面版自带版本一致），不用 22.19.0**。实测证据：同一台机器上访问平台首页，Node 22.19.0 的 `fetch` 报 `ECONNRESET`（curl 也握手失败），Node 24.21.0 返回 HTTP 200；插件的平台能力探测在 22.19 下得到 `{"reachable":false,"reason":"network"}`。这是本机网络环境对 TLS 客户端指纹的过滤，换用 24.21 即通过。DSH `engines` 为 `^22.19.0 || >=24`，插件要求 Node>=22.12，24 均满足。
 
 ### 1.5 上游自动更新与我们插件更新的关系（概述，详见第 5 节）
 
@@ -69,7 +70,7 @@ npm 版实测体量：隔离目录 `npm install @deepseek-ai/dsh@0.2.1-rc.3`，`
 | 安装/升级/卸载 | 安装：解压包运行 `install.cmd`，复制到 `<根>\versions\<id>\`，种 profile，冒烟校验，写 `current.txt` 切换；升级：同一命令装新包，旧版本保留一份，profile 先备份，冒烟失败自动回滚；`rollback.cmd` 手动回退；卸载：`uninstall.ps1`，默认保留用户数据，`-PurgeData` 才删我们 profile |
 | 更新通道 | 上游 DSH 与我们的部分分开存放、分开版本号（`manifest.json` 记录 `upstream.version/integrity`、`plugin.version`、包 id `<插件版本>-dsh<上游版本>`）。统一由我们下发，我们决定何时跟进上游（与“DSH 版本由我们控制”的原则一致） |
 | 签名 | 免费可做：SHA-256 清单。**需花钱**：Windows 代码签名证书（OV/EV 或云签名服务，数额与是否可用需用户核实采购）；未签名包会被 SmartScreen 提示，且从网络下载的 zip 带 Mark-of-the-Web。Node 官方二进制自带官方签名，随包保留。不擅自采购 |
-| 全局环境影响 | 默认不改 PATH、不写注册表、不碰 `~/.dsh`；数据放 `%LOCALAPPDATA%\AurigaDSH\home`。代价：与用户已有 `~/.dsh`（桌面版/CLI 的历史会话）不共享，需要共享时安装参数 `-DataHome` 指过去（风险自负，见未完成项） |
+| 全局环境影响 | 默认不改 PATH、不碰 `~/.dsh`；仅写当前用户的开始菜单/桌面快捷方式与 HKCU“应用和功能”卸载项（无需管理员，卸载时删除）；数据放 `%LOCALAPPDATA%\AurigaDesktop\home`。代价：与用户已有 `~/.dsh`（桌面版/CLI 的历史会话）不共享，需要共享时安装参数 `-DataHome` 指过去（风险自负，见未完成项） |
 | 本地工具落点 | `<DataHome 同级>\tools\<工具id>\<版本>\`：独立于 `versions\`（应用升级/回滚不动它）、独立于 DSH profile（插件市场落点仍是 profile `node_modules`）。工具由 manifest + SHA-256 描述，以 DSH 子进程方式运行，只收到显式授予的环境变量，不继承平台令牌；共享 Node 运行时通过只读路径提供。 |
 | Linux | 同一 `core.mjs` + `bin/node`（`nodeBin` 已区分平台），换 Node 的 linux tar.xz 与 `install.sh`/tar.gz，路径换 XDG；glibc 版本与 `real-dsh` 镜像的 Linux amd64 约束一致 |
 | 可复现/CI | 全部输入可钉死：Node 校验和、npm 锁文件（已提交）、插件 tgz 校验；CI `windows-latest` 能完整重建 |
@@ -96,26 +97,37 @@ npm 版实测体量：隔离目录 `npm install @deepseek-ai/dsh@0.2.1-rc.3`，`
 
 ```
 clients/installer/
-  upstream.json            上游版本参数：dsh 版本 + 完整性、Node 版本 + SHA-256
+  package.json             纳入 pnpm 工作区（@auriga/installer），根级 lint/test 覆盖
+  upstream.json            上游版本参数：dsh 版本 + 完整性、Node 版本 + SHA-256、pnpm 版本 + 完整性
   locks/dsh-<版本>.package-lock.json   已提交的上游依赖锁（npm ci 用）
-  scripts/build.mjs        构建（参数：--upstream <版本> --plugin-tgz --out --cache --no-zip）
+  scripts/build.mjs        构建（参数：--upstream <版本> --plugin-tgz --out --cache --no-zip --exe --platform-origin <地址> --without-libreoffice）
+  scripts/make-exe.mjs     单文件 exe 封装；scripts/e2e.mjs 隔离端到端
   scripts/lib/             semver-lite、文件清单与密钥扫描
   runtime/core.mjs cli.mjs 安装核心（纯 Node）：install / rollback / uninstall / launch
-  windows/                 install.ps1、install.cmd、launcher\（auriga-dsh.cmd、rollback.cmd、uninstall.ps1）
+  windows/                 install.ps1、install.cmd、launcher\（auriga-desktop.cmd、rollback.cmd、uninstall.ps1）、sfx\Stub.cs（exe 存根）
   test/                    node --test
 ```
 
-包内布局：`<包>\install.cmd`、`payload\{manifest.json, upstream\{node, app}, auriga\{plugin, runtime, launcher}}`。安装后：
+包内布局：`<包>\install.cmd`、`payload\{manifest.json, licenses, upstream\{node, app}, tools\{pnpm, bin}, auriga\{plugin, runtime, launcher, defaults.json}}`。安装后：
 
 ```
 <根>\versions\<id>\ (upstream\ + auriga\)   不可变，一个版本一个目录，保留“当前 + 上一版”
 <根>\current.txt  <根>\install.json         当前/上一版指针
-<根>\bin\{auriga-dsh.cmd,rollback.cmd,uninstall.ps1}
+<根>\bin\{auriga-desktop.cmd,rollback.cmd,uninstall.ps1}   <根>\shell.json（快捷方式与注册表项清单）
 <DataHome>\profiles\auriga\{package.json,cordis.patch.yml,node_modules\…}   用户数据区，永不在 <根> 内
 <DataHome>\profile-backups\auriga\<上一版id>\   升级前的 profile 备份
 ```
 
 安全与完整性：构建期校验 Node zip 的 SHA-256（`SHASUMS256.txt` 或 `upstream.json` 钉死值）；上游 `npm ci --ignore-scripts` 以提交的锁安装，并断言锁中 `@deepseek-ai/dsh` 的版本与完整性等于注册表值（非默认版本则记录 `pinnedInRepo:false`）；`engines.dsh` 门槛不满足则构建失败；`manifest.json` 对我们的每个文件给 SHA-256，并扫描 PEM 私钥、`sk-`、JWT、`Bearer`、`AURIGA_*TOKEN=` 与 `.env/*.pem/*.key` 文件名，命中即构建失败。
+
+### 3.1 第 2 轮补齐项
+
+- **产品名**：Auriga Desktop。包内 `licenses\NOTICE.txt` 说明基于开源 DSH（MIT）、非 DeepSeek 官方产品，另带 `LICENSE.dsh.txt`、`LICENSE.node.txt`、`LICENSE.auriga-dsh.txt`。
+- **快捷方式与卸载项**：`install.ps1` 在安装成功后建开始菜单与桌面快捷方式（`Auriga Desktop.lnk`，指向 `bin\auriga-desktop.cmd`，最小化窗口），并写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\AurigaDesktop`（DisplayName/Version/InstallLocation/UninstallString，NoModify/NoRepair），“应用和功能”可卸载；清单记在 `<根>\shell.json`，`uninstall.ps1` 据此删除。目录与注册表键名可由参数/环境变量覆盖（测试用沙箱目录与专用测试键，测完删除），均不需管理员。
+- **单文件 exe**：选用**自编 SFX 存根**（`windows/sfx/Stub.cs`，用 Windows 自带 .NET Framework 4 的 `csc.exe` 编译，免费、无需额外安装；包 zip 附加在存根后，带 16 字节尾标）。存根解包到临时目录、运行 `install.ps1`（参数透传）、转发退出码、清理临时目录，控制台输出进度。放弃 IExpress 的原因：实测 IExpress 生成的 exe 在本机静默不执行 AppLaunched 命令（无报错），无法诊断；NSIS/WiX 需另装工具，首版不采用。限制：无图形向导；exe 未签名，将来签名后“附加数据”的做法需在采购证书后复核；解包依赖系统 `tar.exe`（Windows 10 1803+ 自带）。
+- **随包 pnpm**：`tools\pnpm`（npm 包 `pnpm@11.28.5`，版本与完整性写在 `upstream.json`，构建时与注册表比对），`tools\bin\pnpm.cmd` 垫片；启动 DSH 时 `PATH` 前置 `tools\bin` 与 Node 目录，并把 `npm_config_store_dir` 指到 `<DataHome>\pnpm-store`（包存储不落系统目录）。实测发现：profile 若把 `auriga-dsh` 依赖写成 `*`，插件管理页（pnpm）会因注册表无此包而失败，并把已复制的插件移到 `.ignored`；因此 profile 依赖写成 `file:./.auriga/auriga-dsh.tgz`，安装器把插件 tgz 放进 profile 的 `.auriga\`，pnpm 重装时从 tgz 恢复。
+- **首启平台地址**：构建参数 `--platform-origin <https 地址>` 写入包内 `auriga\defaults.json`；安装时（也可用 `-PlatformOrigin` 覆盖）种进 profile 补丁的 `config.connect.platformOrigin`。公开仓库不含真实域名，具体地址只在构建命令行给出；用户之后可在插件设置页修改并保存。
+- **体积裁剪**：`npm ci --os=win32 --cpu=x64`（只装 win-x64 平台包），构建后删除 `*.map`、`*.d.ts/.d.mts/.d.cts`、README/CHANGELOG/HISTORY 与其他平台的 `prebuilds\`，Node 只带 `node.exe`；可选 `--without-libreoffice` 去掉办公文档渲染包（约 188 MB，办公文档预览/导出功能不可用，默认保留）。前后大小见第 6 节。
 
 ## 4 安装、升级、卸载流程（原型实现）
 
@@ -152,28 +164,53 @@ clients/installer/
 
 ## 6 原型实测（隔离环境）
 
-隔离方式：安装根、`DSH_HOME`、`USERPROFILE/HOME/APPDATA/LOCALAPPDATA` 全部指向 `agent-cache\dsh-pkg\sandbox-*`，不碰全局 DSH、`~/.dsh`（目录修改时间仍为 11-04）与桌面版安装目录。实测用 `clients/installer/scripts/e2e.mjs`，证据在 `D:\project\chatgpt\agent-cache\dsh-pkg\evidence\`。
+隔离方式：安装根、`DSH_HOME`、`USERPROFILE/HOME/APPDATA/LOCALAPPDATA`、开始菜单与桌面目录全部指向 `agent-cache\dsh-pkg\r2\sandbox`；HKCU 卸载项使用专用测试键 `AurigaDesktop-e2e-test`，测完删除。不碰全局 DSH、`~/.dsh` 与桌面版安装目录。`clients/installer/scripts/e2e.mjs` 共 29 项检查全部通过（日志 `agent-cache\dsh-pkg\evidence-r2\e2e-r2-full.log`）。
 
 | 步骤 | 结果 |
 | --- | --- |
-| 构建 rc.3 包（默认上游）和 rc.4 包（`--upstream 0.2.1-rc.4`） | 成功，包 id `0.1.15-dsh0.2.1-rc.3` / `0.1.15-dsh0.2.1-rc.4`，解开约 0.9 GB；Node SHA-256 与官方一致，dsh 完整性与注册表一致 |
-| 安装 rc.3（含冒烟 `--dump-config`） | 约 49 秒；profile `auriga` 含插件与生产依赖，补丁行写入平台地址 |
-| 启动（随机端口、`--no-open`） | `/auriga/` 未认证返回 401、未知路径 404（插件路由已注册）；认证后 `/auriga/settings/state` 返回 `mode:connect`，平台地址来自补丁 |
-| 在插件设置里改平台地址 | `POST /auriga/settings/save` 200，状态变为新地址，持久化在 profile `auriga-settings/settings.json` |
-| 升级到 rc.4 包 | 成功，`previous=rc.3`；会话文件、登录态标记文件、插件设置均保留（补丁文件不被覆盖由单测覆盖）；上游组件换成 0.2.1-rc.4；启动后插件仍加载，平台地址为用户改后的值 |
-| 回滚 | `rollback.cmd` 切回 rc.3，插件文件还原，启动后同样通过 |
-| 卸载 | `uninstall.ps1` 删除安装根，用户数据默认保留 |
+| 旧版 = **单文件 exe**（rc.3、完整版）安装 | 通过；开始菜单与桌面快捷方式已建；HKCU 卸载项含 DisplayName/UninstallString |
+| 随包 pnpm | 启动 PATH 下 `pnpm --version` = 11.28.5；`dsh plugin --profile auriga add <tgz>` 经随包 pnpm 成功，Auriga 插件仍在 |
+| 启动（随机端口） | `/auriga/` 未认证 401、未知路径 404（插件已注册）；平台地址 = 构建时给的默认地址，`mode:connect` |
+| 平台能力探测与登录入口 | `POST /auriga/settings/test` 返回 `{"reachable":true}`；`/auriga/local-login/status` 返回 `available:true, loggedIn:false`（`platform:"signed_out"`） |
+| 浏览器实看（不输凭据） | DSH 侧栏有 Auriga 入口；插件页“已安装插件”列出 auriga-dsh；设置 → Auriga 显示平台地址与“登录”；点登录进入 Auriga 登录页（用户名/口令表单），取消。截图 `evidence-r2\auriga-*.jpg` |
+| **升级失败自动回滚**（真实 zip 解出的 rc.4 包，把 `dsh/lib/bin.js` 临时移走使冒烟失败） | 安装报错退出；指针不变；失败版本目录被删；profile 与登录态数据完好；旧版再启动通过（`broken-upgrade.log`） |
+| 升级 rc.3 → rc.4（精简版，真实 zip 解出） | 成功；会话/登录态/插件设置保留；上游组件换成 0.2.1-rc.4；启动通过 |
+| 回滚 | `rollback.cmd` 切回 rc.3，启动通过 |
+| 卸载 | 删除安装根、快捷方式与注册表项；用户数据默认保留 |
 
-升级失败路径（冒烟失败自动恢复备份与指针）由单测覆盖，未在真实包上制造失败。启动后的 DSH 进程由脚本用 `taskkill /T` 结束，实测后无遗留进程。
+### 实测中发现并已修复的问题
 
-## 7 需要用户决定的事项
+1. **首启补丁配置不完整**：第 1 轮只种 `connect.platformOrigin`，插件对“与 loader 同源”的配置要求 `issuer/clientId/providerId` 齐全，否则连接运行时不创建（登录入口 503、面板显示“平台连接暂不可用”）。现补全为 `{platformOrigin, issuer, clientId:'auriga-dsh', providerId:'discover'}`。
+2. **Node 22.19 连不上平台、Node 24.21 可以**（见 1.4）：包内 Node 改为 24.21.0。
+3. **插件管理页会破坏插件**：见 3.1“随包 pnpm”。
+4. IExpress 生成的 exe 在本机不执行安装命令：改为自编 SFX 存根（3.1）。
 
-1. 产品名/品牌：建议 “Auriga DSH”，避免使用 “DeepSeek Harness” 全称（`BRAND_GUIDELINES.md`）。
-2. 代码签名：是否采购 Windows 代码签名证书（或云签名服务）。未签名包会被 SmartScreen 警告。
-3. 数据目录：默认独立 `%LOCALAPPDATA%\AurigaDSH\home`；是否要与用户现有 `~/.dsh`（桌面版/CLI 历史会话）共享。
-4. 是否接受首版无桌面窗口（浏览器访问本机 DSH），还是等方案 C 的桌面外壳。
-5. 分发渠道（下载位置、清单签名）——当前不发布公网。
+### 体积（win-x64，实测）
+
+| 项 | 大小 |
+| --- | --- |
+| 第 1 轮包（未裁剪，Node 22） | 解开约 922 MB |
+| 上游依赖 + 插件闭包，裁剪前 | 740 MB |
+| 同上，裁剪后（去 map/d.ts/readme/其他平台 prebuilds，24566 个文件） | 606 MB（-18%） |
+| 完整版 payload 总计 / 单文件 exe | 787 MB / 232 MB |
+| 精简版（`--without-libreoffice`）payload 总计 / zip | 594 MB / 163 MB |
+
+办公文档渲染包（libreoffice-kit，188 MB）默认保留，成员不需要时用 `--without-libreoffice` 出精简版；精简版已在升级路径中实测可启动。
+
+## 7 已定与待定事项
+
+已定（用户）：产品名 Auriga Desktop；首版浏览器打开；数据目录独立；测试期不签名；采用方案 B。
+
+待定：
+1. 正式分发前是否采购代码签名证书（或云签名服务）；未签名 exe 会被 SmartScreen 警告，签名后“附加数据”式 SFX 需复核。
+2. 分发渠道与清单签名（当前不发布公网）。
+3. 完整版（含办公文档渲染包）还是精简版作为默认成员包。
+4. 桌面外壳（方案 C）与启动器自动更新的时间点。
 
 ## 8 未完成与风险
 
-见 `.agent-report.md`：开始菜单/快捷方式/注册表卸载项、随包 pnpm（插件管理页）、Linux 版、安装器 exe 封装（IExpress/NSIS/MSI）、体积裁剪（可选平台包）、启动器自动更新、真实平台登录联调。
+- Linux 版（核心已跨平台，缺 Node linux 下载与 install.sh）。
+- exe 无图形向导，仅控制台进度；解包依赖系统 `tar.exe`。
+- 启动器自动检测/下载新包、定时检测上游新版本的 CI、用 0.2.2-rc.1 做兼容性冒烟。
+- 构建依赖 nodejs.org 与 npm 注册表网络；包体较大，安装约 1–2 分钟（杀毒扫描影响）。
+- 平台登录只验证到登录页（未用凭据），完整登录与双 DSH 通信未在本包上验证。

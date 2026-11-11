@@ -1,4 +1,5 @@
 /** Command line entry of the installer core, run with the bundled Node. */
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { install, launch, rollback, uninstall } from './core.mjs';
@@ -30,14 +31,19 @@ function options(argv) {
 try {
   const { values, positional } = options(rest);
   if (command === 'install') {
+    const payload = values.payload ?? join(here, '..', '..');
+    const defaultsFile = join(payload, 'auriga', 'defaults.json');
+    const defaults = existsSync(defaultsFile)
+      ? JSON.parse(readFileSync(defaultsFile, 'utf8'))
+      : {};
     const result = install({
-      payload: values.payload ?? join(here, '..', '..'),
+      payload,
       root: values.root,
       dataHome: values['data-home'],
       platformOrigin:
         typeof values['platform-origin'] === 'string'
           ? values['platform-origin']
-          : undefined,
+          : defaults.platformOrigin,
     });
     console.log(JSON.stringify(result));
   } else if (command === 'rollback') {
@@ -45,13 +51,18 @@ try {
   } else if (command === 'uninstall') {
     console.log(
       JSON.stringify(
-        uninstall({ root: values.root, purgeData: values['purge-data'] === true }),
+        uninstall({
+          root: values.root,
+          purgeData: values['purge-data'] === true,
+        }),
       ),
     );
   } else if (command === 'launch') {
     process.exitCode = launch({ root: values.root, args: positional });
   } else {
-    console.error('usage: cli.mjs install|rollback|uninstall|launch --root <dir> ...');
+    console.error(
+      'usage: cli.mjs install|rollback|uninstall|launch --root <dir> ...',
+    );
     process.exitCode = 2;
   }
 } catch (error) {

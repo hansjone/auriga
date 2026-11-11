@@ -20,7 +20,8 @@ export function listFiles(dir) {
   return out.sort();
 }
 
-const FORBIDDEN_NAMES = /(^|\/)(\.env(\..*)?|.*\.pem|.*\.key|id_rsa|credentials?\.json|.*\.p12|.*\.pfx)$/i;
+const FORBIDDEN_NAMES =
+  /(^|\/)(\.env(\..*)?|.*\.pem|.*\.key|id_rsa|credentials?\.json|.*\.p12|.*\.pfx)$/i;
 const SECRET_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   /\bsk-[A-Za-z0-9]{20,}/,
@@ -52,5 +53,6 @@ function statSize(file) {
 
 export function assertNoSecrets(dir, skip) {
   const hits = findSecrets(dir, skip);
-  if (hits.length > 0) throw new Error(`secrets found in package:\n${hits.join('\n')}`);
+  if (hits.length > 0)
+    throw new Error(`secrets found in package:\n${hits.join('\n')}`);
 }

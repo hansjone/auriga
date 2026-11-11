@@ -9,9 +9,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import {
   install,
+  launchEnv,
+  nodeBin,
   profileDir,
   readState,
   rollback,
@@ -28,8 +30,12 @@ function makePayload(base, id, pluginVersion) {
     JSON.stringify({ name: 'auriga-dsh', version: pluginVersion }),
   );
   writeFileSync(join(modules, '@nats-io', 'nats-core', 'package.json'), '{}');
+  writeFileSync(join(dir, 'auriga', 'plugin', 'auriga-dsh.tgz'), `tgz-${id}`);
   mkdirSync(join(dir, 'auriga', 'launcher'), { recursive: true });
-  writeFileSync(join(dir, 'auriga', 'launcher', 'auriga-dsh.cmd'), `rem ${id}`);
+  writeFileSync(
+    join(dir, 'auriga', 'launcher', 'auriga-desktop.cmd'),
+    `rem ${id}`,
+  );
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ id }));
   return dir;
 }
@@ -43,7 +49,12 @@ function fixture(t) {
 }
 
 function pluginVersion(dataHome) {
-  const file = join(profileDir(dataHome), 'node_modules', 'auriga-dsh', 'package.json');
+  const file = join(
+    profileDir(dataHome),
+    'node_modules',
+    'auriga-dsh',
+    'package.json',
+  );
   return JSON.parse(readFileSync(file, 'utf8')).version;
 }
 
@@ -64,14 +75,30 @@ test('fresh install seeds profile, plugin and platform address', (t) => {
   });
   assert.deepEqual(result, { id: 'a', previous: null, upgraded: false });
   const profile = profileDir(f.dataHome);
-  const manifest = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8'));
+  const manifest = JSON.parse(
+    readFileSync(join(profile, 'package.json'), 'utf8'),
+  );
   assert.ok(manifest.dsh.profile.bundles.includes('auriga-dsh'));
   assert.ok(existsSync(join(profile, 'node_modules', '@nats-io', 'nats-core')));
   const patch = readFileSync(join(profile, 'cordis.patch.yml'), 'utf8');
+  assert.equal(
+    manifest.dependencies['auriga-dsh'],
+    'file:./.auriga/auriga-dsh.tgz',
+  );
+  assert.equal(
+    readFileSync(join(profile, '.auriga', 'auriga-dsh.tgz'), 'utf8'),
+    'tgz-a',
+  );
   assert.match(patch, /id: auriga-dsh/);
-  assert.match(patch, /"platformOrigin":"https:\/\/portal\.example\.com"/);
+  const row = JSON.parse(patch.split('config: ')[1]);
+  assert.deepEqual(row.connect, {
+    platformOrigin: 'https://portal.example.com',
+    issuer: 'https://portal.example.com',
+    clientId: 'auriga-dsh',
+    providerId: 'discover',
+  });
   assert.equal(readFileSync(join(f.root, 'current.txt'), 'utf8').trim(), 'a');
-  assert.ok(existsSync(join(f.root, 'bin', 'auriga-dsh.cmd')));
+  assert.ok(existsSync(join(f.root, 'bin', 'auriga-desktop.cmd')));
 });
 
 test('upgrade keeps user data and settings, keeps previous version', (t) => {
@@ -84,10 +111,17 @@ test('upgrade keeps user data and settings, keeps previous version', (t) => {
 
   const result = put(f, 'b', '1.1.0');
   assert.deepEqual(result, { id: 'b', previous: 'a', upgraded: true });
-  assert.equal(readFileSync(join(f.dataHome, 'sessions', 's1.json'), 'utf8'), 'user-session');
+  assert.equal(
+    readFileSync(join(f.dataHome, 'sessions', 's1.json'), 'utf8'),
+    'user-session',
+  );
   assert.match(readFileSync(patchFile, 'utf8'), /# user edit/);
   assert.equal(pluginVersion(f.dataHome), '1.1.0');
-  assert.deepEqual(readState(f.root), { dataHome: f.dataHome, current: 'b', previous: 'a' });
+  assert.deepEqual(readState(f.root), {
+    dataHome: f.dataHome,
+    current: 'b',
+    previous: 'a',
+  });
   assert.ok(existsSync(join(f.root, 'versions', 'a')));
 });
 
@@ -112,24 +146,46 @@ test('rollback restores previous version and plugin files', (t) => {
   const f = fixture(t);
   put(f, 'a', '1.0.0');
   put(f, 'b', '1.1.0');
-  assert.deepEqual(rollback({ root: f.root, smoke: noSmoke }), { current: 'a' });
+  assert.deepEqual(rollback({ root: f.root, smoke: noSmoke }), {
+    current: 'a',
+  });
   assert.equal(readFileSync(join(f.root, 'current.txt'), 'utf8').trim(), 'a');
   assert.equal(pluginVersion(f.dataHome), '1.0.0');
-  assert.deepEqual(readState(f.root), { dataHome: f.dataHome, current: 'a', previous: 'b' });
-  assert.match(readFileSync(join(f.root, 'bin', 'auriga-dsh.cmd'), 'utf8'), /rem a/);
+  assert.equal(
+    readFileSync(
+      join(profileDir(f.dataHome), '.auriga', 'auriga-dsh.tgz'),
+      'utf8',
+    ),
+    'tgz-a',
+  );
+  assert.deepEqual(readState(f.root), {
+    dataHome: f.dataHome,
+    current: 'a',
+    previous: 'b',
+  });
+  assert.match(
+    readFileSync(join(f.root, 'bin', 'auriga-desktop.cmd'), 'utf8'),
+    /rem a/,
+  );
 });
 
 test('rollback without previous version fails', (t) => {
   const f = fixture(t);
   put(f, 'a', '1.0.0');
-  assert.throws(() => rollback({ root: f.root, smoke: noSmoke }), /no previous/);
+  assert.throws(
+    () => rollback({ root: f.root, smoke: noSmoke }),
+    /no previous/,
+  );
 });
 
 test('uninstall removes the root, keeps data unless purged', (t) => {
   const f = fixture(t);
   put(f, 'a', '1.0.0');
   writeFileSync(join(f.dataHome, 'keep.txt'), 'x');
-  assert.deepEqual(uninstall({ root: f.root }), { dataKept: true, dataHome: f.dataHome });
+  assert.deepEqual(uninstall({ root: f.root }), {
+    dataKept: true,
+    dataHome: f.dataHome,
+  });
   assert.equal(existsSync(f.root), false);
   assert.ok(existsSync(join(profileDir(f.dataHome), 'package.json')));
   put(f, 'a', '1.0.0');
@@ -143,4 +199,16 @@ test('uninstall refuses a directory that is not an installation', (t) => {
   mkdirSync(f.root, { recursive: true });
   assert.throws(() => uninstall({ root: f.root }), /not an installation/);
   assert.ok(existsSync(f.root));
+});
+
+test('launch environment: own data home, bundled node and pnpm first on PATH', () => {
+  const dir = join(tmpdir(), 'v');
+  const env = launchEnv(dir, join(tmpdir(), 'h'), { PATH: 'base', Foo: '1' });
+  assert.equal(env.DSH_HOME, join(tmpdir(), 'h'));
+  assert.equal(env.npm_config_store_dir, join(tmpdir(), 'h', 'pnpm-store'));
+  const parts = env.PATH.split(delimiter);
+  assert.equal(parts[0], join(dir, 'tools', 'bin'));
+  assert.equal(parts[1], dirname(nodeBin(dir)));
+  assert.equal(parts[2], 'base');
+  assert.equal(env.Foo, '1');
 });

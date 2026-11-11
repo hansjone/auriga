@@ -35,10 +35,9 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile --store-dir "$(pnpm store path)"
         shell: bash
-      - name: Unit tests (core, upgrade/rollback, version lock, secret scan)
-        working-directory: clients/installer
-        run: node --test "test/**/*.test.mjs"
-      - name: Build package
+      - name: Lint and unit tests (core, upgrade/rollback, version lock, secret scan)
+        run: pnpm --filter @auriga/installer lint && pnpm --filter @auriga/installer test
+      - name: Build package and single-file setup exe
         working-directory: clients/installer
         shell: bash
         env:
@@ -47,13 +46,12 @@ jobs:
           set -euo pipefail
           extra=()
           if [ -n "$UPSTREAM" ]; then extra=(--upstream "$UPSTREAM"); fi
-          node scripts/build.mjs "${extra[@]}" --out "$RUNNER_TEMP/installer" --no-zip
-          stage="$(ls -d "$RUNNER_TEMP"/installer/auriga-dsh-*-win-x64)"
-          echo "INSTALLER_STAGE=$stage" >> "$GITHUB_ENV"
-      - name: Package checks (manifest, checksums, version lock, no secrets)
-        working-directory: clients/installer
-        run: node --test "test/**/*.test.mjs"
-      - name: Isolated install, launch, uninstall
+          node scripts/build.mjs "${extra[@]}" --out "$RUNNER_TEMP/installer" --no-zip --exe
+          echo "INSTALLER_STAGE=$(ls -d "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64)" >> "$GITHUB_ENV"
+          echo "INSTALLER_EXE=$(ls "$RUNNER_TEMP"/installer/Auriga-Desktop-Setup-*.exe)" >> "$GITHUB_ENV"
+      - name: Package checks (manifest, checksums, version lock, licences, pnpm, no secrets)
+        run: pnpm --filter @auriga/installer test
+      - name: Isolated install from the setup exe, launch, uninstall
         working-directory: clients/installer
         shell: bash
-        run: node scripts/e2e.mjs --old "$INSTALLER_STAGE" --sandbox "$RUNNER_TEMP/sandbox"
+        run: node scripts/e2e.mjs --old "$INSTALLER_EXE" --sandbox "$RUNNER_TEMP/sandbox"
