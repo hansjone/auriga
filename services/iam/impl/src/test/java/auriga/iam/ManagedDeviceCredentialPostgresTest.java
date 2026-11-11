@@ -320,6 +320,32 @@ class ManagedDeviceCredentialPostgresTest {
         });
   }
 
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"bindings", "permissions"})
+  void upstreamForbiddenIsTransientAndRecoversWithoutConsumingFailureBuckets(String upstream) {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          var allowed =
+              permissions.getEffectivePermissions(
+                  GetEffectivePermissionsRequest.getDefaultInstance());
+          var forbidden = new AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+          if (upstream.equals("bindings")) doThrow(forbidden).when(bindings).get(any());
+          else doThrow(forbidden).when(permissions).getEffectivePermissions(any());
+
+          var error = assertThrows(AurigaException.class, () -> access(issued));
+          assertEquals("common.unavailable", error.errorCode().code());
+          assertEquals(503, error.errorCode().httpStatus());
+          assertTrue(store.tx(() -> store.all("rate_limit").isEmpty()));
+
+          doAnswer(i -> binding).when(bindings).get(any());
+          doReturn(allowed).when(permissions).getEffectivePermissions(any());
+          assertFalse(access(issued).isEmpty());
+          assertTrue(store.tx(() -> store.all("rate_limit").isEmpty()));
+        });
+  }
+
   @Test
   void authorityOutageIsTransientAfterVerificationAndDoesNotConsumeFailureBuckets() {
     TenantContext.run(

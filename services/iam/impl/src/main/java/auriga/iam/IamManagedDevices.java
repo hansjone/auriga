@@ -65,8 +65,7 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
     try {
       return activeBinding(instance, owner, version);
     } catch (AurigaException error) {
-      if (Set.of("common.not_found", "common.forbidden").contains(error.errorCode().code()))
-        return false;
+      if ("common.not_found".equals(error.errorCode().code())) return false;
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     } catch (RuntimeException unavailable) {
       throw new AurigaException(CommonErrors.UNAVAILABLE);
@@ -102,8 +101,7 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
               .setAccountId(owner)
               .build());
     } catch (AurigaException error) {
-      if (Set.of("common.not_found", "common.forbidden").contains(error.errorCode().code()))
-        return null;
+      if ("common.not_found".equals(error.errorCode().code())) return null;
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     } catch (RuntimeException error) {
       throw new AurigaException(CommonErrors.UNAVAILABLE);
