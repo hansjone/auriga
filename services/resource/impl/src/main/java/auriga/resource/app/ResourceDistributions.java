@@ -392,14 +392,14 @@ public final class ResourceDistributions {
     try {
       db.lock("distribution/" + instance);
       row = db.distribution(id);
+      if (row.get("state").equals("superseded")) return;
       var snapshot = workspace().snapshot(TenantContext.require(), instance);
       long revision = number(row, "selection_revision");
-      if (snapshot.selectionRevision() > revision && row.get("applied_generation") != null) {
-        long applied = number(row, "applied_generation");
-        if (!row.get("state").equals("applied") || !Objects.equals(row.get("generation"), applied))
+      if (snapshot.selectionRevision() > revision) {
+        if (Set.of("requested", "resolved", "applying").contains(row.get("state")))
           db.update(
-              "UPDATE resource.resource_distribution SET state='applied',generation=:gen,observed_generation=:gen,ready=true,error_code=NULL,revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
-              db.args("id", id, "gen", applied));
+              "UPDATE resource.resource_distribution SET state='superseded',revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
+              db.args("id", id));
         return;
       }
       if (!snapshot.owner().equals(row.get("owner_id")))
@@ -573,22 +573,35 @@ public final class ResourceDistributions {
   }
 
   public void propagate() {
-    if (db.revocations() == null) return;
-    var list = revocations();
-    for (var row :
-        db.rows(
-            "SELECT * FROM resource.resource_revocation_delivery WHERE tenant_id=:tenant AND completed_revision<revision ORDER BY instance_id",
-            db.args())) {
+    var pending =
+        resources.write(
+            () -> {
+              if (db.revocations() == null) return List.<Map<String, Object>>of();
+              revocations();
+              return db.rows(
+                  "SELECT instance_id FROM resource.resource_revocation_delivery WHERE tenant_id=:tenant AND completed_revision<revision ORDER BY instance_id",
+                  db.args());
+            });
+    for (var row : pending) {
       try {
-        db.lock("revocation-delivery/" + row.get("instance_id"));
-        workspace()
-            .revoke(
-                TenantContext.require(),
-                (UUID) row.get("instance_id"),
-                ResourceProtocol.revocations(list));
-        db.update(
-            "UPDATE resource.resource_revocation_delivery SET completed_revision=:rev WHERE tenant_id=:tenant AND instance_id=:instance AND revision<=:rev",
-            db.args("instance", row.get("instance_id"), "rev", list.path("revision").asLong()));
+        resources.writeIndependent(
+            () -> {
+              UUID instance = (UUID) row.get("instance_id");
+              db.lock("revocation-delivery/" + instance);
+              if (db.rows(
+                      "SELECT instance_id FROM resource.resource_revocation_delivery WHERE tenant_id=:tenant AND instance_id=:instance AND completed_revision<revision FOR UPDATE",
+                      db.args("instance", instance))
+                  .isEmpty()) return false;
+              var list = db.revocations();
+              if (list == null || db.needsRevocationSignature())
+                throw new AurigaException(CommonErrors.UNAVAILABLE);
+              workspace()
+                  .revoke(TenantContext.require(), instance, ResourceProtocol.revocations(list));
+              db.update(
+                  "UPDATE resource.resource_revocation_delivery SET completed_revision=:rev WHERE tenant_id=:tenant AND instance_id=:instance AND revision<=:rev",
+                  db.args("instance", instance, "rev", list.path("revision").asLong()));
+              return true;
+            });
       } catch (RuntimeException e) {
         retry(e);
       }
@@ -597,11 +610,7 @@ public final class ResourceDistributions {
 
   public void propagateNow() {
     try {
-      resources.write(
-          () -> {
-            propagate();
-            return true;
-          });
+      propagate();
     } catch (RuntimeException e) {
       org.slf4j.LoggerFactory.getLogger(getClass())
           .warn("Resource revocation propagation will retry");
@@ -633,13 +642,10 @@ public final class ResourceDistributions {
                   } catch (RuntimeException e) {
                     retry(e);
                   }
-                if (!candidates.isEmpty() || resources.write(() -> db.revocations() != null))
-                  resources.write(
-                      () -> {
-                        revocations();
-                        propagate();
-                        return true;
-                      });
+                if (!candidates.isEmpty() || resources.write(() -> db.revocations() != null)) {
+                  resources.write(this::revocations);
+                  propagate();
+                }
                 if (!candidates.isEmpty()) objects.get().cleanupExpiredStaging(tenant);
               });
         } catch (RuntimeException e) {

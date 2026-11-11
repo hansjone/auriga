@@ -58,6 +58,12 @@ class ResourceRecoveryTest {
         UUID.randomUUID(),
         instance,
         UUID.randomUUID());
+    admin.update(
+        "INSERT INTO resource.resource_operation(id,tenant_id,actor_id,operation,request_key,fingerprint,response,expires_at) VALUES(?,?,?,'member-ticket/example','legacy','fingerprint',CAST(? AS jsonb),now()+interval '1 day')",
+        UUID.randomUUID(),
+        tenant,
+        UUID.randomUUID(),
+        "{\"ticket\":\"legacy-secret-ticket\"}");
     CommonMigrations.serviceFlyway(
             Flyway.configure()
                 .dataSource(roles.owner().dataSource())
@@ -66,6 +72,11 @@ class ResourceRecoveryTest {
                 .locations("classpath:db/resource")
                 .load())
         .migrate();
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_operation WHERE response::text LIKE '%legacy-secret-ticket%'",
+            Integer.class));
     assertEquals(
         1,
         admin.queryForObject(
@@ -94,13 +105,14 @@ class ResourceRecoveryTest {
     var signing =
         new auriga.resource.app.ResourceSigning(
             "release", release.getPrivate(), "revoke", revocation.getPrivate());
+    var workspace = org.mockito.Mockito.mock(auriga.resource.api.ResourceWorkspace.class);
     var distributions =
         new auriga.resource.app.ResourceDistributions(
             resources,
             db,
             org.mockito.Mockito.mock(auriga.resource.app.ResourceAccess.class),
             org.mockito.Mockito.mock(auriga.resource.app.ResourceWorkflow.class),
-            () -> null,
+            () -> workspace,
             () -> signing,
             () -> null,
             () -> "",
@@ -124,6 +136,48 @@ class ResourceRecoveryTest {
         false,
         admin.queryForObject(
             "SELECT needs_resign FROM resource.resource_revocations", Boolean.class));
+    UUID nextInstance = UUID.randomUUID();
+    admin.update(
+        "INSERT INTO resource.resource_revocation_delivery(tenant_id,instance_id,revision) VALUES(?,?,8)",
+        tenant,
+        nextInstance);
+    admin.execute(
+        "CREATE FUNCTION resource.test_delivery_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.instance_id='"
+            + instance
+            + "'::uuid THEN RAISE EXCEPTION 'test delivery failure'; END IF; RETURN NEW; END $$");
+    admin.execute(
+        "CREATE TRIGGER test_delivery_failure BEFORE UPDATE ON resource.resource_revocation_delivery FOR EACH ROW EXECUTE FUNCTION resource.test_delivery_failure()");
+    TenantContext.run(tenant, distributions::propagate);
+    assertEquals(
+        0L,
+        admin.queryForObject(
+            "SELECT completed_revision FROM resource.resource_revocation_delivery WHERE instance_id=?",
+            Long.class,
+            instance));
+    assertEquals(
+        8L,
+        admin.queryForObject(
+            "SELECT completed_revision FROM resource.resource_revocation_delivery WHERE instance_id=?",
+            Long.class,
+            nextInstance));
+    org.mockito.Mockito.verify(workspace)
+        .revoke(
+            org.mockito.ArgumentMatchers.eq(tenant),
+            org.mockito.ArgumentMatchers.eq(nextInstance),
+            org.mockito.ArgumentMatchers.any());
+    admin.execute("DROP TRIGGER test_delivery_failure ON resource.resource_revocation_delivery");
+    admin.execute("DROP FUNCTION resource.test_delivery_failure()");
+    TenantContext.run(tenant, distributions::propagate);
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_revocation_delivery WHERE completed_revision<revision",
+            Integer.class));
+    assertEquals(
+        true,
+        admin.queryForObject(
+            "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='resource.resource_operation'::regclass",
+            Boolean.class));
     try (var objects = new LocalObjectStore(root)) {
       var referenced =
           objects.putStaged(

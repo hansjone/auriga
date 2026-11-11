@@ -768,7 +768,9 @@ class ResourceReadAssemblyTest {
         workflowGet("/api/resource/v1/distributions/" + removal.path("id").asString())
             .path("state")
             .asString());
-    assertEquals("applied", workflowGet(distributionPath).path("state").asString());
+    assertEquals("superseded", workflowGet(distributionPath).path("state").asString());
+    workflowSupersededHistory(
+        distributionPath, UUID.fromString(distribution.path("id").asString()));
     var stopped =
         workspace.store.in(
             T1,
@@ -777,6 +779,29 @@ class ResourceReadAssemblyTest {
     assertTrue(
         stopped.getResourceRevocations(0).getRevokedArtifactsList().stream()
             .anyMatch(a -> a.getVersionId().equals(id)));
+  }
+
+  void workflowSupersededHistory(String path, UUID distribution) throws Exception {
+    for (String previous : List.of("requested", "resolved", "applying", "applied", "failed")) {
+      boolean applied = previous.equals("applied"), failed = previous.equals("failed");
+      admin.update(
+          "UPDATE resource.resource_distribution SET state=?,generation=?,observed_generation=?,ready=?,error_code=?,applied_generation=4 WHERE id=?",
+          previous,
+          applied ? 4 : 5,
+          applied ? 4 : 5,
+          applied,
+          failed ? "workspace.apply_failed" : null,
+          distribution);
+      var observed = workflowGet(path);
+      String expected = applied || failed ? previous : "superseded";
+      assertEquals(expected, observed.path("state").asString(), previous);
+      assertEquals(applied ? 4 : 5, observed.path("generation").asLong());
+      assertEquals(applied ? 4 : 5, observed.path("observedGeneration").asLong());
+      assertEquals(4, observed.path("appliedGeneration").asLong());
+      if (failed) assertEquals("workspace.apply_failed", observed.path("errorCode").asString());
+      else assertFalse(observed.has("errorCode"));
+      assertEquals(observed, workflowGet(path));
+    }
   }
 
   void verifyResourceSignature(JsonNode signed) throws Exception {
@@ -890,7 +915,28 @@ class ResourceReadAssemblyTest {
             .put("versionId", version.toString())
             .put("digest", digest);
     String tickets = "/api/resource/v1/member/download-tickets";
-    var ticket = workflowRequest(tickets, ALICE, identity.toString(), "\"0\"", 201);
+    String ticketKey = UUID.randomUUID().toString();
+    var ticket = workflowRequest(tickets, ALICE, identity.toString(), "\"0\"", 201, ticketKey);
+    workflowRequest(tickets, ALICE, identity.toString(), "\"0\"", 409, ticketKey);
+    String plaintext = ticket.path("ticket").asString();
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_operation WHERE response::text LIKE ?",
+            Integer.class,
+            "%" + plaintext + "%"));
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_member_ticket t WHERE to_jsonb(t)::text LIKE ?",
+            Integer.class,
+            "%" + plaintext + "%"));
+    assertEquals(
+        1,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_member_ticket WHERE ticket_hash=?",
+            Integer.class,
+            auriga.resource.app.ResourceWorkflow.hash(plaintext)));
     assertEquals(version.toString(), ticket.path("resourceEnvelope").path("versionId").asString());
     assertTrue(
         Duration.between(Instant.now(), Instant.parse(ticket.path("expiresAt").asString()))

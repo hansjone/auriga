@@ -21,6 +21,7 @@ public final class ResourceStore {
   private final NamedParameterJdbcTemplate jdbc;
   private final TransactionTemplate tx;
   private final TransactionTemplate writes;
+  private final TransactionTemplate independent;
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final String CREATE = "POST /api/resource/v1/packages";
 
@@ -34,6 +35,9 @@ public final class ResourceStore {
     writes.setIsolationLevel(
         org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
     writes.setTimeout(10);
+    independent = new TransactionTemplate(manager, writes);
+    independent.setPropagationBehavior(
+        org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
   public <T> T read(Supplier<T> action) {
@@ -46,6 +50,12 @@ public final class ResourceStore {
     TenantContext.require();
     TenantTransactionManager.verifyTransactionTenant();
     return writes.execute(status -> action.get());
+  }
+
+  public <T> T writeIndependent(Supplier<T> action) {
+    TenantContext.require();
+    TenantTransactionManager.verifyTransactionTenant();
+    return independent.execute(status -> action.get());
   }
 
   public boolean hasVersions(Reader reader, UUID id) {

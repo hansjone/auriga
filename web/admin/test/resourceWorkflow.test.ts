@@ -135,19 +135,51 @@ it('prevents authors from preparing their own review', async () => {
   expect(view.find('[data-testid="approve"]').exists()).toBe(false);
   view.unmount();
 });
-it('hides withdrawal actions after the version has been withdrawn', async () => {
+it('hides withdrawal actions after the version has been maliciously revoked', async () => {
   membership();
   const withdrawn = { ...version, state: 'withdrawn' as const, revision: 5 };
   vi.spyOn(resourceApi, 'governance').mockResolvedValue({ items: [withdrawn] });
   vi.spyOn(resourceApi, 'governanceDetail').mockResolvedValue({
     ...detail,
     version: withdrawn,
+    revoked: true,
   });
   const view = open('published');
   await flushPromises();
   await view.get('[data-testid="detail"]').trigger('click');
   await flushPromises();
   expect(view.find('.market-danger').exists()).toBe(false);
+  view.unmount();
+});
+
+it('allows emergency revocation of an ordinarily withdrawn version', async () => {
+  membership();
+  const withdrawn = { ...version, state: 'withdrawn' as const, revision: 5 };
+  vi.spyOn(resourceApi, 'governance').mockResolvedValue({ items: [withdrawn] });
+  vi.spyOn(resourceApi, 'governanceDetail').mockResolvedValue({
+    ...detail,
+    version: withdrawn,
+    revoked: false,
+  });
+  const revoke = vi
+    .spyOn(resourceApi, 'withdraw')
+    .mockResolvedValue({ ...withdrawn, revision: 6 });
+  const view = open('published');
+  await flushPromises();
+  await view.get('[data-testid="detail"]').trigger('click');
+  await flushPromises();
+  await view.get('[data-testid="reason"]').setValue('Confirmed unsafe archive');
+  await view.get('.market-danger').trigger('click');
+  await view.get('[data-testid="confirm-action"]').trigger('click');
+  await flushPromises();
+  expect(revoke).toHaveBeenCalledWith(
+    'p1',
+    'v1',
+    'malicious',
+    'Confirmed unsafe archive',
+    '"5"',
+    expect.any(String),
+  );
   view.unmount();
 });
 
@@ -320,5 +352,29 @@ it('keeps distinct historical versions visible with their reported distribution 
   expect(rows[0]!.text()).toContain('old-version');
   expect(rows[1]!.text()).toContain('new-version');
   expect(rows[0]!.text()).not.toContain('resource.distribution_denied');
+  view.unmount();
+});
+
+it('labels a superseded pending selection without a denial error', async () => {
+  membership();
+  vi.spyOn(resourceApi, 'distributions').mockResolvedValue({
+    items: [
+      {
+        id: 'superseded',
+        instanceId: 'instance',
+        ownerId: 'owner',
+        selectionRevision: 1,
+        revision: 2,
+        state: 'superseded',
+        generation: 2,
+        observedGeneration: 1,
+        ready: false,
+      },
+    ],
+  });
+  const view = open('distribution');
+  await flushPromises();
+  expect(view.text()).toContain('\u5df2\u53d6\u4ee3');
+  expect(view.text()).not.toContain('resource.distribution_denied');
   view.unmount();
 });

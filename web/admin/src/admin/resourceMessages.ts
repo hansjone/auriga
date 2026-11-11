@@ -48,6 +48,7 @@ export const resourceZh = {
     applying: '应用中',
     applied: '已生效',
     failed: '失败',
+    superseded: '已取代',
   },
   marketDistributionActions: {
     install: '安装',
@@ -258,6 +259,7 @@ export const resourceEn = {
     applying: 'Applying',
     applied: 'Applied',
     failed: 'Failed',
+    superseded: 'Superseded',
   },
   marketDistributionActions: {
     install: 'Install',

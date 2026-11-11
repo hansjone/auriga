@@ -853,7 +853,12 @@ onBeforeUnmount(() => {
             >
               {{ t('marketPublish') }}</button
             ><template
-              v-if="['published', 'deprecated'].includes(detail.version.state)"
+              v-if="
+                !detail.revoked &&
+                ['published', 'deprecated', 'withdrawn'].includes(
+                  detail.version.state,
+                )
+              "
               ><p>{{ t('marketWithdrawNote') }}</p>
               <div class="market-toolbar">
                 <button

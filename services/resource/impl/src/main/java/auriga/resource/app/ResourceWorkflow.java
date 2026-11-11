@@ -74,6 +74,20 @@ public final class ResourceWorkflow {
       String etag,
       Consumer<ResourceAccess.Reader> guard,
       Function<ResourceAccess.Reader, JsonNode> action) {
+    return operation(actor, permission, admin, op, key, body, etag, guard, action, true);
+  }
+
+  JsonNode operation(
+      AurigaPrincipal actor,
+      String permission,
+      boolean admin,
+      String op,
+      String key,
+      ObjectNode body,
+      String etag,
+      Consumer<ResourceAccess.Reader> guard,
+      Function<ResourceAccess.Reader, JsonNode> action,
+      boolean replayResponse) {
     authorize(actor, permission, admin);
     if (key == null || !key.matches("[\\x21-\\x7E]{1,128}")) throw invalid();
     String fingerprint;
@@ -90,9 +104,13 @@ public final class ResourceWorkflow {
             var r = authorize(actor, permission, admin);
             guard.accept(r);
             var replay = db.replay(r.account(), op, key, fingerprint, clock.instant());
-            if (replay.isPresent()) return replay.get();
+            if (replay.isPresent()) {
+              if (!replayResponse) throw new AurigaException(CommonErrors.CONFLICT);
+              return replay.get();
+            }
             var result = action.apply(r);
-            db.remember(r.account(), op, key, fingerprint, result, clock.instant());
+            var receipt = replayResponse ? result : JSON.createObjectNode().put("completed", true);
+            db.remember(r.account(), op, key, fingerprint, receipt, clock.instant());
             return result;
           });
     } catch (org.springframework.dao.DataIntegrityViolationException e) {

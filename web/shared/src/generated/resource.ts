@@ -441,7 +441,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description Authenticated USER portal/admin or DEVICE device context. Live member ACL, policy, published enabled archive and release high water are checked. A 60-second one-use ticket binds member, clientId, packageId, versionId and digest. Device tokens require clientId=did. Ticket appears only in the no-store response/body, never in a URL. Same idempotency key replays the original expiry for 24 hours. Verify the returned signed envelope and revocations with independent trusted roots. */
+    /** @description Authenticated USER portal/admin or DEVICE device context. Live member ACL, policy, published enabled archive and release high water are checked. A 60-second one-use ticket binds member, clientId, packageId, versionId and digest. Device tokens require clientId=did. Ticket appears only in the no-store response/body, never in a URL. Only an idempotency completion marker is persisted. Reusing a key within 24 hours returns 409, including after an uncertain response; use a new key to request a new ticket. No plaintext ticket is stored in operation receipts. Verify the returned signed envelope and revocations with independent trusted roots. */
     post: operations['createMemberResourceDownloadTicket'];
     delete?: never;
     options?: never;
@@ -458,7 +458,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description Requires the same authenticated member and clientId, rechecks current ACL/publication/revocation. Ticket is atomically consumed before bytes are opened. A repeated or concurrent consume returns 409, including the same request key. This endpoint never replays bytes; disconnects require a fresh ticket and request key. Range returns 400. No credentials in URL. */
+    /** @description Requires the same authenticated member and clientId, rechecks current ACL/publication/revocation. Ticket is atomically consumed before bytes are opened. A repeated or concurrent consume returns 409, including the same request key. This endpoint never replays bytes; disconnects require a fresh ticket and request key. Range returns 400. No credentials in URL. Idempotency-Key is a required syntax-validated request marker on this endpoint; it is not persisted and does not select a replay response. The atomically consumed ticket is the duplicate-consumption guard, independent of that header. */
     post: operations['consumeMemberResourceDownloadTicket'];
     delete?: never;
     options?: never;
@@ -692,8 +692,17 @@ export interface components {
       ownerId: string;
       /** Format: int64 */
       selectionRevision: number;
-      /** @enum {string} */
-      state: 'requested' | 'resolved' | 'applying' | 'applied' | 'failed';
+      /**
+       * @description Once workspace accepts a newer selection revision, requested/resolved/applying becomes superseded. Already applied or failed rows keep the latest recorded outcome and error; appliedGeneration never replaces a later real failure.
+       * @enum {string}
+       */
+      state:
+        | 'requested'
+        | 'resolved'
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'superseded';
       /** Format: int64 */
       generation?: number;
       /** Format: int64 */

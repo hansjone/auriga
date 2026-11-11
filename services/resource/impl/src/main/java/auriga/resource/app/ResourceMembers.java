@@ -143,7 +143,8 @@ public final class ResourceMembers {
           result.set("revocations", distributions.revocations());
           workflow.recorded(r, "resource.member.ticket", version);
           return result;
-        });
+        },
+        false);
   }
 
   private JsonNode admit(ResourceAccess.Reader r, UUID pkg, UUID version, String digest) {
