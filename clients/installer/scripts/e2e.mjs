@@ -51,7 +51,7 @@ const powershell = (file, extra) =>
   spawnSync(
     'powershell.exe',
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file, ...extra],
-    { env, encoding: 'utf8', timeout: 900000 },
+    { env, cwd: sandbox, encoding: 'utf8', timeout: 900000 },
   );
 
 function install(pkg, extra = []) {
