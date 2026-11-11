@@ -83,6 +83,8 @@ case "$1" in
   up|start|restart)
     case "$*" in
       'up registry'|'up -d registry'|'start registry'|'restart registry') ;;
+      # The fixed offline signer runs during prepare, before PG secret permissions.
+      'up --no-deps --no-build --pull never --force-recreate --abort-on-container-exit --exit-code-from panel-prepare panel-prepare') ;;
       *)
         docker compose "${ARGS[@]}" up -d --no-build --pull never --wait postgres
         docker compose "${ARGS[@]}" exec -T postgres psql -U auriga_dev -d auriga -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/01-roles.sql

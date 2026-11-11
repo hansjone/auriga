@@ -12,7 +12,7 @@ class EgressPolicyValidationTest {
   @ValueSource(
       strings = {
         "127.0.0.1",
-        "10.0.0.1",
+        "10.0.0.1", // gitleaks:allow synthetic target that must be rejected
         "169.254.169.254",
         "100.64.0.1",
         "::1",

@@ -47,10 +47,17 @@ case " $* " in *' exec -T postgres psql '*) exit "${OPS_ROLE_EXIT:-0}" ;; esac
 		return p
 	}
 	log := filepath.Join(root, "commands.log")
-	for _, failure := range []string{"0", "73"} {
+	for _, failure := range []string{"0", "73", "offline-panel"} {
 		write(log, "")
-		cmd := exec.Command(bash, filepath.ToSlash(filepath.Join(scripts, "compose.sh")), "up", "-d")
-		cmd.Env = append(os.Environ(), "OPS_START_LOG="+slash(log), "OPS_ROLE_EXIT="+failure)
+		args := []string{"up", "-d"}
+		roleExit := failure
+		if failure == "offline-panel" {
+			args = []string{"up", "--no-deps", "--no-build", "--pull", "never", "--force-recreate", "--abort-on-container-exit", "--exit-code-from", "panel-prepare", "panel-prepare"}
+			roleExit = "73"
+		}
+		commandArgs := append([]string{filepath.ToSlash(filepath.Join(scripts, "compose.sh"))}, args...)
+		cmd := exec.Command(bash, commandArgs...)
+		cmd.Env = append(os.Environ(), "OPS_START_LOG="+slash(log), "OPS_ROLE_EXIT="+roleExit)
 		for i, value := range cmd.Env {
 			if strings.HasPrefix(strings.ToUpper(value), "PATH=") {
 				cmd.Env[i] = "PATH=" + slash(bin) + ":" + value[5:]
@@ -62,11 +69,16 @@ case " $* " in *' exec -T postgres psql '*) exit "${OPS_ROLE_EXIT:-0}" ;; esac
 			t.Fatal(readErr)
 		}
 		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		if failure == "0" {
+		switch failure {
+		case "offline-panel":
+			if err != nil || len(lines) != 1 || !strings.HasSuffix(lines[0], strings.Join(args, " ")) {
+				t.Fatalf("offline panel signer started database: %v %s %s", err, output, data)
+			}
+		case "0":
 			if err != nil || len(lines) != 3 || !strings.Contains(lines[0], "--wait postgres") || !strings.Contains(lines[1], "ON_ERROR_STOP=1") || !strings.HasSuffix(lines[2], "up -d") {
 				t.Fatalf("missing automatic roles/order: %v %s %s", err, output, data)
 			}
-		} else {
+		default:
 			if err == nil || len(lines) != 2 {
 				t.Fatalf("role failure did not block platform: %v %s %s", err, output, data)
 			}

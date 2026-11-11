@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -168,6 +169,11 @@ func rotationLinuxRecovery(t *testing.T) *rotationLinuxRecoveryFixture {
 				}
 			case "down":
 				x.controls, x.pg.container = nil, nil
+			case "exec":
+				opsRoles := []string{"exec", "-T", "postgres", "psql", "-U", "auriga_dev", "-d", "auriga", "-v", "ON_ERROR_STOP=1", "-f", "/docker-entrypoint-initdb.d/01-roles.sql"}
+				if !slices.Equal(command, opsRoles) || x.pg.container == nil || !x.pg.container.State.Running {
+					return nil, fmt.Errorf("fixture ops role migration requires the fixed command and running PG")
+				}
 			case "up", "start", "restart":
 				if x.pg.container == nil || !x.pg.container.State.Running {
 					return nil, fmt.Errorf("fixture signer start before PG recovery")
