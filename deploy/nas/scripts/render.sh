@@ -72,6 +72,19 @@ escape_sed() {
   printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
 }
 
+# Existing installations gain new audit-only credentials; never rotate an existing secret.
+for _audit_name in pg_audit_owner_password pg_audit_app_password; do
+  _audit_path="$SECRETS/$_audit_name"
+  [ ! -L "$_audit_path" ] || die "audit secret symlink refused"
+  if [ ! -e "$_audit_path" ]; then
+    _audit_value=$(rand_alnum 32)
+    (umask 077; set -C; printf '%s' "$_audit_value" >"$_audit_path") || die "audit secret creation failed"
+    chmod 0600 "$_audit_path"
+  fi
+done
+PG_AUDIT_OWNER=$(read_secret pg_audit_owner_password)
+PG_AUDIT_APP=$(read_secret pg_audit_app_password)
+
 PG_BOOT=$(read_secret pg_bootstrap_password)
 PG_IAM=$(read_secret pg_iam_password)
 PG_ORG=$(read_secret pg_org_password)
@@ -111,6 +124,13 @@ chmod 0600 "$CONFIG/postgres/init.sql"
 chown_required 999:999 "$CONFIG/postgres/init.sql"
 
 sed \
+  -e "s|__PG_AUDIT_OWNER_PASSWORD__|$(escape_sed "$PG_AUDIT_OWNER")|g" \
+  -e "s|__PG_AUDIT_APP_PASSWORD__|$(escape_sed "$PG_AUDIT_APP")|g" \
+  "$NAS_ROOT/postgres/audit.sql.tmpl" >"$CONFIG/postgres/audit.sql"
+chmod 0600 "$CONFIG/postgres/audit.sql"
+chown_required 0:0 "$CONFIG/postgres/audit.sql"
+
+sed \
   -e "s|__NATS_SYS_PASSWORD__|$(escape_sed "$NATS_SYS")|g" \
   -e "s|__NATS_PLATFORM_PASSWORD__|$(escape_sed "$NATS_PLATFORM")|g" \
   -e "s|__NATS_ROUTES_RW_PASSWORD__|$(escape_sed "$NATS_ROUTES_RW")|g" \
@@ -127,6 +147,12 @@ AURIGA_IAM_DB_PASSWORD=$PG_IAM
 AURIGA_ORG_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_ORG_DB_USER=auriga_org
 AURIGA_ORG_DB_PASSWORD=$PG_ORG
+AURIGA_AUDIT_ENABLED=true
+AURIGA_AUDIT_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
+AURIGA_AUDIT_DB_USER=auriga_audit_app
+AURIGA_AUDIT_DB_PASSWORD=$PG_AUDIT_APP
+AURIGA_AUDIT_MIGRATION_USER=auriga_audit_owner
+AURIGA_AUDIT_MIGRATION_PASSWORD=$PG_AUDIT_OWNER
 AURIGA_WORKSPACE_ENABLED=true
 AURIGA_WORKSPACE_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_WORKSPACE_DB_USER=auriga_workspace_app

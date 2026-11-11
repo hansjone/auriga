@@ -123,6 +123,24 @@ services:
     cpus: 0.25
     pids_limit: 32
 
+  audit-db-prepare:
+    image: ${AURIGA_IMAGE_POSTGRES}
+    <<: *cap_drop_all
+    user: '0:0'
+    read_only: true
+    restart: 'no'
+    entrypoint: ['/bin/sh', '-ec']
+    command: ['export PGPASSWORD="$$(cat /run/secrets/pg_bootstrap_password)"; exec psql -X -q -h postgres -U auriga_bootstrap -d auriga -v ON_ERROR_STOP=1 -f /config/audit.sql']
+    secrets: [pg_bootstrap_password]
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/postgres/audit.sql:/config/audit.sql:ro
+    networks: [internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 64m
+    pids_limit: 32
+
   postgres:
     image: ${AURIGA_IMAGE_POSTGRES}
     pull_policy: never
@@ -264,6 +282,8 @@ services:
     user: '10001:10001'
     group_add: ['65532', '65533']
     depends_on:
+      audit-db-prepare:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:

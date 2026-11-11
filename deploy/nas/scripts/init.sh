@@ -100,6 +100,8 @@ write_secret() {
 _v=$(rand_alnum 32); write_secret pg_bootstrap_password "$_v"
 _v=$(rand_alnum 32); write_secret pg_iam_password "$_v"
 _v=$(rand_alnum 32); write_secret pg_org_password "$_v"
+_v=$(rand_alnum 32); write_secret pg_audit_owner_password "$_v"
+_v=$(rand_alnum 32); write_secret pg_audit_app_password "$_v"
 _v=$(rand_alnum 32); write_secret pg_ws_owner_password "$_v"
 _v=$(rand_alnum 32); write_secret pg_ws_app_password "$_v"
 _v=$(rand_alnum 32); write_secret nats_sys_password "$_v"

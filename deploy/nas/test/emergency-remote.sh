@@ -6,7 +6,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf -- "$TMP"' EXIT INT TERM
 mkdir -p "$TMP/package/scripts" "$TMP/package/postgres" "$TMP/package/nats"
 cp "$ROOT/scripts/render.sh" "$TMP/package/scripts/"
-cp "$ROOT/postgres/init.sql.tmpl" "$TMP/package/postgres/"
+cp "$ROOT/postgres/init.sql.tmpl" "$ROOT/postgres/audit.sql.tmpl" "$TMP/package/postgres/"
 cp "$ROOT/nats/nats.conf.tmpl" "$TMP/package/nats/"
 cat >"$TMP/package/scripts/lib.sh" <<'EOF'
 die() { printf '%s\n' "$*" >&2; exit 1; }
@@ -33,7 +33,7 @@ for value in default true false empty invalid; do
   export AURIGA_DATA_ROOT="$TMP/data-$index"
   mkdir -p "$AURIGA_DATA_ROOT/secrets" "$AURIGA_DATA_ROOT/config/materials" \
     "$AURIGA_DATA_ROOT/config/postgres" "$AURIGA_DATA_ROOT/config/nats"
-  for name in pg_bootstrap_password pg_iam_password pg_org_password pg_ws_owner_password pg_ws_app_password \
+  for name in pg_bootstrap_password pg_iam_password pg_org_password pg_audit_owner_password pg_audit_app_password pg_ws_owner_password pg_ws_app_password \
     nats_sys_password nats_platform_password nats_routes_rw_password nats_edge_password iam_encryption_key workspace_encryption_key; do
     openssl rand -hex 16 >"$AURIGA_DATA_ROOT/secrets/$name"
   done

@@ -10,16 +10,22 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /** Tenant-scoped, idempotent registration, using only the formal catalog as metadata authority. */
 final class M3Permissions {
   private final OrgStore store;
+  private final UUID platformTenant;
   private final Set<UUID> registered = ConcurrentHashMap.newKeySet();
 
-  M3Permissions(OrgStore store) {
+  M3Permissions(OrgStore store, UUID platformTenant) {
     this.store = store;
+    this.platformTenant = platformTenant;
   }
 
   void register() {
     UUID tenant = store.tenantId();
     if (registered.contains(tenant)) return;
-    for (var permission : M3PermissionCatalog.all()) {
+    var permissions =
+        M3PermissionCatalog.all().stream()
+            .filter(p -> !p.key().equals("audit.events.read") || tenant.equals(platformTenant))
+            .toList();
+    for (var permission : permissions) {
       store
           .jdbc()
           .update(
@@ -38,10 +44,14 @@ final class M3Permissions {
               permission.sensitive());
     }
     var roles = new TreeSet<String>();
-    M3PermissionCatalog.all().forEach(permission -> roles.addAll(permission.builtinRoles()));
+    permissions.forEach(permission -> roles.addAll(permission.builtinRoles()));
     for (String role : roles) {
       String[] additions =
-          M3PermissionCatalog.forRole(role).stream().sorted().toArray(String[]::new);
+          permissions.stream()
+              .filter(p -> p.builtinRoles().contains(role))
+              .map(M3PermissionCatalog.Permission::key)
+              .sorted()
+              .toArray(String[]::new);
       OrgArrays.update(
           store.jdbc(),
           "UPDATE role SET permissions=ARRAY(SELECT DISTINCT p FROM unnest(permissions || ?::text[]) p ORDER BY p)"

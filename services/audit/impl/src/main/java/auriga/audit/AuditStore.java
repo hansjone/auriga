@@ -24,15 +24,21 @@ public class AuditStore {
   private final JsonMapper json = JsonMapper.builder().build();
 
   public AuditStore(DataSource ds) {
-    auriga.common.persistence.CommonMigrations.migrate(ds, "audit");
-    auriga.common.persistence.CommonMigrations.serviceFlyway(
-            Flyway.configure()
-                .dataSource(ds)
-                .schemas("audit")
-                .defaultSchema("audit")
-                .locations("classpath:db/audit")
-                .load())
-        .migrate();
+    this(ds, true);
+  }
+
+  public AuditStore(DataSource ds, boolean migrate) {
+    if (migrate) {
+      auriga.common.persistence.CommonMigrations.migrate(ds, "audit");
+      auriga.common.persistence.CommonMigrations.serviceFlyway(
+              Flyway.configure()
+                  .dataSource(ds)
+                  .schemas("audit")
+                  .defaultSchema("audit")
+                  .locations("classpath:db/audit")
+                  .load())
+          .migrate();
+    }
     jdbc = new JdbcTemplate(ds);
     tx = new TransactionTemplate(new JdbcTransactionManager(ds));
   }
@@ -178,22 +184,34 @@ public class AuditStore {
         });
   }
 
+  public void recordDenied() {
+    tx.executeWithoutResult(status -> recordAccess("audit.events.denied", "denied"));
+  }
+
   private void recordAccess(String action) {
+    recordAccess(action, "success");
+  }
+
+  private void recordAccess(String action, String result) {
     var ctx = RequestContext.current().orElseThrow();
-    var p = Objects.requireNonNull(ctx.principal());
+    var p = ctx.principal();
+    var tenant = p == null ? auriga.common.context.TenantContext.PLATFORM_TENANT : p.tenantId();
     var node = json.createObjectNode();
     var id = UuidV7.next();
     var now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     node.put("id", id.toString());
-    node.put("tenantId", p.tenantId().toString());
+    node.put("tenantId", tenant.toString());
     node.put("time", now.toString());
     node.put("action", action);
-    node.put("result", "success");
+    node.put("result", result);
     node.put("source", "auriga/audit");
     node.put("traceId", ctx.trace().traceId());
-    var actor = json.createObjectNode().put("type", p.type().claimValue()).put("id", p.subject());
+    var actor =
+        json.createObjectNode()
+            .put("type", p == null ? "system" : p.type().claimValue())
+            .put("id", p == null ? "anonymous" : p.subject());
     if (ctx.clientIp() != null) actor.put("ip", ctx.clientIp());
     node.set("actor", actor);
-    insert(id, p.tenantId(), now, node);
+    insert(id, tenant, now, node);
   }
 }

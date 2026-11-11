@@ -42,7 +42,12 @@ public final class OrgService {
   public OrgService(
       OrgStore store, EventPublisher events, Clock clock, DeploymentAccess deploymentAccess) {
     this.store = store;
-    this.m3Permissions = new M3Permissions(store);
+    this.m3Permissions =
+        new M3Permissions(
+            store,
+            deploymentAccess == null
+                ? OrgIds.DEFAULT_TENANT
+                : UUID.fromString(deploymentAccess.tenantId()));
     this.userEvents = new OrgUserEvents(events);
     this.clock = clock;
     this.deploymentAccess = deploymentAccess;

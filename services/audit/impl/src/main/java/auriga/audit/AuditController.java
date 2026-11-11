@@ -10,6 +10,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import tools.jackson.databind.JsonNode;
 
+@org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
+    "${auriga.services.audit.enabled:true} && '${auriga.audit.jdbc-url:}' != ''")
 @RestController
 @RequestMapping("/api/audit/v1/admin/events")
 @AdminOnly

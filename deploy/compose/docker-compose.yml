@@ -33,6 +33,21 @@ services:
       timeout: 5s
       retries: 30
 
+  audit-db-prepare:
+    image: postgres:17
+    user: '999:999'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    environment:
+      PGPASSWORD: e2e_pg_super
+    command: ['psql', '-X', '-q', '-h', 'postgres', '-U', 'auriga_dev', '-d', 'auriga', '-v', 'ON_ERROR_STOP=1', '-f', '/config/audit.sql']
+    volumes:
+      - ./postgres/audit.sql:/config/audit.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   bifrost:
     build:
       context: ../..
@@ -152,6 +167,8 @@ services:
       - path: ./var/access.env
         required: false # prepare starts registry before generating materials
     depends_on:
+      audit-db-prepare:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:
@@ -192,6 +209,12 @@ services:
       AURIGA_ORG_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_ORG_DB_USER: auriga_org
       AURIGA_ORG_DB_PASSWORD: e2e_org_only
+      AURIGA_AUDIT_ENABLED: 'true'
+      AURIGA_AUDIT_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
+      AURIGA_AUDIT_DB_USER: auriga_audit_app
+      AURIGA_AUDIT_DB_PASSWORD: e2e_audit_app
+      AURIGA_AUDIT_MIGRATION_USER: auriga_audit_owner
+      AURIGA_AUDIT_MIGRATION_PASSWORD: e2e_audit_owner
       AURIGA_WORKSPACE_ENABLED: 'true'
       AURIGA_WORKSPACE_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_WORKSPACE_DB_USER: auriga_workspace_app
