@@ -35,3 +35,23 @@ ALTER DEFAULT PRIVILEGES FOR ROLE auriga_workspace_owner IN SCHEMA workspace
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO auriga_workspace_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE auriga_workspace_owner IN SCHEMA workspace
   GRANT USAGE, SELECT ON SEQUENCES TO auriga_workspace_app;
+
+-- Operations uses its own non-privileged owner and runtime roles.
+DO $$ BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='auriga_ops_owner') THEN
+  CREATE ROLE auriga_ops_owner LOGIN PASSWORD '__PG_OPS_OWNER_PASSWORD__' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+ END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='auriga_ops_app') THEN
+  CREATE ROLE auriga_ops_app LOGIN PASSWORD '__PG_OPS_APP_PASSWORD__' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+ END IF;
+ IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('auriga_ops_owner','auriga_ops_app') AND (rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole OR rolinherit)) THEN
+  RAISE EXCEPTION 'ops roles must be unprivileged';
+ END IF;
+END $$;
+CREATE SCHEMA IF NOT EXISTS ops AUTHORIZATION auriga_ops_owner;
+GRANT USAGE,CREATE ON SCHEMA ops TO auriga_ops_owner;
+GRANT USAGE ON SCHEMA ops TO auriga_ops_app;
+ALTER ROLE auriga_ops_owner SET search_path TO ops;
+ALTER ROLE auriga_ops_app SET search_path TO ops;
+ALTER DEFAULT PRIVILEGES FOR ROLE auriga_ops_owner IN SCHEMA ops GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO auriga_ops_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE auriga_ops_owner IN SCHEMA ops GRANT USAGE,SELECT ON SEQUENCES TO auriga_ops_app;

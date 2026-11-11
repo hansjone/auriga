@@ -42,6 +42,9 @@ func init() {
 }
 
 func writeComposeKeys(out string) error {
+	if err := writeComposeOpsKey(out); err != nil {
+		return err
+	}
 	p, err := materials.Open(out)
 	if err != nil {
 		return err
