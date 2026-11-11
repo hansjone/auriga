@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { createManagedNetwork } from '../../src/network/managed-device.js';
 import { createPlatform } from '../../src/local/platform.js';
+import { createNetworkLifecycle } from '../../src/network/lifecycle.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const ids = {
   tenantId: '00000000-0000-4000-8000-000000000001',
@@ -34,7 +36,12 @@ const material = () => ({
   network: installation(),
 });
 
-async function fixture(t, change = (x) => x, realRequest = false) {
+async function fixture(
+  t,
+  change = (x) => x,
+  realRequest = false,
+  lifecycleFactory,
+) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-managed-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'device.json');
@@ -83,6 +90,7 @@ async function fixture(t, change = (x) => x, realRequest = false) {
     },
     createLifecycle(input) {
       lifecycleInput = input;
+      if (lifecycleFactory) return lifecycleFactory(input);
       return {
         login() {
           calls.push('login');
@@ -137,6 +145,106 @@ test('managed credential uses the common device provider and lifecycle, never in
   f.network.attach({ prepare() {} });
   assert.ok(f.calls.includes('attach'));
 });
+
+for (const result of ['accepted', 'unavailable', 'revoked'])
+  test(
+    'gateway startup revocation is adjudicated by IAM grant: ' + result,
+    async (t) => {
+      t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
+      let opened = 0,
+        closed = 0;
+      const f = await fixture(
+        t,
+        (x) => x,
+        false,
+        (input) =>
+          createNetworkLifecycle({
+            ...input,
+            async open() {
+              const first = ++opened === 1;
+              let disposed = false;
+              return {
+                status: { connected: true },
+                async start() {
+                  if (first)
+                    throw Object.assign(new Error('gateway grace exhausted'), {
+                      code: 'network.revoked',
+                    });
+                },
+                async close() {
+                  if (!disposed) {
+                    disposed = true;
+                    closed++;
+                  }
+                },
+                messagingUI() {
+                  return 'ready';
+                },
+              };
+            },
+          }),
+      );
+      await f.network.refresh();
+      const until = async (predicate) => {
+        for (let i = 0; i < 200; i++) {
+          if (predicate()) return;
+          await delay(5);
+        }
+        assert.fail('lifecycle did not settle');
+      };
+      await until(() => closed === 1 && !f.network.sessionAvailable);
+      assert.equal(f.network.sessionRevoked, false);
+      assert.equal(f.network.status.connected, false);
+      assert.equal(f.network.status.reason, 'unavailable');
+      assert.throws(() => f.network.messagingUI({}), /unavailable/);
+      const grants = () => f.calls.filter((x) => typeof x === 'object').length;
+      assert.equal(grants(), 1);
+      await f.network.refresh();
+      assert.equal(grants(), 1, 'gateway signal must not cause a tight retry');
+      if (result !== 'accepted')
+        f.intercept(() => {
+          throw Object.assign(new Error('IAM result'), {
+            status: result === 'revoked' ? 403 : 503,
+            code:
+              result === 'revoked' ? 'network.revoked' : 'common.unavailable',
+          });
+        });
+      t.mock.timers.tick(1001);
+      await f.network.refresh();
+      assert.equal(
+        grants(),
+        2,
+        'must renew with IAM instead of reusing cached access',
+      );
+      if (result === 'revoked') {
+        assert.equal(f.network.sessionAvailable, false);
+        assert.equal(f.network.sessionRevoked, true);
+        for (let i = 0; i < 5; i++) {
+          t.mock.timers.tick(31000);
+          await f.network.refresh(true);
+        }
+        assert.equal(grants(), 2, 'authoritative rejection remains terminal');
+        assert.equal(opened, 1);
+        return;
+      }
+      if (result === 'unavailable') {
+        assert.equal(f.network.sessionAvailable, false);
+        assert.equal(f.network.sessionRevoked, false);
+        assert.throws(() => f.network.messagingUI({}), /unavailable/);
+        await f.network.refresh();
+        assert.equal(grants(), 2);
+        f.intercept(undefined);
+        t.mock.timers.tick(2001);
+        await f.network.refresh();
+        assert.equal(grants(), 3);
+      }
+      await until(() => f.network.status.connected);
+      assert.equal(f.network.sessionAvailable, true);
+      assert.equal(f.network.sessionRevoked, false);
+      assert.equal(f.network.messagingUI({}), 'ready');
+      assert.equal(opened, 2);
+    },
+  );
 
 for (const code of ['network.revoked', 'common.forbidden'])
   test(

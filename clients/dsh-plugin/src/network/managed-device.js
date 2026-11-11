@@ -286,8 +286,14 @@ export function createManagedNetwork(options) {
             getAccess: async () => (await getDevice()).accessToken,
             authorizeLocal: options.authorizeLocal ?? (async () => false),
             onRevoked() {
-              rejected = raw;
-              access = undefined;
+              if (closed || expected !== generation || raw === rejected) return;
+              // Gateway failure-grace exhaustion can also report revocation.
+              // Fence first, then let the next IAM grant adjudicate the material.
+              void retire().catch(() => {});
+              interrupted = true;
+              retryAt =
+                Date.now() +
+                Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
             },
           });
           if (attached) detach = lifecycle.attach(attached);
@@ -399,7 +405,7 @@ export function createManagedNetwork(options) {
       access = undefined;
     },
     get status() {
-      return rejected === raw || !lifecycle
+      return rejected === raw || !lifecycle || interrupted
         ? {
             available: false,
             connected: false,
