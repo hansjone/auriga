@@ -385,6 +385,20 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ops is served by the platform protected hop, and only on the admin origin.
+	if path == "/api/ops" || strings.HasPrefix(path, "/api/ops/") {
+		if audience != "admin" {
+			writeProblem(w, problem(403, "common.forbidden", "Forbidden", "admin origin required", rid))
+		} else if !strings.HasPrefix(path, "/api/ops/v1/admin/") {
+			writeProblem(w, problem(404, "common.not_found", "Not Found", "ops route not allowed", rid))
+		} else if g.iamURL == nil {
+			writeProblem(w, problem(503, "common.unavailable", "Service Unavailable", "platform unavailable", rid))
+		} else {
+			g.proxyAPI(w, r, g.iamURL, audience, clientIP, rid)
+		}
+		return
+	}
+
 	// Team uses only device Bearer credentials, never browser-session exchange.
 	if path == "/ai" || strings.HasPrefix(path, "/ai/") {
 		g.proxyTeam(w, r, audience, clientIP, rid)

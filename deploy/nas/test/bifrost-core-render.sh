@@ -26,6 +26,7 @@ AURIGA_NAS_PORTAL_HOST=portal.example.com
 AURIGA_NAS_PROJECT=fixture
 load_stack_env() { :; }
 require_cmd() { :; }
+rand_alnum() { printf fixture-password-0123456789012345; }
 marker_path() { echo "$AURIGA_DATA_ROOT/marker"; }
 prepare_socket_parent() { :; }
 project_is_running() { return 0; }
@@ -83,6 +84,7 @@ sh "$temp/scripts/render.sh" --core-only
 cmp "$temp/data/config/materials/edge.config.json" "$temp/data/config/bifrost/edge.config.json"
 [ ! -e "$temp/data/config/collab-runtime/edge/edge.config.json" ]
 printf 'PASS bifrost_core_render_without_message_projection\n'
+cp "$temp/data/secrets/ops_notification_key" "$temp/ops-key.saved"
 sh "$temp/scripts/render-collab.sh"
 cmp "$temp/data/config/collab-source/edge.config.json" "$temp/data/config/bifrost/edge.config.json"
 printf 'PASS bifrost_message_render_rebuilds_and_rebinds_projection\n'
@@ -118,3 +120,13 @@ if sh "$temp/scripts/render.sh" --core-only; then exit 1; fi
 printf 'PASS invalid_core_still_rejected\n'
 [ "$(cat "$temp/data/config/collab-source/activation.receipt")" = sealed-identity ]
 [ "$(cat "$temp/data/config/materials-upgrades/upgrade.receipt")" = sealed-upgrade ]
+
+rm "$temp/bad-core"
+cmp "$temp/ops-key.saved" "$temp/data/secrets/ops_notification_key"
+grep -q '^AURIGA_OPS_ENABLED=true$' "$temp/data/config/platform.env"
+# The database upgrade must precede starting the platform on an existing volume.
+grep -q 'exec -T postgres psql -U auriga_bootstrap.*01-roles.sql' "$temp/compose.log"
+rm "$temp/data/secrets/ops_notification_key"
+if sh "$temp/scripts/render.sh" --core-only >"$temp/ops-missing.log" 2>&1; then exit 1; fi
+grep -q 'ops key missing; restore' "$temp/ops-missing.log"
+printf 'PASS ops_key_reused_missing_key_refused_and_roles_upgraded\n'

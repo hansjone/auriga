@@ -73,6 +73,34 @@ escape_sed() {
   printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
 }
 
+# Exclusive creation keeps missing/new feature secrets separate from existing keys.
+write_ops_secret() {
+  _ops_path="$SECRETS/$1"
+  [ ! -e "$_ops_path" ] && [ ! -L "$_ops_path" ] || die 'ops secret already exists'
+  _ops_secret_value=$2
+  [ "${#_ops_secret_value}" -ge 16 ] || die 'ops secret generation failed'
+  (umask 077; set -C; printf '%s' "$2" >"$_ops_path") || die 'ops secret creation refused'
+}
+# Add ops secrets to an existing installation without rotating any existing key.
+if [ ! -e "$SECRETS/ops_notification_key" ]; then
+  if [ -f "$CONFIG/platform.env" ] && grep -q '^AURIGA_OPS_NOTIFICATION_KEY=' "$CONFIG/platform.env"; then
+    die 'ops key missing; restore the installation secret backup'
+  fi
+  require_cmd openssl
+  _ops_key=$(openssl rand -base64 32 | tr -d '\n') || die 'ops key generation failed'
+  [ -n "$_ops_key" ] || die 'empty ops key'
+  write_ops_secret ops_notification_key "$_ops_key"
+fi
+for _ops_password in pg_ops_owner_password pg_ops_app_password; do
+  if [ ! -e "$SECRETS/$_ops_password" ]; then
+    require_cmd openssl
+    _ops_value=$(openssl rand -hex 16) || die 'ops password generation failed'
+    write_ops_secret "$_ops_password" "$_ops_value"
+  fi
+done
+PG_OPS_OWNER=$(read_secret pg_ops_owner_password)
+PG_OPS_APP=$(read_secret pg_ops_app_password)
+OPS_KEY=$(read_secret ops_notification_key)
 PG_BOOT=$(read_secret pg_bootstrap_password)
 PG_IAM=$(read_secret pg_iam_password)
 PG_ORG=$(read_secret pg_org_password)
@@ -104,6 +132,8 @@ umask 077
 sed \
   -e "s|__PG_IAM_PASSWORD__|$(escape_sed "$PG_IAM")|g" \
   -e "s|__PG_ORG_PASSWORD__|$(escape_sed "$PG_ORG")|g" \
+  -e "s|__PG_OPS_OWNER_PASSWORD__|$(escape_sed "$PG_OPS_OWNER")|g" \
+  -e "s|__PG_OPS_APP_PASSWORD__|$(escape_sed "$PG_OPS_APP")|g" \
   -e "s|__PG_WS_OWNER_PASSWORD__|$(escape_sed "$PG_WS_OWNER")|g" \
   -e "s|__PG_WS_APP_PASSWORD__|$(escape_sed "$PG_WS_APP")|g" \
   "$NAS_ROOT/postgres/init.sql.tmpl" >"$CONFIG/postgres/init.sql"
@@ -128,6 +158,13 @@ AURIGA_IAM_DB_PASSWORD=$PG_IAM
 AURIGA_ORG_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_ORG_DB_USER=auriga_org
 AURIGA_ORG_DB_PASSWORD=$PG_ORG
+AURIGA_OPS_ENABLED=true
+AURIGA_OPS_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
+AURIGA_OPS_DB_USER=auriga_ops_app
+AURIGA_OPS_DB_PASSWORD=$PG_OPS_APP
+AURIGA_OPS_MIGRATION_USER=auriga_ops_owner
+AURIGA_OPS_MIGRATION_PASSWORD=$PG_OPS_OWNER
+AURIGA_OPS_NOTIFICATION_KEY=$OPS_KEY
 AURIGA_WORKSPACE_ENABLED=true
 AURIGA_WORKSPACE_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_WORKSPACE_DB_USER=auriga_workspace_app
