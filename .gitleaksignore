@@ -27,3 +27,12 @@ ac141ddc60228517bc7b9bbd21f72c266b445406:deploy/compose/docker-compose.yml:priva
 08fb0be3b4568c6497305845f0fdebe7a7a24c12:e2e/phase1/run.test.mjs:generic-api-key:146
 # e2e cloud-desk config validation fixture private address; not a deployment address.
 b5aeaf0e1109dcdb5073d1fef69f1c5a0662d753:e2e/phase1/cloud-desk.test.mjs:private-ipv4:294
+
+# PR299 historical SSRF rejection test literals, not deployment addresses or secrets.
+# New source constructs these test addresses; old commits remain unchanged.
+6d91d48c4f4a80ae95c6fbc2984365a77fb6cb45:services/ops/impl/src/test/java/auriga/ops/OpsWebhookTest.java:private-ipv4:14
+6d91d48c4f4a80ae95c6fbc2984365a77fb6cb45:services/ops/impl/src/test/java/auriga/ops/OpsWebhookTest.java:private-ipv4:16
+# PR300 egress policy rejection fixture (private address must be refused); not a deployment address.
+83b206938e761ad5900acebfc7d33961f51f5d35:services/org/impl/src/test/java/auriga/org/EgressPolicyValidationTest.java:private-ipv4:15
+# Installer secret-scanner self-test sample bearer string; synthetic, not a credential.
+2ff1ff6181844b6252597730dfd085687fb82dbb:clients/installer/test/package.test.mjs:generic-api-key:52
