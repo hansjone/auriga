@@ -63,7 +63,10 @@ elif [ -e "$VAR/collab-installation" ] || [ -L "$VAR/collab-installation" ]; the
   ARGS+=(-f "$COMPOSE/scripts/collab-required.yml" --profile network-collab)
   export COMPOSE_PROFILES=network-collab
 fi
-if [ "$1" = upgrade-bifrost ]; then
+if [ "$1" = upgrade-ops ]; then
+  [ "$#" -eq 1 ] || exit 2
+  set -- exec -T postgres psql -U auriga_dev -d auriga -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/01-roles.sql
+elif [ "$1" = upgrade-bifrost ]; then
   [ "$#" -eq 1 ] || exit 2
   # A fixed maintenance action; do not expose arbitrary one-off containers.
   set -- run --rm --no-deps --pull never --user 999:999 -e PGHOST=postgres \
@@ -75,4 +78,16 @@ fi
 for ARG in "$@"; do
   case "$ARG" in -p*|--project-name|--project-name=*|-f*|--file|--file=*|--env-file|--env-file=*|--profile|--profile=*|--project-directory|--project-directory=*) exit 2 ;; esac
 done
+# Prepare idempotent ops roles for retained PG volumes before starting platform.
+case "$1" in
+  up|start|restart)
+    case "$*" in
+      'up registry'|'up -d registry'|'start registry'|'restart registry') ;;
+      *)
+        docker compose "${ARGS[@]}" up -d --no-build --pull never --wait postgres
+        docker compose "${ARGS[@]}" exec -T postgres psql -U auriga_dev -d auriga -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/01-roles.sql
+        ;;
+    esac
+    ;;
+esac
 exec docker compose "${ARGS[@]}" "$@"
