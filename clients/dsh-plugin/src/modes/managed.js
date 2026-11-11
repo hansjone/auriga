@@ -506,6 +506,7 @@ export async function createManaged(options = {}) {
       disposeSession = installManagedSessionGuard(
         server,
         () => network?.sessionAvailable === true,
+        () => network?.sessionRevoked === true,
       );
       disposeDoor = door.install(server);
       disposeSettingsOwnership = installManagedSettingsOwnership(ctx);
@@ -514,7 +515,7 @@ export async function createManaged(options = {}) {
 
       return () => {
         detachModels?.();
-        void network?.close();
+        const stopping = network?.close();
         heartbeat.stop();
         disposeActivity?.();
         disposeDoor?.();
@@ -528,6 +529,7 @@ export async function createManaged(options = {}) {
         host.getBrowsers = undefined;
         keyCache.close();
         panelKeyCache?.close();
+        return stopping;
       };
     },
     guardPluginManager,
@@ -538,13 +540,14 @@ export async function createManaged(options = {}) {
       disposeSettingsOwnership?.();
       disposeSession?.();
       detachModels?.();
-      void network?.close();
+      const stopping = network?.close();
       heartbeat.stop();
       disposeActivity?.();
       disposeHostAuth?.();
       host.ctx = null;
       keyCache.close();
       panelKeyCache?.close();
+      return stopping;
     },
   };
 }

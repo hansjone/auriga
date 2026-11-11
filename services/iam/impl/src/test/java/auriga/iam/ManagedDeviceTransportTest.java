@@ -12,6 +12,52 @@ import org.junit.jupiter.api.Test;
 
 class ManagedDeviceTransportTest {
   @Test
+  void managedGrantPreservesRevocationProblemCodeOverHttp() throws Exception {
+    var oauth = mock(OAuthProvider.class);
+    var requests = mock(RequestIdentity.class);
+    var controller =
+        new OAuthController(
+            oauth,
+            mock(SigningKeys.class),
+            requests,
+            mock(IamStore.class),
+            mock(SessionManager.class));
+    when(requests.clientIp(any())).thenReturn("192.0.2.25");
+    when(requests.call(any(), any()))
+        .thenAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(1)).get());
+    var mvc =
+        org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller)
+            .setControllerAdvice(
+                new auriga.common.error.ProblemExceptionHandler(
+                    new auriga.common.error.Problems(
+                        new auriga.common.error.ErrorMessages(List.of(), Locale.ENGLISH))))
+            .build();
+    for (var error :
+        List.of(
+            auriga.common.error.ErrorCode.of(
+                "network.revoked", 403, io.grpc.Status.Code.PERMISSION_DENIED),
+            auriga.common.error.CommonErrors.FORBIDDEN,
+            auriga.common.error.CommonErrors.UNAVAILABLE)) {
+      doThrow(new AurigaException(error)).when(oauth).managedToken(anyMap(), anyString());
+      mvc.perform(
+              org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                      "/oauth2/token")
+                  .contentType(org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED)
+                  .param("grant_type", IamManagedDevices.GRANT)
+                  .param("client_id", "auriga-managed-network"))
+          .andExpect(
+              org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                  .is(error.httpStatus()))
+          .andExpect(
+              org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                  .contentTypeCompatibleWith("application/problem+json"))
+          .andExpect(
+              org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code")
+                  .value(error.code()));
+    }
+  }
+
+  @Test
   void managedTokenUsesAuthenticatedHopClientAddress() {
     var oauth = mock(OAuthProvider.class);
     var requests = mock(RequestIdentity.class);

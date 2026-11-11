@@ -162,10 +162,13 @@ export class LoginJar {
 
 /** Every network request has a timeout, body cap and redirect refusal. No automatic write retries.
  * @param {ReturnType<typeof platformConfig>} config
- * @param {{clockToleranceSeconds?:number}} [options] Bounded iat/nbf skew; expiry remains strict. */
+ * @param {{clockToleranceSeconds?:number,signal?:AbortSignal}} [options] Bounded iat/nbf skew; expiry remains strict. */
 export function createPlatform(
   config,
-  { clockToleranceSeconds = defaultClockToleranceSeconds } = {},
+  {
+    clockToleranceSeconds = defaultClockToleranceSeconds,
+    signal: ownerSignal,
+  } = {},
 ) {
   resolveClockToleranceSeconds(clockToleranceSeconds);
   /** @param {string} path @param {any} [options] */
@@ -176,7 +179,7 @@ export function createPlatform(
       body,
       token,
       jar,
-      signal,
+      signal = ownerSignal,
       headers = {},
       form = false,
     } = {},

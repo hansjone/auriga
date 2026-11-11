@@ -5,7 +5,11 @@ import {
   platformConfig,
   PlatformError,
 } from '../local/platform.js';
-import { createDeviceProvider } from './device-provider.js';
+import { logEvent, newTraceparent } from '../observability/index.js';
+import {
+  createDeviceProvider,
+  isDeviceRevocationError,
+} from './device-provider.js';
 import { createNetworkLifecycle } from './lifecycle.js';
 import { networkIsolation } from './isolation.js';
 import { parseStrictJson } from './trust/jcs.js';
@@ -40,6 +44,12 @@ export function createManagedNetwork(options) {
   let displayName;
   let profileRetryAt = 0;
   let materialUntil = 0;
+  let interrupted = false;
+  /** @type {AbortController|undefined} */
+  let controller;
+  let retiring = Promise.resolve();
+  /** @type {Promise<void>|undefined} */
+  let closing;
   /** @type {(renew?:boolean)=>Promise<{accessToken:string,claims:any}>} */
   let getDevice = async () => {
     throw new Error('managed credential unavailable');
@@ -92,8 +102,7 @@ export function createManagedNetwork(options) {
       !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(
         value.expiresAt,
       ) ||
-      !Number.isFinite(Date.parse(value.expiresAt)) ||
-      Date.parse(value.expiresAt) <= Date.now()
+      !Number.isFinite(Date.parse(value.expiresAt))
     )
       throw new Error('invalid managed credential binding');
     const config = platformConfig({
@@ -106,14 +115,18 @@ export function createManagedNetwork(options) {
     return { value, config };
   }
 
-  async function retire() {
+  function retire() {
     generation++;
+    controller?.abort();
+    controller = undefined;
     access = undefined;
     profileRetryAt = 0;
+    interrupted = false;
     const previous = lifecycle;
     lifecycle = undefined;
     detach = undefined;
-    await previous?.close();
+    retiring = Promise.allSettled([retiring, previous?.close()]).then(() => {});
+    return retiring;
   }
 
   /** @param {boolean} [force] */
@@ -126,6 +139,12 @@ export function createManagedNetwork(options) {
         const next = await readMaterial();
         if (closed) return;
         if (next === rejected) return;
+        if (next === raw && materialUntil <= Date.now()) {
+          rejected = raw;
+          access = undefined;
+          lifecycle?.logout();
+          return;
+        }
         if (
           next === raw &&
           Date.now() < retryAt &&
@@ -141,11 +160,24 @@ export function createManagedNetwork(options) {
           if (next !== raw) displayName = undefined;
           raw = next;
           rejected = '';
+          if (materialUntil <= Date.now()) {
+            rejected = raw;
+            return;
+          }
           const expected = generation;
-          const platform = (options.createPlatform ?? createPlatform)(config);
+          controller = new AbortController();
+          const signal = controller.signal;
+          const platform = (options.createPlatform ?? createPlatform)(config, {
+            signal,
+          });
           let pending;
           getDevice = async (renew = false) => {
-            if (closed || expected !== generation)
+            if (
+              closed ||
+              expected !== generation ||
+              raw === rejected ||
+              materialUntil <= Date.now()
+            )
               throw new PlatformError(401, 'network.revoked');
             if (
               !renew &&
@@ -155,19 +187,38 @@ export function createManagedNetwork(options) {
                 Date.now() < retryAt)
             )
               return access;
+            const trace = newTraceparent();
             pending ??= (async () => {
-              const response = await platform.request('/oauth2/token', {
-                method: 'POST',
-                form: true,
-                body: {
-                  grant_type:
-                    'urn:auriga:params:oauth:grant-type:managed-device',
-                  client_id: 'auriga-managed-network',
-                  instance_id: value.instanceId,
-                  owner_id: value.ownerId,
-                  credential: value.credential,
-                },
-              });
+              const response = await platform
+                .request('/oauth2/token', {
+                  signal,
+                  method: 'POST',
+                  form: true,
+                  body: {
+                    grant_type:
+                      'urn:auriga:params:oauth:grant-type:managed-device',
+                    client_id: 'auriga-managed-network',
+                    instance_id: value.instanceId,
+                    owner_id: value.ownerId,
+                    credential: value.credential,
+                  },
+                })
+                .catch((error) => {
+                  // Only the credential authority can revoke the material; a
+                  // JWKS denial is a verification outage, regardless of its code.
+                  if (
+                    !closed &&
+                    expected === generation &&
+                    isDeviceRevocationError(error)
+                  ) {
+                    rejected = raw;
+                    interrupted = true;
+                    lifecycle?.logout();
+                    access = undefined;
+                  }
+                  throw error;
+                });
+              signal.throwIfAborted();
               if (
                 response.token_type !== 'Bearer' ||
                 response.scope !== 'auriga.connect' ||
@@ -176,14 +227,24 @@ export function createManagedNetwork(options) {
                 response.expires_in > 300
               )
                 throw new Error('invalid managed device response');
-              const claims = await platform.verifyDevice(
-                response.access_token,
-                {
+              const claims = await platform
+                .verifyDevice(response.access_token, {
                   tid: value.tenantId,
                   sub: value.ownerId,
                   did: value.deviceId,
-                },
-              );
+                })
+                .catch((error) => {
+                  if (!closed && expected === generation) {
+                    access = undefined;
+                    interrupted = true;
+                    lifecycle?.logout();
+                  }
+                  // A key-server response is never the credential authority.
+                  const status = /** @type {any} */ (error)?.status;
+                  throw new PlatformError(
+                    Number.isInteger(status) ? status : 503,
+                  );
+                });
               if (closed || expected !== generation)
                 throw new PlatformError(401, 'network.revoked');
               access = { accessToken: response.access_token, claims };
@@ -192,7 +253,16 @@ export function createManagedNetwork(options) {
             try {
               return await pending;
             } catch (error) {
+              if (closed || expected !== generation) throw error;
               const status = /** @type {any} */ (error)?.status;
+              if (failures === 0)
+                logEvent('WARN', 'Managed credential check failed', {
+                  trace_id: trace.slice(3, 35),
+                  classification: raw === rejected ? 'revoked' : 'temporary',
+                  http_status: [401, 403, 429, 503].includes(status)
+                    ? status
+                    : 0,
+                });
               if (
                 status === 429 &&
                 access &&
@@ -204,7 +274,7 @@ export function createManagedNetwork(options) {
                 return access;
               }
               if (status === 401 || status === 403) {
-                rejected = raw;
+                interrupted = true;
                 lifecycle?.logout();
                 access = undefined;
               }
@@ -230,16 +300,27 @@ export function createManagedNetwork(options) {
             getAccess: async () => (await getDevice()).accessToken,
             authorizeLocal: options.authorizeLocal ?? (async () => false),
             onRevoked() {
-              rejected = raw;
-              access = undefined;
+              if (closed || expected !== generation || raw === rejected) return;
+              // Gateway failure-grace exhaustion can also report revocation.
+              // Fence first, then let the next IAM grant adjudicate the material.
+              void retire().catch(() => {});
+              interrupted = true;
+              retryAt =
+                Date.now() +
+                Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
             },
           });
           if (attached) detach = lifecycle.attach(attached);
+          interrupted = false;
           lifecycle.login();
         } else {
           validate(next);
           sameVerifiedMaterial = true;
           await getDevice(force);
+          if (interrupted) {
+            interrupted = false;
+            lifecycle.login();
+          }
         }
         if (Date.now() >= retryAt) {
           failures = 0;
@@ -249,12 +330,18 @@ export function createManagedNetwork(options) {
           profileRetryAt = Date.now() + 60000;
           const expected = generation;
           const { config } = validate(next);
-          const platform = (options.createPlatform ?? createPlatform)(config);
+          const signal = controller?.signal;
+          const platform = (options.createPlatform ?? createPlatform)(config, {
+            signal,
+          });
           void deviceMemberName(
             platform,
             access.accessToken,
             options.ownerId,
-            AbortSignal.timeout(4000),
+            AbortSignal.any([
+              ...(signal ? [signal] : []),
+              AbortSignal.timeout(4000),
+            ]),
           )
             .then((name) => {
               if (!closed && expected === generation) displayName = name;
@@ -290,6 +377,9 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    get sessionRevoked() {
+      return !!raw && (raw === rejected || materialUntil <= Date.now());
+    },
     get sessionAvailable() {
       return (
         !closed &&
@@ -335,11 +425,12 @@ export function createManagedNetwork(options) {
       access = undefined;
     },
     get status() {
-      return rejected === raw || !lifecycle
+      return rejected === raw || !lifecycle || interrupted
         ? {
             available: false,
             connected: false,
             state: 'unavailable',
+            reason: rejected && rejected === raw ? 'revoked' : 'unavailable',
             isolation: networkIsolation,
           }
         : lifecycle.status;
@@ -352,12 +443,13 @@ export function createManagedNetwork(options) {
       if (!lifecycle) throw new Error('managed network unavailable');
       return lifecycle.messagingUI(context);
     },
-    async close() {
-      if (closed) return;
+    close() {
+      if (closing) return closing;
       closed = true;
       clearInterval(timer);
       // Retire immediately, even if an exchange/verification response is pending.
-      await retire();
+      closing = retire();
+      return closing;
     },
   };
 }

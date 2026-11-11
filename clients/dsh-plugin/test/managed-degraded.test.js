@@ -1,6 +1,8 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { Buffer } from 'node:buffer';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -18,10 +20,32 @@ import {
 // Exercise the production managed mode, file binding, ES256 verification,
 // health route and both identity guards. Only remote IAM/message/model services
 // and the host's model handler are fixtures; no real DSH, PG or model is started.
-for (const credential of ['valid', 'rejected', 'bad-signature'])
+for (const credential of [
+  'valid',
+  'rejected',
+  'revoked',
+  'expired',
+  'bad-signature',
+  'closing-grant',
+  'closing-jwks',
+  'closing-profile',
+])
   test(`message outage preserves model admission only with ${credential} managed identity`, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), 'auriga-degraded-'));
-    t.after(() => rm(directory, { recursive: true, force: true }));
+    const cleanups = [() => rm(directory, { recursive: true, force: true })];
+    t.after(async () => {
+      const errors = [];
+      for (const cleanup of cleanups.toReversed()) {
+        try {
+          await cleanup();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1)
+        throw new AggregateError(errors, 'managed fixture cleanup failed');
+    });
     const tenantId = '00000000-0000-4000-8000-000000000001';
     const deviceId = '00000000-0000-4000-8000-000000000004';
     const origin = 'https://platform.example.com';
@@ -35,7 +59,9 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
         ownerId: OWNER_ID,
         deviceId,
         credential: 'a'.repeat(43),
-        expiresAt: new Date(Date.now() + 600000).toISOString(),
+        expiresAt: new Date(
+          Date.now() + (credential === 'expired' ? -1000 : 600000),
+        ).toISOString(),
         platformOrigin: origin,
         issuer: origin,
         network: {
@@ -80,16 +106,47 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
     const accessToken = jwt + '.' + signature.toString('base64url');
     let exchanges = 0,
       messageCalls = 0,
-      modelCalls = 0;
-    t.mock.method(globalThis, 'fetch', async (input) => {
+      modelCalls = 0,
+      recovered = false;
+    let entered;
+    const pendingRequest = new Promise((resolve) => {
+      entered = resolve;
+    });
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
       const url = new URL(input);
       assert.equal(url.origin, origin);
+      const heldPath = {
+        'closing-grant': '/oauth2/token',
+        'closing-jwks': '/oauth2/jwks',
+        'closing-profile': '/api/iam/v1/network/systems',
+      }[credential];
+      if (heldPath && url.pathname === heldPath) {
+        return new Promise((resolve, reject) => {
+          const stop = () => {
+            clearTimeout(timer);
+            reject(new Error('fixture request aborted'));
+          };
+          const timer = setTimeout(stop, 60000);
+          t.after(stop);
+          init.signal.addEventListener('abort', stop, { once: true });
+          entered();
+        });
+      }
       const response = (body, status = 200) =>
         new Response(JSON.stringify(body), { status });
       if (url.pathname === '/oauth2/token') {
         exchanges++;
-        return credential === 'rejected'
-          ? response({ code: 'common.forbidden' }, 403)
+        return (credential === 'rejected' && !recovered) ||
+          credential === 'revoked'
+          ? response(
+              {
+                code:
+                  credential === 'revoked'
+                    ? 'network.revoked'
+                    : 'common.forbidden',
+              },
+              403,
+            )
           : response({
               access_token: accessToken,
               token_type: 'Bearer',
@@ -145,7 +202,13 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
       },
     };
     const keys = makeIdentityKeys();
-    t.after(() => rm(dirname(keys.keyFile), { recursive: true, force: true }));
+    cleanups.push(() =>
+      rm(dirname(keys.keyFile), { recursive: true, force: true }),
+    );
+    cleanups.push(async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    });
     const runtime = await createManaged({
       env: {
         AURIGA_MODE: 'managed',
@@ -167,15 +230,20 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
       startHeartbeat: false,
     });
     const dispose = runtime.apply(ctx);
-    t.after(async () => {
-      dispose();
-      runtime.close();
-      for (const effect of effects.reverse())
-        if (typeof effect === 'function') await effect();
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
-    });
+    cleanups.push(
+      ...effects.filter((effect) => typeof effect === 'function'),
+      () => runtime.close(),
+      dispose,
+    );
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    if (credential.startsWith('closing-')) {
+      await pendingRequest;
+      assert.ok(process.getActiveResourcesInfo().includes('Timeout'));
+      await dispose();
+      await runtime.close();
+      assert.equal(process.getActiveResourcesInfo().includes('Timeout'), false);
+      return;
+    }
     const request = (path, authenticated = true) =>
       new Promise((resolve, reject) => {
         const method = path === '/api/session/prompt' ? 'POST' : 'GET';
@@ -191,13 +259,19 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
             path,
             method,
             agent: false,
-            headers: authenticated ? { 'Auriga-Identity': token } : {},
+            headers: {
+              'accept-language': 'zh-CN',
+              ...(authenticated ? { 'Auriga-Identity': token } : {}),
+            },
           },
           (res) => {
             let body = '';
             res.on('data', (chunk) => (body += chunk));
             res.on('end', () =>
-              resolve({ status: res.statusCode, body: JSON.parse(body) }),
+              resolve({
+                status: res.statusCode,
+                body: path === '/' ? body : JSON.parse(body),
+              }),
             );
           },
         );
@@ -211,7 +285,9 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
       if (
         credential === 'valid'
           ? health.body.ready && messageCalls > 0
-          : exchanges > 0
+          : credential === 'expired'
+            ? runtime.networkStatus.reason === 'revoked'
+            : exchanges > 0
       )
         break;
       await delay(10);
@@ -222,6 +298,41 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
     const prompt = await request('/api/session/prompt');
     assert.equal(prompt.status, credential === 'valid' ? 200 : 401);
     assert.equal(modelCalls, credential === 'valid' ? 1 : 0);
+    if (credential !== 'valid') {
+      const index = await request('/');
+      assert.equal(index.status, 401);
+      assert.match(
+        index.body,
+        credential === 'revoked' || credential === 'expired'
+          ? /实例会话已失效，请从门户重新进入/
+          : /连接中断，正在重试/,
+      );
+    }
+    if (credential === 'rejected') {
+      recovered = true;
+      const deadline = Date.now() + 5000;
+      do {
+        health = await request('/_auriga/health', false);
+        if (health.body.ready) break;
+        await delay(10);
+      } while (Date.now() < deadline);
+      assert.equal(
+        health.body.ready,
+        true,
+        'same managed material automatically recovers',
+      );
+      assert.equal((await request('/api/session/prompt')).status, 200);
+    }
+    if (credential === 'revoked' || credential === 'expired') {
+      const before = exchanges;
+      await delay(1100);
+      assert.equal(
+        exchanges,
+        before,
+        'permanent rejection does not retry grant',
+      );
+      if (credential === 'expired') assert.equal(exchanges, 0);
+    }
     if (credential === 'valid') {
       assert.ok(messageCalls > 0, 'real message registration must fail first');
       assert.equal(prompt.body.choices[0].message.content, 'model-ok');
@@ -229,3 +340,50 @@ for (const credential of ['valid', 'rejected', 'bad-signature'])
       assert.equal(modelCalls, 1, 'signed browser identity remains mandatory');
     }
   });
+
+test('directory cleanup failure leaves no managed fixture listener', () => {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      new URL('./fixtures/managed-cleanup-failure.mjs', import.meta.url).href,
+      '--test',
+      '--test-name-pattern=message outage.*rejected',
+      fileURLToPath(import.meta.url),
+    ],
+    { encoding: 'utf8', timeout: 10000, env },
+  );
+  assert.equal(result.error, undefined, result.stdout + result.stderr);
+  assert.equal(
+    result.status,
+    1,
+    'injected cleanup error must still fail the child',
+  );
+  assert.match(result.stdout, /ENOTEMPTY/);
+  assert.match(result.stdout, /managed_cleanup_before_remove \[\]/);
+  assert.match(result.stdout, /managed_cleanup_after_hooks \[\]/);
+  assert.doesNotMatch(
+    result.stdout,
+    /managed fixture must release timers and TCP handles/,
+  );
+});
+
+after(async () => {
+  // Native TCP destruction may finish after server.close's callback on Windows.
+  const remainingResources = () =>
+    process
+      .getActiveResourcesInfo()
+      .filter((type) =>
+        ['Timeout', 'TCPWrap', 'TCPSocketWrap', 'TCPServerWrap'].includes(type),
+      );
+  const deadline = Date.now() + 1000;
+  while (remainingResources().length && Date.now() < deadline) await delay(5);
+  const remaining = remainingResources();
+  assert.deepEqual(
+    remaining,
+    [],
+    'managed fixture must release timers and TCP handles',
+  );
+});

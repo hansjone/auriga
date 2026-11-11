@@ -16,6 +16,8 @@ import tools.jackson.databind.node.ObjectNode;
 /** IAM-owned managed device lineage. Instance state and membership remain online authorities. */
 public final class IamManagedDevices implements ManagedDeviceCredentials {
   public static final String GRANT = "urn:auriga:params:oauth:grant-type:managed-device";
+  private static final ErrorCode REVOKED =
+      ErrorCode.of("network.revoked", 403, io.grpc.Status.Code.PERMISSION_DENIED);
   private final IamStore store;
   private final SessionManager sessions;
   private final TokenService tokens;
@@ -63,8 +65,7 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
     try {
       return activeBinding(instance, owner, version);
     } catch (AurigaException error) {
-      if (Set.of("common.not_found", "common.forbidden").contains(error.errorCode().code()))
-        return false;
+      if ("common.not_found".equals(error.errorCode().code())) return false;
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     } catch (RuntimeException unavailable) {
       throw new AurigaException(CommonErrors.UNAVAILABLE);
@@ -99,6 +100,9 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
               .setTenantId(TenantContext.require().toString())
               .setAccountId(owner)
               .build());
+    } catch (AurigaException error) {
+      if ("common.not_found".equals(error.errorCode().code())) return null;
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
     } catch (RuntimeException error) {
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     }
@@ -142,9 +146,7 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
               var device = store.get("device", previous.path("device").asString(), false);
               require(device != null && !device.path("revoked").asBoolean());
               if (sessions.activeById(device.path("sessionId").asString()) == null)
-                throw new AurigaException(
-                    auriga.common.error.ErrorCode.of(
-                        "network.revoked", 403, io.grpc.Status.Code.PERMISSION_DENIED));
+                throw new AurigaException(REVOKED);
               if (!previous.has("modelCredential")) {
                 addModelCredential(previous, request.getInstanceId());
                 store.save("managed_device", previous);
@@ -375,41 +377,50 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
   }
 
   public ObjectNode exchange(Map<String, String> input, String trustedSource) {
-    IamError.validate(
-        Set.of("grant_type", "client_id", "instance_id", "owner_id", "credential")
-            .containsAll(input.keySet()));
     String instance = input.getOrDefault("instance_id", ""),
         owner = input.getOrDefault("owner_id", "");
-    uuid(instance);
-    uuid(owner);
     try {
+      if (!Set.of("grant_type", "client_id", "instance_id", "owner_id", "credential")
+          .containsAll(input.keySet())) throw new InvalidCredential();
+      try {
+        uuid(instance);
+        uuid(owner);
+      } catch (AurigaException malformed) {
+        throw new InvalidCredential();
+      }
       return store.tx(
           () -> {
             var row = store.get("managed_device", instance, false);
-            if (!(row != null
-                && !row.path("revoked").asBoolean()
-                && owner.equals(row.path("owner").asString())
-                && clock.instant().isBefore(Instant.parse(row.path("expiresAt").asString()))))
+            if (!(row != null && owner.equals(row.path("owner").asString())))
               throw new InvalidCredential();
             var device = store.get("device", row.path("device").asString(), false);
             if (!(device != null
-                && !device.path("revoked").asBoolean()
+                && owner.equals(device.path("accountId").asString())
+                && row.path("device").asString().equals(device.path("deviceId").asString())
+                && "managed".equals(device.path("deviceType").asString())
+                && instance.equals(device.path("managedInstance").asString())
+                && row.path("version").asLong() == device.path("managedVersion").asLong()
                 && Secrets.same(
                     device.path("credentialHash").asString(),
                     Secrets.hash(input.getOrDefault("credential", "")))))
               throw new InvalidCredential();
+            // Only a holder of the tenant/member/instance-bound secret may learn revocation.
+            if (row.path("revoked").asBoolean()
+                || device.path("revoked").asBoolean()
+                || !clock.instant().isBefore(Instant.parse(row.path("expiresAt").asString())))
+              throw new AurigaException(REVOKED);
             var identity =
                 new DeviceAccessAuthority(store, sessions, tokens)
                     .credential(
                         TenantContext.require().toString(), owner, row.path("device").asString());
-            require(identity != null);
+            if (identity == null) throw new AurigaException(REVOKED);
             var effective = effective(owner);
-            require(
-                effective != null
-                    && effective.getStatus() == MemberStatus.MEMBER_STATUS_ACTIVE
-                    && effective.getPermissionsList().contains("auriga.connect.collab.use")
-                    && (effective.getMemberType() == MemberType.MEMBER_TYPE_MEMBER
-                        || effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL));
+            if (!(effective != null
+                && effective.getStatus() == MemberStatus.MEMBER_STATUS_ACTIVE
+                && effective.getPermissionsList().contains("auriga.connect.collab.use")
+                && (effective.getMemberType() == MemberType.MEMBER_TYPE_MEMBER
+                    || effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL)))
+              throw new AurigaException(REVOKED);
             var token =
                 tokens.managedDevice(
                     TenantContext.require(),

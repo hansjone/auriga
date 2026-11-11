@@ -9,7 +9,11 @@ test('R7 expired managed sessions block business and upgrades, keeping health an
   let available = true,
     reached = 0;
   server.on('request', () => reached++);
-  const dispose = installManagedSessionGuard(server, () => available);
+  const dispose = installManagedSessionGuard(
+    server,
+    () => available,
+    () => !available,
+  );
   t.after(dispose);
   const request = (url) => {
     const res = {
@@ -57,3 +61,73 @@ test('R7 expired managed sessions block business and upgrades, keeping health an
   request('/api/session/prompt');
   assert.equal(reached, 6);
 });
+
+for (const language of ['zh-CN', 'en'])
+  test(
+    'managed guard distinguishes temporary failure and revocation: ' + language,
+    (t) => {
+      const server = new EventEmitter();
+      let available = false,
+        revoked = false,
+        reached = 0;
+      server.on('request', () => reached++);
+      t.after(
+        installManagedSessionGuard(
+          server,
+          () => available,
+          () => revoked,
+        ),
+      );
+      function request(url) {
+        const response = {
+          writeHead(status, headers) {
+            this.status = status;
+            this.headers = headers;
+          },
+          end(body) {
+            this.body = body;
+          },
+        };
+        server.emit(
+          'request',
+          { method: 'GET', url, headers: { 'accept-language': language } },
+          response,
+        );
+        return response;
+      }
+      const temporary =
+        language === 'zh-CN'
+          ? '连接中断，正在重试'
+          : 'Connection interrupted. Retrying.';
+      const permanent =
+        language === 'zh-CN'
+          ? '实例会话已失效，请从门户重新进入'
+          : 'Instance session has expired. Re-enter from the portal.';
+      for (const url of ['/', '/api/session/prompt']) {
+        const res = request(url);
+        assert.equal(res.status, 401);
+        assert.ok(res.body.includes(temporary));
+        assert.ok(!res.body.includes(permanent));
+      }
+      assert.equal(reached, 0);
+      const socket = {
+        destroyed: false,
+        destroy() {
+          this.destroyed = true;
+        },
+      };
+      server.emit('upgrade', { url: '/api/_remote-stream' }, socket);
+      assert.equal(socket.destroyed, true);
+      revoked = true;
+      for (const url of ['/', '/api/session/prompt']) {
+        const res = request(url);
+        assert.equal(res.status, 401);
+        assert.ok(res.body.includes(permanent));
+        assert.ok(!res.body.includes(temporary));
+      }
+      revoked = false;
+      available = true;
+      request('/api/session/prompt');
+      assert.equal(reached, 1);
+    },
+  );

@@ -154,6 +154,212 @@ class ManagedDeviceCredentialPostgresTest {
         "common.forbidden", assertThrows(AurigaException.class, action::run).errorCode().code());
   }
 
+  void revoked(Runnable action) {
+    var error = assertThrows(AurigaException.class, action::run);
+    assertEquals("network.revoked", error.errorCode().code());
+    assertEquals(403, error.errorCode().httpStatus());
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(
+      strings = {
+        "device", "material", "session", "sessionExpired", "account", "memberRemoved",
+        "memberDisabled", "memberMissing", "permission", "instanceStopped", "instanceDeleted",
+            "bindingVersion"
+      })
+  void verifiedRevocationDoesNotConsumeFailureBuckets(String reason) {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          switch (reason) {
+            case "device", "session", "sessionExpired", "account" ->
+                store.tx(
+                    () -> {
+                      var device = store.get("device", issued.getDeviceId(), true);
+                      var row =
+                          switch (reason) {
+                            case "device" -> device;
+                            case "account" -> store.get("account", owner.toString(), true);
+                            default ->
+                                store.byId("session", device.path("sessionId").asString(), true);
+                          };
+                      if (reason.equals("account")) row.put("status", "disabled");
+                      else if (reason.equals("sessionExpired"))
+                        row.put("expiresAt", clock.instant().toString());
+                      else row.put("revoked", true);
+                      store.save(
+                          reason.equals("device")
+                              ? "device"
+                              : reason.equals("account") ? "account" : "session",
+                          row);
+                      return null;
+                    });
+            case "material" ->
+                managed.revoke(
+                    RevokeManagedDeviceRequest.newBuilder()
+                        .setTenantId(tenant.toString())
+                        .setInstanceId(instance.toString())
+                        .setCredentialVersion(1)
+                        .build());
+            case "memberRemoved", "memberDisabled", "permission" ->
+                when(permissions.getEffectivePermissions(any()))
+                    .thenReturn(
+                        GetEffectivePermissionsResponse.newBuilder()
+                            .setMemberType(MemberType.MEMBER_TYPE_MEMBER)
+                            .setStatus(
+                                reason.equals("memberRemoved")
+                                    ? MemberStatus.MEMBER_STATUS_OFFBOARDED
+                                    : reason.equals("memberDisabled")
+                                        ? MemberStatus.MEMBER_STATUS_DISABLED
+                                        : MemberStatus.MEMBER_STATUS_ACTIVE)
+                            .build());
+            case "memberMissing" ->
+                doThrow(new AurigaException(auriga.common.error.CommonErrors.NOT_FOUND))
+                    .when(permissions)
+                    .getEffectivePermissions(any());
+            case "instanceStopped" -> binding = binding.toBuilder().setActive(false).build();
+            case "instanceDeleted" ->
+                doThrow(new AurigaException(auriga.common.error.CommonErrors.NOT_FOUND))
+                    .when(bindings)
+                    .get(any());
+            case "bindingVersion" -> binding = binding.toBuilder().setCredentialVersion(2).build();
+            default -> fail(reason);
+          }
+          revoked(() -> access(issued));
+          assertTrue(store.tx(() -> store.all("rate_limit").isEmpty()));
+          // Even for revoked state an unauthenticated caller must get the generic failure.
+          denied(
+              () ->
+                  managed.exchange(
+                      Map.of(
+                          "instance_id",
+                          instance.toString(),
+                          "owner_id",
+                          owner.toString(),
+                          "credential",
+                          "wrong")));
+          assertEquals(3, store.tx(() -> store.all("rate_limit").size()));
+        });
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(
+      strings = {
+        "credential",
+        "instance",
+        "owner",
+        "tenant",
+        "unknownDevice",
+        "malformed",
+        "missingCredential",
+        "extraField",
+        "deviceOwner",
+        "deviceInstance",
+        "deviceVersion"
+      })
+  void unverifiedMaterialRemainsGenericAndConsumesFailureBuckets(String reason) {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          var input =
+              new HashMap<>(
+                  Map.of(
+                      "instance_id",
+                      instance.toString(),
+                      "owner_id",
+                      owner.toString(),
+                      "credential",
+                      issued.getCredential()));
+          switch (reason) {
+            case "credential" -> input.put("credential", Secrets.random());
+            case "missingCredential" -> input.remove("credential");
+            case "extraField" -> input.put("device_id", issued.getDeviceId());
+            case "deviceOwner", "deviceInstance", "deviceVersion" ->
+                store.tx(
+                    () -> {
+                      var device = store.get("device", issued.getDeviceId(), true);
+                      if (reason.equals("deviceVersion")) device.put("managedVersion", 2);
+                      else {
+                        String other = UUID.randomUUID().toString();
+                        if (reason.equals("deviceOwner"))
+                          store.insert(
+                              "account",
+                              other,
+                              Json.object("accountId", other, "status", "active"),
+                              null);
+                        device.put(
+                            reason.equals("deviceOwner") ? "accountId" : "managedInstance", other);
+                      }
+                      store.save("device", device);
+                      return null;
+                    });
+            case "instance" -> input.put("instance_id", UUID.randomUUID().toString());
+            case "owner" -> input.put("owner_id", UUID.randomUUID().toString());
+            case "malformed" -> input.put("instance_id", "invalid");
+            case "unknownDevice" ->
+                store.tx(
+                    () -> {
+                      var row = store.get("managed_device", instance.toString(), true);
+                      row.put("device", UUID.randomUUID().toString());
+                      store.save("managed_device", row);
+                      return null;
+                    });
+            default -> {}
+          }
+          UUID target = reason.equals("tenant") ? UUID.randomUUID() : tenant;
+          TenantContext.run(
+              target,
+              () -> {
+                denied(() -> managed.exchange(input));
+                var buckets = store.tx(() -> store.all("rate_limit"));
+                assertEquals(3, buckets.size());
+                for (var bucket : buckets) assertEquals(1, bucket.path("count").asInt());
+              });
+        });
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"bindings", "permissions"})
+  void upstreamForbiddenIsTransientAndRecoversWithoutConsumingFailureBuckets(String upstream) {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          var allowed =
+              permissions.getEffectivePermissions(
+                  GetEffectivePermissionsRequest.getDefaultInstance());
+          var forbidden = new AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+          if (upstream.equals("bindings")) doThrow(forbidden).when(bindings).get(any());
+          else doThrow(forbidden).when(permissions).getEffectivePermissions(any());
+
+          var error = assertThrows(AurigaException.class, () -> access(issued));
+          assertEquals("common.unavailable", error.errorCode().code());
+          assertEquals(503, error.errorCode().httpStatus());
+          assertTrue(store.tx(() -> store.all("rate_limit").isEmpty()));
+
+          doAnswer(i -> binding).when(bindings).get(any());
+          doReturn(allowed).when(permissions).getEffectivePermissions(any());
+          assertFalse(access(issued).isEmpty());
+          assertTrue(store.tx(() -> store.all("rate_limit").isEmpty()));
+        });
+  }
+
+  @Test
+  void authorityOutageIsTransientAfterVerificationAndDoesNotConsumeFailureBuckets() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          doThrow(new IllegalStateException("offline")).when(bindings).get(any());
+          assertEquals(
+              "common.unavailable",
+              assertThrows(AurigaException.class, () -> access(issued)).errorCode().code());
+          assertTrue(store.tx(() -> store.all("rate_limit").isEmpty()));
+        });
+  }
+
   @Test
   void modelCredentialIsSeparateAndBoundToCurrentInstanceMemberAndGeneration() {
     TenantContext.run(
@@ -438,7 +644,7 @@ class ManagedDeviceCredentialPostgresTest {
           assertNotNull(authority.access(oldAccess));
           binding = binding.toBuilder().setCredentialVersion(2).build();
           assertNull(authority.access(oldAccess));
-          denied(() -> access(first));
+          revoked(() -> access(first));
           var second = managed.issue(request(2));
           assertNotEquals(first.getDeviceId(), second.getDeviceId());
           assertNotEquals(first.getCredential(), second.getCredential());
@@ -446,7 +652,7 @@ class ManagedDeviceCredentialPostgresTest {
           assertNotNull(authority.access(fresh));
           binding = binding.toBuilder().setActive(false).build();
           assertNull(authority.access(fresh));
-          denied(() -> access(second));
+          revoked(() -> access(second));
         });
   }
 
@@ -497,12 +703,12 @@ class ManagedDeviceCredentialPostgresTest {
                   .setInstanceId(instance.toString())
                   .setCredentialVersion(1)
                   .build());
-          denied(() -> access(issued));
+          revoked(() -> access(issued));
           denied(() -> managed.issue(request(1)));
           binding = binding.toBuilder().setCredentialVersion(2).build();
           var next = managed.issue(request(2));
           clock.now = clock.now.plus(Duration.ofDays(31));
-          denied(() -> access(next));
+          revoked(() -> access(next));
         });
     TenantContext.run(UUID.randomUUID(), () -> denied(() -> managed.issue(request(1))));
   }
@@ -521,7 +727,7 @@ class ManagedDeviceCredentialPostgresTest {
                       .setMemberType(MemberType.MEMBER_TYPE_MEMBER)
                       .build());
           assertNull(authority.access(token));
-          denied(() -> access(issued));
+          revoked(() -> access(issued));
         });
   }
 
@@ -547,7 +753,7 @@ class ManagedDeviceCredentialPostgresTest {
                 return null;
               });
           assertNull(authority.access(token));
-          denied(() -> access(issued));
+          revoked(() -> access(issued));
           denied(() -> managed.issue(request(1)));
         });
   }
