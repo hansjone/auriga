@@ -21,6 +21,7 @@ const { t } = useI18n({
       error: '无法完成请求，请重试。',
       disabled: '实例服务未启用，请联系管理员。',
       unavailable: '实例服务暂时不可用，请稍后重试。',
+      statusUnavailable: '暂时无法获取状态',
       timeout: '等待超时，请重试。',
       failed: '实例启动失败，请重试。',
       stopped: '实例已停止。',
@@ -55,6 +56,7 @@ const { t } = useI18n({
         'The instance service is not enabled. Please contact an administrator.',
       unavailable:
         'The instance service is temporarily unavailable. Please retry later.',
+      statusUnavailable: 'Status temporarily unavailable',
       timeout: 'Waiting timed out. Please retry.',
       failed: 'Instance failed to start. Please retry.',
       stopped: 'Instance stopped.',
@@ -83,6 +85,7 @@ const loaded = ref(false);
 const message = ref('');
 const detail = ref('');
 const expired = ref(false);
+const statusUnavailable = ref(false);
 function isReady(value: Instance | null) {
   return (
     !!value?.ready &&
@@ -97,6 +100,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 let epoch = 0;
 let enterIntent = false;
 let resume: (() => void) | undefined;
+let retryRead: (() => void) | undefined;
 
 function stop() {
   epoch++;
@@ -106,6 +110,8 @@ function stop() {
   busy.value = false;
   enterIntent = false;
   resume = undefined;
+  retryRead = undefined;
+  statusUnavailable.value = false;
 }
 function cancel() {
   stop();
@@ -148,6 +154,7 @@ async function run(open: boolean) {
   let delay = 2000;
   let observations = 0;
   let polling = false;
+  let consecutiveFailures = 0;
   function schedule(id: string) {
     globalThis.clearTimeout(timer);
     resume = () => {
@@ -166,6 +173,7 @@ async function run(open: boolean) {
     if (!current()) return;
     instance.value = value;
     loaded.value = true;
+    consecutiveFailures = 0;
     // Receiving an instance confirms acceptance. A slow startup is not failure.
     globalThis.clearTimeout(timeout);
     if (value.phase === 'failed') {
@@ -210,10 +218,28 @@ async function run(open: boolean) {
         isApiError(error) &&
         error.status >= 400 &&
         error.status < 500 &&
-        error.status !== 429
+        ![408, 425, 429].includes(error.status)
       ) {
         stop();
-        fail(error);
+        if (error.status === 404) message.value = 'stopped';
+        else fail(error);
+      } else if (++consecutiveFailures >= 5) {
+        globalThis.clearTimeout(timer);
+        resume = undefined;
+        busy.value = false;
+        statusUnavailable.value = true;
+        message.value = 'statusUnavailable';
+        // Keep this observation's intent and ID; retry never sends another open.
+        retryRead = () => {
+          if (!current() || busy.value) return;
+          retryRead = undefined;
+          consecutiveFailures = 0;
+          statusUnavailable.value = false;
+          busy.value = true;
+          message.value = '';
+          if (document.visibilityState === 'hidden') schedule(id);
+          else void poll(id);
+        };
       } else {
         schedule(id);
       }
@@ -243,6 +269,10 @@ function enter() {
   if (!busy.value && !expired.value && ready.value && instance.value)
     void run(true);
 }
+function retry() {
+  if (retryRead) retryRead();
+  else void run(false);
+}
 function visibilityChanged() {
   if (document.visibilityState === 'hidden') globalThis.clearTimeout(timer);
   else resume?.();
@@ -270,13 +300,16 @@ onBeforeUnmount(() => {
     <p v-if="message" role="alert">
       {{ t(message) }} <span v-if="detail">({{ detail }})</span>
     </p>
-    <ElButton v-if="busy" @click="cancel">{{ t('cancel') }}</ElButton>
-    <template v-else-if="!expired">
+    <ElButton v-if="busy || statusUnavailable" @click="cancel">{{
+      t('cancel')
+    }}</ElButton>
+    <template v-if="!busy && !expired">
       <ElButton v-if="ready && !message" type="primary" @click="enter">{{
         t('enter')
       }}</ElButton>
       <ElButton
         v-else-if="
+          !statusUnavailable &&
           loaded &&
           (!instance ||
             instance.phase === 'stopped' ||
@@ -287,9 +320,7 @@ onBeforeUnmount(() => {
         @click="run(true)"
         >{{ t('start') }}</ElButton
       >
-      <ElButton @click="run(false)">{{
-        t(message ? 'retry' : 'refresh')
-      }}</ElButton>
+      <ElButton @click="retry">{{ t(message ? 'retry' : 'refresh') }}</ElButton>
     </template>
   </section>
 </template>

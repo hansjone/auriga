@@ -186,3 +186,131 @@ it('bounds hung reads independently and continues waiting without replaying open
   expect(enterInstance).toHaveBeenCalledExactlyOnceWith(starting.id);
   expect(api.open).toHaveBeenCalledTimes(1);
 });
+
+it.each(['network', 'server', 'timeout'])(
+  'pauses after five consecutive %s failures and retries reads with the original entry intent',
+  async (failure) => {
+    await start();
+    if (failure === 'timeout') {
+      api.get.mockImplementation(
+        (_id: string, signal: AbortSignal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            );
+          }),
+      );
+    } else {
+      api.get.mockRejectedValue(
+        failure === 'server'
+          ? new ApiError({
+              status: 503,
+              code: 'common.unavailable',
+              title: 'Unavailable',
+            })
+          : new TypeError('network unavailable'),
+      );
+    }
+    await vi.advanceTimersByTimeAsync(240000);
+    expect(api.get).toHaveBeenCalledTimes(5);
+    expect(view.get('[role=alert]').text()).toBe('暂时无法获取状态');
+    expect(view.find('[role=status]').exists()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(api.get).toHaveBeenCalledTimes(5);
+    api.get.mockResolvedValue(ready);
+    await button('重试').trigger('click');
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(api.open).toHaveBeenCalledTimes(1);
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(enterInstance).toHaveBeenCalledExactlyOnceWith(starting.id);
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+it('resets consecutive failures after a successful non-ready response', async () => {
+  await start();
+  api.get.mockRejectedValue(new TypeError('offline'));
+  for (let i = 0; i < 4; i++) {
+    api.get.mockRejectedValueOnce(new TypeError('offline'));
+  }
+  api.get.mockResolvedValueOnce(starting);
+  await vi.advanceTimersByTimeAsync(18000);
+  expect(api.get).toHaveBeenCalledTimes(5);
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(api.get).toHaveBeenCalledTimes(9);
+  expect(view.find('[role=alert]').exists()).toBe(false);
+  await vi.advanceTimersByTimeAsync(15000);
+  expect(api.get).toHaveBeenCalledTimes(10);
+  expect(view.get('[role=alert]').text()).toBe('暂时无法获取状态');
+});
+
+it.each(['cancel', 'unmount', 'pagehide'])(
+  'clears paused entry intent on %s',
+  async (action) => {
+    await start();
+    api.get.mockRejectedValue(new TypeError('offline'));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(view.get('[role=alert]').text()).toBe('暂时无法获取状态');
+    if (action === 'cancel') await button('取消等待').trigger('click');
+    else if (action === 'unmount') view.unmount();
+    else window.dispatchEvent(new Event('pagehide'));
+    if (action === 'cancel') {
+      api.list.mockResolvedValue({ items: [ready] });
+      await button('重试').trigger('click');
+      await flushPromises();
+      expect(api.list).toHaveBeenCalledTimes(2);
+    }
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(enterInstance).not.toHaveBeenCalled();
+    expect(api.open).toHaveBeenCalledTimes(1);
+    expect(api.get).toHaveBeenCalledTimes(5);
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+it('keeps a read-only observation read-only after failure and retry', async () => {
+  api.list.mockResolvedValue({ items: [starting] });
+  api.get.mockRejectedValue(new TypeError('offline'));
+  view = mount(InstanceCard, {
+    global: { plugins: [createAurigaI18n('zh-CN')] },
+  });
+  await flushPromises();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(view.get('[role=alert]').text()).toBe('暂时无法获取状态');
+  api.get.mockResolvedValue(ready);
+  await button('重试').trigger('click');
+  await flushPromises();
+  expect(enterInstance).not.toHaveBeenCalled();
+  expect(api.open).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each([408, 425])('retries temporary HTTP %i reads', async (status) => {
+  await start();
+  api.get.mockRejectedValueOnce(
+    new ApiError({ status, title: 'Temporary', code: 'common.unavailable' }),
+  );
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(view.find('[role=alert]').exists()).toBe(false);
+  api.get.mockResolvedValue(ready);
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(enterInstance).toHaveBeenCalledExactlyOnceWith(starting.id);
+});
+
+it('clears entry intent and explains a deleted instance on HTTP 404', async () => {
+  await start();
+  api.get.mockRejectedValueOnce(
+    new ApiError({ status: 404, title: 'Missing', code: 'common.not_found' }),
+  );
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(view.get('[role=alert]').text()).toBe('实例已停止。');
+  expect(enterInstance).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
