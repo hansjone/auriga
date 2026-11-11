@@ -1,6 +1,7 @@
 ﻿import type { IAMComponents } from '@auriga/shared';
 import { apiClient } from '../api';
 export type Credential = IAMComponents['schemas']['CredentialMetadata'];
+export type CredentialGap = IAMComponents['schemas']['CredentialSourceGap'];
 type List = IAMComponents['schemas']['CredentialList'];
 const base = '/api/iam/v1/admin/credentials';
 export const credentialsApi = {

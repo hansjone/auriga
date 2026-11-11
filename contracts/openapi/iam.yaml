@@ -40,7 +40,7 @@ paths:
       x-admin-only: true
       x-permission: iam.keys.write
       parameters:
-        - { name: type, in: query, schema: { type: string, enum: [managed, signing] } }
+        - { name: type, in: query, schema: { type: string, enum: [managed, signing, service, node, keyset] } }
         - { name: status, in: query, schema: { type: string, enum: [active, revoked, expired, next, retiring] } }
         - { name: expiringSoon, in: query, schema: { type: boolean, default: false } }
       responses:
@@ -55,8 +55,8 @@ paths:
     post:
       tags: [admin-keys]
       operationId: revokeCredential
-      summary: Revoke a managed credential and require a new version to be issued
-      description: Invalidates the device and managed session. Reissuance requires the existing workspace credential version rotation workflow.
+      summary: Revoke a managed credential and rotate its workspace version
+      description: Commits IAM device and session revocation before requesting workspace version rotation. Retries return the existing successor version. New material is issued on the existing startup or renewal reconciliation workflow.
       x-admin-only: true
       x-permission: iam.keys.write
       x-step-up: true
@@ -1195,13 +1195,23 @@ components:
       required: [id, type, status, expiringSoon]
       properties:
         id: { type: string }
-        type: { type: string, enum: [managed, signing] }
+        type: { type: string, enum: [managed, signing, service, node, keyset] }
         status: { type: string, enum: [active, revoked, expired, next, retiring] }
+        source: { type: string }
+        versionLabel: { type: string }
+        replacementVersion: { type: integer, format: int64, minimum: 1, maximum: 9007199254740991, description: Authoritative workspace version scheduled for issuance }
         instanceId: { type: string, format: uuid }
         version: { type: integer, format: int64 }
         issuedAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
         expiringSoon: { type: boolean }
+    CredentialSourceGap:
+      type: object
+      additionalProperties: false
+      required: [source, reason]
+      properties:
+        source: { type: string }
+        reason: { type: string, enum: [not_configured, not_reported, issued_at_unavailable, validity_unavailable, key_validity_unavailable, unavailable] }
     CredentialList:
       type: object
       additionalProperties: false
@@ -1209,6 +1219,7 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/CredentialMetadata' } }
         serviceMetadataAvailable: { type: boolean, description: Whether service and node credential metadata is connected }
+        sourceGaps: { type: array, items: { $ref: '#/components/schemas/CredentialSourceGap' } }
     AdminCsrfTokenRegistration:
       type: object
       properties:

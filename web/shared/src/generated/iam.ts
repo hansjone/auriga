@@ -26,8 +26,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Revoke a managed credential and require a new version to be issued
-     * @description Invalidates the device and managed session. Reissuance requires the existing workspace credential version rotation workflow.
+     * Revoke a managed credential and rotate its workspace version
+     * @description Commits IAM device and session revocation before requesting workspace version rotation. Retries return the existing successor version. New material is issued on the existing startup or renewal reconciliation workflow.
      */
     post: operations['revokeCredential'];
     delete?: never;
@@ -1068,9 +1068,16 @@ export interface components {
     CredentialMetadata: {
       id: string;
       /** @enum {string} */
-      type: 'managed' | 'signing';
+      type: 'managed' | 'signing' | 'service' | 'node' | 'keyset';
       /** @enum {string} */
       status: 'active' | 'revoked' | 'expired' | 'next' | 'retiring';
+      source?: string;
+      versionLabel?: string;
+      /**
+       * Format: int64
+       * @description Authoritative workspace version scheduled for issuance
+       */
+      replacementVersion?: number;
       /** Format: uuid */
       instanceId?: string;
       /** Format: int64 */
@@ -1081,10 +1088,22 @@ export interface components {
       expiresAt?: string;
       expiringSoon: boolean;
     };
+    CredentialSourceGap: {
+      source: string;
+      /** @enum {string} */
+      reason:
+        | 'not_configured'
+        | 'not_reported'
+        | 'issued_at_unavailable'
+        | 'validity_unavailable'
+        | 'key_validity_unavailable'
+        | 'unavailable';
+    };
     CredentialList: {
       items: components['schemas']['CredentialMetadata'][];
       /** @description Whether service and node credential metadata is connected */
       serviceMetadataAvailable: boolean;
+      sourceGaps?: components['schemas']['CredentialSourceGap'][];
     };
     AdminCsrfTokenRegistration: {
       /** @description 每tab由crypto.getRandomValues生成32字节、规范无填充base64url。服务端校格式不能证明熵，客户端必须使用安全随机源。 */
@@ -1835,7 +1854,7 @@ export interface operations {
   listCredentials: {
     parameters: {
       query?: {
-        type?: 'managed' | 'signing';
+        type?: 'managed' | 'signing' | 'service' | 'node' | 'keyset';
         status?: 'active' | 'revoked' | 'expired' | 'next' | 'retiring';
         expiringSoon?: boolean;
       };

@@ -16,17 +16,28 @@ public final class CredentialInventory {
   private final IamManagedDevices managed;
   private final Clock clock;
   private final AuditLogger audit;
+  private final java.util.function.Supplier<List<auriga.iam.api.CredentialMetadataSource>> sources;
+  private final java.util.function.Supplier<auriga.workspace.api.ManagedCredentialRotation>
+      rotations;
 
   public CredentialInventory(
-      IamStore store, IamManagedDevices managed, Clock clock, AuditLogger audit) {
+      IamStore store,
+      IamManagedDevices managed,
+      Clock clock,
+      AuditLogger audit,
+      java.util.function.Supplier<List<auriga.iam.api.CredentialMetadataSource>> sources,
+      java.util.function.Supplier<auriga.workspace.api.ManagedCredentialRotation> rotations) {
     this.store = store;
     this.managed = managed;
     this.clock = clock;
     this.audit = audit;
+    this.sources = sources;
+    this.rotations = rotations;
   }
 
   public ObjectNode list(String type, String status, boolean expiring) {
-    IamError.validate(type == null || Set.of("managed", "signing").contains(type));
+    IamError.validate(
+        type == null || Set.of("managed", "signing", "service", "node", "keyset").contains(type));
     IamError.validate(
         status == null
             || Set.of("active", "revoked", "expired", "next", "retiring").contains(status));
@@ -38,13 +49,81 @@ public final class CredentialInventory {
           store.isolated(
               SigningKeys.PLATFORM,
               () -> store.all("signing_key").stream().map(this::signing).toList()));
+    var gaps = new ArrayList<auriga.iam.api.CredentialMetadataSource.Gap>();
+    if (items.stream()
+        .anyMatch(item -> item.path("type").asString().equals("signing") && !item.has("expiresAt")))
+      gaps.add(
+          new auriga.iam.api.CredentialMetadataSource.Gap(
+              "iam-signing-keys", "validity_unavailable"));
+    boolean serviceAvailable = false;
+    boolean nodeAvailable = false;
+    var availableSources = sources.get();
+    for (var source : availableSources) {
+      try {
+        var snapshot = source.snapshot();
+        if (source.name().equals("workspace-node-certificates")) nodeAvailable = true;
+        gaps.addAll(snapshot.gaps());
+        for (var entry : snapshot.entries()) {
+          if (entry.type().equals("service")) serviceAvailable = true;
+          if (entry.type().equals("node")) nodeAvailable = true;
+          if (type != null && !type.equals(entry.type())) continue;
+          String expiry = entry.expiresAt() == null ? "" : entry.expiresAt().toString();
+          String state = entry.status();
+          if (!state.equals("revoked") && expired(expiry)) state = "expired";
+          var view =
+              Json.object(
+                  "id",
+                  entry.id(),
+                  "type",
+                  entry.type(),
+                  "source",
+                  entry.source(),
+                  "versionLabel",
+                  entry.versionLabel(),
+                  "status",
+                  state,
+                  "expiringSoon",
+                  soon(expiry) && !state.equals("revoked"));
+          if (entry.issuedAt() != null) view.put("issuedAt", entry.issuedAt().toString());
+          if (!expiry.isEmpty()) view.put("expiresAt", expiry);
+          items.add(view);
+        }
+      } catch (RuntimeException unavailable) {
+        gaps.add(new auriga.iam.api.CredentialMetadataSource.Gap(source.name(), "unavailable"));
+      }
+    }
+    var rotation = rotations.get();
+    for (var item : items)
+      if (item.path("type").asString().equals("managed")) {
+        try {
+          if (rotation == null) throw new IllegalStateException();
+          long current =
+              rotation.currentVersion(
+                  TenantContext.require(), UUID.fromString(item.path("id").asString()));
+          if (current > item.path("version").asLong()) item.put("replacementVersion", current);
+        } catch (RuntimeException unavailable) {
+          if (gaps.stream().noneMatch(g -> g.source().equals("workspace-rotation")))
+            gaps.add(
+                new auriga.iam.api.CredentialMetadataSource.Gap(
+                    "workspace-rotation", "unavailable"));
+        }
+      }
+    if (availableSources.isEmpty())
+      gaps.add(
+          new auriga.iam.api.CredentialMetadataSource.Gap("platform-keysets", "not_configured"));
     var filtered =
         items.stream()
             .filter(r -> status == null || status.equals(r.path("status").asString()))
             .filter(r -> !expiring || r.path("expiringSoon").asBoolean())
             .sorted(Comparator.comparing(r -> r.path("id").asString()))
             .toList();
-    return Json.object("items", filtered, "serviceMetadataAvailable", false);
+    return Json.object(
+        "items",
+        filtered,
+        "serviceMetadataAvailable",
+        serviceAvailable && nodeAvailable,
+        "sourceGaps",
+        gaps);
   }
 
   private ObjectNode device(ObjectNode row) {
@@ -101,22 +180,32 @@ public final class CredentialInventory {
   }
 
   public ObjectNode revoke(String instance, long version) {
-    return store.tx(
-        () -> {
-          store.lock("managed:" + instance);
-          var row = store.get("managed_device", instance, true);
-          IamError.require(row != null, "not_found", 404);
-          if (row.path("version").asLong() != version)
-            throw new AurigaException(CommonErrors.CONFLICT);
-          managed.revoke(
-              RevokeManagedDeviceRequest.newBuilder()
-                  .setTenantId(TenantContext.require().toString())
-                  .setInstanceId(instance)
-                  .setCredentialVersion(version)
-                  .build());
-          audit.record(
-              AuditEntry.builder("iam.credential.revoke").target("instance", instance).build());
-          return device(store.get("managed_device", instance, false));
-        });
+    store.requireTransactionReleased();
+    var rotation = rotations.get();
+    if (rotation == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    UUID tenant = TenantContext.require();
+    var result =
+        store.tx(
+            () -> {
+              store.lock("managed:" + instance);
+              var row = store.get("managed_device", instance, true);
+              IamError.require(row != null, "not_found", 404);
+              if (row.path("version").asLong() != version)
+                throw new AurigaException(CommonErrors.CONFLICT);
+              managed.revoke(
+                  RevokeManagedDeviceRequest.newBuilder()
+                      .setTenantId(TenantContext.require().toString())
+                      .setInstanceId(instance)
+                      .setCredentialVersion(version)
+                      .build());
+              audit.record(
+                  AuditEntry.builder("iam.credential.revoke").target("instance", instance).build());
+              return device(store.get("managed_device", instance, false));
+            });
+    long replacement = rotation.rotate(tenant, UUID.fromString(instance), version);
+    if (replacement <= version || replacement > 9007199254740991L)
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    result.put("replacementVersion", replacement);
+    return result;
   }
 }

@@ -10,7 +10,11 @@ import java.util.*;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-public final class TokenService implements InternalTokenIssuer {
+public final class TokenService
+    implements InternalTokenIssuer, auriga.iam.api.CredentialMetadataSource {
+  private final java.util.concurrent.ConcurrentMap<
+          String, auriga.iam.api.CredentialMetadataSource.Entry>
+      credentialMetadata = new java.util.concurrent.ConcurrentHashMap<>();
   private final SigningKeys keys;
   private final ContractSchemas schemas;
   private final PermissionResolver permissions;
@@ -326,12 +330,50 @@ public final class TokenService implements InternalTokenIssuer {
             && Secrets.same(internalSecrets.get(service), Secrets.hash(installationSecret)),
         "invalid_service_credentials",
         401);
-    return signAccess(
+    var claims =
         base(
             SigningKeys.PLATFORM,
             "svc:" + service,
             "auriga.internal",
             "internal_service",
-            "service"));
+            "service");
+    String jwt = signAccess(claims);
+    credentialMetadata.put(
+        service,
+        new auriga.iam.api.CredentialMetadataSource.Entry(
+            "service:" + service,
+            "service",
+            "iam-service-issuance",
+            claims.path("jti").asString(),
+            Instant.ofEpochSecond(claims.path("iat").asLong()),
+            Instant.ofEpochSecond(claims.path("exp").asLong()),
+            "active"));
+    return jwt;
+  }
+
+  @Override
+  public String name() {
+    return "iam-service-issuance";
+  }
+
+  @Override
+  public auriga.iam.api.CredentialMetadataSource.Snapshot snapshot() {
+    var entries =
+        internalSecrets.keySet().stream()
+            .map(credentialMetadata::get)
+            .filter(Objects::nonNull)
+            .toList();
+    var gaps =
+        internalSecrets.keySet().stream()
+            .filter(s -> !credentialMetadata.containsKey(s))
+            .map(
+                s ->
+                    new auriga.iam.api.CredentialMetadataSource.Gap("service:" + s, "not_reported"))
+            .toList();
+    return new auriga.iam.api.CredentialMetadataSource.Snapshot(
+        entries,
+        internalSecrets.isEmpty()
+            ? List.of(new auriga.iam.api.CredentialMetadataSource.Gap(name(), "not_configured"))
+            : gaps);
   }
 }

@@ -3,6 +3,7 @@ package auriga.iam;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.common.persistence.*;
 import auriga.testsupport.PostgresExtension;
@@ -19,6 +20,8 @@ class CredentialInventoryPostgresTest {
   UUID tenant = UUID.randomUUID(), other = UUID.randomUUID(), instance = UUID.randomUUID();
   Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
   auriga.common.audit.AuditLogger audit = mock(auriga.common.audit.AuditLogger.class);
+  auriga.workspace.api.ManagedCredentialRotation rotation =
+      mock(auriga.workspace.api.ManagedCredentialRotation.class);
   IamManagedDevices managed = mock(IamManagedDevices.class);
 
   @BeforeAll
@@ -42,6 +45,8 @@ class CredentialInventoryPostgresTest {
 
   @BeforeEach
   void seed() {
+    when(rotation.currentVersion(any(), any())).thenReturn(2L);
+    when(rotation.rotate(any(), any(), anyLong())).thenReturn(3L);
     store.tenant(
         tenant,
         () ->
@@ -64,7 +69,7 @@ class CredentialInventoryPostgresTest {
 
   @Test
   void tenantIsolationAndSecretProjection() {
-    var inventory = new CredentialInventory(store, managed, clock, audit);
+    var inventory = new CredentialInventory(store, managed, clock, audit, List::of, () -> rotation);
     var own = store.tenant(tenant, () -> inventory.list("managed", "active", true));
     assertEquals(1, own.path("items").size());
     assertFalse(own.toString().contains("must-not-leak"));
@@ -74,7 +79,7 @@ class CredentialInventoryPostgresTest {
     var denied =
         assertThrows(
             AurigaException.class,
-            () -> store.tenant(other, () -> inventory.revoke(instance.toString(), 2)));
+            () -> TenantContext.call(other, () -> inventory.revoke(instance.toString(), 2)));
     assertEquals("common.not_found", denied.errorCode().code());
     verifyNoInteractions(managed);
   }
@@ -175,7 +180,7 @@ class CredentialInventoryPostgresTest {
         store.tenant(
             tenant,
             () ->
-                new CredentialInventory(store, managed, clock, audit)
+                new CredentialInventory(store, managed, clock, audit, List::of, () -> rotation)
                     .list("signing", "retiring", true));
     assertTrue(result.path("items").size() >= 1);
     assertFalse(result.toString().contains("must-not-leak"));
@@ -233,35 +238,39 @@ class CredentialInventoryPostgresTest {
             mock(auriga.workspace.api.ManagedInstanceBindings.class),
             mock(auriga.iam.api.InstanceAiAuthorization.class),
             clock);
-    store.tenant(
+    TenantContext.call(
         tenant,
         () -> {
           var result =
-              new CredentialInventory(store, real, clock, audit).revoke(instance.toString(), 2);
+              new CredentialInventory(store, real, clock, audit, List::of, () -> rotation)
+                  .revoke(instance.toString(), 2);
           assertEquals("revoked", result.path("status").asString());
-          assertTrue(store.byId("session", sessionId, false).path("revoked").asBoolean());
-          var lineage = store.get("managed_device", instance.toString(), false);
           assertTrue(
-              store
-                  .get("device", lineage.path("device").asString(), false)
-                  .path("revoked")
-                  .asBoolean());
+              store.tx(() -> store.byId("session", sessionId, false).path("revoked").asBoolean()));
+          var lineage = store.tx(() -> store.get("managed_device", instance.toString(), false));
+          assertTrue(
+              store.tx(
+                  () ->
+                      store
+                          .get("device", lineage.path("device").asString(), false)
+                          .path("revoked")
+                          .asBoolean()));
           return null;
         });
   }
 
   @Test
   void staleVersionCannotRevokeReplacement() {
-    var inventory = new CredentialInventory(store, managed, clock, audit);
+    var inventory = new CredentialInventory(store, managed, clock, audit, List::of, () -> rotation);
     assertEquals(
         409,
         assertThrows(
                 AurigaException.class,
-                () -> store.tenant(tenant, () -> inventory.revoke(instance.toString(), 1)))
+                () -> TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 1)))
             .errorCode()
             .httpStatus());
     verifyNoInteractions(managed);
-    store.tenant(tenant, () -> inventory.revoke(instance.toString(), 2));
+    TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 2));
     verify(audit)
         .record(
             argThat(
@@ -275,5 +284,91 @@ class CredentialInventoryPostgresTest {
                     r.getTenantId().equals(tenant.toString())
                         && r.getInstanceId().equals(instance.toString())
                         && r.getCredentialVersion() == 2));
+  }
+
+  @Test
+  void rotationRunsAfterIamCommitAndReadbackShowsReplacement() {
+    var inventory = new CredentialInventory(store, managed, clock, audit, List::of, () -> rotation);
+    when(rotation.rotate(any(), any(), anyLong()))
+        .thenAnswer(
+            call -> {
+              assertFalse(
+                  org.springframework.transaction.support.TransactionSynchronizationManager
+                      .isActualTransactionActive());
+              return 3L;
+            });
+    var result = TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 2));
+    assertEquals(3, result.path("replacementVersion").asLong());
+    when(rotation.currentVersion(any(), any())).thenReturn(3L);
+    assertEquals(
+        3,
+        TenantContext.call(tenant, () -> inventory.list("managed", null, false))
+            .path("items")
+            .get(0)
+            .path("replacementVersion")
+            .asLong());
+    verify(rotation).rotate(tenant, instance, 2);
+  }
+
+  @Test
+  void metadataSourcesCannotSmuggleSecretValuesAndMissingSourcesAreExplicit() {
+    var source = mock(auriga.iam.api.CredentialMetadataSource.class);
+    when(source.name()).thenReturn("fixture");
+    when(source.snapshot())
+        .thenReturn(
+            new auriga.iam.api.CredentialMetadataSource.Snapshot(
+                List.of(
+                    new auriga.iam.api.CredentialMetadataSource.Entry(
+                        "service:edge",
+                        "service",
+                        "iam-service-issuance",
+                        "v1",
+                        clock.instant(),
+                        clock.instant().plusSeconds(60),
+                        "active")),
+                List.of(
+                    new auriga.iam.api.CredentialMetadataSource.Gap(
+                        "identity-header", "not_reported"))));
+    var inventory =
+        new CredentialInventory(
+            store, managed, clock, audit, () -> List.of(source), () -> rotation);
+    var result = TenantContext.call(tenant, () -> inventory.list("service", null, true));
+    assertEquals(1, result.path("items").size());
+    assertEquals("v1", result.path("items").get(0).path("versionLabel").asString());
+    assertEquals("identity-header", result.path("sourceGaps").get(0).path("source").asString());
+    assertFalse(result.toString().contains("private"));
+  }
+
+  @Test
+  void workspaceFailureCanRetryAfterCommittedRevocationWithoutHoldingIamResources() {
+    var real =
+        new IamManagedDevices(
+            store,
+            mock(SessionManager.class),
+            mock(TokenService.class),
+            mock(Secrets.class),
+            mock(auriga.workspace.api.ManagedInstanceBindings.class),
+            mock(auriga.iam.api.InstanceAiAuthorization.class),
+            clock);
+    var inventory = new CredentialInventory(store, real, clock, audit, List::of, () -> rotation);
+    when(rotation.rotate(any(), any(), anyLong()))
+        .thenThrow(new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE))
+        .thenReturn(3L);
+    assertThrows(
+        AurigaException.class,
+        () -> TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 2)));
+    assertTrue(
+        store.tenant(
+            tenant,
+            () ->
+                store
+                    .get("managed_device", instance.toString(), false)
+                    .path("revoked")
+                    .asBoolean()));
+    assertEquals(
+        3,
+        TenantContext.call(tenant, () -> inventory.revoke(instance.toString(), 2))
+            .path("replacementVersion")
+            .asLong());
   }
 }

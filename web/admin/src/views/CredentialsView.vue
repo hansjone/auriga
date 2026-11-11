@@ -2,12 +2,16 @@
 import { onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import { ElButton, ElTable, ElTableColumn } from 'element-plus';
 import { isApiError } from '@auriga/shared';
-import { credentialsApi, type Credential } from '../admin/credentialsApi';
+import {
+  credentialsApi,
+  type Credential,
+  type CredentialGap,
+} from '../admin/credentialsApi';
 import { adminApi } from '../admin/api';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
 import '../admin/management.css';
-const { t } = useAdminI18n();
+const { t, te } = useAdminI18n();
 const rows = shallowRef<Credential[]>([]);
 const pending = shallowRef<Credential>();
 const type = ref(''),
@@ -16,8 +20,8 @@ const type = ref(''),
 const loading = ref(false),
   busy = ref(false),
   allowed = ref(false);
-const services = ref(true),
-  error = ref(''),
+const gaps = shallowRef<CredentialGap[]>([]);
+const error = ref(''),
   notice = ref('');
 let alive = true;
 onBeforeUnmount(() => {
@@ -25,6 +29,22 @@ onBeforeUnmount(() => {
 });
 function failure(e: unknown) {
   return isApiError(e) && e.status === 403 ? t('forbidden') : t('failed');
+}
+function typeName(value: string) {
+  const labels: Record<string, string> = {
+    managed: 'credentialManaged',
+    signing: 'credentialSigning',
+    service: 'credentialService',
+    node: 'credentialNode',
+    keyset: 'credentialKeyset',
+  };
+  return t(labels[value] ?? 'credentialUnknown');
+}
+function sourceName(value: string) {
+  if (value.startsWith('service:'))
+    return t('credentialService') + ' ' + value.slice(8);
+  const key = 'credentialSources.' + value;
+  return te(key) ? t(key) : value;
 }
 async function load() {
   if (loading.value || busy.value || pending.value) return;
@@ -47,7 +67,7 @@ async function load() {
     if (!alive) return;
     allowed.value = true;
     rows.value = result.items;
-    services.value = result.serviceMetadataAvailable;
+    gaps.value = result.sourceGaps ?? [];
   } catch (e) {
     if (alive) error.value = failure(e);
   } finally {
@@ -57,8 +77,7 @@ async function load() {
 function ask(id: string) {
   if (!allowed.value || busy.value || loading.value || pending.value) return;
   pending.value = rows.value.find(
-    (row) =>
-      row.id === id && row.type === 'managed' && row.status !== 'revoked',
+    (row) => row.id === id && row.type === 'managed' && !row.replacementVersion,
   );
 }
 async function confirm() {
@@ -69,9 +88,12 @@ async function confirm() {
   error.value = '';
   notice.value = '';
   try {
-    await credentialsApi.revoke(row.instanceId, row.version);
+    const result = await credentialsApi.revoke(row.instanceId, row.version);
     succeeded = true;
-    if (alive) notice.value = t('credentialRevoked');
+    if (alive)
+      notice.value = t('credentialRevoked', {
+        version: result.replacementVersion ?? '',
+      });
   } catch (e) {
     if (alive) {
       error.value = failure(e);
@@ -107,6 +129,9 @@ onMounted(load);
           <option value="">{{ t('credentialAll') }}</option>
           <option value="managed">{{ t('credentialManaged') }}</option>
           <option value="signing">{{ t('credentialSigning') }}</option>
+          <option value="service">{{ t('credentialService') }}</option>
+          <option value="node">{{ t('credentialNode') }}</option>
+          <option value="keyset">{{ t('credentialKeyset') }}</option>
         </select></label
       >
       <label
@@ -154,18 +179,26 @@ onMounted(load);
       <ElTable :data="rows" :empty-text="t('credentialEmpty')">
         <ElTableColumn :label="t('credentialType')" width="140"
           ><template #default="{ row }">{{
-            t(
-              row.type === 'managed'
-                ? 'credentialManaged'
-                : 'credentialSigning',
-            )
+            typeName(row.type)
+          }}</template></ElTableColumn
+        >
+        <ElTableColumn :label="t('credentialSource')" min-width="160"
+          ><template #default="{ row }">{{
+            row.source ? sourceName(row.source) : typeName(row.type)
           }}</template></ElTableColumn
         >
         <ElTableColumn prop="id" :label="t('credentialId')" min-width="260" />
         <ElTableColumn :label="t('credentialVersion')" width="100"
-          ><template #default="{ row }">{{
-            row.version ?? row.id
-          }}</template></ElTableColumn
+          ><template #default="{ row }"
+            >{{ row.versionLabel ?? row.version ?? row.id
+            }}<span
+              v-if="row.replacementVersion"
+              data-testid="replacement-version"
+              >{{
+                t('credentialReplacement', { version: row.replacementVersion })
+              }}</span
+            ></template
+          ></ElTableColumn
         >
         <ElTableColumn :label="t('credentialStatus')" width="100"
           ><template #default="{ row }">{{
@@ -188,7 +221,7 @@ onMounted(load);
               v-if="row.type === 'managed'"
               data-testid="revoke"
               :disabled="
-                loading || busy || !!pending || row.status === 'revoked'
+                loading || busy || !!pending || !!row.replacementVersion
               "
               @click="ask(row.id)"
               >{{ t('credentialRevoke') }}</ElButton
@@ -196,7 +229,13 @@ onMounted(load);
           ></ElTableColumn
         >
       </ElTable>
-      <p v-if="!services" class="muted">{{ t('credentialServices') }}</p>
+      <aside v-if="gaps.length" class="muted" data-testid="source-gaps">
+        <h2>{{ t('credentialGap') }}</h2>
+        <p v-for="gap in gaps" :key="gap.source + gap.reason">
+          {{ sourceName(gap.source) }}:
+          {{ t('credentialReasons.' + gap.reason) }}
+        </p>
+      </aside>
     </template>
     <ActionConfirm
       :message="pending ? t('credentialConfirm') : undefined"

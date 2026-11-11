@@ -22,8 +22,20 @@ public class CredentialAdminController {
       IamStore store,
       IamManagedDevices managed,
       Clock clock,
-      auriga.common.audit.AuditLogger audit) {
-    inventory = new CredentialInventory(store, managed, clock, audit);
+      auriga.common.audit.AuditLogger audit,
+      org.springframework.beans.factory.ObjectProvider<auriga.iam.api.CredentialMetadataSource>
+          sources,
+      org.springframework.beans.factory.ObjectProvider<
+              auriga.workspace.api.ManagedCredentialRotation>
+          rotations) {
+    inventory =
+        new CredentialInventory(
+            store,
+            managed,
+            clock,
+            audit,
+            () -> sources.orderedStream().toList(),
+            rotations::getIfAvailable);
   }
 
   @GetMapping
