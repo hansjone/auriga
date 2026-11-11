@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+const maxOpenFlows = 8
+
+var errTicketFlow = errString("ticket flow mismatch")
+
 const ticketSweepEvery = 64 // purge expired entries every N mutations
 
 // InstanceTarget is server-selected, never a browser-provided return URL.
@@ -16,6 +20,9 @@ type InstanceTarget struct {
 
 // Ticket binds a one-time open grant to a portal session and instance.
 type Ticket struct {
+	FlowID           string   // non-authorizing, independently random per open
+	EvictedFlows     []string // cookie cleanup for this issuance only
+	issuedOrder      uint64
 	Token            string
 	SessionID        string
 	SessionKey       string
@@ -47,17 +54,18 @@ type InstBinding struct {
 // TicketStore issues one-time tickets and instance cookie bindings.
 type TicketStore interface {
 	Issue(sessionID, sessionKey, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time, target ...InstanceTarget) (*Ticket, error)
-	Redeem(token string) (*Ticket, error)
+	Redeem(token, flow string) (*Ticket, error)
 	BindInstance(sessionID, sessionKey, accountID, tenantID, instanceID string, expiresAt time.Time, target ...InstanceTarget) (*InstBinding, error)
 	LookupInstance(cookieRaw string) (*InstBinding, error)
 }
 
 type MemoryTicketStore struct {
-	mu       sync.Mutex
-	tickets  map[string]*Ticket
-	bindings map[string]*InstBinding
-	now      func() time.Time
-	ops      int
+	mu        sync.Mutex
+	tickets   map[string]*Ticket
+	bindings  map[string]*InstBinding
+	now       func() time.Time
+	ops       int
+	flowOrder uint64
 }
 
 func NewMemoryTicketStore() *MemoryTicketStore {
@@ -73,7 +81,12 @@ func (m *MemoryTicketStore) Issue(sessionID, sessionKey, accountID, tenantID, in
 	if err != nil {
 		return nil, err
 	}
+	flow, err := randomID(12)
+	if err != nil {
+		return nil, err
+	}
 	t := &Ticket{
+		FlowID:           flow,
 		Token:            tok,
 		SessionID:        sessionID,
 		SessionKey:       sessionKey,
@@ -88,6 +101,31 @@ func (m *MemoryTicketStore) Issue(sessionID, sessionKey, accountID, tenantID, in
 		t.Target = target[0]
 	}
 	m.mu.Lock()
+	m.flowOrder++
+	t.issuedOrder = m.flowOrder
+	// Serialize issuance and eviction so concurrent opens have one stable order.
+	now := m.now().UTC()
+	for {
+		count := 0
+		var oldest *Ticket
+		for key, pending := range m.tickets {
+			if !now.Before(pending.ExpiresAt) {
+				delete(m.tickets, key)
+				continue
+			}
+			if pending.SessionKey == sessionKey && pending.SessionID == sessionID && pending.InstanceID == instanceID {
+				count++
+				if oldest == nil || pending.issuedOrder < oldest.issuedOrder {
+					oldest = pending
+				}
+			}
+		}
+		if count < maxOpenFlows {
+			break
+		}
+		t.EvictedFlows = append(t.EvictedFlows, oldest.FlowID)
+		delete(m.tickets, oldest.Token)
+	}
 	m.tickets[tok] = t
 	m.maybeSweepLocked()
 	m.mu.Unlock()
@@ -95,13 +133,16 @@ func (m *MemoryTicketStore) Issue(sessionID, sessionKey, accountID, tenantID, in
 	return &cp, nil
 }
 
-func (m *MemoryTicketStore) Redeem(token string) (*Ticket, error) {
+func (m *MemoryTicketStore) Redeem(token, flow string) (*Ticket, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.maybeSweepLocked()
 	t, ok := m.tickets[token]
 	if !ok || t == nil {
 		return nil, fmt.Errorf("ticket not found")
+	}
+	if t.FlowID != flow {
+		return nil, errTicketFlow
 	}
 	if t.Used {
 		return nil, fmt.Errorf("ticket already used")

@@ -331,7 +331,7 @@ func TestAudit6_TicketAndBindingSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.now = func() time.Time { return fixed.Add(2 * time.Second) }
-	if _, err := store.Redeem(tok.Token); err == nil {
+	if _, err := store.Redeem(tok.Token, tok.FlowID); err == nil {
 		t.Fatal("expired ticket should fail")
 	}
 	store.mu.Lock()

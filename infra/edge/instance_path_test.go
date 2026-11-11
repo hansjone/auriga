@@ -410,7 +410,7 @@ func TestIPBrowserRejectsPathsCookiesAndTicketAbuse(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"missing-nonce", 403, "edge.bad_ticket_nav"}, {"wrong-nonce", 403, "edge.bad_ticket_nav"}, {"duplicate-nonce", 403, "edge.bad_ticket_nav"}, {"cross-instance", 403, "edge.bad_ticket"}, {"expired", 401, "edge.bad_ticket"}, {"revoked", 401, "edge.bad_ticket"}, {"foreign-tenant", 401, "edge.bad_ticket"}, {"replaced-sid", 401, "edge.bad_ticket"}, {"return-query", 400, "edge.bad_ticket"}, {"replay", 401, "edge.bad_ticket"},
+		{"missing-nonce", 403, "edge.bad_ticket_nav"}, {"wrong-nonce", 403, "edge.bad_ticket_nav"}, {"duplicate-nonce", 403, "edge.bad_ticket_nav"}, {"cross-instance", 403, "edge.bad_ticket"}, {"expired", 401, "edge.bad_ticket"}, {"revoked", 401, "edge.bad_ticket"}, {"foreign-tenant", 401, "edge.bad_ticket"}, {"foreign-account", 401, "edge.bad_ticket"}, {"replaced-sid", 401, "edge.bad_ticket"}, {"return-query", 400, "edge.bad_ticket"}, {"replay", 401, "edge.bad_ticket"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			browser := newIPBrowser(t, false, http.NotFoundHandler())
@@ -431,11 +431,14 @@ func TestIPBrowserRejectsPathsCookiesAndTicketAbuse(t *testing.T) {
 			if tt.name == "revoked" {
 				browser.sessions.Revoke("11111111-1111-1111-1111-111111111111")
 			}
-			if tt.name == "foreign-tenant" || tt.name == "replaced-sid" {
+			if tt.name == "foreign-tenant" || tt.name == "foreign-account" || tt.name == "replaced-sid" {
 				s, _ := browser.sessions.Get(t.Context(), HashCookie("portal"))
-				if tt.name == "foreign-tenant" {
+				switch tt.name {
+				case "foreign-tenant":
 					s.TenantID = "other-tenant"
-				} else {
+				case "foreign-account":
+					s.AccountID = "other-account"
+				default:
 					s.SessionID = "other-session"
 				}
 				browser.sessions.Put("portal", s)

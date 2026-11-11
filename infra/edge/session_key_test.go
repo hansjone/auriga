@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,7 +63,7 @@ func TestInstanceAccessWithKeyOnlySessionStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nonceName := openNonceCookieName(false, openNonceCookieDomain(cfg.InstanceParentDomain), instID)
+	nonceName := openNonceCookieName(false, openNonceCookieDomain(cfg.InstanceParentDomain), instID, strings.SplitN(u.Query().Get("t"), ".", 2)[0])
 	nonce := ""
 	for _, c := range rr.Result().Cookies() {
 		if c.Name == nonceName {

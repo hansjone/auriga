@@ -122,11 +122,12 @@ func sanitizeCookieNameSuffix(id string) string {
 	return out
 }
 
-func openNonceCookieName(secure bool, domain, instanceID string, mounts ...string) string {
+func openNonceCookieName(secure bool, domain, instanceID, flow string, mounts ...string) string {
 	base := openNonceCookieBase()
 	if instanceID != "" {
 		base = base + "_" + sanitizeCookieNameSuffix(instanceID)
 	}
+	base += "_" + flow
 	if domain == "" && secure {
 		if len(mounts) == 1 && mounts[0] != "/" {
 			return "__Secure-" + base
@@ -136,13 +137,13 @@ func openNonceCookieName(secure bool, domain, instanceID string, mounts ...strin
 	return base
 }
 
-func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID, value string, maxAge int, mounts ...string) {
+func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID, flow, value string, maxAge int, mounts ...string) {
 	mount := "/"
 	if len(mounts) == 1 {
 		mount = mounts[0]
 	}
 	c := &http.Cookie{
-		Name:     openNonceCookieName(secure, domain, instanceID, mount),
+		Name:     openNonceCookieName(secure, domain, instanceID, flow, mount),
 		Value:    value,
 		Path:     mount,
 		HttpOnly: true,
@@ -156,6 +157,6 @@ func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID, 
 	http.SetCookie(w, c)
 }
 
-func clearOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID string, mounts ...string) {
-	setOpenNonceCookie(w, secure, domain, instanceID, "", -1, mounts...)
+func clearOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID, flow string, mounts ...string) {
+	setOpenNonceCookie(w, secure, domain, instanceID, flow, "", -1, mounts...)
 }
