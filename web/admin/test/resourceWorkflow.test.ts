@@ -135,7 +135,7 @@ it('prevents authors from preparing their own review', async () => {
   expect(view.find('[data-testid="approve"]').exists()).toBe(false);
   view.unmount();
 });
-it('allows emergency revocation after ordinary withdrawal without offering another ordinary withdrawal', async () => {
+it('hides withdrawal actions after the version has been withdrawn', async () => {
   membership();
   const withdrawn = { ...version, state: 'withdrawn' as const, revision: 5 };
   vi.spyOn(resourceApi, 'governance').mockResolvedValue({ items: [withdrawn] });
@@ -147,10 +147,10 @@ it('allows emergency revocation after ordinary withdrawal without offering anoth
   await flushPromises();
   await view.get('[data-testid="detail"]').trigger('click');
   await flushPromises();
-  expect(view.findAll('button').some((b) => b.text() === '下架')).toBe(false);
-  expect(view.text()).toContain('紧急撤销并停止受影响实例');
+  expect(view.find('.market-danger').exists()).toBe(false);
   view.unmount();
 });
+
 it('shows actual pending generations without inventing a successful application', async () => {
   membership();
   vi.spyOn(resourceApi, 'distributions').mockResolvedValue({
@@ -268,5 +268,57 @@ it('labels a recovered private personal draft as unreviewed before confirming it
     '"1"',
     expect.any(String),
   );
+  view.unmount();
+});
+
+it('keeps distinct historical versions visible with their reported distribution outcomes', async () => {
+  membership();
+  vi.spyOn(resourceApi, 'distributions').mockResolvedValue({
+    items: [
+      {
+        id: 'old',
+        instanceId: 'instance',
+        ownerId: 'owner',
+        selectionRevision: 1,
+        revision: 2,
+        state: 'applied',
+        generation: 2,
+        observedGeneration: 2,
+        ready: true,
+        selections: [
+          {
+            packageId: 'plugin-package',
+            versionId: 'old-version',
+            action: 'install',
+          },
+        ],
+      },
+      {
+        id: 'new',
+        instanceId: 'instance',
+        ownerId: 'owner',
+        selectionRevision: 2,
+        revision: 1,
+        state: 'applying',
+        generation: 3,
+        observedGeneration: 2,
+        ready: false,
+        selections: [
+          {
+            packageId: 'plugin-package',
+            versionId: 'new-version',
+            action: 'install',
+          },
+        ],
+      },
+    ],
+  });
+  const view = open('distribution');
+  await flushPromises();
+  const rows = view.findAll('tbody tr');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]!.text()).toContain('old-version');
+  expect(rows[1]!.text()).toContain('new-version');
+  expect(rows[0]!.text()).not.toContain('resource.distribution_denied');
   view.unmount();
 });

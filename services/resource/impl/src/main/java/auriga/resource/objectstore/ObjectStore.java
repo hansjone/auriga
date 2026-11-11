@@ -44,6 +44,17 @@ public interface ObjectStore extends AutoCloseable {
   /** Only recognized, expired, unlocked stage directories of this tenant are eligible. */
   int cleanupExpiredStaging(UUID tenant);
 
+  record GarbageCandidate(UUID tenant, String digest) {}
+
+  /** Only physical, recognized committed files older than the cutoff are candidates. */
+  java.util.List<GarbageCandidate> expiredObjects(java.time.Instant cutoff);
+
+  /** Caller holds the same database digest lock as publication through the reference recheck. */
+  boolean deleteExpired(
+      GarbageCandidate candidate,
+      java.time.Instant cutoff,
+      java.util.function.BooleanSupplier unreferenced);
+
   /** Aborts local stages. Does not close streams already handed to their caller. */
   @Override
   void close();

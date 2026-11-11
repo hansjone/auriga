@@ -598,6 +598,7 @@ onBeforeUnmount(() => {
               <tr>
                 <th>{{ t('marketInstance') }}</th>
                 <th>{{ t('marketSelection') }}</th>
+                <th>{{ t('marketPackage') }} / {{ t('marketVersion') }}</th>
                 <th>{{ t('status') }}</th>
                 <th>{{ t('marketGeneration') }}</th>
                 <th>{{ t('details') }}</th>
@@ -607,6 +608,17 @@ onBeforeUnmount(() => {
               <tr v-for="row in distributions" :key="row.id">
                 <td>{{ row.instanceId }}</td>
                 <td>{{ row.selectionRevision }}</td>
+                <td>
+                  <ul v-if="row.selections?.length">
+                    <li
+                      v-for="selection in row.selections"
+                      :key="selection.packageId"
+                    >
+                      {{ selection.packageId }} / {{ selection.versionId }}
+                    </li>
+                  </ul>
+                  <span v-else>—</span>
+                </td>
                 <td>{{ t('marketDistributionStates.' + row.state) }}</td>
                 <td>
                   {{ row.generation ?? '—' }} /
@@ -841,11 +853,7 @@ onBeforeUnmount(() => {
             >
               {{ t('marketPublish') }}</button
             ><template
-              v-if="
-                ['published', 'deprecated', 'withdrawn'].includes(
-                  detail.version.state,
-                )
-              "
+              v-if="['published', 'deprecated'].includes(detail.version.state)"
               ><p>{{ t('marketWithdrawNote') }}</p>
               <div class="market-toolbar">
                 <button

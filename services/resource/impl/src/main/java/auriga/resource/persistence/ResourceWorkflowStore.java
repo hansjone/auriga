@@ -159,8 +159,21 @@ public final class ResourceWorkflowStore {
 
   public void saveRevocations(ObjectNode body) {
     jdbc.update(
-        "INSERT INTO resource.resource_revocations(id,tenant_id,revision,document) VALUES(:id,:tenant,:rev,CAST(:body AS jsonb)) ON CONFLICT(tenant_id) DO UPDATE SET revision=excluded.revision,document=excluded.document",
+        "INSERT INTO resource.resource_revocations(id,tenant_id,revision,document) VALUES(:id,:tenant,:rev,CAST(:body AS jsonb)) ON CONFLICT(tenant_id) DO UPDATE SET revision=excluded.revision,document=excluded.document,needs_resign=false",
         args("id", UuidV7.next(), "rev", body.path("revision").asLong(), "body", body.toString()));
+  }
+
+  public void enqueueRevocations(long revision) {
+    update(
+        "INSERT INTO resource.resource_revocation_delivery(tenant_id,instance_id,revision) SELECT DISTINCT tenant_id,instance_id,:rev FROM resource.resource_distribution WHERE tenant_id=:tenant ON CONFLICT(tenant_id,instance_id) DO UPDATE SET revision=greatest(resource.resource_revocation_delivery.revision,excluded.revision)",
+        args("rev", revision));
+  }
+
+  public boolean needsRevocationSignature() {
+    return !rows(
+            "SELECT id FROM resource.resource_revocations WHERE tenant_id=:tenant AND needs_resign",
+            args())
+        .isEmpty();
   }
 
   public List<Map<String, Object>> distributions(UUID after, int limit) {
@@ -184,6 +197,9 @@ public final class ResourceWorkflowStore {
             .put("selectionRevision", number(row, "selection_revision"))
             .put("state", row.get("state").toString())
             .put("revision", number(row, "revision"));
+    out.set("selections", json(row, "selections"));
+    if (row.get("applied_generation") != null)
+      out.put("appliedGeneration", number(row, "applied_generation"));
     if (row.get("generation") != null) out.put("generation", number(row, "generation"));
     if (row.get("observed_generation") != null)
       out.put("observedGeneration", number(row, "observed_generation"));

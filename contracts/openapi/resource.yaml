@@ -1105,7 +1105,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "限64MiB gzip归档：流式暂存、摘要/归档验证后登记；不执行安装脚本，不代取任意URL。同版本内容不可覆盖。 L4私有分支在对象验证后签名保存，仍标未审核；不得由此进入共享published。",
+        "description": "限64MiB gzip归档：流式暂存、摘要/归档验证后登记；不执行安装脚本，不代取任意URL。同版本内容不可覆盖。 L4私有分支在对象验证后签名保存，仍标未审核；不得由此进入共享published。 If-Match is mandatory and refers to the package revision. Permissions, ETag, idempotency replay/conflict and version uniqueness are checked before object commit; publication and GC share a digest lock. Upload requires strict SemVer. The archive is at most 64 MiB; edge permits an additional bounded 128 KiB of multipart metadata/framing.",
         "x-permission": "resource.packages.upload",
         "x-error-codes": [
           "common.unauthenticated",
@@ -2195,7 +2195,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "普通下架阻新下载/分发；malicious须签名撤销并由workspace/agent禁用，不能宣称立即清除。",
+        "description": "普通下架阻新下载/分发；malicious须签名撤销并由workspace/agent禁用，不能宣称立即清除。 Repeating malicious withdrawal with a fresh key is an idempotent no-op for an already revoked version/digest; it creates no additional revocation entry. Pending workspace stop delivery is persisted and retried independently of known list revisions.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -2400,7 +2400,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "仅本人实例；逐项核等级/可见/版本/策略，仅记录意图，202不代表已安装。",
+        "description": "仅本人实例；逐项核等级/可见/版本/策略，仅记录意图，202不代表已安装。 Requires recent step-up within 600 seconds for both administrator and member callers; MARKET-CLIENT must align with this contract.",
         "x-permission": "resource.distributions.manage",
         "x-error-codes": [
           "common.unauthenticated",
@@ -4691,6 +4691,710 @@
           }
         }
       }
+    },
+    "/api/resource/v1/member/download-tickets": {
+      "post": {
+        "operationId": "createMemberResourceDownloadTicket",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Authenticated USER portal/admin or DEVICE device context. Live member ACL, policy, published enabled archive and release high water are checked. A 60-second one-use ticket binds member, clientId, packageId, versionId and digest. Device tokens require clientId=did. Ticket appears only in the no-store response/body, never in a URL. Same idempotency key replays the original expiry for 24 hours. Verify the returned signed envelope and revocations with independent trusted roots.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberDownloadTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberDownloadTicketInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/member/downloads": {
+      "post": {
+        "operationId": "consumeMemberResourceDownloadTicket",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Requires the same authenticated member and clientId, rechecks current ACL/publication/revocation. Ticket is atomically consumed before bytes are opened. A repeated or concurrent consume returns 409, including the same request key. This endpoint never replays bytes; disconnects require a fresh ticket and request key. Range returns 400. No credentials in URL.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original verified archive bytes. Cache-Control: no-store.",
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberDownloadInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/member/installations": {
+      "post": {
+        "operationId": "selectMemberResourceInstallation",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Own member/client selection only; device clientId must equal did. If-Match is required: use \"0\" for the first selection, then the returned installation revision. L0 is deployment-fixed; L1 cannot be disabled/removed; L2 cannot be removed. Install/enable require current ACL, policy, published enabled high-water version and matching digest. Disabled/removed rows retain durable high water. 202 is applying until an exact revision/version/digest report. Uses 24-hour actor-scoped idempotency.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IfMatch"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Success. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberInstallation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberInstallationInput"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listMemberResourceInstallations",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Only the authenticated member/client rows. reportSource=member is a desktop client report, separate from workspace node inventory. Keyset pagination uses nextAfterPackageId. Removed rows retain high water.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "clientId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "afterPackageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberInstallationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/member/installation-reports": {
+      "post": {
+        "operationId": "reportMemberResourceInstallation",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Authenticated member/client reports only its exact installationRevision, versionId and digest. Stale reports return 409. Applied enabled versions are reauthorized; failed returns the fixed resource.apply_failed code. Does not accept arbitrary error text. Report and selection revision are separate; reportedRevision identifies the actual client observation.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberInstallation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request rejected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberInstallationReport"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5291,6 +5995,46 @@
             "format": "int64",
             "minimum": 1,
             "maximum": 9007199254740991
+          },
+          "selections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "packageId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "versionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "install",
+                    "enable",
+                    "disable",
+                    "remove"
+                  ]
+                }
+              },
+              "required": [
+                "packageId",
+                "versionId",
+                "action"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 128,
+            "minItems": 1
+          },
+          "appliedGeneration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64",
+            "description": "Last generation genuinely observed ready. Historical rows retain this successful observation after a newer selection replaces them."
           }
         },
         "required": [
@@ -5587,6 +6331,9 @@
               "$ref": "#/components/schemas/MarketAdminFile"
             },
             "maxItems": 4096
+          },
+          "revoked": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -5611,6 +6358,273 @@
           },
           "nextCursor": {
             "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "MemberDownloadTicketInput": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "packageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "clientId",
+          "packageId",
+          "versionId",
+          "digest"
+        ],
+        "additionalProperties": false
+      },
+      "MemberDownloadTicket": {
+        "type": "object",
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resourceEnvelope": {
+            "$ref": "#/components/schemas/ResourceEnvelope"
+          },
+          "revocations": {
+            "$ref": "#/components/schemas/RevocationList"
+          }
+        },
+        "required": [
+          "ticket",
+          "clientId",
+          "expiresAt",
+          "resourceEnvelope",
+          "revocations"
+        ],
+        "additionalProperties": false
+      },
+      "MemberDownloadInput": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ticket": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          }
+        },
+        "required": [
+          "clientId",
+          "ticket"
+        ],
+        "additionalProperties": false
+      },
+      "MemberInstallationInput": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "packageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "install",
+              "enable",
+              "disable",
+              "remove"
+            ]
+          }
+        },
+        "required": [
+          "clientId",
+          "packageId",
+          "versionId",
+          "digest",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "MemberInstallationReport": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "packageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "installationRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "clientId",
+          "packageId",
+          "versionId",
+          "digest",
+          "installationRevision",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "MemberInstallation": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "packageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "releaseSequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "l1",
+              "l2",
+              "l3",
+              "l4"
+            ]
+          },
+          "desired": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "removed"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "applying",
+              "applied",
+              "failed"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "reportSource": {
+            "type": "string",
+            "const": "member"
+          },
+          "reportedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "reportedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "errorCode": {
+            "type": "string",
+            "const": "resource.apply_failed"
+          }
+        },
+        "required": [
+          "clientId",
+          "packageId",
+          "versionId",
+          "digest",
+          "releaseSequence",
+          "level",
+          "desired",
+          "state",
+          "revision",
+          "reportSource"
+        ],
+        "additionalProperties": false
+      },
+      "MemberInstallationPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/MemberInstallation"
+            }
+          },
+          "nextAfterPackageId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [

@@ -40,6 +40,20 @@ public final class ResourceAccess {
     return resolve(principal, UPLOAD);
   }
 
+  public Reader member(AurigaPrincipal principal) {
+    if (principal == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    boolean device =
+        principal.type() == PrincipalType.DEVICE
+            && principal.context() == auriga.common.security.TokenContext.DEVICE
+            && principal.deviceId() != null;
+    boolean user =
+        principal.type() == PrincipalType.USER
+            && (principal.context() == auriga.common.security.TokenContext.PORTAL
+                || principal.context() == auriga.common.security.TokenContext.ADMIN);
+    if (!device && !user) throw new AurigaException(CommonErrors.FORBIDDEN);
+    return resolve(principal, READ);
+  }
+
   public Reader administrator(AurigaPrincipal principal, String permission) {
     if (principal == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     if (principal.type() != PrincipalType.USER

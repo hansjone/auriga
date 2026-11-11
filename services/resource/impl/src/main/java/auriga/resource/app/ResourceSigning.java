@@ -76,6 +76,13 @@ public final class ResourceSigning {
     throw new IllegalArgumentException("Outside integer JCS domain");
   }
 
+  public static String time(java.time.Instant value) {
+    return java.time.format.DateTimeFormatter.ISO_INSTANT
+        .format(value)
+        .replaceFirst("(\\.\\d*?[1-9])0+Z$", "$1Z")
+        .replaceFirst("\\.0+Z$", "Z");
+  }
+
   private static String quote(String text) {
     for (int i = 0; i < text.length(); i++) {
       char c = text.charAt(i);
@@ -84,7 +91,21 @@ public final class ResourceSigning {
           throw new IllegalArgumentException("Invalid Unicode");
       } else if (Character.isLowSurrogate(c)) throw new IllegalArgumentException("Invalid Unicode");
     }
-    return JSON.writeValueAsString(text);
+    String encoded = JSON.writeValueAsString(text);
+    var result = new StringBuilder();
+    for (int i = 0; i < encoded.length(); i++) {
+      char c = encoded.charAt(i);
+      result.append(c);
+      if (c == '\\' && i + 1 < encoded.length()) {
+        char escaped = encoded.charAt(++i);
+        result.append(escaped);
+        if (escaped == 'u') {
+          result.append(encoded.substring(i + 1, i + 5).toLowerCase(Locale.ROOT));
+          i += 4;
+        }
+      }
+    }
+    return result.toString();
   }
 
   public static PrivateKey load(Path path) {
@@ -103,7 +124,16 @@ public final class ResourceSigning {
           Files.getFileAttributeView(
               parent, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
       if (parentPosix != null) {
-        var permissions = parentPosix.readAttributes().permissions();
+        var directory = parentPosix.readAttributes();
+        var serviceOwner =
+            parent
+                .getFileSystem()
+                .getUserPrincipalLookupService()
+                .lookupPrincipalByName(System.getProperty("user.name"));
+        if (!directory.owner().equals(serviceOwner)
+            || !directory.permissions().equals(PosixFilePermissions.fromString("rwx------")))
+          throw new IllegalArgumentException("Unsafe key directory owner or permissions");
+        var permissions = directory.permissions();
         if (permissions.contains(PosixFilePermission.GROUP_WRITE)
             || permissions.contains(PosixFilePermission.OTHERS_WRITE))
           throw new IllegalArgumentException("Writable key directory");
@@ -112,6 +142,15 @@ public final class ResourceSigning {
           Files.getFileAttributeView(
               absolute, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
       if (posix != null) {
+        if (!posix
+            .readAttributes()
+            .owner()
+            .equals(
+                absolute
+                    .getFileSystem()
+                    .getUserPrincipalLookupService()
+                    .lookupPrincipalByName(System.getProperty("user.name"))))
+          throw new IllegalArgumentException("Invalid key owner");
         if (posix.readAttributes().permissions().stream()
             .anyMatch(p -> p.name().startsWith("GROUP_") || p.name().startsWith("OTHERS_")))
           throw new IllegalArgumentException("Exposed key");

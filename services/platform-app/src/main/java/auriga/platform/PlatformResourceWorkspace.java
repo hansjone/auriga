@@ -109,6 +109,7 @@ public final class PlatformResourceWorkspace implements ResourceWorkspace {
           service.store.lock();
           var row = service.store.instance(instance);
           var previous = WorkspaceService.spec(row);
+          var currentRevocations = effective(previous, revocations);
           if (!owner.equals(row.get("owner_id"))
               || inputs.member(tenant, owner).getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE)
             throw new AurigaException(CommonErrors.FORBIDDEN);
@@ -116,12 +117,10 @@ public final class PlatformResourceWorkspace implements ResourceWorkspace {
             throw new AurigaException(CommonErrors.CONFLICT);
           if (refresh && previous.getResourceSelectionRevision() != revision)
             throw new AurigaException(CommonErrors.CONFLICT);
-          if (!refresh && previous.getResourceSelectionRevision() == revision) return view(row);
-          if (number(row, "generation") >= 9007199254740991L)
-            throw new AurigaException(CommonErrors.CONFLICT);
+          boolean replay = !refresh && previous.getResourceSelectionRevision() == revision;
           Map<String, PluginRef> plugins = new LinkedHashMap<>();
           previous.getPluginsList().forEach(p -> plugins.put(p.getName(), p));
-          for (var change : changes) {
+          for (var change : replay ? List.<Selection>of() : changes) {
             if (refresh && !change.action().equals("retain"))
               throw new AurigaException(CommonErrors.FORBIDDEN);
             var plugin = change.plugin();
@@ -176,10 +175,20 @@ public final class PlatformResourceWorkspace implements ResourceWorkspace {
               default -> throw new AurigaException(CommonErrors.VALIDATION_FAILED);
             }
           }
-          if (refresh
+          boolean affected = affected(plugins.values(), currentRevocations);
+          if (affected)
+            plugins.replaceAll(
+                (name, plugin) ->
+                    revoked(plugin, currentRevocations)
+                        ? plugin.toBuilder().setEnabled(false).build()
+                        : plugin);
+          if ((refresh || replay)
+              && (!affected || previous.getDesired() == DesiredState.DESIRED_STATE_STOPPED)
               && previous.getPluginsList().equals(new ArrayList<>(plugins.values()))
-              && previous.getResourceRevocationsList().equals(List.of(revocations)))
+              && previous.getResourceRevocationsList().equals(List.of(currentRevocations)))
             return view(row);
+          if (number(row, "generation") >= 9007199254740991L)
+            throw new AurigaException(CommonErrors.CONFLICT);
           var next =
               previous.toBuilder()
                   .clearPlugins()
@@ -187,11 +196,40 @@ public final class PlatformResourceWorkspace implements ResourceWorkspace {
                   .setResourceSelectionRevision(revision)
                   .setGeneration(number(row, "generation") + 1)
                   .clearResourceRevocations()
-                  .addResourceRevocations(revocations)
+                  .addResourceRevocations(currentRevocations)
                   .build();
+          if (affected)
+            next = next.toBuilder().setDesired(DesiredState.DESIRED_STATE_STOPPED).build();
           service.saveSpec(row, next);
           return view(service.store.instance(instance));
         });
+  }
+
+  private static ResourceRevocationList effective(
+      InstanceSpec spec, ResourceRevocationList incoming) {
+    return spec.getResourceRevocationsList().stream()
+        .filter(
+            r ->
+                r.getTenantId().equals(incoming.getTenantId())
+                    && r.getRevision() > incoming.getRevision())
+        .max(Comparator.comparingLong(ResourceRevocationList::getRevision))
+        .orElse(incoming);
+  }
+
+  private static boolean affected(Collection<PluginRef> plugins, ResourceRevocationList list) {
+    return plugins.stream().anyMatch(p -> revoked(p, list));
+  }
+
+  private static boolean revoked(PluginRef plugin, ResourceRevocationList list) {
+    if (!plugin.hasResourceEnvelope()) return false;
+    var envelope = plugin.getResourceEnvelope();
+    return list.getRevokedKidsList().contains(envelope.getSignature().getKid())
+        || list.getRevokedArtifactsList().stream()
+            .anyMatch(
+                a ->
+                    a.getPackageId().equals(envelope.getPackageId())
+                        && a.getVersionId().equals(envelope.getVersionId())
+                        && a.getDigest().equals(plugin.getDigest()));
   }
 
   @Override
@@ -202,35 +240,23 @@ public final class PlatformResourceWorkspace implements ResourceWorkspace {
           service.store.lock();
           var row = service.store.instance(instance);
           var old = WorkspaceService.spec(row);
-          long known =
-              old.getResourceRevocationsList().stream()
-                  .filter(r -> r.getTenantId().equals(tenant.toString()))
-                  .mapToLong(ResourceRevocationList::getRevision)
-                  .max()
-                  .orElse(0);
-          if (known >= revocations.getRevision()) return null;
-          boolean affected =
+          var effective = effective(old, revocations);
+          boolean affected = affected(old.getPluginsList(), effective);
+          var plugins =
               old.getPluginsList().stream()
-                  .filter(PluginRef::hasResourceEnvelope)
-                  .anyMatch(
-                      p ->
-                          revocations
-                                  .getRevokedKidsList()
-                                  .contains(p.getResourceEnvelope().getSignature().getKid())
-                              || revocations.getRevokedArtifactsList().stream()
-                                  .anyMatch(
-                                      a ->
-                                          a.getPackageId()
-                                                  .equals(p.getResourceEnvelope().getPackageId())
-                                              && a.getVersionId()
-                                                  .equals(p.getResourceEnvelope().getVersionId())
-                                              && a.getDigest().equals(p.getDigest())));
+                  .map(p -> revoked(p, effective) ? p.toBuilder().setEnabled(false).build() : p)
+                  .toList();
+          if (old.getResourceRevocationsList().equals(List.of(effective))
+              && old.getPluginsList().equals(plugins)
+              && (!affected || old.getDesired() == DesiredState.DESIRED_STATE_STOPPED)) return null;
           if (old.getGeneration() >= 9007199254740991L)
             throw new AurigaException(CommonErrors.CONFLICT);
           var next =
               old.toBuilder()
                   .clearResourceRevocations()
-                  .addResourceRevocations(revocations)
+                  .addResourceRevocations(effective)
+                  .clearPlugins()
+                  .addAllPlugins(plugins)
                   .setGeneration(old.getGeneration() + 1);
           if (affected) next.setDesired(DesiredState.DESIRED_STATE_STOPPED);
           service.saveSpec(row, next.build());

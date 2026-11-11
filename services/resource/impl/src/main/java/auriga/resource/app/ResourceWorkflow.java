@@ -59,6 +59,7 @@ public final class ResourceWorkflow {
   }
 
   private ResourceAccess.Reader authorize(AurigaPrincipal actor, String permission, boolean admin) {
+    if (permission.equals(ResourceAccess.READ)) return access.member(actor);
     if (permission.equals("resource.levels.admin")) return access.owner(actor);
     return admin ? access.administrator(actor, permission) : access.memberWriter(actor, permission);
   }
@@ -141,6 +142,20 @@ public final class ResourceWorkflow {
             .build());
   }
 
+  private static String safeReason(String reason) {
+    return auriga.common.observability.SensitiveDataMasker.mask(reason)
+        .replaceAll("(?i)https?://[^\\s]+", "[url omitted]");
+  }
+
+  private void recorded(ResourceAccess.Reader r, String action, UUID id, String reason) {
+    audit.record(
+        AuditEntry.builder(action)
+            .target("resource", id.toString())
+            .actor(new AuditEntry.Actor("user", r.account().toString()))
+            .detail("reason", reason)
+            .build());
+  }
+
   private void state(UUID p, UUID v, String state) {
     db.update(
         "UPDATE resource.resource_version SET state=:state,revision=revision+1 WHERE tenant_id=:tenant AND package_id=:pkg AND id=:id AND revision<9007199254740991",
@@ -168,7 +183,7 @@ public final class ResourceWorkflow {
           return true;
         });
     String version = text(metadata, "version", 128), digest = text(metadata, "expectedDigest", 71);
-    if (!digest.matches("sha256:[0-9a-f]{64}")) throw invalid();
+    if (!digest.matches("sha256:[0-9a-f]{64}") || !ResourceSemver.valid(version)) throw invalid();
     var manifest = metadata.path("manifest");
     if (!manifest.isObject()
         || !new HashSet<>(manifest.propertyNames())
@@ -214,7 +229,6 @@ public final class ResourceWorkflow {
       }
       ObjectNode stored = metadata.deepCopy();
       stored.set("permissions", declared);
-      store.commitIfAbsent(r.tenant(), stage.id(), stage.object());
       return operation(
           actor,
           ResourceAccess.UPLOAD,
@@ -228,6 +242,12 @@ public final class ResourceWorkflow {
             var pack = pkg(current, p, true, false);
             match(etag, pack.getRevision());
             if (!name.equals(pack.getName())) throw invalid();
+            if (!db.rows(
+                    "SELECT id FROM resource.resource_version WHERE tenant_id=:tenant AND package_id=:pkg AND version=:version",
+                    db.args("pkg", p, "version", version))
+                .isEmpty()) throw new AurigaException(CommonErrors.CONFLICT);
+            db.lock("object/" + digest);
+            store.commitIfAbsent(current.tenant(), stage.id(), stage.object());
             UUID id = UuidV7.next();
             db.update(
                 "INSERT INTO resource.resource_version(id,tenant_id,package_id,author_id,version,digest,size_bytes,state,revision,created_at,manifest,files,archive_verified) VALUES(:id,:tenant,:pkg,:author,:version,:digest,:size,'draft',1,:created,CAST(:manifest AS jsonb),CAST(:files AS jsonb),true)",
@@ -423,6 +443,17 @@ public final class ResourceWorkflow {
               db.row(
                   "SELECT release_high_water FROM resource.resource_package WHERE tenant_id=:tenant AND id=:id FOR UPDATE",
                   db.args("id", p));
+          var preceding =
+              db.rows(
+                  "SELECT version FROM resource.resource_version WHERE tenant_id=:tenant AND package_id=:pkg AND release_sequence=:seq",
+                  db.args("pkg", p, "seq", number(locked, "release_high_water")));
+          if (!preceding.isEmpty()) {
+            String previous = preceding.getFirst().get("version").toString();
+            if (!ResourceSemver.valid(previous)
+                || !ResourceSemver.valid(row.get("version").toString())
+                || ResourceSemver.compare(row.get("version").toString(), previous) < 0)
+              throw new AurigaException(CommonErrors.CONFLICT);
+          }
           long sequence = number(locked, "release_high_water") + 1;
           if (sequence > MAX) throw new AurigaException(CommonErrors.CONFLICT);
           var envelope = envelope(r.tenant(), p, v, row, sequence);
@@ -462,7 +493,7 @@ public final class ResourceWorkflow {
             .put("os", manifest.path("os").asString())
             .put("arch", manifest.path("arch").asString())
             .put("digest", row.get("digest").toString())
-            .put("issuedAt", now.toString());
+            .put("issuedAt", ResourceSigning.time(now));
     var body =
         JSON.createObjectNode()
             .put("schemaVersion", 1)
@@ -470,7 +501,7 @@ public final class ResourceWorkflow {
             .put("packageId", p.toString())
             .put("versionId", v.toString())
             .put("releaseSequence", sequence)
-            .put("notAfter", now.plusSeconds(86400).toString());
+            .put("notAfter", ResourceSigning.time(now.plusSeconds(86400)));
     body.set("statement", statement);
     return signing.get().sign(body, false);
   }
@@ -492,7 +523,7 @@ public final class ResourceWorkflow {
 
   public JsonNode withdraw(
       AurigaPrincipal actor, UUID p, UUID v, ObjectNode body, String key, String etag) {
-    text(body, "reason", 1024);
+    String reason = safeReason(text(body, "reason", 1024));
     String mode = text(body, "mode", 16);
     if (!Set.of("withdrawn", "malicious").contains(mode)) throw invalid();
     return operation(
@@ -514,6 +545,14 @@ public final class ResourceWorkflow {
           if (mode.equals("malicious")) {
             db.lock("revocations");
             var old = db.revocations();
+            var already =
+                db.rows(
+                    "SELECT version_id FROM resource.resource_revoked_artifact WHERE tenant_id=:tenant AND package_id=:pkg AND version_id=:version AND digest=:digest",
+                    db.args("pkg", p, "version", v, "digest", row.get("digest")));
+            if (!already.isEmpty()) return db.versionJson(row);
+            db.update(
+                "INSERT INTO resource.resource_revoked_artifact(tenant_id,package_id,version_id,digest) VALUES(:tenant,:pkg,:version,:digest) ON CONFLICT DO NOTHING",
+                db.args("pkg", p, "version", v, "digest", row.get("digest")));
             var revoked =
                 old == null ? JSON.createArrayNode() : old.withArray("revokedArtifacts").deepCopy();
             if (revoked.size() >= 8192) throw new AurigaException(CommonErrors.CONFLICT);
@@ -530,21 +569,22 @@ public final class ResourceWorkflow {
                     .put("schemaVersion", 1)
                     .put("tenantId", r.tenant().toString())
                     .put("revision", revision)
-                    .put("issuedAt", now.toString())
-                    .put("expiresAt", now.plusSeconds(86400).toString());
+                    .put("issuedAt", ResourceSigning.time(now))
+                    .put("expiresAt", ResourceSigning.time(now.plusSeconds(86400)));
             list.set("revokedKids", old == null ? JSON.createArrayNode() : old.get("revokedKids"));
             list.set("revokedArtifacts", revoked);
             db.saveRevocations(signing.get().sign(list, true));
+            db.enqueueRevocations(revision);
           }
           state(p, v, "withdrawn");
           db.update(
               "UPDATE resource.resource_package SET enabled=CASE WHEN default_version_id=:version THEN false ELSE enabled END,revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
               db.args("id", p, "version", v));
-          recorded(r, "resource.version." + mode, v);
+          recorded(r, "resource.version." + mode, v, reason);
           var next = db.version(p, v);
           var data = event(next);
           data.put("mode", mode);
-          data.put("reason", "Administrative withdrawal");
+          data.put("reason", reason);
           events.publish("resource.version_withdrawn", v.toString(), data, "1");
           return db.versionJson(next);
         });
@@ -560,6 +600,7 @@ public final class ResourceWorkflow {
           result.set("resourcePackage", JSON.valueToTree(pack));
           result.set("version", db.versionJson(row));
           result.put("authorId", row.get("author_id").toString());
+          result.put("revoked", row.get("envelope") != null && revoked(json(row, "envelope")));
           result.set("metadata", json(row, "manifest"));
           result.set("files", json(row, "files"));
           var history = JSON.createArrayNode();
@@ -629,7 +670,7 @@ public final class ResourceWorkflow {
   }
 
   public JsonNode govern(AurigaPrincipal actor, UUID p, ObjectNode body, String etag) {
-    text(body, "reason", 1024);
+    String reason = safeReason(text(body, "reason", 1024));
     access.owner(actor);
     return resources.write(
         () -> {
@@ -711,7 +752,7 @@ public final class ResourceWorkflow {
             db.update(
                 "INSERT INTO resource.resource_package_group(id,tenant_id,package_id,group_id) VALUES(:key,:tenant,:id,:group)",
                 db.args("key", UuidV7.next(), "id", p, "group", group));
-          recorded(r, "resource.package.govern", p);
+          recorded(r, "resource.package.govern", p, reason);
           // Return the authorized result even when the new visibility removes the caller's
           // membership.
           pack.setLevel(ModelPackage.LevelEnum.fromValue(level));

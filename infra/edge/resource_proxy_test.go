@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -53,6 +55,24 @@ func TestResourceUnconfigured(t *testing.T) {
 	requireEntryProblem(t, addresses["admin"], "GET", "/api/resource/v1/packages", g.Cfg.AdminHost, nil, 503, "common.unavailable")
 }
 
+func TestResourceMemberDeviceBearerThroughPortal(t *testing.T) {
+	for _, domain := range []bool{false, true} {
+		g, addresses, _ := accessFixtureConfigured(t, domain, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer device-member-token" || r.Header.Get("Cookie") != "" || r.URL.RawQuery != "" {
+				t.Error("member identity or ticket URL boundary regressed")
+			}
+			w.WriteHeader(http.StatusCreated)
+		}), func(c *Config, _ map[string]any) { c.Upstreams["resource"] = c.Upstreams["iam"] })
+		closeAIAdminTransports(t, g)
+		for _, path := range []string{"/api/resource/v1/member/download-tickets", "/api/resource/v1/member/downloads", "/api/resource/v1/member/installations", "/api/resource/v1/member/installation-reports"} {
+			status, _, body := aiAdminRequest(t, g, addresses, "portal", "POST", path, http.Header{"Authorization": {"Bearer device-member-token"}})
+			if status != http.StatusCreated {
+				t.Fatalf("member route rejected: %d %s", status, body)
+			}
+		}
+	}
+}
+
 func TestResourceDeviceConfiguration(t *testing.T) {
 	g, _, _ := accessFixture(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	for _, key := range []string{"resource", "ai-device"} {
@@ -76,5 +96,56 @@ func TestResourceDeviceConfiguration(t *testing.T) {
 	}
 	if _, err := cfg.parseDeviceUpstream(); err == nil {
 		t.Fatal("device accepted missing Access")
+	}
+}
+
+func TestResourceUploadBodyLimitIsSpecificToArchiveRoute(t *testing.T) {
+	var size int64
+	g, addresses, store := accessFixtureConfigured(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, err := io.Copy(io.Discard, r.Body)
+		size = n
+		if err != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}), func(c *Config, _ map[string]any) { c.Upstreams["resource"] = c.Upstreams["iam"] })
+	closeAIAdminTransports(t, g)
+	backend, _ := browserRPCFixture(t, g, store)
+	putBrowserSession(g, backend, "admin", "admin").AccessToken = "admin-token"
+	store.Put("admin", backend.rows["admin"])
+	g.AdminCSRF = aiAdminCSRF{}
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	defer client.CloseIdleConnections()
+	for _, tc := range []struct {
+		path   string
+		length int
+		ok     bool
+	}{
+		{"/api/resource/v1/packages/01900000-0000-7000-8000-000000000001/versions", 2 << 20, true},
+		{"/api/resource/v1/packages/01900000-0000-7000-8000-000000000001/versions", (64 << 20) + 131072 + 1, false},
+		{"/api/resource/v1/packages", 2 << 20, false},
+	} {
+		req, err := http.NewRequest("POST", "http://"+addresses["admin"]+tc.path, bytes.NewReader(make([]byte, tc.length)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = g.Cfg.AdminHost
+		req.Header.Set("Cookie", "auriga_admin_session=admin; auriga_csrf=csrf")
+		req.Header.Set("Origin", g.Cfg.Access.AdminURL())
+		req.Header.Set("X-Auriga-CSRF", "csrf")
+		req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if tc.ok && (response.StatusCode != 201 || size != int64(tc.length)) {
+			t.Fatalf("upload rejected: status=%d bytes=%d", response.StatusCode, size)
+		}
+		if !tc.ok && response.StatusCode == 201 {
+			t.Fatal("body limit bypassed")
+		}
 	}
 }
