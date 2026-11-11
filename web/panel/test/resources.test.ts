@@ -563,3 +563,179 @@ it('labels personal L4 resources as unreviewed without inferring approval from p
   expect(wrapper.text()).toContain('Unreviewed');
   expect(wrapper.text()).toContain('Permission declarations are unavailable');
 });
+it('confirms a managed distribution and only shows applied after the node generation matches', async () => {
+  const instanceId = '01900000-0000-7000-8000-000000000009';
+  const distId = '01900000-0000-7000-8000-000000000008';
+  let observed = 2;
+  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.includes('/distributions'))
+      return json(
+        {
+          id: distId,
+          instanceId,
+          ownerId: plugin.ownerId,
+          revision: observed,
+          selectionRevision: 1,
+          state: init?.method === 'POST' ? 'requested' : 'applied',
+          generation: 3,
+          observedGeneration: observed,
+          ready: true,
+        },
+        init?.method === 'POST' ? 202 : 200,
+      );
+    if (path.endsWith('/versions/' + versionId)) return json(version);
+    if (path.includes('/versions')) return json({ items: [version] });
+    return json(
+      path.includes(packageId)
+        ? { ...plugin, level: 'l3' }
+        : { items: [{ ...plugin, level: 'l3' }] },
+    );
+  });
+  const wrapper = render({
+    ...connect(fetch),
+    mode: 'managed',
+    resourceDistributionAvailable: true,
+    resourceIdentity: {
+      instanceId,
+      tenantId: plugin.tenantId,
+      ownerId: plugin.ownerId,
+    },
+  });
+  await flushPromises();
+  await click(wrapper, 'View details');
+  await click(wrapper, 'Install / update');
+  expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(
+    false,
+  );
+  await click(wrapper, 'Cancel');
+  expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(
+    false,
+  );
+  await click(wrapper, 'Install / update');
+  await click(wrapper, 'Confirm');
+  expect(wrapper.text()).toContain('Dispatched');
+  await click(wrapper, 'Refresh distribution status');
+  expect(wrapper.text()).toContain('Applying');
+  expect(wrapper.text()).not.toContain('Applied (node');
+  observed = 3;
+  await click(wrapper, 'Refresh distribution status');
+  expect(wrapper.text()).toContain('Applied (node ready');
+  expect(
+    fetch.mock.calls.filter(([, init]) => init?.method === 'POST'),
+  ).toHaveLength(1);
+});
+
+it('keeps uncertain managed writes bound to the same intent key when manually retried', async () => {
+  const instanceId = '01900000-0000-7000-8000-000000000009';
+  const keys: string[] = [];
+  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      keys.push(new Headers(init.headers).get('Idempotency-Key')!);
+      throw new Error('private-transport-error');
+    }
+    if (path.endsWith('/versions/' + versionId)) return json(version);
+    if (path.includes('/versions')) return json({ items: [version] });
+    return json(
+      path.includes(packageId)
+        ? { ...plugin, level: 'l3' }
+        : { items: [{ ...plugin, level: 'l3' }] },
+    );
+  });
+  const wrapper = render({
+    ...connect(fetch),
+    mode: 'managed',
+    resourceDistributionAvailable: true,
+    resourceIdentity: {
+      instanceId,
+      tenantId: plugin.tenantId,
+      ownerId: plugin.ownerId,
+    },
+  });
+  await flushPromises();
+  await click(wrapper, 'View details');
+  await click(wrapper, 'Install / update');
+  await click(wrapper, 'Confirm');
+  expect(wrapper.text()).toContain('request outcome is unknown');
+  expect(wrapper.text()).not.toContain('private-transport-error');
+  await click(wrapper, 'Retry this distribution');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
+it('keeps normal device-backed managed operations unavailable without claiming a successful writer grant', async () => {
+  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+    expect(init?.method).not.toBe('POST');
+    return json(
+      path.includes('/versions')
+        ? { items: [version] }
+        : path.includes(packageId)
+          ? { ...plugin, level: 'l3' }
+          : { items: [plugin] },
+    );
+  });
+  const wrapper = render({
+    ...connect(fetch),
+    mode: 'managed',
+    resourceIdentity: {
+      instanceId: versionId,
+      tenantId: plugin.tenantId,
+      ownerId: plugin.ownerId,
+    },
+    resourceDistributionAvailable: false,
+  });
+  await flushPromises();
+  await click(wrapper, 'View details');
+  expect(wrapper.text()).toContain(
+    'Member distribution credentials are not connected',
+  );
+  expect(
+    wrapper
+      .findAll('button')
+      .some((button) => button.text() === 'Install / update'),
+  ).toBe(false);
+  expect(
+    fetch.mock.calls.some(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
+    ),
+  ).toBe(false);
+});
+it('limits the member market to enabled published defaults and published versions', async () => {
+  const unpublished = {
+    ...plugin,
+    id: '01900000-0000-7000-8000-000000000006',
+    name: 'Unpublished plugin',
+    defaultVersionId: null,
+  };
+  const disabled = {
+    ...plugin,
+    id: '01900000-0000-7000-8000-000000000007',
+    name: 'Disabled plugin',
+    enabled: false,
+  };
+  const fetch = vi.fn(async (path: string) =>
+    json(
+      path.includes('/versions')
+        ? {
+            items: [
+              version,
+              {
+                ...version,
+                id: unpublished.id,
+                state: 'draft',
+                version: 'draft-version',
+              },
+            ],
+          }
+        : path.includes(packageId)
+          ? plugin
+          : { items: [plugin, unpublished, disabled] },
+    ),
+  );
+  const wrapper = render(connect(fetch));
+  await flushPromises();
+  expect(wrapper.findAll('.card')).toHaveLength(1);
+  expect(wrapper.text()).not.toContain('Unpublished plugin');
+  expect(wrapper.text()).not.toContain('Disabled plugin');
+  await click(wrapper, 'View details');
+  expect(wrapper.text()).toContain(version.version);
+  expect(wrapper.text()).not.toContain('draft-version');
+});

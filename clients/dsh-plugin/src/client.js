@@ -341,7 +341,26 @@ window.__ModuleLoader__.load({
         integrity,
         fetchBase: localURL(body.fetchBase).href,
         source: 'signed',
+        resourceDistributionAvailable:
+          body.resourceDistributionAvailable === true,
       };
+      if (body.resourceIdentity !== undefined) {
+        const identity = body.resourceIdentity;
+        const uuid =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+        if (
+          !identity ||
+          ![identity.instanceId, identity.tenantId, identity.ownerId].every(
+            (id) => typeof id === 'string' && uuid.test(id),
+          )
+        )
+          throw failure('verification');
+        view.resourceIdentity = {
+          instanceId: identity.instanceId,
+          tenantId: identity.tenantId,
+          ownerId: identity.ownerId,
+        };
+      }
       view.fetch = makeFetch(view);
       return view;
     }
@@ -1450,6 +1469,8 @@ window.__ModuleLoader__.load({
               apiBase: '',
               fetch: boot.fetch,
               listInstalled,
+              resourceIdentity: boot.resourceIdentity,
+              resourceDistributionAvailable: boot.resourceDistributionAvailable,
             };
           }, [boot, host.locale, host.theme]);
           React.useEffect(() => {

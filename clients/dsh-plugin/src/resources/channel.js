@@ -3,7 +3,7 @@ const prefix = '/auriga/resources';
 const uuid =
   '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const reader = new RegExp(
-  `^/api/resource/v1/packages(?:/${uuid}(?:/versions(?:/${uuid})?)?)?$`,
+  `^(?:/api/resource/v1/packages(?:/${uuid}(?:/versions(?:/${uuid})?)?)?|/api/resource/v1/distributions/${uuid})$`,
 );
 
 /** Validate the raw path before URL normalization. @param {string} path */
@@ -30,7 +30,8 @@ export function resourcePath(path) {
   return path;
 }
 
-/** Native authentication gates a read-only proxy. No request headers cross this boundary.
+/** Native authentication gates fixed reads and renderer-bound distribution writes.
+ * Browser credentials never cross this boundary.
  * @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any, fetchImpl?: typeof fetch}} options */
 export function createResourceHandler({ auth, current, fetchImpl = fetch }) {
   /** @param {any} req @param {any} res */
@@ -46,11 +47,17 @@ export function createResourceHandler({ auth, current, fetchImpl = fetch }) {
     };
     const rejection = auth.requestRejection(req);
     if (rejection !== undefined) return send(rejection);
-    if (req.method !== 'GET') return send(405);
+    const write = req.method === 'POST';
+    if (req.method !== 'GET' && !write) return send(405);
     let path;
     try {
       if (!req.url?.startsWith(prefix + '/')) throw new Error('invalid prefix');
-      path = resourcePath(req.url.slice(prefix.length));
+      const raw = req.url.slice(prefix.length);
+      path =
+        write && raw === '/api/resource/v1/distributions'
+          ? raw
+          : resourcePath(raw);
+      if (write && path !== '/api/resource/v1/distributions') return send(405);
     } catch {
       return send(403);
     }
@@ -58,30 +65,89 @@ export function createResourceHandler({ auth, current, fetchImpl = fetch }) {
     if (!runtime) return send(503);
     const identity = runtime.resolve(req);
     if (!identity) return send(401);
+    if (write && (!runtime.resourceIdentity || !runtime.checkCsrf?.(req)))
+      return send(403);
     try {
+      let requestBody;
+      let intentKey;
+      if (write) {
+        if (
+          !/^application\/json(?:;|$)/i.test(req.headers['content-type'] ?? '')
+        )
+          return send(400);
+        intentKey = req.headers['idempotency-key'];
+        if (
+          typeof intentKey !== 'string' ||
+          !/^[A-Za-z0-9._-]{1,128}$/.test(intentKey)
+        )
+          return send(400);
+        const chunks = [];
+        let bytes = 0;
+        for await (const chunk of req) {
+          bytes += chunk.length;
+          if (bytes > 65536) return send(413);
+          chunks.push(chunk);
+        }
+        let input;
+        try {
+          input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        } catch {
+          return send(400);
+        }
+        const isId = new RegExp(`^${uuid}$`);
+        if (
+          !input ||
+          Object.keys(input).sort().join() !== 'instanceId,selections' ||
+          input.instanceId !== runtime.resourceIdentity.instanceId ||
+          !Array.isArray(input.selections) ||
+          input.selections.length < 1 ||
+          input.selections.length > 128 ||
+          input.selections.some(
+            (/** @type {any} */ s) =>
+              !s ||
+              Object.keys(s).sort().join() !== 'action,packageId,versionId' ||
+              !isId.test(s.packageId) ||
+              !isId.test(s.versionId) ||
+              !['install', 'enable', 'disable', 'remove'].includes(s.action),
+          )
+        )
+          return send(400);
+        requestBody = JSON.stringify(input);
+      }
       const token = await runtime.getAccess();
       if (current() !== runtime || runtime.resolve(req) !== identity)
         return send(401);
       const response = await fetchImpl(
         new URL(path, runtime.config.platformOrigin),
         {
-          method: 'GET',
+          method: write ? 'POST' : 'GET',
           headers: {
             accept: 'application/json',
             authorization: 'Bearer ' + token,
+            ...(write
+              ? {
+                  'content-type': 'application/json',
+                  'idempotency-key': intentKey,
+                }
+              : {}),
           },
           credentials: 'omit',
           redirect: 'error',
           signal: AbortSignal.timeout(15000),
+          body: requestBody,
         },
       );
       if (!response.ok) {
         await response.body?.cancel();
         return send(
-          [401, 403, 404, 429].includes(response.status)
+          [400, 401, 403, 404, 409, 412, 422, 429].includes(response.status)
             ? response.status
             : 503,
         );
+      }
+      if (write && response.status !== 202) {
+        await response.body?.cancel();
+        return send(502);
       }
       if (
         !response.headers.get('content-type')?.startsWith('application/json')
@@ -111,7 +177,7 @@ export function createResourceHandler({ auth, current, fetchImpl = fetch }) {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (current() !== runtime || runtime.resolve(req) !== identity)
         return send(401);
-      return send(200, body);
+      return send(write ? 202 : 200, body);
     } catch {
       return send(runtime.resolve(req) ? 503 : 401);
     }
@@ -120,6 +186,11 @@ export function createResourceHandler({ auth, current, fetchImpl = fetch }) {
 
 /** @param {any} ctx @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any}} options */
 export function installResourceChannel(ctx, options) {
+  if (
+    typeof ctx.effect !== 'function' ||
+    typeof ctx.webServer?.register !== 'function'
+  )
+    return false;
   ctx.effect(
     () =>
       ctx.webServer.register({
@@ -127,6 +198,7 @@ export function installResourceChannel(ctx, options) {
         path: prefix,
         handler: createResourceHandler(options),
       }),
-    'auriga-dsh: read-only resource catalogue',
+    'auriga-dsh: resource catalogue and member distribution channel',
   );
+  return true;
 }

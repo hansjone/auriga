@@ -843,3 +843,42 @@ test('public inventory Remote failures are rejected without exposing host errors
     }
   }
 });
+test('managed renderer resource identity and local server channel survive the real browser adapter', async () => {
+  const resourceIdentity = {
+    instanceId: '01900000-0000-7000-8000-000000000001',
+    tenantId: '01900000-0000-7000-8000-000000000002',
+    ownerId: '01900000-0000-7000-8000-000000000003',
+  };
+  const calls = [];
+  const host = surfaceHost(async (url, init) => {
+    calls.push({ url: String(url), init });
+    return response(200, {
+      ...boot(),
+      fetchBase: '/auriga/resources/',
+      resourceIdentity,
+    });
+  });
+  try {
+    const main = host.mount('main');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(panel.context.resourceIdentity)),
+      resourceIdentity,
+    );
+    await panel.context.fetch('/api/resource/v1/distributions', {
+      method: 'POST',
+      body: '{}',
+    });
+    assert.equal(
+      calls.at(-1).url,
+      'https://instance.example.com/auriga/resources/api/resource/v1/distributions',
+    );
+    assert.equal(calls.at(-1).init.credentials, 'omit');
+    assert.equal(calls.at(-1).init.headers, undefined);
+    main.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});

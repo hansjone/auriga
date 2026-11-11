@@ -202,3 +202,84 @@ test('resource channel uses native owner admission to bind the request before re
   assert.equal(res.status, 200);
   admission.dispose();
 });
+test('managed channel binds distribution to the renderer instance and strips browser credentials', async () => {
+  const { Readable } = await import('node:stream');
+  const instanceId = '01900000-0000-7000-8000-000000000001';
+  const packageId = '01900000-0000-7000-8000-000000000002';
+  const versionId = '01900000-0000-7000-8000-000000000003';
+  const identity = {};
+  const runtime = {
+    resolve: () => identity,
+    checkCsrf: (req) => req.headers.origin === 'https://instance.example.com',
+    resourceIdentity: { instanceId },
+    config: { platformOrigin: 'https://platform.example.com' },
+    getAccess: async () => 'device-token',
+  };
+  let writes = 0;
+  const handler = createResourceHandler({
+    auth: { requestRejection: () => undefined },
+    current: () => runtime,
+    fetchImpl: async (url, init) => {
+      writes++;
+      assert.equal(url.pathname, '/api/resource/v1/distributions');
+      assert.equal(init.method, 'POST');
+      assert.equal(init.headers.authorization, 'Bearer device-token');
+      assert.equal(init.headers.cookie, undefined);
+      assert.equal(init.headers['idempotency-key'], 'intent-key');
+      assert.equal(JSON.parse(init.body).instanceId, instanceId);
+      return Response.json({ state: 'requested' }, { status: 202 });
+    },
+  });
+  async function request(overrides = {}, owner = instanceId) {
+    const req = Readable.from([
+      Buffer.from(
+        JSON.stringify({
+          instanceId: owner,
+          selections: [{ packageId, versionId, action: 'install' }],
+        }),
+      ),
+    ]);
+    Object.assign(req, {
+      method: 'POST',
+      url: '/auriga/resources/api/resource/v1/distributions',
+      headers: {
+        origin: 'https://instance.example.com',
+        'content-type': 'application/json',
+        'idempotency-key': 'intent-key',
+        cookie: 'private-cookie',
+        authorization: 'private-browser-token',
+        ...overrides,
+      },
+    });
+    const res = response();
+    await handler(req, res);
+    return res;
+  }
+  assert.equal((await request()).status, 202);
+  assert.equal(
+    (await request({ origin: 'https://attacker.example.com' })).status,
+    403,
+  );
+  assert.equal((await request({}, packageId)).status, 400);
+  assert.equal((await request({ 'idempotency-key': '' })).status, 400);
+  assert.equal(writes, 1);
+});
+test('missing public resource route lifecycle capability stays unavailable without crashing other host features', async () => {
+  const { installResourceChannel } =
+    await import('../../src/resources/channel.js');
+  let registrations = 0;
+  assert.equal(
+    installResourceChannel(
+      {
+        webServer: {
+          register: () => {
+            registrations++;
+          },
+        },
+      },
+      { auth: {}, current: () => null },
+    ),
+    false,
+  );
+  assert.equal(registrations, 0);
+});

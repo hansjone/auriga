@@ -14,6 +14,8 @@ export interface PanelContext {
   apiBase?: string;
   fetch?: (path: string, init?: RequestInit) => Promise<Response>;
   listInstalled?: () => Promise<unknown>;
+  resourceIdentity?: { tenantId: string; ownerId: string; instanceId: string };
+  resourceDistributionAvailable?: boolean;
 }
 
 export type Failure =
@@ -56,7 +58,7 @@ function isPackage(value: unknown): value is ResourcePackage {
   );
 }
 
-function isVersion(value: unknown): value is ResourceVersion {
+export function isVersion(value: unknown): value is ResourceVersion {
   return (
     record(value) &&
     id(value.id) &&
@@ -273,6 +275,24 @@ export function createResourceReader(context: PanelContext) {
         isVersion,
       );
       if (value.items.some((item) => item.packageId !== packageId))
+        throw new ResourceError('invalid');
+      return value;
+    },
+    async version(
+      packageId: string,
+      versionId: string,
+      signal: AbortSignal,
+    ): Promise<ResourceVersion> {
+      if (!id(versionId)) throw new ResourceError('invalid');
+      const value = await read(
+        `${packagePath(packageId)}/versions/${versionId}`,
+        signal,
+      );
+      if (
+        !isVersion(value) ||
+        value.id !== versionId ||
+        value.packageId !== packageId
+      )
         throw new ResourceError('invalid');
       return value;
     },

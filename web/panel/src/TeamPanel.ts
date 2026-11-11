@@ -1,6 +1,14 @@
 import { messages } from './messages';
 import style from './panel.css?inline';
 import {
+  allowedActions,
+  canDistribute,
+  createDistributionClient,
+  distributionPhase,
+  type Action,
+  type Distribution,
+} from './distributions';
+import {
   canReadResources,
   createResourceReader,
   ResourceError,
@@ -29,6 +37,18 @@ export class AurigaTeamPanel extends HTMLElement {
   private epoch = 0;
   private controller?: AbortController;
   private retryAction?: () => void;
+  private confirmation?: { action: Action; versionId: string };
+  private operation?: {
+    packageId: string;
+    versionId: string;
+    action: Action;
+    key: string;
+    pending: boolean;
+    row?: Distribution;
+    distributionId?: string;
+    failure?: Failure;
+  };
+  private operationAbort?: AbortController;
   private root: HTMLElement;
   constructor() {
     super();
@@ -51,8 +71,15 @@ export class AurigaTeamPanel extends HTMLElement {
       previous.protocol !== value?.protocol ||
       previous.fetch !== value?.fetch ||
       previous.listInstalled !== value?.listInstalled ||
+      previous.resourceDistributionAvailable !==
+        value?.resourceDistributionAvailable ||
+      JSON.stringify(previous.resourceIdentity) !==
+        JSON.stringify(value?.resourceIdentity) ||
       previous.apiBase !== value?.apiBase;
     if (changed) {
+      this.operationAbort?.abort();
+      this.operation = undefined;
+      this.confirmation = undefined;
       this.cancel();
       this.clearData();
       this.installed = undefined;
@@ -79,6 +106,7 @@ export class AurigaTeamPanel extends HTMLElement {
   }
   disconnectedCallback() {
     this.cancel();
+    this.operationAbort?.abort();
   }
   cancel() {
     this.epoch++;
@@ -166,7 +194,9 @@ export class AurigaTeamPanel extends HTMLElement {
           throw new ResourceError('invalid');
         this.packages = [
           ...new Map(
-            [...this.packages, ...page.items].map((item) => [item.id, item]),
+            [...this.packages, ...page.items]
+              .filter((item) => item.enabled && item.defaultVersionId !== null)
+              .map((item) => [item.id, item]),
           ).values(),
         ];
         this.nextCursor = page.nextCursor;
@@ -191,7 +221,7 @@ export class AurigaTeamPanel extends HTMLElement {
         ]),
       ([item, page]) => {
         this.detail = item;
-        this.versions = page.items;
+        this.versions = page.items.filter((item) => item.state === 'published');
         this.versionCursor = page.nextCursor;
       },
       () => this.openDetail(packageId),
@@ -209,7 +239,9 @@ export class AurigaTeamPanel extends HTMLElement {
         if (page.nextCursor === cursor) throw new ResourceError('invalid');
         this.versions = [
           ...new Map(
-            [...this.versions, ...page.items].map((item) => [item.id, item]),
+            [...this.versions, ...page.items]
+              .filter((item) => item.state === 'published')
+              .map((item) => [item.id, item]),
           ).values(),
         ];
         this.versionCursor = page.nextCursor;
@@ -226,6 +258,7 @@ export class AurigaTeamPanel extends HTMLElement {
     this.versions = [];
     this.failure = undefined;
     this.retryAction = undefined;
+    this.confirmation = undefined;
     if (value === 'market' && !this.loaded) this.loadPackages();
     if (value === 'mine') this.loadInstalled();
     this.render();
@@ -241,6 +274,124 @@ export class AurigaTeamPanel extends HTMLElement {
       () => this.loadInstalled(),
       true,
     );
+  }
+
+  private async runDistribution(action?: Action, versionId?: string) {
+    if (!canDistribute(this.context) || this.operation?.pending) return;
+    let operation = this.operation;
+    if (action && versionId && this.detail) {
+      if (
+        operation &&
+        (!operation.row ||
+          !['applied', 'failed'].includes(distributionPhase(operation.row)))
+      )
+        return;
+      const key = globalThis.crypto?.randomUUID?.();
+      if (!key) return;
+      operation = {
+        packageId: this.detail.id,
+        versionId,
+        action,
+        key,
+        pending: false,
+      };
+      this.operation = operation;
+    }
+    if (!operation) return;
+    const own = operation,
+      controller = new AbortController();
+    this.operationAbort = controller;
+    this.confirmation = undefined;
+    own.pending = true;
+    own.failure = undefined;
+    this.render();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const client = createDistributionClient(this.context!);
+      const row = await Promise.race([
+        own.distributionId
+          ? client.status(own.distributionId, controller.signal)
+          : client.request(
+              own.packageId,
+              own.versionId,
+              own.action,
+              own.key,
+              controller.signal,
+            ),
+        new Promise<never>((_, reject) => {
+          controller.signal.addEventListener(
+            'abort',
+            () => reject(new ResourceError('unavailable')),
+            { once: true },
+          );
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new ResourceError('unavailable'));
+          }, 15000);
+        }),
+      ]);
+      if (own !== this.operation) return;
+      if (
+        own.row &&
+        (row.revision < own.row.revision ||
+          row.selectionRevision !== own.row.selectionRevision)
+      )
+        throw new ResourceError('invalid');
+      own.row = row;
+      own.distributionId = row.id;
+    } catch (error) {
+      if (own !== this.operation) return;
+      own.failure =
+        error instanceof ResourceError ? error.reason : 'unavailable';
+      if (own.failure === 'auth') {
+        this.clearData();
+        this.installed = undefined;
+        own.row = undefined;
+        this.dispatchEvent(
+          new CustomEvent('auriga-auth-required', {
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      own.pending = false;
+      if (own === this.operation && this.isConnected) this.render();
+    }
+  }
+
+  private distributionStatus(section: HTMLElement) {
+    const own = this.operation,
+      text = this.text;
+    if (!own) return;
+    const card = this.element('article', undefined, 'notice');
+    card.setAttribute('role', own.failure ? 'alert' : 'status');
+    card.append(
+      this.element(
+        'p',
+        own.failure
+          ? text[own.failure]
+          : own.pending
+            ? text.loading
+            : own.row
+              ? text[`distribution_${distributionPhase(own.row)}`]
+              : text.distribution_unknown,
+      ),
+    );
+    if (own.failure && !own.distributionId)
+      card.append(this.element('p', text.distribution_unknown));
+    card.append(
+      this.button(
+        own.distributionId
+          ? text.distribution_refresh
+          : text.distribution_retry,
+        () => void this.runDistribution(),
+        own.pending,
+      ),
+    );
+    section.append(card);
   }
 
   private element<K extends keyof HTMLElementTagNameMap>(
@@ -300,6 +451,7 @@ export class AurigaTeamPanel extends HTMLElement {
     this.root.append(tabs);
     const section = this.element('section');
     this.root.append(section);
+    this.distributionStatus(section);
     if (this.tab === 'mine') {
       section.setAttribute('aria-busy', String(this.busy));
       section.append(
@@ -488,12 +640,72 @@ export class AurigaTeamPanel extends HTMLElement {
           this.element('span', text[version.state]),
           this.element('p', text.digest + ' · ' + version.digest, 'muted'),
         );
+        if (canDistribute(this.context)) {
+          const permitted = allowedActions(
+            item,
+            this.context!.resourceIdentity!,
+          );
+          for (const action of permitted) {
+            if (
+              ['install', 'enable'].includes(action) &&
+              version.state !== 'published'
+            )
+              continue;
+            const label =
+              action === 'install'
+                ? text.installOrUpdate
+                : text[`action_${action}`];
+            row.append(
+              this.button(
+                label,
+                () => {
+                  this.confirmation = { action, versionId: version.id };
+                  this.render();
+                },
+                this.busy ||
+                  !!(
+                    this.operation &&
+                    (this.operation.pending ||
+                      !this.operation.row ||
+                      !['applied', 'failed'].includes(
+                        distributionPhase(this.operation.row),
+                      ))
+                  ),
+              ),
+            );
+          }
+          if (this.confirmation?.versionId === version.id) {
+            const action = this.confirmation.action;
+            const confirm = this.element('div', undefined, 'notice');
+            confirm.setAttribute('role', 'group');
+            confirm.append(
+              this.element('p', text.distribution_confirm),
+              this.button(
+                text.confirm,
+                () => void this.runDistribution(action, version.id),
+              ),
+              this.button(text.cancel, () => {
+                this.confirmation = undefined;
+                this.render();
+              }),
+            );
+            row.append(confirm);
+          }
+        }
         versions.append(row);
       }
       detail.append(
         this.element('h2', item.name),
         list,
-        this.element('p', text.installHint, 'notice'),
+        this.element(
+          'p',
+          canDistribute(this.context)
+            ? text.managedDistributionHint
+            : this.context?.mode === 'managed'
+              ? text.managedDistributionUnavailable
+              : text.installHint,
+          'notice',
+        ),
         this.element('h3', text.versions),
         versions,
       );

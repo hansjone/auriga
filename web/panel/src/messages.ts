@@ -16,6 +16,28 @@ export const messages = {
     versions: '版本',
     author: '作者 ID',
     unreviewed: '未审核',
+    installOrUpdate: '安装／更新',
+    managedDistributionUnavailable:
+      '当前托管凭据尚未接入成员分发，暂不能安装、启停或卸载。平台管理的 L0/L1 仍由平台下发。',
+    action_enable: '启用',
+    action_disable: '关闭',
+    action_remove: '卸载',
+    action_install: '安装',
+    confirm: '确认',
+    cancel: '取消',
+    distribution_confirm:
+      '确认向当前托管实例下发此版本？执行结果以节点回报为准。',
+    managedDistributionHint:
+      '由平台向当前托管实例分发；L0/L1 由平台管理。权限声明未知，操作前请联系管理员确认。',
+    distribution_requested: '已下发，等待平台处理',
+    distribution_resolved: '已解析，等待节点应用',
+    distribution_applying: '应用中',
+    distribution_applied: '已生效（节点就绪且代数一致）',
+    distribution_failed: '分发失败，请联系管理员查看详情',
+    distribution_unknown:
+      '请求结果未知。重试将复用本次操作标识，不另建分发意图。',
+    distribution_refresh: '刷新分发状态',
+    distribution_retry: '重试本次下发',
     permissions: '权限声明',
     permissionsUnavailable: '暂时无法读取权限声明，请联系管理员确认。',
     level: '资源级别',
@@ -80,6 +102,29 @@ export const messages = {
     versions: 'Versions',
     author: 'Author ID',
     unreviewed: 'Unreviewed',
+    installOrUpdate: 'Install / update',
+    managedDistributionUnavailable:
+      'Member distribution credentials are not connected. Install, enable, disable and uninstall are unavailable. The platform continues to manage L0/L1.',
+    action_enable: 'Enable',
+    action_disable: 'Disable',
+    action_remove: 'Uninstall',
+    action_install: 'Install',
+    confirm: 'Confirm',
+    cancel: 'Cancel',
+    distribution_confirm:
+      'Distribute this version to the current managed instance? The node reports the application result.',
+    managedDistributionHint:
+      'The platform distributes to this managed instance; L0/L1 are platform managed. Permission declarations are unknown. Confirm them with your administrator before proceeding.',
+    distribution_requested: 'Dispatched; waiting for platform processing',
+    distribution_resolved: 'Resolved; waiting for node application',
+    distribution_applying: 'Applying',
+    distribution_applied: 'Applied (node ready and generation matched)',
+    distribution_failed:
+      'Distribution failed. Contact your administrator for details.',
+    distribution_unknown:
+      'The request outcome is unknown. Retry reuses this operation identifier.',
+    distribution_refresh: 'Refresh distribution status',
+    distribution_retry: 'Retry this distribution',
     permissions: 'Permissions',
     permissionsUnavailable:
       'Permission declarations are unavailable. Contact your administrator.',
