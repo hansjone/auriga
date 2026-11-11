@@ -765,9 +765,11 @@ export async function openMemberResources(options) {
   }, 1000);
   timer?.unref();
   try {
-    for (const record of Object.values(state.records))
-      if (record.rollback && record.activationPending) await restore(record);
-    await enforceLocal();
+    await serial(async () => {
+      for (const record of Object.values(state.records))
+        if (record.rollback && record.activationPending) await restore(record);
+      await enforceLocal();
+    });
   } catch (error) {
     clearInterval(timer);
     await gate.close();
@@ -836,22 +838,24 @@ export async function openMemberResources(options) {
       });
     },
     monitor: () => serial(monitor),
-    enforce: enforceLocal,
+    enforce: () => serial(enforceLocal),
     cachedRevocations: () => state.revocation?.list,
     /** @param {any} list */
-    async acceptRevocations(list) {
-      const checked = verifyRevocations(
-        list,
-        identity.tenantId,
-        (await roots()).revocationKeys,
-        now(),
-        state.revocation,
-        true,
-      );
-      if (!state.revocation || checked.revision > state.revocation.revision) {
-        state.revocation = checked;
-        await save();
-      }
+    acceptRevocations(list) {
+      return serial(async () => {
+        const checked = verifyRevocations(
+          list,
+          identity.tenantId,
+          (await roots()).revocationKeys,
+          now(),
+          state.revocation,
+          true,
+        );
+        if (!state.revocation || checked.revision > state.revocation.revision) {
+          state.revocation = checked;
+          await save();
+        }
+      });
     },
     async close() {
       closed = true;
