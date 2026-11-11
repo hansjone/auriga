@@ -1,0 +1,11 @@
+{
+  "name": "@auriga/installer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Auriga Desktop installer (Windows prototype)",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint . && prettier --check .",
+    "test": "node --test \"test/**/*.test.mjs\""
+  }
+}
