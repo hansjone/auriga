@@ -32,6 +32,7 @@ public final class OrgService {
   private final OrgUserEvents userEvents;
   private final Clock clock;
   private final DeploymentAccess deploymentAccess;
+  private final java.nio.file.Path edgeConfig;
   private final SecureRandom random = new SecureRandom();
 
   public OrgService(OrgStore store, EventPublisher events, Clock clock) {
@@ -41,11 +42,21 @@ public final class OrgService {
   /** Invitation creation requires a validated installation identity matching the current tenant. */
   public OrgService(
       OrgStore store, EventPublisher events, Clock clock, DeploymentAccess deploymentAccess) {
+    this(store, events, clock, deploymentAccess, null);
+  }
+
+  public OrgService(
+      OrgStore store,
+      EventPublisher events,
+      Clock clock,
+      DeploymentAccess deploymentAccess,
+      java.nio.file.Path edgeConfig) {
     this.store = store;
     this.m3Permissions = new M3Permissions(store);
     this.userEvents = new OrgUserEvents(events);
     this.clock = clock;
     this.deploymentAccess = deploymentAccess;
+    this.edgeConfig = edgeConfig;
   }
 
   public OrgStore store() {
@@ -1030,17 +1041,43 @@ public final class OrgService {
     if (deploymentAccess == null
         || !TenantContext.require().toString().equals(deploymentAccess.tenantId()))
       throw new AurigaException(CommonErrors.UNAVAILABLE);
-    return OrgJson.object(
-        "mode",
-        deploymentAccess.mode(),
-        "portalOrigin",
-        deploymentAccess.portalUrl(),
-        "adminOrigin",
-        deploymentAccess.adminUrl(),
-        "instanceParentDomain",
-        deploymentAccess.instanceParentDomain(),
-        "ingressKind",
-        deploymentAccess.ingressKind());
+    var out =
+        OrgJson.object(
+            "mode",
+            deploymentAccess.mode(),
+            "portalOrigin",
+            deploymentAccess.portalUrl(),
+            "adminOrigin",
+            deploymentAccess.adminUrl(),
+            "instanceParentDomain",
+            deploymentAccess.instanceParentDomain(),
+            "ingressKind",
+            deploymentAccess.ingressKind());
+    // Read only the approved projection. Never return edge credentials or arbitrary URLs.
+    if (edgeConfig != null) {
+      try (var input = java.nio.file.Files.newInputStream(edgeConfig)) {
+        byte[] bytes = input.readNBytes(1048577);
+        if (bytes.length > 1048576) return out;
+        var config = OrgJson.MAPPER.readTree(bytes);
+        String origin = config.path("relay").path("origin").asString("");
+        if (!origin.isEmpty()) {
+          var url = java.net.URI.create(origin);
+          if (Set.of("http", "https").contains(url.getScheme())
+              && url.getHost() != null
+              && url.getRawUserInfo() == null
+              && url.getRawQuery() == null
+              && url.getRawFragment() == null
+              && (url.getPath().isEmpty() || url.getPath().equals("/"))) {
+            out.put("relayBackendOrigin", origin);
+            out.put("relayPublicUrl", deploymentAccess.portalUrl() + "/ai/v1");
+            out.put("relayDefaultExit", "direct");
+          }
+        }
+      } catch (java.io.IOException | IllegalArgumentException ignored) {
+        // Observation unavailable; absence must not turn into a healthy or disabled claim.
+      }
+    }
+    return out;
   }
 
   public ObjectNode getPolicy(String key) {

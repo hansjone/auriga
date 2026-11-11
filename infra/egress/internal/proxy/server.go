@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hansjone/auriga/infra/egress/internal/policy"
 )
 
 const (
@@ -34,6 +36,54 @@ type Server struct {
 	live        map[*tunnel]struct{}
 	deniedHosts []string
 	tunnels     sync.WaitGroup
+	managed     bool
+	policyReady bool
+	generation  uint64
+	policy      policy.Value
+}
+
+// RequirePolicy closes the cold-start path until a durable policy is loaded.
+func (s *Server) RequirePolicy() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managed = true
+	s.policyReady = false
+}
+
+// ApplyPolicy is called only after policy validation and durable state commit.
+// Closing existing tunnels makes a deny update effective for existing traffic.
+func (s *Server) ApplyPolicy(value policy.Value) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managed = true
+	s.policyReady = true
+	s.generation++
+	s.policy = policy.Value{AllowDomains: append([]string(nil), value.AllowDomains...), DenyDomains: append([]string(nil), value.DenyDomains...)}
+	for t := range s.live {
+		t.close()
+	}
+}
+
+func (s *Server) allowed(host string) (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.managed {
+		return s.generation, true
+	}
+	if !s.policyReady {
+		return s.generation, false
+	}
+	for _, pattern := range s.policy.DenyDomains {
+		if policy.Match(pattern, host) {
+			return s.generation, false
+		}
+	}
+	for _, pattern := range s.policy.AllowDomains {
+		if policy.Match(pattern, host) {
+			return s.generation, true
+		}
+	}
+	return s.generation, false
 }
 
 // SetDeniedHosts installs trusted deployment origins before serving. Public
@@ -116,6 +166,13 @@ func (s *Server) closeTunnels() {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && r.URL.Path == "/health" && r.URL.RawQuery == "" {
+		s.mu.Lock()
+		ready := !s.managed || s.policyReady
+		s.mu.Unlock()
+		if !ready {
+			http.Error(w, "policy not ready", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -137,6 +194,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "target denied", http.StatusForbidden)
 			return
 		}
+	}
+	generation, allowed := s.allowed(host)
+	if !allowed {
+		http.Error(w, "target denied", http.StatusForbidden)
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), connectTimeout)
 	defer cancel()
@@ -171,7 +233,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = client.Close() }()
 	t := &tunnel{client: client, upstream: upstream, deadline: time.Now().Add(tunnelLifetime)}
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || s.generation != generation {
 		s.mu.Unlock()
 		return
 	}

@@ -1,14 +1,19 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import ElementPlus from 'element-plus';
-import { createAurigaI18n } from '@auriga/shared';
+import { createAurigaI18n, ApiError } from '@auriga/shared';
 import EgressView from '../src/views/security/EgressView.vue';
 import EntriesView from '../src/views/security/EntriesView.vue';
 import { securityApi } from '../src/admin/securityApi';
 import { adminApi } from '../src/admin/api';
 import ActionConfirm from '../src/admin/ActionConfirm.vue';
 vi.mock('../src/admin/securityApi', () => ({
-  securityApi: { entries: vi.fn(), egress: vi.fn(), save: vi.fn() },
+  securityApi: {
+    entries: vi.fn(),
+    egress: vi.fn(),
+    status: vi.fn(),
+    save: vi.fn(),
+  },
 }));
 vi.mock('../src/admin/api', () => ({ adminApi: { membership: vi.fn() } }));
 const options = () => ({
@@ -16,9 +21,22 @@ const options = () => ({
 });
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(securityApi.save).mockResolvedValue({
+    key: 'egress',
+    version: 3,
+    value: { categories: [], allowDomains: [], denyDomains: [] },
+    updatedAt: '2026-01-01T00:00:00Z',
+  });
   vi.mocked(adminApi.membership).mockResolvedValue({
     permissions: ['org.policies.read', 'org.policies.write'],
   } as never);
+  vi.mocked(securityApi.status).mockResolvedValue({
+    savedVersion: '2',
+    distributedVersion: '2',
+    appliedVersion: '1',
+    phase: 'distributed',
+    nodeId: 'egress-primary',
+  });
   vi.mocked(securityApi.egress).mockResolvedValue({
     data: {
       key: 'egress',
@@ -99,11 +117,13 @@ describe('security pages', () => {
     expect(wrapper.text()).toContain('\u6743\u9650');
     wrapper.unmount();
   });
-  it('shows saved version separately from unavailable observation', async () => {
+  it('shows saved and applied versions separately', async () => {
     const wrapper = mount(EgressView, options());
     await flushPromises();
     expect(wrapper.text()).toContain('2');
-    expect(wrapper.text()).toContain('\u5c1a\u672a\u63a5\u5165');
+    expect(wrapper.get('[data-testid="egress-phase"]').text()).toBe(
+      '\u5df2\u4e0b\u53d1',
+    );
     expect(wrapper.find('[data-testid="save-policy"]').exists()).toBe(true);
     await wrapper.get('[data-testid="save-policy"]').trigger('click');
     expect(securityApi.save).not.toHaveBeenCalled();
@@ -113,6 +133,9 @@ describe('security pages', () => {
       expect.anything(),
       '"2"',
       expect.anything(),
+    );
+    expect(wrapper.get('[data-testid="egress-phase"]').text()).toBe(
+      '\u5df2\u4fdd\u5b58',
     );
     wrapper.unmount();
   });
@@ -127,6 +150,47 @@ describe('security pages', () => {
       wrapper.get('[data-testid="save-policy"]').attributes('disabled'),
     ).toBeDefined();
     expect(wrapper.text()).toContain('\u5237\u65b0');
+    wrapper.unmount();
+  });
+  it.each([
+    ['effective', '\u5df2\u751f\u6548'],
+    ['failed', '\u5931\u8d25'],
+    ['stale', '\u56de\u62a5\u5df2\u8fc7\u671f'],
+    ['saved', '\u5df2\u4fdd\u5b58'],
+  ] as const)('renders the reported %s state', async (phase, label) => {
+    vi.mocked(securityApi.status).mockResolvedValue({
+      savedVersion: '2',
+      phase,
+      nodeId: 'egress-primary',
+    });
+    const wrapper = mount(EgressView, options());
+    await flushPromises();
+    expect(wrapper.get('[data-testid="egress-phase"]').text()).toBe(label);
+    wrapper.unmount();
+  });
+  it('does not claim effectiveness when observation fails', async () => {
+    vi.mocked(securityApi.status).mockRejectedValue(new Error('offline'));
+    const wrapper = mount(EgressView, options());
+    await flushPromises();
+    expect(wrapper.get('[data-testid="egress-phase"]').text()).not.toContain(
+      '\u5df2\u751f\u6548',
+    );
+    expect(wrapper.find('[data-testid="save-policy"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+  it('clears protected data when the status endpoint revokes access', async () => {
+    vi.mocked(securityApi.status).mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'Forbidden',
+        status: 403,
+        code: 'common.forbidden',
+      }),
+    );
+    const wrapper = mount(EgressView, options());
+    await flushPromises();
+    expect(wrapper.find('[data-testid="save-policy"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('\u6743\u9650');
     wrapper.unmount();
   });
   it('renders configured entries and no TLS health claims', async () => {

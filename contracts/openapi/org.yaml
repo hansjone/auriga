@@ -44,6 +44,26 @@ paths:
             application/problem+json:
               schema: { $ref: 'common.yaml#/components/schemas/Problem' }
 
+  /admin/security/egress:
+    get:
+      operationId: adminSecNetEgress
+      summary: Read durable egress delivery and application status
+      tags: [policies]
+      x-admin-only: true
+      x-permission: org.policies.read
+      responses:
+        '200':
+          description: Saved, distributed and applied versions with last node heartbeat.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSecNetEgress' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '503':
+          description: Installation configuration unavailable
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+
   /me:
     get:
       tags: [me]
@@ -831,6 +851,26 @@ components:
         adminOrigin: { type: string, format: uri }
         instanceParentDomain: { type: string }
         ingressKind: { type: string, enum: [direct, trusted_proxy] }
+        relayPublicUrl: { type: string, format: uri }
+        relayBackendOrigin: { type: string, format: uri }
+        relayDefaultExit: { type: string, enum: [direct] }
+
+    AdminSecNetEgress:
+      type: object
+      additionalProperties: false
+      required: [savedVersion, phase, nodeId]
+      properties:
+        savedVersion: { type: string, pattern: '^[1-9][0-9]*$' }
+        distributedVersion: { type: string, pattern: '^[1-9][0-9]*$' }
+        appliedVersion: { type: string, pattern: '^[0-9]+$' }
+        distributedAt: { type: string, format: date-time }
+        reportedAt: { type: string, format: date-time }
+        nodeId: { type: string }
+        result: { type: string, enum: [applied, failed] }
+        phase: { type: string, enum: [saved, distributed, effective, failed, stale, disabled] }
+        relayPublicUrl: { type: string, format: uri }
+        relayBackendOrigin: { type: string, format: uri }
+        relayDefaultExit: { type: string, enum: [direct] }
 
     Tenant:
       type: object

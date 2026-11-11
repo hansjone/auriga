@@ -78,7 +78,7 @@ onMounted(load);
           {{ entries.instanceParentDomain }}
         </dd>
         <dt>{{ t('securityRelay') }}</dt>
-        <dd>{{ t('securityRelayHint') }}</dd>
+        <dd>{{ entries.relayPublicUrl ?? t('securityRelayHint') }}</dd>
       </dl>
     </div>
   </section>

@@ -63,24 +63,51 @@ class SecurityEntriesTest {
 
   @Test
   void entriesRequireAdminAndReadPermission() throws Exception {
-    var rules =
-        AuthorizationRules.of(
-            SecurityEntriesController.class.getMethod("entries"), SecurityEntriesController.class);
-    error(
-        "common.forbidden",
-        () ->
-            rules.check(
-                principal(TokenContext.PORTAL, Set.of("org.policies.read"), Instant.now()),
-                Clock.systemUTC()));
-    error(
-        "common.forbidden",
-        () ->
-            rules.check(principal(TokenContext.ADMIN, Set.of(), Instant.now()), Clock.systemUTC()));
-    assertDoesNotThrow(
-        () ->
-            rules.check(
-                principal(TokenContext.ADMIN, Set.of("org.policies.read"), null),
-                Clock.systemUTC()));
+    for (var endpoint :
+        List.of(
+            SecurityEntriesController.class.getMethod("entries"),
+            SecurityEgressController.class.getMethod("status"))) {
+      var rules = AuthorizationRules.of(endpoint, endpoint.getDeclaringClass());
+      error(
+          "common.forbidden",
+          () ->
+              rules.check(
+                  principal(TokenContext.PORTAL, Set.of("org.policies.read"), Instant.now()),
+                  Clock.systemUTC()));
+      error(
+          "common.forbidden",
+          () ->
+              rules.check(
+                  principal(TokenContext.ADMIN, Set.of(), Instant.now()), Clock.systemUTC()));
+      assertDoesNotThrow(
+          () ->
+              rules.check(
+                  principal(TokenContext.ADMIN, Set.of("org.policies.read"), null),
+                  Clock.systemUTC()));
+    }
+  }
+
+  @Test
+  void relayProjectionContainsNoCredentials(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+    var access =
+        DeploymentAccess.load(
+            java.nio.file.Files.readAllBytes(
+                java.nio.file.Path.of("../../../contracts/deployment/fixtures/ip-http.json")));
+    var file = directory.resolve("edge.json");
+    java.nio.file.Files.writeString(
+        file,
+        "{\"relay\":{\"origin\":\"http://bifrost:8080\",\"password\":\"do-not-expose\"},\"privateKey\":\"do-not-expose\"}");
+    var svc = new OrgService(null, mock(EventPublisher.class), Clock.systemUTC(), access, file);
+    var value = TenantContext.call(UUID.fromString(access.tenantId()), svc::securityEntries);
+    assertEquals(access.portalUrl() + "/ai/v1", value.path("relayPublicUrl").asString());
+    assertEquals("http://bifrost:8080", value.path("relayBackendOrigin").asString());
+    assertFalse(value.toString().contains("do-not-expose"));
+    java.nio.file.Files.writeString(
+        file, "{\"relay\":{\"origin\":\"http://user:secret@bifrost:8080\"}}");
+    assertFalse(
+        TenantContext.call(UUID.fromString(access.tenantId()), svc::securityEntries)
+            .has("relayBackendOrigin"));
   }
 
   @Test

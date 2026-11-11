@@ -16,6 +16,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/admin/security/egress': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read durable egress delivery and application status */
+    get: operations['adminSecNetEgress'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/me': {
     parameters: {
       query?: never;
@@ -499,6 +516,33 @@ export interface components {
       instanceParentDomain: string;
       /** @enum {string} */
       ingressKind: 'direct' | 'trusted_proxy';
+      /** Format: uri */
+      relayPublicUrl?: string;
+      /** Format: uri */
+      relayBackendOrigin?: string;
+      /** @enum {string} */
+      relayDefaultExit?: 'direct';
+    };
+    AdminSecNetEgress: {
+      savedVersion: string;
+      distributedVersion?: string;
+      appliedVersion?: string;
+      /** Format: date-time */
+      distributedAt?: string;
+      /** Format: date-time */
+      reportedAt?: string;
+      nodeId: string;
+      /** @enum {string} */
+      result?: 'applied' | 'failed';
+      /** @enum {string} */
+      phase:
+        'saved' | 'distributed' | 'effective' | 'failed' | 'stale' | 'disabled';
+      /** Format: uri */
+      relayPublicUrl?: string;
+      /** Format: uri */
+      relayBackendOrigin?: string;
+      /** @enum {string} */
+      relayDefaultExit?: 'direct';
     };
     Tenant: {
       id: components['schemas']['Uuid'];
@@ -844,6 +888,36 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['AdminSecNetEntries'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+      /** @description Installation configuration unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  adminSecNetEgress: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Saved, distributed and applied versions with last node heartbeat. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AdminSecNetEgress'];
         };
       };
       403: components['responses']['Forbidden'];

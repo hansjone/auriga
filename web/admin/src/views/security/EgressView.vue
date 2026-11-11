@@ -4,6 +4,7 @@ import { ElButton, ElInput, ElForm, ElFormItem } from 'element-plus';
 import {
   securityApi,
   type EgressValue,
+  type EgressStatus,
   type Policy,
 } from '../../admin/securityApi';
 import { adminApi } from '../../admin/api';
@@ -25,6 +26,18 @@ const loading = ref(false),
   uncertain = ref(false),
   unsupported = ref(false);
 const pending = shallowRef<EgressValue>();
+const status = shallowRef<EgressStatus>();
+const phase = computed(() => {
+  const keys = {
+    saved: 'securitySaved',
+    distributed: 'securityDistributed',
+    effective: 'securityEffective',
+    failed: 'securityFailed',
+    stale: 'securityStale',
+    disabled: 'securityDisabled',
+  } as const;
+  return status.value ? t(keys[status.value.phase]) : t('unavailable');
+});
 let alive = true;
 const abort = new globalThis.AbortController();
 onBeforeUnmount(() => {
@@ -49,6 +62,7 @@ async function load() {
   if (loading.value || busy.value) return;
   pending.value = undefined;
   policy.value = undefined;
+  status.value = undefined;
   etag.value = null;
   permissions.value = [];
   loading.value = true;
@@ -92,6 +106,23 @@ async function load() {
       ? value.denyDomains.join('\n')
       : '';
     uncertain.value = false;
+    try {
+      const observation = await securityApi.status();
+      if (alive) status.value = observation;
+    } catch (failure) {
+      if (alive) {
+        status.value = undefined;
+        if (
+          isApiError(failure) &&
+          (failure.status === 401 || failure.status === 403)
+        ) {
+          policy.value = undefined;
+          permissions.value = [];
+          etag.value = null;
+          error.value = t('forbidden');
+        }
+      }
+    }
   } catch (failure) {
     if (alive) {
       policy.value = undefined;
@@ -135,9 +166,15 @@ async function save() {
       policy.value = undefined;
       return;
     }
-    await securityApi.save(value, version, abort.signal);
+    const saved = await securityApi.save(value, version, abort.signal);
     if (!alive) return;
-    notice.value = t('saved');
+    policy.value = saved;
+    notice.value = t('securitySaved');
+    status.value = {
+      savedVersion: String(saved.version),
+      phase: 'saved',
+      nodeId: status.value?.nodeId ?? t('unknown'),
+    };
     uncertain.value = true;
   } catch (failure) {
     if (alive) {
@@ -175,13 +212,33 @@ onMounted(load);
     <div v-if="policy" class="details">
       <dl>
         <dt>{{ t('securityStored') }}</dt>
-        <dd>{{ policy.version }}</dd>
+        <dd>{{ status?.savedVersion ?? policy.version }}</dd>
+        <dt>{{ t('securityDistributedVersion') }}</dt>
+        <dd>{{ status?.distributedVersion ?? t('unknown') }}</dd>
         <dt>{{ t('securityApplied') }}</dt>
-        <dd>{{ t('unknown') }}</dd>
+        <dd>{{ status?.appliedVersion ?? t('unknown') }}</dd>
         <dt>{{ t('securityReport') }}</dt>
-        <dd>{{ t('securityPending') }}</dd>
+        <dd data-testid="egress-phase">{{ phase }}</dd>
+        <dt>{{ t('securityNode') }}</dt>
+        <dd>{{ status?.nodeId ?? t('unknown') }}</dd>
+        <dt>{{ t('securityReportedAt') }}</dt>
+        <dd>{{ status?.reportedAt ?? t('unknown') }}</dd>
       </dl>
-      <p>{{ t('securityUpstream') }}</p>
+      <p class="muted">{{ t('securityEmptyAllow') }}</p>
+      <dl>
+        <dt>{{ t('securityRelay') }}</dt>
+        <dd>{{ status?.relayPublicUrl ?? t('unknown') }}</dd>
+        <dt>{{ t('securityUpstream') }}</dt>
+        <dd>{{ status?.relayBackendOrigin ?? t('unknown') }}</dd>
+        <dt>{{ t('securityExit') }}</dt>
+        <dd>
+          {{
+            status?.relayDefaultExit === 'direct'
+              ? t('securityDirect')
+              : t('unknown')
+          }}
+        </dd>
+      </dl>
       <p v-if="unsupported" role="alert">{{ t('securityUnsupported') }}</p>
       <p v-if="!canWrite">{{ t('readonly') }}</p>
       <ElForm class="edit-form" label-position="top" @submit.prevent="confirm">
