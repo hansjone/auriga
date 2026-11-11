@@ -18,6 +18,7 @@ import (
 )
 
 const Subject = "auriga.audit.ai-gateway"
+const InboxPrefix = "_INBOX_bifrost_audit"
 
 type metadata struct{ actor, ip string }
 type metadataKey struct{}
@@ -34,6 +35,13 @@ func WithMetadata(ctx context.Context, actor, ip, parent string) context.Context
 		ip = ""
 	}
 	return context.WithValue(observability.Continue(ctx, parent), metadataKey{}, metadata{actor, ip})
+}
+
+// WithSystemActor attributes deployment policy changes to the service while retaining IP/trace.
+func WithSystemActor(ctx context.Context) context.Context {
+	m, _ := ctx.Value(metadataKey{}).(metadata)
+	m.actor = ""
+	return context.WithValue(ctx, metadataKey{}, m)
 }
 
 // Record accepts fixed action/target metadata only. No business document, name, prompt,
@@ -101,7 +109,7 @@ func ForwardOnce(ctx context.Context, db *store.Store, tenant string, publish Pu
 // Run reconnects while offline; committed audit records remain durable until a broker ACK.
 // Stream creation stays with the combined platform's existing AURIGA_AUDIT bootstrap.
 func Run(ctx context.Context, db *store.Store, tenant, url string) error {
-	conn, err := nats.Connect(url, nats.RetryOnFailedConnect(true), nats.MaxReconnects(-1), nats.ReconnectWait(time.Second), nats.Timeout(3*time.Second))
+	conn, err := nats.Connect(url, nats.CustomInboxPrefix(InboxPrefix), nats.RetryOnFailedConnect(true), nats.MaxReconnects(-1), nats.ReconnectWait(time.Second), nats.Timeout(3*time.Second))
 	if err != nil {
 		return errors.New("audit NATS connection configuration rejected")
 	}

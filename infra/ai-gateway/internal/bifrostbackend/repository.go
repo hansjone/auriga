@@ -205,7 +205,8 @@ func (b *Backend) EnsureMember(ctx context.Context, m api.RelayMemberEnsure) (ap
 	k := api.RelayKey{MaxConcurrency: &c, MaxInFlightTokens: &n, Id: m.AccountId, Name: memberName(m.TenantId, m.AccountId), Source: "member", AccountId: m.AccountId, Active: true, MonthlyBudgetMicros: m.MonthlyBudgetMicros, RequestsPerMinute: m.RequestsPerMinute, Models: []string{"*"}}
 	origin := "default"
 	k.PolicyOrigin = &origin
-	k.MeteringOnly = m.MeteringOnly
+	meteringOnly := m.GetMeteringOnly()
+	k.MeteringOnly = &meteringOnly
 	raw, e := json.Marshal(k)
 	if e != nil {
 		return out, e
@@ -220,10 +221,12 @@ func (b *Backend) EnsureMember(ctx context.Context, m api.RelayMemberEnsure) (ap
 			return e
 		}
 		action := "ai.relay_key.budget.update"
+		auditCtx := audit.WithSystemActor(ctx)
 		if created {
 			action = "ai.relay_key.create"
+			auditCtx = ctx
 		}
-		return audit.Record(ctx, tx, m.TenantId, action, "relay_key", m.AccountId)
+		return audit.Record(auditCtx, tx, m.TenantId, action, "relay_key", m.AccountId)
 
 	}); e != nil {
 		return out, e
@@ -428,7 +431,11 @@ func (b *Backend) SaveProvider(ctx context.Context, tenant, id string, p api.Rel
 			return err
 		}
 		if secret != nil {
-			return audit.Record(ctx, tx, tenant, "ai.credential.rotate", "provider", id)
+			action := "ai.credential.rotate"
+			if create {
+				action = "ai.credential.create"
+			}
+			return audit.Record(ctx, tx, tenant, action, "provider", id)
 		}
 		if revokedCredential {
 			return audit.Record(ctx, tx, tenant, "ai.credential.revoke", "provider", id)
@@ -510,10 +517,21 @@ func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, 
 			if tag.RowsAffected() != 1 {
 				return fault("common.precondition_failed")
 			}
+			return audit.Record(ctx, tx, tenant, "ai.pool.create", "relay_pool", p.Id)
+		}
+		var created bool
+		e = tx.QueryRow(ctx, `INSERT INTO ai.relay_pool(tenant_id,id,document) VALUES($1,$2,$3) ON CONFLICT(tenant_id,id) DO UPDATE SET document=EXCLUDED.document WHERE ai.relay_pool.document IS DISTINCT FROM EXCLUDED.document RETURNING (xmax=0)`, tenant, p.Id, raw).Scan(&created)
+		if errors.Is(e, pgx.ErrNoRows) {
 			return nil
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO ai.relay_pool(tenant_id,id,document) VALUES($1,$2,$3) ON CONFLICT(tenant_id,id) DO UPDATE SET document=EXCLUDED.document`, tenant, p.Id, raw)
-		return e
+		if e != nil {
+			return e
+		}
+		action := "ai.pool.update"
+		if created {
+			action = "ai.pool.create"
+		}
+		return audit.Record(ctx, tx, tenant, action, "relay_pool", p.Id)
 	})
 }
 

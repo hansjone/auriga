@@ -165,8 +165,109 @@ func TestRelayAuditOutboxAtomicity(t *testing.T) {
 	}
 }
 
+func TestRelayAuditDefaultBudgetUsesSystemActor(t *testing.T) {
+	db := testpg.Open(t)
+	master := make([]byte, 32)
+	if _, err := rand.Read(master); err != nil {
+		t.Fatal(err)
+	}
+	b, err := New(db, hex.EncodeToString(master), rand.Text()+rand.Text(), rand.Text()+rand.Text(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, _ := newID()
+	member, _ := newID()
+	ctx := audit.WithMetadata(t.Context(), member, "192.0.2.20", "00-12345678901234567890123456789012-1234567890123456-01")
+	request := api.RelayMemberEnsure{TenantId: tenant, AccountId: member, MonthlyBudgetMicros: 10}
+	if _, err := b.EnsureMember(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	request.MonthlyBudgetMicros = 20
+	for range 2 {
+		if _, err := b.EnsureMember(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err = db.Transaction(ctx, tenant, func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ai.audit_outbox WHERE tenant_id=$1`, tenant).Scan(&count); err != nil {
+			return err
+		}
+		if count != 2 {
+			t.Fatalf("creation and changed deployment policy only: %d", count)
+		}
+		var raw []byte
+		if err := tx.QueryRow(ctx, `SELECT envelope FROM ai.audit_outbox WHERE tenant_id=$1 AND envelope->'data'->>'action'='ai.relay_key.budget.update'`, tenant).Scan(&raw); err != nil {
+			return err
+		}
+		var record struct {
+			Data struct{ Actor struct{ Type, Id, Ip string } }
+		}
+		if err := json.Unmarshal(raw, &record); err != nil {
+			return err
+		}
+		if record.Data.Actor.Type != "system" || record.Data.Actor.Id != "svc:ai-gateway" || record.Data.Actor.Ip != "192.0.2.20" {
+			t.Fatalf("deployment policy attributed to caller: %s", raw)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The Java combined integration driver supplies its live audit HTTP API, signed admin
 // token, temporary PostgreSQL database and NATS server. No audit rows are injected.
+func TestRelayAuditPoolAndInitialCredential(t *testing.T) {
+	b, _, _, tenant := reviewBackend(t)
+	secret := rand.Text() + rand.Text()
+	provider, err := b.SaveProvider(t.Context(), tenant, "", api.RelayProviderInput{Name: "fixture", Kind: "openai-compatible", BaseUrl: "https://api.example.com", Enabled: true}, &secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := api.RelayPool{Id: "audited-pool", Enabled: true, Routes: []api.RelayRoute{{ProviderId: provider.Id, Model: "m", Weight: 1}}, ContextWindow: 16, MaxOutputTokens: 8, Price: api.Price{Currency: "USD", Version: "v1", EffectiveAt: time.Now().Add(-time.Minute), InputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}}
+	if err := b.CreatePool(t.Context(), tenant, pool); err != nil {
+		t.Fatal(err)
+	}
+	pool.Enabled = false
+	for range 2 {
+		if err := b.SavePool(t.Context(), tenant, pool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err = b.db.Transaction(t.Context(), tenant, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT envelope FROM ai.audit_outbox WHERE tenant_id=$1 ORDER BY id`, tenant)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		actions := map[string]int{}
+		for rows.Next() {
+			var raw []byte
+			if err := rows.Scan(&raw); err != nil {
+				return err
+			}
+			if bytes.Contains(raw, []byte(secret)) {
+				t.Fatal("credential leaked")
+			}
+			var event struct{ Data struct{ Action string } }
+			if err := json.Unmarshal(raw, &event); err != nil {
+				return err
+			}
+			actions[event.Data.Action]++
+		}
+		for _, action := range []string{"ai.credential.create", "ai.pool.create", "ai.pool.update"} {
+			if actions[action] != 1 {
+				t.Fatalf("one record per mutation: %v", actions)
+			}
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRelayAuditPage(t *testing.T) {
 	endpoint, broker := os.Getenv("AURIGA_AUDIT_TEST_URL"), os.Getenv("AURIGA_AUDIT_TEST_NATS_URL")
 	if endpoint == "" || broker == "" {

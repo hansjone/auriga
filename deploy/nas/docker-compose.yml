@@ -125,13 +125,16 @@ services:
 
   audit-db-prepare:
     image: ${AURIGA_IMAGE_POSTGRES}
+    pull_policy: never
     <<: *cap_drop_all
-    user: '0:0'
+    user: '999:999'
     read_only: true
     restart: 'no'
     entrypoint: ['/bin/sh', '-ec']
-    command: ['export PGPASSWORD="$$(cat /run/secrets/pg_bootstrap_password)"; exec psql -X -q -h postgres -U auriga_bootstrap -d auriga -v ON_ERROR_STOP=1 -f /config/audit.sql']
-    secrets: [pg_bootstrap_password]
+    command: ['exec psql -X -q -h postgres -U auriga_bootstrap -d auriga -v ON_ERROR_STOP=1 -f /config/audit.sql']
+    env_file:
+      - path: ${AURIGA_DATA_ROOT}/config/audit-db.env
+        required: true
     volumes:
       - ${AURIGA_DATA_ROOT}/config/postgres/audit.sql:/config/audit.sql:ro
     networks: [internal]

@@ -1213,6 +1213,11 @@ public final class OrgService {
                     value.toString(),
                     java.sql.Timestamp.from(clock.instant()));
           }
+          audit.record(
+              "org.quota.update",
+              "quota_" + scope,
+              scopeId == null ? store.tenantId() : scopeId,
+              actorId());
           return getQuota(scope, scopeId);
         });
   }
@@ -1232,6 +1237,7 @@ public final class OrgService {
                       scope,
                       scopeId);
           OrgError.require(n > 0, "not_found", 404);
+          audit.record("org.quota.delete", "quota_" + scope, scopeId, actorId());
           return null;
         });
   }

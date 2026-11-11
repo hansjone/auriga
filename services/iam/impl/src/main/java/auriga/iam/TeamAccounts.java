@@ -133,6 +133,10 @@ public final class TeamAccounts {
         next != null && next.length() >= 10 && next.length() <= 256, "invalid_password", 400);
     row.put("passwordHash", passwords.encode(next));
     store.save("team_account", row);
+    IamAudit.record(
+        new auriga.common.audit.OutboxAuditLogger(events),
+        IamAudit.entry("iam.password.change", "account", accountId.toString(), accountId.toString())
+            .build());
   }
 
   public boolean hasTotp(UUID accountId) {

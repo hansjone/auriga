@@ -37,7 +37,7 @@ require_root_or_capable_chown() { :; }
 bootstrap_nas_materials() { [ ! -e "$NAS_ROOT/bad-core" ]; }
 load_nas_access_env() { :; }
 install_edge_material() { :; }
-chown_required() { :; }
+chown_required() { printf '%s %s\n' "$1" "$2" >>"$NAS_ROOT/chown.log"; }
 info() { :; }
 die() { echo "$*" >&2; exit 1; }
 stat() {
@@ -88,6 +88,10 @@ done
 grep -q '^AURIGA_AUDIT_NATS_URL=nats://bifrost_audit:' "$temp/data/config/bifrost-audit.env"
 grep -q '^AURIGA_AUDIT_ENABLED=true$' "$temp/data/config/platform.env"
 grep -q '^AURIGA_AUDIT_DB_USER=auriga_audit_app$' "$temp/data/config/platform.env"
+grep -q '^PGPASSWORD=fixture$' "$temp/data/config/audit-db.env"
+[ "$(/usr/bin/stat -c '%a' "$temp/data/config/audit-db.env")" = 600 ]
+grep -q "^999:999 $temp/data/config/postgres/audit.sql$" "$temp/chown.log"
+grep -q "^999:999 $temp/data/config/audit-db.env$" "$temp/chown.log"
 grep -q '__PG_AUDIT_' "$temp/data/config/postgres/audit.sql" && exit 1
 sh "$temp/scripts/render.sh" --core-only
 for name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do

@@ -462,6 +462,20 @@ class AuditCombinedIntegrationTest {
   }
 
   @Test
+  void quotaBusinessOperationsBecomeQueryable() throws Exception {
+    UUID target = UuidV7.next();
+    business(
+        () -> {
+          var org = businessOrg(target);
+          org.putQuota("member", target, JSON.createObjectNode().put("monthlyBudgetMicros", 100));
+          org.deleteQuota("member", target);
+          return null;
+        });
+    awaitBusinessAudit("org.quota.update", target.toString());
+    awaitBusinessAudit("org.quota.delete", target.toString());
+  }
+
+  @Test
   void iamSecurityBusinessOperationsBecomeQueryable() throws Exception {
     var ids =
         business(
@@ -521,6 +535,25 @@ class AuditCombinedIntegrationTest {
                               .put("enabled", true)
                               .put("connectorType", "team-account"),
                           null));
+              iam.tx(
+                  () -> {
+                    accounts.register(
+                        provider.toString(), "alice", "password-must-not-appear", "Alice");
+                    iam.insert(
+                        "identity",
+                        provider + ":alice",
+                        JSON.createObjectNode()
+                            .put("providerId", provider.toString())
+                            .put("accountId", BUSINESS_ACTOR.toString())
+                            .put("subject", "alice"),
+                        null);
+                    accounts.changePassword(
+                        BUSINESS_ACTOR,
+                        provider.toString(),
+                        "password-must-not-appear",
+                        "next-password-must-not-appear");
+                    return null;
+                  });
               var issued =
                   iam.tx(
                       () ->
@@ -556,6 +589,7 @@ class AuditCombinedIntegrationTest {
             });
     awaitBusinessAudit("iam.mfa.totp.add", BUSINESS_ACTOR.toString());
     awaitBusinessAudit("iam.mfa.totp.remove", BUSINESS_ACTOR.toString());
+    awaitBusinessAudit("iam.password.change", BUSINESS_ACTOR.toString());
     awaitBusinessAudit("iam.session.step_up", ids.get(0));
     awaitBusinessAudit("iam.device.revoke", ids.get(1));
     assertFalse(

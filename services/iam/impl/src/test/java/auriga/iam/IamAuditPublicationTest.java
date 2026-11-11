@@ -110,6 +110,71 @@ class IamAuditPublicationTest {
   }
 
   @Test
+  void passwordChangesAreAuditedWithoutSecretsAndRollbackTogether() {
+    request(
+        () -> {
+          String provider = UuidV7.next().toString();
+          String current = "correct-horse-current";
+          String next = "correct-horse-next";
+          store.tx(
+              () -> {
+                store.insert(
+                    "idp_provider",
+                    provider,
+                    Json.object("enabled", true, "connectorType", "team-account"),
+                    null);
+                accounts.register(provider, "alice", current, "Alice");
+                store.insert(
+                    "identity",
+                    TeamAccounts.accountKey(provider, "alice"),
+                    Json.object(
+                        "accountId",
+                        account.toString(),
+                        "providerId",
+                        provider,
+                        "subject",
+                        "alice"),
+                    null);
+                return null;
+              });
+          assertThrows(
+              IllegalStateException.class,
+              () ->
+                  store.tx(
+                      () -> {
+                        accounts.changePassword(account, provider, current, next);
+                        throw new IllegalStateException("rollback");
+                      }));
+          assertTrue(records("iam.password.change", account.toString()).isEmpty());
+          store.tx(
+              () -> {
+                accounts.authenticatePassword(provider, "alice", current);
+                return null;
+              });
+          store.tx(
+              () -> {
+                accounts.changePassword(account, provider, current, next);
+                return null;
+              });
+          var entries = records("iam.password.change", account.toString());
+          assertEquals(1, entries.size());
+          assertFalse(entries.getFirst().contains(current));
+          assertFalse(entries.getFirst().contains(next));
+          assertFalse(entries.getFirst().contains("passwordHash"));
+          assertThrows(
+              RuntimeException.class,
+              () ->
+                  store.tx(
+                      () -> {
+                        accounts.changePassword(account, provider, current, next);
+                        return null;
+                      }));
+          assertEquals(1, records("iam.password.change", account.toString()).size());
+          return null;
+        });
+  }
+
+  @Test
   void totpChangesContainNoCredentialsAndRollbackTogether() {
     request(
         () -> {

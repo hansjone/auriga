@@ -128,6 +128,50 @@ class OrgAuditPublicationTest {
   }
 
   @Test
+  void quotaChangesAreAuditedWithoutValuesAndRollbackTogether() {
+    request(
+        () -> {
+          service.putQuota("default", null, OrgJson.object("monthlyBudgetMicros", 100L));
+          service.putQuota("member", member, OrgJson.object("monthlyBudgetMicros", 5L));
+          assertEquals(1, audit("org.quota.update", TENANT).size());
+          assertEquals(1, audit("org.quota.update", member).size());
+          assertThrows(
+              IllegalStateException.class,
+              () ->
+                  store.tx(
+                      () -> {
+                        service.putQuota(
+                            "member", member, OrgJson.object("monthlyBudgetMicros", 9L));
+                        throw new IllegalStateException("rollback");
+                      }));
+          assertEquals(5L, service.getQuota("member", member).path("monthlyBudgetMicros").asLong());
+          assertEquals(1, audit("org.quota.update", member).size());
+          assertThrows(
+              IllegalStateException.class,
+              () ->
+                  store.tx(
+                      () -> {
+                        service.deleteQuota("member", member);
+                        throw new IllegalStateException("rollback");
+                      }));
+          assertTrue(audit("org.quota.delete", member).isEmpty());
+          service.deleteQuota("member", member);
+          var records = audit("org.quota.delete", member);
+          assertEquals(1, records.size());
+          assertFalse(records.getFirst().contains("monthlyBudgetMicros"));
+          assertEquals(
+              actor.toString(),
+              OrgJson.MAPPER
+                  .readTree(records.getFirst())
+                  .path("data")
+                  .path("actor")
+                  .path("id")
+                  .asString());
+          return null;
+        });
+  }
+
+  @Test
   void memberMutationsCarryOnlySafeMetadata() {
     request(
         () -> {

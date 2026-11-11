@@ -129,7 +129,10 @@ sed \
   -e "s|__PG_AUDIT_APP_PASSWORD__|$(escape_sed "$PG_AUDIT_APP")|g" \
   "$NAS_ROOT/postgres/audit.sql.tmpl" >"$CONFIG/postgres/audit.sql"
 chmod 0600 "$CONFIG/postgres/audit.sql"
-chown_required 0:0 "$CONFIG/postgres/audit.sql"
+chown_required 999:999 "$CONFIG/postgres/audit.sql"
+printf 'PGPASSWORD=%s\n' "$PG_BOOT" >"$CONFIG/audit-db.env"
+chmod 0600 "$CONFIG/audit-db.env"
+chown_required 999:999 "$CONFIG/audit-db.env"
 
 sed \
   -e "s|__NATS_SYS_PASSWORD__|$(escape_sed "$NATS_SYS")|g" \
