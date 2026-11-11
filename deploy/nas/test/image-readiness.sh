@@ -31,7 +31,11 @@ case "$1 ${2:-}" in
     ;;
   'compose version'|'info '|'ps -q') exit 0 ;;
   'compose -f')
-    case " $* " in *' up '*) exit "${NAS_READY_UP_EXIT:-0}" ;; esac
+    case " $* " in
+      *' up -d --no-build --pull never --wait postgres '*) exit "${NAS_READY_PG_EXIT:-0}" ;;
+      *' exec -T postgres psql '*) exit "${NAS_READY_ROLE_EXIT:-0}" ;;
+      *' up '*) exit "${NAS_READY_UP_EXIT:-0}" ;;
+    esac
     ;;
   *) echo 'unexpected docker operation' >&2; exit 90 ;;
 esac
@@ -128,11 +132,12 @@ for NAS_READY_UP_EXIT in 73 0; do
   : >"$NAS_READY_LOG"
   if sh "$NAS_ROOT/scripts/start.sh" >"$TMP/start.output" 2>&1; then result=0; else result=$?; fi
   if [ "$result" = "$NAS_READY_UP_EXIT" ] \
-    && [ "$(grep -c ' up ' "$NAS_READY_LOG")" = 1 ] \
+    && [ "$(grep -c ' up ' "$NAS_READY_LOG")" = 2 ] \
+    && grep -q ' exec -T postgres psql .*ON_ERROR_STOP=1.*01-roles.sql$' "$NAS_READY_LOG" \
     && grep -q ' up -d --no-build --pull never$' "$NAS_READY_LOG" \
     && ! grep -Eq '(^| )pull( |$)' "$NAS_READY_LOG"; then
-    pass "start_single_up_exit_$NAS_READY_UP_EXIT"
-  else bad "start_single_up_exit_$NAS_READY_UP_EXIT"; fi
+    pass "start_prepared_up_exit_$NAS_READY_UP_EXIT"
+  else bad "start_prepared_up_exit_$NAS_READY_UP_EXIT"; fi
 done
 write_env
 printf 'COMPOSE_PROFILES=observability\n' >>"$AURIGA_DATA_ROOT/stack.env"

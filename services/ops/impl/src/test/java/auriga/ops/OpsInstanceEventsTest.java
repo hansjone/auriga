@@ -52,4 +52,30 @@ class OpsInstanceEventsTest {
             data);
     assertThrows(RuntimeException.class, () -> TenantContext.run(tenant, () -> handler.handle(e)));
   }
+
+  @Test
+  void ignoresEventsBeforePersistedActivation() {
+    var since = java.time.Instant.now();
+    var calls = new ArrayList<Boolean>();
+    var handler = new OpsInstanceEvents((t, s, id, level, active) -> calls.add(active), since);
+    var tenant = UUID.randomUUID();
+    var instance = UUID.randomUUID();
+    var data =
+        JsonMapper.builder().build().createObjectNode().put("instanceId", instance.toString());
+    for (var time : List.of(since.minusSeconds(1), since.plusSeconds(1))) {
+      var e =
+          new ReceivedEvent(
+              UUID.randomUUID(),
+              "instance.failed",
+              "auriga/workspace",
+              instance.toString(),
+              time,
+              tenant,
+              "1",
+              null,
+              data);
+      TenantContext.run(tenant, () -> handler.handle(e));
+    }
+    assertEquals(List.of(true), calls);
+  }
 }

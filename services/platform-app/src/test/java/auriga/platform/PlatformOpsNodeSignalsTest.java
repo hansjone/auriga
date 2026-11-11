@@ -79,6 +79,6 @@ class PlatformOpsNodeSignalsTest {
     poller.poll();
     store.in(tenant, () -> store.jdbc.update("UPDATE node SET revoked=true WHERE id=?", node));
     poller.poll();
-    assertEquals(List.of(true, false, true, false), observations);
+    assertEquals(List.of(false, false, true, false), observations);
   }
 }

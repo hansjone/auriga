@@ -95,9 +95,20 @@ class OpsStoreTest {
         () -> {
           assertEquals(0, ops.alerts().path("items").size());
           assertEquals(0, ops.channels().path("items").size());
+          var collision =
+              assertThrows(
+                  AurigaException.class,
+                  () -> ops.save(id, "foreign", "https://example.com/hook", "", true, "warning"));
+          assertEquals("ops.not_found", collision.errorCode().code());
           var e = assertThrows(AurigaException.class, () -> ops.delete(id));
           assertEquals("ops.not_found", e.errorCode().code());
         });
     assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM ops.alert", Integer.class));
+  }
+
+  @Test
+  void instanceEpochIsPersistedAcrossHandlerRestarts() {
+    var first = ops.instanceEventsSince();
+    assertEquals(first, ops.instanceEventsSince());
   }
 }

@@ -92,7 +92,9 @@ if [ ! -e "$SECRETS/ops_notification_key" ]; then
 fi
 for _ops_password in pg_ops_owner_password pg_ops_app_password; do
   if [ ! -e "$SECRETS/$_ops_password" ]; then
-    _ops_value=$(rand_alnum 32); write_ops_secret "$_ops_password" "$_ops_value"
+    require_cmd openssl
+    _ops_value=$(openssl rand -hex 16) || die 'ops password generation failed'
+    write_ops_secret "$_ops_password" "$_ops_value"
   fi
 done
 PG_OPS_OWNER=$(read_secret pg_ops_owner_password)

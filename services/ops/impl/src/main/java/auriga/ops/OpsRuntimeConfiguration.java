@@ -22,7 +22,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 public class OpsRuntimeConfiguration {
   @Bean
   auriga.common.events.EventHandler opsInstanceEvents(OpsStore store) {
-    return new OpsInstanceEvents(store);
+    return new OpsInstanceEvents(store, store.instanceEventsSince());
   }
 
   @Bean

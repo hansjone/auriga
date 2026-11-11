@@ -107,6 +107,7 @@ paths:
       operationId: post_admin_alerts_id_acknowledge
       summary: ops.alerts.write
       x-permission: ops.alerts.write
+      x-recent-step-up: true
       responses:
         '200':
           description: Success
@@ -192,6 +193,7 @@ paths:
       operationId: post_admin_alerts_id_silence
       summary: ops.alerts.write
       x-permission: ops.alerts.write
+      x-recent-step-up: true
       responses:
         '200':
           description: Success
@@ -277,6 +279,7 @@ paths:
       operationId: post_admin_alerts_id_unsilence
       summary: ops.alerts.write
       x-permission: ops.alerts.write
+      x-recent-step-up: true
       responses:
         '200':
           description: Success

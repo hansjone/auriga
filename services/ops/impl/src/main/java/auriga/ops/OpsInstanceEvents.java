@@ -13,9 +13,15 @@ import java.util.UUID;
  */
 final class OpsInstanceEvents implements EventHandler {
   private final OpsSignals signals;
+  private final java.time.Instant since;
 
   OpsInstanceEvents(OpsSignals signals) {
+    this(signals, java.time.Instant.now());
+  }
+
+  OpsInstanceEvents(OpsSignals signals, java.time.Instant since) {
     this.signals = signals;
+    this.since = since;
   }
 
   public String name() {
@@ -29,6 +35,7 @@ final class OpsInstanceEvents implements EventHandler {
   public void handle(ReceivedEvent event) {
     OpsError.require(
         eventTypes().contains(event.type()) && TenantContext.require().equals(event.tenantId()));
+    if (event.time() == null || event.time().isBefore(since)) return;
     String subject = UUID.fromString(event.data().path("instanceId").asText()).toString();
     signals.observe(
         event.tenantId(),

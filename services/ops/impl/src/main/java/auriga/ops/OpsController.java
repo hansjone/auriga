@@ -31,6 +31,7 @@ public class OpsController {
 
   @PostMapping("/alerts/{id}/{action}")
   @RequiresPermission("ops.alerts.write")
+  @RequiresRecentStepUp
   public void action(
       @PathVariable UUID id,
       @PathVariable String action,

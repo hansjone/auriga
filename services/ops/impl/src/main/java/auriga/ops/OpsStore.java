@@ -144,6 +144,24 @@ public class OpsStore implements OpsSignals {
                         TenantContext.PLATFORM_TENANT)));
   }
 
+  java.time.Instant instanceEventsSince() {
+    return TenantContext.call(
+        TenantContext.PLATFORM_TENANT,
+        () ->
+            fresh.execute(
+                status -> {
+                  jdbc.update(
+                      "INSERT INTO ops.instance_event_epoch(id,tenant_id) VALUES (?,?) ON CONFLICT(tenant_id) DO NOTHING",
+                      UuidV7.next(),
+                      TenantContext.PLATFORM_TENANT);
+                  return jdbc.queryForObject(
+                          "SELECT activated_at FROM ops.instance_event_epoch WHERE tenant_id=?",
+                          java.sql.Timestamp.class,
+                          TenantContext.PLATFORM_TENANT)
+                      .toInstant();
+                }));
+  }
+
   ObjectNode deliveries(UUID id) {
     return transaction(
         () -> {
@@ -264,18 +282,22 @@ public class OpsStore implements OpsSignals {
         secrets.seal(
             tenant() + ":" + id,
             JSON.createObjectNode().put("url", url).put("bearer", bearer).toString());
-    transaction(
-        () -> {
-          jdbc.update(
-              "INSERT INTO ops.notification_channel(id,tenant_id,name,encrypted_target,enabled,min_severity) VALUES (?,?,?,?,?,?) ON CONFLICT (tenant_id,id) DO UPDATE SET name=EXCLUDED.name,encrypted_target=EXCLUDED.encrypted_target,enabled=EXCLUDED.enabled,min_severity=EXCLUDED.min_severity",
-              id,
-              tenant(),
-              name,
-              encrypted,
-              enabled,
-              minSeverity);
-          return null;
-        });
+    try {
+      transaction(
+          () -> {
+            jdbc.update(
+                "INSERT INTO ops.notification_channel(id,tenant_id,name,encrypted_target,enabled,min_severity) VALUES (?,?,?,?,?,?) ON CONFLICT (tenant_id,id) DO UPDATE SET name=EXCLUDED.name,encrypted_target=EXCLUDED.encrypted_target,enabled=EXCLUDED.enabled,min_severity=EXCLUDED.min_severity",
+                id,
+                tenant(),
+                name,
+                encrypted,
+                enabled,
+                minSeverity);
+            return null;
+          });
+    } catch (org.springframework.dao.DuplicateKeyException e) {
+      throw OpsError.error("not_found", 404);
+    }
   }
 
   void delete(UUID id) {

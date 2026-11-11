@@ -92,7 +92,8 @@ class PlatformOpsConfigurationTest {
                       .put("id", UUID.randomUUID().toString())
                       .put("tenantid", t.toString())
                       .put("source", "auriga/workspace")
-                      .put("type", "instance.failed");
+                      .put("type", "instance.failed")
+                      .put("time", java.time.Instant.now().toString());
               event.putObject("data").put("instanceId", instance.toString());
               var bytes = event.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
               assertEquals(

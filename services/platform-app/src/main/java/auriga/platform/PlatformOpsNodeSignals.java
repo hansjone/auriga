@@ -34,8 +34,8 @@ public final class PlatformOpsNodeSignals implements SmartLifecycle {
         var seen = (java.sql.Timestamp) row.get("last_seen_at");
         boolean offline =
             !(Boolean) row.get("revoked")
-                && (seen == null
-                    || !seen.toInstant().isAfter(service.clock.instant().minusSeconds(60)));
+                && seen != null
+                && !seen.toInstant().isAfter(service.clock.instant().minusSeconds(60));
         signals.observe(tenant, "node_offline", row.get("id").toString(), "critical", offline);
       }
     }

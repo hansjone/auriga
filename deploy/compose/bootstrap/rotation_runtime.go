@@ -736,6 +736,12 @@ func (r *rotation) lifecycle(args []string) error {
 			return err
 		}
 	}
+	if starting {
+		// resumePostgres and authoritative checks above already verified this instance.
+		if _, err := r.run("/usr/bin/docker", append(r.composeArgs(), "exec", "-T", "postgres", "psql", "-U", "auriga_dev", "-d", "auriga", "-v", "ON_ERROR_STOP=1", "-f", "/docker-entrypoint-initdb.d/01-roles.sql")...); err != nil {
+			return err
+		}
+	}
 	if args[0] == "upgrade-bifrost" {
 		args = []string{"run", "--rm", "--no-deps", "--pull", "never", "--user", "999:999", "-e", "PGHOST=postgres", "--entrypoint", "sh", "postgres", "/docker-entrypoint-initdb.d/03-bifrost.sh"}
 	}
