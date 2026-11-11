@@ -2,8 +2,8 @@ import { isAbsolute } from 'node:path';
 import { refuse } from './trust.js';
 /** Public DSH PluginManager only. No Loader/profile internals or edits to DSH.
  * Roots and staging paths are never accepted from the browser.
- * @param {any} ctx @param {{stop?:()=>void}} [options] */
-export function resourceHost(ctx, { stop = () => process.exit(78) } = {}) {
+ * @param {any} ctx */
+export function resourceHost(ctx) {
   function manager() {
     const host = ctx.get?.('pluginManager');
     if (
@@ -64,8 +64,5 @@ export function resourceHost(ctx, { stop = () => process.exit(78) } = {}) {
     async remove(name) {
       return result(await manager().removeBundle(name), name);
     },
-    // The contract requires stopping a host that cannot hot-disable revoked or
-    // expired code. Persist disable through the public manager before this exit.
-    stop,
   };
 }

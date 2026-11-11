@@ -99,7 +99,14 @@ export function createMemberApi({
       refuse('common.unauthenticated');
   }
   /** @param {string} path @param {any} [input] @param {string} [key] @param {string} [etag] @param {boolean} [binary] */
-  async function request(path, input, key, etag, binary = false) {
+  async function request(
+    path,
+    input,
+    key,
+    etag,
+    binary = false,
+    timeout = 15000,
+  ) {
     check();
     const token = await runtime.getAccess();
     check();
@@ -107,7 +114,7 @@ export function createMemberApi({
       method: input === undefined ? 'GET' : 'POST',
       credentials: 'omit',
       redirect: 'error',
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(timeout),
       headers: {
         authorization: 'Bearer ' + token,
         accept: binary ? 'application/gzip' : 'application/json',
@@ -146,9 +153,44 @@ export function createMemberApi({
     }
     const data = await bytes(response, binary ? 67108864 : 2097152);
     check();
-    return binary ? data : parseStrictJson(data, true);
+    if (binary) return data;
+    const fields = new Map();
+    const value = parseStrictJson(data, true, fields);
+    if (path.endsWith('/download-tickets'))
+      value.envelopeWire = fields.get('resourceEnvelope');
+    return value;
   }
   const base = '/api/resource/v1/member';
+  /** @param {any} ref */
+  async function issue(ref) {
+    const ticket = await request(
+      `${base}/download-tickets`,
+      {
+        clientId: identity.clientId,
+        packageId: ref.pack.id,
+        versionId: ref.version.id,
+        digest: ref.version.digest,
+      },
+      randomUUID(),
+    );
+    const expiry = instant(ticket.expiresAt),
+      clock = BigInt(now()) * 1000000n;
+    if (
+      ticket.clientId !== identity.clientId ||
+      typeof ticket.ticket !== 'string' ||
+      !/^[A-Za-z0-9_-]{43}$/.test(ticket.ticket) ||
+      expiry <= clock ||
+      expiry - clock > 60000000000n ||
+      ticket.resourceEnvelope?.tenantId !== identity.tenantId ||
+      ticket.resourceEnvelope?.packageId !== ref.pack.id ||
+      ticket.resourceEnvelope?.versionId !== ref.version.id ||
+      ticket.resourceEnvelope?.statement?.digest !== ref.version.digest
+    )
+      return refuse('resource.signature_invalid');
+
+    if (!(ticket.envelopeWire instanceof Uint8Array)) refuse();
+    return ticket;
+  }
   return {
     identity,
     check,
@@ -205,41 +247,32 @@ export function createMemberApi({
     },
     /** Each new attempt has a NEW ticket key. A lost ticket response is never replayed.
      * @param {any} ref */
+    async authorize(ref) {
+      const ticket = await issue(ref);
+      return {
+        envelope: ticket.resourceEnvelope,
+        wire: ticket.envelopeWire,
+        revocations: ticket.revocations,
+      };
+    },
+    /** @param {any} ref */
     async download(ref) {
-      const ticket = await request(
-        `${base}/download-tickets`,
-        {
-          clientId: identity.clientId,
-          packageId: ref.pack.id,
-          versionId: ref.version.id,
-          digest: ref.version.digest,
-        },
-        randomUUID(),
-      );
-      const expiry = instant(ticket.expiresAt),
-        clock = BigInt(now()) * 1000000n;
-      if (
-        ticket.clientId !== identity.clientId ||
-        typeof ticket.ticket !== 'string' ||
-        !/^[A-Za-z0-9_-]{43}$/.test(ticket.ticket) ||
-        expiry <= clock ||
-        expiry - clock > 60000000000n ||
-        ticket.resourceEnvelope?.tenantId !== identity.tenantId ||
-        ticket.resourceEnvelope?.packageId !== ref.pack.id ||
-        ticket.resourceEnvelope?.versionId !== ref.version.id ||
-        ticket.resourceEnvelope?.statement?.digest !== ref.version.digest
-      )
-        return refuse('resource.signature_invalid');
+      const ticket = await issue(ref);
       const archive = await request(
-        `${base}/downloads`,
+        base + '/downloads',
         { clientId: identity.clientId, ticket: ticket.ticket },
         randomUUID(),
         undefined,
         true,
+        Math.min(
+          300000,
+          30000 + Math.ceil(ref.version.sizeBytes / 262144) * 1000,
+        ),
       );
       return {
         archive,
         envelope: ticket.resourceEnvelope,
+        wire: ticket.envelopeWire,
         revocations: ticket.revocations,
       };
     },

@@ -91,9 +91,10 @@ export function integerToken(token) {
 /** Reject ambiguous wire JSON before its original representation is lost.
  * @param {Uint8Array} bytes
  * @param {boolean} [integers]
+ * @param {Map<string,Buffer>} [fields] Raw top-level value bytes, after strict parsing.
  * @returns {any}
  */
-export function parseStrictJson(bytes, integers = false) {
+export function parseStrictJson(bytes, integers = false, fields) {
   if (!bytes || !bytes.byteLength || bytes.byteLength > 2097152)
     bad('payload size');
   let text = '';
@@ -153,7 +154,10 @@ export function parseStrictJson(bytes, integers = false) {
           bad('duplicate key or object size');
         ws();
         if (text[i++] !== ':') bad('expected colon');
+        const start = i;
         out[k] = val(depth + 1);
+        if (depth === 1 && fields)
+          fields.set(k, Buffer.from(text.slice(start, i)));
         ws();
         if (text[i] === ',') {
           i++;

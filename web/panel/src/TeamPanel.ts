@@ -493,7 +493,9 @@ export class AurigaTeamPanel extends HTMLElement {
               };
               this.render();
             },
-            this.memberBlocked() || item.state === 'applying',
+            this.memberBlocked() ||
+              item.state === 'applying' ||
+              (this.memberOffline && action === 'enable'),
           ),
         );
       cards.append(card);

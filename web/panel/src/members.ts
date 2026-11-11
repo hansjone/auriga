@@ -24,6 +24,7 @@ export type MemberItem = MemberInstallation & {
   localEnabled: boolean;
   restartRequired: boolean;
   syncPending: boolean;
+  renewalState?: 'current' | 'offline' | 'denied';
 };
 const id = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -52,6 +53,8 @@ function item(value: unknown): MemberItem {
     typeof value.localEnabled !== 'boolean' ||
     typeof value.restartRequired !== 'boolean' ||
     typeof value.syncPending !== 'boolean' ||
+    (value.renewalState !== undefined &&
+      !['current', 'offline', 'denied'].includes(String(value.renewalState))) ||
     (value.reportedRevision !== undefined &&
       (!Number.isSafeInteger(value.reportedRevision) ||
         Number(value.reportedRevision) < 1 ||
@@ -96,7 +99,12 @@ export async function readMembers(context: PanelContext, signal: AbortSignal) {
       throw new ResourceError('invalid');
     seen.add(row.packageId);
   }
-  return { identity, items, offline: response.offline };
+  return {
+    identity,
+    items,
+    offline:
+      response.offline || items.some((row) => row.renewalState === 'offline'),
+  };
 }
 export async function applyMember(
   context: PanelContext,

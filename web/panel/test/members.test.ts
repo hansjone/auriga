@@ -45,6 +45,18 @@ function context(item: unknown = row): PanelContext {
   };
 }
 describe('desktop member resources', () => {
+  it('exposes failed renewal as offline while preserving the observed installed version', async () => {
+    const data = await readMembers(
+      context({ ...row, renewalState: 'offline' }),
+      signal,
+    );
+    expect(data.offline).toBe(true);
+    expect(data.items[0].localEnabled).toBe(true);
+    expect(data.items[0].localVersion).toBe('1.0.0');
+    await expect(
+      readMembers(context({ ...row, renewalState: 'invented' }), signal),
+    ).rejects.toThrow('invalid');
+  });
   it('keeps local version and exact member report independent of requested state', async () => {
     const data = await readMembers(context(), signal);
     expect(data.items[0].localVersion).toBe('1.0.0');

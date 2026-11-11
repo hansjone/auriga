@@ -113,21 +113,24 @@ test('resource trust roots come only from an explicit independent local deployme
     code: 'resource.signature_invalid',
   });
 });
-test('archive admission rejects traversal, links, scripts, unresolved dependencies and compression bombs without extraction', () => {
+test('archive admission rejects traversal, links, scripts, unresolved dependencies and compression bombs without extraction', async () => {
   const manifest = {
     name: 'example-plugin',
     version: '1.0.0',
     dsh: { bundle: { patch: './cordis.patch.yml' } },
   };
   const expected = { name: manifest.name, version: manifest.version };
-  assert.deepEqual(validateArchive(tarball(manifest), expected), expected);
+  assert.deepEqual(
+    await validateArchive(tarball(manifest), expected),
+    expected,
+  );
   for (const archive of [
     tarball({ ...manifest, scripts: { install: 'dangerous' } }),
     tarball({ ...manifest, dependencies: { unverified: '1.0.0' } }),
     tarball(manifest, { 'package/../escape': 'x' }),
     gzipSync(Buffer.alloc(1048576)),
   ])
-    assert.throws(() => validateArchive(archive, expected));
+    await assert.rejects(validateArchive(archive, expected));
   const raw = gunzipSync(tarball(manifest));
   raw[156] = 50;
   raw.fill(32, 148, 156);
@@ -139,21 +142,22 @@ test('archive admission rejects traversal, links, scripts, unresolved dependenci
       .padStart(6, '0') + '\0 ',
     148,
   );
-  assert.throws(() => validateArchive(gzipSync(raw), expected));
+  await assert.rejects(validateArchive(gzipSync(raw), expected));
   const vendored = {
     'package/node_modules/dep/package.json': JSON.stringify({
       name: 'dep',
       version: '1.0.0',
     }),
   };
-  assert.throws(() =>
-    validateArchive(
-      tarball({ ...manifest, dependencies: { dep: '1.0.0' } }, vendored),
-      expected,
-    ),
+  await assert.rejects(
+    async () =>
+      await validateArchive(
+        tarball({ ...manifest, dependencies: { dep: '1.0.0' } }, vendored),
+        expected,
+      ),
   );
   assert.deepEqual(
-    validateArchive(
+    await validateArchive(
       tarball(
         {
           ...manifest,
@@ -177,7 +181,7 @@ test('archive admission rejects traversal, links, scripts, unresolved dependenci
       .padStart(6, '0') + '\0 ',
     148,
   );
-  assert.throws(() => validateArchive(gzipSync(wrongMagic), expected));
+  await assert.rejects(validateArchive(gzipSync(wrongMagic), expected));
 });
 test('strict resource JSON rejects rounded fractional counters and ambiguous bytes while retaining general package numbers', () => {
   for (const source of [

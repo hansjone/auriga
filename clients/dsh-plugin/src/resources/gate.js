@@ -55,11 +55,18 @@ export async function openResourceGate(store) {
     closed = false;
   let pending = Promise.resolve();
   return {
+    /** Verify against durable high water without committing an uninstalled release.
+     * @param {Uint8Array} wire @param {Uint8Array} archive
+     * @param {Omit<Parameters<typeof verifyResourceArchive>[2], 'highWater'>} options */
+    check(wire, archive, options) {
+      return this.admit(wire, archive, options, false);
+    },
     /** Returns only AFTER the high water has been persisted. A failed/uncertain
      * commit poisons this handle; reopening reloads the last durable snapshot.
      * @param {Uint8Array} wire @param {Uint8Array} archive
-     * @param {Omit<Parameters<typeof verifyResourceArchive>[2], 'highWater'>} options */
-    admit(wire, archive, options) {
+     * @param {Omit<Parameters<typeof verifyResourceArchive>[2], 'highWater'>} options
+     * @param {boolean} [persist] */
+    admit(wire, archive, options, persist = true) {
       if (
         !(wire instanceof Uint8Array) ||
         wire.byteLength > 65536 ||
@@ -90,6 +97,7 @@ export async function openResourceGate(store) {
           ...locked,
           highWater: state.rows[key],
         });
+        if (!persist) return envelope;
         const next = {
           ...state,
           rows: {

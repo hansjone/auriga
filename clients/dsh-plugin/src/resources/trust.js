@@ -152,8 +152,16 @@ export async function readResourceRoots(file) {
   }
 }
 /** @param {any} list @param {string} tenantId @param {ReadonlyMap<string, import('node:crypto').KeyObject>} keys
- * @param {number} now @param {{revision:number,digest:string}|undefined} previous */
-export function verifyRevocations(list, tenantId, keys, now, previous) {
+ * @param {number} now @param {{revision:number,digest:string}|undefined} previous
+ * @param {boolean} [allowExpired] Runtime offline checks retain signed revocations. Admission always requires a fresh list. */
+export function verifyRevocations(
+  list,
+  tenantId,
+  keys,
+  now,
+  previous,
+  allowExpired = false,
+) {
   if (
     !Number.isSafeInteger(now) ||
     (previous && (!counter(previous.revision) || !digest(previous.digest)))
@@ -209,7 +217,7 @@ export function verifyRevocations(list, tenantId, keys, now, previous) {
     clock = BigInt(now) * 1000000n;
   if (
     issued > clock ||
-    expiry <= clock ||
+    (!allowExpired && expiry <= clock) ||
     expiry <= issued ||
     expiry - issued > 86400000000000n
   )

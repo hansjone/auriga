@@ -25,11 +25,12 @@ export const messages = {
       '安装前验证平台签名、撤销清单和发行序号；只有本机应用成功才回报已生效。',
     memberLocalVersion: '本机已核验版本',
     memberReport: '成员安装回报',
-    memberOffline: '平台暂时不可达；显示本机清单，安装回报等待同步。',
+    memberOffline: '无法续签（离线）。已装版本继续运行，联网后可安装或启用。',
     member_applying: '应用中',
     member_applied: '已生效',
     member_failed: '失败',
-    verification: '资源签名、有效期、摘要或撤销校验失败，未安装。',
+    verification:
+      '资源签名、有效期、摘要或撤销校验失败，请检查本机时间与可信公钥。',
     setup: '无法读取受保护的资源信任配置或本机清单，请检查部署配置。',
     conflict: '资源选择或修订已变化，请刷新后确认操作。',
     stepup: '平台要求近期身份验证，请先在平台完成身份验证后重试。',
@@ -118,12 +119,12 @@ export const messages = {
     memberLocalVersion: 'Verified local version',
     memberReport: 'Member installation report',
     memberOffline:
-      'The platform is unavailable. Showing the local manifest; reports await synchronization.',
+      'Renewal unavailable (offline). Installed versions keep running. Connect to install or enable.',
     member_applying: 'Applying',
     member_applied: 'Applied',
     member_failed: 'Failed',
     verification:
-      'Signature, expiry, digest or revocation verification failed. The resource was not installed.',
+      'Signature, expiry, digest or revocation verification failed. Check the system clock and trusted keys.',
     setup:
       'Protected resource trust configuration or the local manifest is unavailable. Check the deployment configuration.',
     conflict:

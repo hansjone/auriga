@@ -694,6 +694,58 @@ it('limits the member market to enabled published defaults and published version
   expect(wrapper.text()).toContain(version.version);
   expect(wrapper.text()).not.toContain('draft-version');
 });
+it('shows renewal failure and blocks enabling while the installed version remains visible', async () => {
+  const identity = {
+    tenantId: plugin.tenantId,
+    ownerId: plugin.ownerId,
+    clientId: '01900000-0000-7000-8000-000000000006',
+  };
+  const apply = vi.fn();
+  const wrapper = render({
+    ...connect(vi.fn().mockResolvedValue(json({ items: [plugin] }))),
+    memberResources: {
+      list: async () => ({
+        identity,
+        reportSource: 'member',
+        offline: false,
+        items: [
+          {
+            ...identity,
+            packageId,
+            versionId,
+            digest: version.digest,
+            releaseSequence: 1,
+            level: 'l2',
+            desired: 'enabled',
+            state: 'applied',
+            revision: 1,
+            reportedRevision: 1,
+            reportSource: 'member',
+            name: plugin.name,
+            version: '1.0.0',
+            localVersion: '1.0.0',
+            localEnabled: true,
+            restartRequired: false,
+            syncPending: false,
+            renewalState: 'offline',
+          },
+        ],
+      }),
+      apply,
+    },
+  });
+  await flushPromises();
+  await click(wrapper, 'My resources');
+  expect(wrapper.text()).toContain('Renewal unavailable (offline)');
+  expect(wrapper.text()).toContain('1.0.0');
+  expect(
+    wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Enable')
+      ?.element?.hasAttribute('disabled'),
+  ).toBe(true);
+  expect(apply).not.toHaveBeenCalled();
+});
 it('uses the desktop server port to install, show the verified version and report state, and disable', async () => {
   const clientId = '01900000-0000-7000-8000-000000000009';
   const identity = {

@@ -216,7 +216,10 @@ export async function apply(ctx, config) {
                 if (disposed || profileOwner !== owner) return;
                 if (owned?.runtime.config.platformOrigin === origin) return;
                 await invalidate(origin);
-                if (!origin || disposed) return;
+                if (!origin || disposed) {
+                  await resources.attach(undefined);
+                  return;
+                }
                 const effective = await savedPlatformConfig(
                   config?.connect,
                   origin,
@@ -258,12 +261,15 @@ export async function apply(ctx, config) {
                     handler: createConnectRoutes({ runtime, admission }),
                   };
                   binding = owned;
+                  await resources.attach(runtime).catch(() => {});
                 } catch (error) {
                   await runtime.close();
                   throw error;
                 }
               });
-              configuring = operation.catch(() => {});
+              configuring = operation.catch(async () => {
+                await resources.attach(undefined).catch(() => {});
+              });
               return operation;
             };
             const unsubscribe = store.subscribe(

@@ -84,7 +84,7 @@ test('L1 cannot disable, L2 cannot remove and L4 cannot act for another owner', 
     assert.equal(f.hostCalls.length, 0);
   }
 });
-test('revocation disables active code and an expired cache cannot keep it enabled', async (t) => {
+test('signed revocation disables active code independently of admission expiry', async (t) => {
   const f = await fixture(t);
   await f.engine.apply(input);
   f.revocations.revision = 2;

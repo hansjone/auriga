@@ -1,16 +1,17 @@
-import { gunzipSync } from 'node:zlib';
-import { TextDecoder } from 'node:util';
+import { gunzip } from 'node:zlib';
+import { TextDecoder, promisify } from 'node:util';
 import { parseStrictJson } from './json.js';
 import { refuse } from './trust.js';
 const decoder = new TextDecoder('utf-8', { fatal: true });
+const decompress = promisify(gunzip);
 /** Validate without extracting or executing. Only the same bounded strict USTAR
  * subset accepted by the resource service is supported. Package-manager scripts
  * and network-resolved dependencies are not admitted as signed local bytes.
  * @param {Uint8Array} archive @param {{name:string,version:string}} expected */
-export function validateArchive(archive, expected) {
+export async function validateArchive(archive, expected) {
   if (!archive.byteLength || archive.byteLength > 67108864)
     return refuse('resource.apply_failed');
-  const data = gunzipSync(archive, { maxOutputLength: 268435456 });
+  const data = await decompress(archive, { maxOutputLength: 268435456 });
   if (data.length > archive.byteLength * 100 || data.length % 512)
     return refuse('resource.apply_failed');
   /** @type {Map<string,Buffer>} */ const files = new Map();
@@ -65,8 +66,14 @@ export function validateArchive(archive, expected) {
     )
       return refuse('resource.apply_failed');
     const normalized = path.replace(/^(?:\.\/)+/, '').replace(/\/$/, '');
+    const collisionKey = normalized
+      .normalize('NFC')
+      .toUpperCase()
+      .toLowerCase()
+      .normalize('NFC');
     if (
       !normalized ||
+      (normalized !== 'package' && !normalized.startsWith('package/')) ||
       normalized
         .split('/')
         .some(
@@ -76,14 +83,15 @@ export function validateArchive(archive, expected) {
             /[. ]$/.test(p) ||
             /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p),
         ) ||
-      paths.has(normalized)
+      paths.has(collisionKey)
     )
       return refuse('resource.apply_failed');
-    paths.add(normalized);
+    paths.add(collisionKey);
     const kind = header[156],
       size = octal(header.subarray(124, 136));
     if (
       ![0, 48, 53].includes(kind) ||
+      (normalized === 'package' && kind !== 53) ||
       (kind === 53 && size !== 0) ||
       octal(header.subarray(100, 108)) & 0o7000 ||
       offset + size > data.length
@@ -94,7 +102,7 @@ export function validateArchive(archive, expected) {
     offset += Math.ceil(size / 512) * 512;
   }
   if (!ended) return refuse('resource.apply_failed');
-  const root = files.has('package/package.json') ? 'package/' : '';
+  const root = 'package/';
   const manifestBytes = files.get(root + 'package.json');
   if (!manifestBytes || manifestBytes.length > 1048576)
     return refuse('resource.apply_failed');

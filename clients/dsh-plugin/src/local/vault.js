@@ -39,7 +39,22 @@ export async function createVault(directory) {
     throw new Error('connect state unavailable');
   let queue = Promise.resolve(),
     closed = false;
+  /** @type {Set<()=>Promise<void>>} */
+  const resourceIdentityListeners = new Set();
+  /** @param {any} value */
+  const resourceIdentity = (value) =>
+    ['tid', 'sub', 'did']
+      .map((key) => value?.credential?.claims?.[key] ?? '')
+      .join('/');
   return {
+    /** Observe durable ownership changes so private resource code stops before logout completes.
+     * @param {()=>Promise<void>} listener */
+    subscribeResourceIdentity(listener) {
+      resourceIdentityListeners.add(listener);
+      return () => {
+        resourceIdentityListeners.delete(listener);
+      };
+    },
     snapshot() {
       if (closed) throw new Error('connect state closed');
       return structuredClone(state);
@@ -52,13 +67,21 @@ export async function createVault(directory) {
         await change(next);
         await atomicWriteJson(path, sealSecret(key, JSON.stringify(next)));
         if (closed) throw new Error('connect state closed');
+        const changed = resourceIdentity(state) !== resourceIdentity(next);
         state = next;
+        if (changed)
+          await Promise.allSettled(
+            [...resourceIdentityListeners].map((listener) =>
+              Promise.resolve().then(listener),
+            ),
+          );
       });
       queue = work.catch(() => {});
       return work;
     },
     close() {
       closed = true;
+      resourceIdentityListeners.clear();
       state = null;
       key.fill(0);
     },

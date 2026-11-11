@@ -4,7 +4,7 @@ import { mkdir, readFile, open, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createFileLedgerStore } from '../network/host/store.js';
 import { openResourceGate } from './gate.js';
-import { createMemberApi, installation } from './member-api.js';
+import { createMemberApi, installation, memberIdentity } from './member-api.js';
 import { validateArchive } from './archive.js';
 import { canonicalize } from './json.js';
 import {
@@ -19,11 +19,35 @@ import {
 } from './trust.js';
 const BOOT = `${process.pid}:${performance.timeOrigin}`;
 /** @typedef {ReturnType<import('./host.js').resourceHost>} Host */
-/** @param {{directory:string,runtime:any,host:Host,trustFile?:string,roots?:()=>Promise<{releaseKeys:ReadonlyMap<string,import('node:crypto').KeyObject>,revocationKeys:ReadonlyMap<string,import('node:crypto').KeyObject>}>,fetchImpl?:typeof fetch,alive?:()=>boolean,now?:()=>number}} options */
+/** @param {{directory:string,runtime?:any,host:Host,trustFile?:string,roots?:()=>Promise<{releaseKeys:ReadonlyMap<string,import('node:crypto').KeyObject>,revocationKeys:ReadonlyMap<string,import('node:crypto').KeyObject>}>,fetchImpl?:typeof fetch,alive?:()=>boolean,now?:()=>number,identity?:{tenantId:string,ownerId:string,clientId:string},current?:()=>any,identityReady?:()=>boolean}} options */
 export async function openMemberResources(options) {
   const { host, directory, now = Date.now } = options;
-  const api = createMemberApi(options),
-    identity = api.identity;
+  const identity = options.identity ?? memberIdentity(options.runtime);
+  function activeApi() {
+    const runtime = options.current ? options.current() : options.runtime;
+    const client = createMemberApi({
+      ...options,
+      runtime,
+      alive: () =>
+        (!options.alive || options.alive()) &&
+        (!options.current || options.current() === runtime),
+    });
+    if (
+      client.identity.tenantId !== identity.tenantId ||
+      client.identity.ownerId !== identity.ownerId ||
+      client.identity.clientId !== identity.clientId
+    )
+      refuse('common.unauthenticated');
+    return client;
+  }
+  function ownsScope() {
+    try {
+      activeApi().check();
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const root = join(
     directory,
     identity.tenantId,
@@ -70,6 +94,11 @@ export async function openMemberResources(options) {
         )
           refuse('resource.storage_unavailable');
         installation(r.row, identity.clientId);
+        // Older manifests predate preservation of the original envelope bytes.
+        if (r.envelope && !r.envelopeWire)
+          r.envelopeWire = Buffer.from(JSON.stringify(r.envelope)).toString(
+            'base64',
+          );
       }
       for (const [key, value] of Object.entries(loaded.operations)) {
         const op = /** @type {any} */ (value);
@@ -96,76 +125,17 @@ export async function openMemberResources(options) {
     throw error;
   }
   const roots = options.roots ?? (() => readResourceRoots(options.trustFile));
-  /** @type {NodeJS.Timeout|undefined} */ let deadline;
-  /** @type {NodeJS.Timeout|undefined} */ let deadlineForce;
-  let expiring = false;
-  function armDeadline() {
-    clearTimeout(deadline);
-    const active = Object.values(state.records).filter(
-      (r) => r.localEnabled || r.activationPending,
-    );
-    if (!active.length || closed) return;
-    let until = now();
-    try {
-      until = Number(instant(state.revocation.list.expiresAt) / 1000000n);
-      for (const r of active) {
-        for (const e of [r.envelope, r.pendingEnvelope].filter(Boolean)) {
-          until = Math.min(until, Number(instant(e.notAfter) / 1000000n));
-          if (isRevoked(state.revocation.list, e)) until = now();
-        }
-      }
-    } catch {
-      until = now();
-    }
-    deadline = setTimeout(
-      () => {
-        expiring = true;
-        // This deadline does not wait behind a download or a package-manager job.
-        // Give a live host one second to persist and hot-disable, then stop it.
-        deadlineForce = setTimeout(() => {
-          if (!closed) host.stop();
-        }, 1000);
-        deadlineForce.unref();
-        void Promise.all(
-          active.map(
-            async (r) => (await host.enable(r.name, false)).restartRequired,
-          ),
-        )
-          .then((results) => {
-            clearTimeout(deadlineForce);
-            if (closed) return;
-            if (results.some(Boolean)) host.stop();
-            else
-              void serial(async () => {
-                for (const r of active) {
-                  r.localEnabled = false;
-                  r.activationPending = false;
-                }
-                expiring = false;
-                await save();
-              }).catch(() => {
-                if (!closed) host.stop();
-              });
-          })
-          .catch(() => {
-            clearTimeout(deadlineForce);
-            if (!closed) host.stop();
-          });
-      },
-      Math.max(0, until - now()),
-    );
-    deadline.unref();
-  }
   let closed = false,
     poisoned = false;
   let tail = Promise.resolve();
+  let commits = Promise.resolve();
   async function save() {
     try {
-      await store.commit(state);
-      armDeadline();
+      const commit = commits.then(() => store.commit(state));
+      commits = commit.catch(() => {});
+      await commit;
     } catch {
       poisoned = true;
-      if (Object.values(state.records).some((r) => r.localEnabled)) host.stop();
       refuse('resource.storage_unavailable');
     }
   }
@@ -218,7 +188,7 @@ export async function openMemberResources(options) {
       ].includes(envelope.statement.arch)
     )
       refuse();
-    await gate.admit(Buffer.from(JSON.stringify(envelope)), download.archive, {
+    await gate.check(download.wire, download.archive, {
       expected: {
         tenantId: identity.tenantId,
         packageId: ref.pack.id,
@@ -236,7 +206,7 @@ export async function openMemberResources(options) {
       releaseKeys: trusted.releaseKeys,
       now: now(),
     });
-    validateArchive(download.archive, {
+    await validateArchive(download.archive, {
       name: ref.pack.name,
       version: ref.version.version,
     });
@@ -284,25 +254,19 @@ export async function openMemberResources(options) {
     await save();
     let observed;
     try {
-      observed = await api.report(source, record.reportState, record.reportKey);
+      observed = await activeApi().report(
+        source,
+        record.reportState,
+        record.reportKey,
+      );
     } catch (error) {
       if (
         record.localEnabled &&
-        [
-          'common.conflict',
-          'common.forbidden',
-          'common.unauthenticated',
-          'common.not_found',
-        ].includes(/** @type {any} */ (error).code)
+        ['common.conflict', 'common.forbidden', 'common.not_found'].includes(
+          /** @type {any} */ (error).code,
+        )
       ) {
-        let restart = true;
-        try {
-          restart = (await host.enable(record.name, false)).restartRequired;
-          record.localEnabled = false;
-          await save();
-        } finally {
-          if (restart) host.stop();
-        }
+        await disableRecord(record);
       }
       throw error;
     }
@@ -318,32 +282,39 @@ export async function openMemberResources(options) {
   }
   /** @param {any} op */
   async function perform(op) {
-    if (expiring) refuse('resource.signature_invalid');
-    api.check();
+    activeApi().check();
     if (op.restartRequired && op.boot === BOOT) return;
     const { packageId, versionId, action, key } = op.input;
-    const ref = await api.reference(packageId, versionId);
+    const ref = await activeApi().reference(packageId, versionId);
     policy(ref.pack, action);
-    let file, verifiedEnvelope;
+    let file, verifiedEnvelope, verifiedWire;
     if (['install', 'enable'].includes(action)) {
       if (!ref.pack.enabled || ref.version.state !== 'published')
         refuse('resource.state_conflict');
       // Ticket issuance/consumption never retries automatically. A new attempt
       // receives fresh keys even when a selection intent is being recovered.
-      const download = await api.download(ref);
+      const download = await activeApi().download(ref);
       file = await verifyDownload(ref, download);
       verifiedEnvelope = download.envelope;
+      verifiedWire = download.wire;
     }
     if (!op.row) {
-      const rows = await api.list(),
+      const rows = await activeApi().list(),
         selected = rows.find((r) => r.packageId === packageId);
       op.ifMatch ??= selected?.revision ?? 0;
       await save();
-      op.row = await api.select(ref, action, op.ifMatch, 'select-' + key);
+      op.row = await activeApi().select(
+        ref,
+        action,
+        op.ifMatch,
+        'select-' + key,
+      );
       await save();
     }
     installation(op.row, identity.clientId);
-    const latest = (await api.list()).find((r) => r.packageId === packageId);
+    const latest = (await activeApi().list()).find(
+      (r) => r.packageId === packageId,
+    );
     if (
       !latest ||
       latest.revision !== op.row.revision ||
@@ -361,11 +332,22 @@ export async function openMemberResources(options) {
       version: ref.version.version,
       operation: key,
       restartRequired: false,
+      rollback:
+        previous?.rollback ??
+        (previous?.localVersion
+          ? {
+              localVersion: previous.localVersion,
+              localDigest: previous.localDigest,
+              localEnabled: previous.localEnabled,
+              envelope: previous.envelope,
+              envelopeWire: previous.envelopeWire,
+            }
+          : undefined),
     });
     if (verifiedEnvelope) record.pendingEnvelope = verifiedEnvelope;
     await save();
     try {
-      api.check();
+      activeApi().check();
       let actual = await host.observe(record.name);
       /** @param {{restartRequired:boolean}} outcome */
       async function changed(outcome) {
@@ -393,16 +375,23 @@ export async function openMemberResources(options) {
           record.localVersion !== ref.version.version ||
           !actual?.installed
         ) {
-          api.check();
+          activeApi().check();
           record.activationPending = true;
           await save();
           if (!file) refuse('resource.apply_failed');
+          await verifyDownload(ref, {
+            envelope: verifiedEnvelope,
+            wire: verifiedWire,
+            archive: await readFile(file),
+            revocations: state.revocation.list,
+          });
+          activeApi().check();
           if (await changed(await host.install(file, record.name))) return;
           record.localDigest = ref.version.digest;
           record.localVersion = ref.version.version;
           await save();
         }
-        api.check();
+        activeApi().check();
         if (!file || !verifiedEnvelope) refuse('resource.signature_invalid');
         // Recheck the cached bytes, roots and current expiry immediately before
         // activation, even if package installation took a long time.
@@ -415,31 +404,28 @@ export async function openMemberResources(options) {
           state.revocation,
         ).list;
         if (isRevoked(list, verifiedEnvelope)) refuse();
-        await gate.admit(
-          Buffer.from(JSON.stringify(verifiedEnvelope)),
-          await readFile(file),
-          {
-            expected: {
-              tenantId: identity.tenantId,
-              packageId,
-              versionId,
-              releaseSequence: ref.version.releaseSequence,
-              statement: {
-                ...verifiedEnvelope.statement,
-                name: ref.pack.name,
-                version: ref.version.version,
-                digest: ref.version.digest,
-              },
-              sizeBytes: ref.version.sizeBytes,
+        const admission = {
+          expected: {
+            tenantId: identity.tenantId,
+            packageId,
+            versionId,
+            releaseSequence: ref.version.releaseSequence,
+            statement: {
+              ...verifiedEnvelope.statement,
+              name: ref.pack.name,
+              version: ref.version.version,
+              digest: ref.version.digest,
             },
-            releaseKeys: trusted.releaseKeys,
-            now: now(),
+            sizeBytes: ref.version.sizeBytes,
           },
-        );
+          releaseKeys: trusted.releaseKeys,
+          now: now(),
+        };
+        if (!verifiedWire) refuse();
+        await gate.check(verifiedWire, await readFile(file), admission);
         record.activationPending = true;
         await save();
-        api.check();
-        if (expiring) refuse('resource.signature_invalid');
+        activeApi().check();
         if (await changed(await host.enable(record.name, true))) return;
         actual = await host.observe(record.name);
         if (
@@ -448,8 +434,16 @@ export async function openMemberResources(options) {
           actual.version !== ref.version.version
         )
           refuse('resource.apply_failed');
+        await gate.admit(verifiedWire, await readFile(file), {
+          ...admission,
+          now: now(),
+        });
         record.localEnabled = true;
         record.envelope = verifiedEnvelope;
+        record.envelopeWire = Buffer.from(verifiedWire).toString('base64');
+        record.renewalState = 'current';
+        record.blocked = false;
+        record.rollback = undefined;
         record.pendingEnvelope = undefined;
         record.activationPending = false;
       } else {
@@ -478,16 +472,14 @@ export async function openMemberResources(options) {
       record.reportState = 'applied';
       await save();
     } catch (error) {
-      if (record.activationPending) {
-        let restart = true;
-        try {
-          restart = (await host.enable(record.name, false)).restartRequired;
-          record.localEnabled = false;
-          record.activationPending = false;
-        } finally {
-          if (restart) host.stop();
-        }
+      let restored = false;
+      try {
+        restored = await restore(record);
+      } catch {
+        record.restartRequired = true;
       }
+      if (!restored && record.activationPending) await disableRecord(record);
+      record.activationPending = false;
       record.reportState = 'failed';
       await save();
       try {
@@ -514,6 +506,7 @@ export async function openMemberResources(options) {
       localEnabled: r.localEnabled === true,
       restartRequired: r.restartRequired === true,
       syncPending: !!r.reportState,
+      renewalState: r.renewalState ?? 'current',
     };
   }
   /** @param {any} r */
@@ -531,7 +524,7 @@ export async function openMemberResources(options) {
     return value;
   }
   async function sync() {
-    const remote = await api.list();
+    const remote = await activeApi().list();
     for (const record of Object.values(state.records))
       if (record.reportState) {
         const row = remote.find((r) => r.packageId === record.row.packageId);
@@ -554,7 +547,10 @@ export async function openMemberResources(options) {
         if (row.revision > value.revision) {
           Object.assign(value, row);
           try {
-            const ref = await api.reference(row.packageId, row.versionId);
+            const ref = await activeApi().reference(
+              row.packageId,
+              row.versionId,
+            );
             value.version = ref.version.version;
           } catch {
             value.version = row.versionId;
@@ -565,7 +561,7 @@ export async function openMemberResources(options) {
         let name = row.packageId,
           version = row.versionId;
         try {
-          const ref = await api.reference(row.packageId, row.versionId);
+          const ref = await activeApi().reference(row.packageId, row.versionId);
           name = ref.pack.name;
           version = ref.version.version;
         } catch {
@@ -587,19 +583,30 @@ export async function openMemberResources(options) {
         items.push(await observedProjection(record));
     return { identity, items, reportSource: 'member', offline: false };
   }
-  async function monitor(refresh = true) {
-    const enabled = Object.values(state.records).filter((r) => r.localEnabled);
-    if (!enabled.length) return;
+  /** @param {any} record */
+  async function disableRecord(record) {
+    record.renewalState = 'denied';
+    record.blocked = true;
     try {
-      if (refresh) {
-        const trusted = await roots();
-        await revocations(await api.revocations(), trusted);
-      }
+      const result = await host.enable(record.name, false);
+      record.restartRequired = result.restartRequired;
+      record.localEnabled = (await host.observe(record.name))?.enabled === true;
     } catch {
-      /* A trusted list remains valid only until its original expiry. */
+      record.restartRequired = true;
     }
-    for (const record of enabled) {
-      let stop = false;
+    await save();
+  }
+  /** Runtime checks do not apply the admission notAfter deadline to running code. */
+  async function enforceLocal() {
+    for (const record of Object.values(state.records)) {
+      if (!record.localVersion) continue;
+      const actual = await host.observe(record.name);
+      if (!actual?.enabled && !record.localEnabled) continue;
+      let denied =
+        record.blocked === true ||
+        (record.row.level === 'l4' &&
+          (options.identityReady?.() ?? true) &&
+          !ownsScope());
       try {
         const trusted = await roots();
         const list = verifyRevocations(
@@ -608,29 +615,135 @@ export async function openMemberResources(options) {
           trusted.revocationKeys,
           now(),
           state.revocation,
+          true,
         ).list;
         signed(record.envelope, trusted.releaseKeys);
         if (
-          !record.envelope ||
-          isRevoked(list, record.envelope) ||
-          instant(record.envelope.notAfter) <= BigInt(now()) * 1000000n
+          record.envelope.tenantId !== identity.tenantId ||
+          record.envelope.packageId !== record.row.packageId ||
+          record.envelope.statement.digest !== record.localDigest ||
+          isRevoked(list, record.envelope)
         )
-          stop = true;
+          denied = true;
       } catch {
-        stop = true;
+        denied = true;
       }
-      if (stop) {
-        let restart = true;
-        try {
-          restart = (await host.enable(record.name, false)).restartRequired;
-          record.localEnabled = false;
-          await save();
-        } catch {
-          /* A host unable to disable must stop before its stale code continues. */
-        }
-        if (restart) host.stop();
-      }
+      if (denied) await disableRecord(record);
     }
+  }
+  /** @param {any} record */
+  async function restore(record) {
+    const old = record.rollback;
+    if (!old?.localVersion || !old.envelope || !old.envelopeWire) return false;
+    const trusted = await roots();
+    const list = verifyRevocations(
+      state.revocation?.list,
+      identity.tenantId,
+      trusted.revocationKeys,
+      now(),
+      state.revocation,
+      true,
+    ).list;
+    if (
+      isRevoked(list, old.envelope) ||
+      (record.row.level === 'l4' && !ownsScope())
+    )
+      return false;
+    const file = join(root, 'archives', old.localDigest.slice(7) + '.tgz');
+    const archive = await readFile(file);
+    const envelope = old.envelope;
+    await gate.check(Buffer.from(old.envelopeWire, 'base64'), archive, {
+      expected: {
+        tenantId: identity.tenantId,
+        packageId: envelope.packageId,
+        versionId: envelope.versionId,
+        releaseSequence: envelope.releaseSequence,
+        statement: envelope.statement,
+        sizeBytes: archive.length,
+      },
+      releaseKeys: trusted.releaseKeys,
+      // Restoring the exact previously running version preserves runtime continuity.
+      now: Math.min(now(), Number(instant(envelope.notAfter) / 1000000n) - 1),
+    });
+    await validateArchive(archive, {
+      name: record.name,
+      version: old.localVersion,
+    });
+    if ((await host.install(file, record.name)).restartRequired) return false;
+    if (
+      old.localEnabled &&
+      (await host.enable(record.name, true)).restartRequired
+    )
+      return false;
+    const actual = await host.observe(record.name);
+    if (
+      !actual?.installed ||
+      actual.version !== old.localVersion ||
+      actual.enabled !== old.localEnabled
+    )
+      return false;
+    Object.assign(record, old, {
+      rollback: undefined,
+      activationPending: false,
+      restartRequired: false,
+    });
+    await save();
+    return true;
+  }
+  async function monitor(refresh = true) {
+    await enforceLocal();
+    if (!refresh) return;
+    try {
+      await revocations(await activeApi().revocations(), await roots());
+    } catch {
+      /* Offline runtime uses the last independently signed revocations. */
+    }
+    await enforceLocal();
+    for (const record of Object.values(state.records)) {
+      if (!record.localEnabled || record.blocked) continue;
+      if (
+        record.renewalState === 'current' &&
+        Number(instant(record.envelope.notAfter) / 1000000n) - now() > 300000
+      )
+        continue;
+      try {
+        const ref = await activeApi().reference(
+          record.row.packageId,
+          record.envelope.versionId,
+        );
+        policy(ref.pack, 'enable');
+        if (!ref.pack.enabled || ref.version.state !== 'published')
+          refuse('resource.state_conflict');
+        if (
+          ref.version.digest !== record.localDigest ||
+          ref.version.releaseSequence !== record.envelope.releaseSequence
+        )
+          refuse();
+        const renewal = await activeApi().authorize(ref);
+        await verifyDownload(ref, {
+          ...renewal,
+          archive: await readFile(
+            join(root, 'archives', record.localDigest.slice(7) + '.tgz'),
+          ),
+        });
+        record.envelope = renewal.envelope;
+        record.envelopeWire = Buffer.from(renewal.wire).toString('base64');
+        record.renewalState = 'current';
+      } catch (error) {
+        if (
+          [
+            'common.forbidden',
+            'common.not_found',
+            'resource.level_locked',
+            'resource.state_conflict',
+          ].includes(/** @type {any} */ (error).code)
+        )
+          await disableRecord(record);
+        else record.renewalState = 'offline';
+      }
+      await save();
+    }
+    await enforceLocal();
   }
   let watching = false,
     refreshed = 0;
@@ -651,11 +764,21 @@ export async function openMemberResources(options) {
       });
   }, 1000);
   timer?.unref();
-  armDeadline();
+  try {
+    for (const record of Object.values(state.records))
+      if (record.rollback && record.activationPending) await restore(record);
+    await enforceLocal();
+  } catch (error) {
+    clearInterval(timer);
+    await gate.close();
+    await store.close();
+    throw error;
+  }
   return {
     identity,
     list: () =>
       serial(async () => {
+        activeApi().check();
         try {
           return await sync();
         } catch (error) {
@@ -713,12 +836,29 @@ export async function openMemberResources(options) {
       });
     },
     monitor: () => serial(monitor),
+    enforce: enforceLocal,
+    cachedRevocations: () => state.revocation?.list,
+    /** @param {any} list */
+    async acceptRevocations(list) {
+      const checked = verifyRevocations(
+        list,
+        identity.tenantId,
+        (await roots()).revocationKeys,
+        now(),
+        state.revocation,
+        true,
+      );
+      if (!state.revocation || checked.revision > state.revocation.revision) {
+        state.revocation = checked;
+        await save();
+      }
+    },
     async close() {
       closed = true;
       clearInterval(timer);
-      clearTimeout(deadline);
-      clearTimeout(deadlineForce);
+
       await tail;
+      await commits;
       await gate.close();
       await store.close();
     },
