@@ -64,7 +64,11 @@
       },
       "adminOnly": false,
       "sensitive": false,
-      "builtinRoles": ["owner", "admin", "member"]
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
     },
     "auriga.connect.collab.use": {
       "description": {
@@ -73,7 +77,11 @@
       },
       "adminOnly": false,
       "sensitive": false,
-      "builtinRoles": ["owner", "admin", "member"]
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
     },
     "ai.providers.read": {
       "description": {
@@ -259,6 +267,54 @@
         "owner",
         "admin",
         "member"
+      ]
+    },
+    "ops.alerts.read": {
+      "description": {
+        "en": "Read operations alerts",
+        "zh-CN": "读取告警"
+      },
+      "adminOnly": true,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "ops.alerts.write": {
+      "description": {
+        "en": "Write operations alerts",
+        "zh-CN": "管理告警"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "ops.notifications.read": {
+      "description": {
+        "en": "Read operations notifications",
+        "zh-CN": "读取通知渠道"
+      },
+      "adminOnly": true,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "ops.notifications.write": {
+      "description": {
+        "en": "Write operations notifications",
+        "zh-CN": "管理通知渠道"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
       ]
     }
   },

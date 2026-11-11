@@ -31,7 +31,10 @@ done
 sh "$temp/scripts/start.sh"
 grep -q ' up -d --no-build --pull never$' "$temp/compose.log"
 tail -n 1 "$temp/compose.log" | grep -q ' restart --no-deps agent$'
-[ "$(wc -l <"$temp/compose.log")" -eq 2 ]
+[ "$(wc -l <"$temp/compose.log")" -eq 4 ]
+head -n 1 "$temp/compose.log" | grep -q ' up -d --no-build --pull never --wait postgres$'
+sed -n '2p' "$temp/compose.log" | grep -q ' exec -T postgres psql -U auriga_bootstrap.*01-roles.sql$'
+# PostgreSQL preparation must complete before the platform is started.
 echo 'PASS public_start_recovers_agent_after_edge_is_started'
 : >"$temp/compose.log"
 touch "$temp/fail"
