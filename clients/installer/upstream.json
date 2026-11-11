@@ -1,0 +1,6 @@
+{
+  "dsh": "0.2.1-rc.3",
+  "dshIntegrity": "sha512-H+E9HLnHf7fJqzen84Z9Bq8ggb5xbrcbyhZjXTJLE9NabHr3zteGvTRvdvGkxPl4ov80is4WLglFmSo+/olJjg==",
+  "node": "22.19.0",
+  "nodeWinX64Sha256": "ea3fad0e67a991d8477d8c01344b56e69c676ccb733f065b22436994b1253f86"
+}
