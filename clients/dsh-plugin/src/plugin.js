@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { installSettings } from './settings/host.js';
 import { installNetworkDiagnosticSink } from './network/diagnostics.js';
 import { installObservability, logEvent } from './observability/index.js';
+import { installResourceChannel } from './resources/channel.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -83,6 +84,10 @@ export async function apply(ctx, config) {
         protocol: ctx.webServer.protocol,
       });
       installNativeLoginRPC(ctx, () => current()?.runtime);
+      installResourceChannel(ctx, {
+        auth: admission.nativeAuth,
+        current: () => current()?.runtime,
+      });
       ctx.effect(
         () => () => admission?.dispose(),
         'auriga-dsh: persistent local door',
