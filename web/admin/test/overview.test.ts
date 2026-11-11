@@ -6,6 +6,9 @@ import { adminApi } from '../src/admin/api';
 import { orgApi } from '../src/api';
 import { router } from '../src/router';
 import WorkflowUnavailableView from '../src/views/WorkflowUnavailableView.vue';
+import AuditView from '../src/views/AuditView.vue';
+import AlertsView from '../src/views/ops/AlertsView.vue';
+import NotificationsView from '../src/views/ops/NotificationsView.vue';
 
 afterEach(() => vi.restoreAllMocks());
 describe('overview snapshots', () => {
@@ -20,6 +23,15 @@ describe('overview snapshots', () => {
     ).toBe(OverviewView);
     expect(
       router.resolve('/ops/alerts').matched.at(-1)?.components?.default,
+    ).toBe(AlertsView);
+    expect(
+      router.resolve('/ops/notifications').matched.at(-1)?.components?.default,
+    ).toBe(NotificationsView);
+    expect(router.resolve('/audit').matched.at(-1)?.components?.default).toBe(
+      AuditView,
+    );
+    expect(
+      router.resolve('/ops/upgrades').matched.at(-1)?.components?.default,
     ).toBe(WorkflowUnavailableView);
   });
   it('reads every page and leaves independent failures unknown', async () => {

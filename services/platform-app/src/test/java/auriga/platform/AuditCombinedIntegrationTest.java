@@ -39,6 +39,7 @@ import tools.jackson.databind.json.JsonMapper;
     properties = {
       "auriga.platform.combined=true",
       "auriga.services.audit.enabled=true",
+      "auriga.services.ops.enabled=true",
       "auriga.grpc.server.enabled=false",
       "server.address=127.0.0.1",
       "auriga.logging.json=false",
@@ -116,13 +117,28 @@ class AuditCombinedIntegrationTest {
     r.add("auriga.audit.password", () -> "e2e_audit_app");
     r.add("auriga.audit.migration-username", () -> "auriga_audit_owner");
     r.add("auriga.audit.migration-password", () -> "e2e_audit_owner");
+    var ops =
+        PostgresExtension.serviceRoles(
+            AuditCombinedIntegrationTest.class, "merge_ops_owner", "merge_ops_app", "ops");
+    r.add(
+        "auriga.platform.ops.jdbc-url",
+        () -> database.jdbcUrl().split(java.util.regex.Pattern.quote("?"))[0]);
+    r.add("auriga.platform.ops.username", () -> ops.runtime().role());
+    r.add("auriga.platform.ops.password", () -> "");
+    r.add("auriga.platform.ops.migration-username", () -> ops.owner().role());
+    r.add("auriga.platform.ops.migration-password", () -> "");
     NatsExtension.properties(r);
   }
 
   @Configuration(proxyBeanMethods = false)
   @Profile("audit-integration")
   @EnableAutoConfiguration
-  @Import({PlatformCombinedConfiguration.class, AuditModuleConfiguration.class})
+  @Import({
+    PlatformCombinedConfiguration.class,
+    AuditModuleConfiguration.class,
+    PlatformOpsConfiguration.class,
+    auriga.ops.OpsModuleConfiguration.class
+  })
   static class App {
     @Bean
     JwtDecoder decoder() {
@@ -133,6 +149,10 @@ class AuditCombinedIntegrationTest {
   }
 
   String token(String ctx, boolean allowed) {
+    return token(ctx, allowed ? List.of("audit.events.read") : List.of());
+  }
+
+  String token(String ctx, List<String> permissions) {
     try {
       var now = Instant.now();
       var claims =
@@ -145,7 +165,7 @@ class AuditCombinedIntegrationTest {
               .claim("ctx", ctx)
               .claim("sid", UUID.randomUUID().toString())
               .claim("mtyp", "member")
-              .claim("perms", allowed ? List.of("audit.events.read") : List.of())
+              .claim("perms", permissions)
               .jwtID(UUID.randomUUID().toString())
               .issueTime(Date.from(now))
               .expirationTime(Date.from(now.plusSeconds(300)))
@@ -175,6 +195,47 @@ class AuditCombinedIntegrationTest {
         .connectTimeout(Duration.ofSeconds(5))
         .build()
         .send(b.build(), HttpResponse.BodyHandlers.ofString());
+  }
+
+  @Test
+  void auditAndOpsRemainUsableWithSeparateRolesAndSharedNats() throws Exception {
+    assertEquals(1, context.getBeansOfType(Connection.class).size());
+    assertTrue(auditEventConsumer.isRunning());
+    assertTrue(context.getBean("opsInstanceConsumer", NatsEventConsumer.class).isRunning());
+    var opsSource = context.getBean("opsDataSource", DataSource.class);
+    assertEquals(
+        "merge_ops_app",
+        new JdbcTemplate(opsSource).queryForObject("SELECT current_user", String.class));
+    String subject = "merge-" + UuidV7.next();
+    context
+        .getBean(auriga.ops.api.OpsSignals.class)
+        .observe(TENANT, "instance_failed", subject, "critical", true);
+    var uri = URI.create("http://127.0.0.1:" + port + "/api/ops/v1/admin/alerts");
+    var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    var allowed =
+        client.send(
+            HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(15))
+                .header("Authorization", "Bearer " + token("admin", List.of("ops.alerts.read")))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, allowed.statusCode(), allowed.body());
+    assertTrue(allowed.body().contains(subject), allowed.body());
+    var denied =
+        client.send(
+            HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(15))
+                .header("Authorization", "Bearer " + token("admin", true))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(403, denied.statusCode(), denied.body());
+    assertEquals(200, get("", token("admin", true)).statusCode());
+    assertEquals(
+        0,
+        new JdbcTemplate(opsSource)
+            .queryForObject("SELECT count(*) FROM ops.alert", Integer.class));
   }
 
   @Test
