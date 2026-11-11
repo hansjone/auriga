@@ -1,4 +1,41 @@
 export interface paths {
+  '/admin/credentials': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List credential metadata without secret values */
+    get: operations['listCredentials'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/credentials/{instanceId}/revoke': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revoke a managed credential and require a new version to be issued
+     * @description Invalidates the device and managed session. Reissuance requires the existing workspace credential version rotation workflow.
+     */
+    post: operations['revokeCredential'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/network/register': {
     parameters: {
       query?: never;
@@ -1022,6 +1059,33 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    CredentialRevoke: {
+      /** Format: int64 */
+      version: number;
+      /** @description Must be true to acknowledge revocation */
+      confirm: boolean;
+    };
+    CredentialMetadata: {
+      id: string;
+      /** @enum {string} */
+      type: 'managed' | 'signing';
+      /** @enum {string} */
+      status: 'active' | 'revoked' | 'expired' | 'next' | 'retiring';
+      /** Format: uuid */
+      instanceId?: string;
+      /** Format: int64 */
+      version?: number;
+      /** Format: date-time */
+      issuedAt?: string;
+      /** Format: date-time */
+      expiresAt?: string;
+      expiringSoon: boolean;
+    };
+    CredentialList: {
+      items: components['schemas']['CredentialMetadata'][];
+      /** @description Whether service and node credential metadata is connected */
+      serviceMetadataAvailable: boolean;
+    };
     AdminCsrfTokenRegistration: {
       /** @description 每tab由crypto.getRandomValues生成32字节、规范无填充base64url。服务端校格式不能证明熵，客户端必须使用安全随机源。 */
       token: string;
@@ -1351,23 +1415,6 @@ export interface components {
       /** Format: date-time */
       createdAt: string;
     };
-    /** Network register request */
-    'register.schema': Record<string, never>;
-    /**
-     * Network register result
-     * @description Authenticated HTTPS registration result, not a signed network frame or authorization token. created describes only this call's final committed transaction; never replay a historical true. See README.md#https-register-initialization for the one-use initialization boundary.
-     */
-    'register-result.schema': {
-      /** Format: uuid */
-      tenant: string;
-      realm: string;
-      node: string;
-      /** Format: uuid */
-      device: string;
-      systemAddress: string;
-      /** @description true only if this call actually INSERTed the authenticated device's new node in its final committed transaction. An existing node, idempotent retry or concurrent loser returns false; transaction retries cannot retain true from a rolled-back attempt. Only the current authenticated HTTPS request generation may consume true once, after fully verified signed READY confirms incarnation and the complete ledger is atomically committed. Never persist as reusable initialization permission. */
-      created: boolean;
-    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;
@@ -1398,6 +1445,23 @@ export interface components {
       /** @description 字段级错误（validation_failed 时）。 */
       errors?: components['schemas']['FieldError'][];
       traceId?: string;
+    };
+    /** Network register request */
+    'register.schema': Record<string, never>;
+    /**
+     * Network register result
+     * @description Authenticated HTTPS registration result, not a signed network frame or authorization token. created describes only this call's final committed transaction; never replay a historical true. See README.md#https-register-initialization for the one-use initialization boundary.
+     */
+    'register-result.schema': {
+      /** Format: uuid */
+      tenant: string;
+      realm: string;
+      node: string;
+      /** Format: uuid */
+      device: string;
+      systemAddress: string;
+      /** @description true only if this call actually INSERTed the authenticated device's new node in its final committed transaction. An existing node, idempotent retry or concurrent loser returns false; transaction retries cannot retain true from a rolled-back attempt. Only the current authenticated HTTPS request generation may consume true once, after fully verified signed READY confirms incarnation and the complete ledger is atomically committed. Never persist as reusable initialization permission. */
+      created: boolean;
     };
     /** Network ticket request */
     'ticket-request.schema': {
@@ -1687,28 +1751,9 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
     /** @description 没有权限（common.forbidden 或更具体的码）。 */
     Forbidden: {
       headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 太频繁（common.rate_limited）。 */
-    RateLimited: {
-      headers: {
-        'Retry-After': components['headers']['RetryAfter'];
         [name: string]: unknown;
       };
       content: {
@@ -1727,6 +1772,25 @@ export interface components {
     /** @description 状态冲突（common.conflict 等）。 */
     Conflict: {
       headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 太频繁（common.rate_limited）。 */
+    RateLimited: {
+      headers: {
+        'Retry-After': components['headers']['RetryAfter'];
         [name: string]: unknown;
       };
       content: {
@@ -1768,6 +1832,62 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  listCredentials: {
+    parameters: {
+      query?: {
+        type?: 'managed' | 'signing';
+        status?: 'active' | 'revoked' | 'expired' | 'next' | 'retiring';
+        expiringSoon?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Tenant devices and installation signing metadata; expiry window is seven days */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CredentialList'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  revokeCredential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        instanceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CredentialRevoke'];
+      };
+    };
+    responses: {
+      /** @description Revoked metadata */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CredentialMetadata'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
   registerNetworkClient: {
     parameters: {
       query?: never;

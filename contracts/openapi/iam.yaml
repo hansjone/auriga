@@ -32,6 +32,51 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /admin/credentials:
+    get:
+      tags: [admin-keys]
+      operationId: listCredentials
+      summary: List credential metadata without secret values
+      x-admin-only: true
+      x-permission: iam.keys.write
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [managed, signing] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, revoked, expired, next, retiring] } }
+        - { name: expiringSoon, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Tenant devices and installation signing metadata; expiry window is seven days
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialList' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+  /admin/credentials/{instanceId}/revoke:
+    post:
+      tags: [admin-keys]
+      operationId: revokeCredential
+      summary: Revoke a managed credential and require a new version to be issued
+      description: Invalidates the device and managed session. Reissuance requires the existing workspace credential version rotation workflow.
+      x-admin-only: true
+      x-permission: iam.keys.write
+      x-step-up: true
+      parameters:
+        - { name: instanceId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CredentialRevoke' }
+      responses:
+        '200':
+          description: Revoked metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialMetadata' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
   /network/register:
     $ref: iam-network-client.yaml#/paths/~1network~1register
   /network/tickets:
@@ -1137,6 +1182,33 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    CredentialRevoke:
+      type: object
+      additionalProperties: false
+      required: [version, confirm]
+      properties:
+        version: { type: integer, format: int64, minimum: 1, maximum: 9007199254740991 }
+        confirm: { type: boolean, description: Must be true to acknowledge revocation }
+    CredentialMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, type, status, expiringSoon]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [managed, signing] }
+        status: { type: string, enum: [active, revoked, expired, next, retiring] }
+        instanceId: { type: string, format: uuid }
+        version: { type: integer, format: int64 }
+        issuedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        expiringSoon: { type: boolean }
+    CredentialList:
+      type: object
+      additionalProperties: false
+      required: [items, serviceMetadataAvailable]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CredentialMetadata' } }
+        serviceMetadataAvailable: { type: boolean, description: Whether service and node credential metadata is connected }
     AdminCsrfTokenRegistration:
       type: object
       properties:

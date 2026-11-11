@@ -1,3 +1,4 @@
+import { credentialsZh, credentialsEn } from './credentialsMessages';
 import { useI18n } from 'vue-i18n';
 import { orgZh, orgEn } from './orgMessages';
 import { quotaZh, quotaEn } from './quotaMessages';
@@ -7,6 +8,7 @@ import { providersZh, providersEn } from './providersMessages';
 import { settingsZh, settingsEn } from './settingsMessages';
 
 const zh = {
+  ...credentialsZh,
   navRelayProviders: '模型与供应商',
   navRelayKeys: '虚拟 Key',
   navRelayUsage: '用量查询',
@@ -125,6 +127,7 @@ const zh = {
   },
 };
 const en = {
+  ...credentialsEn,
   navRelayProviders: 'Models and providers',
   navRelayKeys: 'Virtual keys',
   navRelayUsage: 'Usage',
