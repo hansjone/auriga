@@ -167,7 +167,7 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 		latest, loadErr := r.Store.GetDesired(id)
 		return loadErr == nil && proto.Equal(spec, latest)
 	}
-	ctx = telemetry.Start(ctx, "", id, rec.Status.ObservedGeneration, r.Log)
+	ctx = r.startupContext(ctx, r.Store.StartupParent(id, rec.Status.ObservedGeneration), id, rec.Status.ObservedGeneration)
 	checker := r.Driver.(runtime.HealthChecker)
 	actual, checkErr := checker.CheckHealth(ctx, id)
 	if !current() {
@@ -189,7 +189,9 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 					st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART
 				}
 			}
-			r.persistHealth(ctx, epoch, spec, st, 0)
+			if r.persistHealth(ctx, epoch, spec, st, 0) {
+				telemetry.Stage(ctx, "ready")
+			}
 		}
 		return
 	}
@@ -225,12 +227,17 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 					st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART
 				}
 			}
-			r.persistHealth(ctx, epoch, spec, st, 0)
+			if r.persistHealth(ctx, epoch, spec, st, 0) {
+				telemetry.Stage(ctx, "ready")
+			}
 			r.mu.Lock()
 			delete(r.healthRetries, id)
 			r.mu.Unlock()
 			return
 		}
+	}
+	if checkErr != nil {
+		telemetry.Failed(ctx, checkErr)
 	}
 	r.mu.Lock()
 	if r.closed || epoch != r.healthEpochs[id] || ctx.Err() != nil {

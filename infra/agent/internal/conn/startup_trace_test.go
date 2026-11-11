@@ -2,6 +2,7 @@ package conn
 
 import (
 	"context"
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	"io"
 	"log/slog"
 	"strings"
@@ -44,7 +45,7 @@ func TestControlApplyCarriesMessageCauseNotSessionCause(t *testing.T) {
 	if err := store.PutDesiredWithTrace(invalid, strings.Repeat("x", 10000)); err != nil {
 		t.Fatal(err)
 	}
-	if store.StartupParent("instance-b", 1) != "" {
+	if !telemetry.Valid(store.StartupParent("instance-b", 1)) {
 		t.Fatal("invalid parent retained")
 	}
 }

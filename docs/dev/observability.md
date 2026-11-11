@@ -8,7 +8,10 @@ Auriga 使用现有 W3C `traceparent`，日志字段为 `trace_id`、`service`�
 ### 实例启动的异步因果
 
 新建或由 stopped 改为 running 时，workspace 把有效 W3C 上下文与当前 generation
-同事务写入 `instance.startup_traceparent`；它不属于 InstanceSpec、身份、渲染摘要或环境。
+同事务写入 `instance.startup_traceparent`；它不属于 InstanceSpec、身份或渲染摘要。
+容器创建时由 agent 单独注入有效的 `TRACEPARENT` 环境变量，不接受 profile 覆盖。
+该变量在容器生命周期内对容器进程与 inspect 可见，仅用于关联，不是凭据或授权依据。
+DSH 原生进程日志当前没有公开 trace 接口，不能据此声称每条 DSH 日志已关联。
 同一次尚未完成启动的托管材料衍生 generation 显式继承。dispatch 在独立线程建立
 子 span，以 ApplySpec 的可选 `traceparent` 下发；agent 把 spec 与观测数据原子存入
 独立 bbolt bucket，队列/重连/重启不继承已结束 HTTP 的取消或截止。
@@ -18,7 +21,11 @@ Go/插件使用 `span_id/parent_span_id`。探测的
 `Auriga-Observation-Generation` 仅是未经授权信任的诊断值，不参与身份和 ready 判定。
 
 达到 ready、停止或终端失败后关闭该启动因果；restart 的中间 stopped 检查点不关闭。
-同代数重发不会复活已完成因果，无变更 open 不重新绑定；独立恢复使用新 trace。
+同代数重发不会复活已完成因果，无变更 open 不重新绑定。尚未完成启动的同代后台
+健康恢复继续原 trace；已完成后的独立维护使用新 trace。缺失或非法分发 trace 时，
+agent 生成有效 ID 并持久化，日志包含 `trace.origin=generated`，正常继承为 `propagated`。
+未完成同代首次收到有效的平台 trace 时可替换 generated 回退值，提交后记录一次
+`startup trace linked`，以 `previous_trace_id` 连接旧段；已有 propagated trace 不被其他 trace 覆盖。
 旧 agent 可忽略新增字段，旧状态无历史因果；非法或重复 HTTP trace 安全重建，不拒绝业务。
 健康失败记录分类、HTTP 状态、尝试/耗时、脱敏运输异常，以及健康契约四个公开字段的
 诊断投影；任意响应正文、头、身份材料不写日志，不能从 ready=false 推断凭据原因。
@@ -36,6 +43,31 @@ Alloy 对动态容器另设 discovery：`auriga.managed=true` 且
 自动扩采，只能在正常授权的业务生命周期重建后获得标签；不能为观测强制重建。
 可用 `{job=~"auriga-nas|auriga-plugin"} | json | trace_id="<32位ID>"` 一次查询平台、agent、
 托管健康段及已导入的插件文件，并核各源到达与缺源。局测不是 NAS 真实集中链验收。
+
+## 启动阶段耗时查询
+
+agent 的 `startup stage` 日志包含 `stage`、`instance_id`、`generation`、
+`elapsed_ms`（距同一次执行上一个里程碑）、`cumulative_ms`（距 agent 首次接受该代规格）。
+累计起点持久化，包含排队和同代恢复间隔；agent 重启或恢复后阶段间隔重新计时。
+阶段依次为 `accepted`、`image_pull`、`image_ready`、`container_created`、
+`container_started`、`first_health_attempt`、`listen_detected`、`plugin_healthy`、`ready`；
+失败为 `failed` 或 `timeout`。恢复复用容器，跳过镜像和创建阶段，
+`container_started` 的 `reused=true` 表示已有运行进程。
+`listen_detected` 取健康探测首次收到 HTTP 响应的时刻（包括非 200），是可观测的
+listen 上界，并非 DSH 内部绑定端口的精确时刻；不额外发探测请求。
+`plugin_healthy` 通过后仍要通过原有执行/进程校验，最终 `ready` 才代表 agent 启动成功。
+托管插件沿已有健康 HTTP 的 traceparent 与 generation 日志接续，不新增健康正文协议。
+
+从仓库根生成查询 URL，再按已有运维传输送入 NAS 的
+`deploy/nas/scripts/observability-query.sh`（stdin 一行 URL），或把 query 放入 Grafana Explore：
+
+```sh
+node --input-type=module -e 'import {startupTraceUrl} from "./e2e/phase1/loki-query.mjs"; console.log(startupTraceUrl(process.argv[1], {start:"2026-11-01T00:00:00Z",end:"2026-11-01T01:00:00Z"}).href)' 4bf92f3577b34da6a3ce929d0e0e4736
+```
+
+查询覆盖 NAS、Compose 和导入插件源，按时间正序，保留门户/平台/插件普通日志，
+不只筛 stage。返回上限 5000 行，超过时缩小时间窗；没有某段日志时应报告缺源，
+不能由阶段推断 DSH 内部慢点。agent 起点之外的门户/分发耗时通过同 trace HTTP 日志定位。
 
 ## 已接线的边界
 

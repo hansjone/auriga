@@ -17,6 +17,8 @@ type Span struct {
 	Instance   string
 	Generation int64
 	Logger     *slog.Logger
+	Origin     string
+	startup    *startupClock
 }
 
 var parentPattern = regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`)
@@ -47,12 +49,13 @@ func randomID(n int) string {
 	}
 }
 func Start(ctx context.Context, parent, instance string, generation int64, logger *slog.Logger) context.Context {
-	s := Span{Instance: instance, Generation: generation, Logger: logger}
+	s := Span{Instance: instance, Generation: generation, Logger: logger, Origin: "propagated"}
 	span := randomID(8)
 	if Valid(parent) {
 		s.Parent = parent[36:52]
 		s.Value = "00-" + parent[3:35] + "-" + span + "-" + parent[53:55]
 	} else {
+		s.Origin = "generated"
 		s.Value = "00-" + randomID(16) + "-" + span + "-01"
 	}
 	if !Valid(s.Value) {
@@ -62,7 +65,13 @@ func Start(ctx context.Context, parent, instance string, generation int64, logge
 }
 func Child(ctx context.Context) context.Context {
 	s := Current(ctx)
-	return Start(ctx, s.Value, s.Instance, s.Generation, s.Logger)
+	child := Start(ctx, s.Value, s.Instance, s.Generation, s.Logger)
+	next := Current(child)
+	next.startup = s.startup
+	if s.Origin != "" {
+		next.Origin = s.Origin
+	}
+	return context.WithValue(child, key{}, next)
 }
 func Log(ctx context.Context, level slog.Level, message string, fields ...any) {
 	s := Current(ctx)
@@ -71,6 +80,9 @@ func Log(ctx context.Context, level slog.Level, message string, fields ...any) {
 		logger = slog.Default()
 	}
 	attrs := []any{"instance_id", s.Instance, "generation", s.Generation}
+	if s.Origin != "" {
+		attrs = append(attrs, "trace.origin", s.Origin)
+	}
 	if Valid(s.Value) {
 		attrs = append(attrs, "trace_id", s.Value[3:35], "span_id", s.Value[36:52], "parent_span_id", s.Parent)
 	}

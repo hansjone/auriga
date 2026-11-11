@@ -14,6 +14,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -196,9 +197,15 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		if err := validateEnvPair(k, v); err != nil {
 			return fmt.Errorf("docker: %w", err)
 		}
-		env = append(env, k+"="+v)
+		if k != "TRACEPARENT" {
+			env = append(env, k+"="+v)
+		}
 	}
 
+	if parent := telemetry.Current(ctx).Value; telemetry.Valid(parent) {
+		env = append(env, "TRACEPARENT="+parent)
+	}
+	telemetry.Stage(ctx, "image_pull")
 	if err := d.Client.PullImage(ctx, s.Image); err != nil {
 		return err
 	}
@@ -217,6 +224,7 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	if err := scope.recheck(); err != nil {
 		return err
 	}
+	telemetry.Stage(ctx, "image_ready")
 	d.revoke(s.InstanceID)
 	if _, err := d.Client.NetworkCreate(ctx, netName, true, map[string]string{
 		labelInstance: s.InstanceID,
@@ -341,6 +349,7 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	if err != nil {
 		return err
 	}
+	telemetry.Stage(ctx, "container_created")
 	record := &state.ExecutionRecord{Version: 2, InstanceID: s.InstanceID, Generation: s.Generation, DSH: proto.Clone(scope.spec.Dsh).(*nodev1.DshRuntime), Candidate: scope.candidate, ContainerID: containerID, ConfigID: scope.image.ConfigID(), EngineImageID: engineImageID, ProofDigest: scope.image.ManifestDigest(), Phase: "created"}
 	if _, err := d.verifyContainer(ctx, record); err != nil {
 		return err
@@ -424,6 +433,7 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if liveState["Running"] == true && original != process {
 		return fmt.Errorf("docker: process changed during recovery")
 	}
+	telemetry.Stage(ctx, "container_started", "reused", liveState["Running"] == true)
 	port, err := instancePort(insp)
 	if err != nil {
 		return fmt.Errorf("docker: %s: %w", name, err)

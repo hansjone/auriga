@@ -1,8 +1,12 @@
 package state
 
 import (
+	"bytes"
+	"encoding/json"
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
+	"log/slog"
 	"testing"
 )
 
@@ -67,7 +71,7 @@ func TestStartupCauseReloadReplayAndTerminalBoundary(t *testing.T) {
 	if err := store.PutDesiredWithTrace(spec, "invalid"); err != nil {
 		t.Fatal("invalid observation rejected business spec", err)
 	}
-	if store.StartupParent(spec.InstanceId, 8) != "" {
+	if !telemetry.Valid(store.StartupParent(spec.InstanceId, 8)) {
 		t.Fatal("invalid parent persisted")
 	}
 	if !store.StartupComplete(spec.InstanceId, 7) {
@@ -121,5 +125,96 @@ func TestStartupCompletionAdvancesWithoutDiscardingNewerCause(t *testing.T) {
 	}
 	if !store.StartupComplete("legacy-complete", 8) {
 		t.Fatal("completion without old observation dropped its watermark")
+	}
+}
+
+func TestStartupTimingAndGeneratedCauseSurviveReload(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := &nodev1.InstanceSpec{InstanceId: "generated-a", Generation: 7, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING}
+	if err := store.PutDesiredWithTrace(spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	parent := store.StartupParent(spec.InstanceId, 7)
+	started, origin := store.StartupTiming(spec.InstanceId, 7)
+	if !telemetry.Valid(parent) || started.IsZero() || origin != "generated" {
+		t.Fatal(parent, started, origin)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	if err := store.PutDesiredWithTrace(spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, origin := store.StartupTiming(spec.InstanceId, 7)
+	if store.StartupParent(spec.InstanceId, 7) != parent || !started.Equal(reloaded) || origin != "generated" {
+		t.Fatal("replay/reload reset observation")
+	}
+}
+
+func TestGeneratedStartupLinksFirstRealTraceOnly(t *testing.T) {
+	directory := t.TempDir()
+	store, err := Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := &nodev1.InstanceSpec{InstanceId: "linked-a", Generation: 7, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING}
+	if err := store.PutDesiredWithTrace(spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	generated := store.StartupParent(spec.InstanceId, 7)
+	started, _ := store.StartupTiming(spec.InstanceId, 7)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(previousLogger)
+	const parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	if err := store.PutDesiredWithTrace(spec, parent); err != nil {
+		t.Fatal(err)
+	}
+	got, origin := store.StartupTiming(spec.InstanceId, 7)
+	if store.StartupParent(spec.InstanceId, 7) != parent || origin != "propagated" || !got.Equal(started) {
+		t.Fatal("real trace did not take over generated observation")
+	}
+	for _, other := range []string{"", "invalid", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", parent} {
+		if err := store.PutDesiredWithTrace(spec, other); err != nil {
+			t.Fatal(err)
+		}
+		if store.StartupParent(spec.InstanceId, 7) != parent {
+			t.Fatal("real trace was overwritten")
+		}
+	}
+	decoder := json.NewDecoder(&logs)
+	count := 0
+	for decoder.More() {
+		var event map[string]any
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		if event["msg"] == "startup trace linked" {
+			count++
+			if event["previous_trace_id"] != generated[3:35] || event["trace_id"] != parent[3:35] || event["trace.origin"] != "propagated" || event["instance_id"] != spec.InstanceId || event["generation"] != float64(7) {
+				t.Fatal(event)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("link logs=%d", count)
 	}
 }

@@ -261,7 +261,7 @@ func (r *Reconciler) loop(id string, ch chan workItem) {
 		if r.Store.StartupComplete(id, generation) {
 			item.parent = ""
 		}
-		ctx = telemetry.Start(ctx, item.parent, id, generation, r.Log)
+		ctx = r.startupContext(ctx, item.parent, id, generation)
 		switch item.kind {
 		case "health":
 			r.handleHealth(id, item.healthContext, item.healthEpoch)
@@ -292,7 +292,10 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 	}
 	spec = proto.Clone(spec).(*nodev1.InstanceSpec)
 	if telemetry.Current(ctx).Generation != spec.Generation || telemetry.Current(ctx).Instance != id {
-		ctx = telemetry.Start(ctx, r.Store.StartupParent(id, spec.Generation), id, spec.Generation, r.Log)
+		ctx = r.startupContext(ctx, r.Store.StartupParent(id, spec.Generation), id, spec.Generation)
+	}
+	if spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING {
+		telemetry.Stage(ctx, "accepted")
 	}
 	rec, actualErr := r.Store.GetActual(id)
 	if actualErr != nil {
@@ -450,6 +453,7 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		err = run(ctx)
 	}
 	if err != nil {
+		telemetry.Failed(ctx, err)
 		telemetry.Log(ctx, slog.LevelWarn, "runtime activation failed", "error", telemetry.Mask(err.Error()))
 		r.fail(id, spec.Generation, rec.Attempts, code, err.Error(), true)
 		return
@@ -462,7 +466,9 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		st.ObservedGeneration = spec.Generation
 		st.StartedAt = timestamppb.Now()
 		st.UpdatedAt = timestamppb.Now()
-		_ = r.persist(st, 0)
+		if r.persist(st, 0) == nil {
+			telemetry.Stage(ctx, "ready")
+		}
 	case nodev1.DesiredState_DESIRED_STATE_STOPPED:
 		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_STOPPED
 		st.Ready = false
@@ -508,6 +514,7 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 		err = run(ctx)
 	}
 	if err != nil {
+		telemetry.Failed(ctx, err)
 		r.failRecovery(ctx, rec, "runtime health recovery failed")
 		return
 	}
@@ -518,7 +525,9 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 	st.Ready = true
 	st.UpdatedAt = timestamppb.Now()
 	// Start may merely rediscover an existing container. Preserve its start time.
-	_ = r.persist(st, 0)
+	if r.persist(st, 0) == nil {
+		telemetry.Stage(ctx, "ready")
+	}
 }
 
 func (r *Reconciler) failRecovery(ctx context.Context, rec state.ActualRecord, message string) {
@@ -626,4 +635,15 @@ func cloneStatus(st *nodev1.InstanceStatus) *nodev1.InstanceStatus {
 		return nil
 	}
 	return proto.Clone(st).(*nodev1.InstanceStatus)
+}
+
+func (r *Reconciler) startupContext(ctx context.Context, parent, id string, generation int64) context.Context {
+	ctx = telemetry.Start(ctx, parent, id, generation, r.Log)
+	if !r.Store.StartupComplete(id, generation) && generation > 0 {
+		started, origin := r.Store.StartupTiming(id, generation)
+		if !started.IsZero() {
+			ctx = telemetry.WithStartup(ctx, started, origin)
+		}
+	}
+	return ctx
 }
