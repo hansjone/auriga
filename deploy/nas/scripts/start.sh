@@ -48,6 +48,10 @@ if project_is_running; then
   info "project already running — compose up -d is idempotent"
 fi
 
+# Apply idempotent role/schema additions also when the PG data volume already exists.
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build --pull never --wait postgres
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" exec -T postgres psql -U auriga_bootstrap -d auriga -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/01-roles.sql
+
 info "starting project $AURIGA_NAS_PROJECT (no build, no pull)"
 # Fail closed, including when Compose does not support --pull never.
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build --pull never

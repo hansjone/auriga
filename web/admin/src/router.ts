@@ -21,9 +21,14 @@ import KeysView from './views/models/KeysView.vue';
 import UsageView from './views/models/UsageView.vue';
 import { navigation } from './admin/navigation';
 
+import AlertsView from './views/ops/AlertsView.vue';
+import NotificationsView from './views/ops/NotificationsView.vue';
+
 const existing = new Set([
   '/security/entries',
   '/security/egress',
+  '/ops/alerts',
+  '/ops/notifications',
   '/overview',
   '/models/providers',
   '/settings',
@@ -61,6 +66,8 @@ export const router = createRouter({
         { path: 'overview', component: OverviewView },
         { path: 'security/entries', component: EntriesView },
         { path: 'security/egress', component: EgressView },
+        { path: 'ops/alerts', component: AlertsView },
+        { path: 'ops/notifications', component: NotificationsView },
         { path: 'resources', component: ResourcesView },
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },

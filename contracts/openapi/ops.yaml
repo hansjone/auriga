@@ -1,0 +1,1022 @@
+openapi: 3.1.0
+info:
+  title: Auriga Ops
+  version: 1.0.0
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+  description:
+    Tenant-scoped alerts, leased retry delivery and encrypted write-only
+    webhook channels. Deliveries are at-least-once (deliveryId for receiver deduplication),
+    five attempts with 30/60/120/240 second backoff and a 90-second lease. Per-channel
+    sends are limited to one every 30 seconds. SMTP, upstream, expiry and disk signal
+    producers are not integrated.
+servers:
+  - url: /api/ops/v1
+security:
+  - bearerAuth: []
+paths:
+  /admin/alerts:
+    get:
+      operationId: get_admin_alerts
+      summary: ops.alerts.read
+      x-permission: ops.alerts.read
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - limit
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OpsAlert'
+                  limit:
+                    type: integer
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters: []
+  /admin/alerts/{id}/acknowledge:
+    post:
+      operationId: post_admin_alerts_id_acknowledge
+      summary: ops.alerts.write
+      x-permission: ops.alerts.write
+      x-recent-step-up: true
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: minutes
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10080
+            default: 60
+  /admin/alerts/{id}/silence:
+    post:
+      operationId: post_admin_alerts_id_silence
+      summary: ops.alerts.write
+      x-permission: ops.alerts.write
+      x-recent-step-up: true
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: minutes
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10080
+            default: 60
+  /admin/alerts/{id}/unsilence:
+    post:
+      operationId: post_admin_alerts_id_unsilence
+      summary: ops.alerts.write
+      x-permission: ops.alerts.write
+      x-recent-step-up: true
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: minutes
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10080
+            default: 60
+  /admin/notification-channels:
+    get:
+      operationId: get_admin_notification-channels
+      summary: ops.notifications.read
+      x-permission: ops.notifications.read
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - available
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OpsChannel'
+                  available:
+                    type: boolean
+                    description:
+                      Whether encryption key is configured; otherwise channel
+                      writes/tests and automatic sends fail closed.
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters: []
+    post:
+      operationId: createOpsNotificationChannel
+      summary: ops.notifications.write
+      x-permission: ops.notifications.write
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpsChannelInput'
+      x-recent-step-up: true
+  /admin/notification-channels/{id}:
+    put:
+      operationId: put_admin_notification-channels_id
+      summary: ops.notifications.write
+      x-permission: ops.notifications.write
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpsChannelInput'
+      x-recent-step-up: true
+    delete:
+      operationId: delete_admin_notification-channels_id
+      summary: ops.notifications.write
+      x-permission: ops.notifications.write
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      x-recent-step-up: true
+  /admin/notification-channels/{id}/test:
+    post:
+      operationId: post_admin_notification-channels_id_test
+      summary: ops.notifications.write
+      x-permission: ops.notifications.write
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      x-recent-step-up: true
+  /admin/alerts/{id}/deliveries:
+    get:
+      operationId: listOpsAlertDeliveries
+      summary: ops.alerts.read
+      x-permission: ops.alerts.read
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OpsDelivery'
+        '400':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '401':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '403':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '404':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '429':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '502':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+        '503':
+          description: Request rejected; problem code in response
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    OpsAlert:
+      type: object
+      required:
+        - id
+        - source
+        - subject
+        - severity
+        - first_seen
+        - last_seen
+        - acknowledged_at
+        - silenced_until
+        - resolved_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        source:
+          type: string
+        subject:
+          type: string
+        severity:
+          type: string
+          enum:
+            - warning
+            - critical
+        first_seen:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+        acknowledged_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        silenced_until:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        resolved_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    OpsChannel:
+      type: object
+      required:
+        - id
+        - name
+        - enabled
+        - minSeverity
+        - configured
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        enabled:
+          type: boolean
+        minSeverity:
+          type: string
+          enum:
+            - warning
+            - critical
+        configured:
+          type: boolean
+    OpsChannelInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - url
+        - enabled
+        - minSeverity
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        url:
+          type: string
+          format: uri
+          maxLength: 2048
+          writeOnly: true
+          description:
+            HTTPS public hostname, port 443 only. All DNS answers must
+            be public IPv4. IPv6 is rejected.
+        bearer:
+          type: string
+          maxLength: 4096
+          writeOnly: true
+        enabled:
+          type: boolean
+        minSeverity:
+          type: string
+          enum:
+            - warning
+            - critical
+    OpsDelivery:
+      type: object
+      required:
+        - id
+        - channelId
+        - status
+        - attempts
+      properties:
+        id:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        channelName:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+          enum:
+            - pending
+            - sending
+            - sent
+            - failed
+            - cancelled
+        attempts:
+          type: integer
+          minimum: 0
+          maximum: 5
+        error:
+          type:
+            - string
+            - 'null'
+        delivered_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        next_attempt_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
