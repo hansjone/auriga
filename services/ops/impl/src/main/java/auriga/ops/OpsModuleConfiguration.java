@@ -10,4 +10,5 @@ import org.springframework.context.annotation.Configuration;
     name = "enabled",
     havingValue = "true",
     matchIfMissing = true)
+@org.springframework.context.annotation.Import(OpsRuntimeConfiguration.class)
 public class OpsModuleConfiguration {}

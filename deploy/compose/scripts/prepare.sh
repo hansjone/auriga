@@ -76,6 +76,7 @@ CA_SHA="$(tr -d '\n' < "$VAR/ca-sha256.txt")"
 COMPOSE_ENV_TMP="$(umask 077; mktemp "$VAR/.compose.env.XXXXXX")"
 trap 'rm -f -- "$COMPOSE_ENV_TMP"' EXIT
 cat "$VAR/iam-installation/compose.keys" > "$COMPOSE_ENV_TMP"
+printf 'AURIGA_OPS_NOTIFICATION_KEY=%s\n' "$(cat "$VAR/iam-installation/ops.key")" >> "$COMPOSE_ENV_TMP"
 cat >> "$COMPOSE_ENV_TMP" <<EOF
 AURIGA_AGENT_CA_SHA256=$CA_SHA
 AURIGA_PANEL_UID=$(stat -c '%u' "$VAR/panel-signing.key")
