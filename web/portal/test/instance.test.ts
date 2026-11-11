@@ -277,21 +277,79 @@ describe('instance lifecycle', () => {
     expect(enterInstance).not.toHaveBeenCalled();
   });
 
-  it('bounds polling and allows a fresh read after timeout', async () => {
-    fetcher.mockImplementation(async () => json({ items: [starting] }));
-    fetcher.mockResolvedValueOnce(json({ items: [starting] }));
+  it('keeps accepted startup beyond the wait window and enters once through read-only polling', async () => {
+    fetcher.mockResolvedValueOnce(json({ items: [stopped] }));
     render();
+    await flushPromises();
+    fetcher.mockResolvedValueOnce(json({ instance: starting, created: false }));
+    await button('启动并进入').trigger('click');
     await flushPromises();
     fetcher.mockImplementation(async () => json(starting));
     await vi.advanceTimersByTimeAsync(120000);
-    expect(wrapper!.text()).toContain('等待超时');
+    expect(wrapper!.get('[role=status]').text()).toBe('正在启动');
+    expect(wrapper!.find('[role=alert]').exists()).toBe(false);
     expect(enterInstance).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+    const reads = fetcher.mock.calls.slice(2);
+    expect(reads.length).toBeGreaterThan(3);
+    expect(reads.length).toBeLessThan(20);
+    for (const [path, init] of reads) {
+      expect(path).toBe('/api/workspace/v1/instances/instance-1');
+      expect(init?.method).toBe('GET');
+    }
+    fetcher.mockImplementation(async () => json(running));
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(enterInstance).toHaveBeenCalledExactlyOnceWith(running.id);
     expect(vi.getTimerCount()).toBe(0);
-    fetcher.mockResolvedValueOnce(json({ items: [running] }));
-    await button('重试').trigger('click');
-    await flushPromises();
-    expect(button('进入实例').exists()).toBe(true);
+    const requests = fetcher.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(fetcher).toHaveBeenCalledTimes(requests);
+    expect(enterInstance).toHaveBeenCalledTimes(1);
+    expect(
+      fetcher.mock.calls.filter(([, init]) => init?.method === 'POST'),
+    ).toHaveLength(1);
   });
+
+  it.each(['list', 'open'] as const)(
+    'retains the initial request timeout before %s acceptance and ignores late READY',
+    async (request) => {
+      if (request === 'open') {
+        fetcher.mockResolvedValueOnce(json({ items: [stopped] }));
+        render();
+        await flushPromises();
+      }
+      let resolve!: (value: Response) => void;
+      fetcher.mockReturnValueOnce(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      if (request === 'open') await button('启动并进入').trigger('click');
+      else render();
+      await flushPromises();
+      const signal = fetcher.mock.calls.at(-1)![1]!.signal!;
+      const requests = fetcher.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(119999);
+      expect(wrapper!.find('[role=alert]').exists()).toBe(false);
+      expect(signal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(wrapper!.get('[role=alert]').text()).toBe('等待超时，请重试。');
+      expect(signal.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      resolve(
+        json(
+          request === 'open'
+            ? { instance: running, created: false }
+            : { items: [running] },
+        ),
+      );
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(120000);
+      expect(enterInstance).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(requests);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 
   it.each(['cancel', 'unmount'])(
     'aborts and ignores a stale open response on %s',
