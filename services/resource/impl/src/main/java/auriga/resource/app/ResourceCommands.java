@@ -67,6 +67,10 @@ public final class ResourceCommands {
           if (etag == null || !etag.equals("\"" + original.getRevision() + "\""))
             throw error(CommonErrors.PRECONDITION_FAILED);
           if (original.getRevision() >= MAX_REVISION) throw error(STATE_CONFLICT);
+          if (body.name() != null
+              && !body.name().equals(original.getName())
+              && store.hasVersions(current, id)) throw error(STATE_CONFLICT);
+          if (store.hasGovernedVersions(current, id)) throw error(STATE_CONFLICT);
           String visibility =
               body.visibility() == null ? original.getVisibility().getValue() : body.visibility();
           if (original.getLevel() == ModelPackage.LevelEnum.L4 && !visibility.equals("private"))

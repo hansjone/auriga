@@ -61,14 +61,18 @@ describe('resource governance', () => {
     expect(view.findAll('tbody tr')).toHaveLength(0);
     view.unmount();
   });
-  it('does not invent distribution reports or write controls', async () => {
+  it('loads the real distribution queue and offers intent registration', async () => {
     membership(['resource.distributions.manage']);
     const read = vi.spyOn(resourceApi, 'governance');
+    const reports = vi
+      .spyOn(resourceApi, 'distributions')
+      .mockResolvedValue({ items: [] });
     const view = open('distribution');
     await flushPromises();
     expect(read).not.toHaveBeenCalled();
-    expect(view.find('[data-testid="not-connected"]').exists()).toBe(true);
-    expect(view.find('form').exists()).toBe(false);
+    expect(reports).toHaveBeenCalledWith(undefined);
+    expect(view.find('form').exists()).toBe(true);
+    expect(view.findAll('tbody tr')).toHaveLength(0);
     view.unmount();
   });
 });

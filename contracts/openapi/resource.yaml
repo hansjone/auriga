@@ -20,7 +20,7 @@
     }
   ],
   "paths": {
-  "/api/resource/v1/admin/review": {
+    "/api/resource/v1/admin/review": {
       "get": {
         "operationId": "listMarketAdminReview",
         "tags": [
@@ -1124,7 +1124,8 @@
           "resource.digest_mismatch",
           "resource.signature_invalid",
           "resource.download_denied",
-          "resource.storage_unavailable"
+          "resource.storage_unavailable",
+          "iam.step_up_required"
         ],
         "x-events": [],
         "parameters": [
@@ -1139,6 +1140,16 @@
           },
           {
             "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Exact current strong ETag; absent or stale values return 412."
           }
         ],
         "responses": {
@@ -1299,7 +1310,8 @@
               }
             }
           }
-        }
+        },
+        "x-step-up-max-age-seconds": 600
       },
       "get": {
         "operationId": "listResourceVersions",
@@ -1628,7 +1640,8 @@
           "common.rate_limited",
           "common.unavailable",
           "common.internal",
-          "resource.state_conflict"
+          "resource.state_conflict",
+          "iam.step_up_required"
         ],
         "x-events": [],
         "parameters": [
@@ -1790,7 +1803,8 @@
               }
             }
           }
-        }
+        },
+        "x-step-up-max-age-seconds": 600
       }
     },
     "/api/resource/v1/admin/reviews/{reviewId}/decisions": {
@@ -2405,7 +2419,8 @@
           "resource.digest_mismatch",
           "resource.signature_invalid",
           "resource.download_denied",
-          "resource.storage_unavailable"
+          "resource.storage_unavailable",
+          "iam.step_up_required"
         ],
         "x-events": [
           "resource.distribution_requested"
@@ -2546,7 +2561,8 @@
               }
             }
           }
-        }
+        },
+        "x-step-up-max-age-seconds": 600
       }
     },
     "/api/resource/v1/distributions/{distributionId}": {
@@ -3551,6 +3567,1130 @@
           }
         }
       }
+    },
+    "/api/resource/v1/packages/{packageId}/versions/{versionId}/drafts": {
+      "post": {
+        "operationId": "resetMarketAdminDraft",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Live tenant membership and object ACL are checked on every request. Responses are never cached.",
+        "x-permission": "resource.packages.upload",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Exact current strong ETag; absent or stale values return 412."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Reason"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/packages/{packageId}/versions/{versionId}/personal-signatures": {
+      "post": {
+        "operationId": "signMarketAdminPersonal",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Live tenant membership and object ACL are checked on every request. Responses are never cached.",
+        "x-permission": "resource.packages.upload",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Exact current strong ETag; absent or stale values return 412."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Reason"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/admin/review/packages/{packageId}/versions/{versionId}": {
+      "get": {
+        "operationId": "getMarketAdminReviewDetail",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Live tenant membership and object ACL are checked on every request. Responses are never cached.",
+        "x-permission": "resource.versions.review",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketAdminDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/resource/v1/admin/published/packages/{packageId}/versions/{versionId}": {
+      "get": {
+        "operationId": "getMarketAdminPublishedDetail",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Live tenant membership and object ACL are checked on every request. Responses are never cached.",
+        "x-permission": "resource.versions.publish",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketAdminDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/resource/v1/admin/distributions": {
+      "get": {
+        "operationId": "listMarketAdminDistributions",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Live tenant membership and object ACL are checked on every request. Responses are never cached.",
+        "x-permission": "resource.distributions.manage",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketAdminDistributionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/internal/resource/v1/downloads/{downloadId}/renewals": {
+      "post": {
+        "operationId": "renewMarketAdminNodeDownload",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Direct node mTLS required. Reauthorizes the current exact workspace selection and renews the same node-bound locator for at most five minutes. Idempotency replays return the original expiry for 24 hours; use a new key for a later renewal. No bearer URL or caller expiry is accepted.",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "resource.version_immutable",
+          "resource.review_required",
+          "resource.state_conflict",
+          "resource.level_locked",
+          "resource.digest_mismatch",
+          "resource.signature_invalid",
+          "resource.download_denied",
+          "resource.storage_unavailable"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "downloadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Fresh online authorization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadAuthorization"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "resource.level_locked, resource.download_denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "resource.version_immutable, resource.review_required, resource.state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "resource.digest_mismatch, resource.signature_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "resource.storage_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "nodeMtls": []
+          }
+        ],
+        "x-authorization": "node-bound-grant",
+        "x-internal-only": true
+      }
+    },
+    "/api/resource/v1/revocations": {
+      "get": {
+        "operationId": "getResourceRevocations",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Current tenant signed revocation list, including explicit empty arrays. Membership and resource read permission are checked live; requires configured independent revocation signer. Never cached.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Signed tenant revocations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevocationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3754,6 +4894,23 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 1024
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "tenant",
+              "members",
+              "groups"
+            ]
+          },
+          "groupIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 200,
+            "uniqueItems": true
           }
         },
         "required": [
@@ -3900,6 +5057,11 @@
               "arch"
             ],
             "additionalProperties": false
+          },
+          "changeNotes": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
           }
         },
         "required": [
@@ -4266,6 +5428,193 @@
           "instanceId",
           "fromReleaseSequence",
           "reason"
+        ],
+        "additionalProperties": false
+      },
+      "MarketAdminFile": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 268435456
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "path",
+          "sizeBytes",
+          "digest"
+        ],
+        "additionalProperties": false
+      },
+      "MarketAdminMetadata": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "expectedDigest": {
+            "type": "string"
+          },
+          "manifest": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 214
+              },
+              "dshVersionRange": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "os": {
+                "type": "string",
+                "enum": [
+                  "linux",
+                  "windows",
+                  "any"
+                ]
+              },
+              "arch": {
+                "type": "string",
+                "enum": [
+                  "amd64",
+                  "arm64",
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "dshVersionRange",
+              "os",
+              "arch"
+            ],
+            "additionalProperties": false
+          },
+          "changeNotes": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 128
+          }
+        },
+        "required": [
+          "version",
+          "expectedDigest",
+          "manifest",
+          "permissions"
+        ],
+        "additionalProperties": false
+      },
+      "MarketAdminReviewRecord": {
+        "type": "object",
+        "properties": {
+          "review": {
+            "$ref": "#/components/schemas/Review"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reviewerId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "review",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "MarketAdminDetail": {
+        "type": "object",
+        "properties": {
+          "resourcePackage": {
+            "$ref": "#/components/schemas/Package"
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketAdminMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "files": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MarketAdminFile"
+            },
+            "maxItems": 4096
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketAdminReviewRecord"
+            }
+          },
+          "previousVersion": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "previousFiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketAdminFile"
+            },
+            "maxItems": 4096
+          }
+        },
+        "required": [
+          "resourcePackage",
+          "version",
+          "authorId",
+          "metadata",
+          "files",
+          "reviews"
+        ],
+        "additionalProperties": false
+      },
+      "MarketAdminDistributionPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Distribution"
+            },
+            "maxItems": 200
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ],
         "additionalProperties": false
       }

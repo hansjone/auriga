@@ -11,4 +11,8 @@ public interface ResourceAccessInputs {
   GetEffectivePermissionsResponse permissions(UUID tenantId, UUID accountId);
 
   boolean allowPersonalPlugins(UUID tenantId);
+
+  default boolean groupExists(UUID tenantId, UUID groupId) {
+    return false;
+  }
 }

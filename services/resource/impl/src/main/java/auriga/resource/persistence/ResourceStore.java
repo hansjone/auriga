@@ -48,6 +48,22 @@ public final class ResourceStore {
     return writes.execute(status -> action.get());
   }
 
+  public boolean hasVersions(Reader reader, UUID id) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM resource.resource_version WHERE tenant_id=:tenant AND package_id=:id)",
+            Map.of("tenant", reader.tenant(), "id", id),
+            Boolean.class));
+  }
+
+  public boolean hasGovernedVersions(Reader reader, UUID id) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM resource.resource_version WHERE tenant_id=:tenant AND package_id=:id AND state NOT IN ('draft','rejected'))",
+            Map.of("tenant", reader.tenant(), "id", id),
+            Boolean.class));
+  }
+
   public void lockCreation(Reader r, String key) {
     // Hash collisions merely serialize unrelated keys; the unique scope remains exact in SQL.
     jdbc.query(
@@ -272,7 +288,7 @@ public final class ResourceStore {
         + " AND p.visibility <> 'private' AND "
         + (phase.equals("review")
             ? "v.state='pending_review'"
-            : "v.state IN ('published','deprecated','withdrawn')");
+            : "v.state IN ('approved','published','deprecated','withdrawn')");
   }
 
   public UUID governanceCeiling(Reader r, String phase) {
