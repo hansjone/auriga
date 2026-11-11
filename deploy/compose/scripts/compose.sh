@@ -63,7 +63,10 @@ elif [ -e "$VAR/collab-installation" ] || [ -L "$VAR/collab-installation" ]; the
   ARGS+=(-f "$COMPOSE/scripts/collab-required.yml" --profile network-collab)
   export COMPOSE_PROFILES=network-collab
 fi
-if [ "$1" = upgrade-bifrost ]; then
+if [ "$1" = upgrade-ops ]; then
+  [ "$#" -eq 1 ] || exit 2
+  set -- exec -T postgres psql -U auriga_dev -d auriga -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/01-roles.sql
+elif [ "$1" = upgrade-bifrost ]; then
   [ "$#" -eq 1 ] || exit 2
   # A fixed maintenance action; do not expose arbitrary one-off containers.
   set -- run --rm --no-deps --pull never --user 999:999 -e PGHOST=postgres \

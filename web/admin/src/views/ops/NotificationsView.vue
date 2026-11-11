@@ -9,9 +9,11 @@ import { useOpsI18n } from '../../admin/opsMessages';
 import { useRelayUi } from '../models/relayUi';
 import ActionConfirm from '../../admin/ActionConfirm.vue';
 import '../../admin/management.css';
+import '../../admin/ops.css';
 const { t } = useOpsI18n(),
   ui = useRelayUi(t);
 const { loading, busy, error, notice } = ui;
+const available = ref(true);
 const items = ref<OpsChannel[]>([]),
   editing = ref(false),
   key = ref('');
@@ -35,6 +37,7 @@ async function load() {
     opsApi.channels(ui.signal),
   );
   items.value = data?.items ?? [];
+  available.value = data?.available === true;
   if (!data) clear();
 }
 onMounted(load);
@@ -100,7 +103,7 @@ async function confirm() {
 }
 </script>
 <template>
-  <section class="management">
+  <section class="management ops-page">
     <header class="head">
       <h1>{{ t('notifications') }}</h1>
       <button :disabled="loading || busy || !!pending" @click="load">
@@ -110,11 +113,16 @@ async function confirm() {
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
+    <p v-if="!available" role="alert">{{ t('keyUnavailable') }}</p>
     <p class="muted">{{ t('smtp') }}</p>
     <p class="muted">{{ t('routeHint') }}</p>
     <button
       :disabled="
-        busy || loading || !!pending || !ui.can('ops.notifications.write')
+        busy ||
+        loading ||
+        !!pending ||
+        !available ||
+        !ui.can('ops.notifications.write')
       "
       @click="edit()"
     >
@@ -139,21 +147,30 @@ async function confirm() {
           <td>
             <button
               :disabled="
-                busy || !!pending || !ui.can('ops.notifications.write')
+                busy ||
+                !!pending ||
+                !available ||
+                !ui.can('ops.notifications.write')
               "
               @click="edit(row)"
             >
               {{ t('edit') }}</button
             ><button
               :disabled="
-                busy || !!pending || !ui.can('ops.notifications.write')
+                busy ||
+                !!pending ||
+                !available ||
+                !ui.can('ops.notifications.write')
               "
               @click="askTest(row.id)"
             >
               {{ t('test') }}</button
             ><button
               :disabled="
-                busy || !!pending || !ui.can('ops.notifications.write')
+                busy ||
+                !!pending ||
+                !available ||
+                !ui.can('ops.notifications.write')
               "
               @click="askRemove(row.id)"
             >
@@ -166,7 +183,9 @@ async function confirm() {
     <p v-if="!loading && !error && !items.length">{{ t('empty') }}</p>
     <form v-if="editing" class="details edit-form" @submit.prevent="save">
       <fieldset
-        :disabled="busy || !!pending || !ui.can('ops.notifications.write')"
+        :disabled="
+          busy || !!pending || !available || !ui.can('ops.notifications.write')
+        "
       >
         <p>{{ t('secretHint') }}</p>
         <label class="label-row"

@@ -1,5 +1,12 @@
 import { useI18n } from 'vue-i18n';
 const zh = {
+  keyUnavailable: '通知密钥尚未配置，请联系管理员。',
+  deliveryResults: '投递结果',
+  attempts: '尝试次数',
+  pending: '等待投递',
+  sending: '投递中',
+  sent: '已投递',
+  cancelled: '已取消',
   alerts: '告警',
   notifications: '通知',
   refresh: '刷新',
@@ -41,9 +48,8 @@ const zh = {
   configured: '已配置',
   secretHint: '地址与令牌只写不回显；修改时重新填写。仅支持 HTTPS 公网地址。',
   smtp: '邮件尚未接入',
-  signalHint:
-    '节点、实例、中转、到期与磁盘信号待生产者接入；空列表不代表系统健康。',
-  routeHint: '已保存级别规则；自动告警通知尚未接入。',
+  signalHint: '已接入实例失败与节点离线；上游故障、到期和磁盘信号尚未接入。',
+  routeHint: '新告警与级别升级自动投递，失败最多尝试 5 次。',
   historyHint: '显示最近 500 条记录',
   new: '新增渠道',
   edit: '修改',
@@ -57,6 +63,14 @@ const zh = {
   disk_low: '磁盘不足',
 };
 const en = {
+  keyUnavailable:
+    'Notification encryption key is missing. Contact an administrator.',
+  deliveryResults: 'Delivery results',
+  attempts: 'Attempts',
+  pending: 'Pending',
+  sending: 'Sending',
+  sent: 'Delivered',
+  cancelled: 'Cancelled',
   alerts: 'Alerts',
   notifications: 'Notifications',
   refresh: 'Refresh',
@@ -100,9 +114,9 @@ const en = {
     'URL and token are write-only. Re-enter both when editing. Public HTTPS destinations only.',
   smtp: 'Email not integrated',
   signalHint:
-    'Node, instance, relay, expiry and disk signal producers are not connected. An empty list does not mean healthy.',
+    'Instance failures and node heartbeats are connected. Upstream, expiry and disk signals are not integrated.',
   routeHint:
-    'Severity rules are saved; automatic alert delivery is not integrated.',
+    'New alerts and severity escalation follow these routes, with up to five delivery attempts.',
   historyHint: 'Latest 500 records',
   new: 'New channel',
   edit: 'Edit',

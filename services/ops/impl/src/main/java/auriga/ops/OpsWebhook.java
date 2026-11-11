@@ -8,7 +8,7 @@ import javax.net.ssl.*;
 /**
  * Resolves once, verifies every answer, pins the socket, verifies TLS hostname; no redirects/proxy.
  */
-final class OpsWebhook {
+class OpsWebhook {
   static URI target(String value) {
     try {
       URI u = URI.create(value);

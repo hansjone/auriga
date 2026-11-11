@@ -17,11 +17,10 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnExpression(
-    "${auriga.services.ops.enabled:true} && ('${auriga.service.schema:}' == 'ops' || (${auriga.platform.combined:false} && '${auriga.platform.ops.jdbc-url:}' != ''))")
+    "${auriga.services.ops.enabled:true} && ('${auriga.service.schema:}' == 'ops' || (${auriga.platform.combined:false}))")
 @Import(OpsController.class)
 public class OpsRuntimeConfiguration {
   @Bean
-  @ConditionalOnExpression("'${auriga.service.schema:}' == 'ops'")
   auriga.common.events.EventHandler opsInstanceEvents(OpsStore store) {
     return new OpsInstanceEvents(store);
   }
@@ -31,20 +30,8 @@ public class OpsRuntimeConfiguration {
     DataSource ds;
     TenantTransactionManager tx;
     if (env.getProperty("auriga.platform.combined", Boolean.class, false)) {
-      ds =
-          new org.springframework.jdbc.datasource.DriverManagerDataSource(
-              env.getRequiredProperty("auriga.platform.ops.jdbc-url"),
-              env.getRequiredProperty("auriga.platform.ops.username"),
-              env.getProperty("auriga.platform.ops.password", ""));
-      auriga.common.persistence.CommonMigrations.migrate(ds, "ops");
-      auriga.common.persistence.CommonMigrations.serviceFlyway(
-              org.flywaydb.core.Flyway.configure()
-                  .dataSource(ds)
-                  .schemas("ops")
-                  .locations("classpath:db/ops")
-                  .load())
-          .migrate();
-      tx = new TenantTransactionManager(ds);
+      ds = beans.getBean("opsDataSource", DataSource.class);
+      tx = beans.getBean("opsTransactionManager", TenantTransactionManager.class);
     } else {
       ds = beans.getBean(DataSource.class);
       tx = beans.getBean(TenantTransactionManager.class);
@@ -54,6 +41,11 @@ public class OpsRuntimeConfiguration {
         tx,
         new OpsSecrets(env.getProperty("auriga.ops.notification-key", "")),
         new OpsWebhook());
+  }
+
+  @Bean
+  OpsDeliveryWorker opsDeliveryWorker(OpsStore store) {
+    return new OpsDeliveryWorker(store);
   }
 
   @Bean

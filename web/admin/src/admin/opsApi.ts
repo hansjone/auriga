@@ -1,5 +1,6 @@
 import { apiClient } from '../api';
 import type { components } from './opsSchema';
+export type OpsDelivery = components['schemas']['OpsDelivery'];
 export type OpsAlert = components['schemas']['OpsAlert'];
 export type OpsChannel = components['schemas']['OpsChannel'];
 export type OpsChannelInput = components['schemas']['OpsChannelInput'];
@@ -10,6 +11,11 @@ export const opsApi = {
     apiClient.get<{ items: OpsAlert[]; limit: number }>(`${root}/alerts`, {
       signal,
     }),
+  deliveries: (key: string, signal?: AbortSignal) =>
+    apiClient.get<{ items: OpsDelivery[] }>(
+      `${root}/alerts/${id(key)}/deliveries`,
+      { signal },
+    ),
   action: (
     key: string,
     action: 'acknowledge' | 'silence' | 'unsilence',
@@ -19,9 +25,12 @@ export const opsApi = {
       signal,
     }),
   channels: (signal?: AbortSignal) =>
-    apiClient.get<{ items: OpsChannel[] }>(`${root}/notification-channels`, {
-      signal,
-    }),
+    apiClient.get<{ items: OpsChannel[]; available: boolean }>(
+      `${root}/notification-channels`,
+      {
+        signal,
+      },
+    ),
   create: (body: OpsChannelInput, signal?: AbortSignal) =>
     apiClient.post<{ id: string }>(`${root}/notification-channels`, body, {
       signal,

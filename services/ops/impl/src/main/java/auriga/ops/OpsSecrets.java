@@ -16,6 +16,10 @@ final class OpsSecrets {
       throw new IllegalArgumentException("ops encryption key must be 32 bytes");
   }
 
+  boolean available() {
+    return key != null;
+  }
+
   String seal(String tenant, String value) {
     if (key == null) throw OpsError.error("unavailable", 503);
     byte[] nonce = new byte[12];

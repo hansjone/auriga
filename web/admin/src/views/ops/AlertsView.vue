@@ -1,16 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { opsApi, type OpsAlert } from '../../admin/opsApi';
+import { opsApi, type OpsAlert, type OpsDelivery } from '../../admin/opsApi';
 import { useOpsI18n } from '../../admin/opsMessages';
 import { useRelayUi } from '../models/relayUi';
+import AdminDialog from '../../admin/AdminDialog.vue';
 import ActionConfirm from '../../admin/ActionConfirm.vue';
 import '../../admin/management.css';
+import '../../admin/ops.css';
 const { t } = useOpsI18n();
 const ui = useRelayUi(t);
 const { loading, busy, error, notice } = ui;
 const items = ref<OpsAlert[]>([]),
   severity = ref(''),
   status = ref('');
+const detail = ref<OpsAlert>(),
+  deliveries = ref<OpsDelivery[]>([]);
+async function show(row: OpsAlert) {
+  detail.value = row;
+  deliveries.value = [];
+  const data = await ui.read('ops.alerts.read', () =>
+    opsApi.deliveries(row.id, ui.signal),
+  );
+  if (detail.value?.id === row.id) deliveries.value = data?.items ?? [];
+}
 const pending = ref<{
   id: string;
   action: 'acknowledge' | 'silence' | 'unsilence';
@@ -32,6 +44,8 @@ watch(
   (allowed) => {
     if (!allowed) {
       items.value = [];
+      detail.value = undefined;
+      deliveries.value = [];
       pending.value = undefined;
     }
   },
@@ -50,7 +64,7 @@ async function confirm() {
 const date = (v: string | null) => (v ? new Date(v).toLocaleString() : '');
 </script>
 <template>
-  <section class="management">
+  <section class="management ops-page">
     <header class="head">
       <h1>{{ t('alerts') }}</h1>
       <button :disabled="loading || busy" @click="load">
@@ -93,7 +107,9 @@ const date = (v: string | null) => (v ? new Date(v).toLocaleString() : '');
       <tbody>
         <tr v-for="row in visible" :key="row.id">
           <td>{{ t(row.source) }}</td>
-          <td>{{ row.subject }}</td>
+          <td>
+            <button @click="show(row)">{{ row.subject }}</button>
+          </td>
           <td>{{ t(row.severity) }}</td>
           <td>
             {{ t(row.resolved_at ? 'resolved' : 'active') }}
@@ -142,6 +158,40 @@ const date = (v: string | null) => (v ? new Date(v).toLocaleString() : '');
     </table>
     <p v-if="!loading && !error && !visible.length">{{ t('empty') }}</p>
     <p class="muted">{{ t('historyHint') }}</p>
+    <AdminDialog
+      :open="!!detail"
+      :title="t('deliveryResults')"
+      @close="detail = undefined"
+    >
+      <p v-if="loading" role="status">{{ t('loading') }}</p>
+      <p v-if="error" role="alert">{{ error }}</p>
+      <table>
+        <thead>
+          <tr>
+            <th>{{ t('name') }}</th>
+            <th>{{ t('status') }}</th>
+            <th>{{ t('attempts') }}</th>
+            <th>{{ t('last') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="delivery in deliveries" :key="delivery.id">
+            <td>{{ delivery.channelName || delivery.channelId }}</td>
+            <td>
+              {{ t(delivery.status) }}
+              <span v-if="delivery.error">{{ t('failed') }}</span>
+            </td>
+            <td>{{ delivery.attempts }}</td>
+            <td>
+              {{
+                date(delivery.delivered_at || delivery.next_attempt_at || null)
+              }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="!loading && !error && !deliveries.length">{{ t('empty') }}</p>
+    </AdminDialog>
     <ActionConfirm
       :message="pending ? t('confirmText') : undefined"
       :busy="busy"

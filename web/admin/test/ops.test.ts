@@ -16,7 +16,10 @@ afterEach(() => vi.restoreAllMocks());
 describe('ops pages', () => {
   it('creates only after confirmation and clears the credential', async () => {
     permissions(['ops.notifications.read', 'ops.notifications.write']);
-    vi.spyOn(opsApi, 'channels').mockResolvedValue({ items: [] });
+    vi.spyOn(opsApi, 'channels').mockResolvedValue({
+      items: [],
+      available: true,
+    });
     const create = vi
       .spyOn(opsApi, 'create')
       .mockResolvedValue({ id: 'channel' });
@@ -70,9 +73,28 @@ describe('ops pages', () => {
     const w = mount(AlertsView, { global: { plugins: plugins() } });
     await flushPromises();
     expect(w.text()).toContain('node-a');
+    const delivery = vi.spyOn(opsApi, 'deliveries').mockResolvedValue({
+      items: [
+        {
+          id: 'd',
+          channelId: 'c',
+          channelName: 'primary',
+          status: 'sent',
+          attempts: 1,
+          error: null,
+          delivered_at: '2026-11-11T00:00:00Z',
+          next_attempt_at: null,
+        },
+      ],
+    });
+    await w.get('tbody td:nth-child(2) button').trigger('click');
+    await flushPromises();
+    expect(delivery).toHaveBeenCalledWith('a', expect.any(AbortSignal));
+    expect(w.text()).toContain('primary');
+
     expect(
       w
-        .findAll('tbody button')
+        .findAll('tbody td:last-child button')
         .every((b) => b.attributes('disabled') !== undefined),
     ).toBe(true);
     await w.findAll('select')[1]!.setValue('resolved');
@@ -82,6 +104,7 @@ describe('ops pages', () => {
   it('shows channel metadata and clears secret fields on cancel', async () => {
     permissions(['ops.notifications.read', 'ops.notifications.write']);
     vi.spyOn(opsApi, 'channels').mockResolvedValue({
+      available: true,
       items: [
         {
           id: 'a',
@@ -101,6 +124,19 @@ describe('ops pages', () => {
     await w.get('form button[type="button"]').trigger('click');
     expect(w.find('input[name="bearer"]').exists()).toBe(false);
     expect(w.text()).toContain('邮件尚未接入');
+    w.unmount();
+  });
+  it('fails closed with a clear missing-key message', async () => {
+    permissions(['ops.notifications.read', 'ops.notifications.write']);
+    vi.spyOn(opsApi, 'channels').mockResolvedValue({
+      available: false,
+      items: [],
+    });
+    const w = mount(NotificationsView, { global: { plugins: plugins() } });
+    await flushPromises();
+    expect(w.text()).toContain('通知密钥');
+    const create = w.findAll('button').find((b) => b.text() === '新增渠道')!;
+    expect(create.attributes('disabled')).toBeDefined();
     w.unmount();
   });
 });

@@ -7,7 +7,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 @RestController
 @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
-    "${auriga.services.ops.enabled:true} && ('${auriga.service.schema:}' == 'ops' || (${auriga.platform.combined:false} && '${auriga.platform.ops.jdbc-url:}' != ''))")
+    "${auriga.services.ops.enabled:true} && ('${auriga.service.schema:}' == 'ops' || (${auriga.platform.combined:false}))")
 @RequestMapping("/api/ops/v1/admin")
 @AdminOnly
 public class OpsController {
@@ -21,6 +21,12 @@ public class OpsController {
   @RequiresPermission("ops.alerts.read")
   public ObjectNode alerts() {
     return ops.alerts();
+  }
+
+  @GetMapping("/alerts/{id}/deliveries")
+  @RequiresPermission("ops.alerts.read")
+  public ObjectNode deliveries(@PathVariable UUID id) {
+    return ops.deliveries(id);
   }
 
   @PostMapping("/alerts/{id}/{action}")
