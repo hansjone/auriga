@@ -665,8 +665,12 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		return
 	}
 	domain := openNonceCookieDomain(g.Cfg.InstanceParentDomain)
-	setOpenNonceCookie(w, g.requestSecureCookies(r), domain, instanceID, nonce, 60, target.Mount)
-	loc := g.ticketRedirectURL(r, instanceID, ticket.Token)
+	setOpenNonceCookie(w, g.requestSecureCookies(r), domain, instanceID, ticket.FlowID, nonce, 60, target.Mount)
+	for _, old := range ticket.EvictedFlows {
+		clearOpenNonceCookie(w, g.requestSecureCookies(r), domain, instanceID, old, target.Mount)
+	}
+	g.logOpenNonce(r, rid, "issued", openNonceCookieName(g.requestSecureCookies(r), domain, instanceID, ticket.FlowID, target.Mount))
+	loc := g.ticketRedirectURL(r, instanceID, ticket.FlowID+"."+ticket.Token)
 	http.Redirect(w, r, loc, http.StatusFound)
 }
 
@@ -834,33 +838,40 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 
 func (g *Gateway) redeemTicket(w http.ResponseWriter, r *http.Request, instanceID, rid string) {
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
-	t := query.Get("t")
-	if r.Method != http.MethodGet || queryErr != nil || len(query) != 1 || len(query["t"]) != 1 || t == "" {
+	flow, t, hasFlow := strings.Cut(query.Get("t"), ".")
+	if r.Method != http.MethodGet || queryErr != nil || len(query) != 1 || len(query["t"]) != 1 || t == "" || !hasFlow || !validOpenFlow(flow) {
+		g.logOpenNonce(r, rid, "invalid_query", "")
 		writeProblem(w, problem(http.StatusBadRequest, "edge.bad_ticket", "Bad Request", "missing ticket", rid))
 		return
 	}
 	target := g.instanceTarget(r, instanceID)
 	secure := g.requestSecureCookies(r)
 	domain := openNonceCookieDomain(g.Cfg.InstanceParentDomain)
-	nonceName := openNonceCookieName(secure, domain, instanceID, target.Mount)
+	nonceName := openNonceCookieName(secure, domain, instanceID, flow, target.Mount)
+	outcome := "rejected"
+	defer func() { g.logOpenNonce(r, rid, outcome, nonceName) }()
 	nonce, nonceErr := uniqueInstanceCookie(r, nonceName)
 	if nonceErr != nil {
+		clearOpenNonceCookie(w, secure, domain, instanceID, flow, target.Mount)
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket_nav", "Forbidden", "open nonce cookie required", rid))
 		return
 	}
-	ticket, err := g.Tickets.Redeem(t)
+	ticket, err := g.Tickets.Redeem(t, flow)
+	// A mismatched query must not consume another flow or delete its nonce.
+	if !errors.Is(err, errTicketFlow) {
+		clearOpenNonceCookie(w, secure, domain, instanceID, flow, target.Mount)
+	}
 	if err != nil {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.bad_ticket", "Unauthorized", err.Error(), rid))
 		return
 	}
 	sum := sha256.Sum256([]byte(nonce))
 	got := hex.EncodeToString(sum[:])
-	if ticket.NonceHash == "" || !strings.EqualFold(got, ticket.NonceHash) {
-		clearOpenNonceCookie(w, secure, domain, instanceID, target.Mount)
+	if ticket.FlowID != flow || ticket.NonceHash == "" || !strings.EqualFold(got, ticket.NonceHash) {
+		outcome = "mismatch"
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket_nav", "Forbidden", "open nonce mismatch", rid))
 		return
 	}
-	clearOpenNonceCookie(w, secure, domain, instanceID, target.Mount)
 	if ticket.InstanceID != instanceID || ticket.Target != target {
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket", "Forbidden", "ticket instance mismatch", rid))
 		return
@@ -879,6 +890,7 @@ func (g *Gateway) redeemTicket(w http.ResponseWriter, r *http.Request, instanceI
 		writeProblem(w, problem(http.StatusInternalServerError, "edge.ticket_error", "Internal Server Error", "", rid))
 		return
 	}
+	outcome = "redeemed"
 	setInstanceCookie(w, secure, binding.CookieRaw, 0, target.Mount)
 	http.Redirect(w, r, target.Mount, http.StatusFound)
 }

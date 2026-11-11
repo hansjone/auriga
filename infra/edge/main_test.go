@@ -325,7 +325,7 @@ func TestIdentitySignAndTicketOnce(t *testing.T) {
 		t.Fatalf("location %s", loc)
 	}
 
-	nonceName := openNonceCookieName(false, openNonceCookieDomain(cfg.InstanceParentDomain), instID)
+	nonceName := openNonceCookieName(false, openNonceCookieDomain(cfg.InstanceParentDomain), instID, strings.SplitN(u.Query().Get("t"), ".", 2)[0])
 	nonce := ""
 	for _, c := range rr.Result().Cookies() {
 		if c.Name == nonceName {

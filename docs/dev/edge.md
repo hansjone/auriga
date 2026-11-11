@@ -175,8 +175,8 @@ JWKS 子集（含 `d` 私钥种子，选 `state=CURRENT`）：
 
 ## `/open` 与实例骨架
 
-1. 门户 `GET|POST /open/<instanceId>`：校验门户会话 + 所有权 → 下发一次性 `auriga_open_nonce` cookie（有父域时 Domain 覆盖 portal+实例）→ 票据存 nonce 哈希 → 302 到实例 `/_auriga/ticket?t=…`。
-2. 兑换票据：校验 nonce cookie 与票据哈希一致（不能只靠 Sec-Fetch-Site）→ binding 有效期对齐会话 `ExpiresAt` → 设置实例 cookie → 302 `/`。
+1. 门户 `GET|POST /open/<instanceId>`：校验门户会话 + 所有权 → 下发一次性 `auriga_open_nonce_<instance>_<flow>` cookie（有父域时 Domain 覆盖 portal+实例）→ 票据存 nonce 哈希及独立 flow → 302 到实例 `/_auriga/ticket?t=…`。
+2. 兑换票据：校验 flow 与票据绑定、nonce cookie 与票据哈希一致（不能只靠 Sec-Fetch-Site）→ binding 有效期对齐会话 `ExpiresAt` → 设置实例 cookie → 302 `/`。
 3. 实例 Host（或无父域时的门户 `/i/<id>/…`）：验实例 cookie + 门户会话仍有效 → 签身份头 → 反代；剥 `auriga_*` / `__Host-*` Set-Cookie。实例路径只拒 `..`，不套用 portal 的严格规范化（允许 `%2f` 等应用路径）。
 4. WebSocket：`Upgrade: websocket` 才做 Origin 检查；portal/admin API 只接受自身 Origin；实例只接受该实例自己的 Origin。会话附着到长连接，吊销/到期会 cancel。
 
@@ -339,3 +339,21 @@ Java NetworkKeysController、真实 IAM、生产 provider 或双 DSH 验收。
 规范门户来源；通过入口校验的内部 HTTPS 来源则保留在清洗后的 `X-Forwarded-Host/Proto`
 中，供 IAM 按允许来源列表派生 issuer。内部入口不会成为新的浏览器入口，客户端自带的
 转发头不能覆盖此来源，设备凭据及 IAM 在线授权检查保持不变。
+
+### 并发 open 的 nonce 隔离
+
+每次签发生成独立的 96 bit 随机 flow（16 个 base64url 字符），不是 bearer/JWT，
+单独持有不能授权。仍只使用一个查询参数：`t=<flow>.<opaque-ticket>`；
+服务器先核格式，再原子核 flow 绑定并单次消费票据，保留主人、租户、会话、实例与规范目标绑定。
+nonce cookie 名含实例及 flow；Path 保持原实例 mount（domain 模式保持原根路径），
+HttpOnly、Secure、SameSite=Lax 和 60 秒 TTL 均不变。正常成功及失败仅清当前 flow，
+错配的 flow/ticket 不消费票据也不清另一个 flow。格式错误无法选择可信 cookie 名，不执行清理。
+
+同一门户会话对同实例最多保留 8 个未兑换票据；第 9 次签发原子淘汰最早签发者，
+随响应清其 cookie。其他会话、其他实例独立。浏览器响应乱序时可能暂留已淘汰 cookie，
+其票据已失效，cookie 在原 60 秒 TTL 内自然过期；不把客户端 cookie 数当授权依据。
+
+`Open nonce exchange` 结构化日志仅带 request_id/trace_id、nonce_state
+（missing/empty/duplicate/single）、nonce_count、nonce_name 及 outcome
+（issued/redeemed/mismatch/rejected/invalid_query）；不记录 cookie 值、票据 query 或完整 URL。
+nonce_name 内的 flow 只用于诊断，不作为凭据；缺失或重复 cookie 仍失败封闭。

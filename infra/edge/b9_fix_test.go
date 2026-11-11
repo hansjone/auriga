@@ -25,8 +25,8 @@ func TestB9_InstancePathAllowsDotDotInFilename(t *testing.T) {
 }
 
 func TestB9_OpenNonceCookieNameIsPerInstance(t *testing.T) {
-	a := openNonceCookieName(false, "example.com", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-	b := openNonceCookieName(false, "example.com", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	a := openNonceCookieName(false, "example.com", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "flow")
+	b := openNonceCookieName(false, "example.com", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "flow")
 	if a == b {
 		t.Fatalf("expected distinct nonce cookie names, got %q", a)
 	}
