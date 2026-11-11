@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -52,6 +53,19 @@ func TestDeviceHeartbeatFrames(t *testing.T) {
 	}
 }
 
+func TestDeviceHeartbeatHistoryEvictsOldest(t *testing.T) {
+	h := &deviceHeartbeats{byBinding: make(map[string]time.Time)}
+	start := time.Now().UTC().Add(-time.Hour)
+	for i := range 10000 {
+		h.byBinding[strconv.Itoa(i)] = start.Add(time.Duration(i) * time.Millisecond)
+	}
+	latest := time.Now().UTC()
+	h.remember("new-connection", latest)
+	if _, exists := h.byBinding["0"]; exists || len(h.byBinding) != 10000 || !h.remember("new-connection", time.Time{}).Equal(latest) {
+		t.Fatal("saturated heartbeat history did not retain the new connection")
+	}
+}
+
 func TestDevicePresenceOwnershipAndTruncation(t *testing.T) {
 	b := deviceBinding{Device: "device", Server: "N" + strings.Repeat("A", 55), Client: "7", Account: "CLIENTS", Ingress: strings.Repeat("a", 26)}
 	for _, tc := range []struct {
@@ -76,19 +90,22 @@ func TestDevicePresenceOwnershipAndTruncation(t *testing.T) {
 		})
 	}
 	p := &devicePresence{request: func(context.Context, string, []byte) ([]byte, error) { return nil, errors.New("offline") }}
-	if _, err := p.snapshot(context.Background(), []deviceBinding{b}); err == nil {
+	states, err := p.snapshot(context.Background(), []deviceBinding{b})
+	if err != nil || states[b.Device].Online != "unknown" {
 		t.Fatal("outage became offline snapshot")
 	}
 }
 
 func TestDevicePresenceRealWSSHeartbeatAndKick(t *testing.T) {
 	ingress := strings.Repeat("a", 26)
+	deviceID := "01900000-0000-7000-8000-00000000abce"
+	pki := createAccessPKI(t)
 	clients := server.NewAccount("CLIENTS")
 	sys := server.NewAccount("SYS")
-	srv, err := server.NewServer(&server.Options{Host: "127.0.0.1", Port: -1, NoLog: true, NoSigs: true, SystemAccount: "SYS", Accounts: []*server.Account{clients, sys}, Users: []*server.User{
+	srv, err := server.NewServer(&server.Options{Host: "127.0.0.1", Port: -1, NoLog: true, NoSigs: true, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pki.server}, ClientCAs: pki.roots, ClientAuth: tls.RequireAndVerifyClientCert}, SystemAccount: "SYS", Accounts: []*server.Account{clients, sys}, Users: []*server.User{
 		{Username: ingress, Password: "fixture", Account: clients},
 		{Username: strings.Repeat("b", 26), Password: "fixture", Account: clients},
-		{Username: "ops", Password: "fixture", Account: sys, Permissions: &server.Permissions{Publish: &server.SubjectPermission{Allow: []string{"$SYS.REQ.SERVER.*.CONNZ", "$SYS.REQ.SERVER.*.KICK"}}, Subscribe: &server.SubjectPermission{Allow: []string{"_INBOX.>"}}}},
+		{Username: "edge-presence", Password: "fixture", Account: sys, Permissions: &server.Permissions{Publish: &server.SubjectPermission{Allow: []string{"$SYS.REQ.SERVER.*.CONNZ", "$SYS.REQ.SERVER.*.KICK"}}, Subscribe: &server.SubjectPermission{Allow: []string{"_INBOX.>"}}}},
 	}, Websocket: server.WebsocketOpts{Host: "127.0.0.1", Port: -1, NoTLS: true}})
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +126,12 @@ func TestDevicePresenceRealWSSHeartbeatAndKick(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(victim.Close)
-	bystander, err := nats.Connect(srv.ClientURL(), nats.UserInfo(strings.Repeat("b", 26), "fixture"), nats.NoReconnect())
+	clientCert, err := tls.LoadX509KeyPair(pki.hop.CertFile, pki.hop.KeyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTLS := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pki.roots, Certificates: []tls.Certificate{clientCert}, ServerName: pki.hop.ServerName}
+	bystander, err := nats.Connect(strings.Replace(srv.ClientURL(), "nats://", "tls://", 1), nats.Secure(clientTLS), nats.UserInfo(strings.Repeat("b", 26), "fixture"), nats.NoReconnect())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,19 +147,32 @@ func TestDevicePresenceRealWSSHeartbeatAndKick(t *testing.T) {
 	if err = os.WriteFile(secret, []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	presence, err := openDevicePresence(DevicePresenceConfig{URL: srv.ClientURL(), Username: "ops", PasswordFile: secret}, &wss.heartbeats)
+	presenceCfg := DevicePresenceConfig{URL: strings.Replace(srv.ClientURL(), "nats://", "tls://", 1), Username: "edge-presence", PasswordFile: secret, CAFile: pki.hop.CAFile, CertFile: pki.hop.CertFile, KeyFile: pki.hop.KeyFile, ServerName: pki.hop.ServerName}
+	wrongName := presenceCfg
+	wrongName.ServerName = "untrusted.example.com"
+	if unwanted, connectErr := openDevicePresence(wrongName, nil); connectErr == nil {
+		unwanted.close()
+		t.Fatal("Broker certificate hostname was not verified")
+	}
+	withoutCert := clientTLS.Clone()
+	withoutCert.Certificates = nil
+	if unwanted, connectErr := nats.Connect(presenceCfg.URL, nats.Secure(withoutCert), nats.UserInfo("edge-presence", "fixture"), nats.Timeout(time.Second), nats.NoReconnect()); connectErr == nil {
+		unwanted.Close()
+		t.Fatal("Broker accepted monitoring without a client certificate")
+	}
+	presence, err := openDevicePresence(presenceCfg, &wss.heartbeats)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer presence.close()
-	binding := deviceBinding{Device: "device", Server: srv.ID(), Client: strconv.FormatUint(cid, 10), Account: "CLIENTS", Ingress: ingress}
+	binding := deviceBinding{Device: deviceID, Server: srv.ID(), Client: strconv.FormatUint(cid, 10), Account: "CLIENTS", Ingress: ingress}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	states, err := presence.snapshot(ctx, []deviceBinding{binding})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if states["device"].Online != "online" || states["device"].Heartbeat.IsZero() {
+	if states[deviceID].Online != "online" || states[deviceID].Heartbeat.IsZero() {
 		t.Fatalf("state=%+v", states)
 	}
 	var bindingsReads atomic.Int64
@@ -158,10 +193,21 @@ func TestDevicePresenceRealWSSHeartbeatAndKick(t *testing.T) {
 		if r.URL.Query().Has("online") {
 			t.Error("edge passed state filter to placeholder IAM state")
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"id": "device", "online": "unknown"}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"id": deviceID, "online": "unknown"}}})
 	}))
 	t.Cleanup(iam.Close)
-	gateway := &Gateway{Cfg: Config{DevicePresence: DevicePresenceConfig{URL: srv.ClientURL(), Username: "ops", PasswordFile: secret}}, networkWSS: wss}
+	old := binding
+	old.Server = "N" + strings.Repeat("B", 55)
+	old.Device = "old-device"
+	prior, err := presence.snapshot(ctx, []deviceBinding{old, binding})
+	if err != nil || prior["old-device"].Online != "offline" || prior[deviceID].Online != "online" {
+		t.Fatalf("old generation poisoned live state: %+v %v", prior, err)
+	}
+	old.Device = deviceID
+	gateway := &Gateway{Cfg: Config{DevicePresence: presenceCfg}, networkWSS: wss, DevicesRPC: deviceBindingsFunc(func(context.Context, string) ([]deviceBinding, error) {
+		bindingsReads.Add(1)
+		return []deviceBinding{old, binding}, nil
+	})}
 	transport := gateway.devicesTransport(iam.Client().Transport)
 	request := httptest.NewRequest(http.MethodGet, iam.URL+deviceAdminPath+"?online=online", nil)
 	request.Header.Set("Authorization", "Bearer fixture")
@@ -202,8 +248,26 @@ func TestDevicePresenceRealWSSHeartbeatAndKick(t *testing.T) {
 	}
 	revoke := request.Clone(ctx)
 	revoke.Method = http.MethodDelete
-	revoke.URL.Path = deviceAdminPath + "/device"
+	revoke.URL.Path = deviceAdminPath + "/" + strings.ToUpper(deviceID)
 	revoke.URL.RawQuery = ""
+	unmatched := revoke.Clone(ctx)
+	unmatched.URL.Path = deviceAdminPath + "/unmatched-device"
+	response, err = transport.RoundTrip(unmatched)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var partial struct {
+		CredentialRevoked bool   `json:"credentialRevoked"`
+		DisconnectStatus  string `json:"disconnectStatus"`
+	}
+	err = json.NewDecoder(response.Body).Decode(&partial)
+	_ = response.Body.Close()
+	if err != nil || response.StatusCode != 202 || !partial.CredentialRevoked || partial.DisconnectStatus != "pending" {
+		t.Fatalf("unmatched binding became a confirmed disconnect: %+v %v", partial, err)
+	}
+	if err = victim.FlushTimeout(time.Second); err != nil {
+		t.Fatalf("unmatched device disconnected the live device: %v", err)
+	}
 	response, err = transport.RoundTrip(revoke)
 	if err != nil {
 		t.Fatal(err)
@@ -213,10 +277,10 @@ func TestDevicePresenceRealWSSHeartbeatAndKick(t *testing.T) {
 		t.Fatalf("revoke status=%d", response.StatusCode)
 	}
 	states, err = presence.snapshot(ctx, []deviceBinding{binding})
-	if err != nil || states["device"].Online != "offline" {
+	if err != nil || states[deviceID].Online != "offline" {
 		t.Fatalf("readback=%+v err=%v", states, err)
 	}
-	if states["device"].Heartbeat.IsZero() {
+	if states[deviceID].Heartbeat.IsZero() {
 		t.Fatal("lost the actual last heartbeat on disconnect")
 	}
 	if err = bystander.FlushTimeout(time.Second); err != nil {
@@ -264,7 +328,20 @@ func TestDeviceAdminOutageRemainsUnknownAndRevokeUnconfirmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = response.Body.Close()
-	if response.StatusCode != 503 {
+	if response.StatusCode != 202 {
 		t.Fatal("unverified closure was reported successful")
+	}
+}
+
+type deviceBindingsFunc func(context.Context, string) ([]deviceBinding, error)
+
+func (f deviceBindingsFunc) ReadDeviceBindings(ctx context.Context, tenant string) ([]deviceBinding, error) {
+	return f(ctx, tenant)
+}
+func TestDevicePresenceRejectsCleartextRemote(t *testing.T) {
+	for _, cfg := range []DevicePresenceConfig{{URL: "nats://broker.example.com:4222", Username: "presence", PasswordFile: "secret"}, {URL: "tls://broker.example.com:4222", Username: "presence", PasswordFile: "secret"}} {
+		if cfg.validate() == nil {
+			t.Fatal("remote Broker accepted without mTLS")
+		}
 	}
 }

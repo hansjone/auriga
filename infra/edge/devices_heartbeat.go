@@ -154,7 +154,18 @@ func (h *deviceHeartbeats) remember(key string, beat time.Time) time.Time {
 	if previous.After(beat) {
 		return previous
 	}
-	if !beat.IsZero() && (exists || len(h.byBinding) < 10000) {
+	if !beat.IsZero() && !exists && len(h.byBinding) >= 10000 {
+		oldestKey := ""
+		oldest := time.Now()
+		for candidate, timestamp := range h.byBinding {
+			if oldestKey == "" || timestamp.Before(oldest) {
+				oldestKey = candidate
+				oldest = timestamp
+			}
+		}
+		delete(h.byBinding, oldestKey)
+	}
+	if !beat.IsZero() {
 		h.byBinding[key] = beat
 	}
 	return beat

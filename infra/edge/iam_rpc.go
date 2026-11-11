@@ -163,6 +163,30 @@ type iamRPC struct {
 	timeout   time.Duration
 }
 
+type DeviceBindingsReader interface {
+	ReadDeviceBindings(context.Context, string) ([]deviceBinding, error)
+}
+
+func (c *iamRPC) ReadDeviceBindings(ctx context.Context, tenant string) ([]deviceBinding, error) {
+	ctx, cancel, err := c.sessionContext(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	response, err := iamv1.NewAdminDeviceBindingsServiceClient(c.conn).ReadBindings(ctx, &iamv1.ReadAdminDeviceBindingsRequest{})
+	if err != nil {
+		return nil, errIAMUnavailable
+	}
+	if len(response.Items) > 10000 {
+		return nil, errIAMUnavailable
+	}
+	bindings := make([]deviceBinding, 0, len(response.Items))
+	for _, b := range response.Items {
+		bindings = append(bindings, deviceBinding{Device: b.Device, Server: b.ServerId, Client: b.ClientId, Account: b.Account, Ingress: b.Ingress})
+	}
+	return bindings, nil
+}
+
 func newIAMRPC(cfg IAMRPCConfig, hop IAMHopConfig) (*iamRPC, error) {
 	return openIAMRPC(cfg, hop, nil)
 }

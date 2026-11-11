@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import {
   ElButton,
   ElInput,
@@ -59,13 +59,29 @@ const connection = (d: AdminDevice) =>
         ? 'devicesOfflineValue'
         : 'devicesStateUnknown',
   );
+const disconnectPending = computed(
+  () =>
+    selected.value?.status === 'revoked' &&
+    (selected.value.disconnectStatus === 'pending' ||
+      selected.value.online !== 'offline'),
+);
+const revokeNotice = computed(() =>
+  selected.value?.status === 'revoked'
+    ? t(disconnectPending.value ? 'devicesDisconnectPending' : 'devicesSaved')
+    : notice.value,
+);
 function revoke() {
   const device = selected.value;
   if (device)
     ask({
-      message: t('devicesRevokeConfirm', { name: device.name }),
-      run: () => devicesApi.revoke(device.id),
-      success: t('devicesSaved'),
+      message: t(
+        device.status === 'revoked'
+          ? 'devicesRetryConfirm'
+          : 'devicesRevokeConfirm',
+        { name: device.name },
+      ),
+      run: () => devicesApi.revoke(device.id, device),
+      success: '',
     });
 }
 onMounted(() => void load());
@@ -177,22 +193,28 @@ onMounted(() => void load());
           <dt>{{ t('devicesActivity') }}</dt>
           <dd>{{ selected.lastSeenAt || t('unknown') }}</dd>
           <dt>{{ t('devicesNode') }}</dt>
-          <dd>{{ selected.networkNode || '?' }}</dd>
+          <dd>{{ selected.networkNode || '—' }}</dd>
           <dt>{{ t('status') }}</dt>
           <dd>{{ status(selected) }}</dd>
           <dt>{{ t('created') }}</dt>
-          <dd>{{ selected.createdAt || '?' }}</dd>
+          <dd>{{ selected.createdAt || '—' }}</dd>
           <dt v-if="selected.revokedAt">{{ t('devicesRevokedAt') }}</dt>
           <dd v-if="selected.revokedAt">{{ selected.revokedAt }}</dd>
         </dl>
-        <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+        <p v-if="revokeNotice" class="notice" role="status">
+          {{ revokeNotice }}
+        </p>
         <p v-if="detailError" class="error" role="alert">{{ detailError }}</p>
         <ElButton
-          v-if="canWrite && selected.status !== 'revoked'"
+          v-if="
+            canWrite && (selected.status !== 'revoked' || disconnectPending)
+          "
           type="danger"
           :disabled="locked"
           @click="revoke"
-          >{{ t('devicesRevoke') }}</ElButton
+          >{{
+            t(disconnectPending ? 'devicesRetryDisconnect' : 'devicesRevoke')
+          }}</ElButton
         >
       </section>
     </ElDrawer>

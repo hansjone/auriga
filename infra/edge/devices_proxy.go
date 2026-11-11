@@ -13,6 +13,8 @@ import (
 const deviceAdminPath = "/api/iam/v1/admin/devices"
 const deviceBindingsPath = deviceAdminPath + "/connection-bindings"
 
+var devicePresenceSlots = make(chan struct{}, 4)
+
 // Runs AFTER the ordinary proxy has selected the entry, CSRF, administrator
 // bearer and authenticated IAM transport. IAM remains the permission authority.
 type deviceAdminTransport struct {
@@ -32,33 +34,10 @@ func deviceResponse(request *http.Request, status int, value any) *http.Response
 	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {contentType}, "Cache-Control": {"no-store"}}, Body: io.NopCloser(bytes.NewReader(raw)), ContentLength: int64(len(raw)), Request: request}
 }
 func (t *deviceAdminTransport) bindings(request *http.Request) ([]deviceBinding, error) {
-	query := request.Clone(request.Context())
-	u := *request.URL
-	query.URL = &u
-	query.Method = http.MethodGet
-	query.URL.Path = deviceBindingsPath
-	query.URL.RawPath = ""
-	query.URL.RawQuery = ""
-	query.URL.ForceQuery = false
-	query.Body = nil
-	query.GetBody = nil
-	query.ContentLength = 0
-	query.Header.Del("Content-Length")
-	query.Header.Del("Content-Type")
-	query.Header.Set("Accept-Encoding", "identity")
-	response, err := t.base.RoundTrip(query)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = response.Body.Close() }()
-	var body struct {
-		Items []deviceBinding `json:"items"`
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
-	if err != nil || response.StatusCode != 200 || len(data) > 8<<20 || json.Unmarshal(data, &body) != nil || len(body.Items) > 10000 {
+	if t.gateway.DevicesRPC == nil {
 		return nil, errDevicePresence
 	}
-	return body.Items, nil
+	return t.gateway.DevicesRPC.ReadDeviceBindings(request.Context(), t.gateway.Cfg.Access.TenantID())
 }
 func (t *deviceAdminTransport) RoundTrip(original *http.Request) (*http.Response, error) {
 	path := original.URL.Path
@@ -96,29 +75,47 @@ func (t *deviceAdminTransport) RoundTrip(original *http.Request) (*http.Response
 	ctx, cancel := context.WithTimeout(request.Context(), 3*time.Second)
 	defer cancel()
 	query := request.WithContext(ctx)
-	bindings, bindingErr := t.bindings(query)
+	var bindings []deviceBinding
+	bindingErr := errDevicePresence
+	acquired := false
+	select {
+	case devicePresenceSlots <- struct{}{}:
+		acquired = true
+		defer func() { <-devicePresenceSlots }()
+	default:
+	}
+	if acquired {
+		bindings, bindingErr = t.bindings(query)
+	}
 	var heartbeats *deviceHeartbeats
 	if t.gateway.networkWSS != nil {
 		heartbeats = &t.gateway.networkWSS.heartbeats
 	}
-	presence, presenceErr := openDevicePresence(t.gateway.Cfg.DevicePresence, heartbeats)
+	var presence *devicePresence
+	presenceErr := errDevicePresence
+	if acquired {
+		presence, presenceErr = openDevicePresence(t.gateway.Cfg.DevicePresence, heartbeats)
+	}
 	if presence != nil {
 		defer presence.close()
 	}
 	if request.Method == http.MethodDelete {
-		id := strings.TrimPrefix(path, deviceAdminPath+"/")
+		id := strings.ToLower(strings.TrimPrefix(path, deviceAdminPath+"/"))
 		selected := make([]deviceBinding, 0)
 		for _, b := range bindings {
-			if b.Device == id {
+			if strings.ToLower(b.Device) == id {
 				selected = append(selected, b)
 			}
+		}
+		if len(selected) == 0 {
+			bindingErr = errDevicePresence
 		}
 		if bindingErr == nil && presenceErr == nil {
 			presenceErr = presence.disconnect(ctx, selected)
 		}
 		if bindingErr != nil || presenceErr != nil {
 			_ = response.Body.Close()
-			return deviceResponse(original, 503, map[string]string{"code": "common.unavailable", "title": "Service Unavailable", "detail": "Credential revoked; connection closure could not be confirmed. Refresh to verify."}), nil
+			return deviceResponse(original, 202, map[string]any{"id": id, "credentialRevoked": true, "disconnectStatus": "pending"}), nil
 		}
 		return response, nil
 	}
@@ -138,15 +135,28 @@ func (t *deviceAdminTransport) RoundTrip(original *http.Request) (*http.Response
 	decorate := func(row map[string]any) {
 		row["online"] = "unknown"
 		delete(row, "lastHeartbeatAt")
+		if row["status"] == "revoked" {
+			row["disconnectStatus"] = "pending"
+		}
 		if bindingErr != nil || presenceErr != nil {
 			return
 		}
 		state, ok := states[row["id"].(string)]
 		if !ok {
 			state.Online = "offline"
+			if row["status"] == "revoked" {
+				state.Online = "unknown"
+			}
 		}
 		row["online"] = state.Online
-		if !state.Heartbeat.IsZero() {
+		if row["status"] == "revoked" {
+			if state.Online == "offline" {
+				row["disconnectStatus"] = "confirmed"
+			} else {
+				row["disconnectStatus"] = "pending"
+			}
+		}
+		if state.Online != "unknown" && !state.Heartbeat.IsZero() {
 			row["lastHeartbeatAt"] = state.Heartbeat.Format(time.RFC3339Nano)
 		}
 		if !state.Activity.IsZero() {

@@ -28,7 +28,7 @@ import (
 )
 
 // Files are receipt-managed, including all private keys and broker passwords.
-var Files = []string{"server-ca.pem", "client-ca.pem", "submit.pem", "submit.key", "edge.pem", "edge.key", "broker.pem", "broker.key", "broker-client.pem", "broker-client.key", "issuer.seed", "xkey.seed", "auth.password", "ops.password", "data.password", "protocol.key", "runtime.json", "broker.conf"}
+var Files = []string{"server-ca.pem", "client-ca.pem", "submit.pem", "submit.key", "edge.pem", "edge.key", "broker.pem", "broker.key", "broker-client.pem", "broker-client.key", "edge-presence.pem", "edge-presence.key", "edge-presence.password", "issuer.seed", "xkey.seed", "auth.password", "ops.password", "data.password", "protocol.key", "runtime.json", "broker.conf"}
 var CredentialFiles = []string{"gateway.secret", "platform.properties"}
 
 type Options struct {
@@ -189,7 +189,7 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{"submit", "edge", "broker", "broker-client"} {
+	for _, name := range []string{"submit", "edge", "broker", "broker-client", "edge-presence"} {
 		key, err := ecdsa.GenerateKey(elliptic.P256(), entropy)
 		if err != nil {
 			return err
@@ -202,13 +202,16 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 		if name == "edge" {
 			parent, signer, usage = clientCA, clientKey, x509.ExtKeyUsageClientAuth
 		}
-		if name == "broker-client" {
+		if name == "broker-client" || name == "edge-presence" {
 			usage = x509.ExtKeyUsageClientAuth
 		}
 		cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: name + ".network.internal"}, DNSNames: []string{name + ".network.internal"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: parent.NotAfter, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
 		if name == "broker" {
 			cert.DNSNames = append(cert.DNSNames, "network-broker")
 			cert.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
+			if ip := net.ParseIP(o.BrokerHost); ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() {
+				cert.IPAddresses = append(cert.IPAddresses, ip)
+			}
 		}
 		der, err := x509.CreateCertificate(entropy, cert, parent, &key.PublicKey, signer)
 		if err != nil {
@@ -256,7 +259,7 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 	}
 	p := func(name string) string { return strings.TrimRight(filepath.ToSlash(o.Root), "/") + "/" + name }
 	passwords := map[string]string{}
-	for _, user := range []string{"auth", "ops", "data"} {
+	for _, user := range []string{"auth", "ops", "data", "edge-presence"} {
 		raw := make([]byte, 32)
 		if _, err := io.ReadFull(entropy, raw); err != nil {
 			return err
@@ -298,10 +301,10 @@ accounts {
   exports: [{stream: "auriga.net.down.>", accounts: [CLIENTS]}, {stream: "auriga.net.reply.>", accounts: [CLIENTS]}]
   imports: [{stream: {account: CLIENTS, subject: "auriga.net.up.>"}}]
  }
- SYS {users: [{user: "ops", password: %q, permissions: {publish: {allow: ["$SYS.REQ.SERVER.*.KICK", "$SYS.REQ.SERVER.*.LDM", "$SYS.REQ.SERVER.*.CONNZ"]}, subscribe: {allow: ["_INBOX.>"]}}}]}
+ SYS {users: [{user: "edge-presence", password: %q, permissions: {publish: {allow: ["$SYS.REQ.SERVER.*.KICK", "$SYS.REQ.SERVER.*.CONNZ"]}, subscribe: {allow: ["_INBOX.>"]}}}, {user: "ops", password: %q, permissions: {publish: {allow: ["$SYS.REQ.SERVER.*.KICK", "$SYS.REQ.SERVER.*.LDM", "$SYS.REQ.SERVER.*.CONNZ"]}, subscribe: {allow: ["_INBOX.>"]}}}]}
 }
-authorization {timeout: 10, auth_callout {issuer: %q, account: AUTH, auth_users: ["auth", "ops", "data"], xkey: %q}}
-`, o.BrokerHost, o.BrokerPort, p("broker.pem"), p("broker.key"), p("server-ca.pem"), o.WebsocketHost, o.WebsocketPort, p("broker.pem"), p("broker.key"), passwords["auth"], passwords["data"], passwords["ops"], issuerPub, xpub)
+authorization {timeout: 10, auth_callout {issuer: %q, account: AUTH, auth_users: ["auth", "ops", "data", "edge-presence"], xkey: %q}}
+`, o.BrokerHost, o.BrokerPort, p("broker.pem"), p("broker.key"), p("server-ca.pem"), o.WebsocketHost, o.WebsocketPort, p("broker.pem"), p("broker.key"), passwords["auth"], passwords["data"], passwords["edge-presence"], passwords["ops"], issuerPub, xpub)
 	if err = write("broker.conf", []byte(broker)); err != nil {
 		return err
 	}

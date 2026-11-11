@@ -2,6 +2,30 @@
 import { devicesApi } from '../src/admin/devicesApi';
 import { apiClient } from '../src/api';
 describe('devices API', () => {
+  it('preserves the acknowledged revocation when read-back is temporarily unavailable', async () => {
+    const previous = {
+      id: 'device',
+      status: 'active',
+      online: 'online',
+    } as Awaited<ReturnType<typeof devicesApi.get>>;
+    vi.spyOn(apiClient, 'delete').mockResolvedValue({
+      credentialRevoked: true,
+      disconnectStatus: 'pending',
+    });
+    vi.spyOn(apiClient, 'get').mockRejectedValue(
+      new ApiError({
+        status: 503,
+        code: 'common.unavailable',
+        title: 'Unavailable',
+      }),
+    );
+    expect(await devicesApi.revoke('device', previous)).toMatchObject({
+      status: 'revoked',
+      online: 'unknown',
+      disconnectStatus: 'pending',
+    });
+    vi.restoreAllMocks();
+  });
   it('requires an offline read-back after credential revocation', async () => {
     vi.spyOn(apiClient, 'delete').mockResolvedValue(undefined);
     vi.spyOn(apiClient, 'get').mockResolvedValue({
@@ -9,8 +33,8 @@ describe('devices API', () => {
       status: 'revoked',
       online: 'unknown',
     });
-    await expect(devicesApi.revoke('device')).rejects.toThrow(
-      'Revocation not confirmed',
+    expect((await devicesApi.revoke('device')).disconnectStatus).toBe(
+      'pending',
     );
     vi.restoreAllMocks();
   });
@@ -49,7 +73,7 @@ describe('devices API', () => {
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { afterEach } from 'vitest';
 import ElementPlus from 'element-plus';
-import { createAurigaI18n } from '@auriga/shared';
+import { ApiError, createAurigaI18n } from '@auriga/shared';
 import DevicesView from '../src/views/DevicesView.vue';
 import { adminApi } from '../src/admin/api';
 let wrapper: VueWrapper | undefined;
@@ -76,6 +100,66 @@ function page() {
   return wrapper;
 }
 describe('field terminals page', () => {
+  it('reads back a 503 revocation, updates the drawer and permits retrying disconnect', async () => {
+    vi.spyOn(adminApi, 'membership').mockResolvedValue({
+      permissions: ['iam.network.manage'],
+    } as never);
+    vi.spyOn(devicesApi, 'list').mockResolvedValue({ items: [device] });
+    vi.spyOn(devicesApi, 'get').mockResolvedValue(device);
+    const view = page();
+    await flushPromises();
+    await view
+      .findAll('button')
+      .find((button) => button.text() === '详情')!
+      .trigger('click');
+    await flushPromises();
+    vi.spyOn(apiClient, 'delete').mockRejectedValue(
+      new ApiError({
+        status: 503,
+        code: 'common.unavailable',
+        title: 'Unavailable',
+      }),
+    );
+    vi.mocked(devicesApi.get).mockResolvedValue({
+      ...device,
+      status: 'revoked',
+      online: 'online',
+    });
+    Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === '撤销接入')!
+      .click();
+    await flushPromises();
+    (
+      document.querySelector(
+        '[data-testid="confirm-action"]',
+      ) as HTMLButtonElement
+    ).click();
+    await flushPromises();
+    expect(document.body.textContent).toContain('凭据已撤销，断开连接未确认');
+    expect(document.body.textContent).not.toContain('已读回：终端接入已撤销');
+    expect(
+      Array.from(document.querySelectorAll('button')).some(
+        (button) => button.textContent?.trim() === '重试断开',
+      ),
+    ).toBe(true);
+    vi.mocked(apiClient.delete).mockResolvedValue(undefined);
+    vi.mocked(devicesApi.get).mockResolvedValue({
+      ...device,
+      status: 'revoked',
+      online: 'offline',
+    });
+    Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === '重试断开')!
+      .click();
+    await flushPromises();
+    (
+      document.querySelector(
+        '[data-testid="confirm-action"]',
+      ) as HTMLButtonElement
+    ).click();
+    await flushPromises();
+    expect(document.body.textContent).toContain('已读回：终端接入已撤销');
+  });
   it('renders authoritative heartbeat and reports monitoring outages as unknown', async () => {
     vi.spyOn(adminApi, 'membership').mockResolvedValue({
       permissions: ['iam.network.manage'],
@@ -149,7 +233,7 @@ describe('field terminals page', () => {
       ) as HTMLButtonElement
     ).click();
     await flushPromises();
-    expect(revoke).toHaveBeenCalledWith('device');
+    expect(revoke).toHaveBeenCalledWith('device', device);
     expect(document.body.textContent).toContain('已读回：终端接入已撤销');
   });
 });

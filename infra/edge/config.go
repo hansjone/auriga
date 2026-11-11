@@ -172,6 +172,10 @@ func applyEnv(cfg *Config) {
 	set("AURIGA_EDGE_DEVICE_PRESENCE_CREDS_FILE", &cfg.DevicePresence.CredsFile)
 	set("AURIGA_EDGE_DEVICE_PRESENCE_USERNAME", &cfg.DevicePresence.Username)
 	set("AURIGA_EDGE_DEVICE_PRESENCE_PASSWORD_FILE", &cfg.DevicePresence.PasswordFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_CA_FILE", &cfg.DevicePresence.CAFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_CERT_FILE", &cfg.DevicePresence.CertFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_KEY_FILE", &cfg.DevicePresence.KeyFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_SERVER_NAME", &cfg.DevicePresence.ServerName)
 	if cfg.NATSCredsFile == "" {
 		set("AURIGA_NATS_CREDS_FILE", &cfg.NATSCredsFile)
 	}

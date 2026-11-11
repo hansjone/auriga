@@ -33,6 +33,7 @@ type Gateway struct {
 	Ingress       *NodeIngress
 	AdminCSRF     AdminCSRFVerifier
 	SessionRPC    BrowserSessionRPC
+	DevicesRPC    DeviceBindingsReader
 	Activity      *sessionActivity
 	IAMTransport  http.RoundTripper
 	APITransports map[*url.URL]http.RoundTripper

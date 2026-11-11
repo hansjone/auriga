@@ -95,6 +95,7 @@ func run(args []string, out, logs io.Writer) error {
 		defer func() { _ = rpc.Close() }()
 		gw.AdminCSRF = rpc
 		gw.SessionRPC = rpc
+		gw.DevicesRPC = rpc
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

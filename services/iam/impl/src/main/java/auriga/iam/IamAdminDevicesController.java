@@ -33,12 +33,6 @@ public class IamAdminDevicesController {
     return devices.get(deviceId);
   }
 
-  @GetMapping("/connection-bindings")
-  @RequiresPermission("iam.network.manage")
-  public ObjectNode connectionBindings() {
-    return devices.connectionBindings();
-  }
-
   @DeleteMapping("/{deviceId}")
   @RequiresPermission("iam.network.manage")
   @RequiresRecentStepUp

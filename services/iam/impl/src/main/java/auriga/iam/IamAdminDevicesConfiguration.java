@@ -13,6 +13,11 @@ import org.springframework.context.annotation.Configuration;
     name = "issuer")
 public class IamAdminDevicesConfiguration {
   @Bean
+  IamGrpcAdminDevices iamGrpcAdminDevices(IamAdminDevices devices, IamGrpcSessions transportGuard) {
+    return new IamGrpcAdminDevices(devices);
+  }
+
+  @Bean
   IamAdminDevices iamAdminDevices(IamStore store, Clock clock, AuditLogger audit) {
     return new IamAdminDevices(store, clock, audit);
   }

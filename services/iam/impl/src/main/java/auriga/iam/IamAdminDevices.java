@@ -114,6 +114,11 @@ public class IamAdminDevices {
   }
 
   private ObjectNode require(String id, boolean lock) {
+    try {
+      id = UUID.fromString(id).toString();
+    } catch (IllegalArgumentException invalid) {
+      throw IamError.error("not_found", 404);
+    }
     ObjectNode d = store.byId("device", id, lock);
     IamError.require(d != null && field(d), "not_found", 404);
     return d;

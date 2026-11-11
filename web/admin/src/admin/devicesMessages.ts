@@ -1,5 +1,8 @@
 ﻿export const devicesZh = {
   devicesTitle: '现场终端',
+  devicesDisconnectPending: '凭据已撤销，断开连接未确认。可重试断开。',
+  devicesRetryDisconnect: '重试断开',
+  devicesRetryConfirm: '重试断开 {name} 的连接？',
   devicesStateUnknown: '状态未知',
   devicesMember: '所属成员',
   devicesMemberFilter: '成员名称或编号',
@@ -27,6 +30,10 @@
 };
 export const devicesEn = {
   devicesTitle: 'Field terminals',
+  devicesDisconnectPending:
+    'Credentials revoked; connection closure is unconfirmed. Retry disconnecting.',
+  devicesRetryDisconnect: 'Retry disconnect',
+  devicesRetryConfirm: 'Retry disconnecting {name}?',
   devicesStateUnknown: 'Status unknown',
   devicesMember: 'Member',
   devicesMemberFilter: 'Member name or ID',

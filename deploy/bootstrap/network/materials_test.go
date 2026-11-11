@@ -16,7 +16,7 @@ import (
 func TestDedicatedNetworkMaterial(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "network")
 	rpc := map[string]string{"Target": "127.0.0.1:19090", "ServiceTokenFile": "private/service.jwt"}
-	options := Options{Root: filepath.ToSlash(dir), SubmitListen: "127.0.0.1:18443", BrokerHost: "127.0.0.1", BrokerURL: "tls://127.0.0.1:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc}
+	options := Options{Root: filepath.ToSlash(dir), SubmitListen: "127.0.0.1:18443", BrokerHost: "192.0.2.10", BrokerURL: "tls://192.0.2.10:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc}
 	if err := Generate(dir, options); err != nil {
 		t.Fatal(err)
 	}
@@ -38,11 +38,19 @@ func TestDedicatedNetworkMaterial(t *testing.T) {
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(load("client-ca"))
-	for _, name := range []string{"edge", "submit", "broker", "broker-client"} {
+	for _, name := range []string{"edge", "submit", "broker", "broker-client", "edge-presence"} {
 		_, err := load(name).Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}})
 		if (err == nil) != (name == "edge") {
 			t.Fatalf("unexpected submit client trust: %s %v", name, err)
 		}
+	}
+	brokerRoots := x509.NewCertPool()
+	brokerRoots.AddCert(load("server-ca"))
+	if _, err := load("edge-presence").Verify(x509.VerifyOptions{Roots: brokerRoots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+		t.Fatalf("monitoring client certificate is not trusted by Broker: %v", err)
+	}
+	if err := load("broker").VerifyHostname(options.BrokerHost); err != nil {
+		t.Fatalf("Broker certificate does not cover the configured interface: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "runtime.json"))
 	if err != nil {
@@ -61,6 +69,25 @@ func TestDedicatedNetworkMaterial(t *testing.T) {
 	}
 	if err = Generate(dir, options); err == nil {
 		t.Fatal("existing installation overwritten")
+	}
+	broker, err := os.ReadFile(filepath.Join(dir, "broker.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(broker)
+	start := strings.Index(text, `SYS {users: [{user: "edge-presence"`)
+	end := strings.Index(text, `{user: "ops"`)
+	if start < 0 || end < start {
+		t.Fatal("separate presence system user missing")
+	}
+	permissions := text[start:end]
+	if strings.Contains(permissions, ".LDM") || !strings.Contains(permissions, ".CONNZ") || !strings.Contains(permissions, ".KICK") || !strings.Contains(permissions, "_INBOX.>") {
+		t.Fatal("presence permissions are not minimal")
+	}
+	presencePassword, _ := os.ReadFile(filepath.Join(dir, "edge-presence.password"))
+	opsPassword, _ := os.ReadFile(filepath.Join(dir, "ops.password"))
+	if string(presencePassword) == string(opsPassword) {
+		t.Fatal("presence reused ops secret")
 	}
 }
 
