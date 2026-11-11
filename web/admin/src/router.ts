@@ -1,3 +1,6 @@
+import UpgradesView from './views/ops/UpgradesView.vue';
+import BackupsView from './views/ops/BackupsView.vue';
+import LifecycleView from './views/ops/LifecycleView.vue';
 import { createRouter, createWebHistory } from 'vue-router';
 import LoginView from './views/LoginView.vue';
 import AdminLayout from './layouts/AdminLayout.vue';
@@ -20,6 +23,9 @@ import UsageView from './views/models/UsageView.vue';
 import { navigation } from './admin/navigation';
 
 const existing = new Set([
+  '/ops/upgrades',
+  '/ops/backups',
+  '/ops/lifecycle',
   '/overview',
   '/models/providers',
   '/settings',
@@ -55,6 +61,9 @@ export const router = createRouter({
       children: [
         { path: '', redirect: '/overview' },
         { path: 'overview', component: OverviewView },
+        { path: 'ops/upgrades', component: UpgradesView },
+        { path: 'ops/backups', component: BackupsView },
+        { path: 'ops/lifecycle', component: LifecycleView },
         { path: 'resources', component: ResourcesView },
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },
