@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { mkdir, writeFile } from 'node:fs/promises';
-import openapiTS, { astToString } from 'openapi-typescript';
+import openapiTS, { astToString, COMMENT_HEADER } from 'openapi-typescript';
 import { format } from 'prettier';
 import { compileFromFile } from 'json-schema-to-typescript';
 const output = new URL('../src/generated/', import.meta.url);
@@ -33,15 +33,24 @@ for (const name of ['iam', 'org', 'workspace', 'ai', 'resource']) {
   await writeFile(fileURLToPath(new URL(name + '.ts', output)), body);
 }
 
-// Ops is consumed by the admin application only.
-await writeFile(
-  new URL('../../admin/src/admin/opsSchema.ts', import.meta.url),
-  await format(
-    astToString(
-      await openapiTS(
-        new URL('../../../contracts/openapi/ops.yaml', import.meta.url),
-      ),
+// Ops contracts are consumed by the admin application only.
+for (const [name, filename] of [
+  ['ops', 'opsSchema'],
+  ['ops-runtime', 'runtimeContract'],
+]) {
+  await writeFile(
+    new URL('../../admin/src/admin/' + filename + '.ts', import.meta.url),
+    await format(
+      COMMENT_HEADER +
+        astToString(
+          await openapiTS(
+            new URL(
+              '../../../contracts/openapi/' + name + '.yaml',
+              import.meta.url,
+            ),
+          ),
+        ),
+      { parser: 'typescript', singleQuote: true },
     ),
-    { parser: 'typescript', singleQuote: true },
-  ),
-);
+  );
+}

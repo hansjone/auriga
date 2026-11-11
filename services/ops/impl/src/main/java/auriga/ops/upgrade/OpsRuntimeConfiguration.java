@@ -16,7 +16,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * Optional installation control bridge, routed through the existing authenticated workspace
  * upstream.
  */
-@Configuration(proxyBeanMethods = false)
+@Configuration(value = "opsUpgradeRuntimeConfiguration", proxyBeanMethods = false)
 @ConditionalOnExpression("${auriga.ops.runtime.enabled:false}")
 public class OpsRuntimeConfiguration {
   @Bean
