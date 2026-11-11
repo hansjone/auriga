@@ -256,14 +256,9 @@ func TestDevicePresenceRealWSSHeartbeatAndKick(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var partial struct {
-		CredentialRevoked bool   `json:"credentialRevoked"`
-		DisconnectStatus  string `json:"disconnectStatus"`
-	}
-	err = json.NewDecoder(response.Body).Decode(&partial)
 	_ = response.Body.Close()
-	if err != nil || response.StatusCode != 202 || !partial.CredentialRevoked || partial.DisconnectStatus != "pending" {
-		t.Fatalf("unmatched binding became a confirmed disconnect: %+v %v", partial, err)
+	if response.StatusCode != 204 {
+		t.Fatalf("successful binding read without a matching connection was not confirmed: %d", response.StatusCode)
 	}
 	if err = victim.FlushTimeout(time.Second); err != nil {
 		t.Fatalf("unmatched device disconnected the live device: %v", err)
@@ -285,6 +280,76 @@ func TestDevicePresenceRealWSSHeartbeatAndKick(t *testing.T) {
 	}
 	if err = bystander.FlushTimeout(time.Second); err != nil {
 		t.Fatalf("bystander was disconnected: %v", err)
+	}
+}
+
+func TestDeviceAdminWithoutBindingsConfirmsOffline(t *testing.T) {
+	binding := deviceBinding{Device: "other", Server: "N" + strings.Repeat("A", 55), Client: "7", Account: "CLIENTS", Ingress: strings.Repeat("a", 26)}
+	for _, tc := range []struct {
+		name     string
+		bindings []deviceBinding
+		err      error
+		online   string
+		status   int
+	}{
+		{name: "never-connected", online: "offline", status: 204},
+		{name: "expired-bindings-cleaned", bindings: []deviceBinding{}, online: "offline", status: 204},
+		{name: "only-other-device", bindings: []deviceBinding{binding}, online: "offline", status: 204},
+		{name: "binding-read-failed", err: errDevicePresence, online: "unknown", status: 202},
+		{name: "bound-broker-unavailable", bindings: []deviceBinding{{Device: "device", Server: binding.Server, Client: binding.Client, Account: binding.Account, Ingress: binding.Ingress}}, online: "unknown", status: 202},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			iam := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					w.WriteHeader(204)
+					return
+				}
+				row := map[string]any{"id": "device", "status": "revoked", "lastHeartbeatAt": "stale"}
+				if r.URL.Path == deviceAdminPath {
+					_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{row}})
+				} else {
+					_ = json.NewEncoder(w).Encode(row)
+				}
+			}))
+			t.Cleanup(iam.Close)
+			gateway := &Gateway{DevicesRPC: deviceBindingsFunc(func(context.Context, string) ([]deviceBinding, error) { return tc.bindings, tc.err })}
+			transport := gateway.devicesTransport(iam.Client().Transport)
+			for range 2 {
+				response, err := transport.RoundTrip(httptest.NewRequest(http.MethodDelete, iam.URL+deviceAdminPath+"/device", nil))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = response.Body.Close()
+				if response.StatusCode != tc.status {
+					t.Fatalf("revoke=%d want %d", response.StatusCode, tc.status)
+				}
+			}
+			for _, path := range []string{deviceAdminPath + "?online=" + tc.online, deviceAdminPath + "/device"} {
+				response, err := transport.RoundTrip(httptest.NewRequest(http.MethodGet, iam.URL+path, nil))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var body map[string]any
+				err = json.NewDecoder(response.Body).Decode(&body)
+				_ = response.Body.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if rows, ok := body["items"].([]any); ok {
+					if len(rows) != 1 {
+						t.Fatalf("filtered read-back=%+v", rows)
+					}
+					body = rows[0].(map[string]any)
+				}
+				confirmation := "pending"
+				if tc.online == "offline" {
+					confirmation = "confirmed"
+				}
+				if body["online"] != tc.online || body["disconnectStatus"] != confirmation || body["lastHeartbeatAt"] != nil {
+					t.Fatalf("read-back=%+v", body)
+				}
+			}
+		})
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 func TestDedicatedNetworkMaterial(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "network")
 	rpc := map[string]string{"Target": "127.0.0.1:19090", "ServiceTokenFile": "private/service.jwt"}
-	options := Options{Root: filepath.ToSlash(dir), SubmitListen: "127.0.0.1:18443", BrokerHost: "192.0.2.10", BrokerURL: "tls://192.0.2.10:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc}
+	options := Options{Root: filepath.ToSlash(dir), SubmitListen: "127.0.0.1:18443", BrokerHost: "0.0.0.0", BrokerURL: "tls://192.0.2.10:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc}
 	if err := Generate(dir, options); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,12 @@ func TestDedicatedNetworkMaterial(t *testing.T) {
 	if _, err := load("edge-presence").Verify(x509.VerifyOptions{Roots: brokerRoots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
 		t.Fatalf("monitoring client certificate is not trusted by Broker: %v", err)
 	}
-	if err := load("broker").VerifyHostname(options.BrokerHost); err != nil {
+	for _, name := range []string{"broker-client", "edge-presence"} {
+		if len(load(name).IPAddresses) != 0 {
+			t.Fatalf("client certificate contains a server IP SAN: %s", name)
+		}
+	}
+	if err := load("broker").VerifyHostname("192.0.2.10"); err != nil {
 		t.Fatalf("Broker certificate does not cover the configured interface: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "runtime.json"))

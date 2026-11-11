@@ -19,6 +19,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,7 +210,11 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 		if name == "broker" {
 			cert.DNSNames = append(cert.DNSNames, "network-broker")
 			cert.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
-			if ip := net.ParseIP(o.BrokerHost); ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() {
+			brokerURL, err := url.Parse(o.BrokerURL)
+			if err != nil {
+				return fmt.Errorf("invalid broker URL")
+			}
+			if ip := net.ParseIP(brokerURL.Hostname()); ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() {
 				cert.IPAddresses = append(cert.IPAddresses, ip)
 			}
 		}

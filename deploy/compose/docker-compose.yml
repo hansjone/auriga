@@ -317,6 +317,7 @@ services:
     networks:
       default:
         ipv4_address: 172.29.240.10 # gitleaks:allow disposable M2 network
+      network-control: {}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     healthcheck:
@@ -366,7 +367,11 @@ services:
     cap_drop: [ALL]
     read_only: true
     security_opt: ['no-new-privileges:true']
-    network_mode: host
+    # Edge needs a container-reachable mTLS listener. Keep it on an internal
+    # bridge with no published ports; the host-network gateway uses its private IP.
+    networks:
+      network-control:
+        ipv4_address: 172.29.241.2 # gitleaks:allow disposable M2 network
     entrypoint: ['/auriga-network-broker']
     command: ['-c', '/etc/auriga/network/broker.conf']
     volumes:
@@ -568,6 +573,12 @@ volumes:
   collab-tokens:
 
 networks:
+  network-control:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.241.0/24 # gitleaks:allow disposable M2 network
   egress-out:
     driver: bridge
     internal: false

@@ -182,7 +182,7 @@ func main() {
 		fatalf("%v", err)
 	}
 	rpc := map[string]string{"Target": fmt.Sprintf("127.0.0.1:%d", iamRPCPort), "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": iamServerName}
-	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(*out, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "172.29.240.1:18443", BrokerHost: "172.29.240.1", WebsocketHost: "172.29.240.1", BrokerURL: "tls://172.29.240.1:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil { // gitleaks:allow disposable M2 network
+	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(*out, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "172.29.240.1:18443", BrokerHost: "0.0.0.0", WebsocketHost: "0.0.0.0", BrokerURL: "tls://172.29.241.2:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil { // gitleaks:allow disposable M2 network
 		fatalf("generate network deployment: %v", err)
 	}
 	if access.PortalOrigin().Scheme == "https" {
@@ -285,10 +285,10 @@ func main() {
 		"relay":            map[string]string{"origin": "http://bifrost:8080", "adminPasswordFile": "/run/secrets/bifrost_admin_password"},
 		"deviceHop":        map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "ai-relay"},
 		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/network-edge/edge.pem", "keyFile": "/etc/auriga/network-edge/edge.key", "caFile": "/etc/auriga/network-edge/server-ca.pem", "serverName": "submit.network.internal"},
-		"devicePresence":   map[string]string{"url": "tls://172.29.240.1:14224", "username": "edge-presence", "passwordFile": "/etc/auriga/network-edge/edge-presence.password", "caFile": "/etc/auriga/network-edge/server-ca.pem", "certFile": "/etc/auriga/network-edge/edge-presence.pem", "keyFile": "/etc/auriga/network-edge/edge-presence.key", "serverName": "broker.network.internal"}, // gitleaks:allow disposable M2 network
+		"devicePresence":   map[string]string{"url": "tls://172.29.241.2:14224", "username": "edge-presence", "passwordFile": "/etc/auriga/network-edge/edge-presence.password", "caFile": "/etc/auriga/network-edge/server-ca.pem", "certFile": "/etc/auriga/network-edge/edge-presence.pem", "keyFile": "/etc/auriga/network-edge/edge-presence.key", "serverName": "broker.network.internal"}, // gitleaks:allow disposable M2 network
 		"networkWss": map[string]any{
 			"enabled": true, "path": "/net/v1/ws",
-			"upstreamUrl": "wss://172.29.240.1:18444", // gitleaks:allow disposable M2 network
+			"upstreamUrl": "wss://172.29.241.2:18444", // gitleaks:allow disposable M2 network
 			"caFile":      "/etc/auriga/network-edge/server-ca.pem", "serverName": "broker.network.internal",
 			"allowedOrigins": []string{access.PortalURL()},
 		},

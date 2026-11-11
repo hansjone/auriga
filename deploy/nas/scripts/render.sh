@@ -54,9 +54,7 @@ install_edge_material "$CONFIG/materials/identity-signing-keys.json" "$CONFIG/pk
 install_edge_material "$CONFIG/materials/network/server-ca.pem" "$CONFIG/pki-edge/network-server-ca.pem" 644
 install_edge_material "$CONFIG/materials/network/edge.pem" "$CONFIG/pki-edge/network-edge.pem" 644
 install_edge_material "$CONFIG/materials/network/edge.key" "$CONFIG/pki-edge/network-edge.key" 600
-install_edge_material "$CONFIG/materials/network/edge-presence.pem" "$CONFIG/pki-edge/network-presence.pem" 644
-install_edge_material "$CONFIG/materials/network/edge-presence.key" "$CONFIG/pki-edge/network-presence.key" 600
-install_edge_material "$CONFIG/materials/network/edge-presence.password" "$CONFIG/pki-edge/network-presence.password" 600
+install_network_presence_materials
 if [ -f "$CONFIG/materials/browser-tls/browser.key" ]; then
   install_edge_material "$CONFIG/materials/browser-tls/browser.crt" "$CONFIG/pki-edge/browser.crt" 644
   install_edge_material "$CONFIG/materials/browser-tls/browser.key" "$CONFIG/pki-edge/browser.key" 600

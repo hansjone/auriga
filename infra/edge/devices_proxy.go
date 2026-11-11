@@ -93,7 +93,7 @@ func (t *deviceAdminTransport) RoundTrip(original *http.Request) (*http.Response
 	}
 	var presence *devicePresence
 	presenceErr := errDevicePresence
-	if acquired {
+	if acquired && bindingErr == nil && len(bindings) > 0 {
 		presence, presenceErr = openDevicePresence(t.gateway.Cfg.DevicePresence, heartbeats)
 	}
 	if presence != nil {
@@ -107,8 +107,8 @@ func (t *deviceAdminTransport) RoundTrip(original *http.Request) (*http.Response
 				selected = append(selected, b)
 			}
 		}
-		if len(selected) == 0 {
-			bindingErr = errDevicePresence
+		if bindingErr == nil && len(selected) == 0 {
+			return response, nil
 		}
 		if bindingErr == nil && presenceErr == nil {
 			presenceErr = presence.disconnect(ctx, selected)
@@ -122,6 +122,10 @@ func (t *deviceAdminTransport) RoundTrip(original *http.Request) (*http.Response
 	states := map[string]deviceState(nil)
 	if bindingErr == nil && presenceErr == nil {
 		states, presenceErr = presence.snapshot(ctx, bindings)
+	}
+	boundDevices := make(map[string]bool, len(bindings))
+	for _, binding := range bindings {
+		boundDevices[strings.ToLower(binding.Device)] = true
 	}
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
 	_ = response.Body.Close()
@@ -138,15 +142,15 @@ func (t *deviceAdminTransport) RoundTrip(original *http.Request) (*http.Response
 		if row["status"] == "revoked" {
 			row["disconnectStatus"] = "pending"
 		}
-		if bindingErr != nil || presenceErr != nil {
+		if bindingErr != nil {
 			return
 		}
-		state, ok := states[row["id"].(string)]
-		if !ok {
+		id := row["id"].(string)
+		state, ok := states[id]
+		if !boundDevices[strings.ToLower(id)] {
 			state.Online = "offline"
-			if row["status"] == "revoked" {
-				state.Online = "unknown"
-			}
+		} else if presenceErr != nil || !ok {
+			return
 		}
 		row["online"] = state.Online
 		if row["status"] == "revoked" {

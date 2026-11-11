@@ -64,15 +64,15 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		t.Fatal("edge must load shared access.json")
 	}
 	wss := edge.NetworkWSS
-	if !wss.Enabled || wss.Path != "/net/v1/ws" || wss.UpstreamURL != "wss://172.29.240.1:18444" || wss.CAFile != "/etc/auriga/network-edge/server-ca.pem" || wss.ServerName != "broker.network.internal" || len(wss.AllowedOrigins) != 1 || wss.AllowedOrigins[0] != access.PortalURL() { // gitleaks:allow disposable M2 network
+	if !wss.Enabled || wss.Path != "/net/v1/ws" || wss.UpstreamURL != "wss://172.29.241.2:18444" || wss.CAFile != "/etc/auriga/network-edge/server-ca.pem" || wss.ServerName != "broker.network.internal" || len(wss.AllowedOrigins) != 1 || wss.AllowedOrigins[0] != access.PortalURL() { // gitleaks:allow disposable M2 network
 		t.Fatal("missing exact WSS upstream/trust/portal Origin")
 	}
 	broker := string(read("network/broker.conf"))
-	if !strings.Contains(broker, "\nhost: \"172.29.240.1\"\nport: 14224\n") || !strings.Contains(broker, "websocket {host: \"172.29.240.1\", port: 18444,") { // gitleaks:allow disposable M2 network
-		t.Fatal("WSS and authenticated monitoring TCP must bind the private compose bridge")
+	if !strings.Contains(broker, "\nhost: \"0.0.0.0\"\nport: 14224\n") || !strings.Contains(broker, "websocket {host: \"0.0.0.0\", port: 18444,") { // gitleaks:allow disposable M2 network
+		t.Fatal("WSS and monitoring TCP must listen inside the isolated Broker container")
 	}
 	presence := edge.DevicePresence
-	if presence["url"] != "tls://172.29.240.1:14224" || presence["username"] != "edge-presence" || presence["serverName"] != "broker.network.internal" || presence["caFile"] != "/etc/auriga/network-edge/server-ca.pem" || presence["certFile"] != "/etc/auriga/network-edge/edge-presence.pem" || presence["keyFile"] != "/etc/auriga/network-edge/edge-presence.key" || presence["passwordFile"] != "/etc/auriga/network-edge/edge-presence.password" { // gitleaks:allow disposable M2 network
+	if presence["url"] != "tls://172.29.241.2:14224" || presence["username"] != "edge-presence" || presence["serverName"] != "broker.network.internal" || presence["caFile"] != "/etc/auriga/network-edge/server-ca.pem" || presence["certFile"] != "/etc/auriga/network-edge/edge-presence.pem" || presence["keyFile"] != "/etc/auriga/network-edge/edge-presence.key" || presence["passwordFile"] != "/etc/auriga/network-edge/edge-presence.password" { // gitleaks:allow disposable M2 network
 		t.Fatal("monitoring must use the independent system user and mTLS materials")
 	}
 	for _, file := range []string{"network/edge-presence.pem", "network/edge-presence.key", "network/edge-presence.password"} {

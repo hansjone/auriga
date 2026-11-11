@@ -33,19 +33,24 @@ edge 增加可选 `devicePresence`（JSON 配置）：
 部署生成独立 SYS 用户 `edge-presence`、独立随机密码和客户端证书，不复用带 LDM 的 ops 用户。
 该用户仅可发布 `$SYS.REQ.SERVER.*.CONNZ`、`$SYS.REQ.SERVER.*.KICK`，订阅私有 `_INBOX.>`；
 Broker 的 auth_callout 排除列表同步加入该用户，DSH 无系统账户权限。
-compose 的 TCP 入口绑定已配置的专用私有桥地址，证书包含该 IP SAN；edge 校验固定 DNS 名称。
+compose 的 Broker 位于独立 `network-control` 内部 bridge，TCP 和 WSS 仅监听容器接口，不使用 host 网络或发布宿主端口。
+edge 加入该内部网络后访问 Broker；使用 host 网络的网关通过 Broker 的固定私有地址访问。
+这样容器中的 edge 可达特权端口，宿主外部网络不能通过端口发布访问它；同网容器仍须通过 mTLS 和专用 SYS 账户鉴权。
+仅 Broker 服务端证书包含连接地址的 IP SAN，两张客户端证书不包含 IP SAN；edge 校验固定 DNS 名称。
+该拓扑使用新的 compose 封存配方；已有旧配方的 M2 测试安装须使用新的材料目录，prepare 会拒绝静默复用旧监听地址。
 NAS 模板使用 `network-broker:14224`，脚本将新材料复制进 edge 专用目录，不把 ops 秘密交给 edge。
 
-已有安装必须由主控按材料升级流程补齐新用户、客户端证书与 edge 配置，再串行部署验证。
-生成器和脚本保留原有拒绝静默轮换机制；不能只更新 edge 二进制而沿用缺少新用户的 Broker 配置。
-此工位仅修改模板，未修改 NAS 或任何真实秘密。
+旧 NAS 安装缺少新增专用证书、密钥和密码时，init/render 跳过这组可选材料，沿用原封存配置。
+历史材料仍须通过原始收据的完整哈希校验；从新安装删除这组文件不会被当作旧安装接受。
+旧安装重入时不补签证书或轮换 Broker 凭据，在线观测在带完整专用材料的新安装中启用。
+旧配置未启用观测且设备仍有绑定时，页面显示状态未知；管理员撤销凭据后可见断开待确认。
 
 ## 在线、心跳与撤销
 
 在线来自按账户过滤的完整 Broker CONNZ 快照，逐条核对 server 世代、CID、账户和 ingress。
 当前 server 的查询优先；仅在有效 Broker 连接明确返回旧 server 的 no-responders 时认定旧世代已失效。
 单组超时显示该组设备“状态未知”，不拖垮当前 server 的其他设备；权限、证书、归属或截断异常不会冒在线。
-未配置或 Broker 不可达同样显示未知。实现面向现有单 Broker 拓扑，不将网络分区当作集群成员下线证明。
+有绑定时，未配置观测或 Broker 不可达显示未知。实现面向现有单 Broker 拓扑，不将网络分区当作集群成员下线证明。
 
 `lastSeenAt` 是 Broker 业务活动时间，不作为心跳。
 `lastHeartbeatAt` 只来自实际经过本 edge WSS 的 NATS PING/PONG 或 WebSocket PING/PONG。
@@ -55,9 +60,11 @@ NAS 模板使用 `network-broker:14224`，脚本将新材料复制进 edge 专�
 
 撤销先由 IAM 提交设备与节点吊销，再由 edge 核对归属并 KICK。
 只有回读确认全部匹配连接离线才返回 204；已吊销但断开未确认返回 202，包含
-`credentialRevoked: true`、`disconnectStatus: pending`。UUID 大小写归一化；未找到设备绑定不能确认断开。
+`credentialRevoked: true`、`disconnectStatus: pending`。UUID 大小写归一化。
+绑定读取成功且目标设备没有绑定时，表示从未连接或连接已过期，直接确认离线并返回 204。
 前端立即回读并显示已撤销状态、断开未确认提示和“重试断开”，不把部分完成显示为全部失败或全部成功。
-缺失绑定的已撤销设备仍显示未知和 pending。重复撤销幂等，保留近期身份验证门禁。
+此类已撤销设备读回 `offline`、`confirmed`；绑定读取失败或有绑定而 Broker 查询失败时保持未知和 pending。
+重复撤销幂等，保留近期身份验证门禁。
 
 在线筛选在 edge 补充状态后执行。每请求新建观测连接以读取当前秘密和快照，完成即关闭；
 最多四个并发观测、每请求三秒预算、每组 250ms、最多 64 组 CONNZ，溢出显示未知。
@@ -66,4 +73,4 @@ NAS 模板使用 `network-broker:14224`，脚本将新材料复制进 edge 专�
 断开确认只代表该次完整快照，必要时再次刷新/重试，由现有策略更新机制最终收敛。
 
 验证：`go test -run TestDevice -count=1 ./...`，含私有 CA+mTLS 真实 Broker/WSS、证书负例、
-旧世代隔离、真实心跳、大小写撤销、未匹配部分结果、断开回读、旁路存活及权属负例。
+旧世代隔离、真实心跳、大小写撤销、空绑定确认、断开回读、旁路存活及权属负例。

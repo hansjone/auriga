@@ -71,7 +71,7 @@ func TestNativeClientRegistration(t *testing.T) {
 }
 
 func TestNativeRecipeCompatibility(t *testing.T) {
-	if composeRecipe(false) != "network-wss-v3-https-bifrost" || composeRecipe(true) != "network-wss-v6-https-native-client-managed-device-panel-bifrost" {
-		t.Fatal("HTTP legacy input changed or HTTPS native recipe not distinguished")
+	if composeRecipe(false) != "network-wss-v4-https-bifrost-private-broker" || composeRecipe(true) != "network-wss-v7-https-native-client-managed-device-panel-bifrost-private-broker" {
+		t.Fatal("private Broker topology must use new sealed recipes for both access modes")
 	}
 }
