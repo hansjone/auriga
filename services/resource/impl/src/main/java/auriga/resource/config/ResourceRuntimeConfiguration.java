@@ -35,6 +35,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 @ConditionalOnExpression(
     "${auriga.services.resource.enabled:true} && ('${auriga.service.schema:}' == 'resource' || ${auriga.platform.combined:false})")
 @Import({
+  auriga.resource.web.DesktopController.class,
   ResourceController.class,
   ResourceMetadataController.class,
   ResourceAdministrationController.class,
@@ -45,6 +46,45 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
   auriga.resource.web.ResourceMemberController.class
 })
 public class ResourceRuntimeConfiguration {
+  @Bean
+  @ConditionalOnProperty({
+    "auriga.resource.desktop-directory",
+    "auriga.resource.desktop-public-key-file"
+  })
+  DesktopReleases desktopReleases(
+      Environment env,
+      Clock clock,
+      ResourceAccess access,
+      ResourceStore transactions,
+      ListableBeanFactory beans)
+      throws Exception {
+    var tenant =
+        java.util.UUID.fromString(
+            env.getRequiredProperty("auriga.resource.desktop-publisher-tenant-id"));
+    var jdbc = new JdbcTemplate(resourceSource(beans));
+    var publisher =
+        new auriga.common.events.OutboxEventPublisher(
+            jdbc,
+            "resource",
+            "resource",
+            new auriga.common.events.EventSchemas(),
+            tools.jackson.databind.json.JsonMapper.builder().build(),
+            clock,
+            () -> {});
+    var audit =
+        new DesktopAuditWriter(
+            transactions, jdbc, new auriga.common.audit.OutboxAuditLogger(publisher), tenant);
+    return new DesktopReleases(
+        java.nio.file.Path.of(env.getRequiredProperty("auriga.resource.desktop-directory")),
+        java.nio.file.Files.readString(
+            java.nio.file.Path.of(
+                env.getRequiredProperty("auriga.resource.desktop-public-key-file"))),
+        clock,
+        access,
+        tenant,
+        audit::record);
+  }
+
   @Bean
   org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer resourceJsonModels() {
     // Optional contract fields must be absent, not null. Do not change other services' models

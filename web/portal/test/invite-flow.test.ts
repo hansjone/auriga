@@ -88,7 +88,11 @@ describe('portal invitation flow', () => {
       .mockResolvedValueOnce(
         json(transaction({ type: 'complete', redirectTo: '/' })),
       );
-    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('fetch', (input: string, init: RequestInit) =>
+      input === '/api/resource/v1/desktop/latest'
+        ? Promise.resolve(new Response('{}', { status: 404 }))
+        : fetch(input, init),
+    );
     const router = await openInvite('invite+code');
     expect(fetch.mock.calls[0]?.[0]).toBe(
       '/api/org/v1/invitations/preview/invite%2Bcode',
@@ -143,7 +147,11 @@ describe('portal invitation flow', () => {
     'does not start registration for a %s invitation',
     async (reason) => {
       const fetch = vi.fn().mockResolvedValue(json({ valid: false, reason }));
-      vi.stubGlobal('fetch', fetch);
+      vi.stubGlobal('fetch', (input: string, init: RequestInit) =>
+        input === '/api/resource/v1/desktop/latest'
+          ? Promise.resolve(new Response('{}', { status: 404 }))
+          : fetch(input, init),
+      );
       const router = await openInvite();
       expect(wrapper!.text()).toContain('邀请无效或已失效');
       expect(wrapper!.find('button').exists()).toBe(false);

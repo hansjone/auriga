@@ -9,6 +9,7 @@
  * release. Nothing of upstream is modified; it is installed from npm as-is.
  */
 import { Buffer } from 'node:buffer';
+import { createPublicKey } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -23,6 +24,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
+import { parse as parseVersion } from '../runtime/semver-lite.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
 import {
   PINNED_TREES,
@@ -202,7 +204,12 @@ export async function build(args) {
     throw new Error(
       `plugin ${pluginPkg.name}@${pluginPkg.version} requires dsh ${pluginPkg.engines?.dsh}, upstream is ${dshVersion}`,
     );
-  const bundleName = `${pluginPkg.version}-dsh${dshVersion}`;
+  const desktopVersion =
+    args['desktop-version'] ??
+    JSON.parse(readFileSync(join(installerDir, 'desktop.json'), 'utf8'))
+      .version;
+  parseVersion(desktopVersion);
+  const bundleName = `${desktopVersion}-dsh${dshVersion}`;
 
   // 2. Stage the payload.
   const stage = join(out, `auriga-desktop-${bundleName}-win-x64`);
@@ -356,6 +363,15 @@ export async function build(args) {
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });
+  if (args['release-public-key']) {
+    const key = createPublicKey(readFileSync(args['release-public-key']));
+    if (key.asymmetricKeyType !== 'ed25519')
+      throw new Error('Ed25519 release public key required');
+    writeFileSync(
+      join(payload, 'auriga', 'runtime', 'release-public-key.txt'),
+      key.export({ type: 'spki', format: 'pem' }),
+    );
+  }
   cpSync(
     join(installerDir, 'windows', 'launcher'),
     join(payload, 'auriga', 'launcher'),
@@ -369,7 +385,7 @@ export async function build(args) {
   const manifest = {
     schema: 1,
     id: '',
-    bundleVersion: pluginPkg.version,
+    bundleVersion: desktopVersion,
     product: 'Auriga Desktop',
     target: 'win-x64',
     size: {

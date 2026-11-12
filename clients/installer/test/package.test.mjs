@@ -16,10 +16,36 @@ import { computeId, isPinnedPath, verifyPackage } from '../runtime/verify.mjs';
 import { scanForSecrets } from '../scripts/build.mjs';
 import { spawnSync } from 'node:child_process';
 import { findSecrets, listFiles, sha256File } from '../scripts/lib/files.mjs';
+import { buildPayload, tempBase } from './helpers.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const installer = resolve(here, '..');
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
+
+function assertPackageId(manifest) {
+  assert.match(
+    manifest.id,
+    new RegExp(
+      `^${manifest.bundleVersion}-dsh${manifest.upstream.version}-[0-9a-f]{12}$`.replace(
+        /\./g,
+        '\\.',
+      ),
+    ),
+  );
+}
+
+test('package ID uses the independent Desktop version, not the plugin version', (t) => {
+  const { manifest } = buildPayload(tempBase(t), { pluginVersion: '0.1.15' });
+  manifest.bundleVersion = '0.1.0';
+  manifest.id = computeId(manifest);
+  assertPackageId(manifest);
+  assert.throws(() =>
+    assertPackageId({
+      ...manifest,
+      id: manifest.id.replace(/^0\.1\.0/, '0.1.15'),
+    }),
+  );
+});
 
 test('upstream.json pins an exact dsh version the plugin accepts', () => {
   const upstream = readJson(join(installer, 'upstream.json'));
@@ -101,15 +127,7 @@ test(
     const payload = join(stage, 'payload');
     const manifest = readJson(join(payload, 'manifest.json'));
     assert.equal(manifest.id, computeId(manifest));
-    assert.match(
-      manifest.id,
-      new RegExp(
-        `^${manifest.plugin.version}-dsh${manifest.upstream.version}-[0-9a-f]{12}$`.replace(
-          /\./g,
-          '\\.',
-        ),
-      ),
-    );
+    assertPackageId(manifest);
     // The install-time verification accepts the built package as is.
     verifyPackage(payload);
     assert.equal(manifest.target, 'win-x64');

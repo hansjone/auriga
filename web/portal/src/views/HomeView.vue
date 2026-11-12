@@ -11,6 +11,7 @@ import {
 import { isApiError, type Me } from '@auriga/shared';
 import { iamApi } from '../api';
 import InstanceCard from '../components/InstanceCard.vue';
+import DesktopDownload from '../components/DesktopDownload.vue';
 
 const { t, locale } = useI18n();
 const router = useRouter();
@@ -83,6 +84,7 @@ async function logout() {
     <main class="content auriga-glass">
       <h1>{{ t('home.title') }}</h1>
       <InstanceCard v-if="me" />
+      <DesktopDownload v-if="me" />
       <p v-if="loadError" role="alert">{{ t('errors.unknown') }}</p>
       <ElButton v-if="loadError" @click="loadMe">{{
         t('login.retry')

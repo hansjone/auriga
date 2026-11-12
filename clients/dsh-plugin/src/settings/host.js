@@ -19,13 +19,14 @@ function trustedOrigin(value) {
 /** Public host service adapter. Business preferences do not modify loader config
  * or reuse credentials when an origin changes.
  * @param {any} ctx @param {any} config
- * @param {{uiOrigin?:string,activeOrigin?:()=>string,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
+ * @param {{uiOrigin?:string,activeOrigin?:()=>string,desktop?:()=>any,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
 export function installSettings(
   ctx,
   config,
   {
     uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN,
     activeOrigin,
+    desktop,
     nativeAuth,
     mode = 'connect',
   } = {},
@@ -63,6 +64,7 @@ export function installSettings(
           path: '/auriga/settings',
           handler: createSettingsHandler({
             store,
+            desktop,
             mode,
             auth: nativeAuth ?? scoped.connection,
             uiOrigin: expectedOrigin,
@@ -79,9 +81,10 @@ export function installSettings(
   return { getStore };
 }
 
-/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,uiOrigin?:string,mode?:string}} options */
+/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,uiOrigin?:string,mode?:string}} options */
 export function createSettingsHandler({
   store,
+  desktop,
   auth,
   activeOrigin,
   deviceName = null,
@@ -91,6 +94,7 @@ export function createSettingsHandler({
   const expectedOrigin = trustedOrigin(uiOrigin);
   const snapshot = () => ({
     ...store.snapshot(),
+    ...(desktop?.() ? { desktop: desktop().status() } : {}),
     mode,
     activeOrigin:
       typeof activeOrigin === 'function' ? activeOrigin() : activeOrigin,
@@ -167,7 +171,11 @@ export function createSettingsHandler({
       if (mode === 'managed') return json(403, { reason: 'managed' });
       if (
         !write ||
-        !['/auriga/settings/save', '/auriga/settings/test'].includes(path ?? '')
+        ![
+          '/auriga/settings/save',
+          '/auriga/settings/test',
+          '/auriga/settings/desktop',
+        ].includes(path ?? '')
       )
         return json(404, { reason: 'missing' });
       if (
@@ -187,6 +195,20 @@ export function createSettingsHandler({
       try {
         input = JSON.parse(Buffer.concat(parts).toString('utf8'));
       } catch {
+        return json(400, { reason: 'invalidSettings' });
+      }
+      if (path === '/auriga/settings/desktop') {
+        const updater = desktop?.();
+        if (!updater) return json(503, { reason: 'unavailable' });
+        if (
+          Object.keys(input ?? {}).join(',') === 'enabled' &&
+          typeof input.enabled === 'boolean'
+        )
+          return json(200, updater.configure(input.enabled));
+        if (Object.keys(input ?? {}).join(',') !== 'action')
+          return json(400, { reason: 'invalidSettings' });
+        if (input.action === 'check') return json(200, await updater.check());
+        if (input.action === 'update') return json(200, await updater.update());
         return json(400, { reason: 'invalidSettings' });
       }
       if (path === '/auriga/settings/test') {

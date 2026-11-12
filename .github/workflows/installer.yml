@@ -1,8 +1,9 @@
 name: Installer
 
-# Windows installer prototype: build the package, run its tests and an isolated
-# install/launch/uninstall check. Nothing is published or signed.
+# Windows builds produce unsigned release artifacts for offline review/signing.
 on:
+  push:
+    tags: ['desktop-v*']
   pull_request:
     paths:
       - 'clients/installer/**'
@@ -15,6 +16,15 @@ on:
       upstream:
         description: 'Upstream @deepseek-ai/dsh version (default: clients/installer/upstream.json)'
         required: false
+      desktop_version:
+        description: 'Desktop semver (default desktop.json, tags use desktop-v suffix)'
+        required: false
+      sequence:
+        description: 'Monotonic release sequence (default workflow run number)'
+        required: false
+      minimum_version:
+        description: 'Minimum installed Desktop version'
+        default: '0.0.0'
 
 permissions:
   contents: read
@@ -27,6 +37,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Verify release source belongs to main
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          echo "DESKTOP_SOURCE_ON_MAIN=true" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -42,16 +59,50 @@ jobs:
         shell: bash
         env:
           UPSTREAM: ${{ inputs.upstream }}
+          DESKTOP_VERSION: ${{ inputs.desktop_version }}
+          RELEASE_PUBLIC_KEY: ${{ github.event_name != 'pull_request' && vars.DESKTOP_RELEASE_PUBLIC_KEY || '' }}
+          PLATFORM_ORIGIN: ${{ vars.DESKTOP_PLATFORM_ORIGIN }}
+          RELEASE_BUILD: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euo pipefail
           extra=()
-          if [ -n "$UPSTREAM" ]; then extra=(--upstream "$UPSTREAM"); fi
-          node scripts/build.mjs "${extra[@]}" --out "$RUNNER_TEMP/installer" --no-zip --exe
+          if [ -n "$UPSTREAM" ]; then extra+=(--upstream "$UPSTREAM"); fi
+          if [[ "$GITHUB_REF_NAME" == desktop-v* ]]; then DESKTOP_VERSION="${GITHUB_REF_NAME#desktop-v}"; fi
+          if [ -n "$DESKTOP_VERSION" ]; then extra+=(--desktop-version "$DESKTOP_VERSION"); fi
+          if [ "$RELEASE_BUILD" = true ] && [ -z "$RELEASE_PUBLIC_KEY" ]; then echo 'Configure the public DESKTOP_RELEASE_PUBLIC_KEY variable'; exit 1; fi
+          if [ -n "$RELEASE_PUBLIC_KEY" ]; then
+            printf '%s\n' "$RELEASE_PUBLIC_KEY" > "$RUNNER_TEMP/desktop-public.pem"
+            extra+=(--release-public-key "$RUNNER_TEMP/desktop-public.pem")
+          fi
+          if [ -n "$PLATFORM_ORIGIN" ]; then extra+=(--platform-origin "$PLATFORM_ORIGIN"); fi
+          node scripts/build.mjs "${extra[@]}" --out "$RUNNER_TEMP/installer" --exe
           echo "INSTALLER_STAGE=$(ls -d "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64)" >> "$GITHUB_ENV"
           echo "INSTALLER_EXE=$(ls "$RUNNER_TEMP"/installer/Auriga-Desktop-Setup-*.exe)" >> "$GITHUB_ENV"
+          echo "INSTALLER_ZIP=$(ls "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64.zip)" >> "$GITHUB_ENV"
+      - name: Generate unsigned manifest, SHA-256 and source build record
+        working-directory: clients/installer
+        shell: bash
+        env:
+          RELEASE_SEQUENCE: ${{ inputs.sequence || github.run_number }}
+          MINIMUM_VERSION: ${{ inputs.minimum_version || '0.0.0' }}
+        run: |
+          expiry=$(node -e 'console.log(new Date(Date.now()+30*86400000).toISOString())')
+          node scripts/make-release.mjs "payload=$INSTALLER_STAGE/payload" "archive=$INSTALLER_ZIP" "exe=$INSTALLER_EXE" "output=$RUNNER_TEMP/installer" "sequence=$RELEASE_SEQUENCE" "minimumVersion=$MINIMUM_VERSION" "notAfter=$expiry" "workflowRun=$GITHUB_RUN_ID"
       - name: Package checks (manifest, checksums, version lock, licences, pnpm, no secrets)
         run: pnpm --filter @auriga/installer test
       - name: Isolated install from the setup exe, launch, uninstall
         working-directory: clients/installer
         shell: bash
         run: node scripts/e2e.mjs --old "$INSTALLER_EXE" --sandbox "$RUNNER_TEMP/sandbox"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: desktop-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            ${{ runner.temp }}/installer/*.exe
+            ${{ runner.temp }}/installer/*.zip
+            ${{ runner.temp }}/installer/desktop-release.unsigned.json
+            ${{ runner.temp }}/installer/desktop-build.json
+            ${{ runner.temp }}/installer/desktop.sha256

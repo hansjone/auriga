@@ -64,6 +64,7 @@ export const navigation = [
     children: [
       ['/ops/alerts', 'navAlerts'],
       ['/ops/upgrades', 'navUpgrades'],
+      ['/ops/desktop', 'desktopTitle'],
       ['/ops/backups', 'navBackups'],
       ['/ops/lifecycle', 'navLifecycle'],
       ['/ops/notifications', 'navNotifications'],

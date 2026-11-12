@@ -496,6 +496,74 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/resource/v1/desktop/latest': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description Public signed manifest for the latest listed release. It remains visible after notAfter so new users can download; automatic updaters must reject expired manifests until renewed. */
+    get: operations['getDesktopLatest'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/desktop/packages/{sequence}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge. */
+    get: operations['downloadDesktopPackage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/desktop/releases': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listDesktopReleases'];
+    put?: never;
+    /** @description Admin session and recent step-up required. Upload ZIP bytes and a base64url UTF-8 signed manifest in X-Desktop-Manifest. Signature and whole package digest verified before publication. Strictly increasing sequence and version. Signed bytes use integer canonical JSON; independent offline Ed25519 key. */
+    post: operations['publishDesktopRelease'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/desktop/releases/{sequence}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** @description Recent step-up required. Withdrawal is permanent; sequence high-water retained. */
+    delete: operations['withdrawDesktopRelease'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/resource/v1/catalog/packages': {
     parameters: {
       query?: never;
@@ -1256,6 +1324,52 @@ export interface components {
       items: components['schemas']['MemberInstallation'][];
       /** Format: uuid */
       nextAfterPackageId?: string;
+    };
+    DesktopManifest: {
+      /** @constant */
+      schema: 1;
+      /** @constant */
+      product: 'Auriga Desktop';
+      version: string;
+      packageId: string;
+      /** @constant */
+      channel: 'stable';
+      /** @constant */
+      platform: 'win-x64';
+      /** Format: int64 */
+      sizeBytes: number;
+      sha256: string;
+      minimumVersion: string;
+      /** Format: date-time */
+      publishedAt: string;
+      /** Format: date-time */
+      notAfter: string;
+      /** Format: int64 */
+      sequence: number;
+      notes: string;
+      signature: {
+        /** @constant */
+        alg: 'Ed25519';
+        /** @constant */
+        kid: 'auriga-desktop-release-1';
+        value: string;
+      };
+      components: {
+        dshVersion: string;
+        nodeVersion: string;
+        pluginVersion: string;
+      };
+    };
+    DesktopReleaseItem: {
+      manifest: components['schemas']['DesktopManifest'];
+      withdrawn: boolean;
+    };
+    DesktopReleaseLedger: {
+      highestSequence?: number;
+      items?: components['schemas']['DesktopReleaseItem'][];
+      audit?: {
+        [key: string]: unknown;
+      }[];
     };
     /** @description Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections. */
     UnifiedManifest:
@@ -6019,6 +6133,140 @@ export interface operations {
         content: {
           'application/problem+json': components['schemas']['Problem'];
         };
+      };
+    };
+  };
+  getDesktopLatest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Success */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DesktopManifest'];
+        };
+      };
+    };
+  };
+  downloadDesktopPackage: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional single open-ended byte range for interrupted downloads, e.g. bytes=1048576-. */
+        Range?: string;
+      };
+      path: {
+        sequence: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Success */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description Partial package bytes. Full SHA-256 must still be verified after resuming. */
+      206: {
+        headers: {
+          /** @description Returned byte interval and total size. */
+          'Content-Range'?: string;
+          /** @description bytes */
+          'Accept-Ranges'?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description Unsupported or unsatisfiable range. */
+      416: {
+        headers: {
+          /** @description bytes *\/<total size> */
+          'Content-Range'?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listDesktopReleases: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Success */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DesktopReleaseLedger'];
+        };
+      };
+    };
+  };
+  publishDesktopRelease: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-Desktop-Manifest': string;
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/octet-stream': string;
+      };
+    };
+    responses: {
+      /** @description Success */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DesktopManifest'];
+        };
+      };
+    };
+  };
+  withdrawDesktopRelease: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        sequence: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Success */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

@@ -1,14 +1,94 @@
 # Auriga Desktop installer (Windows test build)
 
-设计见 `docs/design/dsh-installer.zh.md`。包一层不 fork：上游 `@deepseek-ai/dsh`、自带 Node 与 pnpm 是可替换组件，我们的插件、首启配置与安装核心单独存放。
+设计见 `docs/design/dsh-installer.zh.md`。包一层不 fork，上游 `@deepseek-ai/dsh`、自带 Node 与 pnpm 是可替换组件，我们的插件、首启配置与安装核心单独存放。
 
 ```powershell
 cd clients/installer
-node scripts/build.mjs --exe                 # 默认上游版本见 upstream.json；--exe 同时出单文件安装器
-node scripts/build.mjs --upstream 0.2.1-rc.4 # 换上游版本重新出包
-node scripts/build.mjs --platform-origin <https 地址> --without-libreoffice   # 首启默认平台地址；精简版
-pnpm test                                    # 单测；设置 INSTALLER_STAGE=<包目录> 额外校验成品包
-node scripts/e2e.mjs --old <包目录|setup.exe> [--new <包>] [--broken <包>] --sandbox <目录>
+node scripts/build.mjs --exe                 # 默认上游版本见 upstream.json，同时出单文件安装器
+node scripts/build.mjs --upstream 0.2.1-rc.4 # 换上游版本重新出开发包
+node scripts/build.mjs --platform-origin <https地址> --without-libreoffice
+pnpm test                                    # INSTALLER_STAGE=<包目录> 可额外校验成品
+node scripts/e2e.mjs --old <包目录或setup.exe> --sandbox <目录>
 ```
 
-本包是 pnpm 工作区成员（`@auriga/installer`），无第三方依赖，脚本只用 Node 内置模块。输出默认在 `target/`（已被 `.gitignore`）。
+本包是 pnpm 工作区成员 `@auriga/installer`，脚本只用 Node 内置模块。输出默认在已忽略的 `target/`。
+
+## 发布新版本
+
+### 版本与发行钥
+
+Desktop 使用自己的 semver，保存在 `clients/installer/desktop.json`。上游 DSH、Node、插件版本分别记入发行清单 `components` 和构建记录。上游或插件更新也递增 Desktop 版本，首版通道为 `stable`。`--desktop-version` 可覆盖开发构建版本。
+
+发行清单使用独立 Ed25519 离线钥。运营者在本机私有目录生成，限制 ACL 为本人，并加密离线备份。以下命令将私钥直接写入文件。
+
+```powershell
+openssl genpkey -algorithm ED25519 -out <私有目录>/desktop-private.pem
+openssl pkey -in <私有目录>/desktop-private.pem -pubout -out <公钥目录>/desktop-public.pem
+```
+
+在 GitHub 仓库变量 `DESKTOP_RELEASE_PUBLIC_KEY` 配置公钥 PEM，`DESKTOP_PLATFORM_ORIGIN` 可配置首启平台 HTTPS origin。私钥始终留在本机私有目录。消息网络、DSH runtime 和插件市场使用各自的钥。
+
+构建时公钥固定到包内 `auriga/runtime/release-public-key.txt`，参与逐文件摘要和包 ID。缺少公钥的开发包会拒绝更新。签名脚本要求包内公钥与签名私钥匹配，当前发行流程更换发行钥须人工重新安装并同步平台信任配置。
+
+### CI 构建
+
+正式包由 `.github/workflows/installer.yml` 在 `windows-latest` 构建。递增 Desktop 版本并合入 main 后，在对应提交打 `desktop-v<版本>` tag，或手动运行 Installer 工作流并选择这个 tag，填写发行序号、最低可升级版本。工作流检查源码提交属于 main。手动选择分支只能用于验证，其制品不能签名发布。PR 构建不嵌生产公钥，也不上传发行制品。
+
+发行序号为严格递增正整数，默认采用工作流 run number。重跑或下架后发行仍须选择比已发布最高序号更大的值。tag 的版本后缀作为构建版本。
+
+CI 制品包含完整 ZIP、EXE、`desktop.sha256`、`desktop-release.unsigned.json` 和 `desktop-build.json`。构建记录包含源码 commit、Desktop 和各组件版本、ZIP SHA-256、EXE SHA-256、包 ID、workflow 路径、run、event、ref、main 祖先检查结果，以及包内公钥 SPKI DER 的 SHA-256 指纹。工作流执行安装器单测、包校验和隔离安装/启动/卸载验证后上传制品。
+
+### 审阅与离线签名
+
+主控下载 CI 制品，先核对工作流来源、源码 commit、版本和 CI 记录，并用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 和 EXE 的摘要。将 ZIP、未签名清单及构建记录放到签名机。
+
+从 `clients/installer` 运行审阅命令。
+
+```powershell
+node scripts/sign-release.mjs --review-only manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整ZIP> output=<输出目录>/desktop-release.json
+```
+
+脚本核对 ZIP 与 CI 清单/记录，实际解包并验证包内文件和公钥指纹，输出版本、包摘要、上游组件、序号、有效期、workflow、ref、commit、公钥指纹和 `reviewSha256`，并保存 `<output>.review.json` 本地审阅检查点。审阅阶段无需私钥。来源必须是通过 main 祖先检查的 `desktop-v<版本>` tag 构建，否则拒签。构建记录仍须与 GitHub 对应运行人工核对，记录本身不是 CI 来源的加密证明。
+
+核对输出与 CI 记录一致后，使用刚审阅的 `reviewSha256` 确认。
+
+```powershell
+node scripts/sign-release.mjs manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整ZIP> output=<输出目录>/desktop-release.json keyFile=<私有目录>/desktop-private.pem --confirm-sha256=<reviewSha256>
+```
+
+确认摘要绑定完整未签名清单与构建记录。审阅后改变版本、摘要、说明、有效期等参数会被拒绝，须重新审阅。签名私钥推导出的公钥必须与 ZIP 内固定公钥指纹相同。输出文件须尚不存在。签名成功后清理检查点。私钥及其路径不会出现在脚本输出里。
+
+### 同包续期
+
+自动更新清单默认有效 30 天。到期前可从原 tag 构建的已核对制品复制未签名清单，仅将 `sequence` 改成高于平台已见最高序号的新整数，将 `notAfter` 延长。保留原 ZIP、构建记录、Desktop 版本、包 ID、SHA、大小和组件版本。重新执行上述 `--review-only` 和 `--confirm-sha256` 两步，再在管理台上传新签名清单和原 ZIP。平台要求同版本的包身份相同且有效期严格延长，拒绝同版本替包。
+
+续期会成为新的上架记录并写发布审计。已安装该版本的客户端只记住新的序号，不重复安装。即使错过续期，登录页与匿名包下载仍提供最新上架的安装包供新用户下载；自动更新客户端继续严格拒绝过期清单，运营者须完成续期后才恢复自动更新。
+
+### 平台接线和发布
+
+resource 服务需要以下配置。
+
+- `AURIGA_RESOURCE_DESKTOP_DIRECTORY=/var/lib/auriga/desktop`，独立持久卷，由服务账号独占写入。
+- `AURIGA_RESOURCE_DESKTOP_PUBLIC_KEY_FILE=/run/auriga/desktop-public.pem`，与 CI 构建相同的发行公钥，只读挂载。
+- `AURIGA_RESOURCE_DESKTOP_PUBLISHER_TENANT_ID=<发行管理员租户UUID>`，固定公开发行来源。仅该租户内具有发布权限的管理会话可以管理，匿名请求无需选择租户。
+
+卷须支持 OS 文件锁和原子 rename。插件市场对象存储上限为 64 MiB，Desktop 使用独立卷存放大包。发行卷与 resource 数据库须纳入备份。反向代理允许上传实际包大小，产品上限 4 GiB，并设置足够超时。签名清单放在 base64url `X-Desktop-Manifest` 头中，代理和服务端头上限至少 44 KiB。
+
+管理台进入“运维 → 客户端版本” `/ops/desktop`，完成近期身份验证，选择签名清单和 ZIP 发布。管理操作要求有效 ADMIN 会话、`resource.versions.publish` 和 step-up。平台验证签名、有效期、SHA、大小、版本和序号后发布。
+
+发布和下架先原子持久化发行状态及待投递审计，再经 resource outbox 向统一审计链路投递。数据库收据防止重试产生重复事件，审计暂不可用时每 30 秒补送。统一审计页可按 `resource.desktop.publish` 或 `resource.desktop.withdraw` 查询。
+
+### 下载、更新和撤回
+
+云端登录首页显示版本、大小、发布时间、SHA-256 和 Windows 下载按钮。以下两个 GET 接口允许匿名访问，返回公开签名清单和 ZIP，复用 edge 的按客户端 IP 限速。
+
+- `/api/resource/v1/desktop/latest`
+- `/api/resource/v1/desktop/packages/{sequence}`
+
+edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口，首启检查一次，此后每 6 小时检查，可在 Auriga 设置中关闭或手动检查。下载仅使用首启绑定的 HTTPS origin。
+
+用户点击更新后下载并校验暂存，须退出整个 Desktop/DSH 进程，启动器随后运行原有安装事务，下次启动进入新版。仅关闭浏览器页不足以退出 DSH。失败由安装事务还原旧版和 profile，用户数据保留。下载采用 60 秒无数据的空闲超时，持续接收数据不受总时长限制。一次更新最多自动尝试三次，中断后通过单个 `Range: bytes=<已下载长度>-` 续传，服务端返回 200 时安全重下，拼接后重新验证完整 SHA。重试耗尽或进程退出后，下次用户操作重新下载。进程被杀时残留锁记录 PID 和创建时间，下次启动在 DSH 启动前清理锁及暂存目录；卸载也清理残留。
+
+下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝降级，可执行 `rollback.cmd`，或等待更高版本的修复包。下架保留最高序号，修复包须新版本、新序号，同包续期须新序号和延长有效期。第一代安装器需先人工安装一次带更新能力的包。
+
+隔离验证运行 `node --test test/update-e2e.test.mjs`，使用随机端口发布替身、真实 ZIP、临时测试钥和安装事务，验证坏包拒绝、退出安装和数据保留。真实 DSH 宿主另按 `scripts/e2e.mjs` 验证。
