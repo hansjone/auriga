@@ -45,7 +45,7 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(target.providers, [])
 
     def test_inherited_or_unrepresentable_policy_fails_before_writes(self):
-        for field in ('team_id', 'tpm_limit', 'aliases', 'budget_duration'):
+        for field in ('team_id', 'tpm_limit', 'aliases', 'budget_duration', 'allowed_routes'):
             with self.subTest(field=field):
                 source = Source(secrets.token_urlsafe(32))
                 original = source.get
@@ -70,7 +70,8 @@ class Source:
         if path == '/model/info':
             return {'data': self.models}
         if path.startswith('/key/list'):
-            return {'keys': [{'token': 'a' * 64, 'models': ['old-model'], 'max_budget': None}], 'total_pages': 1}
+            return {'keys': [{'token': 'a' * 64, 'models': ['old-model'], 'max_budget': None,
+                              'allowed_routes': ['llm_api_routes']}], 'total_pages': 1}
         raise AssertionError('unexpected source read')
 
 

@@ -162,13 +162,16 @@ def plan(source):
                 item = source.get('/key/info?' + urlencode({'key': item}))['info']
             if any(item.get(field) for field in (
                     'tpm_limit', 'tpd_limit', 'max_parallel_requests', 'model_max_budget',
-                    'allowed_cache_controls', 'allowed_routes', 'permissions', 'config',
+                    'allowed_cache_controls', 'permissions', 'config',
                     'team_id', 'user_id', 'organization_id', 'project_id', 'budget_id',
                     'budget_limits', 'budget_fallbacks', 'aliases', 'policies', 'router_settings',
                     'access_group_ids', 'object_permission_id', 'jwt_key_mappings', 'auto_rotate')):
                 raise MigrationError('unsupported_key_policy')
             if item.get('budget_duration') not in (None, '', '1mo'):
                 raise MigrationError('unsupported_budget_period')
+            routes = set(item.get('allowed_routes') or [])
+            if routes and not routes.intersection({'llm_api_routes', 'openai_routes'}) and not {'/v1/chat/completions', '/v1/models'}.issubset(routes):
+                raise MigrationError('unsupported_key_routes')
             raw = item.get('token') or item.get('key')
             if isinstance(raw, str) and raw.startswith('sk-'):
                 digest = hashlib.sha256(raw.encode()).hexdigest()
