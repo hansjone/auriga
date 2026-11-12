@@ -1,6 +1,6 @@
-# 统一资源包规范草案
+# 统一资源包规范
 
-本稿覆盖插件、skill和工具，skill作为首个按本规范接入的新类型。状态为设计待用户审阅，依据主干 `0f7b2712329b9416260e755803dcb182a4ad1a5e` 和第1轮 `d6bde342`。现有实现依据为资源契约、services/resource、PR304管理台和PR308成员安装链路，客户端布局依据clients/installer。Skill原生格式与加载详见专项文档。[Skill类型专项](skill-market.zh.md)
+本稿覆盖插件、skill和工具，skill作为首个按本规范接入的新类型。用户于2026-11-12确认D1–D11全部按推荐执行，第10节已固化为实现要求。契约草案与后续实现以此为依据。设计基线为主干 `0f7b2712329b9416260e755803dcb182a4ad1a5e`，现有实现依据为资源契约、services/resource、PR304管理台和PR308成员安装链路，客户端布局依据clients/installer。Skill原生格式与加载详见专项文档。[Skill类型专项](skill-market.zh.md)
 
 ## 1. 统一模型与存储
 
@@ -68,7 +68,7 @@ delivery=git，repository为去凭据HTTPS地址，commit为完整40或64位十�
 
 规划 `<DataHome>/auriga/runtimes/<kind>/<精确版本>/<os>-<arch>/`，每项runtime带平台签名、来源、许可证、归档摘要、文件清单和兼容性元数据。Node可导入随包已验证副本，或登记受保护安装版本引用。后者须参与应用升级/回滚清理的引用核对，避免删除正在使用的Node。
 
-Python/Java按需下载平台审核的runtime。版本范围解析为允许的精确版本，下载与解包校验完成后写回执。多个工具共享只读runtime，依赖目录独立。回执同时记录安装版本、回滚保留、开发者固定引用和活进程租约。GC在锁内删前复核，下载/解包失败保留已有runtime。离线使用已缓存且仍可信的runtime和依赖。
+Python采用python-build-standalone，Java采用Eclipse Temurin 21 LTS，均经平台审核、签名后按需下载。Node复用Auriga Desktop自带的受管版本。Python固定精确版本、发行构建标识与平台，Temurin固定21 LTS的精确更新版本和构建号，发布记录保存来源、许可证与摘要。runtime范围解析为平台目录中允许的精确版本，下载与解包校验完成后写回执。多个工具共享只读runtime，依赖目录独立。回执同时记录安装版本、回滚保留、开发者固定引用和活进程租约。GC在锁内删前复核，下载/解包失败保留已有runtime。离线使用已缓存且仍可信的runtime和依赖。
 
 普通模式采用平台维护的兼容版本和安全更新策略，新runtime先安装再逐工具切换，保留有效旧版回滚。开发者可显式选择自装runtime的绝对路径并查看实际版本。进程工作目录与环境允许表来自工具安装记录，平台访问令牌不传给工具。
 
@@ -86,11 +86,11 @@ Python/Java按需下载平台审核的runtime。版本范围解析为允许的�
 
 ## 6. 审核、离线和审计
 
-L0–L4表示治理控制，风险另记R1/R2/R3。建议R1用于纯资料技能，由至少一名非作者审核。R2用于命令型技能、插件、在线工具与普通离线工具，R3用于源码构建、特权与高敏操作，R2/R3建议两名非作者且含安全审核。新通用共享路径首期只创建L3，既有插件等级通过原契约继续管理。
+L0–L4表示治理控制，风险另记R1/R2/R3。R1用于纯资料技能，由至少一名非作者完整审核。R2用于命令型技能、插件、在线工具与普通离线工具，R3用于源码构建、特权与高敏操作，R2/R3均须两名非作者审核且至少一名承担安全审核。审核和发布时由服务端核对人数及职责。新通用共享路径首期只创建L3，既有插件等级通过原契约继续管理。
 
 共享租约截止为发行声明notAfter与撤销清单expiresAt较早值，各自最长24小时。缺失、过期、回滚清单或可信时间不可用时阻止新的受管启动/加载。普通下架阻止新下载/安装/启用，已应用版本在当前租约内保留，续签按下架策略重新授权。
 
-恶意撤销立即禁用受影响资源。插件沿工作空间处置，工具停止受管进程树并撤销凭据，在线工具关闭受管入口和代理授权，外部页面配合服务端会话失效。Skill已有正文处置见专项。可信启动门禁/guardian负责撤销与离线期限，Skill整DSH停止行为作为D4/D5待审阅建议。
+恶意撤销立即禁用受影响资源。插件沿工作空间处置，工具停止受管进程树并撤销凭据，在线工具关闭受管入口和代理授权，外部页面配合服务端会话失效。Skill恶意撤销或租约到期时停止受影响DSH，重新授权并禁用被撤销内容后恢复，进入新会话并保留原历史。共享Skill首期仅在具备可信启动门禁/guardian的云端和Auriga Desktop开放，其他宿主提供私有技能。启动门禁在DSH进程启动前检查信任状态，guardian持续检查有效期，执行能力独立于可卸载的Auriga插件。
 
 审计记录资源/版本/制品摘要、固定commit、审核决策、发行/撤销修订、分发与回报，正文、令牌、私有文件和本机路径按脱敏规则处理。签名、扫描和运行隔离各自记录验证范围。
 
@@ -98,7 +98,7 @@ L0–L4表示治理控制，风险另记R1/R2/R3。建议R1用于纯资料技能
 
 PR304/308已实现的Package/Version、Review/Distribution、成员安装与节点下载可复用事务、对象暂存/提交、ACL、ETag、幂等、outbox、审核人分离、高水位与审计。需要改造的部位包括kind固定校验、多制品引用、新清单校验、两种摘要/签名、严格plugin客户端解码器和workspace规格。
 
-本轮把第1轮10个Skill草案路径改为 `/api/resource/v1/catalog/**` 与 `/api/resource/v1/admin/catalog/**`，12个操作使用Unified前缀。包列举、审核队列和已发布列表支持kind过滤。单对象操作由ID解析kind，并复核版本/审核归属。保留原主干插件接口和schemas的语义。
+通用契约使用 `/api/resource/v1/catalog/**` 与 `/api/resource/v1/admin/catalog/**` 的10个路径、12个操作，operationId带Unified前缀。包列举、审核队列和已发布列表支持kind过滤。单对象操作由ID解析kind，并复核版本/审核归属。保留原主干插件接口和schemas的语义。
 
 通用草案覆盖创建/读取资源、版本上传/列举/详情、送审、审核队列、已发布、审核决定、发布和下架。UnifiedManifest与UnifiedEnvelope引用新schema。新Version.digest为清单摘要，旧Version.digest为插件归档摘要，迁移通过来源关联表对应，验证器按协议处理。
 
@@ -119,7 +119,65 @@ PR304/308已实现的Package/Version、Review/Distribution、成员安装与节�
 
 ## 9. 分期与工作线依赖
 
-P1交付统一规范、插件纳入和skill接入。契约线先定清单/发行schema、向量、API、事件和workspace引用。后端存储/工作流、DSH适配/安装器随后并行，管理/成员页面基于同一契约并行。集成依赖签名验证、ACL、撤销传播和宿主能力，先做通用只读投影与私有skill小批，再开放共享安装。
+### P1 统一规范、插件纳入与Skill接入
+
+以下条目是合并本设计后可分别派发的任务。主控在任务文件中固定共同契约HEAD与允许路径。跨线共享文件由指定负责人串行修改，新增跨服务字段交回P1-K统一生成。每条线交付针对性测试和可部署产物，由主控串行部署到开发环境并从正常页面验证。
+
+依赖顺序为P1-K先完成契约，随后P1-A、P1-B、P1-C和P1-D可并行。P1-D的规格/事件能力必须先于P1-A分发联调和P1-C云端安装验收就绪，P1-D无需先于P1-A目录/存储/审核开发或P1-C私有技能开发全部完成。P1-E与上述实现并行；共享安装对用户开放前，云端须通过D的可信停用验收，Desktop须通过E的可信停用验收。P1-F随可独立验收的产物串行集成，小批部署持续进行，最终全链验收等待各线产物到齐。
+
+#### P1-K 公共契约与生成产物
+
+- 范围为补齐当前契约切片的P1接线，包括通用审核详情/历史与风险审核人数、成员票据/制品下载、安装修订/回报、分发/续签/撤销，以及ResourceRef、实例规格和事件字段。固定kind、清单/制品摘要、精确版本、selectionRevision/generation、租约、报告来源和失败状态。补v2签名正反向向量及v1/v2互拒。
+- 涉及目录为 `contracts/openapi/{resource,workspace}.yaml`、`contracts/resource/`、`contracts/proto/auriga/{resource,node,workspace}/v1/`、`contracts/events/`、`contracts/catalog/m3.json`、`contracts/test/`、`services/contracts/`，以及受影响的 `services/{resource,workspace}/api/` 公共端口声明。以新增消息/字段/接口承载通用模型。
+- 依赖本稿、Skill专项、`contracts/resource/package.schema.json`、`contracts/resource/signatures.schema.json`、现行OpenAPI、resource/node/workspace proto和事件目录。P1-K须形成可定位的冻结契约提交，各线按此提交消费。
+- 验收为schema全量校验、OpenAPI lint、proto lint/兼容性检查、类型生成及类型检查通过，跨租户/错kind/签名/过期/重放与代数负例通过，审核人数与下载权限有机器可校验的表达。
+- 文件边界为独占上述公共契约、API端口和相关生成产物，包括 `web/shared/src/generated/`、`clients/dsh-plugin/src/generated/`、`infra/gen/`。其他线只消费这些产物。契约变化由K提交，主控通知消费线更新基线。
+
+#### P1-A resource后端与插件投影迁移
+
+- 范围为通用目录与kind、原字节清单/多制品存储引用、严格语义校验、R1/R2/R3审核、签名发布、分发意图、续签/撤销，以及旧插件投影与新旧写入串行化。资源事务写意图/outbox，消费workspace API完成交接。
+- 涉及目录为 `services/resource/impl/` 及该目录的迁移、归档/对象存储、工作流、HTTP与测试。新增迁移保留旧数据、原始插件归档、审核证据、撤销事实与高水位。
+- 依赖K冻结的resource OpenAPI、清单/签名schema、ResourceResolution与公共端口、resource事件。目录、上传、审核和投影可先开发，分发联调依赖D的workspace接线。
+- 验收为真实PG测试覆盖租户/作者分离、审核人数、幂等/ETag、多制品部分失败回收、不可变发布、旧插件迁移和撤销不可复活。相同选择重试不解析latest。分发202展示已登记，目标代数观察成功后才标applied。
+- 文件边界为独占resource impl，API端口变更交K。workspace、PlatformResourceWorkspace适配器和节点执行器归D，管理台归B，成员界面与宿主安装归C。
+
+#### P1-B 管理台资源中心
+
+- 范围为现有审核、已发布和分发三页的统一kind筛选、共享详情、审核人数/职责、Skill安全文本预览/版本差异、插件投影、精确版本分发及下架/撤销反馈。实现中英文文案和服务端冲突后的刷新。
+- 涉及目录为 `web/admin/src/views/resources/`、`web/admin/src/views/ResourcesView.vue`、`web/admin/src/admin/resource*`、资源相关路由/导航配置及 `web/admin/test/`。共享路由文件由B单独修改，资源相关修改限定在本任务项。
+- 依赖K冻结的resource管理OpenAPI、Problem/权限/step-up及生成类型，功能联调依赖A的管理API和D的分发回报。可先按契约做组件开发。
+- 验收为组件测试覆盖kind切换、跨类型详情、R2缺第二人禁止发布、作者自审拒绝、ETag冲突、202与applied区分、撤销原因与敏感再验证。部署后正常管理入口完成上传到审核/发布/分发追踪的实际操作。
+- 文件边界为独占admin资源页面和对应路由接线，生成类型交K，成员界面归C，共享组件若需改变先交主控指定唯一负责人。
+
+#### P1-C 成员侧与插件Skill安装
+
+- 范围为资源市场/我的资源按kind与位置展示，私有Skill创建/导入/编辑/关闭/卸载，显式冻结送审，共享Skill验签/票据下载/解包/ledger、customSkillDirs活跃视图、原子更新、同名覆盖与安装回报。插件安装沿公开PluginManager，Skill接入沿公开skills服务和目录。
+- 涉及目录为 `web/panel/src/resources.ts`、panel资源/成员页面与测试，`clients/dsh-plugin/src/resources/` 及其测试、宿主原生资源页/设置/插槽接线（`src/settings/` 和 `src/index.js` 的资源部分）。插件共享注册入口由C负责资源部分接线，E通过明确的进程控制端口消费租约状态。
+- 依赖K冻结的成员资源API、统一清单/v2签名向量、身份通道和回报契约。私有技能独立于A/D可先验收，共享下载依赖A，云端规格与代数依赖D；共享功能开放分别依赖D证明云端guardian能力、E证明Desktop guardian能力。
+- 验收为真实DSH公开目录发现/调用、用户私有内容不上云、共享送审冻结、原始字节验签、同名私有/项目覆盖、跨身份隔离、Windows占用/崩溃恢复、并发修订与回报。云端和Desktop正常页面分别跑安装/更新/卸载与私有创建，收到撤销和离线到期分别触发D、E的停用端口。
+- 文件边界为独占panel资源页面和插件资源逻辑。K独占生成代码，E独占安装器和guardian进程生命周期。C不得另写一套guardian或跨目录改节点驱动。
+
+#### P1-D workspace规格与分发事件消费
+
+- 范围为将已锁定kind/manifestDigest/artifact引用写入实例规格，消费资源分发意图并维护selectionRevision与generation，确定性下发、观察回报、续期对账和撤销停机传播。事件生产者由A实现，事件定义归K，D实现workspace消费与节点落地。
+- 涉及目录为 `services/workspace/impl/`，`services/platform-app/src/main/java/auriga/platform/` 下的 `PlatformResourceWorkspace.java`、`PlatformResourceConfiguration.java`、`PlatformWorkspaceConfiguration.java` 及对应测试。节点侧限定 `infra/agent/internal/` 下 `reconciler/`、`runtime/`、`renderer/`、`artifacts/`、`state/`、`observer/observer.go` 与对应测试，装配限 `app/app.go` 中资源相关部分。D负责规格消费、资源下载/渲染、应用观察和云端guardian进程控制；observer的CPU/内存采集文件不属于本任务。
+- 依赖K冻结的node InstanceSpec/观察消息、ResourceResolution、workspace/resource公共端口、resource事件、v2签名和撤销schema。D可用固定契约fixture验证规格与事件消费，随后接A的真实生产事件。
+- 验收为重复/乱序事件不覆盖新选择、同selectionRevision重试锁定字节、generation匹配才applied、签名续期保持身份/摘要/序号、撤销失败可重试且最终停机。Linux/Windows节点分别验证清单过期和恶意撤销、断网到期/重启前门禁，云端恢复新会话。
+- 文件边界为独占workspace impl、平台resource/workspace适配器与节点资源观察/执行路径。A只调用公共workspace端口，C消费回报，E负责Desktop安装器。K独占proto、事件、公共API和生成代码。D与E共用的guardian行为协议先在K冻结，两端执行实现各自归属。
+
+#### P1-E Desktop可信启动门禁与guardian
+
+- 范围为独立于可卸载插件的Desktop guardian、启动前信任核验、运行期租约计时、恶意撤销/到期停止受影响DSH、重启恢复门禁和新会话提示。保留独立DSH_HOME、应用升级/回滚和Node引用，不在P1实现Python/Java下载。
+- 涉及目录为 `clients/installer/runtime/`、`clients/installer/windows/`、其构建脚本和测试。E负责Desktop guardian入口及进程树控制，云端执行归D。
+- 依赖K冻结的租约/撤销/停用状态协议与v2向量、C提供的身份/安装记录观察端口。可与C并行做端口级验证，共享端到端验收等待C真实写入记录。
+- 验收为插件关闭/卸载后仍执行已安装共享资源的有效期门禁，进程重启或时钟回拨不绕过信任检查，断网在最早租约截止停DSH，恶意撤销后阻止旧内容恢复。真实Desktop通过正常启动器和页面验证，新会话进入及原历史保留可见。
+- 文件边界为独占installer，C独占插件/panel，D独占节点。影响共同信任协议时交K，部署脚本与环境修改交主控。
+
+#### P1-F 串行集成与开发部署
+
+- 范围为主控收取K/A/B/C/D/E产物，组合版本、构建/部署收据与正常入口验证。涉及 `e2e/` 的资源集成用例及 `docs/dev/` 资源使用说明，NAS部署走既有主控部署工具。
+- 依赖所有冻结契约和实现产物。验收包括旧插件路径、统一投影、Skill私有/共享、分发/重试、guardian到期和撤销，覆盖云端/Desktop和公开IP/HTTP访问边界。
+- 文件边界为各工人只交付可部署产物与证据，主控唯一执行真实PG/DSH全链和NAS部署。独立可验收改动经针对性测试可先小批部署，PR独审与完整CI沿现行合并门禁进行。
 
 P2交付online与offline工具。端点/凭据绑定、平台payload和进程回报契约先行，后端制品/审核、客户端执行/终止、管理/成员页面并行。依赖P1的统一版本与发行模型。代理授权、独立来源页面、进程回收通过正常入口分别验收。
 
@@ -127,18 +185,18 @@ P3交付Git源码工具和Python/Java runtime。commit/快照/锁文件、隔离
 
 每期测跨身份/租户、篡改、过期、撤销、重放、并发、半完成恢复与卸载归属。P3额外测commit移动、锁文件篡改、构建脚本和GC竞争。云端/Desktop通过正常入口实测，各线交主控串行小批部署。真实PG/DSH全链由主控占唯一槽。
 
-## 10. 待用户决定
+## 10. 已决定
 
-- D1建议skill首期text-only，工具源码/二进制按各自风险审核。备选同期开放skill脚本，需要新增运行授权和隔离设计。
-- D2建议skill共享用独立customSkillDirs活跃根，私有用原生user根，便于切换和到期处置。备选合放user根，接管清理更易影响用户文件。
-- D3建议通用共享首期L3，旧插件等级沿原规则迁移。备选同期给skill/tool强制等级，需解决项目覆盖与进程处置。
-- D4建议最多24小时租约，Skill恶意撤销/超期时停止受影响DSH，恢复后新建会话。代价是中断其他任务。备选仅阻断新加载，需要明确上下文残留与到期边界。
-- D5建议共享Skill先在具备可信guardian的云端/Desktop开放。备选外部DSH同期开放，须明确可验证的启动与进程控制方式。
-- D6建议R1一名非作者，R2/R3两名且含安全审核。备选全部双人，运营成本更高。
-- D7建议清单外置与独立发行声明，复用既有插件归档。备选重封装全部插件，增加下载和迁移验证成本。
-- D8建议复用受管Node，Python/Java按需下载平台审核runtime，独立工具依赖。Python发行版、Java发行商/LTS版本需用户结合体积和许可证选择。备选只用用户自装runtime，一键体验受限。
-- D9建议Git锁commit、存快照/锁文件，默认禁脚本，必要构建在平台隔离执行。备选本机构建保留开发者入口，需逐次明确代码/网络授权。
-- D10建议开发者模式本机显式开启，侧载显示未审核，冻结后显式送审。备选团队共享调试资源，需要补跨成员未审核代码授权。
-- D11建议在线配置变更重审，远端服务周期复核并在域名/认证域/工具清单变化时复核。备选仅首审URL，后续变化证据较少。
+用户于2026-11-12确认以下11项全部按推荐执行，作为各工作线实现与验收要求。
 
-上述推荐待用户审阅后固化为实现要求。
+- D1，Skill首期采用text-only，禁止附带可执行脚本。工具源码和二进制按tool类型及对应风险等级审核，技能先以原生文本格式接入。
+- D2，共享Skill使用独立customSkillDirs活跃根，私有Skill使用原生user根，以便身份切换、到期停用和清理时核对文件归属。
+- D3，新增通用共享资源首期为L3，现有插件等级沿原规则迁移。Skill/tool的强制等级留后续独立范围，P1按照当前允许关闭/卸载的模型验收。
+- D4，共享资源采用最多24小时租约。Skill恶意撤销或租约到期时停止受影响DSH，恢复后新建会话并保留原历史。实现须明确提示可能中断该DSH其他任务，并验证停机和启动门禁。
+- D5，共享Skill首期仅在具备可信guardian的云端和Auriga Desktop开放。其他DSH提供私有技能，开放共享须先具备同等可验证的启动与进程控制能力。
+- D6，R1至少一名非作者完整审核，R2/R3至少两名非作者且含安全审核。服务端审核/发布均须强制核对，作者不得自审自发。
+- D7，统一清单放在制品之外，使用独立发行声明，复用现有插件归档并保存迁移关联，分别验证清单和制品摘要。
+- D8，Node复用Auriga Desktop自带的受管版本。Python采用python-build-standalone，Java采用Eclipse Temurin 21 LTS，两者由平台审核、签名后按需下载。多工具共享只读runtime，工具依赖目录独立，回收核对活进程与回滚引用。
+- D9，Git工具锁完整commit，保存源码快照和锁文件，默认禁安装脚本，必要构建在平台隔离环境执行并记录来源证明，保证普通用户安装固定已审核字节。
+- D10，开发者模式由本机显式开启，侧载标未审核且仅在当前DSH可用，送审前冻结并预览快照，由用户明确提交共享。
+- D11，在线工具配置变化重新审核，远端服务周期复核，域名、认证域和工具清单变化触发复核，保留实际探测与审核证据。

@@ -113,5 +113,7 @@ Git锁完整commit并引用源码快照/锁文件制品，installScripts=false�
 
 后续契约线补充密码学向量、proto/workspace引用、票据/制品下载、分发、安装回报、
 审核详情、重签、runtime目录与构建来源证明。当前草案不代表这些服务已实现。
-离线与撤销延续最长24小时租约；skill已载入正文的处置和guardian开放范围在主文档D4/D5
-留待用户决定。管理台页面复用、插件迁移成本与P1-P3依赖见主文档。
+用户2026-11-12确认D1-D11按推荐执行。D4/D5要求Skill恶意撤销或租约到期时停止受影响DSH，
+恢复使用新会话，共享Skill首期仅在具备可信guardian的云端与Desktop开放。
+D8确定Node复用Desktop自带版本，Python采用python-build-standalone、Java采用Eclipse Temurin
+21 LTS，经平台审核签名后按需下载。机器契约沿本轮已有定义，P1契约补齐与各实现线边界见主文档。
