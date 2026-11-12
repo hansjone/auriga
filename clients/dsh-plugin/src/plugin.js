@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { installBaseToolsHost } from './network/base-tools-host.js';
 /**
  * Cordis / DSH host entry: managed runtime or authenticated local UI.
  * Local pages are unconfigured; identity library sessions are not mounted here.
@@ -32,7 +33,10 @@ export async function apply(ctx, config) {
   installNetworkDiagnosticSink(ctx);
   installObservability(ctx);
   const mode = selectMode();
-  let binding, profileOwner, memberResources;
+  let binding, profileOwner, memberResources, managedRuntime;
+  installBaseToolsHost(ctx, () =>
+    mode === 'managed' ? managedRuntime?.baseTools : binding?.runtime.baseTools,
+  );
   // Preferences select Auriga surfaces; DSH owns local admission independently.
   let configured = true;
   let admission;
@@ -327,6 +331,7 @@ export async function apply(ctx, config) {
     config: config ?? {},
     startHeartbeat: false,
   });
+  managedRuntime = runtime;
   let dispose;
   try {
     dispose = runtime.apply(ctx);

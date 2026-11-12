@@ -182,6 +182,8 @@ export function createPlatform(
       signal = ownerSignal,
       headers = {},
       form = false,
+      onResponse,
+      redirect = 'error',
     } = {},
   ) {
     const url = new URL(path, config.platformOrigin);
@@ -212,7 +214,7 @@ export function createPlatform(
           : form
             ? new URLSearchParams(body)
             : JSON.stringify(body),
-      redirect: 'error',
+      redirect,
       credentials: 'omit',
       signal: signal
         ? AbortSignal.any([
@@ -221,6 +223,7 @@ export function createPlatform(
           ])
         : AbortSignal.timeout(networkTiming.operationMs),
     });
+    onResponse?.(response.status);
     jar?.accept(response.headers);
     let size = 0;
     const parts = [];

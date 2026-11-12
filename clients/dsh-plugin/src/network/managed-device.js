@@ -1,3 +1,5 @@
+import { probeEndpoint } from './diagnostic-probe.js';
+import { readDeviceLedger, connectionReason } from './base-tools.js';
 import { open, constants } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import {
@@ -48,6 +50,59 @@ export function createManagedNetwork(options) {
   let profileRetryAt = 0;
   let materialUntil = 0;
   let interrupted = false;
+  /** @type {string|null} */ let lastSuccessAt = null;
+  /** @type {boolean|null} */
+  let reachable = null;
+  let failureReason = 'unknown';
+  /** @type {any} */ let diagnosticConfig;
+  /** @type {any} */ let verifiedCredential;
+  let localDirectory = '';
+  const baseTools = {
+    getState: () => ({
+      origin: diagnosticConfig?.platformOrigin,
+      reachable,
+      lastSuccessAt,
+      reason: diagnosticConfig ? failureReason : 'unconfigured',
+      loggedIn: !!access && raw !== rejected && !closed,
+      verified: !!access && raw !== rejected && !closed,
+      expiresAt: access
+        ? Math.min(access.claims.exp * 1000, materialUntil)
+        : materialUntil || null,
+      memberId: access?.claims.sub,
+      displayName,
+      network: lifecycle?.status,
+      remoteAvailable: false,
+    }),
+    generation: () => generation,
+    readLocal: () => {
+      if (!verifiedCredential) throw new Error('local identity unavailable');
+      return readDeviceLedger(localDirectory, verifiedCredential);
+    },
+    async probe(/** @type {string} */ path, /** @type {AbortSignal} */ signal) {
+      if (!diagnosticConfig) throw new Error('unconfigured');
+      const g = generation;
+      try {
+        const result = await probeEndpoint(
+          (options.createPlatform ?? createPlatform)(diagnosticConfig),
+          path,
+          signal,
+        );
+        if (!closed && generation === g) {
+          reachable = true;
+          failureReason = result.reason ?? 'unknown';
+          lastSuccessAt = new Date().toISOString();
+        }
+        return result;
+      } catch (error) {
+        if (!closed && generation === g) {
+          const reason = connectionReason(error);
+          if (reason === 'hq_unreachable') reachable = false;
+          failureReason = reason;
+        }
+        throw error;
+      }
+    },
+  };
   /** @type {AbortController|undefined} */
   let controller;
   let retiring = Promise.resolve();
@@ -124,6 +179,7 @@ export function createManagedNetwork(options) {
     controller?.abort();
     controller = undefined;
     access = undefined;
+    verifiedCredential = undefined;
     profileRetryAt = 0;
     interrupted = false;
     const previous = lifecycle;
@@ -146,6 +202,7 @@ export function createManagedNetwork(options) {
         if (next === raw && materialUntil <= Date.now()) {
           rejected = raw;
           access = undefined;
+          verifiedCredential = undefined;
           lifecycle?.logout();
           return;
         }
@@ -160,6 +217,8 @@ export function createManagedNetwork(options) {
           await retire();
           if (closed) return;
           const { value, config } = validate(next);
+          diagnosticConfig = config;
+          localDirectory = join(options.directory, 'network', value.deviceId);
           materialUntil = Date.parse(value.expiresAt);
           if (next !== raw) displayName = undefined;
           raw = next;
@@ -219,6 +278,7 @@ export function createManagedNetwork(options) {
                     interrupted = true;
                     lifecycle?.logout();
                     access = undefined;
+                    verifiedCredential = undefined;
                   }
                   throw error;
                 });
@@ -240,6 +300,7 @@ export function createManagedNetwork(options) {
                 .catch((error) => {
                   if (!closed && expected === generation) {
                     access = undefined;
+                    verifiedCredential = undefined;
                     interrupted = true;
                     lifecycle?.logout();
                   }
@@ -252,6 +313,9 @@ export function createManagedNetwork(options) {
               if (closed || expected !== generation)
                 throw new PlatformError(401, 'network.revoked');
               access = { accessToken: response.access_token, claims };
+              verifiedCredential = { claims };
+              reachable = true;
+              lastSuccessAt = new Date().toISOString();
               return access;
             })();
             try {
@@ -281,6 +345,7 @@ export function createManagedNetwork(options) {
                 interrupted = true;
                 lifecycle?.logout();
                 access = undefined;
+                verifiedCredential = undefined;
               }
               throw error;
             } finally {
@@ -361,7 +426,9 @@ export function createManagedNetwork(options) {
             })
             .catch(() => {});
         }
-      } catch {
+      } catch (error) {
+        failureReason = connectionReason(error);
+        if (failureReason === 'hq_unreachable') reachable = false;
         // Transport failure is not revocation. Keep only an unexpired verified
         // token for the unchanged valid file; never extend its deadline.
         if (
@@ -377,6 +444,7 @@ export function createManagedNetwork(options) {
         }
         lifecycle?.logout();
         access = undefined;
+        verifiedCredential = undefined;
         // Retry transient outage, but never resurrect a proven revoked file.
         if (raw !== rejected) await retire();
         retryAt =
@@ -390,6 +458,7 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    baseTools,
     get resourceSession() {
       return !closed &&
         raw !== rejected &&
@@ -445,6 +514,7 @@ export function createManagedNetwork(options) {
       rejected = raw;
       lifecycle?.logout();
       access = undefined;
+      verifiedCredential = undefined;
     },
     get status() {
       return rejected === raw || !lifecycle || interrupted
