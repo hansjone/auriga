@@ -1,3 +1,8 @@
+import {
+  registerBaseTools,
+  readDeviceLedger,
+  connectionReason,
+} from './base-tools.js';
 import { open, constants } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import {
@@ -48,6 +53,39 @@ export function createManagedNetwork(options) {
   let profileRetryAt = 0;
   let materialUntil = 0;
   let interrupted = false;
+  /** @type {string|null} */ let lastSuccessAt = null;
+  /** @type {boolean|null} */
+  let reachable = null;
+  let failureReason = 'unknown';
+  /** @type {any} */ let diagnosticConfig;
+  /** @type {any} */ let verifiedCredential;
+  let localDirectory = '';
+  const disposeBase = options.ctx.tools?.register
+    ? registerBaseTools({
+        ctx: options.ctx,
+        getState: () => ({
+          origin: diagnosticConfig?.platformOrigin,
+          reachable,
+          lastSuccessAt,
+          reason: failureReason,
+          verified: !!access && raw !== rejected && !closed,
+          expiresAt: access
+            ? Math.min(access.claims.exp * 1000, materialUntil)
+            : materialUntil || null,
+          memberId: access?.claims.sub,
+          displayName,
+          network: lifecycle?.status,
+          remoteAvailable: false,
+        }),
+        readLocal: () => readDeviceLedger(localDirectory, verifiedCredential),
+        probe: (path, signal) => {
+          if (!diagnosticConfig) throw new Error('unconfigured');
+          return (options.createPlatform ?? createPlatform)(
+            diagnosticConfig,
+          ).request(path, { signal });
+        },
+      })
+    : () => {};
   /** @type {AbortController|undefined} */
   let controller;
   let retiring = Promise.resolve();
@@ -160,6 +198,8 @@ export function createManagedNetwork(options) {
           await retire();
           if (closed) return;
           const { value, config } = validate(next);
+          diagnosticConfig = config;
+          localDirectory = join(options.directory, 'network', value.deviceId);
           materialUntil = Date.parse(value.expiresAt);
           if (next !== raw) displayName = undefined;
           raw = next;
@@ -252,6 +292,9 @@ export function createManagedNetwork(options) {
               if (closed || expected !== generation)
                 throw new PlatformError(401, 'network.revoked');
               access = { accessToken: response.access_token, claims };
+              verifiedCredential = { claims };
+              reachable = true;
+              lastSuccessAt = new Date().toISOString();
               return access;
             })();
             try {
@@ -361,7 +404,9 @@ export function createManagedNetwork(options) {
             })
             .catch(() => {});
         }
-      } catch {
+      } catch (error) {
+        reachable = false;
+        failureReason = connectionReason(error);
         // Transport failure is not revocation. Keep only an unexpired verified
         // token for the unchanged valid file; never extend its deadline.
         if (
@@ -468,6 +513,7 @@ export function createManagedNetwork(options) {
     close() {
       if (closing) return closing;
       closed = true;
+      disposeBase();
       clearInterval(timer);
       // Retire immediately, even if an exchange/verification response is pending.
       closing = retire();

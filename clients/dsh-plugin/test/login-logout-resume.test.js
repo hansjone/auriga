@@ -1,3 +1,4 @@
+import { BASE_TOOL_NAMES } from '../src/network/base-tools.js';
 import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -116,7 +117,7 @@ function assertDeviceGone(runtime, request, registered) {
   assert.equal(runtime.vault.snapshot().credential === null, true);
   assert.equal(runtime.isReady(), false);
   assert.equal(runtime.resolve(request), null);
-  assert.equal(registered.size, 0);
+  assert.deepEqual([...registered].sort(), [...BASE_TOOL_NAMES].sort());
   assert.equal(
     runtime.prepare(ownerRequest(runtime, { headers: {} })).body
       .resumeAvailable,

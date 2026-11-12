@@ -1,3 +1,9 @@
+import {
+  registerBaseTools,
+  readDeviceLedger,
+  baseStatus,
+  connectionReason,
+} from '../network/base-tools.js';
 /* global AbortSignal */
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
@@ -112,6 +118,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   /** @type {ReturnType<typeof createTeam>|undefined} */
   let startingTeam;
   let communication = 'idle';
+  /** @type {string|null} */
+  let lastSuccessAt = null;
+  let connectionFailure = 'unknown';
   /** @type {Promise<void>|undefined} */
   let teamStarting;
   let teamFailures = 0,
@@ -357,6 +366,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       onState(state) {
         if (closed || generation !== g) return;
         online = state.connected;
+        connectionFailure = state.reason ?? 'unknown';
+        if (state.connected) lastSuccessAt = new Date().toISOString();
         communication = state.connected
           ? team
             ? 'ready'
@@ -444,8 +455,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       restoreFailures = 0;
       restoreRetryAt = 0;
       connectTeam();
-    } catch {
+    } catch (error) {
       if (!closed && generation === g) {
+        connectionFailure = connectionReason(error);
         online = false;
         communication = 'unavailable';
         restoreRetryAt = Date.now() + retryDelay(++restoreFailures);
@@ -557,6 +569,45 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     for (const attempt of abandoned) await abandon(attempt);
     await drainRevocations();
   }
+  const baseState = () => {
+    const saved = vault.snapshot().credential;
+    return {
+      origin: config.platformOrigin,
+      reachable: online,
+      lastSuccessAt,
+      reason: connectionFailure,
+      verified: !!saved && !broker.status.reauthenticationRequired,
+      expiresAt: saved?.claims.exp * 1000 || null,
+      memberId: saved?.claims.sub,
+      displayName: accountName(saved),
+      network: network.status,
+      remoteAvailable: !!team && online && !closed,
+    };
+  };
+  const disposeBase = ctx.tools?.register
+    ? registerBaseTools({
+        ctx,
+        getState: baseState,
+        readLocal: () =>
+          readDeviceLedger(
+            join(directory, 'network'),
+            vault.snapshot().credential,
+          ),
+        async probe(path, signal) {
+          const g = generation;
+          try {
+            const result = await platform.request(path, { signal });
+            active(g);
+            lastSuccessAt = new Date().toISOString();
+            return result;
+          } catch (error) {
+            if (!closed && g === generation)
+              connectionFailure = connectionReason(error);
+            throw error;
+          }
+        },
+      })
+    : () => {};
   return {
     /** Only call from DSH's admitted owner RPC handler.
      * @param {any} peer */
@@ -620,6 +671,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
               : 'signed_out',
         connected: !!row && !!team && online,
         communication: row ? communication : 'idle',
+        networkDiagnostics: baseStatus(baseState()),
         models: models.status,
         capabilities: { consent: !!row && network.consentAvailable },
         network: row
@@ -984,6 +1036,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (disposed) return networkClosing;
       disposed = true;
       closed = true;
+      disposeBase();
       broker.invalidate('closed');
       models.close();
       clearInterval(expiryTimer);

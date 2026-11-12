@@ -1,3 +1,4 @@
+import { BASE_TOOL_NAMES } from '../src/network/base-tools.js';
 import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,11 +46,11 @@ test('R4 another admitted owner cancels a form without revoking shared device or
   assert.deepEqual(runtime.vault.snapshot(), before);
   assert.deepEqual(runtime.status(a), status);
   assert.equal(runtime.isReady(), true);
-  assert.equal(registered.size, 4);
+  assert.equal(registered.size, BASE_TOOL_NAMES.length + 4);
   assert.equal(requests.includes('/oauth2/revoke'), false);
   await runtime.logout(a);
   assert.equal(runtime.resolve(a), null);
-  assert.equal(registered.size, 0);
+  assert.deepEqual([...registered].sort(), [...BASE_TOOL_NAMES].sort());
   assert.equal(requests.filter((path) => path === '/oauth2/revoke').length, 1);
 });
 
@@ -61,7 +62,7 @@ test('a browser session for another device cannot tombstone the current device',
   const before = runtime.vault.snapshot();
   await assert.rejects(runtime.logout(request), /device ownership/);
   assert.deepEqual(runtime.vault.snapshot(), before);
-  assert.equal(registered.size, 4);
+  assert.equal(registered.size, BASE_TOOL_NAMES.length + 4);
   assert.equal(requests.includes('/oauth2/revoke'), false);
 });
 

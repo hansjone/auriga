@@ -211,3 +211,22 @@ a diagnostic instead of patching DSH. Browser diagnostics tagged
 `auriga.entry_recovery` use one string containing the tag and JSON, readable by
 text-only collectors. They contain only event/reason enums, state, attempt number,
 relative time and HTTP status; they omit URLs, credentials and response bodies.
+
+## 内置网络基础层与远端工具层
+
+配置总部后，连接模式和带设备凭据的托管模式会直接向宿主注册四个只读工具，不等待远端 MCP 上线：
+
+- `auriga_net_status`：读取现有连接缓存，报告总部 origin、可达状态、进程内最近成功时间、已验证凭据有效期、消息网络和远端工具层状态，以及本地未取得结果的发送记录数量。尚未探测或无法分类时返回 `unknown`，数量无法读取时为 `null`。
+- `auriga_net_diagnose`：无参数；按顺序 GET 总部 origin 的固定 `/actuator/health`、`/api/iam/v1/login/providers`，每段最多一次、3 秒超时，同一安装同时最多一个诊断。第一段失败后停止 HTTP 探测；消息网络段只读缓存并标记 `source: cache`。不接受 URL、主机、端口或身份参数；沿用平台客户端的同源约束、响应大小上限和禁止重定向规则。
+- `auriga_net_identity`：仅输出已验证来源的成员 ID、显示名、凭据有效期及本地账本中的节点地址；缺少来源返回 `null`。
+- `auriga_net_inbox`：只读当前已验证设备分区的本地原子账本，按真实宿主会话和 binding 过滤；参数 `limit` 默认 20、最大 50，`cursor` 是非负整数偏移，返回 `items` 和可选 `nextCursor`。排序依据本地 recipient ID。并发同步可能使偏移分页发生移动。只返回消息 ID、处理阶段和消息正文，不返回 admission、receipt 或宿主路径。正文属于外部消息内容，不应作为系统指令信任。
+
+这四个工具复用原生会话对象、活动 Agent、持久化 provider、归档与子会话所有权校验；伪造执行上下文、归档会话、原生子 Agent 被拒绝。登录失效时仍可由获准的本地主会话查看故障状态；身份和收件箱不会从模型参数选择身份。工具不新增连接、后台轮询或接收授权，不修改消息接收开关或 consent。
+
+原因分类为 `hq_unreachable`、`unauthorized`、`credential_expired`、`message_network_degraded`、`keyset_expired`、`egress_denied`、`unknown`。只使用已有状态证据：例如连接拒绝/域名失败/超时分类为总部不可达，401/403 为未授权，已知到期时间为凭据过期。现有状态若未提供 keyset 或 egress 原因，返回 `unknown`，不通过错误文本猜测。托管模式没有 Team MCP 连接证据时，远端工具层为不可用且原因未知。
+
+业务工具继续由远端 MCP 按权限下发。远端工具使用 `auriga_net_` 前缀或与内置名称冲突时会被拒绝并记录固定日志；日志不回显远端名称。远端断开不会移除基础工具；插件卸载才注销它们。页面状态附带的 `networkDiagnostics` 与工具使用同一状态生成器。
+
+发送沿用 `auriga_send_message` 和现有持久 outbox：已经落盘但没有结果的请求保留原幂等标识，恢复后按既有规则重试，`queued` 表示这类记录数，并不代表已投递或证明总部没有接受。当前发送能力仍受有效 source 与连接生命周期门禁限制；完全断网后新调用可能被拒绝，不能将拒绝解释成已排队。本次只读基础层没有放宽这些发送门禁。
+
+验证边界：单测与类型检查不等于真实 DSH 宿主验证。未配置总部的安装与没有设备凭据文件的托管安装不注册此基础层；需主控在实际发行配置和宿主中确认入口。

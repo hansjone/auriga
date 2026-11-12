@@ -1,3 +1,4 @@
+import { BUILTIN_TOOL_NAMES, connectionReason } from '../network/base-tools.js';
 /* global AbortSignal */
 import { createHash, randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
@@ -45,11 +46,20 @@ class UnsupportedSessionOrigin extends Error {
 
 /** Native rc.3 output.render receives (arguments, value), independently of MCP content.
  * @param {any} registry @param {any[]} tools @param {(name:string,args:any,exec:any)=>Promise<any>} call */
-export function registerTeamTools(registry, tools, call) {
+export function registerTeamTools(registry, tools, call, logger = console) {
   /** @type {(()=>void)[]} */
   const disposers = [];
   try {
-    for (const tool of tools.filter((t) => TOOL_NAMES.has(t.name)))
+    for (const tool of tools.filter((t) => {
+      if (
+        (typeof t.name === 'string' && t.name.startsWith('auriga_net_')) ||
+        BUILTIN_TOOL_NAMES.has(t.name)
+      ) {
+        logger.warn?.('[auriga-dsh] rejected conflicting remote tool');
+        return false;
+      }
+      return TOOL_NAMES.has(t.name);
+    }))
       disposers.push(
         registry.register({
           name: tool.name,
@@ -79,7 +89,7 @@ export function registerTeamTools(registry, tools, call) {
 }
 
 /** Remote HTTP MCP only; actor/session never comes from model arguments.
- * @param {{platform:ReturnType<typeof import('./platform.js').createPlatform>,vault:Awaited<ReturnType<typeof import('./vault.js').createVault>>,getAccess:()=>Promise<string>,assertActive:()=>void,ctx:any,label:string,onState?:(state:{connected:boolean,unauthorized?:boolean})=>void}} options */
+ * @param {{platform:ReturnType<typeof import('./platform.js').createPlatform>,vault:Awaited<ReturnType<typeof import('./vault.js').createVault>>,getAccess:()=>Promise<string>,assertActive:()=>void,ctx:any,label:string,onState?:(state:{connected:boolean,unauthorized?:boolean,reason?:string})=>void}} options */
 export function createTeam({
   platform,
   vault,
@@ -117,6 +127,7 @@ export function createTeam({
     } catch (error) {
       onState({
         connected: false,
+        reason: connectionReason(error),
         unauthorized:
           /** @type {any} */ (error).status === 401 ||
           /** @type {any} */ (error).status === 403,
@@ -580,7 +591,9 @@ export function createTeam({
       )
         throw new Error('Team tool manifest incomplete');
       await endpoint();
-      disposers.push(registerTeamTools(ctx.tools, list.tools, toolCall));
+      disposers.push(
+        registerTeamTools(ctx.tools, list.tools, toolCall, ctx.logger),
+      );
       timer = setInterval(() => {
         void poll().catch(() => {
           /* Retry only private lease pull/ACK, never model writes. */

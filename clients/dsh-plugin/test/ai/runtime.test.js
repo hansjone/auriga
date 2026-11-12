@@ -1,3 +1,4 @@
+import { BASE_TOOL_NAMES } from '../../src/network/base-tools.js';
 import { ownerRequest } from '../owner-request.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,7 +52,7 @@ test('runtime: Team 401 disconnects communication without rejecting verified res
     assert.ok(f.runtime.resolve(attempt));
     assert.equal(f.runtime.status(attempt).loggedIn, true);
     assert.equal(f.runtime.status(attempt).connected, false);
-    assert.equal(f.registered.size, 0);
+    assert.deepEqual([...f.registered].sort(), [...BASE_TOOL_NAMES].sort());
     assert.equal(f.runtime.modelStatus.reauthenticationRequired, false);
     assert.equal(ctx.llm.listProviders().length, 1);
   } finally {
@@ -91,7 +92,7 @@ for (const status of [400, 401, 403])
       await assert.rejects(f.runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
       assert.equal(f.runtime.resolve(f.request), null);
       assert.equal(f.runtime.status(f.request).connected, false);
-      assert.equal(f.registered.size, 0);
+      assert.deepEqual([...f.registered].sort(), [...BASE_TOOL_NAMES].sort());
       assert.equal(f.runtime.modelStatus.reauthenticationRequired, true);
       assert.deepEqual(ctx.llm.listProviders(), []);
       assert.equal(f.runtime.vault.snapshot().credential.refreshPending, true);
@@ -322,7 +323,10 @@ for (const failure of ['permission', 'unknown', 'none'])
           runtime.status(request).models.reauthenticationRequired,
           failure === 'unknown',
         );
-        assert.equal(f.registered.size > 0, failure === 'permission');
+        assert.equal(
+          [...f.registered].some((name) => !BASE_TOOL_NAMES.includes(name)),
+          failure === 'permission',
+        );
         await assert.rejects(ctx.llm.listModels('auriga'));
         assert.equal(exchanges, 1);
       }
@@ -334,7 +338,7 @@ for (const failure of ['permission', 'unknown', 'none'])
         assert.equal(runtime.status(request).models.available, false);
         await runtime.logout(request);
         assert.equal(runtime.vault.snapshot().credential, null);
-        assert.equal(f.registered.size, 0);
+        assert.deepEqual([...f.registered].sort(), [...BASE_TOOL_NAMES].sort());
       }
       assert.deepEqual(ctx.llm.listProviders(), []);
       runtime.close();
