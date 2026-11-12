@@ -1,4 +1,7 @@
 import CredentialsView from './views/CredentialsView.vue';
+import UpgradesView from './views/ops/UpgradesView.vue';
+import BackupsView from './views/ops/BackupsView.vue';
+import LifecycleView from './views/ops/LifecycleView.vue';
 import { createRouter, createWebHistory } from 'vue-router';
 import AuditView from './views/AuditView.vue';
 import LoginView from './views/LoginView.vue';
@@ -27,6 +30,9 @@ import NotificationsView from './views/ops/NotificationsView.vue';
 
 const existing = new Set([
   '/security/credentials',
+  '/ops/upgrades',
+  '/ops/backups',
+  '/ops/lifecycle',
   '/audit',
   '/ops/alerts',
   '/ops/notifications',
@@ -69,6 +75,9 @@ export const router = createRouter({
         { path: '', redirect: '/overview' },
         { path: 'security/credentials', component: CredentialsView },
         { path: 'overview', component: OverviewView },
+        { path: 'ops/upgrades', component: UpgradesView },
+        { path: 'ops/backups', component: BackupsView },
+        { path: 'ops/lifecycle', component: LifecycleView },
         { path: 'audit', component: AuditView },
         { path: 'ops/alerts', component: AlertsView },
         { path: 'ops/notifications', component: NotificationsView },

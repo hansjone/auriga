@@ -174,12 +174,23 @@ sed \
 chmod 0600 "$CONFIG/nats/nats.conf"
 chown_required 65532:65532 "$CONFIG/nats/nats.conf"
 
+# Opt-in operations share queue/status/archive storage, never the Docker socket.
+case "${AURIGA_OPS_RUNTIME_ENABLED:-false}" in true|false) ;; *) die 'invalid runtime operations flag' ;; esac
+if [ "${AURIGA_OPS_RUNTIME_ENABLED:-false}" = true ]; then
+  printf '%s' "${AURIGA_OPS_TENANT_ID:-}" | LC_ALL=C grep -Eq '^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$' || die 'runtime operations require installation tenant UUID'
+fi
+[ ! -L "$AURIGA_DATA_ROOT/ops-runtime" ] || die 'symlink operations directory'
+mkdir -p "$AURIGA_DATA_ROOT/ops-runtime"
+chmod 0700 "$AURIGA_DATA_ROOT/ops-runtime"
+chown_required 10001:10001 "$AURIGA_DATA_ROOT/ops-runtime"
 printf 'AURIGA_AUDIT_NATS_URL=nats://bifrost_audit:%s@nats:4222\n' "$NATS_AUDIT" >"$CONFIG/bifrost-audit.env"
 chmod 0600 "$CONFIG/bifrost-audit.env"
 chown_required 10003:10003 "$CONFIG/bifrost-audit.env"
 
 cat >"$CONFIG/platform.env" <<EOF
 SPRING_PROFILES_ACTIVE=$PROFILES
+AURIGA_OPS_RUNTIME_ENABLED=${AURIGA_OPS_RUNTIME_ENABLED:-false}
+AURIGA_OPS_TENANT_ID=${AURIGA_OPS_TENANT_ID:-}
 AURIGA_IAM_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_IAM_DB_USER=auriga_iam
 AURIGA_IAM_DB_PASSWORD=$PG_IAM

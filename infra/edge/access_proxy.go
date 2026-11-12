@@ -128,6 +128,10 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		fail(401, "common.unauthenticated")
 		return
 	}
+	if !opsDownloadFormCSRF(w, r) {
+		fail(403, "common.forbidden")
+		return
+	}
 	if !public && sess == nil && (!clientBearer || cookieOK || ipAdmin && isWriteMethod(r.Method)) {
 		fail(401, "common.unauthenticated")
 		return
