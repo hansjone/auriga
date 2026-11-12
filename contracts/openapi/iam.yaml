@@ -80,7 +80,7 @@ paths:
       x-admin-only: true
       x-permission: iam.providers.write
       description: 既有 provider 创建后配置。必须 If-Match。仅受信 HTTPS 允许列表地址，禁止重定向。systemCode
-        的上游映射待确认。停用撤销该源事务与会话。
+        的上游映射按现场实现迁移到 loginSystemCode，originSystemCode由企业适配器保留部署值。停用撤销该源事务与会话。
       parameters:
         - name: If-Match
           in: header

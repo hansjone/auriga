@@ -12,7 +12,7 @@ export interface paths {
     get: operations['getUacProviderConfig'];
     /**
      * 配置已有 UAC 身份源草案
-     * @description 既有 provider 创建后配置。必须 If-Match。仅受信 HTTPS 允许列表地址，禁止重定向。systemCode 的上游映射待确认。停用撤销该源事务与会话。
+     * @description 既有 provider 创建后配置。必须 If-Match。仅受信 HTTPS 允许列表地址，禁止重定向。systemCode 的上游映射按现场实现迁移到 loginSystemCode，originSystemCode由企业适配器保留部署值。停用撤销该源事务与会话。
      */
     put: operations['putUacProviderConfig'];
     post?: never;
