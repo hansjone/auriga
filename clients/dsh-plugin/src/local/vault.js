@@ -41,12 +41,22 @@ export async function createVault(directory) {
     closed = false;
   /** @type {Set<()=>Promise<void>>} */
   const resourceIdentityListeners = new Set();
+  /** @type {Set<(identity:{tenantId:string,ownerId:string,hostId:string}|undefined)=>Promise<void>>} */
+  const resourceIdentityGates = new Set();
   /** @param {any} value */
   const resourceIdentity = (value) =>
     ['tid', 'sub', 'did']
       .map((key) => value?.credential?.claims?.[key] ?? '')
       .join('/');
   return {
+    /** Fence resource views before publishing a different durable identity. IDs only; no credentials.
+     * @param {(identity:{tenantId:string,ownerId:string,hostId:string}|undefined)=>Promise<void>} gate */
+    subscribeResourceIdentityGate(gate) {
+      resourceIdentityGates.add(gate);
+      return () => {
+        resourceIdentityGates.delete(gate);
+      };
+    },
     /** Observe durable ownership changes so private resource code stops before logout completes.
      * @param {()=>Promise<void>} listener */
     subscribeResourceIdentity(listener) {
@@ -65,9 +75,19 @@ export async function createVault(directory) {
         if (closed) throw new Error('connect state closed');
         const next = structuredClone(state);
         await change(next);
+        const changed = resourceIdentity(state) !== resourceIdentity(next);
+        if (changed) {
+          const c = next.credential?.claims;
+          const identity = c
+            ? { tenantId: c.tid, ownerId: c.sub, hostId: c.did }
+            : undefined;
+          await Promise.all(
+            [...resourceIdentityGates].map((gate) => gate(identity)),
+          );
+        }
+        if (closed) throw new Error('connect state closed');
         await atomicWriteJson(path, sealSecret(key, JSON.stringify(next)));
         if (closed) throw new Error('connect state closed');
-        const changed = resourceIdentity(state) !== resourceIdentity(next);
         state = next;
         if (changed)
           await Promise.allSettled(
@@ -82,6 +102,7 @@ export async function createVault(directory) {
     close() {
       closed = true;
       resourceIdentityListeners.clear();
+      resourceIdentityGates.clear();
       state = null;
       key.fill(0);
     },

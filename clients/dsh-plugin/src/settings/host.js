@@ -205,6 +205,8 @@ export function createSettingsHandler({
         try {
           if (input.action === 'create' && keys === 'action,source')
             return json(200, await privateSkills.create(input.source));
+          if (input.action === 'preview' && keys === 'action,snapshotId')
+            return json(200, await privateSkills.frozen(input.snapshotId));
           if (
             input.action === 'read' &&
             keys === 'action,enabled,name' &&

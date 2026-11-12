@@ -1,3 +1,4 @@
+import { parseDocument, isAlias, isMap, isPair, isCollection } from 'yaml';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   lstat,
@@ -17,65 +18,101 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 const namePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const hash = (/** @type {Uint8Array} */ bytes) =>
   'sha256:' + createHash('sha256').update(bytes).digest('hex');
-/** Strict authoring subset: JSON-quoted YAML scalars and literal booleans.
- * Never interpret YAML tags, aliases, duplicate keys or arbitrary object graphs.
+/** Parse the native YAML format without tags, aliases, duplicate keys or deep graphs.
+ * Preserve the original SKILL.md bytes; parsed metadata is for validation only.
  * @param {string} source */
 export function validatePrivateSkill(source) {
   if (
     typeof source !== 'string' ||
     Buffer.byteLength(source) > 262144 ||
-    source.includes('\0')
+    source.includes('\0') ||
+    Buffer.from(source).toString('utf8') !== source
   )
     refuse('common.validation_failed');
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source);
   if (!match) refuse('common.validation_failed');
-  /** @type {Record<string,any>} */ const fields = Object.create(null);
-  for (const line of match[1].split(/\r?\n/)) {
-    if (!line.trim() || line.startsWith('#')) continue;
-    const field = /^([a-zA-Z-]+):[ \t]*(.*)$/.exec(line);
+  const document = parseDocument(match[1], {
+    version: '1.2',
+    schema: 'core',
+    strict: true,
+    uniqueKeys: true,
+    prettyErrors: false,
+    logLevel: 'silent',
+  });
+  if (
+    document.errors.length ||
+    document.warnings.length ||
+    !isMap(document.contents)
+  )
+    refuse('common.validation_failed');
+  let count = 0;
+  /** @param {any} node @param {number} depth */
+  function inspect(node, depth) {
+    if (!node) return;
     if (
-      !field ||
-      Object.hasOwn(fields, field[1]) ||
-      ![
-        'name',
-        'description',
-        'whenToUse',
-        'disable-model-invocation',
-        'user-invocable',
-      ].includes(field[1])
+      ++count > 4096 ||
+      depth > 16 ||
+      isAlias(node) ||
+      node.anchor ||
+      node.tag
     )
       refuse('common.validation_failed');
-    const [, key, raw] = field;
-    if (['disable-model-invocation', 'user-invocable'].includes(key)) {
-      if (!['true', 'false'].includes(raw)) refuse('common.validation_failed');
-      fields[key] = raw === 'true';
-    } else {
-      let value;
-      if (raw.startsWith('"')) {
-        try {
-          value = JSON.parse(raw);
-        } catch {
-          refuse('common.validation_failed');
-        }
-      } else {
-        if (!raw || /[[\]{}&*!|>:#'"`]/.test(raw))
-          refuse('common.validation_failed');
-        value = raw;
-      }
-      if (typeof value !== 'string' || !value.trim() || value.includes('\0'))
-        refuse('common.validation_failed');
-      fields[key] = value;
-    }
+    if (isPair(node)) {
+      inspect(node.key, depth + 1);
+      inspect(node.value, depth + 1);
+    } else if (isCollection(node))
+      for (const item of node.items) inspect(item, depth + 1);
   }
+  inspect(document.contents, 0);
+  const fields = document.toJS({ maxAliasCount: 0 });
+  const allowed = [
+    'name',
+    'description',
+    'whenToUse',
+    'metadata',
+    'disable-model-invocation',
+    'user-invocable',
+  ];
+  if (
+    !fields ||
+    typeof fields !== 'object' ||
+    Array.isArray(fields) ||
+    Object.keys(fields).some((key) => !allowed.includes(key))
+  )
+    refuse('common.validation_failed');
+  for (const key of ['disable-model-invocation', 'user-invocable'])
+    if (Object.hasOwn(fields, key) && typeof fields[key] !== 'boolean')
+      refuse('common.validation_failed');
   if (
     typeof fields.name !== 'string' ||
     fields.name.length > 64 ||
     !namePattern.test(fields.name) ||
+    /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/.test(fields.name) ||
     typeof fields.description !== 'string' ||
+    !fields.description.trim() ||
     fields.description.length > 2048 ||
-    (fields.whenToUse?.length ?? 0) > 2048
+    (Object.hasOwn(fields, 'whenToUse') &&
+      (typeof fields.whenToUse !== 'string' || fields.whenToUse.length > 2048))
   )
     refuse('common.validation_failed');
+  if (Object.hasOwn(fields, 'metadata')) {
+    if (
+      !fields.metadata ||
+      typeof fields.metadata !== 'object' ||
+      Array.isArray(fields.metadata)
+    )
+      refuse('common.validation_failed');
+    /** @param {any} value */
+    function jsonValue(value) {
+      if (typeof value === 'number' && !Number.isFinite(value))
+        refuse('common.validation_failed');
+      if (value && typeof value === 'object')
+        for (const child of Object.values(value)) jsonValue(child);
+    }
+    jsonValue(fields.metadata);
+    if (Buffer.byteLength(JSON.stringify(fields.metadata)) > 8192)
+      refuse('common.validation_failed');
+  }
   return {
     name: /** @type {string} */ (fields.name),
     description: /** @type {string} */ (fields.description),
@@ -213,6 +250,26 @@ export function createPrivateSkills({ home }) {
     return { ...value, enabled };
   }
   return {
+    /** Read only an explicitly frozen immutable local snapshot.
+     * @param {string} id */
+    async frozen(id) {
+      if (!/^[a-f0-9-]{36}$/.test(id)) refuse('common.validation_failed');
+      const file = join(hidden, 'frozen', id + '.json');
+      await safe(file);
+      const stat = await lstat(file);
+      if (!stat.isFile() || stat.size > 41943040)
+        refuse('common.validation_failed');
+      const value = JSON.parse(await readFile(file, 'utf8'));
+      const ordered = Object.keys(value.files)
+        .sort()
+        .map((key) => [key, value.files[key]]);
+      if (value.revision !== hash(Buffer.from(JSON.stringify(ordered))))
+        refuse('common.conflict');
+      const meta = validatePrivateSkill(value.files['SKILL.md']);
+      if (meta.name !== value.name || meta.description !== value.description)
+        refuse('common.validation_failed');
+      return value;
+    },
     async list() {
       await initialize();
       const result = [];

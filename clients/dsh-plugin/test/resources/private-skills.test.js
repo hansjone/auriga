@@ -18,6 +18,23 @@ import {
 
 const source = (name = 'example', body = 'private body') =>
   `---\nname: ${name}\ndescription: "Private example"\nuser-invocable: true\n---\n${body}\n`;
+test('native YAML block scalars and metadata are supported without tags, aliases or duplicate keys', () => {
+  const text =
+    '---\nname: example\ndescription: >-\n  Native multi-line\n  description\nwhenToUse: |\n  Use this fixture.\nmetadata:\n  category: docs\n  nested: [one, two]\nuser-invocable: false\n---\nBody';
+  assert.equal(
+    validatePrivateSkill(text).description,
+    'Native multi-line description',
+  );
+  for (const input of [
+    text.replace('category: docs', 'category: &a docs\n  copy: *a'),
+    text.replace('category: docs', 'category: !!str docs'),
+    text.replace('category: docs', 'category: .nan'),
+    text.replace('user-invocable: false', 'user-invocable: "false"'),
+  ])
+    assert.throws(() => validatePrivateSkill(input), {
+      code: 'common.validation_failed',
+    });
+});
 async function fixture(t) {
   const home = await mkdtemp(join(tmpdir(), 'auriga-private-'));
   t.after(() => rm(home, { recursive: true, force: true }));
