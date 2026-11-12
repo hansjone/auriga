@@ -1,5 +1,4 @@
 import {
-  registerBaseTools,
   readDeviceLedger,
   baseStatus,
   connectionReason,
@@ -121,6 +120,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   /** @type {string|null} */
   let lastSuccessAt = null;
   let connectionFailure = 'unknown';
+  /** @type {boolean|null} */ let hqReachable = null;
   /** @type {Promise<void>|undefined} */
   let teamStarting;
   let teamFailures = 0,
@@ -366,6 +366,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       onState(state) {
         if (closed || generation !== g) return;
         online = state.connected;
+        hqReachable = state.connected;
         connectionFailure = state.reason ?? 'unknown';
         if (state.connected) lastSuccessAt = new Date().toISOString();
         communication = state.connected
@@ -458,6 +459,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     } catch (error) {
       if (!closed && generation === g) {
         connectionFailure = connectionReason(error);
+        hqReachable = false;
         online = false;
         communication = 'unavailable';
         restoreRetryAt = Date.now() + retryDelay(++restoreFailures);
@@ -573,9 +575,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     const saved = vault.snapshot().credential;
     return {
       origin: config.platformOrigin,
-      reachable: online,
+      reachable: hqReachable,
       lastSuccessAt,
       reason: connectionFailure,
+      loggedIn: !!saved,
       verified: !!saved && !broker.status.reauthenticationRequired,
       expiresAt: saved?.claims.exp * 1000 || null,
       memberId: saved?.claims.sub,
@@ -584,31 +587,30 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       remoteAvailable: !!team && online && !closed,
     };
   };
-  const disposeBase = ctx.tools?.register
-    ? registerBaseTools({
-        ctx,
-        getState: baseState,
-        readLocal: () =>
-          readDeviceLedger(
-            join(directory, 'network'),
-            vault.snapshot().credential,
-          ),
-        async probe(path, signal) {
-          const g = generation;
-          try {
-            const result = await platform.request(path, { signal });
-            active(g);
-            lastSuccessAt = new Date().toISOString();
-            return result;
-          } catch (error) {
-            if (!closed && g === generation)
-              connectionFailure = connectionReason(error);
-            throw error;
-          }
-        },
-      })
-    : () => {};
+  const baseTools = {
+    getState: baseState,
+    generation: () => generation,
+    readLocal: () =>
+      readDeviceLedger(join(directory, 'network'), vault.snapshot().credential),
+    async probe(/** @type {string} */ path, /** @type {AbortSignal} */ signal) {
+      const g = generation;
+      try {
+        const result = await platform.request(path, { signal });
+        active(g);
+        hqReachable = true;
+        lastSuccessAt = new Date().toISOString();
+        return result;
+      } catch (error) {
+        if (!closed && g === generation) {
+          hqReachable = false;
+          connectionFailure = connectionReason(error);
+        }
+        throw error;
+      }
+    },
+  };
   return {
+    baseTools,
     /** Only call from DSH's admitted owner RPC handler.
      * @param {any} peer */
     nativeRequest(peer) {
@@ -1036,7 +1038,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (disposed) return networkClosing;
       disposed = true;
       closed = true;
-      disposeBase();
       broker.invalidate('closed');
       models.close();
       clearInterval(expiryTimer);

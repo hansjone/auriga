@@ -1,8 +1,4 @@
-import {
-  registerBaseTools,
-  readDeviceLedger,
-  connectionReason,
-} from './base-tools.js';
+import { readDeviceLedger, connectionReason } from './base-tools.js';
 import { open, constants } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import {
@@ -60,32 +56,45 @@ export function createManagedNetwork(options) {
   /** @type {any} */ let diagnosticConfig;
   /** @type {any} */ let verifiedCredential;
   let localDirectory = '';
-  const disposeBase = options.ctx.tools?.register
-    ? registerBaseTools({
-        ctx: options.ctx,
-        getState: () => ({
-          origin: diagnosticConfig?.platformOrigin,
-          reachable,
-          lastSuccessAt,
-          reason: failureReason,
-          verified: !!access && raw !== rejected && !closed,
-          expiresAt: access
-            ? Math.min(access.claims.exp * 1000, materialUntil)
-            : materialUntil || null,
-          memberId: access?.claims.sub,
-          displayName,
-          network: lifecycle?.status,
-          remoteAvailable: false,
-        }),
-        readLocal: () => readDeviceLedger(localDirectory, verifiedCredential),
-        probe: (path, signal) => {
-          if (!diagnosticConfig) throw new Error('unconfigured');
-          return (options.createPlatform ?? createPlatform)(
-            diagnosticConfig,
-          ).request(path, { signal });
-        },
-      })
-    : () => {};
+  const baseTools = {
+    getState: () => ({
+      origin: diagnosticConfig?.platformOrigin,
+      reachable,
+      lastSuccessAt,
+      reason: diagnosticConfig ? failureReason : 'unconfigured',
+      loggedIn: !!access && raw !== rejected && !closed,
+      verified: !!access && raw !== rejected && !closed,
+      expiresAt: access
+        ? Math.min(access.claims.exp * 1000, materialUntil)
+        : materialUntil || null,
+      memberId: access?.claims.sub,
+      displayName,
+      network: lifecycle?.status,
+      remoteAvailable: false,
+    }),
+    generation: () => generation,
+    readLocal: () => readDeviceLedger(localDirectory, verifiedCredential),
+    async probe(/** @type {string} */ path, /** @type {AbortSignal} */ signal) {
+      if (!diagnosticConfig) throw new Error('unconfigured');
+      const g = generation;
+      try {
+        const result = await (options.createPlatform ?? createPlatform)(
+          diagnosticConfig,
+        ).request(path, { signal });
+        if (!closed && generation === g) {
+          reachable = true;
+          lastSuccessAt = new Date().toISOString();
+        }
+        return result;
+      } catch (error) {
+        if (!closed && generation === g) {
+          reachable = false;
+          failureReason = connectionReason(error);
+        }
+        throw error;
+      }
+    },
+  };
   /** @type {AbortController|undefined} */
   let controller;
   let retiring = Promise.resolve();
@@ -435,6 +444,7 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    baseTools,
     get resourceSession() {
       return !closed &&
         raw !== rejected &&
@@ -513,7 +523,6 @@ export function createManagedNetwork(options) {
     close() {
       if (closing) return closing;
       closed = true;
-      disposeBase();
       clearInterval(timer);
       // Retire immediately, even if an exchange/verification response is pending.
       closing = retire();

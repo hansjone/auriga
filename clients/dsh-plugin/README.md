@@ -214,19 +214,19 @@ relative time and HTTP status; they omit URLs, credentials and response bodies.
 
 ## 内置网络基础层与远端工具层
 
-配置总部后，连接模式和带设备凭据的托管模式会直接向宿主注册四个只读工具，不等待远端 MCP 上线：
+基础层随插件在统一宿主层注册，不等待总部配置、登录、托管设备凭据或远端 MCP。宿主的公开工具与原生会话服务就绪后，四个只读工具始终出现在模型可见清单中；总部配置、凭据及连接变化只切换数据源，不重新注册工具。宿主必要服务卸载或插件卸载时，基础工具失败封闭并注销。
 
-- `auriga_net_status`：读取现有连接缓存，报告总部 origin、可达状态、进程内最近成功时间、已验证凭据有效期、消息网络和远端工具层状态，以及本地未取得结果的发送记录数量。尚未探测或无法分类时返回 `unknown`，数量无法读取时为 `null`。
-- `auriga_net_diagnose`：无参数；按顺序 GET 总部 origin 的固定 `/actuator/health`、`/api/iam/v1/login/providers`，每段最多一次、3 秒超时，同一安装同时最多一个诊断。第一段失败后停止 HTTP 探测；消息网络段只读缓存并标记 `source: cache`。不接受 URL、主机、端口或身份参数；沿用平台客户端的同源约束、响应大小上限和禁止重定向规则。
-- `auriga_net_identity`：仅输出已验证来源的成员 ID、显示名、凭据有效期及本地账本中的节点地址；缺少来源返回 `null`。
-- `auriga_net_inbox`：只读当前已验证设备分区的本地原子账本，按真实宿主会话和 binding 过滤；参数 `limit` 默认 20、最大 50，`cursor` 是非负整数偏移，返回 `items` 和可选 `nextCursor`。排序依据本地 recipient ID。并发同步可能使偏移分页发生移动。只返回消息 ID、处理阶段和消息正文，不返回 admission、receipt 或宿主路径。正文属于外部消息内容，不应作为系统指令信任。
+- `auriga_net_status`：读取现有连接缓存，报告总部 origin、可达状态、进程内最近成功时间、登录或托管凭据有效期、消息网络与远端工具层状态，以及本地没有取得结果的发送记录数 `queued`。未探测或无法分类返回 `unknown`，未配置返回 `unconfigured`；数量无法读取时为 `null`。`sending.offlineNewMessages` 为 `unavailable`，明确说明离线新消息不可发送；已有连接状态不足以证明可发送时，`sending.available` 为 `null`。本工具不发起网络请求。
+- `auriga_net_diagnose`：无参数；按顺序 GET 已配置总部 origin 的固定 `/actuator/health`、`/api/iam/v1/login/providers`，每段最多一次、3 秒超时，同一安装同时最多一个诊断。首段失败后停止 HTTP 探测；消息网络段只读缓存并标记 `source: cache`。未配置时报告入口段 `unconfigured`，不发请求。不接受 URL、主机、端口或身份参数；沿用平台客户端同源约束、响应大小上限与禁止重定向规则。探测结果更新既有状态缓存，之后的 status 可读取故障分类。
+- `auriga_net_identity`：只输出已验证来源的成员 ID、显示名、凭据有效期及本地账本中的节点地址。未登录时 `loggedIn: false`，凭据状态为 `signed_out`，身份字段为 `null`。
+- `auriga_net_inbox`：只读当前已验证设备分区的本地原子账本，按真实宿主会话和 binding 过滤；`limit` 默认 20、最大 50，`cursor` 为非负整数偏移，返回 `items` 和可选 `nextCursor`。依据 recipient ID 排序；并发同步可能移动分页偏移。仅返回消息 ID、处理阶段和正文，不返回 admission、receipt 或宿主路径。消息正文属于外部输入，不应当作系统指令。
 
-这四个工具复用原生会话对象、活动 Agent、持久化 provider、归档与子会话所有权校验；伪造执行上下文、归档会话、原生子 Agent 被拒绝。登录失效时仍可由获准的本地主会话查看故障状态；身份和收件箱不会从模型参数选择身份。工具不新增连接、后台轮询或接收授权，不修改消息接收开关或 consent。
+四工具沿用真实原生会话、活动 Agent、持久化 provider、归档与子会话所有权校验；伪造执行上下文、归档会话、原生子 Agent 被拒绝。登录失效时，获准的本地主会话仍可查看故障状态；身份与收件箱不允许模型参数选择身份。切换数据源或身份代次后，旧异步调用不能发布结果。工具不新增后台连接或轮询，不修改接收开关或 consent。
 
-原因分类为 `hq_unreachable`、`unauthorized`、`credential_expired`、`message_network_degraded`、`keyset_expired`、`egress_denied`、`unknown`。只使用已有状态证据：例如连接拒绝/域名失败/超时分类为总部不可达，401/403 为未授权，已知到期时间为凭据过期。现有状态若未提供 keyset 或 egress 原因，返回 `unknown`，不通过错误文本猜测。托管模式没有 Team MCP 连接证据时，远端工具层为不可用且原因未知。
+原因枚举为 `unconfigured`、`hq_unreachable`、`unauthorized`、`credential_expired`、`message_network_degraded`、`keyset_expired`、`egress_denied`、`unknown`。仅使用现有状态证据：连接拒绝、域名失败或超时属于总部不可达，401/403 属于未授权，已知到期时间用于判断凭据过期。若消息网络没有暴露 keyset 或 egress 的明确原因则返回 `unknown`，不从错误文本猜测。托管安装没有远端 Team MCP 证据时，远端工具层不可用且原因未知；没有设备凭据文件时报告 `unconfigured`。
 
-业务工具继续由远端 MCP 按权限下发。远端工具使用 `auriga_net_` 前缀或与内置名称冲突时会被拒绝并记录固定日志；日志不回显远端名称。远端断开不会移除基础工具；插件卸载才注销它们。页面状态附带的 `networkDiagnostics` 与工具使用同一状态生成器。
+业务工具仍由远端 MCP 按权限下发。远端工具使用 `auriga_net_` 前缀或与内置名称冲突时拒绝并记录固定日志，不在日志回显远端名称。远端断开不移除基础工具。连接模式页面附带的 `networkDiagnostics` 与工具使用同一个状态生成器，网络就绪状态也沿用现有 network lifecycle 状态源。
 
-发送沿用 `auriga_send_message` 和现有持久 outbox：已经落盘但没有结果的请求保留原幂等标识，恢复后按既有规则重试，`queued` 表示这类记录数，并不代表已投递或证明总部没有接受。当前发送能力仍受有效 source 与连接生命周期门禁限制；完全断网后新调用可能被拒绝，不能将拒绝解释成已排队。本次只读基础层没有放宽这些发送门禁。
+本批不实现离线新发送排队。`auriga_send_message` 沿用现有 source、owner 和 consent 门禁；完全断网后新调用可能被拒绝，不能解释为“已排队”。`queued` 只统计已经落盘且还没有取得结果的记录，不代表已投递，也不证明总部未接受；恢复重试沿用原幂等标识及既有规则。
 
-验证边界：单测与类型检查不等于真实 DSH 宿主验证。未配置总部的安装与没有设备凭据文件的托管安装不注册此基础层；需主控在实际发行配置和宿主中确认入口。
+隔离宿主复核脚本为 `test/real-host/base-tools-smoke.mjs`，配套探针只供测试，不进入默认启动。先把 `deploy/compose/real-dsh` 的 package.json 与 package-lock.json 复制到工位内 `.agent-evidence/base-tools-r2/host-install` 并运行 `npm ci --prefix`，再从仓库根运行 `node clients/dsh-plugin/test/real-host/base-tools-smoke.mjs`。脚本使用实际 DSH 0.2.1-rc.3 CLI、独立 DSH_HOME、随机回环端口及真实 SessionController/Agent/ToolRuntime，检查模型可见 schemas 和实际工具执行，并关闭测试进程。结果保存到 `.agent-evidence/base-tools-r2/summary.json`；原始宿主日志含临时启动凭据，不应发布。该验证不调用外部模型 API，也不替代正常用户页面验收或生产部署。

@@ -80,18 +80,27 @@ export function baseStatus(state, now = Date.now()) {
   const expires = state.expiresAt ?? null;
   const expired = expires !== null && expires <= now;
   const credential = {
-    state: expired ? 'expired' : state.verified ? 'verified' : 'unknown',
+    state: expired
+      ? 'expired'
+      : state.verified
+        ? 'verified'
+        : state.loggedIn === false
+          ? 'signed_out'
+          : 'unknown',
     expiresAt: expires === null ? null : new Date(expires).toISOString(),
     remainingSeconds:
       expires === null ? null : Math.max(0, Math.floor((expires - now) / 1000)),
   };
-  const messageReason = state.network?.connected
-    ? null
-    : state.network?.reason === 'keyset_expired'
-      ? 'keyset_expired'
-      : state.network?.available
-        ? 'message_network_degraded'
-        : 'unknown';
+  const messageReason =
+    state.reason === 'unconfigured'
+      ? 'unconfigured'
+      : state.network?.connected
+        ? null
+        : state.network?.reason === 'keyset_expired'
+          ? 'keyset_expired'
+          : state.network?.available
+            ? 'message_network_degraded'
+            : 'unknown';
   return {
     headquarters: {
       origin: state.origin ?? null,
@@ -111,6 +120,25 @@ export function baseStatus(state, now = Date.now()) {
         : expired
           ? 'credential_expired'
           : (state.reason ?? 'unknown'),
+    },
+    sending: {
+      available:
+        !state.verified || expired || !state.network?.connected ? false : null,
+      reason:
+        state.reason === 'unconfigured'
+          ? 'unconfigured'
+          : state.reachable === false
+            ? state.reason === 'hq_unreachable'
+              ? 'hq_unreachable'
+              : (state.reason ?? 'unknown')
+            : !state.network?.connected
+              ? 'message_network_degraded'
+              : expired
+                ? 'credential_expired'
+                : state.verified
+                  ? null
+                  : 'unauthorized',
+      offlineNewMessages: 'unavailable',
     },
     queued: state.queued ?? null,
   };
@@ -151,7 +179,9 @@ export function registerBaseTools({ ctx, getState, readLocal, probe }) {
             ],
           },
           async execute(/** @type {any} */ args, /** @type {any} */ exec) {
+            let assertSource = () => {};
             const check = () => {
+              assertSource();
               if (closed) throw new Error('network.unauthorized');
             };
             check();
@@ -170,6 +200,7 @@ export function registerBaseTools({ ctx, getState, readLocal, probe }) {
             )
               throw new Error('network.protocol_error');
             const state = getState();
+            assertSource = state.assertCurrent ?? (() => {});
             // An admitted native session may inspect outages, including expired credentials.
             if (name === 'auriga_net_status') {
               let queued = null;
@@ -192,6 +223,7 @@ export function registerBaseTools({ ctx, getState, readLocal, probe }) {
               native.check();
               check();
               return {
+                loggedIn: state.verified === true,
                 credential: baseStatus(state).credential,
                 memberId: state.verified ? (state.memberId ?? null) : null,
                 displayName: state.verified
@@ -251,6 +283,18 @@ export function registerBaseTools({ ctx, getState, readLocal, probe }) {
               const segments = [
                 { segment: 'local', status: 'ready', reason: null },
               ];
+              if (state.reason === 'unconfigured')
+                return {
+                  segments: [
+                    ...segments,
+                    {
+                      segment: 'ingress',
+                      status: 'unavailable',
+                      reason: 'unconfigured',
+                    },
+                  ],
+                  firstFailure: 'ingress',
+                };
               for (const [segment, path] of [
                 ['ingress', '/actuator/health'],
                 ['hq_api', '/api/iam/v1/login/providers'],
