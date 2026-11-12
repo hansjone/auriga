@@ -7,6 +7,7 @@ require (
 	golang.org/x/net v0.60.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.11
+	gopkg.in/validator.v2 v2.0.1
 )
 
 require (

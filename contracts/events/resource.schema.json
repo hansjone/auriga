@@ -142,6 +142,132 @@
         "selections"
       ],
       "additionalProperties": false
+    },
+    "UnifiedResourceVersionPublished": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "skill",
+            "tool"
+          ]
+        },
+        "signatureVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "manifestDigest": {
+          "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+        },
+        "artifactDigests": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+          },
+          "description": "Exact unique lexicographically sorted artifact digest set from the manifest. Empty for online tools."
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "packageId",
+        "versionId",
+        "version",
+        "kind",
+        "signatureVersion",
+        "manifestDigest",
+        "artifactDigests",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedResourceVersionWithdrawn": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "skill",
+            "tool"
+          ]
+        },
+        "signatureVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "manifestDigest": {
+          "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+        },
+        "artifactDigests": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+          },
+          "description": "Exact unique lexicographically sorted artifact digest set from the manifest. Empty for online tools."
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "withdrawn",
+            "malicious"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "packageId",
+        "versionId",
+        "version",
+        "kind",
+        "signatureVersion",
+        "manifestDigest",
+        "artifactDigests",
+        "revision",
+        "mode",
+        "reason"
+      ],
+      "additionalProperties": false
     }
   }
 }

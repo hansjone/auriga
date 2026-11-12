@@ -45,8 +45,13 @@ test('embedded schema is reproducible, complete, and preserves backticks safely'
 
 test('ordinary Java projection is deterministic and leaves generated Go intact', () => {
   const go = new URL('../../../infra/gen/deployment/', import.meta.url);
-  const snapshot = () => readdirSync(go).sort().map(name => [name,
-    createHash('sha256').update(readFileSync(new URL(name, go))).digest('hex')]);
+  const snapshot = (directory = go, prefix = '') => readdirSync(directory, { withFileTypes: true })
+    .flatMap(entry => {
+      const name = prefix + entry.name;
+      const url = new URL(entry.name + (entry.isDirectory() ? '/' : ''), directory);
+      return entry.isDirectory() ? snapshot(url, name + '/') : [[name,
+        createHash('sha256').update(readFileSync(url)).digest('hex')]];
+    }).sort(([a], [b]) => a.localeCompare(b));
   const before = snapshot();
   const run = () => {
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('./gen-access.mjs', import.meta.url)), '--java-only']);

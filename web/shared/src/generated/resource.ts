@@ -496,6 +496,212 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/resource/v1/catalog/packages': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    get: operations['UnifiedListResourcePackages'];
+    put?: never;
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    post: operations['UnifiedCreateResourcePackage'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/packages/{packageId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    get: operations['UnifiedGetResourcePackage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/packages/{packageId}/versions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    get: operations['UnifiedListResourceVersions'];
+    put?: never;
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    post: operations['UnifiedUploadResourceVersion'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    get: operations['UnifiedGetResourceVersion'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/submissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    post: operations['UnifiedSubmitResourceVersion'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/review': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    get: operations['UnifiedListMarketAdminReview'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/published': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    get: operations['UnifiedListMarketAdminPublished'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/reviews/{reviewId}/decisions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    post: operations['UnifiedDecideResourceReview'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/publications': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    post: operations['UnifiedPublishResourceVersion'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/withdrawals': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    post: operations['UnifiedWithdrawResourceVersion'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/manifest': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description DRAFT, NOT IMPLEMENTED. Return the exact stored immutable auriga-resource.json UTF-8 bytes, without JSON parsing, reserialization, newline or BOM changes. Locator does not grant access: check tenant/package/version ACL on every read. Caller hashes bytes and compares version digest and verified envelope before parsing. Plugin IDs return 404. */
+    get: operations['UnifiedDownloadResourceManifest'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/reviews/{reviewId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    get: operations['UnifiedGetResourceReview'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -879,6 +1085,158 @@ export interface components {
       /** Format: uuid */
       nextAfterPackageId?: string;
     };
+    /** @description Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections. */
+    UnifiedManifest:
+      | components['schemas']['SkillManifest']
+      | components['schemas']['ToolManifest'];
+    UnifiedEnvelope: components['schemas']['Envelope'];
+    /** @description Shared L3 skill/tool only. Server derives tenant, owner and level. Private skill stays local. Plugin CRUD uses legacy APIs; catalog rejects plugin kind/IDs. */
+    UnifiedPackageInput: {
+      name: string;
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      /** @enum {string} */
+      visibility: 'tenant' | 'members' | 'groups';
+      groupIds?: string[];
+    };
+    /** @description Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection. */
+    UnifiedPackage: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      tenantId: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      /** Format: uuid */
+      ownerId: string;
+      /** @enum {string} */
+      level: 'l3';
+      /** @enum {string} */
+      visibility: 'tenant' | 'members' | 'groups';
+      groupIds: string[];
+      /** Format: int64 */
+      revision: number;
+      /** Format: date-time */
+      createdAt: string;
+      enabled: boolean;
+      /** Format: uuid */
+      defaultVersionId: string | null;
+    };
+    /** @description Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable. */
+    UnifiedVersion: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      packageId: string;
+      version: string;
+      /** @description SHA-256 of exact immutable auriga-resource.json UTF-8 bytes. Artifact digests are in the manifest. Legacy Version.digest still addresses plugin archive bytes. */
+      digest: components['schemas']['Digest'];
+      /** @enum {string} */
+      state:
+        | 'draft'
+        | 'pending_review'
+        | 'approved'
+        | 'rejected'
+        | 'published'
+        | 'deprecated'
+        | 'withdrawn';
+      /** Format: int64 */
+      revision: number;
+      /** Format: int64 */
+      releaseSequence?: number;
+      resourceEnvelope?: components['schemas']['Envelope'];
+      /** Format: date-time */
+      createdAt: string;
+      /** @description Display only; not signed JSON bytes. Never reserialize this field for verification or installation. Download exact bytes using manifestDownloadPath, hash them against digest and the verified envelope before parsing. */
+      manifest: components['schemas']['UnifiedManifest'];
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      readonly risk: components['schemas']['UnifiedRiskAssessment'];
+      /** @description Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL. */
+      manifestDownloadPath: string;
+    };
+    /** @description Draft multipart upload. expectedDigest is exact manifest bytes SHA-256. Include manifest as a binary part, plus one binary artifacts part per manifest artifact in array order. Online tools use no artifacts. Validate all hashes before committing the immutable version. */
+    UnifiedUploadMetadata: {
+      version: components['schemas']['$defs-Version'];
+      expectedDigest: components['schemas']['Digest'];
+      changeNotes?: string;
+    };
+    UnifiedPackagePage: {
+      items: components['schemas']['UnifiedPackage'][];
+      nextCursor?: string;
+    };
+    UnifiedVersionPage: {
+      items: components['schemas']['UnifiedVersion'][];
+      nextCursor?: string;
+    };
+    /** @description Read-only server assessment, recalculated on content/permission changes. Publication transaction checks the current assessment and review identities. */
+    UnifiedRiskAssessment: {
+      /**
+       * @description Server-derived floor: command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content.
+       * @enum {string}
+       */
+      minimumLevel: 'r1' | 'r2' | 'r3';
+      /**
+       * @description Effective server risk. Authorized reviewers may raise it only; changes increment revision and invalidate earlier reviews.
+       * @enum {string}
+       */
+      level: 'r1' | 'r2' | 'r3';
+      /** @description Distinct non-author reviewers; one for r1, two for r2/r3. Repeated identities count once. */
+      requiredReviewers: number;
+      /** @description Zero for r1; at least one qualified security reviewer for r2/r3. Server verifies qualification independently of input role. */
+      requiredSecurityReviewers: number;
+    } & (unknown & unknown & unknown);
+    /** @description Decision binds exact versionRevision and raw manifest digest. Author cannot review/publish. Required role is server-authorized; publication counts distinct qualified non-author identities. */
+    UnifiedReviewDecision: {
+      /** @enum {string} */
+      decision: 'approve' | 'reject';
+      reason: string;
+      /** Format: int64 */
+      versionRevision: number;
+      digest: components['schemas']['Digest'];
+      /**
+       * @description Claimed review duty; server must verify the authenticated reviewer qualification. Identity is never supplied by this body.
+       * @enum {string}
+       */
+      role: 'general' | 'security';
+      /**
+       * @description Optional raise-only risk proposal. Server rejects lower than current/floor; an accepted change invalidates prior decisions and requires review of the new revision.
+       * @enum {string}
+       */
+      riskLevel?: 'r1' | 'r2' | 'r3';
+    };
+    UnifiedReviewRecord: {
+      /** Format: uuid */
+      reviewerId: string;
+      /** @enum {string} */
+      role: 'general' | 'security';
+      /** @enum {string} */
+      decision: 'approve' | 'reject';
+      reason: string;
+      /** Format: int64 */
+      versionRevision: number;
+      digest: components['schemas']['Digest'];
+      /** Format: date-time */
+      createdAt: string;
+    };
+    /** @description Review identity and immutable decision history for the exact version revision. Version contains kind and server risk/quorum. Failed author/qualification/quorum checks cannot approve/publish. */
+    UnifiedReview: {
+      /** Format: uuid */
+      reviewId: string;
+      /** Format: uuid */
+      authorId: string;
+      version: components['schemas']['UnifiedVersion'];
+      /** Format: int64 */
+      revision: number;
+      /** @enum {string} */
+      status: 'pending' | 'approved' | 'rejected';
+      decisions: components['schemas']['UnifiedReviewRecord'][];
+    };
+    UnifiedReviewPage: {
+      items: components['schemas']['UnifiedReview'][];
+      nextCursor?: string;
+    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;
@@ -941,6 +1299,209 @@ export interface components {
       versionId: components['schemas']['Uuid'];
       digest: components['schemas']['Digest'];
     };
+    Name: string;
+    '$defs-Version': string;
+    '$defs-Statement': {
+      /** @constant */
+      purpose: 'resource';
+      /** @enum {string} */
+      kind: 'plugin' | 'skill' | 'tool';
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      manifestDigest: components['schemas']['Digest'];
+      artifactDigests: components['schemas']['Digest'][];
+      issuedAt: components['schemas']['Time'];
+    };
+    Envelope: {
+      /** @constant */
+      schemaVersion: 2;
+      tenantId: components['schemas']['Uuid'];
+      packageId: components['schemas']['Uuid'];
+      versionId: components['schemas']['Uuid'];
+      releaseSequence: components['schemas']['Counter'];
+      notAfter: components['schemas']['Time'];
+      statement: components['schemas']['$defs-Statement'];
+      signature: components['schemas']['Signature'];
+    };
+    Permissions: {
+      tools: string[];
+      outboundHosts: string[];
+      dataAccess: (
+        'workspace_read' | 'workspace_write' | 'user_selected_files'
+      )[];
+    };
+    Runtime: {
+      /** @enum {string} */
+      kind: 'node' | 'python' | 'java';
+      versionRange: string;
+    };
+    SkillArtifact: {
+      id: components['schemas']['Name'];
+      /** @constant */
+      role: 'payload';
+      digest: components['schemas']['Digest'];
+      sizeBytes: number;
+      /** @constant */
+      mediaType: 'application/gzip';
+      /** @constant */
+      os: 'any';
+      /** @constant */
+      arch: 'any';
+    };
+    Skill: {
+      /** @constant */
+      entry: 'SKILL.md';
+      /** @constant */
+      contentProfile: 'text-only';
+      dshVersionRange: string;
+    };
+    SkillManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['SkillArtifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'skill';
+      skill: components['schemas']['Skill'];
+    };
+    Artifact: {
+      id: components['schemas']['Name'];
+      /** @enum {string} */
+      role: 'payload' | 'source_snapshot' | 'lockfile';
+      digest: components['schemas']['Digest'];
+      sizeBytes: number;
+      /** @enum {string} */
+      mediaType:
+        | 'application/gzip'
+        | 'application/octet-stream'
+        | 'application/json'
+        | 'text/plain';
+      /** @enum {string} */
+      os: 'linux' | 'windows' | 'any';
+      /** @enum {string} */
+      arch: 'amd64' | 'arm64' | 'any';
+    };
+    OnlineTool: {
+      /** @constant */
+      delivery: 'online';
+      /** @enum {string} */
+      protocol: 'web' | 'mcp';
+      /** Format: uri */
+      url: string;
+      /** @enum {string} */
+      authentication: 'none' | 'member_oauth' | 'platform_proxy';
+    };
+    OnlineManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['OnlineTool'];
+    };
+    RelativePath: string;
+    EntryPoint: {
+      artifactId: components['schemas']['Name'];
+      path: components['schemas']['RelativePath'];
+      args: string[];
+    };
+    OfflineTool: {
+      /** @constant */
+      delivery: 'offline';
+      entrypoints: components['schemas']['EntryPoint'][];
+    };
+    OfflineManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['OfflineTool'];
+    };
+    GitTool: {
+      /** @constant */
+      delivery: 'git';
+      /** Format: uri */
+      repository: string;
+      commit: string;
+      sourceArtifactId: components['schemas']['Name'];
+      lockArtifactIds: components['schemas']['Name'][];
+      /** @enum {string} */
+      packageManager: 'npm' | 'pnpm' | 'pip' | 'maven' | 'gradle';
+      installScripts: boolean;
+      entrypoint: components['schemas']['EntryPoint'];
+    };
+    GitManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['GitTool'];
+    };
+    ToolManifest:
+      | components['schemas']['OnlineManifest']
+      | components['schemas']['OfflineManifest']
+      | components['schemas']['GitManifest'];
   };
   responses: never;
   parameters: {
@@ -4825,6 +5386,1677 @@ export interface operations {
       };
       /** @description Request rejected. */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedListResourcePackages: {
+    parameters: {
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+        kind?: 'skill' | 'tool';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedPackagePage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedCreateResourcePackage: {
+    parameters: {
+      query?: never;
+      header?: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedPackageInput'];
+      };
+    };
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      201: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedPackage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedGetResourcePackage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        packageId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedPackage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedListResourceVersions: {
+    parameters: {
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        packageId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedVersionPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedUploadResourceVersion: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description Exact current strong ETag; absent or stale values return 412. */
+        'If-Match': string;
+      };
+      path: {
+        packageId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'multipart/form-data': {
+          metadata: components['schemas']['UnifiedUploadMetadata'];
+          /** Format: binary */
+          manifest: string;
+          artifacts: string[];
+        };
+      };
+    };
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      201: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedVersion'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.level_locked, resource.download_denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.version_immutable, resource.review_required, resource.state_conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.digest_mismatch, resource.signature_invalid */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.storage_unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedGetResourceVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        packageId: string;
+        versionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedVersion'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedSubmitResourceVersion: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description 当前资源ETag；缺失/不匹配返回common.precondition_failed。 */
+        'If-Match': string;
+      };
+      path: {
+        packageId: string;
+        versionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Reason'];
+      };
+    };
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      201: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedReview'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.state_conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedListMarketAdminReview: {
+    parameters: {
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+        kind?: 'skill' | 'tool';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedReviewPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedListMarketAdminPublished: {
+    parameters: {
+      query?: {
+        limit?: components['parameters']['Limit'];
+        /** @description 上一页响应里的 nextCursor。 */
+        cursor?: components['parameters']['Cursor'];
+        kind?: 'skill' | 'tool';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedVersionPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedDecideResourceReview: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description 当前资源ETag；缺失/不匹配返回common.precondition_failed。 */
+        'If-Match': string;
+      };
+      path: {
+        reviewId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedReviewDecision'];
+      };
+    };
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedReview'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.state_conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedPublishResourceVersion: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description 当前资源ETag；缺失/不匹配返回common.precondition_failed。 */
+        'If-Match': string;
+      };
+      path: {
+        packageId: string;
+        versionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Reason'];
+      };
+    };
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      201: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedVersion'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.level_locked, resource.download_denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.version_immutable, resource.review_required, resource.state_conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.digest_mismatch, resource.signature_invalid */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.storage_unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedWithdrawResourceVersion: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description 当前资源ETag；缺失/不匹配返回common.precondition_failed。 */
+        'If-Match': string;
+      };
+      path: {
+        packageId: string;
+        versionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Withdrawal'];
+      };
+    };
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedVersion'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.level_locked, resource.download_denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.version_immutable, resource.review_required, resource.state_conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.digest_mismatch, resource.signature_invalid */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.storage_unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedDownloadResourceManifest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        packageId: string;
+        versionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Exact manifest bytes; X-Auriga-Manifest-Digest equals the raw SHA-256 version digest, but is not itself a signature. */
+      200: {
+        headers: {
+          'X-Auriga-Manifest-Digest'?: components['schemas']['Digest'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedGetResourceReview: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        reviewId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedReview'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
         headers: {
           [name: string]: unknown;
         };

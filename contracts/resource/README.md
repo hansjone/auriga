@@ -5,7 +5,8 @@
 
 ## 资源流程、权限与对象存储
 
-首批只有 `kind=plugin/purpose=plugin`；skill、environment_template 无正式安装规格，不能冒充 plugin。
+本节描述既有v1及原插件路径，只有 `kind=plugin/purpose=plugin`；Skill不能冒充plugin。
+新增通用catalog草案见末节，P1的插件管理视图继续使用原接口，Skill/tool另走通用路径。
 共享资源流程 `draft -> pending_review -> approved -> published -> deprecated/withdrawn`，
 `rejected -> draft`。审核绑定 digest+versionRevision；变更草稿清空审核。
 发布内容 `(tenant,package,version)` 不可覆盖；归档核验成功、审核与签名完成才能发布。
@@ -91,3 +92,53 @@ resource事务记录意图和resource.distribution_requested；workspace复核�
 公网edge不路由 `/internal/resource/**`，浏览器下载另走已授权成员路径，禁止无鉴权blobs/digest入口。
 首批不支持Range，带Range返回400 common.validation_failed；断线重新下载整包并重新鉴权。
 过期授权由workspace重新解析同锁定选择续发，不能延长客户端提供的旧expiry。
+
+## 统一资源包契约草案
+
+统一主文档为 `docs/design/resource-package.zh.md`，skill专项为
+`docs/design/skill-market.zh.md`。本轮将第1轮Skill草案改成通用catalog命名空间，
+新增 `/api/resource/v1/catalog/**`、`/api/resource/v1/admin/catalog/**`，
+本轮补审核详情和原始清单下载后共14个操作，kind筛选只支持skill/tool，均标记 `x-auriga-contract-stage=draft`。
+plugin不在通用接口展示或写入，旧L0–L4/private使用原接口；内部只读关联投影不冒充UnifiedPackage。
+
+`package.schema.json` 定义auriga-resource.json公共字段与kind专属段，tool覆盖
+online/offline/git。清单位于制品外，制品按原字节SHA-256寻址，版本digest为清单原字节摘要。
+清单signature字段声明detached/Ed25519协议，实际签名为独立Envelope v2，签名完整覆盖
+租户、资源、版本、安全序号、清单及制品摘要和有效期。旧ResourceEnvelope v1与
+旧Version.digest插件归档语义继续由原契约表达。迁移通过来源关联与协议选择接入，
+保留撤销和高水位，原主干接口及schemas逐项保留。
+
+插件后续真正双签迁移时，同一版本的旧归档摘要A与新清单摘要M要经原始字节、两种签名和清单payload
+建立不可变关联；恶意撤销同事务写A/M两项。v2按packageId/versionId禁用整版本，并逐项核对清单及
+全部制品摘要与可信租户撤销表。高水位按tenant/package共用seq/versionId和已验证A/M别名，拒绝
+跨协议回滚、假关联或同序号换M。首个v2签发t0后不再用v1发新版本，旧v1续签固定截止t0+24h，
+回滚不能重置截止。具体规则与P1-K密码学向量/负例见主文档第2节，不改现有v1撤销格式。
+
+统一清单严格区分plugin、text-only skill与三种工具，运行时支持Node/Python/Java声明。
+Git锁完整commit并引用源码快照/锁文件制品，installScripts=false；在线工具无本地制品。
+installScripts仍为必填且仅允许布尔false。Schema以boolean加not true表达，避开Java生成器
+对布尔const/单值enum生成错误字符串字面量的问题；生成模型不能替代服务端Schema校验。
+共享草案先用L3，私有/开发者侧载只在当前DSH使用，冻结快照后显式送审。
+跨制品引用、归档路径、平台/入口关系、runtime兼容性与时间窗口需服务端语义校验。
+
+UnifiedRiskAssessment为服务端只读风险下限/有效等级及审核人数，命令型或有工具/外连/数据权限的
+Skill至少R2，Git工具R3，审核只能上调。R1一名非作者，R2/R3两名不同非作者且含有资格的安全审核。
+UnifiedReviewPage/UnifiedReview提供reviewId、作者、版本风险和决定历史；UnifiedReviewDecision
+必填general/security职责，身份与资格在服务端核对。审核和发布事务均复核人数，不采信客户端自报。
+
+UnifiedVersion.manifest仅展示，安装端从manifestDownloadPath逐次鉴权下载原始清单字节，核对digest
+及已验签Envelope后解析，禁止重序列化展示对象代替原字节。通用发布/下架使用新增
+resource.catalog_version_published/catalog_version_withdrawn，带kind、signatureVersion、manifestDigest
+和artifactDigests；旧resource.version_*的digest仍只指插件归档。通用分发将另增事件，不重载旧类型。
+
+共享Skill固定挂载 `<DSH_HOME>/auriga/skills-active/current/`。K冻结路径，云端D唯一写配置与共享文件，
+Desktop E写配置、C切换内容，保留上游预置目录。超期离线先停DSH并隔离失效受管内容，确认清理后
+允许私有Skill新会话；无法隔离则拒绝启动。历史只供查看，共享恢复必须联网重新授权与验签。
+
+后续契约线补充密码学向量、proto/workspace引用、票据/制品下载、分发、安装回报、
+重签、runtime目录与构建来源证明。审核详情/职责/人数、原始清单下载和新发布/下架事件已在本轮补入。
+当前草案不代表这些服务已实现。
+用户2026-11-12确认D1-D11按推荐执行。D4/D5要求Skill恶意撤销或租约到期时停止受影响DSH，
+恢复使用新会话，共享Skill首期仅在具备可信guardian的云端与Desktop开放。
+D8确定Node复用Desktop自带版本，Python采用python-build-standalone、Java采用Eclipse Temurin
+21 LTS，经平台审核签名后按需下载。机器契约沿本轮已有定义，P1契约补齐与各实现线边界见主文档。
