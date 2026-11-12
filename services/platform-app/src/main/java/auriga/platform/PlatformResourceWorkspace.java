@@ -11,6 +11,61 @@ import java.util.*;
 
 /** Resource wiring uses workspace's tenant transaction and spec writer, never resource-side SQL. */
 public final class PlatformResourceWorkspace implements ResourceWorkspace {
+  /** Kept separate because the legacy and unified ports have different Snapshot return types. */
+  public static final class Unified implements auriga.resource.api.UnifiedResourceWorkspace {
+    private final WorkspaceUnifiedResources resources;
+
+    public Unified(WorkspaceUnifiedResources resources) {
+      this.resources = resources;
+    }
+
+    private Snapshot view(WorkspaceUnifiedResources.View view) {
+      return new Snapshot(
+          view.instance(),
+          view.owner(),
+          view.node(),
+          view.spec().getResourceSelectionRevision(),
+          view.spec().getGeneration(),
+          view.observedGeneration(),
+          view.ready(),
+          view.reports());
+    }
+
+    @Override
+    public Snapshot snapshot(UUID tenant, UUID instance) {
+      return view(resources.snapshot(tenant, instance));
+    }
+
+    @Override
+    public Snapshot apply(
+        UUID tenant,
+        UUID instance,
+        UUID owner,
+        long revision,
+        boolean administrator,
+        List<auriga.contracts.resource.v1.UnifiedSelection> selections,
+        ResourceRevocationList revocations) {
+      var applied = resources.apply(tenant, instance, owner, revision, selections);
+      resources.revoke(tenant, instance, revocations);
+      return view(resources.snapshot(tenant, applied.instance()));
+    }
+
+    @Override
+    public Snapshot refresh(
+        UUID tenant,
+        UUID instance,
+        UUID owner,
+        long revision,
+        auriga.contracts.resource.v1.ResolveUnifiedResourcesResponse resolution) {
+      return view(resources.refresh(tenant, instance, owner, revision, resolution));
+    }
+
+    @Override
+    public void revoke(UUID tenant, UUID instance, ResourceRevocationList revocations) {
+      resources.revoke(tenant, instance, revocations);
+    }
+  }
+
   private final WorkspaceService service;
   private final WorkspaceInputs inputs;
   private final NodeEnrollment enrollment;
