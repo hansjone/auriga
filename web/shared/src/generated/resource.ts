@@ -5040,6 +5040,7 @@ export interface operations {
       query?: never;
       header: {
         'X-Desktop-Manifest': string;
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
       };
       path?: never;
       cookie?: never;

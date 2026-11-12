@@ -5403,11 +5403,9 @@
           "Resource"
         ],
         "x-error-codes": [
-          "common.unauthenticated",
-          "common.forbidden",
           "common.validation_failed",
           "common.not_found",
-          "common.conflict",
+          "common.rate_limited",
           "common.unavailable"
         ],
         "responses": {
@@ -5423,7 +5421,10 @@
           }
         },
         "security": [],
-        "description": "Public signed manifest for the latest listed release. It remains visible after notAfter so new users can download; automatic updaters must reject expired manifests until renewed."
+        "description": "Public signed manifest for the latest listed release. It remains visible after notAfter so new users can download; automatic updaters must reject expired manifests until renewed.",
+        "x-events": [],
+        "x-permission": "resource.packages.read",
+        "x-authorization": "anonymous"
       }
     },
     "/api/resource/v1/desktop/packages/{sequence}": {
@@ -5433,11 +5434,9 @@
           "Resource"
         ],
         "x-error-codes": [
-          "common.unauthenticated",
-          "common.forbidden",
           "common.validation_failed",
           "common.not_found",
-          "common.conflict",
+          "common.rate_limited",
           "common.unavailable"
         ],
         "responses": {
@@ -5511,7 +5510,10 @@
           }
         ],
         "security": [],
-        "description": "Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge."
+        "description": "Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge.",
+        "x-events": [],
+        "x-permission": "resource.packages.read",
+        "x-authorization": "anonymous"
       }
     },
     "/api/resource/v1/admin/desktop/releases": {
@@ -5527,7 +5529,8 @@
           "common.validation_failed",
           "common.not_found",
           "common.conflict",
-          "common.unavailable"
+          "common.unavailable",
+          "iam.step_up_required"
         ],
         "responses": {
           "200": {
@@ -5540,7 +5543,10 @@
               }
             }
           }
-        }
+        },
+        "x-events": [],
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
       },
       "post": {
         "operationId": "publishDesktopRelease",
@@ -5554,7 +5560,8 @@
           "common.validation_failed",
           "common.not_found",
           "common.conflict",
-          "common.unavailable"
+          "common.unavailable",
+          "iam.step_up_required"
         ],
         "responses": {
           "201": {
@@ -5578,6 +5585,9 @@
               "type": "string",
               "maxLength": 43700
             }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
           }
         ],
         "requestBody": {
@@ -5590,7 +5600,10 @@
               }
             }
           }
-        }
+        },
+        "x-events": [],
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
       }
     },
     "/api/resource/v1/admin/desktop/releases/{sequence}": {
@@ -5606,7 +5619,8 @@
           "common.validation_failed",
           "common.not_found",
           "common.conflict",
-          "common.unavailable"
+          "common.unavailable",
+          "iam.step_up_required"
         ],
         "responses": {
           "204": {
@@ -5624,7 +5638,10 @@
             }
           }
         ],
-        "description": "Recent step-up required. Withdrawal is permanent; sequence high-water retained."
+        "description": "Recent step-up required. Withdrawal is permanent; sequence high-water retained.",
+        "x-events": [],
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
       }
     }
   },
