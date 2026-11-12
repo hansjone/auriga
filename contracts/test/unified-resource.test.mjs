@@ -458,3 +458,11 @@ test('applied observations require current immutable identity and all three revi
     !valid({ ...good, identity: { ...identity, versionId: 'other' } }, 'node'),
   );
 });
+
+test('migration fixture artifact length matches original archive bytes', () => {
+  const manifest = JSON.parse(vectors.rawManifest);
+  assert.equal(
+    manifest.artifacts[0].sizeBytes,
+    Buffer.from(vectors.legacyArchiveBase64, 'base64').length,
+  );
+});
