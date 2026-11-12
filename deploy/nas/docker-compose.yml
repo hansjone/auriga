@@ -123,6 +123,27 @@ services:
     cpus: 0.25
     pids_limit: 32
 
+  audit-db-prepare:
+    image: ${AURIGA_IMAGE_POSTGRES}
+    pull_policy: never
+    <<: *cap_drop_all
+    user: '999:999'
+    read_only: true
+    restart: 'no'
+    entrypoint: ['/bin/sh', '-ec']
+    command: ['exec psql -X -q -h postgres -U auriga_bootstrap -d auriga -v ON_ERROR_STOP=1 -f /config/audit.sql']
+    env_file:
+      - path: ${AURIGA_DATA_ROOT}/config/audit-db.env
+        required: true
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/postgres/audit.sql:/config/audit.sql:ro
+    networks: [internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 64m
+    pids_limit: 32
+
   postgres:
     image: ${AURIGA_IMAGE_POSTGRES}
     pull_policy: never
@@ -160,6 +181,9 @@ services:
     <<: *cap_drop_all
     user: '10003:10003'
     group_add: ['10005', '10006', '999']
+    env_file:
+      - path: ${AURIGA_DATA_ROOT}/config/bifrost-audit.env
+        required: true
     read_only: true
     tmpfs: ['/tmp:rw,noexec,nosuid,size=64m']
     secrets:
@@ -173,6 +197,8 @@ services:
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
     depends_on:
+      nats:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     networks: [internal, publish]
@@ -264,6 +290,8 @@ services:
     user: '10001:10001'
     group_add: ['65532', '65533']
     depends_on:
+      audit-db-prepare:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:

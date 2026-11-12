@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -15,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/audit"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/budget"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relaylimits"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	ai "github.com/hansjone/auriga/infra/gen/auriga/ai/v1"
@@ -98,6 +101,8 @@ func bearer(r *http.Request) string {
 	return strings.TrimPrefix(auth, "Bearer ")
 }
 func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r, finishTrace := observability.Begin(w, r)
+	defer finishTrace()
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.URL.RawPath != "" || r.URL.EscapedPath() != r.URL.Path || r.Header.Get("Cookie") != "" || r.Header.Get("Origin") != "" {
@@ -118,7 +123,7 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reject(w, e)
 			return
 		}
-		out, e := b.EnsureMember(r.Context(), m)
+		out, e := b.EnsureMember(audit.WithMetadata(r.Context(), m.AccountId, relayPeerIP(r), observability.Parent(r.Context())), m)
 		if e != nil {
 			reject(w, e)
 			return
@@ -206,6 +211,11 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reject(w, denied)
 		return
 	}
+	sourceIP := r.Header.Get("X-Auriga-Audit-IP")
+	if net.ParseIP(sourceIP) == nil {
+		sourceIP = relayPeerIP(r)
+	}
+	r = r.WithContext(audit.WithMetadata(r.Context(), r.Header.Get("X-Auriga-Audit-Actor"), sourceIP, observability.Parent(r.Context())))
 	if r.Method == http.MethodPost {
 		b.idempotentManagement(w, r, tenants[0])
 		return
@@ -590,4 +600,12 @@ func providerReject(w http.ResponseWriter, err error) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"type": "provider_error", "code": code, "message": code}})
+}
+
+func relayPeerIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return ""
+	}
+	return host
 }

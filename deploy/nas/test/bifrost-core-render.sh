@@ -15,7 +15,7 @@ printf 'sealed-identity\n' >"$temp/data/config/collab-source/activation.receipt"
 printf 'sealed-upgrade\n' >"$temp/data/config/materials-upgrades/upgrade.receipt"
 printf 'fixture-ca\n' >"$temp/data/config/materials/ca-sha256.txt"
 for leaf in pg_bootstrap_password pg_iam_password pg_org_password pg_ws_owner_password pg_ws_app_password nats_sys_password nats_platform_password nats_routes_rw_password nats_edge_password iam_encryption_key workspace_encryption_key; do printf fixture >"$temp/data/secrets/$leaf"; done
-: >"$temp/postgres/init.sql.tmpl"; : >"$temp/nats/nats.conf.tmpl"
+: >"$temp/postgres/init.sql.tmpl"; cp "$root/postgres/audit.sql.tmpl" "$temp/postgres/audit.sql.tmpl"; : >"$temp/nats/nats.conf.tmpl"
 cat >"$temp/scripts/lib.sh" <<'EOF'
 set -eu
 NAS_ROOT=$BIFROST_RENDER_FIXTURE
@@ -38,7 +38,7 @@ require_root_or_capable_chown() { :; }
 bootstrap_nas_materials() { [ ! -e "$NAS_ROOT/bad-core" ]; }
 load_nas_access_env() { :; }
 install_edge_material() { :; }
-chown_required() { :; }
+chown_required() { printf '%s %s\n' "$1" "$2" >>"$NAS_ROOT/chown.log"; }
 info() { :; }
 die() { echo "$*" >&2; exit 1; }
 stat() {
@@ -59,6 +59,7 @@ materials_upgrade() {
  cat "$source" >"$AURIGA_DATA_ROOT/config/bifrost/edge.config.json"
 }
 bootstrap_binary() { echo "$NAS_ROOT/bootstrap"; }
+rand_alnum() { printf 0123456789abcdef0123456789abcdef; }
 EOF
 cat >"$temp/bootstrap" <<'EOF'
 #!/bin/sh
@@ -80,6 +81,24 @@ mkdir -p "$2/edge"
 cp "$1/edge.config.json" "$2/edge/edge.config.json"
 EOF
 sh "$temp/scripts/render.sh" --core-only
+# Upgrade rendering creates isolated credentials and preserves them on rerender.
+for name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
+ [ "$(/usr/bin/stat -c '%a' "$temp/data/secrets/$name")" = 600 ]
+ cp "$temp/data/secrets/$name" "$temp/$name.original"
+done
+grep -q '^AURIGA_AUDIT_NATS_URL=nats://bifrost_audit:' "$temp/data/config/bifrost-audit.env"
+grep -q '^AURIGA_AUDIT_ENABLED=true$' "$temp/data/config/platform.env"
+grep -q '^AURIGA_AUDIT_DB_USER=auriga_audit_app$' "$temp/data/config/platform.env"
+grep -q '^PGPASSWORD=fixture$' "$temp/data/config/audit-db.env"
+[ "$(/usr/bin/stat -c '%a' "$temp/data/config/audit-db.env")" = 600 ]
+grep -q "^999:999 $temp/data/config/postgres/audit.sql$" "$temp/chown.log"
+grep -q "^999:999 $temp/data/config/audit-db.env$" "$temp/chown.log"
+grep -q '__PG_AUDIT_' "$temp/data/config/postgres/audit.sql" && exit 1
+sh "$temp/scripts/render.sh" --core-only
+for name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
+ cmp "$temp/data/secrets/$name" "$temp/$name.original"
+done
+printf 'PASS audit_upgrade_credentials_are_created_and_preserved\n'
 cmp "$temp/data/config/materials/edge.config.json" "$temp/data/config/bifrost/edge.config.json"
 [ ! -e "$temp/data/config/collab-runtime/edge/edge.config.json" ]
 printf 'PASS bifrost_core_render_without_message_projection\n'

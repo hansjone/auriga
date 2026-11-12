@@ -340,8 +340,7 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
         session.put("revoked", true);
         store.save("session", session);
       }
-      device.put("revoked", true);
-      store.save("device", device);
+      sessions.revokeDevice(device);
     }
   }
 

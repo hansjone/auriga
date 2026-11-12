@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/audit"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
@@ -151,6 +153,19 @@ func Serve(ctx context.Context, path string) error {
 	recoveryDone := make(chan struct{})
 	go func() { defer close(recoveryDone); backend.recoveryLoop(recoveryCtx) }()
 	defer func() { stopRecovery(); <-recoveryDone }()
+	if auditURL := os.Getenv("AURIGA_AUDIT_NATS_URL"); auditURL != "" {
+		auditDone := make(chan struct{})
+		go func() {
+			defer close(auditDone)
+			if err := audit.Run(recoveryCtx, db, backend.tenant, auditURL); err != nil {
+				slog.Error("Audit delivery unavailable; durable records retained")
+			}
+		}()
+		defer func() { stopRecovery(); <-auditDone }()
+	} else {
+		slog.Warn("Audit delivery paused: AURIGA_AUDIT_NATS_URL is required to forward durable records")
+	}
+
 	listener, e := net.Listen("tcp", c.Listen)
 	if e != nil {
 		return errors.New("relay listener unavailable")

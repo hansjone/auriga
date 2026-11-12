@@ -147,6 +147,7 @@ public final class TeamPasskeys {
               "added",
               "actorId",
               accountId.toString()));
+      IamAudit.mfa(events, accountId.toString(), "passkey", "add");
       return view(row);
     } catch (RegistrationFailedException | java.io.IOException e) {
       throw IamError.error("invalid_credentials", 400);
@@ -297,6 +298,7 @@ public final class TeamPasskeys {
             "removed",
             "actorId",
             accountId.toString()));
+    IamAudit.mfa(events, accountId.toString(), "passkey", "remove");
   }
 
   private ObjectNode requireOwned(UUID accountId, String passkeyId) {

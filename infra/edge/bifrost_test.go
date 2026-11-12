@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,11 +17,16 @@ import (
 func TestBifrostAdminAuthority(t *testing.T) {
 	var calls atomic.Int32
 	var lastCondition atomic.Value
+	var expectedActor atomic.Value
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		u, p, ok := r.BasicAuth()
 		if !ok || u != "auriga" || p != strings.Repeat("s", 64) || (r.URL.Path != "/api/providers" && r.URL.Path != "/api/pools" && r.URL.Path != "/api/virtual-keys" && r.URL.Path != "/api/providers/019a0000-0000-7000-8000-000000000001/models") || r.Header.Get("X-Auriga-Tenant") == "forged" || r.Header.Get("Cookie") != "" {
 			t.Error("unsafe management proxy")
+		}
+
+		if r.Header.Get("X-Auriga-Audit-Actor") != expectedActor.Load().(string) || net.ParseIP(r.Header.Get("X-Auriga-Audit-IP")) == nil || r.Header.Get("X-Auriga-Audit-IP") == "192.0.2.99" {
+			t.Error("caller forged audit identity or source IP")
 		}
 		lastCondition.Store(r.Header.Get("If-None-Match"))
 		w.Header().Set("Set-Cookie", "bad=1")
@@ -38,6 +44,7 @@ func TestBifrostAdminAuthority(t *testing.T) {
 	backend, _ := browserRPCFixture(t, g, store)
 	g.AdminCSRF = aiAdminCSRF{}
 	s := putBrowserSession(g, backend, "admin", "admin")
+	expectedActor.Store(s.AccountID)
 	claims, _ := json.Marshal(map[string]any{"ctx": "admin", "tid": s.TenantID, "sub": s.AccountID, "perms": []string{"ai.providers.read", "ai.providers.write"}})
 	s.AccessToken = "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".fixture"
 	s.AccessTokenExpiresAt = g.Now().Add(10 * time.Minute)
@@ -45,6 +52,8 @@ func TestBifrostAdminAuthority(t *testing.T) {
 	headers := http.Header{"Cookie": {"auriga_admin_session=admin"}, "X-Auriga-Tenant": {"forged"}}
 	// Use the project's audience-specific cookie name.
 	headers.Set("Cookie", sessionCookieBase("admin")+"=admin")
+	headers.Set("X-Auriga-Audit-Actor", "forged")
+	headers.Set("X-Auriga-Audit-IP", "192.0.2.99")
 	code, h, _ := aiAdminRequest(t, g, addresses, "admin", "GET", relayAdminPrefix+"/providers", headers)
 	if code != 200 || h.Get("Set-Cookie") != "" || h.Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("read %d", code)
