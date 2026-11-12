@@ -476,6 +476,14 @@ services:
     env_file: !override
       - path: '$_yaml_private/agent.env'
         required: true
+  audit-db-prepare:
+    env_file: !override
+      - path: '$_yaml_private/audit-db.env'
+        required: true
+  bifrost:
+    env_file: !override
+      - path: '$_yaml_private/bifrost-audit.env'
+        required: true
 EOF
   _cc=$(compose_cmd)
   write_bifrost_override "$(cat "$_private/bifrost.enabled")" >"$_private/bifrost.yml"

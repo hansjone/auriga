@@ -38,6 +38,8 @@ sh "$ROOT/scripts/render.sh"
 EXPORT="$PARENT/collab-env-$MODE.tar"
 NAS_INSTALLER_ACTIVE=1 sh "$ROOT/scripts/installer-entry.sh" export-env >"$EXPORT"
 tar -tf "$EXPORT" | grep -qx collab.enabled
+tar -tf "$EXPORT" | grep -qx audit-db.env
+tar -tf "$EXPORT" | grep -qx bifrost-audit.env
 [ "$(tar -xOf "$EXPORT" collab.enabled)" = 1 ]
 setpriv --reuid=65534 --regid=65534 --clear-groups sh -ec '! test -f "$1/activation.receipt"' sh "$SOURCE"
 # Exercise the host-side branch as an actual unprivileged operator. Its only

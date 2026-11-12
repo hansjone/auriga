@@ -99,7 +99,7 @@ case "${1:-}" in
     printf '%s' "$_rotation" >"$_export/collab.rotation.path"
     printf '%s' "$_rotation_available" >"$_export/collab.rotation.available"
     chmod 0600 "$_export/collab.rotation.path" "$_export/collab.rotation.available"
-    tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env \
+    tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env audit-db.env bifrost-audit.env \
       -C "$_export" collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled ;;
   *) die 'unsupported installer operation' ;;
 esac
