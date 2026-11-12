@@ -237,11 +237,20 @@ class CredentialInventoryPostgresTest {
               null);
           return null;
         });
+    var tokens = mock(TokenService.class);
+    var sessions =
+        new SessionManager(
+            store,
+            mock(SessionKv.class),
+            tokens,
+            clock,
+            mock(auriga.common.events.EventPublisher.class),
+            audit);
     var real =
         new IamManagedDevices(
             store,
-            mock(SessionManager.class),
-            mock(TokenService.class),
+            sessions,
+            tokens,
             mock(Secrets.class),
             mock(auriga.workspace.api.ManagedInstanceBindings.class),
             mock(auriga.iam.api.InstanceAiAuthorization.class),
@@ -263,6 +272,12 @@ class CredentialInventoryPostgresTest {
                           .get("device", lineage.path("device").asString(), false)
                           .path("revoked")
                           .asBoolean()));
+          verify(audit)
+              .record(
+                  argThat(
+                      e ->
+                          e.action().equals("iam.device.revoke")
+                              && e.target().id().equals(lineage.path("device").asString())));
           return null;
         });
   }
