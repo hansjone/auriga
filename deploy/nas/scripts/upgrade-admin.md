@@ -89,7 +89,7 @@ edge 重建使文件 bind 读取本次原子发布的派生配置，随后 agent
 使用原调用方 Key，通过已封存的 portal Origin 请求 edge 的
 `/ai/v1/models` 和 `/ai/v1/chat/completions`，确认原模型名可调用且到达预期上游。
 这两项请求应使用客户端实际使用的地址、TLS 和代理路径。将正常入口调用作为 commit
-检查点，同时核对设备 JWT 的模型访问及 Team MCP/节点路径。回滚后重复原 Key 的
+检查点。回滚后重复原 Key 的
 edge 入口请求，确认旧网关恢复服务。
 
 ### 中转站迁移边界
