@@ -11,6 +11,7 @@ import {
 } from '../src/admin/resourceApi';
 import { navigation } from '../src/admin/navigation';
 import ResourcesView from '../src/views/ResourcesView.vue';
+import ResourceCenterView from '../src/views/resources/ResourceCenterView.vue';
 import WorkflowUnavailableView from '../src/views/WorkflowUnavailableView.vue';
 import ActionConfirm from '../src/admin/ActionConfirm.vue';
 import { router as realRouter } from '../src/router';
@@ -717,7 +718,7 @@ describe('resource async boundaries and navigation', () => {
       ).toBeTruthy();
     expect(
       realRouter.resolve('/resources').matched.at(-1)?.components?.default,
-    ).toBe(ResourcesView);
+    ).toBe(ResourceCenterView);
   });
   it('preserves headquarters and devices as unavailable and retains relay navigation for the platform pages', async () => {
     const router = createRouter({
