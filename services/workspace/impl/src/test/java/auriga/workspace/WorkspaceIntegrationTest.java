@@ -2288,6 +2288,40 @@ class WorkspaceIntegrationTest {
         });
   }
 
+  @Test
+  void lifecyclePolicyChangeAffectsReclamation() throws Exception {
+    policy.idleMinutes(30);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          Instant activity = clock.instant().minusSeconds(600);
+          markRunningIdle(node, id, activity);
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          policy.idleMinutes(5);
+          // Always-on is an explicit exception, even after reducing the timeout.
+          store.tx(
+              () ->
+                  store.jdbc.update(
+                      "UPDATE instance SET always_on=true WHERE tenant_id=? AND id=?", tenant, id));
+          markRunningIdle(node, id, activity);
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          store.tx(
+              () ->
+                  store.jdbc.update(
+                      "UPDATE instance SET always_on=false WHERE tenant_id=? AND id=?",
+                      tenant,
+                      id));
+          markRunningIdle(node, id, activity);
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+        });
+  }
+
   private void markRunningIdle(UUID node, UUID id, Instant activity) {
     store.tx(
         () ->

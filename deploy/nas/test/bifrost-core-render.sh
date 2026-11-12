@@ -80,7 +80,16 @@ cat >"$temp/scripts/collab-materials.sh" <<'EOF'
 mkdir -p "$2/edge"
 cp "$1/edge.config.json" "$2/edge/edge.config.json"
 EOF
+export AURIGA_OPS_RUNTIME_ENABLED=true
+export AURIGA_OPS_TENANT_ID=00000000-0000-0000-0000-000000000001
 sh "$temp/scripts/render.sh" --core-only
+# Runtime backups and audit must remain available in the same rendered installation.
+grep -q '^AURIGA_OPS_RUNTIME_ENABLED=true$' "$temp/data/config/platform.env"
+grep -q "^AURIGA_OPS_TENANT_ID=$AURIGA_OPS_TENANT_ID$" "$temp/data/config/platform.env"
+[ "$(/usr/bin/stat -c '%a' "$temp/data/ops-runtime")" = 700 ]
+grep -q "^10001:10001 $temp/data/ops-runtime$" "$temp/chown.log"
+[ "$(/usr/bin/stat -c '%a' "$temp/data/config/bifrost-audit.env")" = 600 ]
+grep -q "^10003:10003 $temp/data/config/bifrost-audit.env$" "$temp/chown.log"
 # Upgrade rendering creates isolated credentials and preserves them on rerender.
 for name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
  [ "$(/usr/bin/stat -c '%a' "$temp/data/secrets/$name")" = 600 ]

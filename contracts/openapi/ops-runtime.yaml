@@ -1,0 +1,449 @@
+openapi: 3.1.0
+info:
+  title: Auriga runtime operations
+  version: 1.0.0
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+  description: Installation-local deployment receipts and PG backups. Administrators
+    in the configured installation tenant only. Upgrade execution stays in the host
+    deployment worker. No restore endpoint.
+servers:
+- url: /api/workspace/v1
+security:
+- bearerAuth: []
+tags:
+- name: ops-runtime
+paths:
+  /admin/ops/upgrades:
+    get:
+      tags:
+      - ops-runtime
+      operationId: getOpsUpgrades
+      x-admin-only: true
+      x-permission: ops.upgrades.read
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsUpgradeStatus'
+    post:
+      tags:
+      - ops-runtime
+      operationId: registerOpsUpgrade
+      x-admin-only: true
+      x-permission: ops.upgrades.write
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsUpgradeItem'
+      x-step-up-required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpsUpgradeInput'
+      parameters:
+      - &id001
+        in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{16,100}$
+  /admin/ops/backups:
+    get:
+      tags:
+      - ops-runtime
+      operationId: getOpsBackups
+      x-admin-only: true
+      x-permission: ops.backups.read
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsBackupStatus'
+    post:
+      tags:
+      - ops-runtime
+      operationId: triggerOpsBackup
+      x-admin-only: true
+      x-permission: ops.backups.write
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsBackupItem'
+      x-step-up-required: true
+      parameters:
+      - *id001
+  /admin/ops/backups/plan:
+    put:
+      tags:
+      - ops-runtime
+      operationId: configureOpsBackup
+      x-admin-only: true
+      x-permission: ops.backups.write
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsBackupPlan'
+      x-step-up-required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpsBackupPlanInput'
+  /admin/ops/backups/{id}/tickets:
+    post:
+      tags:
+      - ops-runtime
+      operationId: issueOpsBackupTicket
+      x-admin-only: true
+      x-permission: ops.backups.download
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpsBackupTicket'
+      x-step-up-required: true
+      parameters:
+      - &id002
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /admin/ops/backups/{id}/download:
+    post:
+      tags:
+      - ops-runtime
+      operationId: downloadOpsBackup
+      x-admin-only: true
+      x-permission: ops.backups.download
+      x-step-up-required: true
+      parameters:
+      - *id002
+      responses:
+        '200':
+          description: Single use, session-bound archive. No cache.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OpsBackupDownloadInput'
+  /admin/ops/backups/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    delete:
+      tags:
+      - ops-runtime
+      operationId: deleteOpsBackup
+      x-admin-only: true
+      x-permission: ops.backups.write
+      x-step-up-required: true
+      responses:
+        '202':
+          description: Deletion queued for the host worker. Immediately revokes download
+            access.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    OpsUpgradeInput:
+      type: object
+      properties:
+        targetId:
+          type: string
+          pattern: ^[A-Za-z0-9._-]{1,80}$
+      required:
+      - targetId
+    OpsUpgradeTarget:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        image:
+          type: string
+      required:
+      - id
+      - label
+      - image
+    OpsUpgradeItem:
+      type: object
+      properties:
+        id:
+          type: string
+        targetId:
+          type: string
+        actor:
+          type: string
+        key:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+        startedAt:
+          type: string
+        finishedAt:
+          type: string
+        reason:
+          type: string
+        exitCode:
+          type: integer
+      required:
+      - id
+      - targetId
+      - status
+      - createdAt
+    OpsUpgradeInventory:
+      type: object
+      properties:
+        reportedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              image:
+                type: string
+              imageId:
+                type: string
+              state:
+                type: string
+              version:
+                type: string
+            required:
+            - name
+            - image
+            - imageId
+            - state
+            - version
+      required:
+      - reportedAt
+      - items
+    OpsUpgradeStatus:
+      type: object
+      properties:
+        inventory:
+          oneOf:
+          - $ref: '#/components/schemas/OpsUpgradeInventory'
+          - type: 'null'
+        available:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpsUpgradeTarget'
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpsUpgradeItem'
+      required:
+      - inventory
+      - available
+      - requests
+    OpsBackupPlanInput:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        intervalHours:
+          type: integer
+          minimum: 1
+          maximum: 720
+        revision:
+          type: integer
+          format: int64
+          minimum: 0
+        retentionCount:
+          type: integer
+          minimum: 1
+          maximum: 365
+        retentionDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+        minFreeMiB:
+          type: integer
+          minimum: 64
+          maximum: 1048576
+        minimumSuccesses:
+          type: integer
+          minimum: 1
+          maximum: 365
+          default: 1
+          description: At most retentionCount. Automatic retention always keeps this
+            many latest successful backups, regardless of age.
+      required:
+      - enabled
+      - intervalHours
+      - revision
+      description: Retention days times 24 must be at least intervalHours; minimumSuccesses
+        must not exceed retentionCount. Automatic cleanup keeps at least the latest
+        minimumSuccesses successful backups (default one), even if expired. Explicit
+        manual deletion is a separate administrator action.
+    OpsBackupPlan:
+      allOf:
+      - $ref: '#/components/schemas/OpsBackupPlanInput'
+      - type: object
+        properties:
+          nextAt:
+            type: string
+            format: date-time
+          actor:
+            type: string
+    OpsBackupItem:
+      type: object
+      properties:
+        id:
+          type: string
+        actor:
+          type: string
+        key:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+        startedAt:
+          type: string
+        finishedAt:
+          type: string
+        sha256:
+          type: string
+        reason:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        format:
+          type: string
+        databases:
+          type: array
+          items:
+            type: string
+        includesRoles:
+          type: boolean
+        deleteRequestedAt:
+          type: string
+          format: date-time
+        cancelPending:
+          type: boolean
+          description: Prior database task cancellation is unconfirmed; no new backup
+            starts until recovered.
+        skippedDatabases:
+          type: array
+          items:
+            type: string
+          description: Optional databases confirmed absent; currently only legacy
+            installations without bifrost.
+      required:
+      - id
+      - status
+      - createdAt
+    OpsBackupStatus:
+      type: object
+      properties:
+        plan:
+          $ref: '#/components/schemas/OpsBackupPlan'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpsBackupItem'
+        worker:
+          oneOf:
+          - $ref: '#/components/schemas/OpsUpgradeInventory'
+          - type: 'null'
+        alerts:
+          type: array
+          items:
+            type: string
+        audit:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpsBackupAudit'
+      required:
+      - plan
+      - items
+      - worker
+    OpsBackupTicket:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        csrf:
+          type: string
+          description: Echo of the verified browser CSRF nonce, for the native streaming
+            form. Never log.
+      required:
+      - token
+      - expiresAt
+    OpsBackupDownloadInput:
+      type: object
+      properties:
+        ticket:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+        csrf:
+          type: string
+      required:
+      - ticket
+      - csrf
+    OpsBackupAudit:
+      type: object
+      properties:
+        at:
+          type: string
+        actor:
+          type: string
+        session:
+          type: string
+        backupId:
+          type: string
+        action:
+          type: string
+        result:
+          type: string
+        bytes:
+          type: integer
