@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { uptime } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import {
   closeSync,
@@ -19,38 +20,49 @@ const processStartedAt = new Date(
   Date.now() - process.uptime() * 1000,
 ).toISOString();
 
-// Both values are host boot scoped, never Node's process-relative performance.now().
+let bootId;
+// C/E host-lock sources: raw UTC boot identity and OS uptime, never process uptime.
 export function hostTime() {
-  if (process.platform === 'linux')
-    return {
-      bootId: readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(),
-      monotonicMillis: Math.floor(
-        Number(readFileSync('/proc/uptime', 'utf8').split(' ')[0]) * 1000,
-      ),
-    };
-  if (process.platform === 'win32') {
+  if (!bootId && process.platform === 'linux')
+    bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+  if (!bootId && process.platform === 'win32') {
     const result = execFileSync(
       'powershell.exe',
       [
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        "$b=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().Ticks; $h=$b.ToString('x32'); $id=$h.Substring(0,8)+'-'+$h.Substring(8,4)+'-'+$h.Substring(12,4)+'-'+$h.Substring(16,4)+'-'+$h.Substring(20,12); Write-Output ($id+' '+[Math]::Floor([Diagnostics.Stopwatch]::GetTimestamp()*1000.0/[Diagnostics.Stopwatch]::Frequency))",
+        "$ErrorActionPreference='Stop'; (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')",
       ],
       { encoding: 'utf8', windowsHide: true, timeout: 10000 },
-    )
-      .trim()
-      .split(' ');
-    const monotonicMillis = Number(result[1]);
+    ).trim();
     if (
-      result.length !== 2 ||
-      !Number.isSafeInteger(monotonicMillis) ||
-      monotonicMillis < 0
+      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$/.test(result) ||
+      !Number.isFinite(Date.parse(result))
     )
-      throw new Error('unable to read trusted boot clock');
-    return { bootId: result[0], monotonicMillis };
+      throw new Error('unable to read boot identity');
+    bootId = result;
   }
-  throw new Error('unsupported guardian platform');
+  if (!bootId) throw new Error('unsupported guardian platform');
+  const monotonicMillis = Math.floor(uptime() * 1000);
+  if (!Number.isSafeInteger(monotonicMillis) || monotonicMillis < 0)
+    throw new Error('invalid OS uptime');
+  return { bootId, monotonicMillis };
+}
+
+// UnifiedTrustedClock still requires UUIDs. Keep this encoding separate from the
+// raw host-lock identity agreed with C; never change the frozen schema to fit it.
+export function trustedClockTime() {
+  const sample = hostTime();
+  if (process.platform !== 'win32') return sample;
+  const hex = createHash('sha256')
+    .update(sample.bootId)
+    .digest('hex')
+    .slice(0, 32);
+  return {
+    ...sample,
+    bootId: `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`,
+  };
 }
 
 export function assertLocalPath(path) {

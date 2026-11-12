@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
+import { uptime } from 'node:os';
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   writeFileSync,
+  symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -14,10 +16,13 @@ import { tempBase } from './helpers.mjs';
 import { mergeSkillPatch } from '../runtime/skill-config.mjs';
 import {
   acquireHostLock,
+  assertLocalPath,
   durableJson,
   evaluateHostLock,
   hostTime,
+  trustedClockTime,
 } from '../runtime/host-lock.mjs';
+import { schemaValid } from '../runtime/schema.mjs';
 import {
   assertUnmanagedStart,
   checkLease,
@@ -42,6 +47,36 @@ const contract = (name) =>
       new URL(`../../../contracts/resource/${name}`, import.meta.url),
     ),
   );
+test('test sandbox canonicalizes TEMP aliases while production still rejects them', async (t) => {
+  const root = tempBase(t);
+  const target = join(root, 'canonical-temp');
+  const alias = join(root, 'temp-alias');
+  mkdirSync(target);
+  symlinkSync(target, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const helper = new URL('./helpers.mjs', import.meta.url).href;
+  const lock = new URL('../runtime/host-lock.mjs', import.meta.url).href;
+  const source = `import {tempBase} from ${JSON.stringify(helper)}; import {assertLocalPath} from ${JSON.stringify(lock)};
+    let cleanup; try { const home=tempBase({after(fn){cleanup=fn;}}); assertLocalPath(home); console.log(home); }
+    finally { cleanup?.(); }`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+    env: { ...process.env, TEMP: alias, TMP: alias, TMPDIR: alias },
+  });
+  let output = '',
+    errors = '';
+  child.stdout.on('data', (b) => {
+    output += b;
+  });
+  child.stderr.on('data', (b) => {
+    errors += b;
+  });
+  const code = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', resolve);
+  });
+  assert.equal(code, 0, errors);
+  assert(output.trim().startsWith(target));
+  assert.throws(() => assertLocalPath(alias), /link|alias/);
+});
 const fixtures = contract('cordis-upgrade-fixture.json');
 for (const item of fixtures.cases)
   test(`Cordis fixture: ${item.id}`, () => {
@@ -83,6 +118,34 @@ for (const item of protocol.cases)
       );
   });
 
+test('host-lock sources use OS uptime and keep the frozen trusted-clock UUID schema', (t) => {
+  const before = Math.floor(uptime() * 1000);
+  const sample = hostTime();
+  const after = Math.floor(uptime() * 1000);
+  assert(sample.monotonicMillis >= before && sample.monotonicMillis <= after);
+  if (process.platform === 'win32')
+    assert.match(sample.bootId, /^\d{4}-\d\d-\d\dT.*Z$/);
+  const lock = acquireHostLock(tempBase(t));
+  try {
+    assert.equal(lock.owner.bootId, sample.bootId);
+    assert(schemaValid('unified', 'UnifiedHostLockOwner', lock.owner));
+  } finally {
+    lock.release();
+  }
+  const clock = trustedClockTime();
+  const now = new Date().toISOString();
+  assert(
+    schemaValid('unified', 'UnifiedTrustedClock', {
+      bootId: clock.bootId,
+      maxObservedTime: now,
+      lastTrustedTime: now,
+      lastTrustedTimeSource: 'signed_release',
+      lastMonotonicMillis: clock.monotonicMillis,
+      leaseDeadlineMonotonicMillis: clock.monotonicMillis + 1000,
+    }),
+  );
+});
+
 test('real boot clock is shared across processes', async () => {
   const parent = hostTime();
   const module = new URL('../runtime/host-lock.mjs', import.meta.url).href;
@@ -108,7 +171,7 @@ test('real boot clock is shared across processes', async () => {
 test('real concurrent mkdir grants one owner only', async (t) => {
   const home = tempBase(t);
   const module = new URL('../runtime/host-lock.mjs', import.meta.url).href;
-  const program = `import {acquireHostLock} from ${JSON.stringify(module)};try { acquireHostLock(process.argv[1]); console.log('winner'); } catch(e) { console.log(e.code); }`;
+  const program = `import {acquireHostLock} from ${JSON.stringify(module)};try { acquireHostLock(process.argv[1]); console.log('winner'); } catch(e) { if(e.code !== 'EEXIST') throw e; console.log(e.code); }`;
   const run = () =>
     new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [

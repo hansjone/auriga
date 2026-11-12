@@ -14,6 +14,7 @@ import {
   assertLocalPath,
   durableJson,
   hostTime,
+  trustedClockTime,
 } from './host-lock.mjs';
 
 export function checkLease(clock, lease, sample) {
@@ -78,11 +79,12 @@ export class DesktopGuardian {
     this.directory = join(dataHome, 'auriga', 'guardian');
     this.file = join(this.directory, 'state.json');
     this.current = join(dataHome, 'auriga', 'skills-active', 'current');
-    this.time = ports.time ?? hostTime;
+    this.time = ports.time ?? trustedClockTime;
+    this.lockTime = ports.time ?? hostTime;
   }
 
   locked(action) {
-    const lock = acquireHostLock(this.home, 'E', this.time);
+    const lock = acquireHostLock(this.home, 'E', this.lockTime);
     try {
       lock.check();
       return action(lock);
