@@ -78,6 +78,8 @@ if sh "$ROOT/test/runtime-upgrade.sh"; then pass runtime_upgrade_transaction
 else fail_msg runtime_upgrade_transaction "runtime activation or rollback failed"; fi
 if sh "$ROOT/test/materials-upgrade.sh"; then pass materials_upgrade_boundary
 else fail_msg materials_upgrade_boundary "material activation arguments or failure handling failed"; fi
+if sh "$ROOT/test/upgrade-admin.sh"; then pass admin_database_upgrade_boundary
+else fail_msg admin_database_upgrade_boundary "admin role helper sequence or failure handling failed"; fi
 if sh "$ROOT/test/device-presence.sh"; then pass device_presence_upgrade
 else fail_msg device_presence_upgrade "old optional identity blocked init/render"; fi
 if sh "$ROOT/test/container-installer.sh"; then pass container_installer_regressions
