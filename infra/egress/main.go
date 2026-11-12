@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/hansjone/auriga/infra/egress/internal/policy"
 	"github.com/hansjone/auriga/infra/egress/internal/proxy"
 )
 
@@ -48,11 +50,23 @@ func runContext(ctx context.Context, args []string, out, logs io.Writer) error {
 	if err = server.SetDeniedHosts(os.Getenv("AURIGA_EGRESS_DENY_HOSTS")); err != nil {
 		return err
 	}
+	logger := slog.New(slog.NewJSONHandler(logs, nil)).With("service", "egress")
+	policyContext, cancelPolicy := context.WithCancel(ctx)
+	var policyWorker sync.WaitGroup
+	defer func() { cancelPolicy(); policyWorker.Wait() }()
+	if source := os.Getenv("AURIGA_EGRESS_POLICY_FILE"); source != "" {
+		runner, policyErr := policy.New(source, os.Getenv("AURIGA_EGRESS_STATE_FILE"), os.Getenv("AURIGA_EGRESS_REPORT_FILE"), os.Getenv("AURIGA_EGRESS_NODE_ID"), server, os.Getenv("AURIGA_EGRESS_TENANT_ID"))
+		if policyErr != nil {
+			return policyErr
+		}
+		policyWorker.Go(func() {
+			runner.Run(policyContext, 2*time.Second, func(error) { logger.Warn("policy synchronization failed") })
+		})
+	}
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
 		return err
 	}
-	logger := slog.New(slog.NewJSONHandler(logs, nil)).With("service", "egress")
 	logger.Info("egress listening", "version", version, "address", listener.Addr().String())
 	return server.Serve(ctx, listener)
 }

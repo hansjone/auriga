@@ -65,7 +65,8 @@ public class OrgRuntimeConfiguration {
           ObjectProvider<EventPublisher> orgEvents,
       ObjectProvider<EventPublisher> events,
       Clock clock,
-      ObjectProvider<DeploymentAccess> deploymentAccess) {
+      ObjectProvider<DeploymentAccess> deploymentAccess,
+      org.springframework.core.env.Environment environment) {
     EventPublisher publisher;
     if (beans.containsBean("orgEventPublisher")) {
       publisher =
@@ -78,7 +79,13 @@ public class OrgRuntimeConfiguration {
     }
     // Even a primary bean cannot disambiguate multiple installation identities safely.
     var sources = deploymentAccess.stream().limit(2).toList();
-    return new OrgService(store, publisher, clock, sources.size() == 1 ? sources.getFirst() : null);
+    String edgeFile = environment.getProperty("AURIGA_SECURITY_EDGE_CONFIG_FILE");
+    return new OrgService(
+        store,
+        publisher,
+        clock,
+        sources.size() == 1 ? sources.getFirst() : null,
+        edgeFile == null || edgeFile.isBlank() ? null : java.nio.file.Path.of(edgeFile));
   }
 
   @Bean

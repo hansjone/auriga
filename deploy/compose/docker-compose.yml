@@ -126,9 +126,17 @@ services:
     entrypoint: ['/auriga-egress']
     command: ['--listen', '0.0.0.0:3128']
     environment:
+      AURIGA_EGRESS_POLICY_FILE: /var/auriga-egress/policies/policy.json
+      AURIGA_EGRESS_STATE_FILE: /var/auriga-egress/reports/state.json
+      AURIGA_EGRESS_REPORT_FILE: /var/auriga-egress/reports/report.json
+      AURIGA_EGRESS_NODE_ID: egress-primary
+      AURIGA_EGRESS_TENANT_ID: ${AURIGA_EGRESS_TENANT_ID:-}
       AURIGA_EGRESS_DNS_SERVER: ${AURIGA_EGRESS_DNS_SERVER:-}
     cap_drop: [ALL]
     read_only: true
+    volumes:
+      - egress-policies:/var/auriga-egress/policies:ro
+      - egress-reports:/var/auriga-egress/reports
     security_opt: ['no-new-privileges:true']
     networks: [egress-out]
     healthcheck:
@@ -178,6 +186,10 @@ services:
       nats:
         condition: service_healthy
     environment:
+      AURIGA_EGRESS_POLICY_DIRECTORY: /var/auriga-egress/policies
+      AURIGA_EGRESS_REPORT_DIRECTORY: /var/auriga-egress/reports
+      AURIGA_EGRESS_NODE_ID: egress-primary
+      AURIGA_SECURITY_EDGE_CONFIG_FILE: /etc/auriga/edge.config.json
       SPRING_PROFILES_ACTIVE: combined,dev
       AURIGA_LOG_LEVEL: ${AURIGA_LOG_LEVEL:-INFO}
       AURIGA_PLATFORM_ADDRESS: 0.0.0.0
@@ -253,6 +265,9 @@ services:
       AURIGA_WORKSPACE_TEMPLATES_DIRECTORY: /etc/auriga/templates
       AURIGA_WORKSPACE_ARTIFACT_KEYS_DIRECTORY: /etc/auriga/runtime-keys
     volumes:
+      - egress-policies:/var/auriga-egress/policies
+      - egress-reports:/var/auriga-egress/reports:ro
+      - ./var/edge.config.json:/etc/auriga/edge.config.json:ro
       - ./var/access.json:/etc/auriga/access.json:ro
       - ./var/iam-healthcheck.sh:/etc/auriga/iam-healthcheck.sh:ro
       - ./var/pki:/etc/auriga/pki:ro
@@ -597,6 +612,8 @@ services:
       retries: 30
 
 volumes:
+  egress-policies:
+  egress-reports:
   lokidata:
   grafanadata:
   alloydata:

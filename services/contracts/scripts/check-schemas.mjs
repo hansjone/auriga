@@ -35,6 +35,7 @@ if (failures) process.exitCode = 1;
 console.log(files.length + ' schema files, ' + failures + ' failed');
 if (!failures) {
   const checks = [
+    [fileURLToPath(new URL('gen-egress.mjs', import.meta.url)), '--check'],
     ['--test', fileURLToPath(new URL('../../../contracts/network/fixtures/source-control.test.mjs', import.meta.url))],
     [fileURLToPath(new URL('../../../contracts/network/generate-source-control.mjs', import.meta.url)), '--check'],
   ];

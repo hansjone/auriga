@@ -33,6 +33,7 @@ public final class OrgService {
   private final OrgAudit audit;
   private final Clock clock;
   private final DeploymentAccess deploymentAccess;
+  private final java.nio.file.Path edgeConfig;
   private final SecureRandom random = new SecureRandom();
 
   public OrgService(OrgStore store, EventPublisher events, Clock clock) {
@@ -42,6 +43,15 @@ public final class OrgService {
   /** Invitation creation requires a validated installation identity matching the current tenant. */
   public OrgService(
       OrgStore store, EventPublisher events, Clock clock, DeploymentAccess deploymentAccess) {
+    this(store, events, clock, deploymentAccess, null);
+  }
+
+  public OrgService(
+      OrgStore store,
+      EventPublisher events,
+      Clock clock,
+      DeploymentAccess deploymentAccess,
+      java.nio.file.Path edgeConfig) {
     this.store = store;
     this.m3Permissions =
         new M3Permissions(
@@ -53,6 +63,7 @@ public final class OrgService {
     this.audit = new OrgAudit(events);
     this.clock = clock;
     this.deploymentAccess = deploymentAccess;
+    this.edgeConfig = edgeConfig;
   }
 
   public OrgStore store() {
@@ -1058,6 +1069,47 @@ public final class OrgService {
 
   // ---- policies ----
 
+  public ObjectNode securityEntries() {
+    if (deploymentAccess == null
+        || !TenantContext.require().toString().equals(deploymentAccess.tenantId()))
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    var out =
+        OrgJson.object(
+            "mode",
+            deploymentAccess.mode(),
+            "portalOrigin",
+            deploymentAccess.portalUrl(),
+            "adminOrigin",
+            deploymentAccess.adminUrl(),
+            "instanceParentDomain",
+            deploymentAccess.instanceParentDomain(),
+            "ingressKind",
+            deploymentAccess.ingressKind());
+    // Read only the approved projection. Never return edge credentials or arbitrary URLs.
+    if (edgeConfig != null) {
+      try (var input = java.nio.file.Files.newInputStream(edgeConfig)) {
+        byte[] bytes = input.readNBytes(1048577);
+        if (bytes.length > 1048576) return out;
+        var config = OrgJson.MAPPER.readTree(bytes);
+        String origin = config.path("relay").path("origin").asString("");
+        if (!origin.isEmpty()) {
+          var url = java.net.URI.create(origin);
+          if (Set.of("http", "https").contains(url.getScheme())
+              && url.getHost() != null
+              && url.getRawUserInfo() == null
+              && url.getRawQuery() == null
+              && url.getRawFragment() == null
+              && (url.getPath().isEmpty() || url.getPath().equals("/"))) {
+            out.put("relayPublicUrl", deploymentAccess.portalUrl() + "/ai/v1");
+          }
+        }
+      } catch (java.io.IOException | IllegalArgumentException ignored) {
+        // Observation unavailable; absence must not turn into a healthy or disabled claim.
+      }
+    }
+    return out;
+  }
+
   public ObjectNode getPolicy(String key) {
     return store.tx(
         () -> {
@@ -1075,12 +1127,12 @@ public final class OrgService {
                                 "version",
                                 rs.getLong("version"),
                                 "value",
-                                OrgJson.read(rs.getString("value")),
+                                OrgJson.MAPPER.readTree(rs.getString("value")),
                                 "updatedAt",
                                 rs.getTimestamp("updated_at").toInstant().toString());
                         UUID by = (UUID) rs.getObject("updated_by");
                         if (by != null) n.put("updatedBy", by.toString());
-                        return n;
+                        return key.equals("egress") ? EgressPolicyCompatibility.project(n) : n;
                       },
                       store.tenantId(),
                       key);
@@ -1090,6 +1142,15 @@ public final class OrgService {
   }
 
   public ObjectNode putPolicy(String key, JsonNode value, Long ifMatch) {
+    if (key.equals("egress")) {
+      new AuthorizationRules(
+              Set.of("org.policies.write"), true, java.time.Duration.ofMinutes(10), true)
+          .check(AuthorizationRules.currentPrincipal().orElse(null), clock);
+      OrgError.require(ifMatch != null, "precondition_required", 428);
+      EgressPolicyValidation.validate(value);
+    }
+    JsonNode checkedValue =
+        key.equals("egress") ? EgressPolicyCompatibility.canonical(value) : value;
     return store.tx(
         () -> {
           OrgError.require(Set.of("workspace", "egress", "login").contains(key), "conflict", 409);
@@ -1105,7 +1166,7 @@ public final class OrgService {
           if (ifMatch != null)
             OrgError.require(
                 existing.path("version").asLong() == ifMatch, "precondition_failed", 412);
-          if (key.equals("workspace")) validateWorkspacePolicy(value);
+          if (key.equals("workspace")) validateWorkspacePolicy(checkedValue);
           long version = existing.path("version").asLong() + 1;
           store
               .jdbc()
@@ -1113,7 +1174,7 @@ public final class OrgService {
                   "UPDATE policy SET version=?, value=?::jsonb, updated_at=?, updated_by=?"
                       + " WHERE tenant_id=? AND key=?",
                   version,
-                  value.toString(),
+                  checkedValue.toString(),
                   java.sql.Timestamp.from(clock.instant()),
                   actorId(),
                   store.tenantId(),

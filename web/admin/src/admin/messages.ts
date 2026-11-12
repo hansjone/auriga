@@ -1,3 +1,4 @@
+import { securityZh, securityEn } from './securityMessages';
 import { credentialsZh, credentialsEn } from './credentialsMessages';
 import { devicesZh, devicesEn } from './devicesMessages';
 import { runtimeZh, runtimeEn } from './runtimeMessages';
@@ -10,6 +11,7 @@ import { providersZh, providersEn } from './providersMessages';
 import { settingsZh, settingsEn } from './settingsMessages';
 
 const zh = {
+  ...securityZh,
   ...credentialsZh,
   ...devicesZh,
   ...runtimeZh,
@@ -131,6 +133,7 @@ const zh = {
   },
 };
 const en = {
+  ...securityEn,
   ...credentialsEn,
   ...devicesEn,
   ...runtimeEn,

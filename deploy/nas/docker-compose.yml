@@ -300,6 +300,10 @@ services:
       - path: ${AURIGA_DATA_ROOT}/config/platform.env
         required: true
     environment:
+      AURIGA_EGRESS_POLICY_DIRECTORY: /var/auriga-egress/policies
+      AURIGA_EGRESS_REPORT_DIRECTORY: /var/auriga-egress/reports
+      AURIGA_EGRESS_NODE_ID: egress-primary
+      AURIGA_SECURITY_EDGE_CONFIG_FILE: /etc/auriga/edge.config.json
       SPRING_CONFIG_ADDITIONAL_LOCATION: file:/etc/auriga/platform-access.yaml
       SERVER_ADDRESS: 0.0.0.0
       SERVER_SSL_ENABLED: 'true'
@@ -337,6 +341,9 @@ services:
       AURIGA_PLATFORM_PORT: '8081'
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60 -XX:+UseContainerSupport
     volumes:
+      - egress-policies:/var/auriga-egress/policies
+      - egress-reports:/var/auriga-egress/reports:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/edge.config.json:/etc/auriga/edge.config.json:ro
       - ${AURIGA_DATA_ROOT}/config/managed-ca:/etc/auriga/managed-ca:ro
       - ${AURIGA_DATA_ROOT}/config/materials/platform-access.yaml:/etc/auriga/platform-access.yaml:ro
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
@@ -497,9 +504,17 @@ services:
     user: '65532:65532'
     restart: unless-stopped
     read_only: true
+    volumes:
+      - egress-policies:/var/auriga-egress/policies:ro
+      - egress-reports:/var/auriga-egress/reports
     entrypoint: ['/auriga-egress']
     command: ['--listen', '0.0.0.0:3128']
     environment:
+      AURIGA_EGRESS_POLICY_FILE: /var/auriga-egress/policies/policy.json
+      AURIGA_EGRESS_STATE_FILE: /var/auriga-egress/reports/state.json
+      AURIGA_EGRESS_REPORT_FILE: /var/auriga-egress/reports/report.json
+      AURIGA_EGRESS_NODE_ID: egress-primary
+      AURIGA_EGRESS_TENANT_ID: ${AURIGA_EGRESS_TENANT_ID:-}
       AURIGA_EGRESS_DNS_SERVER: ${AURIGA_EGRESS_DNS_SERVER:-}
       AURIGA_EGRESS_DENY_HOSTS: ${AURIGA_NAS_PORTAL_HOST:?sealed portal host required},${AURIGA_NAS_ADMIN_HOST:?sealed admin host required}
     # The only non-internal attachment is an egress-only bridge, with no host
@@ -593,6 +608,8 @@ networks:
     name: ${AURIGA_LAN_NETWORK}
 
 volumes:
+  egress-policies:
+  egress-reports:
   lokidata:
   alloydata:
 

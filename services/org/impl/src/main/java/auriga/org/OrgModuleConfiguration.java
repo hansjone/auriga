@@ -11,5 +11,5 @@ import org.springframework.context.annotation.Import;
     name = "enabled",
     havingValue = "true",
     matchIfMissing = true)
-@Import(OrgRuntimeConfiguration.class)
+@Import({OrgRuntimeConfiguration.class, OrgEgressConfiguration.class})
 public class OrgModuleConfiguration {}

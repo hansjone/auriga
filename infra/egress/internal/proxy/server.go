@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hansjone/auriga/infra/egress/internal/policy"
 )
 
 const (
@@ -34,6 +36,43 @@ type Server struct {
 	live        map[*tunnel]struct{}
 	deniedHosts []string
 	tunnels     sync.WaitGroup
+	policy      policy.Value
+}
+
+// ApplyPolicy revokes only tunnels whose targets are no longer allowed.
+// Deployment host and address restrictions are enforced independently below.
+func (s *Server) ApplyPolicy(value policy.Value) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.policy = policy.Value{Mode: policy.EffectiveMode(value), AllowDomains: append([]string(nil), value.AllowDomains...), DenyDomains: append([]string(nil), value.DenyDomains...)}
+	for t := range s.live {
+		if !s.allowedLocked(t.host) {
+			t.close()
+		}
+	}
+}
+
+func (s *Server) allowedLocked(host string) bool {
+	for _, pattern := range s.policy.DenyDomains {
+		if policy.Match(pattern, host) {
+			return false
+		}
+	}
+	if policy.EffectiveMode(s.policy) == "open" {
+		return true
+	}
+	for _, pattern := range s.policy.AllowDomains {
+		if policy.Match(pattern, host) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) allowed(host string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.allowedLocked(host)
 }
 
 // SetDeniedHosts installs trusted deployment origins before serving. Public
@@ -138,6 +177,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !s.allowed(host) {
+		http.Error(w, "target denied", http.StatusForbidden)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), connectTimeout)
 	defer cancel()
 	targets, err := publicTargets(ctx, s.dns, host)
@@ -169,9 +212,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = client.Close() }()
-	t := &tunnel{client: client, upstream: upstream, deadline: time.Now().Add(tunnelLifetime)}
+	t := &tunnel{host: host, client: client, upstream: upstream, deadline: time.Now().Add(tunnelLifetime)}
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || !s.allowedLocked(host) {
 		s.mu.Unlock()
 		return
 	}
@@ -210,6 +253,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type tunnel struct {
+	host             string
 	client, upstream net.Conn
 	deadline         time.Time
 	mu               sync.Mutex

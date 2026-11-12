@@ -24,6 +24,46 @@ tags:
   - name: quotas
   - name: invitations
 paths:
+  /admin/security/entries:
+    get:
+      operationId: adminSecNetEntries
+      summary: Read validated installation entry configuration
+      tags: [policies]
+      x-admin-only: true
+      x-permission: org.policies.read
+      responses:
+        '200':
+          description: Configured origins; does not attest live TLS or reachability.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSecNetEntries' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '503':
+          description: Installation configuration unavailable
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+
+  /admin/security/egress:
+    get:
+      operationId: adminSecNetEgress
+      summary: Read durable egress delivery and application status
+      tags: [policies]
+      x-admin-only: true
+      x-permission: org.policies.read
+      responses:
+        '200':
+          description: Saved, distributed and applied versions with last node heartbeat.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSecNetEgress' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '503':
+          description: Installation configuration unavailable
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+
   /me:
     get:
       tags: [me]
@@ -543,6 +583,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Policy' }
     put:
+      description: Egress writes require If-Match; missing preconditions return 428. Other policy keys retain their existing behavior.
       tags: [policies]
       operationId: putPolicy
       x-admin-only: true
@@ -559,6 +600,11 @@ paths:
                 value: { $ref: '#/components/schemas/PolicyValue' }
               required: [value]
       responses:
+        '428':
+          description: Egress write requires If-Match (org.precondition_required)
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
         '200':
           description: 已保存（version 加一）
           content:
@@ -801,6 +847,36 @@ components:
   securitySchemes:
     bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
   schemas:
+    AdminSecNetEntries:
+      type: object
+      additionalProperties: false
+      required: [mode, portalOrigin, adminOrigin, instanceParentDomain, ingressKind]
+      properties:
+        mode: { type: string, enum: [domain, ip] }
+        portalOrigin: { type: string, format: uri }
+        adminOrigin: { type: string, format: uri }
+        instanceParentDomain: { type: string }
+        ingressKind: { type: string, enum: [direct, trusted_proxy] }
+        relayPublicUrl: { type: string, format: uri }
+
+    AdminSecNetEgress:
+      type: object
+      additionalProperties: false
+      required: [savedVersion, phase, nodeId]
+      properties:
+        mode: { type: string, enum: [open, allowlist] }
+        legacyAdjusted: { type: boolean }
+        reportError: { type: string, enum: [invalid_report, policy_version_regression] }
+        savedVersion: { type: string, pattern: '^[1-9][0-9]*$' }
+        distributedVersion: { type: string, pattern: '^[1-9][0-9]*$' }
+        appliedVersion: { type: string, pattern: '^[0-9]+$' }
+        distributedAt: { type: string, format: date-time }
+        reportedAt: { type: string, format: date-time }
+        nodeId: { type: string }
+        result: { type: string, enum: [applied, failed] }
+        phase: { type: string, enum: [unconfigured, saved, distributed, effective, failed, stale, disabled] }
+        relayPublicUrl: { type: string, format: uri }
+
     Tenant:
       type: object
       properties:
@@ -911,6 +987,10 @@ components:
       type: object
       description: 策略键 egress。解析到内网地址的目标一律拒绝，不能通过策略放开。
       properties:
+        mode:
+          type: string
+          enum: [open, allowlist]
+          description: Open preserves public egress subject to deny rules and deployment protections; allowlist requires a match. Missing mode uses allowlist only when allowDomains is nonempty.
         categories:
           type: array
           description: 允许的分类（分类清单由 egress 维护，例如 package_registries、code_hosting、model_providers、search）。
@@ -932,6 +1012,8 @@ components:
     Policy:
       type: object
       properties:
+        configured: { type: boolean, description: Egress only; false for an untouched installation seed. }
+        legacyAdjusted: { type: boolean, description: Egress only; unsupported legacy values were omitted from the read projection. }
         key: { $ref: '#/components/schemas/PolicyKey' }
         version: { type: integer }
         value: { $ref: '#/components/schemas/PolicyValue' }
