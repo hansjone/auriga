@@ -21,7 +21,28 @@ public interface UnifiedResourceWorkspace {
       List<UnifiedInstallationReport> reports,
       // Expected resources carry installationRevision, desiredState and REMOVED tombstones.
       // Reports cannot supply their own expected counters. Missing/zero counters deny applied.
-      List<UnifiedResourceRef> resources) {}
+      List<UnifiedResourceRef> resources) {
+    public Snapshot(
+        UUID instance,
+        UUID owner,
+        UUID node,
+        long selectionRevision,
+        long generation,
+        long observedGeneration,
+        boolean ready,
+        List<UnifiedInstallationReport> reports) {
+      this(
+          instance,
+          owner,
+          node,
+          selectionRevision,
+          generation,
+          observedGeneration,
+          ready,
+          reports,
+          List.of());
+    }
+  }
 
   Snapshot snapshot(UUID tenant, UUID instance);
 

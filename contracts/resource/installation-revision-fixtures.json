@@ -1270,6 +1270,337 @@
         "accepted": false,
         "installationRevision": 4
       }
+    },
+    {
+      "id": "idempotent-replay-preserves-revision",
+      "operation": "lifecycle",
+      "input": {
+        "initialRevision": 4,
+        "steps": [
+          {
+            "action": "install",
+            "idempotencyKey": "install-1",
+            "ifMatch": 4
+          },
+          {
+            "action": "install",
+            "idempotencyKey": "install-1",
+            "ifMatch": 4
+          }
+        ]
+      },
+      "expect": {
+        "responseRevisions": [5, 5],
+        "persistedRevision": 5
+      }
+    },
+    {
+      "id": "uninstall-reinstall-continues-revision",
+      "operation": "lifecycle",
+      "input": {
+        "initialRevision": 4,
+        "steps": [
+          {
+            "action": "remove",
+            "idempotencyKey": "remove-1",
+            "ifMatch": 4
+          },
+          {
+            "action": "install",
+            "idempotencyKey": "install-2",
+            "ifMatch": 5
+          }
+        ]
+      },
+      "expect": {
+        "responseRevisions": [5, 6],
+        "persistedRevision": 6
+      }
+    },
+    {
+      "id": "outbound-carries-installation-revision",
+      "operation": "dispatch-validation",
+      "input": {
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "manifestDownloadPath": "/api/resource/v1/catalog/packages/019a0000-0000-7000-8000-000000000002/versions/019a0000-0000-7000-8000-000000000004/manifest",
+        "artifacts": [
+          {
+            "artifactId": "payload",
+            "digest": "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2",
+            "sizeBytes": 33,
+            "downloadPath": "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000013/artifacts/payload"
+          }
+        ],
+        "lease": {
+          "envelopeNotAfter": "2026-11-13T00:00:00Z",
+          "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revocationRevision": 3
+        },
+        "releaseSequence": 7,
+        "enabled": true,
+        "installationRevision": 4
+      },
+      "expect": true
+    },
+    {
+      "id": "outbound-missing-installation-revision-rejected",
+      "operation": "dispatch-validation",
+      "input": {
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "manifestDownloadPath": "/api/resource/v1/catalog/packages/019a0000-0000-7000-8000-000000000002/versions/019a0000-0000-7000-8000-000000000004/manifest",
+        "artifacts": [
+          {
+            "artifactId": "payload",
+            "digest": "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2",
+            "sizeBytes": 33,
+            "downloadPath": "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000013/artifacts/payload"
+          }
+        ],
+        "lease": {
+          "envelopeNotAfter": "2026-11-13T00:00:00Z",
+          "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revocationRevision": 3
+        },
+        "releaseSequence": 7,
+        "enabled": true
+      },
+      "expect": false
+    },
+    {
+      "id": "outbound-zero-installation-revision-rejected",
+      "operation": "dispatch-validation",
+      "input": {
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "manifestDownloadPath": "/api/resource/v1/catalog/packages/019a0000-0000-7000-8000-000000000002/versions/019a0000-0000-7000-8000-000000000004/manifest",
+        "artifacts": [
+          {
+            "artifactId": "payload",
+            "digest": "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2",
+            "sizeBytes": 33,
+            "downloadPath": "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000013/artifacts/payload"
+          }
+        ],
+        "lease": {
+          "envelopeNotAfter": "2026-11-13T00:00:00Z",
+          "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revocationRevision": 3
+        },
+        "releaseSequence": 7,
+        "enabled": true,
+        "installationRevision": 0
+      },
+      "expect": false
+    },
+    {
+      "id": "outbound-tombstone-must-carry-installation-revision",
+      "operation": "dispatch-validation",
+      "input": {
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "manifestDownloadPath": "/api/resource/v1/catalog/packages/019a0000-0000-7000-8000-000000000002/versions/019a0000-0000-7000-8000-000000000004/manifest",
+        "artifacts": [
+          {
+            "artifactId": "payload",
+            "digest": "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2",
+            "sizeBytes": 33,
+            "downloadPath": "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000013/artifacts/payload"
+          }
+        ],
+        "lease": {
+          "envelopeNotAfter": "2026-11-13T00:00:00Z",
+          "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revocationRevision": 3
+        },
+        "releaseSequence": 7,
+        "enabled": false,
+        "desiredState": "REMOVED"
+      },
+      "expect": false
+    },
+    {
+      "id": "outbound-tombstone-carries-installation-revision",
+      "operation": "dispatch-validation",
+      "input": {
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "manifestDownloadPath": "/api/resource/v1/catalog/packages/019a0000-0000-7000-8000-000000000002/versions/019a0000-0000-7000-8000-000000000004/manifest",
+        "artifacts": [
+          {
+            "artifactId": "payload",
+            "digest": "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2",
+            "sizeBytes": 33,
+            "downloadPath": "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000013/artifacts/payload"
+          }
+        ],
+        "lease": {
+          "envelopeNotAfter": "2026-11-13T00:00:00Z",
+          "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revocationRevision": 3
+        },
+        "releaseSequence": 7,
+        "enabled": false,
+        "installationRevision": 4,
+        "desiredState": "REMOVED"
+      },
+      "expect": true
     }
   ]
 }

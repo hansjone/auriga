@@ -151,6 +151,17 @@
       ],
       "additionalProperties": false
     },
+    "UnifiedResourceDispatchRef": {
+      "description": "Resource service outbound validation. Legacy readers use UnifiedResourceRef; every new dispatch must carry a positive installationRevision.",
+      "allOf": [{ "$ref": "#/$defs/UnifiedResourceRef" }],
+      "type": "object",
+      "properties": {
+        "installationRevision": {
+          "$ref": "#/$defs/UnifiedResourceRef/properties/installationRevision"
+        }
+      },
+      "required": ["installationRevision"]
+    },
     "UnifiedSelection": {
       "type": "object",
       "properties": {

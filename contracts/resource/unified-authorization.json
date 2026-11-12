@@ -82,6 +82,10 @@
     "revokedSecurityReviewCounts": false,
     "missingQualificationError": "common.forbidden",
     "insufficientPublicationQuorumError": "resource.review_required",
-    "fixtures": "security-review-fixtures.json"
+    "fixtures": "security-review-fixtures.json",
+    "revocationScope": {
+      "builtinOwner": "remove-owner-role",
+      "customRole": "revoke-permission-or-role"
+    }
   }
 }

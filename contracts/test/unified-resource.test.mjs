@@ -568,10 +568,6 @@ for (const fixture of transitions.cases) {
   });
 }
 
-import './security-review.test.mjs';
-
-import './installation-revision.test.mjs';
-
 test('resource refs carry positive safe installation revisions with additive transport compatibility', () => {
   const value = read('resource/installation-revision-fixtures.json').cases[0]
     .input.expected.resource;
@@ -596,8 +592,6 @@ test('resource refs carry positive safe installation revisions with additive tra
     );
   }
 });
-
-import './desired-state.test.mjs';
 
 test('desired state schema accepts additive legacy refs and rejects unknown states', () => {
   const resource = read('resource/installation-revision-fixtures.json').cases[0]

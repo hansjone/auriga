@@ -768,6 +768,34 @@
         "distinctReviewers": 2,
         "securityReviewers": 1
       }
+    },
+    {
+      "id": "security-permission-without-general-review-rejected",
+      "operation": "review-decision",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "principal": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "permissions": ["resource.versions.security_review"]
+        },
+        "review": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "role": "security",
+          "decision": "approve",
+          "versionRevision": 3,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "common.forbidden"
+      }
     }
   ]
 }

@@ -1,4 +1,4 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 const read = (file) =>
@@ -16,6 +16,10 @@ test('security qualification uses trusted current permission and owner-only defa
   assert.equal(policy.requireSameTenant, true);
   assert.equal(policy.clientRoleIsDeclarationOnly, true);
   assert.equal(policy.revocable, true);
+  assert.deepEqual(policy.revocationScope, {
+    builtinOwner: 'remove-owner-role',
+    customRole: 'revoke-permission-or-role',
+  });
   assert.equal(policy.independentlyGrantable, true);
   assert.equal(policy.authorMayReview, false);
   assert.equal(policy.revokedSecurityReviewCounts, false);

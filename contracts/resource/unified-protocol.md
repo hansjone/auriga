@@ -18,6 +18,8 @@ installationRevision 由 resource 服务（A）分配并持久化，是成员对
 
 期望值沿 UnifiedResourceRef.installationRevision（proto 字段 installation_revision=8）逐项传递：ResolveUnifiedResourcesResponse.resources → node InstanceSpec.unified_resources；UnifiedResourceWorkspace.Snapshot.resources 保存相同的期望条目。使用现有嵌套类型，不另造整批共用的 installationRevision，也不得从节点自报的 reports 推导期望值。JSON Schema/OpenAPI 只增加可选传输字段以保持既有结构兼容，但 A 的新下发必须填正整数；缺失字段或 proto 默认 0 都不能满足 applied 条件。
 
+A 下发每个资源条目前必须通过 `unified.schema.json#/$defs/UnifiedResourceDispatchRef` 校验。该 Schema 复用 UnifiedResourceRef 的字段定义并要求 installationRevision，覆盖正常资源和 REMOVED 墓碑。旧数据读取继续使用 UnifiedResourceRef。Snapshot 保留原 8 参数构造器，resources 默认为空列表，期望资源仍须由新下发补齐。desiredState 继续使用可选字段和缺失时的旧 enabled 推导规则。
+
 云端节点（D）和 Desktop 都原样回报下发的 installationRevision，不能自行分配或使用其他计数器代替。接收方按当前持久化的期望值比较 identity、installationRevision、selectionRevision、generation，四者全部相等且 observedGeneration 等于 generation 才可计为 applied；正常报告来源和宿主来源确认门禁继续生效。旧代次乱序回报不得覆盖新状态，不匹配返回 resource.state_conflict。续期后仍以原 installationRevision 接受回报，不能把续期误当安装更新。可复用夹具见 installation-revision-fixtures.json。
 
 ### 期望状态与卸载墓碑
@@ -80,7 +82,7 @@ guardian 全部转移、守卫和动作见 guardian-transitions.json。未列转
 
 ## 安全审核资格与发布复核
 
-安全审核资格唯一来源为权限 `resource.versions.security_review`。服务端从现有可信输入 `ResourceAccessInputs.permissions` 读取审核者在资源所属租户的当前有效权限，禁止从客户端请求、历史审核记录或其他租户权限推断资格。内置角色仅 owner 默认拥有，admin 不默认拥有；此权限可单独授予和撤销，不替代普通审核所需的 `resource.versions.review` 或其他既有授权门禁。owner 身份也不能绕过当前有效权限检查。
+安全审核资格唯一来源为权限 `resource.versions.security_review`。服务端从现有可信输入 `ResourceAccessInputs.permissions` 读取审核者在资源所属租户的当前有效权限，禁止从客户端请求、历史审核记录或其他租户权限推断资格。内置角色仅 owner 默认拥有，admin 不默认拥有。owner 权限由内置角色目录对齐，不能单独撤销其安全审核权限，移除 owner 角色才能撤掉这项来源。通过自定义角色授予的安全审核权限可以撤销。A、B 线按此范围实现撤销。此权限不替代普通审核所需的 `resource.versions.review` 或其他既有授权门禁，owner 身份仍须通过当前有效权限检查。
 
 客户端 `role=security` 只是职责声明。提交审核决定时核验当前资格，无资格、跨租户或作者自审返回 `common.forbidden`，不能降格为普通审核后接受。发布时再次按资源租户解析每名审核者的当前可信权限；资格被撤销、无法解析或租户不匹配的安全审核不再计入审核人数和安全审核人数，不沿用提交时的资格快照。有效普通审核仍可单独计数，但不能替代安全资格。资格无法确认或人数不足均拒绝发布，返回 `resource.review_required`。
 
