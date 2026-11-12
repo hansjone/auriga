@@ -3,6 +3,7 @@ package auriga.resource.api;
 import auriga.contracts.resource.v1.ResolveUnifiedResourcesResponse;
 import auriga.contracts.resource.v1.ResourceRevocationList;
 import auriga.contracts.resource.v1.UnifiedInstallationReport;
+import auriga.contracts.resource.v1.UnifiedResourceRef;
 import auriga.contracts.resource.v1.UnifiedSelection;
 import java.util.List;
 import java.util.UUID;
@@ -17,7 +18,10 @@ public interface UnifiedResourceWorkspace {
       long generation,
       long observedGeneration,
       boolean ready,
-      List<UnifiedInstallationReport> reports) {}
+      List<UnifiedInstallationReport> reports,
+      // Expected resources from resource resolution, including each installationRevision.
+      // Reports cannot supply their own expected counters. Missing/zero counters deny applied.
+      List<UnifiedResourceRef> resources) {}
 
   Snapshot snapshot(UUID tenant, UUID instance);
 

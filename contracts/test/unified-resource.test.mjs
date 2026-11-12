@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import Ajv from '../../services/contracts/node_modules/ajv/dist/2020.js';
 import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/index.js';
+import { parse as parseYaml } from '../../services/contracts/node_modules/yaml/dist/index.js';
 const root = new URL('../', import.meta.url);
 const read = (file) => JSON.parse(readFileSync(new URL(file, root), 'utf8'));
 const ajv = new Ajv({ strict: true, allErrors: true });
@@ -568,3 +569,30 @@ for (const fixture of transitions.cases) {
 }
 
 import './security-review.test.mjs';
+
+import './installation-revision.test.mjs';
+
+test('resource refs carry positive safe installation revisions with additive transport compatibility', () => {
+  const value = read('resource/installation-revision-fixtures.json').cases[0]
+    .input.expected.resource;
+  assert(check('unified', 'UnifiedResourceRef', value));
+  for (const installationRevision of [0, -1, 1.5, 9007199254740992])
+    assert(
+      !check('unified', 'UnifiedResourceRef', {
+        ...value,
+        installationRevision,
+      }),
+    );
+  const { installationRevision, ...legacy } = value;
+  assert.equal(installationRevision, 4);
+  assert(check('unified', 'UnifiedResourceRef', legacy));
+  for (const file of ['resource', 'workspace']) {
+    const spec = parseYaml(
+      readFileSync(new URL('openapi/' + file + '.yaml', root), 'utf8'),
+    );
+    assert.equal(
+      spec.components.schemas.UnifiedResourceRef.$ref,
+      '../resource/unified.schema.json#/$defs/UnifiedResourceRef',
+    );
+  }
+});

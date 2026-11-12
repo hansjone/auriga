@@ -667,6 +667,11 @@ export interface components {
       /** Format: int64 */
       releaseSequence: number;
       enabled: boolean;
+      /**
+       * Format: int64
+       * @description Resource-assigned persisted per-installation CAS revision. Preserved by signature renewal and echoed by node/Desktop reports. Omission is transport-compatible only: never accept applied without a positive expected revision.
+       */
+      installationRevision?: number;
     };
     UnifiedSelection: {
       identity: components['schemas']['UnifiedResourceIdentity'];

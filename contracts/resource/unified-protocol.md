@@ -12,6 +12,14 @@ UnifiedResourceIdentity 绑定可信 tenant、kind、packageId、versionId、严
 
 202 表示接受意图。applied 要求报告 identity、installationRevision、selectionRevision 和 generation 与当前期望完全相等，observedGeneration 等于 generation，且宿主公开 catalog 已确认名称与实际来源。member 来源仅表示成员自报，node 来源只能由已认证调度节点上报，服务端从认证通道决定来源。失败状态包括 failed、pending_restart、superseded、overridden、expired、revoked。失败保留 errorCode 和原安装，禁止把未知来源/状态计为 applied。云端 C 仅观察和回报宿主来源，D 为共享内容唯一写者。
 
+### installationRevision 的分配与传递
+
+installationRevision 由 resource 服务（A）分配并持久化，是成员对某资源的安装 CAS 代次，首次为 1。每次成功安装、更新、启用、停用或卸载都在同一事务内以当前代次为 CAS 前置条件加 1；失败的 CAS 不改变代次，幂等重放不重复增加。卸载保留代次记录，重新安装继续递增，不能重置为 1。签名或租约续期只刷新可信声明，不改变 installationRevision，也不改变既有选择代次。它不等同于 releaseSequence、selectionRevision 或 generation，同一批中的不同资源可有不同 installationRevision。
+
+期望值沿 UnifiedResourceRef.installationRevision（proto 字段 installation_revision=8）逐项传递：ResolveUnifiedResourcesResponse.resources → node InstanceSpec.unified_resources；UnifiedResourceWorkspace.Snapshot.resources 保存相同的期望条目。使用现有嵌套类型，不另造整批共用的 installationRevision，也不得从节点自报的 reports 推导期望值。JSON Schema/OpenAPI 只增加可选传输字段以保持既有结构兼容，但 A 的新下发必须填正整数；缺失字段或 proto 默认 0 都不能满足 applied 条件。
+
+云端节点（D）和 Desktop 都原样回报下发的 installationRevision，不能自行分配或使用其他计数器代替。接收方按当前持久化的期望值比较 identity、installationRevision、selectionRevision、generation，四者全部相等且 observedGeneration 等于 generation 才可计为 applied；正常报告来源和宿主来源确认门禁继续生效。旧代次乱序回报不得覆盖新状态，不匹配返回 resource.state_conflict。续期后仍以原 installationRevision 接受回报，不能把续期误当安装更新。可复用夹具见 installation-revision-fixtures.json。
+
 ## 信任、迁移与撤销
 
 所有签名按既有独立 release/revocation/downgrade 根验证，保留原 UTC 时间文本，JCS 去除顶层 signature 后验 Ed25519。v1 仅接受 schemaVersion=1/purpose=plugin，v2 仅接受 schemaVersion=2/purpose=resource。v2 artifactDigests 必须与原始清单集合精确一致、去重并按字典序排序。租约截止 expiresAt 必须等于 envelopeNotAfter 和 revocationsExpiresAt 的较早值，两个可信声明各自最多24小时。

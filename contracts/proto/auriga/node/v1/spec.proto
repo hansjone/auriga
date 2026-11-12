@@ -39,7 +39,8 @@ message InstanceSpec {
   // 不通过此字段替换根公钥。离线清单失效最迟 24h 停用受管资源，见 contracts/resource/README.md。
   repeated auriga.resource.v1.ResourceRevocationList resource_revocations = 16;
   repeated auriga.resource.v1.ResourceDowngradeAuthorization resource_downgrades = 17;
-  // Exact kind/version/manifest/artifacts/lease, sharing resource_selection_revision.
+  // Exact kind/version/manifest/artifacts/lease and per-entry installation_revision from resource.
+  // Echo each installation_revision unchanged in reports; sharing resource_selection_revision.
   repeated auriga.resource.v1.UnifiedResourceRef unified_resources = 18;
   repeated auriga.resource.v1.UnifiedDowngradeAuthorization unified_downgrades = 19;
 }

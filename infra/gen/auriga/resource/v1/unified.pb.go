@@ -446,6 +446,9 @@ type UnifiedResourceRef struct {
 	Lease                *UnifiedLease              `protobuf:"bytes,5,opt,name=lease,proto3" json:"lease,omitempty"`
 	ReleaseSequence      uint64                     `protobuf:"varint,6,opt,name=release_sequence,json=releaseSequence,proto3" json:"release_sequence,omitempty"`
 	Enabled              bool                       `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// Resource-assigned, persisted per-installation CAS counter; renewal preserves it.
+	// Required for applied acknowledgement; absent/zero is not an expected revision.
+	InstallationRevision uint64 `protobuf:"varint,8,opt,name=installation_revision,json=installationRevision,proto3" json:"installation_revision,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -527,6 +530,13 @@ func (x *UnifiedResourceRef) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *UnifiedResourceRef) GetInstallationRevision() uint64 {
+	if x != nil {
+		return x.InstallationRevision
+	}
+	return 0
 }
 
 type UnifiedSelection struct {
@@ -1763,12 +1773,13 @@ func (x *ResolveUnifiedResourcesRequest) GetSelections() []*UnifiedSelection {
 }
 
 type ResolveUnifiedResourcesResponse struct {
-	state             protoimpl.MessageState  `protogen:"open.v1"`
-	SelectionRevision uint64                  `protobuf:"varint,1,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
-	Resources         []*UnifiedResourceRef   `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
-	Revocations       *ResourceRevocationList `protobuf:"bytes,3,opt,name=revocations,proto3" json:"revocations,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	SelectionRevision uint64                 `protobuf:"varint,1,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	// Every entry carries its own resource-assigned installation_revision, never a batch counter.
+	Resources     []*UnifiedResourceRef   `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
+	Revocations   *ResourceRevocationList `protobuf:"bytes,3,opt,name=revocations,proto3" json:"revocations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ResolveUnifiedResourcesResponse) Reset() {
@@ -2093,7 +2104,7 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x06digest\x18\x02 \x01(\tR\x06digest\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x03 \x01(\x04R\tsizeBytes\x12#\n" +
-	"\rdownload_path\x18\x04 \x01(\tR\fdownloadPath\"\x9c\x03\n" +
+	"\rdownload_path\x18\x04 \x01(\tR\fdownloadPath\"\xd1\x03\n" +
 	"\x12UnifiedResourceRef\x12G\n" +
 	"\bidentity\x18\x01 \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12?\n" +
 	"\benvelope\x18\x02 \x01(\v2#.auriga.resource.v1.UnifiedEnvelopeR\benvelope\x124\n" +
@@ -2101,7 +2112,8 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\tartifacts\x18\x04 \x03(\v2+.auriga.resource.v1.UnifiedArtifactDownloadR\tartifacts\x126\n" +
 	"\x05lease\x18\x05 \x01(\v2 .auriga.resource.v1.UnifiedLeaseR\x05lease\x12)\n" +
 	"\x10release_sequence\x18\x06 \x01(\x04R\x0freleaseSequence\x12\x18\n" +
-	"\aenabled\x18\a \x01(\bR\aenabled\"s\n" +
+	"\aenabled\x18\a \x01(\bR\aenabled\x123\n" +
+	"\x15installation_revision\x18\b \x01(\x04R\x14installationRevision\"s\n" +
 	"\x10UnifiedSelection\x12G\n" +
 	"\bidentity\x18\x01 \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\"\xb7\x01\n" +

@@ -29,6 +29,8 @@ type UnifiedResourceRef struct {
 	Lease                UnifiedLease              `json:"lease"`
 	ReleaseSequence      int64                     `json:"releaseSequence"`
 	Enabled              bool                      `json:"enabled"`
+	// Resource-assigned persisted per-installation CAS revision. Preserved by signature renewal and echoed by node/Desktop reports. Omission is transport-compatible only: never accept applied without a positive expected revision.
+	InstallationRevision *int64 `json:"installationRevision,omitempty"`
 }
 
 type _UnifiedResourceRef UnifiedResourceRef
@@ -225,6 +227,38 @@ func (o *UnifiedResourceRef) SetEnabled(v bool) {
 	o.Enabled = v
 }
 
+// GetInstallationRevision returns the InstallationRevision field value if set, zero value otherwise.
+func (o *UnifiedResourceRef) GetInstallationRevision() int64 {
+	if o == nil || IsNil(o.InstallationRevision) {
+		var ret int64
+		return ret
+	}
+	return *o.InstallationRevision
+}
+
+// GetInstallationRevisionOk returns a tuple with the InstallationRevision field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedResourceRef) GetInstallationRevisionOk() (*int64, bool) {
+	if o == nil || IsNil(o.InstallationRevision) {
+		return nil, false
+	}
+	return o.InstallationRevision, true
+}
+
+// HasInstallationRevision returns a boolean if a field has been set.
+func (o *UnifiedResourceRef) HasInstallationRevision() bool {
+	if o != nil && !IsNil(o.InstallationRevision) {
+		return true
+	}
+
+	return false
+}
+
+// SetInstallationRevision gets a reference to the given int64 and assigns it to the InstallationRevision field.
+func (o *UnifiedResourceRef) SetInstallationRevision(v int64) {
+	o.InstallationRevision = &v
+}
+
 func (o UnifiedResourceRef) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -242,6 +276,9 @@ func (o UnifiedResourceRef) ToMap() (map[string]interface{}, error) {
 	toSerialize["lease"] = o.Lease
 	toSerialize["releaseSequence"] = o.ReleaseSequence
 	toSerialize["enabled"] = o.Enabled
+	if !IsNil(o.InstallationRevision) {
+		toSerialize["installationRevision"] = o.InstallationRevision
+	}
 	return toSerialize, nil
 }
 

@@ -267,7 +267,8 @@ type InstanceSpec struct {
 	// 不通过此字段替换根公钥。离线清单失效最迟 24h 停用受管资源，见 contracts/resource/README.md。
 	ResourceRevocations []*v1.ResourceRevocationList         `protobuf:"bytes,16,rep,name=resource_revocations,json=resourceRevocations,proto3" json:"resource_revocations,omitempty"`
 	ResourceDowngrades  []*v1.ResourceDowngradeAuthorization `protobuf:"bytes,17,rep,name=resource_downgrades,json=resourceDowngrades,proto3" json:"resource_downgrades,omitempty"`
-	// Exact kind/version/manifest/artifacts/lease, sharing resource_selection_revision.
+	// Exact kind/version/manifest/artifacts/lease and per-entry installation_revision from resource.
+	// Echo each installation_revision unchanged in reports; sharing resource_selection_revision.
 	UnifiedResources  []*v1.UnifiedResourceRef            `protobuf:"bytes,18,rep,name=unified_resources,json=unifiedResources,proto3" json:"unified_resources,omitempty"`
 	UnifiedDowngrades []*v1.UnifiedDowngradeAuthorization `protobuf:"bytes,19,rep,name=unified_downgrades,json=unifiedDowngrades,proto3" json:"unified_downgrades,omitempty"`
 	unknownFields     protoimpl.UnknownFields

@@ -64,6 +64,9 @@ message UnifiedResourceRef {
   UnifiedLease lease = 5;
   uint64 release_sequence = 6;
   bool enabled = 7;
+  // Resource-assigned, persisted per-installation CAS counter; renewal preserves it.
+  // Required for applied acknowledgement; absent/zero is not an expected revision.
+  uint64 installation_revision = 8;
 }
 
 message UnifiedSelection {
@@ -209,6 +212,7 @@ message ResolveUnifiedResourcesRequest {
 }
 message ResolveUnifiedResourcesResponse {
   uint64 selection_revision = 1;
+  // Every entry carries its own resource-assigned installation_revision, never a batch counter.
   repeated UnifiedResourceRef resources = 2;
   ResourceRevocationList revocations = 3;
 }
