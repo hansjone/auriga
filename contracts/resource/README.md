@@ -92,25 +92,26 @@ resource事务记录意图和resource.distribution_requested；workspace复核�
 首批不支持Range，带Range返回400 common.validation_failed；断线重新下载整包并重新鉴权。
 过期授权由workspace重新解析同锁定选择续发，不能延长客户端提供的旧expiry。
 
-## Skill 市场契约草案（未实现）
+## 统一资源包契约草案
 
-设计见 `docs/design/skill-market.zh.md`。本轮仅增 OpenAPI 的 `Skill*` schemas、
-operationId 和 `/api/resource/v1/skills/**`、`/api/resource/v1/admin/skills/**` 路径，
-操作标记 `x-auriga-contract-stage=draft`；不修改上文首批 plugin 边界或旧签名格式。
-草案覆盖共享 L3 包/版本/送审/审核/发布/下架，不表示服务路由或成员安装已支持。
-私有 skill 仅写当前 DSH 原生目录，不经总部上传或签名。
+统一主文档为 `docs/design/resource-package.zh.md`，skill专项为
+`docs/design/skill-market.zh.md`。本轮将第1轮Skill草案改成通用catalog命名空间，
+新增 `/api/resource/v1/catalog/**`、`/api/resource/v1/admin/catalog/**` 的12个操作，
+kind筛选支持plugin/skill/tool，均标记 `x-auriga-contract-stage=draft`。
 
-单加 kind 枚举不足：归档校验、manifest、purpose、严格签名 schema、PluginRef 和
-客户端均限制 plugin。SkillManifest 使用 text-only profile；上限5MiB压缩、20MiB解压、
-512条目、100倍压缩比；禁脚本、链接与执行位。原始 gzip 字节 SHA-256 为 digest，
-原始 manifest.json 字节 SHA-256 为 manifestDigest；packageId/versionId 由服务端生成。
-SkillEnvelope 草案为 schemaVersion=2、purpose=skill，完整字段 JCS/Ed25519，
-继承身份、ACL、高水位、独立信任根和最长24小时有效期；旧v1验证器必须拒绝。
+`package.schema.json` 定义auriga-resource.json公共字段与kind专属段，tool覆盖
+online/offline/git。清单位于制品外，制品按原字节SHA-256寻址，版本digest为清单原字节摘要。
+清单signature字段声明detached/Ed25519协议，实际签名为独立Envelope v2，签名完整覆盖
+租户、资源、版本、安全序号、清单及制品摘要和有效期。旧ResourceEnvelope v1与
+旧Version.digest插件归档语义继续由原契约表达。迁移通过来源关联与协议选择接入，
+保留撤销和高水位，原主干接口及schemas逐项保留。
 
-实现前须补独立签名 JSON Schema/向量、proto/workspace spec、票据、分发、重签、
-安装回报、审核详情与风险策略，不能用本 OpenAPI 草案绕过旧签名验证。
-SkillSelection 仅表达后续精确选择，不接旧 PluginRef 或插件安装接口。
-技能不运行独立进程；目录移除仅阻止新加载，不能抹掉会话历史。
-共享技能的有效加载截止 envelope.notAfter 与撤销清单 expiresAt 的较早者；
-紧急撤销/离线到期须由可信 guardian/workspace 停止受影响 DSH 并在恢复时新建会话。
-缺少可信停用能力的外部宿主首期不开放共享安装。以上取舍待用户审阅，不构成部署承诺。
+统一清单严格区分plugin、text-only skill与三种工具，运行时支持Node/Python/Java声明。
+Git锁完整commit并引用源码快照/锁文件制品，installScripts=false；在线工具无本地制品。
+共享草案先用L3，私有/开发者侧载只在当前DSH使用，冻结快照后显式送审。
+跨制品引用、归档路径、平台/入口关系、runtime兼容性与时间窗口需服务端语义校验。
+
+后续契约线补充密码学向量、proto/workspace引用、票据/制品下载、分发、安装回报、
+审核详情、重签、runtime目录与构建来源证明。当前草案不代表这些服务已实现。
+离线与撤销延续最长24小时租约；skill已载入正文的处置和guardian开放范围在主文档D4/D5
+留待用户决定。管理台页面复用、插件迁移成本与P1-P3依赖见主文档。

@@ -572,18 +572,67 @@ test('签名schema不接受缺省空数组、错purpose/租户/整数/时间表�
     false,
   );
 });
-const skillUri = pathToFileURL(path.join(root, 'openapi/resource.yaml')).href;
+const unifiedUri = pathToFileURL(path.join(root, 'openapi/resource.yaml')).href;
 ajv.addSchema({
-  $id: skillUri,
+  $id: unifiedUri,
   $defs: schemaRefs(read('openapi/resource.yaml').components.schemas),
 });
+const unifiedSchema = 'resource/package.schema.json';
+const artifactDigest = 'sha256:' + 'a'.repeat(64);
+function resourceManifest(kind) {
+  const common = {
+    schemaVersion: 1,
+    name: 'network-guide',
+    version: '1.0.0',
+    description: 'Network guide',
+    author: { displayName: 'Example author' },
+    license: 'MIT',
+    permissions: { tools: [], outboundHosts: [], dataAccess: [] },
+    runtimes: [],
+    artifacts: [
+      {
+        id: 'payload',
+        role: 'payload',
+        digest: artifactDigest,
+        sizeBytes: 1024,
+        mediaType: 'application/gzip',
+        os: 'any',
+        arch: 'any',
+      },
+    ],
+    signature: { mode: 'detached', algorithm: 'Ed25519' },
+    kind,
+  };
+  if (kind === 'skill')
+    common.skill = {
+      entry: 'SKILL.md',
+      contentProfile: 'text-only',
+      dshVersionRange: '>=0.2.1-rc.3',
+    };
+  if (kind === 'plugin')
+    common.plugin = {
+      packageName: '@example/plugin',
+      dshVersionRange: '>=0.2.1-rc.3',
+    };
+  if (kind === 'tool')
+    common.tool = {
+      delivery: 'offline',
+      entrypoints: [{ artifactId: 'payload', path: 'bin/tool.exe', args: [] }],
+    };
+  return common;
+}
 
-test('Skill草案限制共享L3与纯文本声明，不接受私有上传或客户端指定身份', () => {
-  const check = ajv.getSchema(skillUri + '#/$defs/SkillPackageInput');
+test('通用草案按kind创建共享资源，拒绝私有上传与客户端指定身份', () => {
+  const check = ajv.getSchema(unifiedUri + '#/$defs/UnifiedPackageInput');
+  for (const kind of ['plugin', 'skill', 'tool'])
+    assert.equal(
+      check({ name: 'network-guide', kind, visibility: 'members' }),
+      true,
+      JSON.stringify(check.errors),
+    );
   const body = { name: 'network-guide', kind: 'skill', visibility: 'members' };
-  assert.equal(check(body), true, JSON.stringify(check.errors));
   for (const extra of [
-    { kind: 'plugin' },
+    { kind: 'agent-preset' },
     { visibility: 'private' },
     { name: '../escape' },
     { ownerId: uuid },
@@ -591,39 +640,43 @@ test('Skill草案限制共享L3与纯文本声明，不接受私有上传或客�
     { level: 'l1' },
   ])
     assert.equal(check({ ...body, ...extra }), false, JSON.stringify(extra));
-  const manifest = ajv.getSchema(skillUri + '#/$defs/SkillManifest');
-  const value = {
-    schemaVersion: 1,
-    name: 'network-guide',
-    version: '1.0.0',
-    description: 'Network guide',
-    dshVersionRange: '>=0.2.1-rc.3',
-    contentProfile: 'text-only',
-    license: 'MIT',
-    outboundHosts: [],
-    requiredTools: [],
-  };
-  assert.equal(manifest(value), true, JSON.stringify(manifest.errors));
-  for (const extra of [
-    { contentProfile: 'code' },
-    { scripts: ['run.sh'] },
-    { schemaVersion: 2 },
-  ])
-    assert.equal(manifest({ ...value, ...extra }), false);
+  const manifest = validate(unifiedSchema, 'Manifest');
+  for (const kind of ['plugin', 'skill', 'tool'])
+    assert.equal(
+      manifest(resourceManifest(kind)),
+      true,
+      JSON.stringify(manifest.errors),
+    );
+  for (const mutate of [
+    (v) => (v.skill.contentProfile = 'code'),
+    (v) => (v.skill.scripts = ['run.sh']),
+    (v) => (v.schemaVersion = 2),
+    (v) => (v.version = '01.0.0'),
+    (v) => (v.plugin = { packageName: 'other', dshVersionRange: '*' }),
+    (v) => (v.artifacts[0].os = 'windows'),
+    (v) => (v.artifacts[0].sizeBytes = 5242881),
+    (v) => v.runtimes.push({ kind: 'node', versionRange: '*' }),
+  ]) {
+    const invalid = resourceManifest('skill');
+    mutate(invalid);
+    assert.equal(manifest(invalid), false);
+  }
 });
 
-test('Skill v2 envelope与plugin v1相互拒绝，禁止未知签名字段和错purpose', () => {
-  const check = ajv.getSchema(skillUri + '#/$defs/SkillEnvelope');
+test('通用v2与plugin v1签名结构相互拒绝，未知字段和purpose拒绝', () => {
+  const check = validate(unifiedSchema, 'Envelope');
   const plugin = read('resource/signature-vectors.json').cases[0].document;
   const value = clone(plugin);
   value.schemaVersion = 2;
-  Object.assign(value.statement, {
-    purpose: 'skill',
+  value.statement = {
+    purpose: 'resource',
+    kind: 'skill',
     name: 'network-guide',
-    os: 'any',
-    arch: 'any',
-    manifestDigest: 'sha256:' + 'a'.repeat(64),
-  });
+    version: '1.0.0',
+    manifestDigest: artifactDigest,
+    artifactDigests: [artifactDigest],
+    issuedAt: plugin.statement.issuedAt,
+  };
   assert.equal(check(value), true, JSON.stringify(check.errors));
   assert.equal(check(plugin), false);
   assert.equal(
@@ -637,9 +690,96 @@ test('Skill v2 envelope与plugin v1相互拒绝，禁止未知签名字段和错
     (v) => (v.unknown = true),
     (v) => (v.statement.script = 'run.sh'),
     (v) => (v.schemaVersion = 1),
+    (v) => v.statement.artifactDigests.push(artifactDigest),
   ]) {
     const invalid = clone(value);
     mutate(invalid);
     assert.equal(check(invalid), false);
   }
+});
+
+test('在线和Git工具保留不同制品与runtime要求，源码禁止启用安装脚本', () => {
+  const check = validate(unifiedSchema, 'Manifest');
+  const online = resourceManifest('tool');
+  online.artifacts = [];
+  online.tool = {
+    delivery: 'online',
+    protocol: 'mcp',
+    url: 'https://tools.example.com/mcp',
+    authentication: 'member_oauth',
+  };
+  assert.equal(check(online), true, JSON.stringify(check.errors));
+  const ipHttp = clone(online);
+  ipHttp.tool.protocol = 'web';
+  ipHttp.tool.url = 'http://192.0.2.10:8080/tool';
+  assert.equal(check(ipHttp), true, JSON.stringify(check.errors));
+  for (const mutate of [
+    (v) => v.artifacts.push(resourceManifest('skill').artifacts[0]),
+    (v) => (v.tool.url = 'file:///tmp/tool'),
+    (v) => (v.tool.entrypoints = []),
+    (v) => v.runtimes.push({ kind: 'python', versionRange: '>=3.12' }),
+  ]) {
+    const invalid = clone(online);
+    mutate(invalid);
+    assert.equal(check(invalid), false);
+  }
+  const git = resourceManifest('tool');
+  git.runtimes = [{ kind: 'node', versionRange: '>=24 <25' }];
+  git.artifacts = [
+    { ...git.artifacts[0], id: 'source', role: 'source_snapshot' },
+    {
+      ...git.artifacts[0],
+      id: 'lock',
+      role: 'lockfile',
+      mediaType: 'application/json',
+    },
+  ];
+  git.tool = {
+    delivery: 'git',
+    repository: 'https://git.example.com/tools/example.git',
+    commit: 'a'.repeat(40),
+    sourceArtifactId: 'source',
+    lockArtifactIds: ['lock'],
+    packageManager: 'npm',
+    installScripts: false,
+    entrypoint: { artifactId: 'source', path: 'src/main.js', args: [] },
+  };
+  assert.equal(check(git), true, JSON.stringify(check.errors));
+  for (const mutate of [
+    (v) => (v.tool.commit = 'main'),
+    (v) => (v.tool.installScripts = true),
+    (v) => (v.tool.lockArtifactIds = []),
+    (v) => (v.runtimes = []),
+    (v) => (v.tool.entrypoint.path = '../outside.js'),
+    (v) => (v.tool.entrypoint.path = 'C:\\outside.js'),
+    (v) => (v.artifacts[0].digest = 'sha256:INVALID'),
+  ]) {
+    const invalid = clone(git);
+    mutate(invalid);
+    assert.equal(check(invalid), false);
+  }
+});
+
+test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留原始清单字节', () => {
+  const spec = read('openapi/resource.yaml');
+  assert(!Object.keys(spec.paths).some((p) => p.includes('/skills/')));
+  const paths = Object.entries(spec.paths).filter(([p]) =>
+    p.includes('/catalog/'),
+  );
+  assert.equal(paths.length, 10);
+  for (const [path, methods] of paths) {
+    for (const [method, operation] of Object.entries(methods)) {
+      assert(operation.operationId.startsWith('Unified'));
+      assert.equal(operation['x-auriga-contract-stage'], 'draft');
+      if (method === 'get' && !path.includes('{')) {
+        const kind = operation.parameters.find((p) => p.name === 'kind');
+        assert.deepEqual(kind.schema.enum, ['plugin', 'skill', 'tool']);
+      }
+    }
+  }
+  const upload =
+    spec.paths['/api/resource/v1/catalog/packages/{packageId}/versions'].post;
+  const multipart = upload.requestBody.content['multipart/form-data'].schema;
+  assert.equal(multipart.properties.manifest.format, 'binary');
+  assert.equal(multipart.properties.artifacts.type, 'array');
 });

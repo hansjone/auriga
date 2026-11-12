@@ -496,33 +496,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/skills/packages': {
+  '/api/resource/v1/catalog/packages': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    get: operations['SkillListResourcePackages'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    get: operations['UnifiedListResourcePackages'];
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    post: operations['SkillCreateResourcePackage'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    post: operations['UnifiedCreateResourcePackage'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/skills/packages/{packageId}': {
+  '/api/resource/v1/catalog/packages/{packageId}': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    get: operations['SkillGetResourcePackage'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    get: operations['UnifiedGetResourcePackage'];
     put?: never;
     post?: never;
     delete?: never;
@@ -531,33 +531,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/skills/packages/{packageId}/versions': {
+  '/api/resource/v1/catalog/packages/{packageId}/versions': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    get: operations['SkillListResourceVersions'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    get: operations['UnifiedListResourceVersions'];
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    post: operations['SkillUploadResourceVersion'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    post: operations['UnifiedUploadResourceVersion'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/skills/packages/{packageId}/versions/{versionId}': {
+  '/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    get: operations['SkillGetResourceVersion'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    get: operations['UnifiedGetResourceVersion'];
     put?: never;
     post?: never;
     delete?: never;
@@ -566,7 +566,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/skills/packages/{packageId}/versions/{versionId}/submissions': {
+  '/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/submissions': {
     parameters: {
       query?: never;
       header?: never;
@@ -575,23 +575,23 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    post: operations['SkillSubmitResourceVersion'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    post: operations['UnifiedSubmitResourceVersion'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/admin/skills/review': {
+  '/api/resource/v1/admin/catalog/review': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    get: operations['SkillListMarketAdminReview'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    get: operations['UnifiedListMarketAdminReview'];
     put?: never;
     post?: never;
     delete?: never;
@@ -600,15 +600,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/admin/skills/published': {
+  '/api/resource/v1/admin/catalog/published': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    get: operations['SkillListMarketAdminPublished'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    get: operations['UnifiedListMarketAdminPublished'];
     put?: never;
     post?: never;
     delete?: never;
@@ -617,7 +617,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/admin/skills/reviews/{reviewId}/decisions': {
+  '/api/resource/v1/admin/catalog/reviews/{reviewId}/decisions': {
     parameters: {
       query?: never;
       header?: never;
@@ -626,15 +626,15 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    post: operations['SkillDecideResourceReview'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    post: operations['UnifiedDecideResourceReview'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/admin/skills/packages/{packageId}/versions/{versionId}/publications': {
+  '/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/publications': {
     parameters: {
       query?: never;
       header?: never;
@@ -643,15 +643,15 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    post: operations['SkillPublishResourceVersion'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    post: operations['UnifiedPublishResourceVersion'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/api/resource/v1/admin/skills/packages/{packageId}/versions/{versionId}/withdrawals': {
+  '/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/withdrawals': {
     parameters: {
       query?: never;
       header?: never;
@@ -660,8 +660,8 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation. */
-    post: operations['SkillWithdrawResourceVersion'];
+    /** @description DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior. */
+    post: operations['UnifiedWithdrawResourceVersion'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1051,40 +1051,26 @@ export interface components {
       /** Format: uuid */
       nextAfterPackageId?: string;
     };
-    /** @description Draft text-only archive manifest. Exact name/description agreement with SKILL.md is required. Tool and outbound declarations grant no permissions. Validate strict SemVer server-side. */
-    SkillManifest: {
-      /** @constant */
-      schemaVersion: 1;
+    UnifiedManifest: components['schemas']['Manifest'];
+    UnifiedEnvelope: components['schemas']['Envelope'];
+    /** @description Draft shared L3 resource. Tenant, owner and level are server-derived. Local private and developer sideloads are not uploaded automatically. */
+    UnifiedPackageInput: {
       name: string;
-      version: string;
-      description: string;
-      dshVersionRange: string;
-      /** @constant */
-      contentProfile: 'text-only';
-      license: string;
-      /** Format: uri */
-      sourceUrl?: string;
-      outboundHosts: string[];
-      requiredTools: string[];
-    };
-    /** @description Draft shared L3 skill creation only. Tenant, author and level are server-derived. Local private skills never use this endpoint. */
-    SkillPackageInput: {
-      name: string;
-      /** @constant */
-      kind: 'skill';
+      /** @enum {string} */
+      kind: 'plugin' | 'skill' | 'tool';
       /** @enum {string} */
       visibility: 'tenant' | 'members' | 'groups';
       groupIds?: string[];
     };
-    /** @description Draft shared L3 skill. Mandatory L0-L2 skill governance is outside this proposal. */
-    SkillPackage: {
+    /** @description Draft shared L3 resource. Legacy plugin levels remain available through their existing contracts. */
+    UnifiedPackage: {
       /** Format: uuid */
       id: string;
       /** Format: uuid */
       tenantId: string;
       name: string;
-      /** @constant */
-      kind: 'skill';
+      /** @enum {string} */
+      kind: 'plugin' | 'skill' | 'tool';
       /** Format: uuid */
       ownerId: string;
       /** @enum {string} */
@@ -1100,45 +1086,15 @@ export interface components {
       /** Format: uuid */
       defaultVersionId: string | null;
     };
-    SkillStatement: {
-      /** @constant */
-      purpose: 'skill';
-      name: string;
-      version: string;
-      /** @constant */
-      os: 'any';
-      /** @constant */
-      arch: 'any';
-      digest: components['schemas']['Digest'];
-      issuedAt: components['schemas']['Time'];
-      manifestDigest: components['schemas']['Digest'];
-    };
-    /** @description Draft v2 strict JCS/Ed25519 envelope with purpose=skill. Legacy v1 validators must reject it. Maximum validity 24 hours. Final signature JSON Schema, vectors and proto are required before implementation. */
-    SkillEnvelope: {
-      /** @constant */
-      schemaVersion: 2;
-      tenantId: components['schemas']['Uuid'];
-      packageId: components['schemas']['Uuid'];
-      versionId: components['schemas']['Uuid'];
-      /** @description 同一租户/包的单调安全序号，不能用 SemVer 或 build metadata 替代。 */
-      releaseSequence: components['schemas']['Counter'];
-      /** @description 必须晚于 statement.issuedAt，最长 24 小时；续签不改变身份/字节/安全序号且必须重新授权审计。 */
-      notAfter: components['schemas']['Time'];
-      statement: components['schemas']['SkillStatement'];
-      signature: components['schemas']['Signature'];
-    };
-    /** @description Draft skill version. Reviews bind digest and revision. Published bytes are immutable. */
-    SkillVersion: {
+    /** @description Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable. */
+    UnifiedVersion: {
       /** Format: uuid */
       id: string;
       /** Format: uuid */
       packageId: string;
       version: string;
+      /** @description SHA-256 of exact immutable auriga-resource.json UTF-8 bytes. Artifact digests are in the manifest. Legacy Version.digest still addresses plugin archive bytes. */
       digest: components['schemas']['Digest'];
-      /** Format: int64 */
-      sizeBytes: number;
-      /** @constant */
-      mediaType: 'application/gzip';
       /** @enum {string} */
       state:
         | 'draft'
@@ -1152,36 +1108,24 @@ export interface components {
       revision: number;
       /** Format: int64 */
       releaseSequence?: number;
-      resourceEnvelope?: components['schemas']['SkillEnvelope'];
+      resourceEnvelope?: components['schemas']['Envelope'];
       /** Format: date-time */
       createdAt: string;
-      manifest: components['schemas']['SkillManifest'];
+      manifest: components['schemas']['Manifest'];
     };
-    /** @description Draft upload: original gzip SHA-256, exact archive manifest agreement, 5 MiB compressed, 20 MiB expanded, 512 entries, ratio 100. UTF-8 text only; no scripts, links or executable modes. */
-    SkillUploadMetadata: {
-      version: string;
+    /** @description Draft multipart upload. expectedDigest is exact manifest bytes SHA-256. Include manifest as a binary part, plus one binary artifacts part per manifest artifact in array order. Online tools use no artifacts. Validate all hashes before committing the immutable version. */
+    UnifiedUploadMetadata: {
+      version: components['schemas']['$defs-Version'];
       expectedDigest: components['schemas']['Digest'];
-      manifest: components['schemas']['SkillManifest'];
-      changeNotes: string;
+      changeNotes?: string;
     };
-    SkillPackagePage: {
-      items: components['schemas']['SkillPackage'][];
+    UnifiedPackagePage: {
+      items: components['schemas']['UnifiedPackage'][];
       nextCursor?: string;
     };
-    SkillVersionPage: {
-      items: components['schemas']['SkillVersion'][];
+    UnifiedVersionPage: {
+      items: components['schemas']['UnifiedVersion'][];
       nextCursor?: string;
-    };
-    /** @description Draft exact selection for future workspace/member contracts. No caller-controlled filesystem paths or download URLs. */
-    SkillSelection: {
-      /** @constant */
-      kind: 'skill';
-      /** Format: uuid */
-      packageId: string;
-      /** Format: uuid */
-      versionId: string;
-      digest: components['schemas']['Digest'];
-      releaseSequence: components['schemas']['Counter'];
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -1245,6 +1189,241 @@ export interface components {
       versionId: components['schemas']['Uuid'];
       digest: components['schemas']['Digest'];
     };
+    Name: string;
+    '$defs-Version': string;
+    '$defs-Statement': {
+      /** @constant */
+      purpose: 'resource';
+      /** @enum {string} */
+      kind: 'plugin' | 'skill' | 'tool';
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      manifestDigest: components['schemas']['Digest'];
+      artifactDigests: components['schemas']['Digest'][];
+      issuedAt: components['schemas']['Time'];
+    };
+    Envelope: {
+      /** @constant */
+      schemaVersion: 2;
+      tenantId: components['schemas']['Uuid'];
+      packageId: components['schemas']['Uuid'];
+      versionId: components['schemas']['Uuid'];
+      releaseSequence: components['schemas']['Counter'];
+      notAfter: components['schemas']['Time'];
+      statement: components['schemas']['$defs-Statement'];
+      signature: components['schemas']['Signature'];
+    };
+    Permissions: {
+      tools: string[];
+      outboundHosts: string[];
+      dataAccess: (
+        'workspace_read' | 'workspace_write' | 'user_selected_files'
+      )[];
+    };
+    Runtime: {
+      /** @enum {string} */
+      kind: 'node' | 'python' | 'java';
+      versionRange: string;
+    };
+    Artifact: {
+      id: components['schemas']['Name'];
+      /** @enum {string} */
+      role: 'payload' | 'source_snapshot' | 'lockfile';
+      digest: components['schemas']['Digest'];
+      sizeBytes: number;
+      /** @enum {string} */
+      mediaType:
+        | 'application/gzip'
+        | 'application/octet-stream'
+        | 'application/json'
+        | 'text/plain';
+      /** @enum {string} */
+      os: 'linux' | 'windows' | 'any';
+      /** @enum {string} */
+      arch: 'amd64' | 'arm64' | 'any';
+    };
+    Plugin: {
+      packageName: string;
+      dshVersionRange: string;
+    };
+    PluginManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'plugin';
+      plugin: components['schemas']['Plugin'];
+    };
+    SkillArtifact: {
+      id: components['schemas']['Name'];
+      /** @constant */
+      role: 'payload';
+      digest: components['schemas']['Digest'];
+      sizeBytes: number;
+      /** @constant */
+      mediaType: 'application/gzip';
+      /** @constant */
+      os: 'any';
+      /** @constant */
+      arch: 'any';
+    };
+    Skill: {
+      /** @constant */
+      entry: 'SKILL.md';
+      /** @constant */
+      contentProfile: 'text-only';
+      dshVersionRange: string;
+    };
+    SkillManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['SkillArtifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'skill';
+      skill: components['schemas']['Skill'];
+    };
+    OnlineTool: {
+      /** @constant */
+      delivery: 'online';
+      /** @enum {string} */
+      protocol: 'web' | 'mcp';
+      /** Format: uri */
+      url: string;
+      /** @enum {string} */
+      authentication: 'none' | 'member_oauth' | 'platform_proxy';
+    };
+    OnlineManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['OnlineTool'];
+    };
+    RelativePath: string;
+    EntryPoint: {
+      artifactId: components['schemas']['Name'];
+      path: components['schemas']['RelativePath'];
+      args: string[];
+    };
+    OfflineTool: {
+      /** @constant */
+      delivery: 'offline';
+      entrypoints: components['schemas']['EntryPoint'][];
+    };
+    OfflineManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['OfflineTool'];
+    };
+    GitTool: {
+      /** @constant */
+      delivery: 'git';
+      /** Format: uri */
+      repository: string;
+      commit: string;
+      sourceArtifactId: components['schemas']['Name'];
+      lockArtifactIds: components['schemas']['Name'][];
+      /** @enum {string} */
+      packageManager: 'npm' | 'pnpm' | 'pip' | 'maven' | 'gradle';
+      /** @constant */
+      installScripts: false;
+      entrypoint: components['schemas']['EntryPoint'];
+    };
+    GitManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['GitTool'];
+    };
+    ToolManifest:
+      | components['schemas']['OnlineManifest']
+      | components['schemas']['OfflineManifest']
+      | components['schemas']['GitManifest'];
+    Manifest:
+      | components['schemas']['PluginManifest']
+      | components['schemas']['SkillManifest']
+      | components['schemas']['ToolManifest'];
   };
   responses: never;
   parameters: {
@@ -5138,12 +5317,13 @@ export interface operations {
       };
     };
   };
-  SkillListResourcePackages: {
+  UnifiedListResourcePackages: {
     parameters: {
       query?: {
         limit?: components['parameters']['Limit'];
         /** @description 上一页响应里的 nextCursor。 */
         cursor?: components['parameters']['Cursor'];
+        kind?: 'plugin' | 'skill' | 'tool';
       };
       header?: never;
       path?: never;
@@ -5157,7 +5337,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillPackagePage'];
+          'application/json': components['schemas']['UnifiedPackagePage'];
         };
       };
       /** @description common.validation_failed */
@@ -5252,7 +5432,7 @@ export interface operations {
       };
     };
   };
-  SkillCreateResourcePackage: {
+  UnifiedCreateResourcePackage: {
     parameters: {
       query?: never;
       header?: {
@@ -5263,7 +5443,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['SkillPackageInput'];
+        'application/json': components['schemas']['UnifiedPackageInput'];
       };
     };
     responses: {
@@ -5274,7 +5454,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillPackage'];
+          'application/json': components['schemas']['UnifiedPackage'];
         };
       };
       /** @description common.validation_failed */
@@ -5369,7 +5549,7 @@ export interface operations {
       };
     };
   };
-  SkillGetResourcePackage: {
+  UnifiedGetResourcePackage: {
     parameters: {
       query?: never;
       header?: never;
@@ -5387,7 +5567,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillPackage'];
+          'application/json': components['schemas']['UnifiedPackage'];
         };
       };
       /** @description common.validation_failed */
@@ -5482,7 +5662,7 @@ export interface operations {
       };
     };
   };
-  SkillListResourceVersions: {
+  UnifiedListResourceVersions: {
     parameters: {
       query?: {
         limit?: components['parameters']['Limit'];
@@ -5503,7 +5683,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillVersionPage'];
+          'application/json': components['schemas']['UnifiedVersionPage'];
         };
       };
       /** @description common.validation_failed */
@@ -5598,7 +5778,7 @@ export interface operations {
       };
     };
   };
-  SkillUploadResourceVersion: {
+  UnifiedUploadResourceVersion: {
     parameters: {
       query?: never;
       header: {
@@ -5614,9 +5794,10 @@ export interface operations {
     requestBody: {
       content: {
         'multipart/form-data': {
-          metadata: components['schemas']['SkillUploadMetadata'];
+          metadata: components['schemas']['UnifiedUploadMetadata'];
           /** Format: binary */
-          archive: string;
+          manifest: string;
+          artifacts: string[];
         };
       };
     };
@@ -5628,7 +5809,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillVersion'];
+          'application/json': components['schemas']['UnifiedVersion'];
         };
       };
       /** @description common.validation_failed */
@@ -5732,7 +5913,7 @@ export interface operations {
       };
     };
   };
-  SkillGetResourceVersion: {
+  UnifiedGetResourceVersion: {
     parameters: {
       query?: never;
       header?: never;
@@ -5751,7 +5932,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillVersion'];
+          'application/json': components['schemas']['UnifiedVersion'];
         };
       };
       /** @description common.validation_failed */
@@ -5846,7 +6027,7 @@ export interface operations {
       };
     };
   };
-  SkillSubmitResourceVersion: {
+  UnifiedSubmitResourceVersion: {
     parameters: {
       query?: never;
       header: {
@@ -5968,12 +6149,13 @@ export interface operations {
       };
     };
   };
-  SkillListMarketAdminReview: {
+  UnifiedListMarketAdminReview: {
     parameters: {
       query?: {
         limit?: components['parameters']['Limit'];
         /** @description 上一页响应里的 nextCursor。 */
         cursor?: components['parameters']['Cursor'];
+        kind?: 'plugin' | 'skill' | 'tool';
       };
       header?: never;
       path?: never;
@@ -5987,7 +6169,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillVersionPage'];
+          'application/json': components['schemas']['UnifiedVersionPage'];
         };
       };
       /** @description common.validation_failed */
@@ -6082,12 +6264,13 @@ export interface operations {
       };
     };
   };
-  SkillListMarketAdminPublished: {
+  UnifiedListMarketAdminPublished: {
     parameters: {
       query?: {
         limit?: components['parameters']['Limit'];
         /** @description 上一页响应里的 nextCursor。 */
         cursor?: components['parameters']['Cursor'];
+        kind?: 'plugin' | 'skill' | 'tool';
       };
       header?: never;
       path?: never;
@@ -6101,7 +6284,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillVersionPage'];
+          'application/json': components['schemas']['UnifiedVersionPage'];
         };
       };
       /** @description common.validation_failed */
@@ -6196,7 +6379,7 @@ export interface operations {
       };
     };
   };
-  SkillDecideResourceReview: {
+  UnifiedDecideResourceReview: {
     parameters: {
       query?: never;
       header: {
@@ -6317,7 +6500,7 @@ export interface operations {
       };
     };
   };
-  SkillPublishResourceVersion: {
+  UnifiedPublishResourceVersion: {
     parameters: {
       query?: never;
       header: {
@@ -6344,7 +6527,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillVersion'];
+          'application/json': components['schemas']['UnifiedVersion'];
         };
       };
       /** @description common.validation_failed */
@@ -6448,7 +6631,7 @@ export interface operations {
       };
     };
   };
-  SkillWithdrawResourceVersion: {
+  UnifiedWithdrawResourceVersion: {
     parameters: {
       query?: never;
       header: {
@@ -6475,7 +6658,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['SkillVersion'];
+          'application/json': components['schemas']['UnifiedVersion'];
         };
       };
       /** @description common.validation_failed */

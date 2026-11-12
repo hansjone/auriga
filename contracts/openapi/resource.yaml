@@ -5396,13 +5396,13 @@
         }
       }
     },
-    "/api/resource/v1/skills/packages": {
+    "/api/resource/v1/catalog/packages": {
       "get": {
-        "operationId": "SkillListResourcePackages",
+        "operationId": "UnifiedListResourcePackages",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5422,6 +5422,19 @@
           },
           {
             "$ref": "./common.yaml#/components/parameters/Cursor"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "plugin",
+                "skill",
+                "tool"
+              ]
+            }
           }
         ],
         "responses": {
@@ -5430,7 +5443,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillPackagePage"
+                  "$ref": "#/components/schemas/UnifiedPackagePage"
                 }
               }
             }
@@ -5539,11 +5552,11 @@
         "x-auriga-contract-stage": "draft"
       },
       "post": {
-        "operationId": "SkillCreateResourcePackage",
+        "operationId": "UnifiedCreateResourcePackage",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.packages.upload",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5568,7 +5581,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillPackage"
+                  "$ref": "#/components/schemas/UnifiedPackage"
                 }
               }
             },
@@ -5684,7 +5697,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SkillPackageInput"
+                "$ref": "#/components/schemas/UnifiedPackageInput"
               }
             }
           }
@@ -5692,13 +5705,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/skills/packages/{packageId}": {
+    "/api/resource/v1/catalog/packages/{packageId}": {
       "get": {
-        "operationId": "SkillGetResourcePackage",
+        "operationId": "UnifiedGetResourcePackage",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5729,7 +5742,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillPackage"
+                  "$ref": "#/components/schemas/UnifiedPackage"
                 }
               }
             },
@@ -5843,13 +5856,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/skills/packages/{packageId}/versions": {
+    "/api/resource/v1/catalog/packages/{packageId}/versions": {
       "get": {
-        "operationId": "SkillListResourceVersions",
+        "operationId": "UnifiedListResourceVersions",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5886,7 +5899,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillVersionPage"
+                  "$ref": "#/components/schemas/UnifiedVersionPage"
                 }
               }
             }
@@ -5995,11 +6008,11 @@
         "x-auriga-contract-stage": "draft"
       },
       "post": {
-        "operationId": "SkillUploadResourceVersion",
+        "operationId": "UnifiedUploadResourceVersion",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.packages.upload",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6052,7 +6065,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillVersion"
+                  "$ref": "#/components/schemas/UnifiedVersion"
                 }
               }
             },
@@ -6181,16 +6194,26 @@
                 "type": "object",
                 "properties": {
                   "metadata": {
-                    "$ref": "#/components/schemas/SkillUploadMetadata"
+                    "$ref": "#/components/schemas/UnifiedUploadMetadata"
                   },
-                  "archive": {
+                  "manifest": {
                     "type": "string",
                     "format": "binary"
+                  },
+                  "artifacts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "minItems": 0,
+                    "maxItems": 32
                   }
                 },
                 "required": [
                   "metadata",
-                  "archive"
+                  "manifest",
+                  "artifacts"
                 ],
                 "additionalProperties": false
               },
@@ -6198,8 +6221,11 @@
                 "metadata": {
                   "contentType": "application/json"
                 },
-                "archive": {
-                  "contentType": "application/gzip"
+                "manifest": {
+                  "contentType": "application/json"
+                },
+                "artifacts": {
+                  "contentType": "application/octet-stream"
                 }
               }
             }
@@ -6209,13 +6235,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/skills/packages/{packageId}/versions/{versionId}": {
+    "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}": {
       "get": {
-        "operationId": "SkillGetResourceVersion",
+        "operationId": "UnifiedGetResourceVersion",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6255,7 +6281,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillVersion"
+                  "$ref": "#/components/schemas/UnifiedVersion"
                 }
               }
             },
@@ -6369,13 +6395,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/skills/packages/{packageId}/versions/{versionId}/submissions": {
+    "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/submissions": {
       "post": {
-        "operationId": "SkillSubmitResourceVersion",
+        "operationId": "UnifiedSubmitResourceVersion",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.versions.submit",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6555,13 +6581,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/admin/skills/review": {
+    "/api/resource/v1/admin/catalog/review": {
       "get": {
-        "operationId": "SkillListMarketAdminReview",
+        "operationId": "UnifiedListMarketAdminReview",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.versions.review",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6582,6 +6608,19 @@
           },
           {
             "$ref": "./common.yaml#/components/parameters/Cursor"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "plugin",
+                "skill",
+                "tool"
+              ]
+            }
           }
         ],
         "responses": {
@@ -6590,7 +6629,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillVersionPage"
+                  "$ref": "#/components/schemas/UnifiedVersionPage"
                 }
               }
             }
@@ -6701,13 +6740,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/admin/skills/published": {
+    "/api/resource/v1/admin/catalog/published": {
       "get": {
-        "operationId": "SkillListMarketAdminPublished",
+        "operationId": "UnifiedListMarketAdminPublished",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6728,6 +6767,19 @@
           },
           {
             "$ref": "./common.yaml#/components/parameters/Cursor"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "plugin",
+                "skill",
+                "tool"
+              ]
+            }
           }
         ],
         "responses": {
@@ -6736,7 +6788,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillVersionPage"
+                  "$ref": "#/components/schemas/UnifiedVersionPage"
                 }
               }
             }
@@ -6847,13 +6899,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/admin/skills/reviews/{reviewId}/decisions": {
+    "/api/resource/v1/admin/catalog/reviews/{reviewId}/decisions": {
       "post": {
-        "operationId": "SkillDecideResourceReview",
+        "operationId": "UnifiedDecideResourceReview",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.versions.review",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7025,13 +7077,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/admin/skills/packages/{packageId}/versions/{versionId}/publications": {
+    "/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/publications": {
       "post": {
-        "operationId": "SkillPublishResourceVersion",
+        "operationId": "UnifiedPublishResourceVersion",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7095,7 +7147,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillVersion"
+                  "$ref": "#/components/schemas/UnifiedVersion"
                 }
               }
             },
@@ -7231,13 +7283,13 @@
         "x-auriga-contract-stage": "draft"
       }
     },
-    "/api/resource/v1/admin/skills/packages/{packageId}/versions/{versionId}/withdrawals": {
+    "/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/withdrawals": {
       "post": {
-        "operationId": "SkillWithdrawResourceVersion",
+        "operationId": "UnifiedWithdrawResourceVersion",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Shared L3 skill only. Local private content is never uploaded. Enforce live ACL, tenant identity, ETag, idempotency, and author/reviewer/publisher separation.",
+        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7301,7 +7353,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillVersion"
+                  "$ref": "#/components/schemas/UnifiedVersion"
                 }
               }
             },
@@ -8675,84 +8727,13 @@
         ],
         "additionalProperties": false
       },
-      "SkillManifest": {
-        "type": "object",
-        "properties": {
-          "schemaVersion": {
-            "type": "integer",
-            "const": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64,
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          },
-          "version": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "description": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1024
-          },
-          "dshVersionRange": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "contentProfile": {
-            "type": "string",
-            "const": "text-only"
-          },
-          "license": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "sourceUrl": {
-            "type": "string",
-            "format": "uri",
-            "maxLength": 2048
-          },
-          "outboundHosts": {
-            "type": "array",
-            "maxItems": 32,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 253
-            }
-          },
-          "requiredTools": {
-            "type": "array",
-            "maxItems": 32,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            }
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "name",
-          "version",
-          "description",
-          "dshVersionRange",
-          "contentProfile",
-          "license",
-          "outboundHosts",
-          "requiredTools"
-        ],
-        "additionalProperties": false,
-        "description": "Draft text-only archive manifest. Exact name/description agreement with SKILL.md is required. Tool and outbound declarations grant no permissions. Validate strict SemVer server-side."
+      "UnifiedManifest": {
+        "$ref": "../resource/package.schema.json#/$defs/Manifest"
       },
-      "SkillPackageInput": {
+      "UnifiedEnvelope": {
+        "$ref": "../resource/package.schema.json#/$defs/Envelope"
+      },
+      "UnifiedPackageInput": {
         "type": "object",
         "properties": {
           "name": {
@@ -8763,7 +8744,11 @@
           },
           "kind": {
             "type": "string",
-            "const": "skill"
+            "enum": [
+              "plugin",
+              "skill",
+              "tool"
+            ]
           },
           "visibility": {
             "type": "string",
@@ -8789,9 +8774,9 @@
           "visibility"
         ],
         "additionalProperties": false,
-        "description": "Draft shared L3 skill creation only. Tenant, author and level are server-derived. Local private skills never use this endpoint."
+        "description": "Draft shared L3 resource. Tenant, owner and level are server-derived. Local private and developer sideloads are not uploaded automatically."
       },
-      "SkillPackage": {
+      "UnifiedPackage": {
         "type": "object",
         "properties": {
           "id": {
@@ -8810,7 +8795,11 @@
           },
           "kind": {
             "type": "string",
-            "const": "skill"
+            "enum": [
+              "plugin",
+              "skill",
+              "tool"
+            ]
           },
           "ownerId": {
             "type": "string",
@@ -8875,101 +8864,9 @@
           "defaultVersionId"
         ],
         "additionalProperties": false,
-        "description": "Draft shared L3 skill. Mandatory L0-L2 skill governance is outside this proposal."
+        "description": "Draft shared L3 resource. Legacy plugin levels remain available through their existing contracts."
       },
-      "SkillStatement": {
-        "type": "object",
-        "properties": {
-          "purpose": {
-            "type": "string",
-            "const": "skill"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64,
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          },
-          "version": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "os": {
-            "type": "string",
-            "const": "any"
-          },
-          "arch": {
-            "type": "string",
-            "const": "any"
-          },
-          "digest": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Digest"
-          },
-          "issuedAt": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Time"
-          },
-          "manifestDigest": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Digest"
-          }
-        },
-        "required": [
-          "purpose",
-          "name",
-          "version",
-          "os",
-          "arch",
-          "digest",
-          "issuedAt",
-          "manifestDigest"
-        ],
-        "additionalProperties": false
-      },
-      "SkillEnvelope": {
-        "type": "object",
-        "properties": {
-          "schemaVersion": {
-            "type": "integer",
-            "const": 2
-          },
-          "tenantId": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Uuid"
-          },
-          "packageId": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Uuid"
-          },
-          "versionId": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Uuid"
-          },
-          "releaseSequence": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Counter",
-            "description": "同一租户/包的单调安全序号，不能用 SemVer 或 build metadata 替代。"
-          },
-          "notAfter": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Time",
-            "description": "必须晚于 statement.issuedAt，最长 24 小时；续签不改变身份/字节/安全序号且必须重新授权审计。"
-          },
-          "statement": {
-            "$ref": "#/components/schemas/SkillStatement"
-          },
-          "signature": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Signature"
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "tenantId",
-          "packageId",
-          "versionId",
-          "releaseSequence",
-          "notAfter",
-          "statement",
-          "signature"
-        ],
-        "additionalProperties": false,
-        "description": "Draft v2 strict JCS/Ed25519 envelope with purpose=skill. Legacy v1 validators must reject it. Maximum validity 24 hours. Final signature JSON Schema, vectors and proto are required before implementation."
-      },
-      "SkillVersion": {
+      "UnifiedVersion": {
         "type": "object",
         "properties": {
           "id": {
@@ -8986,17 +8883,8 @@
             "maxLength": 128
           },
           "digest": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Digest"
-          },
-          "sizeBytes": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 1,
-            "maximum": 5242880
-          },
-          "mediaType": {
-            "type": "string",
-            "const": "application/gzip"
+            "$ref": "../resource/signatures.schema.json#/$defs/Digest",
+            "description": "SHA-256 of exact immutable auriga-resource.json UTF-8 bytes. Artifact digests are in the manifest. Legacy Version.digest still addresses plugin archive bytes."
           },
           "state": {
             "type": "string",
@@ -9023,14 +8911,14 @@
             "maximum": 9007199254740991
           },
           "resourceEnvelope": {
-            "$ref": "#/components/schemas/SkillEnvelope"
+            "$ref": "#/components/schemas/UnifiedEnvelope"
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
           },
           "manifest": {
-            "$ref": "#/components/schemas/SkillManifest"
+            "$ref": "#/components/schemas/UnifiedManifest"
           }
         },
         "required": [
@@ -9038,29 +8926,22 @@
           "packageId",
           "version",
           "digest",
-          "sizeBytes",
-          "mediaType",
           "state",
           "revision",
           "createdAt",
           "manifest"
         ],
         "additionalProperties": false,
-        "description": "Draft skill version. Reviews bind digest and revision. Published bytes are immutable."
+        "description": "Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable."
       },
-      "SkillUploadMetadata": {
+      "UnifiedUploadMetadata": {
         "type": "object",
         "properties": {
           "version": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
+            "$ref": "../resource/package.schema.json#/$defs/Version"
           },
           "expectedDigest": {
             "$ref": "../resource/signatures.schema.json#/$defs/Digest"
-          },
-          "manifest": {
-            "$ref": "#/components/schemas/SkillManifest"
           },
           "changeNotes": {
             "type": "string",
@@ -9070,22 +8951,21 @@
         },
         "required": [
           "version",
-          "expectedDigest",
-          "manifest",
-          "changeNotes"
+          "expectedDigest"
         ],
         "additionalProperties": false,
-        "description": "Draft upload: original gzip SHA-256, exact archive manifest agreement, 5 MiB compressed, 20 MiB expanded, 512 entries, ratio 100. UTF-8 text only; no scripts, links or executable modes."
+        "description": "Draft multipart upload. expectedDigest is exact manifest bytes SHA-256. Include manifest as a binary part, plus one binary artifacts part per manifest artifact in array order. Online tools use no artifacts. Validate all hashes before committing the immutable version."
       },
-      "SkillPackagePage": {
+      "UnifiedPackagePage": {
         "type": "object",
         "properties": {
           "items": {
             "type": "array",
-            "maxItems": 200,
             "items": {
-              "$ref": "#/components/schemas/SkillPackage"
-            }
+              "$ref": "#/components/schemas/UnifiedPackage"
+            },
+            "minItems": 0,
+            "maxItems": 200
           },
           "nextCursor": {
             "type": "string",
@@ -9098,15 +8978,16 @@
         ],
         "additionalProperties": false
       },
-      "SkillVersionPage": {
+      "UnifiedVersionPage": {
         "type": "object",
         "properties": {
           "items": {
             "type": "array",
-            "maxItems": 200,
             "items": {
-              "$ref": "#/components/schemas/SkillVersion"
-            }
+              "$ref": "#/components/schemas/UnifiedVersion"
+            },
+            "minItems": 0,
+            "maxItems": 200
           },
           "nextCursor": {
             "type": "string",
@@ -9118,38 +8999,6 @@
           "items"
         ],
         "additionalProperties": false
-      },
-      "SkillSelection": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "skill"
-          },
-          "packageId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "versionId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "digest": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Digest"
-          },
-          "releaseSequence": {
-            "$ref": "../resource/signatures.schema.json#/$defs/Counter"
-          }
-        },
-        "required": [
-          "kind",
-          "packageId",
-          "versionId",
-          "digest",
-          "releaseSequence"
-        ],
-        "additionalProperties": false,
-        "description": "Draft exact selection for future workspace/member contracts. No caller-controlled filesystem paths or download URLs."
       }
     }
   }
