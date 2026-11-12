@@ -1,4 +1,5 @@
 import { credentialsZh, credentialsEn } from './credentialsMessages';
+import { devicesZh, devicesEn } from './devicesMessages';
 import { runtimeZh, runtimeEn } from './runtimeMessages';
 import { useI18n } from 'vue-i18n';
 import { orgZh, orgEn } from './orgMessages';
@@ -10,6 +11,7 @@ import { settingsZh, settingsEn } from './settingsMessages';
 
 const zh = {
   ...credentialsZh,
+  ...devicesZh,
   ...runtimeZh,
   navRelayProviders: '模型与供应商',
   navRelayKeys: '虚拟 Key',
@@ -130,6 +132,7 @@ const zh = {
 };
 const en = {
   ...credentialsEn,
+  ...devicesEn,
   ...runtimeEn,
   navRelayProviders: 'Models and providers',
   navRelayKeys: 'Virtual keys',

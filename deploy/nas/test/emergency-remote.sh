@@ -17,6 +17,7 @@ require_root_or_capable_chown() { :; }
 bootstrap_nas_materials() { :; }
 install_bifrost_materials() { :; }
 install_edge_material() { :; }
+install_network_presence_materials() { :; }
 chown_required() { :; }
 load_nas_access_env() {
   AURIGA_NAS_ISSUER=http://portal.example.com:8080

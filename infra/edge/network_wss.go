@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -34,6 +35,7 @@ type NetworkWSS struct {
 	proxy          *httputil.ReverseProxy
 	maxConcurrent  int
 	active         atomic.Int64
+	heartbeats     deviceHeartbeats
 }
 
 func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error) {
@@ -95,18 +97,47 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Del("Authorization")
 			pr.Out.Header.Del("Auriga-Identity")
+			// Keep the passive heartbeat observer on uncompressed websocket frames.
+			pr.Out.Header.Del("Sec-WebSocket-Extensions")
 		},
 		Transport: tr,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			writeProblem(w, problem(http.StatusBadGateway, "edge.upstream_error", "Bad Gateway", "network wss upstream unavailable", requestID(r)))
 		},
 	}
-	return &NetworkWSS{
+	n := &NetworkWSS{
 		Path:           path,
 		AllowedOrigins: origins,
 		proxy:          proxy,
 		maxConcurrent:  max,
-	}, nil
+	}
+	baseRewrite := proxy.Rewrite
+	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
+		baseRewrite(pr)
+		pr.Out = n.heartbeats.trace(pr.Out)
+	}
+	proxy.ModifyResponse = func(response *http.Response) error {
+		if response.StatusCode != http.StatusSwitchingProtocols {
+			return nil
+		}
+		address, ok := response.Request.Context().Value(deviceHeartbeatKey{}).(*deviceHeartbeatAddress)
+		body, supported := response.Body.(io.ReadWriteCloser)
+		if !ok || !supported || address.value == "" {
+			return nil
+		}
+		n.heartbeats.mu.Lock()
+		if n.heartbeats.byAddress == nil {
+			n.heartbeats.byAddress = make(map[string]deviceHeartbeatRecord)
+		}
+		_, exists := n.heartbeats.byAddress[address.value]
+		if len(n.heartbeats.byAddress) < 10000 || exists {
+			n.heartbeats.byAddress[address.value] = deviceHeartbeatRecord{}
+		}
+		n.heartbeats.mu.Unlock()
+		response.Body = &deviceHeartbeatBody{ReadWriteCloser: body, frames: deviceHeartbeatFrames{beat: func() { n.heartbeats.update(address.value, false) }}, closed: func() { n.heartbeats.update(address.value, true) }}
+		return nil
+	}
+	return n, nil
 }
 
 func (n *NetworkWSS) Match(path string) bool {

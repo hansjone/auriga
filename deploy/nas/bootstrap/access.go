@@ -139,6 +139,7 @@ func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer st
 		"relay":            map[string]string{"origin": "http://bifrost:8080", "adminPasswordFile": "/run/secrets/bifrost_admin_password"},
 		"deviceHop":        map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "ai-relay"},
 		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/pki/network-edge.pem", "keyFile": "/etc/auriga/pki/network-edge.key", "caFile": "/etc/auriga/pki/network-server-ca.pem", "serverName": "submit.network.internal"},
+		"devicePresence":   map[string]string{"url": "tls://network-broker:14224", "username": "edge-presence", "passwordFile": "/etc/auriga/pki/network-presence.password", "caFile": "/etc/auriga/pki/network-server-ca.pem", "certFile": "/etc/auriga/pki/network-presence.pem", "keyFile": "/etc/auriga/pki/network-presence.key", "serverName": "broker.network.internal"},
 		"networkWss": map[string]any{
 			"enabled": true, "path": "/net/v1/ws", "upstreamUrl": "wss://network-broker:18444",
 			"caFile": "/etc/auriga/pki/network-server-ca.pem", "serverName": "broker.network.internal",

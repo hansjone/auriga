@@ -313,6 +313,57 @@ test('local connection state drives the real shell entry and endpoint/acceptance
     }
   }
 });
+test('desktop resource port uses current local CSRF and keeps member credentials out of browser requests', async () => {
+  const calls = [];
+  let loggedIn = true;
+  const host = surfaceHost(async (url, init) => {
+    const path = new URL(url).pathname;
+    calls.push({ path, init });
+    if (path.endsWith('/local-login/status'))
+      return response(200, { loggedIn, csrf: 'test-csrf' });
+    if (path.includes('/resources/local/')) return response(200, { ok: true });
+    return response(200, {
+      ...localBoot(true),
+      memberResourcesAvailable: true,
+    });
+  });
+  try {
+    const main = host.mount('main');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    const port = panel.context.memberResources;
+    assert(port);
+    await port.list();
+    const input = {
+      packageId: 'package',
+      versionId: 'version',
+      action: 'install',
+      key: 'intent',
+    };
+    await port.apply(input);
+    const post = calls.find(({ path }) =>
+      path.endsWith('/resources/local/actions'),
+    );
+    assert.equal(post.init.method, 'POST');
+    assert.equal(post.init.headers['X-Auriga-CSRF'], 'test-csrf');
+    assert.deepEqual(JSON.parse(post.init.body), input);
+    assert.equal(post.init.redirect, 'error');
+    assert.equal(post.init.credentials, 'same-origin');
+    assert.equal(post.init.headers.authorization, undefined);
+    loggedIn = false;
+    await assert.rejects(port.apply(input), { reason: 'auth' });
+    assert.equal(
+      calls.filter(({ path }) => path.endsWith('/resources/local/actions'))
+        .length,
+      1,
+    );
+    main.close();
+    host.dispose();
+    assert.equal(host.counts.timers.size, 0);
+  } finally {
+    host.close();
+  }
+});
 test('connection bootstrap without an explicit validated status cannot claim connected', async () => {
   const value = localBoot(true);
   delete value.connection;
@@ -457,6 +508,32 @@ test('consent children use independent hooks and the authenticated HTTP bridge w
     host.dispose();
     assert.equal(host.subscriptions.size, 0);
     assert.equal(host.counts.timers.size, 0);
+  } finally {
+    host.close();
+  }
+});
+
+test('connect resource context mounts the authenticated Node catalogue proxy', async () => {
+  const calls = [];
+  const host = surfaceHost(async (url, init) => {
+    calls.push({ url: String(url), init });
+    return response(200, localBoot(true));
+  });
+  try {
+    const main = host.mount('main');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    await panel.context.fetch('/api/resource/v1/packages?limit=50', {
+      method: 'GET',
+    });
+    assert.equal(
+      calls.at(-1).url,
+      'https://instance.example.com/i/example/auriga/resources/api/resource/v1/packages?limit=50',
+    );
+    assert.equal(calls.at(-1).init.credentials, 'same-origin');
+    assert.equal(calls.at(-1).init.headers, undefined);
+    main.close();
+    host.dispose();
   } finally {
     host.close();
   }

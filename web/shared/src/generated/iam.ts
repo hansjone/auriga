@@ -36,6 +36,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/admin/devices': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List tenant field terminals */
+    get: operations['listAdminDevices'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/devices/{deviceId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deviceId: string;
+      };
+      cookie?: never;
+    };
+    /** Read field terminal */
+    get: operations['getAdminDevice'];
+    put?: never;
+    post?: never;
+    /**
+     * Revoke terminal credentials and network node
+     * @description Requires recent step-up. Idempotent; committed revocation is authoritative for device access and refresh. Read the terminal afterwards to confirm.
+     */
+    delete: operations['revokeAdminDevice'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/network/register': {
     parameters: {
       query?: never;
@@ -1114,6 +1154,36 @@ export interface components {
       serviceMetadataAvailable: boolean;
       sourceGaps?: components['schemas']['CredentialSourceGap'][];
     };
+    AdminDevicesDevice: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      accountId: string;
+      memberName: string;
+      name: string;
+      platform?: string;
+      clientVersion?: string;
+      createdAt?: string;
+      lastSeenAt?: string;
+      /**
+       * Format: date-time
+       * @description Actual client PING/PONG observed on the edge WSS connection; absent until observed
+       */
+      lastHeartbeatAt?: string;
+      revokedAt?: string;
+      networkNode?: string;
+      /** @enum {string} */
+      disconnectStatus?: 'pending' | 'confirmed';
+      /** @enum {string} */
+      accessMode: 'native_tx' | 'manual' | 'unknown';
+      /** @enum {string} */
+      status: 'active' | 'revoked';
+      /**
+       * @description Authoritative broker connection snapshot; unknown on edge monitoring outage; lastSeenAt is activity rather than heartbeat
+       * @enum {string}
+       */
+      online: 'unknown' | 'online' | 'offline';
+    };
     AdminCsrfTokenRegistration: {
       /** @description 每tab由crypto.getRandomValues生成32字节、规范无填充base64url。服务端校格式不能证明熵，客户端必须使用安全随机源。 */
       token: string;
@@ -1920,6 +1990,93 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+    };
+  };
+  listAdminDevices: {
+    parameters: {
+      query?: {
+        member?: string;
+        online?: 'unknown' | 'online' | 'offline';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Field terminals with authoritative edge connection state; unknown on monitoring failure */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['AdminDevicesDevice'][];
+          };
+        };
+      };
+      403: components['responses']['Forbidden'];
+    };
+  };
+  getAdminDevice: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deviceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Terminal */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AdminDevicesDevice'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  revokeAdminDevice: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deviceId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Credentials revoked, connection closure pending confirmation */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** Format: uuid */
+            id: string;
+            credentialRevoked: boolean;
+            /** @constant */
+            disconnectStatus: 'pending';
+          };
+        };
+      };
+      /** @description Revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
     };
   };
   registerNetworkClient: {

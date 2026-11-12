@@ -47,6 +47,7 @@ func TestNASNetworkSubmitConfiguration(t *testing.T) {
 			var edge struct {
 				Upstreams                map[string]string
 				IAMHop, NetworkSubmitHop map[string]string
+				DevicePresence           map[string]string
 				NetworkWSS               struct {
 					Enabled                               bool
 					Path, UpstreamURL, CAFile, ServerName string
@@ -57,6 +58,10 @@ func TestNASNetworkSubmitConfiguration(t *testing.T) {
 				t.Fatal(err)
 			}
 			hop := edge.NetworkSubmitHop
+			presence := edge.DevicePresence
+			if presence["url"] != "tls://network-broker:14224" || presence["username"] != "edge-presence" || presence["serverName"] != "broker.network.internal" || presence["caFile"] != "/etc/auriga/pki/network-server-ca.pem" || presence["certFile"] != "/etc/auriga/pki/network-presence.pem" || presence["keyFile"] != "/etc/auriga/pki/network-presence.key" || presence["passwordFile"] != "/etc/auriga/pki/network-presence.password" {
+				t.Fatal("monitoring must use independent credentials and client TLS")
+			}
 			wss := edge.NetworkWSS
 			if mode == "proxy-port" && cfg.PortalURL() != "https://portal.example.com:9443" {
 				t.Fatal("fixture lost explicit portal port")
@@ -74,7 +79,7 @@ func TestNASNetworkSubmitConfiguration(t *testing.T) {
 	for _, name := range set.PublicFiles {
 		leaves[name] = true
 	}
-	for _, name := range []string{"network/edge.key", "network/client-ca.pem", "network/runtime.json", "network-platform/gateway.secret", "network-platform/platform.properties", "network/broker.conf", "network/broker.pem", "network/broker.key", "network/server-ca.pem", "pki/gateway.key"} {
+	for _, name := range []string{"network/edge.key", "network/client-ca.pem", "network/runtime.json", "network-platform/gateway.secret", "network-platform/platform.properties", "network/broker.conf", "network/broker.pem", "network/broker.key", "network/server-ca.pem", "network/edge-presence.pem", "network/edge-presence.key", "network/edge-presence.password", "pki/gateway.key"} {
 		if !leaves[name] {
 			t.Fatalf("material absent from installation receipt: %s", name)
 		}

@@ -3,6 +3,7 @@ import { createManagedModelStatus } from '../ai/managed-status.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedNetwork } from '../network/managed-device.js';
+import { installResourceChannel } from '../resources/channel.js';
 import { installManagedSessionGuard } from '../managed/session.js';
 import { installManagedSettingsOwnership } from '../managed/settings.js';
 import { createConsentRoutes } from '../local/consent-routes.js';
@@ -328,6 +329,34 @@ export async function createManaged(options = {}) {
       disposeHostAuth = installHostAuthentication(ctx.connection, door, {
         browserOrigin,
       });
+      const resourceAuthorized = (req) =>
+        door.isAuthenticated(req) && browserFenceOk(req, browserOrigin);
+      let resourceSource, resourceRuntime;
+      installResourceChannel(ctx, {
+        auth: {
+          requestRejection: (req) =>
+            resourceAuthorized(req) ? undefined : 401,
+        },
+        current() {
+          const source = network?.resourceSession;
+          if (!source || !network?.sessionAvailable) return undefined;
+          if (source !== resourceSource) {
+            resourceSource = source;
+            resourceRuntime = {
+              ...source,
+              resourceIdentity: { instanceId, ownerId, tenantId },
+              resolve: (req) =>
+                resourceAuthorized(req) && network?.sessionAvailable
+                  ? source
+                  : null,
+              checkCsrf: (req) =>
+                resourceAuthorized(req) &&
+                typeof req.headers.origin === 'string',
+            };
+          }
+          return resourceRuntime;
+        },
+      });
       host.getBrowsers = () => browserSockets.size;
       installManagedGuards(ctx, { workspaceRoot });
       provideAurigaSdk(ctx, {
@@ -490,6 +519,10 @@ export async function createManaged(options = {}) {
         getManifest,
         pluginVersion,
         panelBase: env.AURIGA_PANEL_BASE,
+        resourceFetchBase: '/auriga/resources/',
+        resourceIdentity: tenantId
+          ? { instanceId, tenantId, ownerId }
+          : undefined,
       });
       ctx.effect?.(
         () =>

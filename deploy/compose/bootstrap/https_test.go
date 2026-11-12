@@ -226,7 +226,7 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			if before != installationSnapshot(t, out) {
 				t.Fatal("old receipt repaired")
 			}
-			for _, oldRecipe := range []string{"network-wss-v3-https-native-client-litellm-ui-v2", "network-wss-v4-managed-device"} {
+			for _, oldRecipe := range []string{"network-wss-v3-https-native-client-litellm-ui-v2", "network-wss-v4-managed-device", "network-wss-v3-https-bifrost", "network-wss-v6-https-native-client-managed-device-panel-bifrost"} {
 				oldInput := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\nreal\nfalse\ntrue\n%s\n%s", oldRecipe, image, browserDigest, "legacy-relay-ui"))...))
 				if err := os.WriteFile(receipt, append([]byte(fmt.Sprintf("%x", oldInput)), sealed[64:]...), 0600); err != nil {
 					t.Fatal(err)

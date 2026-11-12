@@ -123,7 +123,7 @@ func main() {
 	if *validateOnly {
 		return
 	}
-	set := runtimeMaterialSet(verified, directHTTPS)
+	set := nasCompatibleNetworkMaterials(*out, runtimeMaterialSet(verified, directHTTPS))
 	guard, err := openNASMaterialGuard(*out, set)
 	if err != nil {
 		fatalf("%v", err)
