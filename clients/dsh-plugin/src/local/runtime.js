@@ -1,5 +1,11 @@
 import { desktopUpdater } from './desktop.js';
 /* global AbortSignal */
+import { probeEndpoint } from '../network/diagnostic-probe.js';
+import {
+  readDeviceLedger,
+  baseStatus,
+  connectionReason,
+} from '../network/base-tools.js';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { join } from 'node:path';
@@ -113,6 +119,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   /** @type {ReturnType<typeof createTeam>|undefined} */
   let startingTeam;
   let communication = 'idle';
+  /** @type {string|null} */
+  let lastSuccessAt = null;
+  let connectionFailure = 'unknown';
+  /** @type {boolean|null} */ let hqReachable = null;
   /** @type {Promise<void>|undefined} */
   let teamStarting;
   let teamFailures = 0,
@@ -361,6 +371,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       onState(state) {
         if (closed || generation !== g) return;
         online = state.connected;
+        if (state.connected || state.unauthorized) hqReachable = true;
+        else if (state.reason === 'hq_unreachable') hqReachable = false;
+        connectionFailure = state.reason ?? 'unknown';
+        if (state.connected) lastSuccessAt = new Date().toISOString();
         communication = state.connected
           ? team
             ? 'ready'
@@ -448,8 +462,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       restoreFailures = 0;
       restoreRetryAt = 0;
       connectTeam();
-    } catch {
+    } catch (error) {
       if (!closed && generation === g) {
+        connectionFailure = connectionReason(error);
+        if (connectionFailure === 'hq_unreachable') hqReachable = false;
         online = false;
         communication = 'unavailable';
         restoreRetryAt = Date.now() + retryDelay(++restoreFailures);
@@ -561,7 +577,48 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     for (const attempt of abandoned) await abandon(attempt);
     await drainRevocations();
   }
+  const baseState = () => {
+    const saved = vault.snapshot().credential;
+    return {
+      origin: config.platformOrigin,
+      reachable: hqReachable,
+      lastSuccessAt,
+      reason: connectionFailure,
+      loggedIn: !!saved,
+      verified: !!saved && !broker.status.reauthenticationRequired,
+      expiresAt: saved?.claims.exp * 1000 || null,
+      memberId: saved?.claims.sub,
+      displayName: accountName(saved),
+      network: network.status,
+      remoteAvailable: !!team && online && !closed,
+    };
+  };
+  const baseTools = {
+    getState: baseState,
+    generation: () => generation,
+    readLocal: () =>
+      readDeviceLedger(join(directory, 'network'), vault.snapshot().credential),
+    async probe(/** @type {string} */ path, /** @type {AbortSignal} */ signal) {
+      const g = generation;
+      try {
+        const result = await probeEndpoint(platform, path, signal);
+        active(g);
+        hqReachable = true;
+        connectionFailure = result.reason ?? 'unknown';
+        lastSuccessAt = new Date().toISOString();
+        return result;
+      } catch (error) {
+        if (!closed && g === generation) {
+          const reason = connectionReason(error);
+          if (reason === 'hq_unreachable') hqReachable = false;
+          connectionFailure = reason;
+        }
+        throw error;
+      }
+    },
+  };
   return {
+    baseTools,
     /** Only call from DSH's admitted owner RPC handler.
      * @param {any} peer */
     nativeRequest(peer) {
@@ -625,6 +682,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
               : 'signed_out',
         connected: !!row && !!team && online,
         communication: row ? communication : 'idle',
+        networkDiagnostics: baseStatus(baseState()),
         models: models.status,
         capabilities: { consent: !!row && network.consentAvailable },
         network: row

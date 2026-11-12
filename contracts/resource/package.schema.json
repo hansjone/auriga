@@ -1,0 +1,909 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/resource/package.schema.json",
+  "title": "Unified resource package draft",
+  "description": "Design draft. Manifest is external to artifact bytes. Signatures are detached. Cross-field artifact references, target uniqueness, archive safety, ACL, time windows and runtime compatibility require semantic validation.",
+  "$ref": "#/$defs/Manifest",
+  "$defs": {
+    "Name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "Version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "RelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[A-Za-z0-9._/-]+$"
+    },
+    "Runtime": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["node", "python", "java"]
+        },
+        "versionRange": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": ["kind", "versionRange"],
+      "additionalProperties": false
+    },
+    "Permissions": {
+      "type": "object",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "outboundHosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253
+          },
+          "minItems": 0,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "dataAccess": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["workspace_read", "workspace_write", "user_selected_files"]
+          },
+          "minItems": 0,
+          "maxItems": 3,
+          "uniqueItems": true
+        }
+      },
+      "required": ["tools", "outboundHosts", "dataAccess"],
+      "additionalProperties": false
+    },
+    "Artifact": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Name"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["payload", "source_snapshot", "lockfile"]
+        },
+        "digest": {
+          "$ref": "./signatures.schema.json#/$defs/Digest"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 536870912
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": [
+            "application/gzip",
+            "application/octet-stream",
+            "application/json",
+            "text/plain"
+          ]
+        },
+        "os": {
+          "type": "string",
+          "enum": ["linux", "windows", "any"]
+        },
+        "arch": {
+          "type": "string",
+          "enum": ["amd64", "arm64", "any"]
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "digest",
+        "sizeBytes",
+        "mediaType",
+        "os",
+        "arch"
+      ],
+      "additionalProperties": false
+    },
+    "SkillArtifact": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Name"
+        },
+        "role": {
+          "type": "string",
+          "const": "payload"
+        },
+        "digest": {
+          "$ref": "./signatures.schema.json#/$defs/Digest"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5242880
+        },
+        "mediaType": {
+          "type": "string",
+          "const": "application/gzip"
+        },
+        "os": {
+          "type": "string",
+          "const": "any"
+        },
+        "arch": {
+          "type": "string",
+          "const": "any"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "digest",
+        "sizeBytes",
+        "mediaType",
+        "os",
+        "arch"
+      ],
+      "additionalProperties": false
+    },
+    "EntryPoint": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "$ref": "#/$defs/Name"
+        },
+        "path": {
+          "$ref": "#/$defs/RelativePath"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": ["artifactId", "path", "args"],
+      "additionalProperties": false
+    },
+    "Plugin": {
+      "type": "object",
+      "properties": {
+        "packageName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 214,
+          "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+$"
+        },
+        "dshVersionRange": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": ["packageName", "dshVersionRange"],
+      "additionalProperties": false
+    },
+    "Skill": {
+      "type": "object",
+      "properties": {
+        "entry": {
+          "type": "string",
+          "const": "SKILL.md"
+        },
+        "contentProfile": {
+          "type": "string",
+          "const": "text-only"
+        },
+        "dshVersionRange": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": ["entry", "contentProfile", "dshVersionRange"],
+      "additionalProperties": false
+    },
+    "OnlineTool": {
+      "type": "object",
+      "properties": {
+        "delivery": {
+          "type": "string",
+          "const": "online"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["web", "mcp"]
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "authentication": {
+          "type": "string",
+          "enum": ["none", "member_oauth", "platform_proxy"]
+        }
+      },
+      "required": ["delivery", "protocol", "url", "authentication"],
+      "additionalProperties": false
+    },
+    "OfflineTool": {
+      "type": "object",
+      "properties": {
+        "delivery": {
+          "type": "string",
+          "const": "offline"
+        },
+        "entrypoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EntryPoint"
+          },
+          "minItems": 1,
+          "maxItems": 16
+        }
+      },
+      "required": ["delivery", "entrypoints"],
+      "additionalProperties": false
+    },
+    "GitTool": {
+      "type": "object",
+      "properties": {
+        "delivery": {
+          "type": "string",
+          "const": "git"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "sourceArtifactId": {
+          "$ref": "#/$defs/Name"
+        },
+        "lockArtifactIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Name"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "packageManager": {
+          "type": "string",
+          "enum": ["npm", "pnpm", "pip", "maven", "gradle"]
+        },
+        "installScripts": {
+          "type": "boolean",
+          "$comment": "Boolean plus not true is equivalent to const false; avoid the Java generator's invalid Boolean enum literal for const/enum false.",
+          "not": {
+            "const": true
+          }
+        },
+        "entrypoint": {
+          "$ref": "#/$defs/EntryPoint"
+        }
+      },
+      "required": [
+        "delivery",
+        "repository",
+        "commit",
+        "sourceArtifactId",
+        "lockArtifactIds",
+        "packageManager",
+        "installScripts",
+        "entrypoint"
+      ],
+      "additionalProperties": false
+    },
+    "PluginManifest": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "author": {
+          "type": "object",
+          "properties": {
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": ["displayName"],
+          "additionalProperties": false
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        },
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Runtime"
+          },
+          "minItems": 0,
+          "maxItems": 8
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "signature": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "detached"
+            },
+            "algorithm": {
+              "type": "string",
+              "const": "Ed25519"
+            }
+          },
+          "required": ["mode", "algorithm"],
+          "additionalProperties": false
+        },
+        "kind": {
+          "type": "string",
+          "const": "plugin"
+        },
+        "plugin": {
+          "$ref": "#/$defs/Plugin"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "version",
+        "description",
+        "author",
+        "license",
+        "permissions",
+        "runtimes",
+        "artifacts",
+        "signature",
+        "kind",
+        "plugin"
+      ],
+      "additionalProperties": false
+    },
+    "SkillManifest": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "author": {
+          "type": "object",
+          "properties": {
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": ["displayName"],
+          "additionalProperties": false
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        },
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Runtime"
+          },
+          "minItems": 0,
+          "maxItems": 0
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SkillArtifact"
+          },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "signature": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "detached"
+            },
+            "algorithm": {
+              "type": "string",
+              "const": "Ed25519"
+            }
+          },
+          "required": ["mode", "algorithm"],
+          "additionalProperties": false
+        },
+        "kind": {
+          "type": "string",
+          "const": "skill"
+        },
+        "skill": {
+          "$ref": "#/$defs/Skill"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "version",
+        "description",
+        "author",
+        "license",
+        "permissions",
+        "runtimes",
+        "artifacts",
+        "signature",
+        "kind",
+        "skill"
+      ],
+      "additionalProperties": false
+    },
+    "OnlineManifest": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "author": {
+          "type": "object",
+          "properties": {
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": ["displayName"],
+          "additionalProperties": false
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        },
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Runtime"
+          },
+          "minItems": 0,
+          "maxItems": 0
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          },
+          "minItems": 0,
+          "maxItems": 0
+        },
+        "signature": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "detached"
+            },
+            "algorithm": {
+              "type": "string",
+              "const": "Ed25519"
+            }
+          },
+          "required": ["mode", "algorithm"],
+          "additionalProperties": false
+        },
+        "kind": {
+          "type": "string",
+          "const": "tool"
+        },
+        "tool": {
+          "$ref": "#/$defs/OnlineTool"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "version",
+        "description",
+        "author",
+        "license",
+        "permissions",
+        "runtimes",
+        "artifacts",
+        "signature",
+        "kind",
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    "OfflineManifest": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "author": {
+          "type": "object",
+          "properties": {
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": ["displayName"],
+          "additionalProperties": false
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        },
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Runtime"
+          },
+          "minItems": 0,
+          "maxItems": 8
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "signature": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "detached"
+            },
+            "algorithm": {
+              "type": "string",
+              "const": "Ed25519"
+            }
+          },
+          "required": ["mode", "algorithm"],
+          "additionalProperties": false
+        },
+        "kind": {
+          "type": "string",
+          "const": "tool"
+        },
+        "tool": {
+          "$ref": "#/$defs/OfflineTool"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "version",
+        "description",
+        "author",
+        "license",
+        "permissions",
+        "runtimes",
+        "artifacts",
+        "signature",
+        "kind",
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    "GitManifest": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "author": {
+          "type": "object",
+          "properties": {
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": ["displayName"],
+          "additionalProperties": false
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        },
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Runtime"
+          },
+          "minItems": 1,
+          "maxItems": 8
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          },
+          "minItems": 2,
+          "maxItems": 32
+        },
+        "signature": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "detached"
+            },
+            "algorithm": {
+              "type": "string",
+              "const": "Ed25519"
+            }
+          },
+          "required": ["mode", "algorithm"],
+          "additionalProperties": false
+        },
+        "kind": {
+          "type": "string",
+          "const": "tool"
+        },
+        "tool": {
+          "$ref": "#/$defs/GitTool"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "version",
+        "description",
+        "author",
+        "license",
+        "permissions",
+        "runtimes",
+        "artifacts",
+        "signature",
+        "kind",
+        "tool"
+      ],
+      "additionalProperties": false
+    },
+    "ToolManifest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OnlineManifest"
+        },
+        {
+          "$ref": "#/$defs/OfflineManifest"
+        },
+        {
+          "$ref": "#/$defs/GitManifest"
+        }
+      ]
+    },
+    "Manifest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PluginManifest"
+        },
+        {
+          "$ref": "#/$defs/SkillManifest"
+        },
+        {
+          "$ref": "#/$defs/ToolManifest"
+        }
+      ]
+    },
+    "Statement": {
+      "type": "object",
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "const": "resource"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["plugin", "skill", "tool"]
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "manifestDigest": {
+          "$ref": "./signatures.schema.json#/$defs/Digest"
+        },
+        "artifactDigests": {
+          "type": "array",
+          "items": {
+            "$ref": "./signatures.schema.json#/$defs/Digest"
+          },
+          "minItems": 0,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "issuedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        }
+      },
+      "required": [
+        "purpose",
+        "kind",
+        "name",
+        "version",
+        "manifestDigest",
+        "artifactDigests",
+        "issuedAt"
+      ],
+      "additionalProperties": false
+    },
+    "Envelope": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "tenantId": {
+          "$ref": "./signatures.schema.json#/$defs/Uuid"
+        },
+        "packageId": {
+          "$ref": "./signatures.schema.json#/$defs/Uuid"
+        },
+        "versionId": {
+          "$ref": "./signatures.schema.json#/$defs/Uuid"
+        },
+        "releaseSequence": {
+          "$ref": "./signatures.schema.json#/$defs/Counter"
+        },
+        "notAfter": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "statement": {
+          "$ref": "#/$defs/Statement"
+        },
+        "signature": {
+          "$ref": "./signatures.schema.json#/$defs/Signature"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "packageId",
+        "versionId",
+        "releaseSequence",
+        "notAfter",
+        "statement",
+        "signature"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
