@@ -52,6 +52,9 @@ run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" kill --signal HUP nats
 的安装继续使用原始材料，无需 stage，也无需最后的 materials commit。
 
 `render.sh` 生成 ops/audit 独立秘密与私有 env、NATS audit 用户、ops-runtime 目录。
+资源目录同时启用独立 resource owner/app、schema 与游标签名秘密，旧秘密保留。
+资源元数据读接口使用这套数据库接线。资源对象存储、发布/撤销签名及分发审批材料
+仍须沿资源服务的公开部署配置提供，涉及这些操作时另核其可用性。
 一次性 helper 连接正在运行的 postgres，依次执行角色/schema SQL、audit SQL、Bifrost
 角色/库/schema。密码从已挂载的文件读取。任一步失败立即退出，修复原因后从该阶段重跑。
 确认原 postgres 在同一固定项目的 internal 网络可达，准备过程中持续验证旧服务请求。
@@ -65,12 +68,15 @@ Compose 的普通 up 无法通过绑定文件内容变化识别这次配置更�
 
 ```sh
 sh "$NEW/deploy-nas/scripts/start.sh"
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-deps --no-build --pull never --force-recreate --wait edge
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" restart --no-deps agent
 sh "$NEW/deploy-nas/scripts/status.sh"
 sh "$NEW/deploy-nas/scripts/smoke.sh"
 ```
 
 `audit-db-prepare`、`panel-prepare` 等一次性容器应成功退出，长期服务按各自 healthcheck
 或实际协议检查。确认所有服务的真实镜像 Id，并从正常管理台入口登录。
+edge 重建使文件 bind 读取本次原子发布的派生配置，随后 agent 恢复实例桥接端点。
 逐项访问审计、运维告警、备份与升级、出网策略、现场终端、资源市场、我的资源与平台凭据。
 在浏览器核对这些页面的实际 API 请求结果，审计使用 `/api/audit/v1`，运维使用 `/api/ops`。
 `/security/egress`、`/runtime/devices`、`/resources/*` 为页面路由，页面加载与后端响应分别检查。
