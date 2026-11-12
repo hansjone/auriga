@@ -3,6 +3,9 @@
 # Run render.sh first. This command neither switches services nor commits materials.
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
+if [ "$#" = 1 ] && [ "$1" = migrate-relay ]; then
+  exec sh "$NAS_ROOT/scripts/migrate-relay.sh"
+fi
 [ "$#" = 0 ] || die 'Usage: sh upgrade-admin.sh'
 load_stack_env
 [ -f "$(marker_path)" ] || die 'not initialized'

@@ -469,6 +469,9 @@ if sh "$ROOT/test/load-images.sh"; then pass load_images_regressions
 else fail_msg load_images_regressions "workflow artifact metadata failed"; fi
 
 # --- LF ---
+if python3 "$ROOT/test/migrate_relay_test.py"; then pass migrate_relay_regressions
+else fail_msg migrate_relay_regressions "relay migration failed"; fi
+
 cr=0
 for f in "$ROOT"/scripts/*.sh "$ROOT"/docker/agent-entrypoint.sh "$ROOT"/test/run-tests.sh; do
   [ -f "$f" ] || continue

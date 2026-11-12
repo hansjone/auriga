@@ -39,6 +39,13 @@ cmp "$temp/steps" "$temp/expected-steps"
 grep -q 'psql -X -q -h postgres -U auriga_bootstrap -d auriga -v ON_ERROR_STOP=1' "$temp/actions"
 echo 'PASS admin_upgrade_repeatable_helper_sequence'
 cp "$temp/actions" "$temp/before"
+cat >"$temp/scripts/migrate-relay.sh" <<'EOF'
+exit "${TEST_RELAY_EXIT:-0}"
+EOF
+sh "$temp/scripts/upgrade-admin.sh" migrate-relay
+if TEST_RELAY_EXIT=74 sh "$temp/scripts/upgrade-admin.sh" migrate-relay; then exit 1; else [ "$?" = 74 ]; fi
+cmp "$temp/actions" "$temp/before"
+echo 'PASS admin_upgrade_relay_delegate_and_failure_propagation'
 if sh "$temp/scripts/upgrade-admin.sh" unexpected 2>/dev/null; then exit 1; fi
 cmp "$temp/actions" "$temp/before"
 rm "$temp/initialized"

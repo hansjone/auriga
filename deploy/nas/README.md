@@ -384,7 +384,7 @@ prepare 命令并验证可持久写入；结束时仅清理标签匹配的测试
 ## 已有数据库卷接入中转站
 
 已有安装升级管理台、ops 与 audit 时，按[管理台升级操作单](scripts/upgrade-admin.md)
-分阶段执行材料 stage、render、`upgrade-admin.sh`、服务切换、用户入口验收及 commit。
+分阶段执行材料 stage、render、`upgrade-admin.sh`、服务切换、`upgrade-admin.sh migrate-relay`、用户入口验收及 commit。
 操作单包含失败重入、commit 前回滚和旧中转站数据迁移检查点。
 
 不依赖 postgres entrypoint 的首次初始化。先核验安装材料中五份 Bifrost 秘密和审核镜像，确认原 PostgreSQL 健康，然后运行 `sh scripts/upgrade-bifrost.sh`（在 NAS 发布包根目录）。它以一次性 helper 连接原库，幂等创建角色/库/schema，保留既有数据与密码，并撤销运行账号对迁移历史表的写权限。错误 owner 或特权角色立即失败，不能通过清卷绕过。再按原部署流程更新服务。原测试中转库、角色、秘密和旧发布材料不自动删除，由主控按保留证据另行批准清理。

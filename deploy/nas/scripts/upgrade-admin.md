@@ -12,8 +12,10 @@
 2. 记录当前服务镜像、Compose profile、实例 generation、成员数量、中转站供应商及 Key 的
    不可逆指纹、实例元数据。通过正常登录入口验证一次模型请求并记录结果。
    检查当前中转站是否已经使用 Bifrost。`materials-upgrade` 仅增加 Bifrost 秘密与配置，
-   `upgrade-admin.sh` 仅增加数据库结构。旧 LiteLLM 供应商及 Key 的业务迁移须另有经过验证的
-   公开迁移流程。缺少该流程时暂停服务切换，保留原服务继续运行。
+   `upgrade-admin.sh` 无参数时增加数据库结构；其 `migrate-relay` 子命令负责只读导出旧
+   LiteLLM 并通过 Bifrost 管理 API 导入。保留原 `AURIGA_IMAGE_LITELLM`，helper 使用
+   原核验镜像的 Prisma/decryptor，不把明文配置写入文件。切换窗口先停止旧调用写入，
+   直到迁移、验证完成；源库保持原样，可直接恢复旧服务。
 3. 保存数据根、`stack.env`、访问输入和 runtime 审批输入的权限与完整备份。
    数据库使用 `pg_dumpall` 逻辑备份，文件快照应在停止写入后取得，包含实例目录、NATS
    数据、enrollment、secrets、全部材料与追加收据。用已有备份工具检查可恢复性。
@@ -64,10 +66,11 @@ Compose 的普通 up 无法通过绑定文件内容变化识别这次配置更�
 
 ## 服务切换与提交
 
-确认中转站数据迁移检查点完成，再执行。
+确认备份和旧流量冻结后执行。迁移失败立即停止后续步骤，不得 commit。
 
 ```sh
 sh "$NEW/deploy-nas/scripts/start.sh"
+sh "$NEW/deploy-nas/scripts/upgrade-admin.sh" migrate-relay
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-deps --no-build --pull never --force-recreate --wait edge
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" restart --no-deps agent
 sh "$NEW/deploy-nas/scripts/status.sh"
@@ -83,6 +86,29 @@ edge 重建使文件 bind 读取本次原子发布的派生配置，随后 agent
 出网策略初始应显示未配置并开放，重新验证旧实例模型请求和出网请求。
 旧安装缺 presence 三份材料时应报告 `device_presence=disabled`，保留其他功能。
 核对原成员、实例元数据、中转站配置与 Key 指纹，完成一次现有实例真实请求。
+
+### 中转站迁移边界
+
+`migrate-relay` 先在只读事务中读取旧模型与调用 Key，完成全量预检后写入目标。
+供应商、凭据、模型池及外部 Key 使用稳定幂等键；同一静止源可重复执行。
+同名目标模型池采用 `If-None-Match: *`，避免覆盖人工已有配置。源模型或配额在首次
+写入后变化会发生幂等冲突，应暂停并保留证据，不得通过更换幂等键重复创建。
+helper 只输出数量和固定错误信息，第三方库及子进程 stdout/stderr 均被抑制。
+
+支持 OpenAI、Anthropic、Gemini、DeepSeek、MiniMax 的直接模型，api_base 为 origin 或
+`/v1`；保留旧公开模型名、供应商密钥和模型允许列表。高级模型参数、TPM/模型预算等
+无法对应的策略失败封闭，需先按目标能力明确转换，不会默默丢弃。
+旧数据库仅存调用 Key 的 SHA256；公开管理端 `PUT /api/legacy-key-bindings` 接受
+`{keyId, sha256, expiresAt?}`，要求安装管理员 Basic auth 与安装租户头，仅可绑定 external Key。
+同一摘要禁止改绑，保留旧过期时间；撤销、预算、RPM 与租户检查沿用目标 Key 的正常路径。
+调用方继续使用原 Key，新增的目标原生 Key 由管理界面管理，不输出到迁移证据。
+
+目标预算按旧 `max_budget-spend` 转成微美元后向下取整，从切换起作为每月额度，旧用量历史
+留在源库；无上限旧 Key 转为最大精确整数额度 `9007199254740991` 微美元。
+未标价/零价模型使用目标最小正价格 1 微美元/百万 token，避免绕过预算。
+这些转换会在计数输出 `unlimitedKeysCapped`、`minimumPriceModels` 标明，执行前须核对预算语义。
+分组/组织继承策略、非月度预算重置、动态路由和高级多媒体参数不属于自动等价迁移范围，
+须在切换前核对；不能仅凭数量相同宣称这些能力已迁移。
 
 上述检查全部通过，才提交追加材料。
 
