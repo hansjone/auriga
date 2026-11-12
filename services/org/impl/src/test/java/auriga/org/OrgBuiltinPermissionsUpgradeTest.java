@@ -19,6 +19,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class OrgBuiltinPermissionsUpgradeTest {
   @Test
   void legacyBuiltinRolesGainCurrentPermissionsWithoutChangingCustomRoles() {
+    assertTrue(M3PermissionCatalog.adminOnly("iam.network.manage"));
+    assertEquals(
+        Set.of("owner", "admin"),
+        M3PermissionCatalog.all().stream()
+            .filter(permission -> permission.key().equals("iam.network.manage"))
+            .findFirst()
+            .orElseThrow()
+            .builtinRoles());
     var roles = PostgresExtension.serviceRoles(getClass(), "org_owner", "org_app", "org");
     CommonMigrations.migrate(roles.owner().dataSource(), "org");
     CommonMigrations.serviceFlyway(

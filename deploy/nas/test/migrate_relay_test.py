@@ -27,6 +27,7 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(target.credentials, [secret])
         self.assertEqual(target.pools[0]['id'], 'old-model')
         self.assertEqual(target.bindings[0]['sha256'], 'a' * 64)
+        self.assertEqual(migration.plan(source)[2][0][1]['name'], 'litellm:' + 'a' * 12)
         self.assertNotIn(secret, str(first))
 
     def test_unsupported_source_fails_before_any_destination_write(self):

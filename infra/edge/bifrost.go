@@ -42,6 +42,17 @@ func (c Config) parseRelayOrigin() (*url.URL, error) {
 
 var relayTransport = &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 165 * time.Second, IdleConnTimeout: 60 * time.Second, MaxIdleConnsPerHost: 32}
 
+// IAM device credentials are signed JWTs. Only the disjoint sk- namespace is
+// selected here; Bifrost still checks every key's identity, source and revocation.
+func isExternalRelayBearer(r *http.Request) bool {
+	auth := r.Header.Values("Authorization")
+	if len(auth) != 1 || !strings.HasPrefix(auth[0], "Bearer sk-") {
+		return false
+	}
+	token := strings.TrimPrefix(auth[0], "Bearer ")
+	return len(token) > len("sk-") && len(token) <= 512 && token != "sk-bf-" && !strings.ContainsAny(token, " ,\r\n\t")
+}
+
 // A member VK must never bypass the live IAM/org checks at ai-gateway. There is
 // no local allow cache: quota lookup uses the caller's VK on every public call.
 func (g *Gateway) checkExternalRelayKey(r *http.Request) (int, string) {
@@ -122,7 +133,7 @@ func (g *Gateway) proxyExternalRelay(w http.ResponseWriter, r *http.Request, aud
 		return
 	}
 	auth := r.Header.Values("Authorization")
-	if len(auth) != 1 || !strings.HasPrefix(auth[0], "Bearer sk-bf-") || len(auth[0]) <= len("Bearer sk-bf-") || len(auth[0]) > 16384 || strings.ContainsAny(strings.TrimPrefix(auth[0], "Bearer "), " ,\r\n\t") {
+	if !isExternalRelayBearer(r) {
 		fail(401, "common.unauthenticated")
 		return
 	}

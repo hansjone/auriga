@@ -371,7 +371,7 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		g.proxyRelayAdmin(w, r, audience, rid)
 		return
 	}
-	if g.relayURL != nil && strings.HasPrefix(path, "/ai/v1/") && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer sk-bf-") {
+	if g.relayURL != nil && strings.HasPrefix(path, "/ai/v1/") && isExternalRelayBearer(r) {
 		g.proxyExternalRelay(w, r, audience, rid)
 		return
 	}

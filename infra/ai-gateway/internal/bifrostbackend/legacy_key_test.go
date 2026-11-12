@@ -31,6 +31,9 @@ func TestLegacyKeyBindingPreservesCallerCredentialAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := "sk-" + rand.Text()
+	if _, _, err := b.parseToken(old); err == nil {
+		t.Fatal("unbound legacy key accepted")
+	}
 	hash := sha256.Sum256([]byte(old))
 	body := fmt.Sprintf(`{"keyId":%q,"sha256":%q}`, key.Key.Id, hex.EncodeToString(hash[:]))
 	call := func(tenant, auth, value string) int {
@@ -95,5 +98,32 @@ func TestLegacyKeyBindingPreservesCallerCredentialAndRevocation(t *testing.T) {
 	b.ServeHTTP(w, r)
 	if w.Code == 200 {
 		t.Fatal("revoked key still usable")
+	}
+}
+
+func TestLegacyMissCacheBoundedExpiresAndBindingWins(t *testing.T) {
+	var cache legacyMissCache
+	now := time.Now()
+	digest := sha256.Sum256([]byte(rand.Text()))
+	_, generation := cache.lookup(digest, now)
+	cache.remember(digest, generation, now)
+	if hit, _ := cache.lookup(digest, now.Add(time.Second)); !hit {
+		t.Fatal("miss was not cached")
+	}
+	if hit, _ := cache.lookup(digest, now.Add(3*time.Second)); hit {
+		t.Fatal("negative cache did not expire")
+	}
+	cache.invalidate(digest)
+	cache.remember(digest, generation, now)
+	if hit, _ := cache.lookup(digest, now); hit {
+		t.Fatal("in-flight lookup hid a new binding")
+	}
+	for i := range 1100 {
+		digest := sha256.Sum256(fmt.Appendf(nil, "unknown-%d", i))
+		_, generation := cache.lookup(digest, now)
+		cache.remember(digest, generation, now)
+	}
+	if len(cache.entries) > 1024 {
+		t.Fatal("negative cache grew without a bound")
 	}
 }

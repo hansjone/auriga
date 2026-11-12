@@ -50,6 +50,7 @@ type Backend struct {
 	password       [32]byte
 	memberPassword [32]byte
 	allowPrivate   bool
+	legacyMisses   legacyMissCache
 }
 
 func New(db *store.Store, masterHex, password, memberPassword string, allowPrivate bool) (*Backend, error) {

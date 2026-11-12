@@ -86,6 +86,11 @@ edge 重建使文件 bind 读取本次原子发布的派生配置，随后 agent
 出网策略初始应显示未配置并开放，重新验证旧实例模型请求和出网请求。
 旧安装缺 presence 三份材料时应报告 `device_presence=disabled`，保留其他功能。
 核对原成员、实例元数据、中转站配置与 Key 指纹，完成一次现有实例真实请求。
+使用原调用方 Key，通过已封存的 portal Origin 请求 edge 的
+`/ai/v1/models` 和 `/ai/v1/chat/completions`，确认原模型名可调用且到达预期上游。
+这两项请求应使用客户端实际使用的地址、TLS 和代理路径。将正常入口调用作为 commit
+检查点，同时核对设备 JWT 的模型访问及 Team MCP/节点路径。回滚后重复原 Key 的
+edge 入口请求，确认旧网关恢复服务。
 
 ### 中转站迁移边界
 
@@ -103,9 +108,14 @@ helper 只输出数量和固定错误信息，第三方库及子进程 stdout/st
 `{keyId, sha256, expiresAt?}`，要求安装管理员 Basic auth 与安装租户头，仅可绑定 external Key。
 同一摘要禁止改绑，保留旧过期时间；撤销、预算、RPM 与租户检查沿用目标 Key 的正常路径。
 调用方继续使用原 Key，新增的目标原生 Key 由管理界面管理，不输出到迁移证据。
-目标调用入口为 `/v1/chat/completions` 和 `/v1/models`；旧 `llm_api_routes`、
+客户端入口为 portal Origin 下的 `/ai/v1/chat/completions` 和 `/ai/v1/models`。
+edge 将旧 `sk-` 和新 `sk-bf-` Key 交给 relay，设备 JWT 沿 Device 路径鉴权，
+Team MCP/节点操作仍按各自路径转发。目标内部接口为 `/v1/chat/completions` 和 `/v1/models`，旧 `llm_api_routes`、
 `openai_routes` 或显式包含这两个路径的范围可转换，其余路由范围失败封闭。
 旧中转站的其他调用协议与路由不自动启用。
+仅迁移 LiteLLM 虚拟调用 Key。LiteLLM master key 用于旧管理端和解密源数据，
+不作为调用凭据迁入 Bifrost。切换前核对现有调用方及受控访问记录，使用 master key
+调用模型的客户端应先改用独立虚拟 Key，再按相同的 edge 入口完成验证。
 
 目标预算按旧 `max_budget-spend` 转成微美元后向下取整，从切换起作为每月额度，旧用量历史
 留在源库；无上限旧 Key 转为最大精确整数额度 `9007199254740991` 微美元。

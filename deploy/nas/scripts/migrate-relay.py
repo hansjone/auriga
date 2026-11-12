@@ -190,7 +190,7 @@ def plan(source):
             rpm = int(item.get('rpm_limit') or 0)
             if remaining > MAX_INTEGER or not 0 <= rpm <= 1000000:
                 raise MigrationError('unsupported_key_budget')
-            body = {'name': 'litellm:' + digest, 'active': not bool(item.get('blocked')),
+            body = {'name': 'litellm:' + digest[:12], 'active': not bool(item.get('blocked')),
                     'monthlyBudgetMicros': remaining, 'requestsPerMinute': rpm, 'models': allowed}
             expires = item.get('expires')
             if expires:
