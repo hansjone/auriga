@@ -7,6 +7,8 @@ import {
   renameSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { requireSchema } from './schema.mjs';
+import { parseStrictJson } from './json.mjs';
 import {
   acquireHostLock,
   assertLocalPath,
@@ -92,7 +94,10 @@ export class DesktopGuardian {
   read() {
     assertLocalPath(this.file);
     if (!existsSync(this.file)) return null;
-    const state = JSON.parse(readFileSync(this.file, 'utf8'));
+    const state = requireSchema(
+      'UnifiedGuardianStateFile',
+      parseStrictJson(readFileSync(this.file), true),
+    );
     if (
       state.schemaVersion !== 1 ||
       !Number.isSafeInteger(state.revision) ||
@@ -149,6 +154,7 @@ export class DesktopGuardian {
   write(state, lock) {
     lock.check();
     state.revision++;
+    requireSchema('UnifiedGuardianStateFile', state);
     durableJson(this.file, state);
   }
 
@@ -245,9 +251,13 @@ export class DesktopGuardian {
           recordedAt: new Date().toISOString(),
         };
         const receiptFile = join(receipts, `${receiptId}.json`);
+        requireSchema('UnifiedReceiptFile', receipt);
         assertLocalPath(receiptFile);
         if (existsSync(receiptFile)) {
-          const existing = JSON.parse(readFileSync(receiptFile, 'utf8'));
+          const existing = requireSchema(
+            'UnifiedReceiptFile',
+            parseStrictJson(readFileSync(receiptFile), true),
+          );
           if (
             Object.keys(receipt).some(
               (k) => k !== 'recordedAt' && receipt[k] !== existing[k],
@@ -299,13 +309,17 @@ export class DesktopGuardian {
   }
 }
 
-// Production entry remains fail closed until the C observer and trusted new-session port
-// are integrated. In particular a persisted active boolean is never a launch permit.
+// P1 round 2 permits private-only restart after verified quarantine, with a session warning.
 export function assertUnmanagedStart(dataHome) {
   assertLocalPath(dataHome);
   const guardian = new DesktopGuardian(dataHome, {});
   guardian.locked(() => {
-    if (guardian.read() || !guardian.cleared())
+    const state = guardian.read();
+    if (
+      (state &&
+        (state.guardian.state !== 'private_only' || state.pendingIsolation)) ||
+      !guardian.cleared()
+    )
       throw new Error(
         '共享资源需完成可信重验与新会话门禁，当前拒绝启动。历史与私有技能已保留。',
       );

@@ -1,7 +1,9 @@
 import { cleanupDownloads } from './update-state.mjs';
 import { createRequire } from 'node:module';
 import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
-import { assertUnmanagedStart } from './guardian.mjs';
+import { ProcessTree, assertNTFS, notifyPrivateOnly } from './process-tree.mjs';
+import { Supervisor, packagedTrust } from './supervisor.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -223,6 +225,25 @@ function seedProfile(dataHome, { platformOrigin, target }) {
   } catch (error) {
     console.error(`Auriga 共享技能配置未启用：${error.message}`);
   }
+}
+
+function assertGuardianCompatible(target, dataHome) {
+  const stateFile = join(dataHome, 'auriga', 'guardian', 'state.json');
+  if (
+    !existsSync(stateFile) ||
+    existsSync(join(target, 'auriga', 'runtime', 'supervisor.mjs'))
+  )
+    return;
+  const state = readJson(stateFile);
+  const current = join(dataHome, 'auriga', 'skills-active', 'current');
+  if (
+    state.guardian?.state !== 'private_only' ||
+    state.pendingIsolation ||
+    (existsSync(current) && readdirSync(current).length)
+  )
+    throw new Error(
+      '目标版本缺少可信 guardian；请先停用并隔离共享技能再回滚。',
+    );
 }
 
 const copyTree = (from, to) =>
@@ -513,6 +534,7 @@ export function install({
     );
   // Verify before anything is copied into place or executed.
   const manifest = verifyPackage(payload, { trees: false });
+  assertGuardianCompatible(payload, dataHome);
   mkdirSync(join(root, 'versions'), { recursive: true });
   writeFileSync(
     join(root, INSTALL_MARKER),
@@ -576,6 +598,7 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
   if (!existsSync(dir))
     throw new Error(`previous version missing: ${state.previous}`);
   verifyPackage(dir);
+  assertGuardianCompatible(dir, state.dataHome);
   transition({
     root,
     dataHome: state.dataHome,
@@ -674,8 +697,32 @@ export function desktopSession(root) {
 export async function launch({ root, args = [], env = process.env }) {
   root = resolve(root);
   assertOwned(root);
-  const session = desktopSession(root);
+  const initial = readState(root);
+  if (!initial) throw new Error('installation state missing');
+  assertNTFS(initial.dataHome);
+  const tree = new ProcessTree(initial.dataHome);
+  const oldProcesses = [
+    tree.record.launcher,
+    tree.record.root,
+    ...tree.record.children,
+  ].filter(Boolean);
+  const supervisor = new Supervisor(
+    initial.dataHome,
+    tree,
+    packagedTrust(versionDir(root, initial.current)),
+  );
+  const releaseSingleton = tree.singleton();
+  let session;
+  let monitor;
+  let finished = false;
   try {
+    await supervisor.prepare();
+    const sessionFile = join(root, 'desktop-session.json');
+    if (existsSync(sessionFile) && (await tree.isStopped())) {
+      const previous = readJson(sessionFile);
+      if (oldProcesses.some((p) => p.pid === previous.pid)) rmSync(sessionFile);
+    }
+    session = desktopSession(root);
     recover(root);
     cleanupDownloads(root, { stopped: true });
     const { applyPending } = await import('./update.mjs');
@@ -688,9 +735,12 @@ export async function launch({ root, args = [], env = process.env }) {
     };
     await apply();
     const state = readState(root);
-    if (!state) throw new Error(`no installation state in ${root}`);
-    assertUnmanagedStart(state.dataHome);
     const dir = versionDir(root, state.current);
+    // The update transaction may have changed packaged trust or profile bytes.
+    supervisor.trust = packagedTrust(dir);
+    await supervisor.reconcile(true);
+    if (supervisor.guardian.read()?.guardian.state === 'private_only')
+      notifyPrivateOnly();
     const child = spawn(
       nodeBin(dir),
       [dshBin(dir), '--profile', PROFILE, ...args],
@@ -703,15 +753,37 @@ export async function launch({ root, args = [], env = process.env }) {
         }),
       },
     );
-    if (child.pid) session.child(child.pid);
-    const status = await new Promise((resolve, reject) => {
+    const exited = new Promise((resolve, reject) => {
       child.once('error', reject);
       child.once('exit', (code) => resolve(code ?? 1));
     });
+    if (child.pid) {
+      tree.attach(child.pid);
+      session.child(child.pid);
+    }
+    monitor = (async () => {
+      while (!finished) {
+        await delay(1000);
+        if (finished) break;
+        tree.refresh();
+        await supervisor.reconcile();
+      }
+    })();
+    const status = await Promise.race([exited, monitor]);
+    finished = true;
+    await monitor;
+    await tree.stopTree();
     session.child(process.pid);
     await apply();
     return status;
   } finally {
-    session.close();
+    finished = true;
+    if (monitor) await monitor.catch(() => {});
+    try {
+      await tree.stopTree();
+    } finally {
+      session?.close();
+      releaseSingleton();
+    }
   }
 }

@@ -95,8 +95,12 @@ edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口�
 
 # P1-E 集成状态
 
-当前 installer 已加入保留原文的宿主级共享 Skill 配置升级、宿主目录锁、租约时钟检查与停机后的隔离事务。共享能力仍未开放：正常启动入口遇到任何 guardian 记录或非空共享目录时拒绝启动，不能把这些基础实现视为完整可信 guardian。
+正常入口仍为 `bin/auriga-desktop.cmd`。启动器独立核验共享 Skill 的冻结 ledger、事务、回执、原始清单、归档及实际落盘字节，再持锁复核 revision 和字节后持久化高水位与激活许可。启动器单实例监督 DSH 子进程，记录 PID/创建时间和后代；撤销、最早租约截止、身份改变或回拨触发 `taskkill /T /F`，确认退出后隔离共享根并写停用回执。插件关闭或卸载不影响该监督。
 
-`runtime/guardian.mjs` 的 `DesktopGuardian` 目前是供可信宿主控制器调用的端口级实现：`stopTree` 必须停止整个受管 DSH 进程树，`isStopped` 必须确认全部退出，`verifyCurrent` 必须独立验证 C 的完整安装快照、签名、撤销、身份及代次，不能传入插件自报的成功布尔值。`tick` 必须由独立于插件的串行监督循环调用。当前正常启动入口尚未接入这些端口，因而拒绝共享启动。
+构建时以 `--resource-trust-json <可信公钥文件>` 固定独立的 release/revocation/downgrade Ed25519 公钥；文件按 `{release:{kid,publicKeySpkiBase64},revocation:{...},downgrade:{...}}` 提供，禁止测试钥用于部署。未固定资源公钥的包只能使用私有技能。构建同时带入冻结 JSON Schema，使用锁定上游 Ajv 完整校验。运行时不从插件、环境变量或制品读取公钥。
 
-完成共享开放前，还需独立验签与高水位事务、C 的安装记录观察接线、Windows 进程树监督与 guardian 崩溃后的回收、强制新会话的宿主接线、Windows 持久化替换语义及本地文件系统核验。Linux 争锁与真实 Desktop 页面验收交 F 线；完整签名向量也必须在启用前跑齐。配置只引用固定共享根，原预置行、用户配置和历史均保留。
+仅支持本地固定 NTFS 卷，拒绝网络盘、映射盘、UNC 与重解析路径。持久化以同目录临时文件、fsync、rename 为前提。已知陈旧锁必须在停止全部受管写者、复核 lockId 后回收；未知锁保留并失败封闭。进程崩溃后的下次启动先根据可信账本停止旧树并恢复隔离；高水位与停用证据放在独立 DSH_HOME，不随应用回滚删除。存在未隔离共享状态时禁止退回不带 guardian 的旧版本。
+
+第 2 轮决定允许隔离后以 `private_only` 正常重启。启动器显示“共享技能已停用，建议新建会话”，原历史保留，也允许恢复旧会话；已载入旧上下文的影响是已知残余风险。guardian 崩溃至下次启动期间，DSH 可能继续运行。正常配置和预置技能均保留；本提交未经 NAS 部署，Linux 争锁、C 的真实安装联调及完整页面验收由 F 线执行。
+
+本机 Windows 实测：先按 installer 锁在 `target/dsh` 安装隔离的 DSH，再在仓库根执行 `node clients/installer/scripts/guardian-real-dsh.mjs`；它只使用临时 DSH_HOME、随机端口，并在结束时停止自己的进程。缓存摘要目录内应有唯一匹配摘要的原字节文件；签名撤销表也以内容摘要缓存。prepared 内容位于 `staging/<transactionId>/<manifest.name>/`，applied 回执按 K 路径布局。C 只能在 E 许可的身份、代次和完整集合完全一致时切换 current，停用回执须先对账后才能重新申请共享。

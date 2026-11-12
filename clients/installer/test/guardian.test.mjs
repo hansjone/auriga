@@ -198,12 +198,24 @@ function fixture(t, stopped = true) {
       generation: 1,
       state: 'active',
       reason: 'startup',
-      lease: { expiresAt: '2026-11-13T00:00:00Z' },
+      lease: {
+        envelopeNotAfter: '2026-11-13T00:00:00Z',
+        revocationsExpiresAt: '2026-11-13T00:00:00Z',
+        expiresAt: '2026-11-13T00:00:00Z',
+        revocationRevision: 1,
+      },
       processStopped: false,
       viewCleared: false,
       newSessionRequired: false,
     },
-    clock: {},
+    clock: {
+      bootId: identity,
+      maxObservedTime: '2026-11-12T00:00:00Z',
+      lastTrustedTime: '2026-11-12T00:00:00Z',
+      lastTrustedTimeSource: 'signed_release',
+      lastMonotonicMillis: 1,
+      leaseDeadlineMonotonicMillis: 86400001,
+    },
   });
   const calls = [];
   const guardian = new DesktopGuardian(home, {
@@ -237,7 +249,7 @@ test('plugin-free isolation stops first and preserves history and quarantine', a
   assert(
     existsSync(join(f.home, receipt.quarantinePath, 'example', 'SKILL.md')),
   );
-  assert.throws(() => assertUnmanagedStart(f.home));
+  assert.doesNotThrow(() => assertUnmanagedStart(f.home));
 });
 
 test('unconfirmed process stop keeps current and blocks startup', async (t) => {
@@ -269,4 +281,10 @@ test('restart after rename finishes isolation and durable receipt', async (t) =>
   await f.guardian.disable('verification_failed');
   assert.equal(f.guardian.read().guardian.state, 'private_only');
   assert(!f.guardian.read().pendingIsolation);
+});
+
+test('empty flow patch upgrades to valid block YAML', () => {
+  const merged = mergeSkillPatch('[]\n', parse, process.cwd());
+  assert.equal(parse(merged)[0].insert[0].id, 'auriga-shared-skills');
+  assert.equal(mergeSkillPatch(merged, parse, process.cwd()), merged);
 });

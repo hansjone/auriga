@@ -363,6 +363,35 @@ export async function build(args) {
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });
+  mkdirSync(join(payload, 'auriga', 'runtime', 'schemas'), { recursive: true });
+  for (const name of ['package', 'signatures', 'unified'])
+    cpSync(
+      join(installerDir, '../../contracts/resource', name + '.schema.json'),
+      join(payload, 'auriga', 'runtime', 'schemas', name + '.schema.json'),
+    );
+  if (args['resource-trust-json']) {
+    const trust = JSON.parse(readFileSync(args['resource-trust-json'], 'utf8'));
+    for (const role of ['release', 'revocation', 'downgrade']) {
+      const root = trust[role];
+      if (!root || !/^[A-Za-z0-9._-]{1,128}$/.test(root.kid))
+        throw new Error('invalid resource trust root');
+      const key = createPublicKey({
+        key: Buffer.from(root.publicKeySpkiBase64, 'base64'),
+        type: 'spki',
+        format: 'der',
+      });
+      if (key.asymmetricKeyType !== 'ed25519')
+        throw new Error('resource trust must be Ed25519');
+    }
+    if (
+      new Set(Object.values(trust).map((k) => k.publicKeySpkiBase64)).size !== 3
+    )
+      throw new Error('resource trust roles require independent keys');
+    writeFileSync(
+      join(payload, 'auriga', 'runtime', 'resource-roots.json'),
+      JSON.stringify(trust),
+    );
+  }
   if (args['release-public-key']) {
     const key = createPublicKey(readFileSync(args['release-public-key']));
     if (key.asymmetricKeyType !== 'ed25519')

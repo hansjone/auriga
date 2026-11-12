@@ -856,3 +856,24 @@ test('an upstream file changed after installation is replaced when the package i
     undefined,
   );
 });
+
+test('active shared state prevents rollback into a version without guardian', (t) => {
+  const f = fixture(t);
+  put(f, { name: 'a' });
+  put(f, { name: 'b', pluginVersion: '1.1.0' });
+  const before = readState(f.root);
+  const directory = join(f.dataHome, 'auriga', 'guardian');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, 'state.json'),
+    JSON.stringify({ guardian: { state: 'active' } }),
+  );
+  assert.throws(() => rollback({ root: f.root, smoke: noSmoke }));
+  assert.deepEqual(readState(f.root), before);
+  writeFileSync(
+    join(directory, 'state.json'),
+    JSON.stringify({ guardian: { state: 'private_only' } }),
+  );
+  rollback({ root: f.root, smoke: noSmoke });
+  assert.equal(readState(f.root).current, before.previous);
+});

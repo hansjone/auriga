@@ -27,7 +27,7 @@ export function yamlParser(yaml) {
 // Parse only. Never evaluate the upstream !!js expressions or serialize user YAML.
 export function mergeSkillPatch(source, parse, dataHome) {
   if (!isAbsolute(dataHome)) throw new Error('DSH_HOME must be absolute');
-  const rows = parse(source);
+  const rows = parse(source) ?? [];
   if (!Array.isArray(rows)) throw new Error('Cordis patch must be a sequence');
   const expected = parse(SHARED_ROW)[0].insert[0];
   const owned = [];
@@ -65,6 +65,10 @@ export function mergeSkillPatch(source, parse, dataHome) {
       throw new Error('conflicting shared provider');
     return source;
   }
+  if (source.trim() === '[]') return source.replace('[]', SHARED_ROW.trimEnd());
+  // Appending block items to a nonempty flow sequence is not valid YAML.
+  if (source.trimStart().startsWith('['))
+    throw new Error('flow sequence patch requires explicit conversion');
   return source + (source && !source.endsWith('\n') ? '\n' : '') + SHARED_ROW;
 }
 
