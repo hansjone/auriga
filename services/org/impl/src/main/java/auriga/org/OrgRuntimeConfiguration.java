@@ -28,6 +28,11 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
     "${auriga.services.org.enabled:true} && ('${auriga.service.schema:}' == 'org' || ${auriga.platform.combined:false})")
 public class OrgRuntimeConfiguration {
   @Bean
+  org.springframework.boot.ApplicationRunner orgBuiltinPermissions(OrgService service) {
+    return args -> service.initializeBuiltinPermissions();
+  }
+
+  @Bean
   @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(OrgStore.class)
   OrgStore orgStore(
       org.springframework.beans.factory.ListableBeanFactory beans,

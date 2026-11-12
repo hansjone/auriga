@@ -21,8 +21,18 @@ final class M3Permissions {
   void register() {
     UUID tenant = store.tenantId();
     if (registered.contains(tenant)) return;
+    // IAM's network administration permission predates the M3 catalog.
+    var catalog = new ArrayList<>(M3PermissionCatalog.all());
+    catalog.add(
+        new M3PermissionCatalog.Permission(
+            "iam.network.manage",
+            "Manage registered devices",
+            "管理已登记设备",
+            true,
+            true,
+            Set.of("owner", "admin")));
     var permissions =
-        M3PermissionCatalog.all().stream()
+        catalog.stream()
             .filter(p -> !p.key().equals("audit.events.read") || tenant.equals(platformTenant))
             .toList();
     for (var permission : permissions) {

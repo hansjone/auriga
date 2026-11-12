@@ -240,6 +240,15 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 		return invalid
 	}
 	switch {
+	case r.URL.Path == "/api/legacy-key-bindings" && r.Method == http.MethodPut:
+		var input legacyKeyBinding
+		if e := decode(w, r, &input); e != nil {
+			return e
+		}
+		if e := b.bindLegacyKey(r.Context(), tenant, input); e != nil {
+			return e
+		}
+		respond(w, map[string]string{"status": "bound"})
 	case len(parts) == 1 && parts[0] == "providers" && r.Method == http.MethodGet:
 		out, e := b.ListProviders(r.Context(), tenant, page)
 		if e != nil {
