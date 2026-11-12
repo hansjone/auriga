@@ -38,12 +38,8 @@ require_root_or_capable_chown() { :; }
 bootstrap_nas_materials() { [ ! -e "$NAS_ROOT/bad-core" ]; }
 load_nas_access_env() { :; }
 install_edge_material() { :; }
-<<<<<<< HEAD
 install_network_presence_materials() { :; }
-chown_required() { :; }
-=======
 chown_required() { printf '%s %s\n' "$1" "$2" >>"$NAS_ROOT/chown.log"; }
->>>>>>> origin/main
 info() { :; }
 die() { echo "$*" >&2; exit 1; }
 stat() {
