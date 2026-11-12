@@ -5,14 +5,16 @@ import OverviewView from '../src/views/OverviewView.vue';
 import { adminApi } from '../src/admin/api';
 import { orgApi } from '../src/api';
 import { router } from '../src/router';
-import WorkflowUnavailableView from '../src/views/WorkflowUnavailableView.vue';
 import AuditView from '../src/views/AuditView.vue';
 import AlertsView from '../src/views/ops/AlertsView.vue';
 import NotificationsView from '../src/views/ops/NotificationsView.vue';
+import UpgradesView from '../src/views/ops/UpgradesView.vue';
+import BackupsView from '../src/views/ops/BackupsView.vue';
+import LifecycleView from '../src/views/ops/LifecycleView.vue';
 
 afterEach(() => vi.restoreAllMocks());
 describe('overview snapshots', () => {
-  it('makes overview the default while keeping unavailable navigation honest', () => {
+  it('makes overview the default and connects operations and audit pages', () => {
     expect(
       router
         .getRoutes()
@@ -32,7 +34,13 @@ describe('overview snapshots', () => {
     );
     expect(
       router.resolve('/ops/upgrades').matched.at(-1)?.components?.default,
-    ).toBe(WorkflowUnavailableView);
+    ).toBe(UpgradesView);
+    expect(
+      router.resolve('/ops/backups').matched.at(-1)?.components?.default,
+    ).toBe(BackupsView);
+    expect(
+      router.resolve('/ops/lifecycle').matched.at(-1)?.components?.default,
+    ).toBe(LifecycleView);
   });
   it('reads every page and leaves independent failures unknown', async () => {
     vi.spyOn(orgApi, 'listMembers')

@@ -10,6 +10,11 @@
   <artifactId>ops-impl</artifactId>
   <dependencies>
     <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>auriga</groupId>
       <artifactId>ops-api</artifactId>
       <version>${project.version}</version>
@@ -32,7 +37,6 @@
       <groupId>org.springframework</groupId>
       <artifactId>spring-context</artifactId>
     </dependency>
-    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
     <dependency><groupId>auriga</groupId><artifactId>test-support</artifactId><version>${project.version}</version><scope>test</scope></dependency>
   </dependencies>
   <build>

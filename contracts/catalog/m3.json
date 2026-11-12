@@ -50,6 +50,61 @@
         "admin"
       ]
     },
+    "ops.upgrades.read": {
+      "description": {
+        "zh-CN": "查看部署版本及升级回执",
+        "en": "Read deployment inventory and upgrade receipts"
+      },
+      "adminOnly": true,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner"
+      ]
+    },
+    "ops.upgrades.write": {
+      "description": {
+        "zh-CN": "登记平台升级",
+        "en": "Register deployment upgrades"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner"
+      ]
+    },
+    "ops.backups.read": {
+      "description": {
+        "zh-CN": "查看数据库备份与计划",
+        "en": "Read database backups and schedules"
+      },
+      "adminOnly": true,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner"
+      ]
+    },
+    "ops.backups.write": {
+      "description": {
+        "zh-CN": "配置和触发数据库备份",
+        "en": "Configure and trigger database backups"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner"
+      ]
+    },
+    "ops.backups.download": {
+      "description": {
+        "zh-CN": "下载数据库备份",
+        "en": "Download database backups"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner"
+      ]
+    },
     "collab.messages.use": {
       "description": {
         "zh-CN": "以本人身份使用本租户参与的 Team 通信",
