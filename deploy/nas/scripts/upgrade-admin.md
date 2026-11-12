@@ -99,6 +99,7 @@ sh "$NEW/deploy-nas/scripts/materials-upgrade.sh" status
 
 ```sh
 sh "$NEW/deploy-nas/scripts/stop.sh"
+sh "$OLD/deploy-nas/scripts/stop.sh"
 sh "$NEW/deploy-nas/scripts/materials-upgrade.sh" rollback "$RECEIPT"
 cp -p "$BACKUP/stack.env.before" "$AURIGA_DATA_ROOT/stack.env"
 sh "$OLD/deploy-nas/scripts/render.sh"
@@ -108,6 +109,7 @@ sh "$OLD/deploy-nas/scripts/smoke.sh"
 ```
 
 原封存目录与追加材料历史全部保留。新增数据库和角色保留以支持重试。
+两份 bundle 的固定服务定义分别清理各自容器，覆盖旧 LiteLLM 容器引用已移除网络的情况。
 上述回滚恢复旧 bundle/env 与投影，数据库已执行的业务 Flyway 迁移需要独立兼容性验证。
 恢复后从原页面再次验证成员、实例、供应商与模型请求。重新尝试升级时先恢复本次候选
 `stack.env`，执行同一个 stage、render、数据库 helper 和验收顺序。
