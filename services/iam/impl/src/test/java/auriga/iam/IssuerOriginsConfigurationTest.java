@@ -24,6 +24,7 @@ class IssuerOriginsConfigurationTest {
     String base = "http://192.0.2.10:8080", alias = "https://portal.example.com";
     var access = mock(DeploymentAccess.class);
     when(access.issuer()).thenReturn(base);
+    when(access.tenantId()).thenReturn(UUID.randomUUID().toString());
     var env =
         new MockEnvironment()
             .withProperty("auriga.iam.issuer", base)

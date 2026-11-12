@@ -1,5 +1,6 @@
 import EntriesView from './views/security/EntriesView.vue';
 import EgressView from './views/security/EgressView.vue';
+import CredentialsView from './views/CredentialsView.vue';
 import DevicesView from './views/DevicesView.vue';
 import UpgradesView from './views/ops/UpgradesView.vue';
 import BackupsView from './views/ops/BackupsView.vue';
@@ -33,6 +34,7 @@ import NotificationsView from './views/ops/NotificationsView.vue';
 const existing = new Set([
   '/security/entries',
   '/security/egress',
+  '/security/credentials',
   '/runtime/devices',
   '/ops/upgrades',
   '/ops/backups',
@@ -77,6 +79,7 @@ export const router = createRouter({
       component: AdminLayout,
       children: [
         { path: '', redirect: '/overview' },
+        { path: 'security/credentials', component: CredentialsView },
         { path: 'overview', component: OverviewView },
         { path: 'security/entries', component: EntriesView },
         { path: 'security/egress', component: EgressView },

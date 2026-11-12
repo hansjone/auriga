@@ -1,4 +1,5 @@
 import { securityZh, securityEn } from './securityMessages';
+import { credentialsZh, credentialsEn } from './credentialsMessages';
 import { devicesZh, devicesEn } from './devicesMessages';
 import { runtimeZh, runtimeEn } from './runtimeMessages';
 import { useI18n } from 'vue-i18n';
@@ -11,6 +12,7 @@ import { settingsZh, settingsEn } from './settingsMessages';
 
 const zh = {
   ...securityZh,
+  ...credentialsZh,
   ...devicesZh,
   ...runtimeZh,
   navRelayProviders: '模型与供应商',
@@ -132,6 +134,7 @@ const zh = {
 };
 const en = {
   ...securityEn,
+  ...credentialsEn,
   ...devicesEn,
   ...runtimeEn,
   navRelayProviders: 'Models and providers',
