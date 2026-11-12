@@ -98,7 +98,8 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		fail(http.StatusBadRequest, "edge.bad_path")
 		return
 	}
-	public := preview || iam && (loginOperation(r) || protocolOperation(r))
+	desktop := target == g.resourceURL && desktopPublicRead(r)
+	public := desktop || preview || iam && (loginOperation(r) || protocolOperation(r))
 	raw, cookieOK := singleCookie(r, cookieName(e.scheme == "https", sessionCookieBase(audience)))
 	count := 0
 	for _, cookie := range r.Cookies() {
@@ -112,7 +113,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	}
 	var sess *Session
 	// Invitation previews are anonymous even when the browser has a session.
-	if cookieOK && !preview {
+	if cookieOK && !preview && !desktop {
 		loaded, err := g.browserSession(r, raw, audience, !public && r.Method == http.MethodGet)
 		if err != nil && !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, errIAMUnauthenticated) && !public {
 			unavailable("browser_session_unavailable")
@@ -123,7 +124,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		}
 	}
 	auth := r.Header.Get("Authorization")
-	clientBearer := strings.HasPrefix(auth, "Bearer ") && len(auth) > len("Bearer ")
+	clientBearer := !desktop && strings.HasPrefix(auth, "Bearer ") && len(auth) > len("Bearer ")
 	if bootstrap && sess == nil {
 		fail(401, "common.unauthenticated")
 		return
@@ -202,6 +203,9 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	}
 	if r.Body != nil && r.Body != http.NoBody {
 		limit := int64(maxAPIBodyBytes)
+		if target == g.resourceURL && r.Method == http.MethodPost && r.URL.Path == "/api/resource/v1/admin/desktop/releases" {
+			limit = 4 << 30
+		}
 		if target == g.resourceURL && r.Method == http.MethodPost && resourceUploadPath.MatchString(r.URL.Path) {
 			limit = (64 << 20) + 131072 // Contract archive bytes plus bounded multipart metadata/framing.
 		}

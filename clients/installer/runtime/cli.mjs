@@ -58,7 +58,7 @@ try {
       ),
     );
   } else if (command === 'launch') {
-    process.exitCode = launch({ root: values.root, args: positional });
+    process.exitCode = await launch({ root: values.root, args: positional });
   } else {
     console.error(
       'usage: cli.mjs install|rollback|uninstall|launch --root <dir> ...',

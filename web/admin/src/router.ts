@@ -1,3 +1,4 @@
+import DesktopView from './views/DesktopView.vue';
 import EntriesView from './views/security/EntriesView.vue';
 import EgressView from './views/security/EgressView.vue';
 import CredentialsView from './views/CredentialsView.vue';
@@ -32,6 +33,7 @@ import AlertsView from './views/ops/AlertsView.vue';
 import NotificationsView from './views/ops/NotificationsView.vue';
 
 const existing = new Set([
+  '/ops/desktop',
   '/security/entries',
   '/security/egress',
   '/security/credentials',
@@ -84,6 +86,7 @@ export const router = createRouter({
         { path: 'security/entries', component: EntriesView },
         { path: 'security/egress', component: EgressView },
         { path: 'ops/upgrades', component: UpgradesView },
+        { path: 'ops/desktop', component: DesktopView },
         { path: 'ops/backups', component: BackupsView },
         { path: 'ops/lifecycle', component: LifecycleView },
         { path: 'audit', component: AuditView },

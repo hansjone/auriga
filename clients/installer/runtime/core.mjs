@@ -1,3 +1,4 @@
+import { cleanupDownloads } from './update-state.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -19,6 +20,8 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  openSync,
+  closeSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -35,7 +38,8 @@ import {
   relative,
   resolve,
 } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { verifyPackage } from './verify.mjs';
 
 export const PROFILE = 'auriga';
@@ -58,6 +62,10 @@ const OWNED_ENTRIES = [
   'install.json',
   'shell.json',
   'txn.json',
+  'desktop-update.json',
+  'desktop-pending',
+  'desktop-origin.json',
+  'desktop-session.json',
 ];
 
 export class CrashError extends Error {}
@@ -537,6 +545,10 @@ export function install({
       smoke(target, dataHome);
     },
   });
+  if (platformOrigin && !existsSync(join(root, 'desktop-origin.json')))
+    writeJsonAtomic(join(root, 'desktop-origin.json'), {
+      origin: new URL(platformOrigin).origin,
+    });
   return { id, previous, upgraded: Boolean(previous && previous !== id) };
 }
 
@@ -580,6 +592,7 @@ export function uninstall({ root, purgeData = false }) {
   root = resolve(root);
   assertOwned(root);
   recover(root);
+  cleanupDownloads(root, { stopped: true });
   const state = readState(root);
   if (!state) throw new Error(`no installation state in ${root}`);
   if (purgeData) {
@@ -605,17 +618,86 @@ export function uninstall({ root, purgeData = false }) {
   return { dataKept: !purgeData, dataHome: state.dataHome };
 }
 
-export function launch({ root, args = [], env = process.env }) {
+/** One running DSH per installation: deferred updates may only mutate a stopped profile. */
+export function desktopSession(root) {
+  const file = join(root, 'desktop-session.json');
+  const token = randomUUID();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(file, 'wx', 0o600);
+      try {
+        writeFileSync(fd, JSON.stringify({ pid: process.pid, token }));
+      } finally {
+        closeSync(fd);
+      }
+      return {
+        child(pid) {
+          writeJsonAtomic(file, { pid, token });
+        },
+        close() {
+          if (readJson(file).token === token) rmSync(file, { force: true });
+        },
+      };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const previous = readFileSync(file, 'utf8');
+      const { pid } = JSON.parse(previous);
+      if (!Number.isSafeInteger(pid) || pid < 1)
+        throw new Error('invalid desktop session lock');
+      try {
+        process.kill(pid, 0);
+      } catch (check) {
+        if (check.code === 'ESRCH' && readFileSync(file, 'utf8') === previous) {
+          rmSync(file);
+          continue;
+        }
+      }
+      throw new Error('Auriga Desktop 已在运行，请先退出。');
+    }
+  }
+  throw new Error('desktop session busy');
+}
+
+export async function launch({ root, args = [], env = process.env }) {
   root = resolve(root);
   assertOwned(root);
-  recover(root);
-  const state = readState(root);
-  if (!state) throw new Error(`no installation state in ${root}`);
-  const dir = versionDir(root, state.current);
-  const child = spawnSync(
-    nodeBin(dir),
-    [dshBin(dir), '--profile', PROFILE, ...args],
-    { stdio: 'inherit', env: launchEnv(dir, state.dataHome, env) },
-  );
-  return child.status ?? 1;
+  const session = desktopSession(root);
+  try {
+    recover(root);
+    cleanupDownloads(root, { stopped: true });
+    const { applyPending } = await import('./update.mjs');
+    const apply = async () => {
+      try {
+        await applyPending(root);
+      } catch {
+        console.error('Auriga Desktop 更新失败，已保留旧版。');
+      }
+    };
+    await apply();
+    const state = readState(root);
+    if (!state) throw new Error(`no installation state in ${root}`);
+    const dir = versionDir(root, state.current);
+    const child = spawn(
+      nodeBin(dir),
+      [dshBin(dir), '--profile', PROFILE, ...args],
+      {
+        stdio: 'inherit',
+        env: launchEnv(dir, state.dataHome, {
+          ...env,
+          AURIGA_DESKTOP_ROOT: root,
+          AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
+        }),
+      },
+    );
+    if (child.pid) session.child(child.pid);
+    const status = await new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', (code) => resolve(code ?? 1));
+    });
+    session.child(process.pid);
+    await apply();
+    return status;
+  } finally {
+    session.close();
+  }
 }

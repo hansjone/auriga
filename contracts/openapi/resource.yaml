@@ -4798,7 +4798,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -4808,7 +4808,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -4938,7 +4938,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -4948,7 +4948,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5080,7 +5080,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5090,7 +5090,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5234,7 +5234,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5244,7 +5244,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5363,7 +5363,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5373,7 +5373,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5394,6 +5394,254 @@
             }
           }
         }
+      }
+    },
+    "/api/resource/v1/desktop/latest": {
+      "get": {
+        "operationId": "getDesktopLatest",
+        "tags": [
+          "Resource"
+        ],
+        "x-error-codes": [
+          "common.validation_failed",
+          "common.not_found",
+          "common.rate_limited",
+          "common.unavailable"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopManifest"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "description": "Public signed manifest for the latest listed release. It remains visible after notAfter so new users can download; automatic updaters must reject expired manifests until renewed.",
+        "x-events": [],
+        "x-permission": "resource.packages.read",
+        "x-authorization": "anonymous"
+      }
+    },
+    "/api/resource/v1/desktop/packages/{sequence}": {
+      "get": {
+        "operationId": "downloadDesktopPackage",
+        "tags": [
+          "Resource"
+        ],
+        "x-error-codes": [
+          "common.validation_failed",
+          "common.not_found",
+          "common.rate_limited",
+          "common.unavailable"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial package bytes. Full SHA-256 must still be verified after resuming.",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Returned byte interval and total size."
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "bytes"
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Unsupported or unsatisfiable range.",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "bytes */<total size>"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sequence",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "required": false,
+            "description": "Optional single open-ended byte range for interrupted downloads, e.g. bytes=1048576-.",
+            "schema": {
+              "type": "string",
+              "pattern": "^bytes=[0-9]+-$"
+            }
+          }
+        ],
+        "security": [],
+        "description": "Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge.",
+        "x-events": [],
+        "x-permission": "resource.packages.read",
+        "x-authorization": "anonymous"
+      }
+    },
+    "/api/resource/v1/admin/desktop/releases": {
+      "get": {
+        "operationId": "listDesktopReleases",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.versions.publish",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopReleaseLedger"
+                }
+              }
+            }
+          }
+        },
+        "x-events": [],
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      },
+      "post": {
+        "operationId": "publishDesktopRelease",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.versions.publish",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopManifest"
+                }
+              }
+            }
+          }
+        },
+        "description": "Admin session and recent step-up required. Upload ZIP bytes and a base64url UTF-8 signed manifest in X-Desktop-Manifest. Signature and whole package digest verified before publication. Strictly increasing sequence and version. Signed bytes use integer canonical JSON; independent offline Ed25519 key.",
+        "parameters": [
+          {
+            "name": "X-Desktop-Manifest",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 43700
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "x-events": [],
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/resource/v1/admin/desktop/releases/{sequence}": {
+      "delete": {
+        "operationId": "withdrawDesktopRelease",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.versions.publish",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable",
+          "iam.step_up_required"
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sequence",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "description": "Recent step-up required. Withdrawal is permanent; sequence high-water retained.",
+        "x-events": [],
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
       }
     },
     "/api/resource/v1/catalog/packages": {
@@ -9035,6 +9283,162 @@
           "items"
         ],
         "additionalProperties": false
+      },
+      "DesktopManifest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema",
+          "product",
+          "version",
+          "packageId",
+          "channel",
+          "platform",
+          "sizeBytes",
+          "sha256",
+          "minimumVersion",
+          "publishedAt",
+          "notAfter",
+          "sequence",
+          "notes",
+          "signature",
+          "components"
+        ],
+        "properties": {
+          "schema": {
+            "type": "integer",
+            "const": 1
+          },
+          "product": {
+            "type": "string",
+            "const": "Auriga Desktop"
+          },
+          "version": {
+            "type": "string"
+          },
+          "packageId": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "channel": {
+            "type": "string",
+            "const": "stable"
+          },
+          "platform": {
+            "type": "string",
+            "const": "win-x64"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967296,
+            "format": "int64"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "minimumVersion": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "signature": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "alg",
+              "kid",
+              "value"
+            ],
+            "properties": {
+              "alg": {
+                "type": "string",
+                "const": "Ed25519"
+              },
+              "kid": {
+                "type": "string",
+                "const": "auriga-desktop-release-1"
+              },
+              "value": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{86}$"
+              }
+            }
+          },
+          "components": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "dshVersion",
+              "nodeVersion",
+              "pluginVersion"
+            ],
+            "properties": {
+              "dshVersion": {
+                "type": "string"
+              },
+              "nodeVersion": {
+                "type": "string"
+              },
+              "pluginVersion": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "DesktopReleaseItem": {
+        "type": "object",
+        "required": [
+          "manifest",
+          "withdrawn"
+        ],
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/DesktopManifest"
+          },
+          "withdrawn": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DesktopReleaseLedger": {
+        "type": "object",
+        "properties": {
+          "highestSequence": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesktopReleaseItem"
+            }
+          },
+          "audit": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
       },
       "UnifiedManifest": {
         "oneOf": [

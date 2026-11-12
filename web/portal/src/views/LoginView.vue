@@ -14,6 +14,7 @@ import {
   mapProblemMessage,
 } from '@auriga/shared';
 import { iamApi } from '../api';
+import DesktopDownload from '../components/DesktopDownload.vue';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -131,5 +132,6 @@ const step = (): ClientStep | null =>
         {{ t('login.back') }}
       </button>
     </template>
+    <DesktopDownload />
   </section>
 </template>
