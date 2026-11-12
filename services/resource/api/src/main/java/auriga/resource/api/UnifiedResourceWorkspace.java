@@ -19,7 +19,7 @@ public interface UnifiedResourceWorkspace {
       long observedGeneration,
       boolean ready,
       List<UnifiedInstallationReport> reports,
-      // Expected resources from resource resolution, including each installationRevision.
+      // Expected resources carry installationRevision, desiredState and REMOVED tombstones.
       // Reports cannot supply their own expected counters. Missing/zero counters deny applied.
       List<UnifiedResourceRef> resources) {}
 

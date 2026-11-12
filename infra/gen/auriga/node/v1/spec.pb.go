@@ -269,6 +269,7 @@ type InstanceSpec struct {
 	ResourceDowngrades  []*v1.ResourceDowngradeAuthorization `protobuf:"bytes,17,rep,name=resource_downgrades,json=resourceDowngrades,proto3" json:"resource_downgrades,omitempty"`
 	// Exact kind/version/manifest/artifacts/lease and per-entry installation_revision from resource.
 	// Echo each installation_revision unchanged in reports; sharing resource_selection_revision.
+	// REMOVED entries remain until a matching removed report is accepted, then retire next generation.
 	UnifiedResources  []*v1.UnifiedResourceRef            `protobuf:"bytes,18,rep,name=unified_resources,json=unifiedResources,proto3" json:"unified_resources,omitempty"`
 	UnifiedDowngrades []*v1.UnifiedDowngradeAuthorization `protobuf:"bytes,19,rep,name=unified_downgrades,json=unifiedDowngrades,proto3" json:"unified_downgrades,omitempty"`
 	unknownFields     protoimpl.UnknownFields

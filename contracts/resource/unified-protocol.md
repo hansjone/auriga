@@ -20,6 +20,14 @@ installationRevision 由 resource 服务（A）分配并持久化，是成员对
 
 云端节点（D）和 Desktop 都原样回报下发的 installationRevision，不能自行分配或使用其他计数器代替。接收方按当前持久化的期望值比较 identity、installationRevision、selectionRevision、generation，四者全部相等且 observedGeneration 等于 generation 才可计为 applied；正常报告来源和宿主来源确认门禁继续生效。旧代次乱序回报不得覆盖新状态，不匹配返回 resource.state_conflict。续期后仍以原 installationRevision 接受回报，不能把续期误当安装更新。可复用夹具见 installation-revision-fixtures.json。
 
+### 期望状态与卸载墓碑
+
+UnifiedResourceRef 新增 desiredState，HTTP/JSON 枚举值为 ENABLED、DISABLED、REMOVED。proto 字段 desired_state=9 为 optional UnifiedResourceDesiredState，分别对应 UNIFIED_RESOURCE_DESIRED_STATE_ENABLED、UNIFIED_RESOURCE_DESIRED_STATE_DISABLED、UNIFIED_RESOURCE_DESIRED_STATE_REMOVED。ResolveUnifiedResourcesResponse.resources、InstanceSpec.unified_resources 和 Snapshot.resources 逐项保留该字段。消费方在字段存在时优先使用它。旧数据缺失时才按 enabled=true 推导 ENABLED、enabled=false 推导 DISABLED。显式 UNSPECIFIED、未知枚举或 null 均拒绝，不能回退。enabled 原字段继续保留，新生产者将 ENABLED 映射为 true，将 DISABLED/REMOVED 映射为 false。
+
+卸载时 A 持久化新的 installationRevision，并在期望资源列表保留 desiredState=REMOVED 的墓碑，携带完整 identity 和该新代次。节点必须能够从当前规格取得它，不能在下发前删除条目。DISABLED 表示停用并保留安装，REMOVED 表示清除该安装内容。节点执行前核对当前规格的 identity、installationRevision、selectionRevision、generation，旧墓碑不得清除更新代次的安装。节点完成清除后原样回报四元组、observedGeneration 和 state=removed，正常认证来源检查继续适用。
+
+卸载动作的成功应用确认以匹配当前期望的 removed 回报表示。仅有 state=applied 或 disabled 不能触发墓碑回收。A 在接受 removed 确认后，将已确认墓碑从下一 generation 的期望资源条目中移除，由 workspace 发布相应规格。当前 generation 内保留墓碑，失败、清除未完成、缺失或不匹配的回报均继续保留。不匹配返回 resource.state_conflict。回收时再次比较当前持久化的四元组，期间重新安装或其他变更已产生新代次时，旧 removed 回报不得删除新条目。墓碑回收继续保留安装 CAS 代次记录，不能因回收重置 installationRevision。可复用夹具见 desired-state-fixtures.json。
+
 ## 信任、迁移与撤销
 
 所有签名按既有独立 release/revocation/downgrade 根验证，保留原 UTC 时间文本，JCS 去除顶层 signature 后验 Ed25519。v1 仅接受 schemaVersion=1/purpose=plugin，v2 仅接受 schemaVersion=2/purpose=resource。v2 artifactDigests 必须与原始清单集合精确一致、去重并按字典序排序。租约截止 expiresAt 必须等于 envelopeNotAfter 和 revocationsExpiresAt 的较早值，两个可信声明各自最多24小时。

@@ -596,3 +596,19 @@ test('resource refs carry positive safe installation revisions with additive tra
     );
   }
 });
+
+import './desired-state.test.mjs';
+
+test('desired state schema accepts additive legacy refs and rejects unknown states', () => {
+  const resource = read('resource/installation-revision-fixtures.json').cases[0]
+    .input.expected.resource;
+  const cases = read('resource/desired-state-fixtures.json').cases.filter(
+    (fixture) => fixture.operation === 'desired-state',
+  );
+  for (const fixture of cases)
+    assert.equal(
+      check('unified', 'UnifiedResourceRef', { ...resource, ...fixture.input }),
+      fixture.expect.state !== null,
+      fixture.id,
+    );
+});

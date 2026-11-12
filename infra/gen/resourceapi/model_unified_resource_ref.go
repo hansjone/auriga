@@ -31,6 +31,8 @@ type UnifiedResourceRef struct {
 	Enabled              bool                      `json:"enabled"`
 	// Resource-assigned persisted per-installation CAS revision. Preserved by signature renewal and echoed by node/Desktop reports. Omission is transport-compatible only: never accept applied without a positive expected revision.
 	InstallationRevision *int64 `json:"installationRevision,omitempty"`
+	// Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values.
+	DesiredState *string `json:"desiredState,omitempty"`
 }
 
 type _UnifiedResourceRef UnifiedResourceRef
@@ -259,6 +261,38 @@ func (o *UnifiedResourceRef) SetInstallationRevision(v int64) {
 	o.InstallationRevision = &v
 }
 
+// GetDesiredState returns the DesiredState field value if set, zero value otherwise.
+func (o *UnifiedResourceRef) GetDesiredState() string {
+	if o == nil || IsNil(o.DesiredState) {
+		var ret string
+		return ret
+	}
+	return *o.DesiredState
+}
+
+// GetDesiredStateOk returns a tuple with the DesiredState field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedResourceRef) GetDesiredStateOk() (*string, bool) {
+	if o == nil || IsNil(o.DesiredState) {
+		return nil, false
+	}
+	return o.DesiredState, true
+}
+
+// HasDesiredState returns a boolean if a field has been set.
+func (o *UnifiedResourceRef) HasDesiredState() bool {
+	if o != nil && !IsNil(o.DesiredState) {
+		return true
+	}
+
+	return false
+}
+
+// SetDesiredState gets a reference to the given string and assigns it to the DesiredState field.
+func (o *UnifiedResourceRef) SetDesiredState(v string) {
+	o.DesiredState = &v
+}
+
 func (o UnifiedResourceRef) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -278,6 +312,9 @@ func (o UnifiedResourceRef) ToMap() (map[string]interface{}, error) {
 	toSerialize["enabled"] = o.Enabled
 	if !IsNil(o.InstallationRevision) {
 		toSerialize["installationRevision"] = o.InstallationRevision
+	}
+	if !IsNil(o.DesiredState) {
+		toSerialize["desiredState"] = o.DesiredState
 	}
 	return toSerialize, nil
 }
