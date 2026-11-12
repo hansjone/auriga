@@ -53,6 +53,10 @@ public final class DesktopReleases {
   }
 
   public ObjectNode verify(ObjectNode envelope) {
+    return verify(envelope, false);
+  }
+
+  private ObjectNode verify(ObjectNode envelope, boolean allowExpired) {
     try {
       var body = envelope.deepCopy();
       var sig = body.remove("signature");
@@ -83,12 +87,13 @@ public final class DesktopReleases {
               "notes",
               "components");
       if (!body.propertyNames().equals(fields)
-          || body.path("schema").asInt() != 1
+          || (!body.path("schema").isIntegralNumber() || body.path("schema").asInt() != 1)
           || !text(body, "product", 32).equals("Auriga Desktop")
           || !text(body, "channel", 16).equals("stable")
           || !text(body, "platform", 16).equals("win-x64")
           || !text(body, "packageId", 200).matches("[A-Za-z0-9.+-]{1,200}")
           || !text(body, "sha256", 64).matches("[a-f0-9]{64}")
+          || counter(body, "sizeBytes") < 1
           || counter(body, "sizeBytes") > MAX_BYTES
           || counter(body, "sequence") < 1
           || !ResourceSemver.valid(text(body, "version", 128))
@@ -105,7 +110,7 @@ public final class DesktopReleases {
       Instant published = Instant.parse(text(body, "publishedAt", 64)),
           expiry = Instant.parse(text(body, "notAfter", 64));
       if (published.isAfter(clock.instant())
-          || !expiry.isAfter(clock.instant())
+          || (!allowExpired && !expiry.isAfter(clock.instant()))
           || !expiry.isAfter(published)) throw invalid();
       return body;
     } catch (Exception e) {
@@ -159,16 +164,25 @@ public final class DesktopReleases {
                 if (seq <= state.path("highestSequence").asLong())
                   throw new AurigaException(CONFLICT);
                 var items = state.withArray("items");
-                for (var item : items)
-                  if (ResourceSemver.compare(
-                          body.path("version").asString(),
-                          item.path("manifest").path("version").asString())
-                      <= 0) throw new AurigaException(CONFLICT);
+                for (var item : items) {
+                  var previous = item.path("manifest");
+                  int comparison =
+                      ResourceSemver.compare(
+                          body.path("version").asString(), previous.path("version").asString());
+                  if (comparison < 0) throw new AurigaException(CONFLICT);
+                  if (comparison == 0) {
+                    for (String field : Set.of("packageId", "sha256", "sizeBytes", "components"))
+                      if (!body.path(field).equals(previous.path(field)))
+                        throw new AurigaException(CONFLICT);
+                    if (!Instant.parse(body.path("notAfter").asString())
+                        .isAfter(Instant.parse(previous.path("notAfter").asString())))
+                      throw new AurigaException(CONFLICT);
+                  }
+                }
                 try {
-                  Files.move(
-                      stage,
-                      store.root().resolve(body.path("sha256").asString() + ".zip"),
-                      StandardCopyOption.ATOMIC_MOVE);
+                  Path blob = store.root().resolve(body.path("sha256").asString() + ".zip");
+                  if (Files.exists(blob)) Files.delete(stage);
+                  else Files.move(stage, blob, StandardCopyOption.ATOMIC_MOVE);
                 } catch (IOException e) {
                   throw new AurigaException(UNAVAILABLE);
                 }
@@ -261,7 +275,7 @@ public final class DesktopReleases {
       if (item.path("withdrawn").asBoolean()) continue;
       var manifest = (ObjectNode) item.path("manifest");
       try {
-        verify(manifest);
+        verify(manifest, true);
       } catch (AurigaException e) {
         continue;
       }
@@ -281,7 +295,7 @@ public final class DesktopReleases {
           for (var item : state.withArray("items"))
             if (!item.path("withdrawn").asBoolean()
                 && item.path("manifest").path("sequence").asLong() == sequence) {
-              var body = verify((ObjectNode) item.path("manifest"));
+              var body = verify((ObjectNode) item.path("manifest"), true);
               try {
                 var stream =
                     Files.newInputStream(

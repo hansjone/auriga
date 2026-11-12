@@ -1,5 +1,11 @@
 /** Offline release review and signing. Never prints private key material or its path. */
-import { readFileSync, writeFileSync, statSync, rmSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  statSync,
+  rmSync,
+  mkdtempSync,
+} from 'node:fs';
 import {
   createPrivateKey,
   sign,
@@ -8,7 +14,9 @@ import {
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { extractArchive } from '../runtime/update.mjs';
+import { resolve, join } from 'node:path';
 import { canonical, verifyRelease, RELEASE_KID } from '../runtime/release.mjs';
 import { verifyPackage, sha256File } from '../runtime/verify.mjs';
 
@@ -59,12 +67,55 @@ export function reviewRelease(options) {
     record = JSON.parse(readFileSync(options.buildRecord, 'utf8'));
     if (
       record.sha256 !== body.sha256 ||
+      record.sizeBytes !== body.sizeBytes ||
       record.packageId !== body.packageId ||
       record.desktopVersion !== body.version ||
       canonical(record.components) !== canonical(body.components) ||
       !/^[a-f0-9]{40}$/.test(record.sourceCommit)
     )
       throw new Error('build record mismatch');
+  }
+  let publicKeyFingerprint = null;
+  if (record) {
+    if (
+      !['push', 'workflow_dispatch'].includes(record.event) ||
+      record.ref !== `refs/tags/desktop-v${body.version}` ||
+      record.workflow !== '.github/workflows/installer.yml' ||
+      record.sourceOnMain !== true ||
+      !/^[0-9]+$/.test(record.workflowRun ?? '')
+    )
+      throw new Error('only desktop tag builds on main may be signed');
+    const temporary = mkdtempSync(join(tmpdir(), 'desktop-review-'));
+    try {
+      const payload = extractArchive(
+        options.archive,
+        join(temporary, 'unpacked'),
+      );
+      const actual = verifyPackage(payload);
+      if (
+        actual.id !== body.packageId ||
+        actual.bundleVersion !== body.version ||
+        canonical(body.components) !==
+          canonical({
+            dshVersion: actual.upstream.version,
+            nodeVersion: actual.upstream.nodeVersion,
+            pluginVersion: actual.plugin.version,
+          })
+      )
+        throw new Error('archive package identity mismatch');
+      const publicKey = createPublicKey(
+        readFileSync(join(payload, 'auriga/runtime/release-public-key.txt')),
+      );
+      if (publicKey.asymmetricKeyType !== 'ed25519')
+        throw new Error('invalid package release key');
+      publicKeyFingerprint = createHash('sha256')
+        .update(publicKey.export({ type: 'spki', format: 'der' }))
+        .digest('hex');
+      if (record.publicKeyFingerprint !== publicKeyFingerprint)
+        throw new Error('package public key differs from build record');
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
   }
   const reviewSha256 = createHash('sha256')
     .update(canonical({ body, record: record ?? null }))
@@ -79,6 +130,11 @@ export function reviewRelease(options) {
       sizeBytes: body.sizeBytes,
       components: body.components,
       sourceCommit: record?.sourceCommit ?? null,
+      workflow: record?.workflow ?? null,
+      workflowRun: record?.workflowRun ?? null,
+      event: record?.event ?? null,
+      ref: record?.ref ?? null,
+      publicKeyFingerprint,
       sequence: body.sequence,
       notAfter: body.notAfter,
       minimumVersion: body.minimumVersion,
@@ -95,6 +151,13 @@ export function signRelease(options) {
   const key = createPrivateKey(readFileSync(options.keyFile));
   if (key.asymmetricKeyType !== 'ed25519')
     throw new Error('Ed25519 key required');
+  if (
+    summary.publicKeyFingerprint &&
+    createHash('sha256')
+      .update(createPublicKey(key).export({ type: 'spki', format: 'der' }))
+      .digest('hex') !== summary.publicKeyFingerprint
+  )
+    throw new Error('signing key differs from package trust root');
   const envelope = {
     ...body,
     signature: {
@@ -133,6 +196,8 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
         separator + 1,
       );
     }
+    if (!options.manifest || !options.buildRecord)
+      throw new Error('CI manifest and build record required');
     const review = reviewRelease(options).summary;
     const checkpoint = options.reviewState ?? options.output + '.review.json';
     if (options.reviewOnly) {

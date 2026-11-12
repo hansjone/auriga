@@ -1,3 +1,4 @@
+import { cleanupDownloads } from './update-state.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -591,6 +592,7 @@ export function uninstall({ root, purgeData = false }) {
   root = resolve(root);
   assertOwned(root);
   recover(root);
+  cleanupDownloads(root, { stopped: true });
   const state = readState(root);
   if (!state) throw new Error(`no installation state in ${root}`);
   if (purgeData) {
@@ -662,6 +664,7 @@ export async function launch({ root, args = [], env = process.env }) {
   const session = desktopSession(root);
   try {
     recover(root);
+    cleanupDownloads(root, { stopped: true });
     const { applyPending } = await import('./update.mjs');
     const apply = async () => {
       try {

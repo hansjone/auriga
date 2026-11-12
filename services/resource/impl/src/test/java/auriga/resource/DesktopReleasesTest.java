@@ -158,7 +158,7 @@ class DesktopReleasesTest {
     releases.publish(actor, first, zip());
     var controller = new DesktopController(releases);
     assertEquals(200, controller.latest().getStatusCode().value());
-    var response = controller.download(2);
+    var response = controller.download(2, null);
     assertEquals(200, response.getStatusCode().value());
     response.getBody().getInputStream().close();
     rejects(controller::list, CommonErrors.UNAUTHENTICATED);
@@ -192,6 +192,72 @@ class DesktopReleasesTest {
     assertEquals(1, exported.size());
     releases.flushAudit();
     assertEquals(1, exported.size());
+  }
+
+  @Test
+  void renewalAndExpiredPublicDownloadRemainAvailable() throws Exception {
+    var first = envelope();
+    releases.publish(actor, first, zip());
+    var later =
+        new DesktopReleases(
+            root,
+            Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()),
+            Clock.fixed(Instant.parse("2026-12-02T00:00:00Z"), ZoneOffset.UTC),
+            access,
+            tenant,
+            event -> exported.add(event.deepCopy()));
+    rejects(() -> later.verify(first), CommonErrors.VALIDATION_FAILED);
+    assertEquals(first, later.latest());
+    try (var stream = later.download(2).stream()) {
+      assertEquals("zip", new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+    }
+    var renewed = sign(first.deepCopy().put("sequence", 3).put("notAfter", "2027-01-01T00:00:00Z"));
+    later.publish(actor, renewed, zip());
+    assertEquals(3, later.latest().path("sequence").asInt());
+    var changedId =
+        sign(
+            renewed
+                .deepCopy()
+                .put("sequence", 4)
+                .put("packageId", "different")
+                .put("notAfter", "2027-02-01T00:00:00Z"));
+    rejects(() -> later.publish(actor, changedId, zip()), CommonErrors.CONFLICT);
+    var unchangedExpiry = sign(renewed.deepCopy().put("sequence", 4));
+    rejects(() -> later.publish(actor, unchangedExpiry, zip()), CommonErrors.CONFLICT);
+    later.withdraw(actor, 3);
+    assertEquals(first, later.latest()); // expired fallback is still downloadable by new users
+  }
+
+  @Test
+  void anonymousDownloadSupportsSingleOpenEndedRange() throws Exception {
+    releases.publish(actor, envelope(), zip());
+    var controller = new DesktopController(releases);
+    var partial = controller.download(2, "bytes=1-");
+    assertEquals(206, partial.getStatusCode().value());
+    assertEquals("bytes 1-2/3", partial.getHeaders().getFirst("Content-Range"));
+    assertEquals(2, partial.getHeaders().getContentLength());
+    try (var stream = partial.getBody().getInputStream()) {
+      assertEquals("ip", new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+    }
+    for (String range :
+        List.of("bytes=3-", "bytes=0-1,2-", "bytes=-1", "bytes=999999999999999999999-"))
+      assertEquals(416, controller.download(2, range).getStatusCode().value());
+    var mvc =
+        org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller)
+            .build();
+    mvc.perform(
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                    "/api/resource/v1/desktop/packages/2")
+                .header("Range", "bytes=1-"))
+        .andExpect(
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                .isPartialContent())
+        .andExpect(
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                .string("Content-Range", "bytes 1-2/3"))
+        .andExpect(
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                .bytes("ip".getBytes(StandardCharsets.UTF_8)));
   }
 
   @Test

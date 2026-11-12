@@ -1,5 +1,5 @@
 /* global setInterval, clearInterval */
-/** Authenticated transport is supplied by the existing platform session adapter. */
+/** Anonymous transport is bound to the configured platform origin. */
 import {
   mkdirSync,
   mkdtempSync,
@@ -11,6 +11,7 @@ import {
   openSync,
   closeSync,
   writeSync,
+  statSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -18,6 +19,8 @@ import { Buffer } from 'node:buffer';
 import { verifyRelease } from './release.mjs';
 import { verifyPackage, sha256File } from './verify.mjs';
 import { install, readState, versionDir } from './core.mjs';
+import { downloadLock } from './update-state.mjs';
+import { systemTool } from './system-tools.mjs';
 import { compare } from './semver-lite.mjs';
 
 export function platformUrl(origin, path) {
@@ -35,7 +38,7 @@ export function platformUrl(origin, path) {
 export function extractArchive(archive, directory) {
   mkdirSync(directory);
   // Only a fully signature/hash-verified publisher archive reaches tar.
-  const listed = spawnSync('tar', ['-tf', archive], {
+  const listed = spawnSync(systemTool('tar'), ['-tf', archive], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 ** 2,
   });
@@ -53,9 +56,13 @@ export function extractArchive(archive, directory) {
       )
   )
     throw new Error('unsafe update archive');
-  const result = spawnSync('tar', ['-xf', archive, '-C', directory], {
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    systemTool('tar'),
+    ['-xf', archive, '-C', directory],
+    {
+      encoding: 'utf8',
+    },
+  );
   if (result.status !== 0) throw new Error('update archive extraction failed');
   return join(directory, 'payload');
 }
@@ -86,7 +93,12 @@ export function createUpdater({
     if (!state) throw new Error('desktop installation missing');
     return {
       ...state,
-      version: verifyPackage(versionDir(root, state.current)).bundleVersion,
+      version: JSON.parse(
+        readFileSync(
+          join(versionDir(root, state.current), 'manifest.json'),
+          'utf8',
+        ),
+      ).bundleVersion,
     };
   };
   let pending = null,
@@ -144,22 +156,25 @@ export function createUpdater({
     async update() {
       if (busy || !pending) throw new Error('no update ready');
       busy = true;
-      const lock = join(root, '.desktop-update-lock');
-      let fd, temporary;
+      let unlock, temporary;
       try {
-        fd = openSync(lock, 'wx', 0o600);
+        unlock = downloadLock(root);
         const body = verified(pending),
           state = current();
         temporary = mkdtempSync(join(root, '.desktop-download-'));
         if (process.platform === 'win32') {
-          const who = spawnSync('whoami', ['/user', '/fo', 'csv', '/nh'], {
-            encoding: 'utf8',
-          });
+          const who = spawnSync(
+            systemTool('whoami'),
+            ['/user', '/fo', 'csv', '/nh'],
+            {
+              encoding: 'utf8',
+            },
+          );
           const sid = who.stdout?.match(/S-1-5-[0-9-]+/)?.[0];
           if (
             !sid ||
             spawnSync(
-              'icacls',
+              systemTool('icacls'),
               [temporary, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`],
               { windowsHide: true },
             ).status !== 0
@@ -167,12 +182,12 @@ export function createUpdater({
             throw new Error('cannot secure update staging');
         }
         const archive = join(temporary, 'desktop.zip');
-        const response = await request(
+        await downloadPackage(
+          request,
           platformUrl(origin, `packages/${body.sequence}`),
-          { redirect: 'error' },
+          archive,
+          body.sizeBytes,
         );
-        if (!response.ok) throw new Error('package download failed');
-        await download(response, archive, body.sizeBytes);
         if (sha256File(archive) !== body.sha256)
           throw new Error('package SHA mismatch');
         const payload = await extract(archive, join(temporary, 'unpacked'));
@@ -204,10 +219,7 @@ export function createUpdater({
         };
       } finally {
         if (temporary) rmSync(temporary, { recursive: true, force: true });
-        if (fd !== undefined) {
-          closeSync(fd);
-          rmSync(lock, { force: true });
-        }
+        unlock?.();
         busy = false;
       }
     },
@@ -237,21 +249,53 @@ async function bounded(response, limit) {
   return Buffer.concat(parts);
 }
 
-async function download(response, file, expected) {
-  const fd = openSync(file, 'wx', 0o600);
-  let count = 0;
-  try {
-    for await (const chunk of response.body) {
-      count += chunk.length;
-      if (count > expected) throw new Error('package size mismatch');
-      const bytes = Buffer.from(chunk);
-      let offset = 0;
-      while (offset < bytes.length)
-        offset += writeSync(fd, bytes, offset, bytes.length - offset);
+/** Retry interrupted transfers with a validated single byte range; verify full SHA afterwards. */
+export async function downloadPackage(request, url, file, expected) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let offset = existsSync(file) ? statSync(file).size : 0;
+    if (offset === expected) return; // full hash is still checked by the caller
+    let response;
+    try {
+      response = await request(url, {
+        redirect: 'error',
+        headers: offset ? { Range: `bytes=${offset}-` } : {},
+      });
+      if (!response.ok) throw new Error('package download failed');
+      if (response.status === 206) {
+        const range = response.headers.get('content-range');
+        if (range !== `bytes ${offset}-${expected - 1}/${expected}`)
+          throw new Error('invalid package content range');
+      } else if (response.status === 200)
+        offset = 0; // server ignored Range: restart safely
+      else throw new Error('invalid package response');
+      const fd = openSync(file, offset ? 'a' : 'w', 0o600);
+      let count = offset;
+      try {
+        for await (const chunk of response.body) {
+          count += chunk.length;
+          if (count > expected) throw new Error('package size mismatch');
+          const bytes = Buffer.from(chunk);
+          let written = 0;
+          while (written < bytes.length)
+            written += writeSync(fd, bytes, written, bytes.length - written);
+        }
+        if (count !== expected) throw new Error('interrupted package download');
+        return;
+      } finally {
+        closeSync(fd);
+      }
+    } catch (error) {
+      await response?.cancel?.();
+      await response?.body?.cancel?.().catch(() => {});
+      // Never extract or trust partial bytes. Oversize/range violations fail closed.
+      if (
+        /size mismatch|content range|invalid package response/.test(
+          error.message,
+        ) ||
+        attempt === 2
+      )
+        throw error;
     }
-    if (count !== expected) throw new Error('interrupted package download');
-  } finally {
-    closeSync(fd);
   }
 }
 

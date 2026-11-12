@@ -15,6 +15,7 @@ import {
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { signRelease, reviewRelease } from '../scripts/sign-release.mjs';
+import { systemTool } from '../runtime/system-tools.mjs';
 import { createUpdater, applyPending } from '../runtime/update.mjs';
 import { install, readState, profileDir } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
@@ -37,7 +38,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   cpSync(next.dir, join(stage, 'payload'), { recursive: true });
   const zip = join(base, 'desktop.zip');
   assert.equal(
-    spawnSync('tar', ['-a', '-cf', zip, '-C', stage, '.']).status,
+    spawnSync(systemTool('tar'), ['-a', '-cf', zip, '-C', stage, '.']).status,
     0,
   );
   const signingOptions = {
@@ -54,6 +55,8 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     confirmSha256: reviewRelease(signingOptions).summary.reviewSha256,
   });
   let corrupt = false;
+  let interrupted = false,
+    resumed = false;
   const server = createServer((req, res) => {
     if (req.url.endsWith('/latest')) {
       res.setHeader('Content-Type', 'application/json');
@@ -61,7 +64,17 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     } else {
       const bytes = readFileSync(zip);
       if (corrupt) bytes[0] ^= 1;
-      res.end(bytes);
+      if (req.headers.range) {
+        const offset = Number(req.headers.range.match(/^bytes=(\d+)-$/)[1]);
+        resumed = true;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${offset}-${bytes.length - 1}/${bytes.length}`,
+        });
+        res.end(bytes.subarray(offset));
+      } else if (interrupted) {
+        interrupted = false;
+        res.end(bytes.subarray(0, 100));
+      } else res.end(bytes);
     }
   });
   server.listen(0, '127.0.0.1');
@@ -93,7 +106,9 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   assert.equal(readState(root).current, old.id);
   assert.equal(existsSync(join(root, 'versions', next.id)), false);
   corrupt = false;
+  interrupted = true;
   const queued = await updater.update();
+  assert.equal(resumed, true);
   assert.equal(queued.queued, true);
   assert.equal(readState(root).current, old.id); // no live-session mutation
   await applyPending(root, { publicKey: keys.publicKey, smoke: () => {} });

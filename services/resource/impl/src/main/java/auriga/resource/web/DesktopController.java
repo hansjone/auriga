@@ -67,12 +67,39 @@ public class DesktopController {
 
   @GetMapping("/desktop/packages/{sequence}")
   @PublicEndpoint
-  public ResponseEntity<InputStreamResource> download(@PathVariable long sequence) {
+  public ResponseEntity<InputStreamResource> download(
+      @PathVariable long sequence, @RequestHeader(value = "Range", required = false) String range)
+      throws java.io.IOException {
     var result = releases.download(sequence);
-    return ResponseEntity.ok()
+    long offset = 0;
+    if (range != null) {
+      try {
+        if (!range.matches("bytes=[0-9]+-")) throw new IllegalArgumentException();
+        offset = Long.parseLong(range.substring(6, range.length() - 1));
+        if (offset >= result.size()) throw new IllegalArgumentException();
+      } catch (IllegalArgumentException e) {
+        result.stream().close();
+        return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+            .header("Content-Range", "bytes */" + result.size())
+            .build();
+      }
+      try {
+        result.stream().skipNBytes(offset);
+      } catch (java.io.IOException e) {
+        result.stream().close();
+        throw e;
+      }
+    }
+    var response =
+        ResponseEntity.status(range == null ? HttpStatus.OK : HttpStatus.PARTIAL_CONTENT)
+            .header("Accept-Ranges", "bytes");
+    if (range != null)
+      response.header(
+          "Content-Range", "bytes " + offset + "-" + (result.size() - 1) + "/" + result.size());
+    return response
         .cacheControl(CacheControl.noStore())
         .contentType(MediaType.APPLICATION_OCTET_STREAM)
-        .contentLength(result.size())
+        .contentLength(result.size() - offset)
         .header("Content-Disposition", "attachment; filename=\"Auriga-Desktop.zip\"")
         .body(new InputStreamResource(result.stream()));
   }

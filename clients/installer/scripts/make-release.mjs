@@ -1,5 +1,6 @@
 /** CI produces unsigned artifacts. This script never accepts a private key. */
-import { writeFileSync } from 'node:fs';
+import { createHash, createPublicKey } from 'node:crypto';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +13,27 @@ export function makeRelease(options) {
   const sourceCommit = commit.stdout.trim();
   if (commit.status !== 0 || !/^[a-f0-9]{40}$/.test(sourceCommit))
     throw new Error('source commit unavailable');
+  const keyFile = join(
+    options.payload,
+    'auriga/runtime/release-public-key.txt',
+  );
   const record = {
+    event: options.event ?? process.env.GITHUB_EVENT_NAME ?? null,
+    ref: options.ref ?? process.env.GITHUB_REF ?? null,
+    workflow: '.github/workflows/installer.yml',
+    sourceOnMain:
+      options.sourceOnMain === true ||
+      process.env.DESKTOP_SOURCE_ON_MAIN === 'true',
+    publicKeyFingerprint: existsSync(keyFile)
+      ? createHash('sha256')
+          .update(
+            createPublicKey(readFileSync(keyFile)).export({
+              type: 'spki',
+              format: 'der',
+            }),
+          )
+          .digest('hex')
+      : null,
     exeSha256: options.exe ? sha256File(options.exe) : null,
     sourceCommit,
     desktopVersion: body.version,

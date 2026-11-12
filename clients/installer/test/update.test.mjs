@@ -4,7 +4,17 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { join } from 'node:path';
-import { existsSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import {
+  existsSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  mkdirSync,
+} from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { cleanupDownloads, downloadLock } from '../runtime/update-state.mjs';
+import { downloadPackage } from '../runtime/update.mjs';
 import { canonical, verifyRelease, RELEASE_KID } from '../runtime/release.mjs';
 import { createUpdater, platformUrl } from '../runtime/update.mjs';
 import {
@@ -12,6 +22,7 @@ import {
   readState,
   profileDir,
   desktopSession,
+  uninstall,
 } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
 
@@ -143,7 +154,7 @@ function fixture(
       if (url.endsWith('/latest'))
         return new Response(JSON.stringify(manifest));
       attempts++;
-      if (interrupted && attempts === 1) return new Response('zi');
+      if (interrupted && attempts <= 3) return new Response('zi');
       return new Response('zip');
     },
     extract: () => next.dir,
@@ -186,4 +197,114 @@ test('下载中断后重试成功；关闭检查后不请求', async (t) => {
   assert.equal(f.updater.status().enabled, false);
   await f.updater.check();
   assert.equal(f.updater.status().available, null);
+});
+
+test('真实子进程被杀后锁失效，下次更新成功并清理残留', async (t) => {
+  const f = fixture(t);
+  const module = new URL('../runtime/update-state.mjs', import.meta.url).href;
+  const child = spawn(process.execPath, [
+    '--input-type=module',
+    '-e',
+    `import { downloadLock } from ${JSON.stringify(module)}; downloadLock(${JSON.stringify(f.root)}); console.log('ready'); setInterval(()=>{},1000);`,
+  ]);
+  t.after(() => {
+    if (child.exitCode === null) child.kill();
+  });
+  await once(child.stdout, 'data');
+  const stale = join(f.root, '.desktop-download-killed');
+  mkdirSync(stale);
+  writeFileSync(join(stale, 'partial'), 'bytes');
+  assert.equal(cleanupDownloads(f.root), false); // live owner is protected
+  child.kill();
+  await once(child, 'exit');
+  await f.updater.check();
+  await f.updater.update();
+  assert.equal(readState(f.root).current, f.next.id);
+  assert.equal(existsSync(stale), false);
+  assert.equal(existsSync(join(f.root, '.desktop-update-lock')), false);
+});
+
+test('启动前清理空锁等崩溃残留；卸载删除下载残留且保留用户数据', (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.root, '.desktop-update-lock'), '');
+  mkdirSync(join(f.root, '.desktop-download-empty'));
+  cleanupDownloads(f.root, { stopped: true });
+  const release = downloadLock(f.root);
+  const lock = JSON.parse(
+    readFileSync(join(f.root, '.desktop-update-lock'), 'utf8'),
+  );
+  assert.equal(lock.pid, process.pid);
+  assert.ok(lock.createdAt > 0);
+  release();
+  mkdirSync(join(f.root, '.desktop-download-uninstall'));
+  uninstall({ root: f.root });
+  assert.equal(existsSync(f.root), false);
+  assert.equal(
+    readFileSync(join(profileDir(f.dataHome), 'user-data.txt'), 'utf8'),
+    'keep',
+  );
+});
+
+test('Range 续传拼接完整包；忽略 Range 时安全重下；错误 Range 拒绝', async (t) => {
+  const base = tempBase(t);
+  for (const mode of ['resume', 'ignored', 'invalid']) {
+    const file = join(base, mode);
+    let attempts = 0;
+    const request = async (_url, init) => {
+      attempts++;
+      if (attempts === 1) return new Response('zi');
+      assert.equal(init.headers.Range, 'bytes=2-');
+      if (mode === 'ignored') return new Response('zip');
+      return new Response('p', {
+        status: 206,
+        headers: {
+          'Content-Range': mode === 'invalid' ? 'bytes 1-2/3' : 'bytes 2-2/3',
+        },
+      });
+    };
+    if (mode === 'invalid')
+      await assert.rejects(
+        downloadPackage(request, 'https://example.com', file, 3),
+        /content range/,
+      );
+    else {
+      await downloadPackage(request, 'https://example.com', file, 3);
+      assert.equal(readFileSync(file, 'utf8'), 'zip');
+    }
+    assert.equal(attempts, 2);
+  }
+});
+
+test('同版本同包更高序号续期不会重复更新，周期检查不重新哈希安装树', async (t) => {
+  const f = fixture(t);
+  await f.updater.check();
+  await f.updater.update();
+  // Damage a file to detect accidental full hashing in a routine check.
+  writeFileSync(
+    join(f.root, 'versions', f.next.id, 'auriga/runtime/core.mjs'),
+    'changed',
+  );
+  const updater = createUpdater({
+    root: f.root,
+    origin: 'https://example.com',
+    publicKey: keys.publicKey,
+    now: () => now,
+    request: async () =>
+      new Response(
+        JSON.stringify(
+          signed({
+            sequence: 3,
+            packageId: f.next.id,
+            notAfter: '2027-01-01T00:00:00Z',
+          }),
+        ),
+      ),
+  });
+  await updater.check();
+  assert.equal(updater.status().available, null);
+  assert.equal(
+    JSON.parse(readFileSync(join(f.root, 'desktop-update.json')))
+      .highestSequence,
+    3,
+  );
 });

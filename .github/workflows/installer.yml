@@ -41,7 +41,9 @@ jobs:
       - name: Verify release source belongs to main
         if: github.event_name != 'pull_request'
         shell: bash
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          echo "DESKTOP_SOURCE_ON_MAIN=true" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -58,7 +60,7 @@ jobs:
         env:
           UPSTREAM: ${{ inputs.upstream }}
           DESKTOP_VERSION: ${{ inputs.desktop_version }}
-          RELEASE_PUBLIC_KEY: ${{ vars.DESKTOP_RELEASE_PUBLIC_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ github.event_name != 'pull_request' && vars.DESKTOP_RELEASE_PUBLIC_KEY || '' }}
           PLATFORM_ORIGIN: ${{ vars.DESKTOP_PLATFORM_ORIGIN }}
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' }}
         run: |
@@ -93,6 +95,7 @@ jobs:
         shell: bash
         run: node scripts/e2e.mjs --old "$INSTALLER_EXE" --sandbox "$RUNNER_TEMP/sandbox"
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: desktop-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error

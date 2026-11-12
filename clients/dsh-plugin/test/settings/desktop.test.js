@@ -5,9 +5,41 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { desktopUpdater } from '../../src/local/desktop.js';
+import { desktopUpdater, idleFetch } from '../../src/local/desktop.js';
+import { setTimeout as delay } from 'node:timers/promises';
+import { TextDecoder } from 'node:util';
 import { createSettingsStore } from '../../src/settings/store.js';
 import { createSettingsHandler } from '../../src/settings/host.js';
+
+test('下载空闲超时随数据续期，慢速持续传输不受总时长限制', async (t) => {
+  const server = createServer(async (req, res) => {
+    res.writeHead(200);
+    res.write('a');
+    if (req.url === '/stalled') return;
+    for (let i = 0; i < 5; i++) {
+      await delay(40);
+      if (res.destroyed) return;
+      res.write('b');
+    }
+    res.end();
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const controller = new AbortController();
+  const good = await idleFetch(origin + '/slow', {}, controller.signal, 150);
+  let value = '';
+  for await (const bytes of good.body) value += new TextDecoder().decode(bytes);
+  assert.equal(value, 'abbbbb');
+  const bad = await idleFetch(origin + '/stalled', {}, controller.signal, 150);
+  await assert.rejects(async () => {
+    for await (const bytes of bad.body) void bytes;
+  });
+});
 
 test('Desktop 仅绑定首次 HTTPS 平台，普通 DSH 不挂更新器', async () => {
   const savedRoot = process.env.AURIGA_DESKTOP_ROOT,

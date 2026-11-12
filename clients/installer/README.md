@@ -28,15 +28,15 @@ openssl pkey -in <私有目录>/desktop-private.pem -pubout -out <公钥目录>/
 
 在 GitHub 仓库变量 `DESKTOP_RELEASE_PUBLIC_KEY` 配置公钥 PEM，`DESKTOP_PLATFORM_ORIGIN` 可配置首启平台 HTTPS origin。私钥始终留在本机私有目录。消息网络、DSH runtime 和插件市场使用各自的钥。
 
-构建时公钥固定到包内 `auriga/runtime/release-public-key.txt`，参与逐文件摘要和包 ID。缺少公钥的开发包会拒绝更新。更换发行钥需要旧钥授权的安装包带入新公钥，或人工重新安装。
+构建时公钥固定到包内 `auriga/runtime/release-public-key.txt`，参与逐文件摘要和包 ID。缺少公钥的开发包会拒绝更新。签名脚本要求包内公钥与签名私钥匹配，当前发行流程更换发行钥须人工重新安装并同步平台信任配置。
 
 ### CI 构建
 
-正式包由 `.github/workflows/installer.yml` 在 `windows-latest` 构建。递增 Desktop 版本并合入 main 后，在对应提交打 `desktop-v<版本>` tag，或手动运行 Installer 工作流并填 Desktop 版本、发行序号、最低可升级版本。工作流检查源码提交属于 main。
+正式包由 `.github/workflows/installer.yml` 在 `windows-latest` 构建。递增 Desktop 版本并合入 main 后，在对应提交打 `desktop-v<版本>` tag，或手动运行 Installer 工作流并选择这个 tag，填写发行序号、最低可升级版本。工作流检查源码提交属于 main。手动选择分支只能用于验证，其制品不能签名发布。PR 构建不嵌生产公钥，也不上传发行制品。
 
 发行序号为严格递增正整数，默认采用工作流 run number。重跑或下架后发行仍须选择比已发布最高序号更大的值。tag 的版本后缀作为构建版本。
 
-CI 制品包含完整 ZIP、EXE、`desktop.sha256`、`desktop-release.unsigned.json` 和 `desktop-build.json`。构建记录包含源码 commit、Desktop 和各组件版本、ZIP SHA-256、EXE SHA-256、包 ID 与 workflow run。工作流执行安装器单测、包校验和隔离安装/启动/卸载验证后上传制品。
+CI 制品包含完整 ZIP、EXE、`desktop.sha256`、`desktop-release.unsigned.json` 和 `desktop-build.json`。构建记录包含源码 commit、Desktop 和各组件版本、ZIP SHA-256、EXE SHA-256、包 ID、workflow 路径、run、event、ref、main 祖先检查结果，以及包内公钥 SPKI DER 的 SHA-256 指纹。工作流执行安装器单测、包校验和隔离安装/启动/卸载验证后上传制品。
 
 ### 审阅与离线签名
 
@@ -48,7 +48,7 @@ CI 制品包含完整 ZIP、EXE、`desktop.sha256`、`desktop-release.unsigned.j
 node scripts/sign-release.mjs --review-only manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整ZIP> output=<输出目录>/desktop-release.json
 ```
 
-脚本核对 ZIP 与 CI 清单/记录，输出版本、包摘要、上游组件、序号、有效期、源码 commit 和 `reviewSha256`，并保存 `<output>.review.json` 本地审阅检查点。审阅阶段无需私钥。
+脚本核对 ZIP 与 CI 清单/记录，实际解包并验证包内文件和公钥指纹，输出版本、包摘要、上游组件、序号、有效期、workflow、ref、commit、公钥指纹和 `reviewSha256`，并保存 `<output>.review.json` 本地审阅检查点。审阅阶段无需私钥。来源必须是通过 main 祖先检查的 `desktop-v<版本>` tag 构建，否则拒签。构建记录仍须与 GitHub 对应运行人工核对，记录本身不是 CI 来源的加密证明。
 
 核对输出与 CI 记录一致后，使用刚审阅的 `reviewSha256` 确认。
 
@@ -56,7 +56,13 @@ node scripts/sign-release.mjs --review-only manifest=<制品目录>/desktop-rele
 node scripts/sign-release.mjs manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整ZIP> output=<输出目录>/desktop-release.json keyFile=<私有目录>/desktop-private.pem --confirm-sha256=<reviewSha256>
 ```
 
-确认摘要绑定完整未签名清单与构建记录。审阅后改变版本、摘要、说明、有效期等参数会被拒绝，须重新审阅。输出文件须尚不存在。签名成功后清理检查点。私钥及其路径不会出现在脚本输出里。
+确认摘要绑定完整未签名清单与构建记录。审阅后改变版本、摘要、说明、有效期等参数会被拒绝，须重新审阅。签名私钥推导出的公钥必须与 ZIP 内固定公钥指纹相同。输出文件须尚不存在。签名成功后清理检查点。私钥及其路径不会出现在脚本输出里。
+
+### 同包续期
+
+自动更新清单默认有效 30 天。到期前可从原 tag 构建的已核对制品复制未签名清单，仅将 `sequence` 改成高于平台已见最高序号的新整数，将 `notAfter` 延长。保留原 ZIP、构建记录、Desktop 版本、包 ID、SHA、大小和组件版本。重新执行上述 `--review-only` 和 `--confirm-sha256` 两步，再在管理台上传新签名清单和原 ZIP。平台要求同版本的包身份相同且有效期严格延长，拒绝同版本替包。
+
+续期会成为新的上架记录并写发布审计。已安装该版本的客户端只记住新的序号，不重复安装。即使错过续期，登录页与匿名包下载仍提供最新上架的安装包供新用户下载；自动更新客户端继续严格拒绝过期清单，运营者须完成续期后才恢复自动更新。
 
 ### 平台接线和发布
 
@@ -81,8 +87,8 @@ resource 服务需要以下配置。
 
 edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口，首启检查一次，此后每 6 小时检查，可在 Auriga 设置中关闭或手动检查。下载仅使用首启绑定的 HTTPS origin。
 
-用户点击更新后下载并校验暂存，须退出整个 Desktop/DSH 进程，启动器随后运行原有安装事务，下次启动进入新版。仅关闭浏览器页不足以退出 DSH。失败由安装事务还原旧版和 profile，用户数据保留。
+用户点击更新后下载并校验暂存，须退出整个 Desktop/DSH 进程，启动器随后运行原有安装事务，下次启动进入新版。仅关闭浏览器页不足以退出 DSH。失败由安装事务还原旧版和 profile，用户数据保留。下载采用 60 秒无数据的空闲超时，持续接收数据不受总时长限制。一次更新最多自动尝试三次，中断后通过单个 `Range: bytes=<已下载长度>-` 续传，服务端返回 200 时安全重下，拼接后重新验证完整 SHA。重试耗尽或进程退出后，下次用户操作重新下载。进程被杀时残留锁记录 PID 和创建时间，下次启动在 DSH 启动前清理锁及暂存目录；卸载也清理残留。
 
-下架当前版本后，登录首页和更新检查返回上一个仍上架且未过期的版本。已安装更高版本的客户端会拒绝降级，可执行 `rollback.cmd`，或等待更高版本的修复包。下架保留最高序号，重新发布须新版本、新序号。第一代安装器需先人工安装一次带更新能力的包。
+下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝降级，可执行 `rollback.cmd`，或等待更高版本的修复包。下架保留最高序号，修复包须新版本、新序号，同包续期须新序号和延长有效期。第一代安装器需先人工安装一次带更新能力的包。
 
 隔离验证运行 `node --test test/update-e2e.test.mjs`，使用随机端口发布替身、真实 ZIP、临时测试钥和安装事务，验证坏包拒绝、退出安装和数据保留。真实 DSH 宿主另按 `scripts/e2e.mjs` 验证。

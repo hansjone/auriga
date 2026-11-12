@@ -503,7 +503,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge. */
+    /** @description Public signed manifest for the latest listed release. It remains visible after notAfter so new users can download; automatic updaters must reject expired manifests until renewed. */
     get: operations['getDesktopLatest'];
     put?: never;
     post?: never;
@@ -4971,7 +4971,10 @@ export interface operations {
   downloadDesktopPackage: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Optional single open-ended byte range for interrupted downloads, e.g. bytes=1048576-. */
+        Range?: string;
+      };
       path: {
         sequence: number;
       };
@@ -4987,6 +4990,28 @@ export interface operations {
         content: {
           'application/octet-stream': string;
         };
+      };
+      /** @description Partial package bytes. Full SHA-256 must still be verified after resuming. */
+      206: {
+        headers: {
+          /** @description Returned byte interval and total size. */
+          'Content-Range'?: string;
+          /** @description bytes */
+          'Accept-Ranges'?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description Unsupported or unsatisfiable range. */
+      416: {
+        headers: {
+          /** @description bytes *\/<total size> */
+          'Content-Range'?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

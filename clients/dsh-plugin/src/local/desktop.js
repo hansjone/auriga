@@ -3,6 +3,69 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+/** Each received chunk renews the idle deadline, regardless of total transfer time.
+ * @param {string} url
+ * @param {RequestInit} init
+ * @param {AbortSignal} lifetime
+ * @param {number} idleMs
+ */
+export async function idleFetch(url, init, lifetime, idleMs = 60_000) {
+  const controller = new AbortController();
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  const reset = () => {
+    clearTimeout(timer);
+    timer = setTimeout(
+      () => controller.abort(new Error('desktop transfer idle timeout')),
+      idleMs,
+    );
+  };
+  reset();
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: AbortSignal.any([lifetime, controller.signal]),
+    });
+    // Error responses have no body consumed by the updater.
+    if (!response.ok) {
+      clearTimeout(timer);
+      await response.body?.cancel();
+      return response;
+    }
+    clearTimeout(timer);
+    return {
+      ok: response.ok,
+      status: response.status,
+      headers: response.headers,
+      async cancel() {
+        clearTimeout(timer);
+        controller.abort();
+        await response.body?.cancel().catch(() => {});
+      },
+      body: (async function* () {
+        reset();
+        const reader = response.body?.getReader();
+        try {
+          if (reader)
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              reset();
+              yield value;
+            }
+        } finally {
+          clearTimeout(timer);
+          await reader?.cancel().catch(() => {});
+          reader?.releaseLock();
+        }
+      })(),
+    };
+  } catch (error) {
+    clearTimeout(timer);
+    throw error;
+  }
+}
+
 /** Installer-owned capability. An ordinary/plugin-only DSH has no updater.
  * @param {{origin:string}} options */
 export async function desktopUpdater({ origin }) {
@@ -40,16 +103,16 @@ export async function desktopUpdater({ origin }) {
     request: async (/** @type {string} */ url, /** @type {any} */ init) => {
       if (new URL(url).origin !== origin)
         throw new Error('untrusted desktop download');
-      return fetch(url, {
-        ...init,
-        credentials: 'omit',
-        redirect: 'error',
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.any([
-          lifetime.signal,
-          AbortSignal.timeout(15 * 60 * 1000),
-        ]),
-      });
+      return idleFetch(
+        url,
+        {
+          ...init,
+          credentials: 'omit',
+          redirect: 'error',
+          headers: { Accept: 'application/json', ...init.headers },
+        },
+        lifetime.signal,
+      );
     },
   });
   const stop = updater.start();

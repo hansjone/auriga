@@ -5423,7 +5423,7 @@
           }
         },
         "security": [],
-        "description": "Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge."
+        "description": "Public signed manifest for the latest listed release. It remains visible after notAfter so new users can download; automatic updaters must reject expired manifests until renewed."
       }
     },
     "/api/resource/v1/desktop/packages/{sequence}": {
@@ -5451,6 +5451,42 @@
                 }
               }
             }
+          },
+          "206": {
+            "description": "Partial package bytes. Full SHA-256 must still be verified after resuming.",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Returned byte interval and total size."
+              },
+              "Accept-Ranges": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "bytes"
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Unsupported or unsatisfiable range.",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "bytes */<total size>"
+              }
+            }
           }
         },
         "parameters": [
@@ -5461,6 +5497,16 @@
             "schema": {
               "type": "integer",
               "minimum": 1
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "required": false,
+            "description": "Optional single open-ended byte range for interrupted downloads, e.g. bytes=1048576-.",
+            "schema": {
+              "type": "string",
+              "pattern": "^bytes=[0-9]+-$"
             }
           }
         ],
