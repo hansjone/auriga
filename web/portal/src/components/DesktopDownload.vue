@@ -28,7 +28,9 @@ const error = ref('');
 async function load() {
   error.value = '';
   try {
-    release.value = await apiClient.get('/api/resource/v1/desktop/latest');
+    release.value = await apiClient.get('/api/resource/v1/desktop/latest', {
+      credentials: 'omit',
+    });
   } catch (e) {
     error.value = isApiError(e) && e.status === 404 ? t('empty') : t('failed');
   }

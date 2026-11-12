@@ -23,6 +23,11 @@ function signed(changes = {}) {
     product: 'Auriga Desktop',
     version: '2.0.0',
     packageId: 'package-2',
+    components: {
+      dshVersion: '0.2.1-rc.3',
+      nodeVersion: '24.0.0',
+      pluginVersion: '2.0.0',
+    },
     channel: 'stable',
     platform: 'win-x64',
     sizeBytes: 3,

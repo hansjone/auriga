@@ -79,6 +79,7 @@ export function verifyRelease(
     'notAfter',
     'sequence',
     'notes',
+    'components',
   ];
   if (
     Object.keys(body).length !== fields.length ||
@@ -107,6 +108,14 @@ export function verifyRelease(
     !/^\d{4}-\d\d-\d\dT/.test(body.notAfter)
   )
     throw new Error('malformed release timestamps');
+  if (
+    !body.components ||
+    Object.keys(body.components).sort().join(',') !==
+      'dshVersion,nodeVersion,pluginVersion'
+  )
+    throw new Error('malformed release components');
+  for (const version of Object.values(body.components))
+    compare(version, version);
   const published = Date.parse(body.publishedAt),
     expiry = Date.parse(body.notAfter);
   if (

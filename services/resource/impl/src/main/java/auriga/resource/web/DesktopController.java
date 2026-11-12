@@ -60,15 +60,15 @@ public class DesktopController {
   }
 
   @GetMapping("/desktop/latest")
-  @RequiresPermission(ResourceAccess.READ)
+  @PublicEndpoint
   public ResponseEntity<JsonNode> latest() {
-    return response(releases.latest(actor()), 200);
+    return response(releases.latest(), 200);
   }
 
   @GetMapping("/desktop/packages/{sequence}")
-  @RequiresPermission(ResourceAccess.READ)
+  @PublicEndpoint
   public ResponseEntity<InputStreamResource> download(@PathVariable long sequence) {
-    var result = releases.download(actor(), sequence);
+    var result = releases.download(sequence);
     return ResponseEntity.ok()
         .cacheControl(CacheControl.noStore())
         .contentType(MediaType.APPLICATION_OCTET_STREAM)

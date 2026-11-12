@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { signRelease } from '../scripts/sign-release.mjs';
+import { signRelease, reviewRelease } from '../scripts/sign-release.mjs';
 import { createUpdater, applyPending } from '../runtime/update.mjs';
 import { install, readState, profileDir } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
@@ -40,13 +40,18 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     spawnSync('tar', ['-a', '-cf', zip, '-C', stage, '.']).status,
     0,
   );
-  let manifest = signRelease({
+  const signingOptions = {
     payload: next.dir,
     archive: zip,
     keyFile,
     sequence: 2,
+    publishedAt: new Date().toISOString(),
     minimumVersion: '1.0.0',
     notAfter: new Date(Date.now() + 86400000).toISOString(),
+  };
+  let manifest = signRelease({
+    ...signingOptions,
+    confirmSha256: reviewRelease(signingOptions).summary.reviewSha256,
   });
   let corrupt = false;
   const server = createServer((req, res) => {

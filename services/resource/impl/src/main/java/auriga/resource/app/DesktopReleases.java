@@ -23,8 +23,16 @@ public final class DesktopReleases {
   private final PublicKey key;
   private final Clock clock;
   private final ResourceAccess access;
+  private final UUID publisherTenant;
+  private final java.util.function.Consumer<ObjectNode> unifiedAudit;
 
-  public DesktopReleases(Path root, String pem, Clock clock, ResourceAccess access)
+  public DesktopReleases(
+      Path root,
+      String pem,
+      Clock clock,
+      ResourceAccess access,
+      UUID publisherTenant,
+      java.util.function.Consumer<ObjectNode> unifiedAudit)
       throws Exception {
     this.root = root.toAbsolutePath().normalize();
     Files.createDirectories(this.root);
@@ -40,6 +48,8 @@ public final class DesktopReleases {
                                 .replace("-----END PUBLIC KEY-----", ""))));
     this.clock = clock;
     this.access = access;
+    this.publisherTenant = Objects.requireNonNull(publisherTenant);
+    this.unifiedAudit = Objects.requireNonNull(unifiedAudit);
   }
 
   public ObjectNode verify(ObjectNode envelope) {
@@ -70,7 +80,8 @@ public final class DesktopReleases {
               "publishedAt",
               "notAfter",
               "sequence",
-              "notes");
+              "notes",
+              "components");
       if (!body.propertyNames().equals(fields)
           || body.path("schema").asInt() != 1
           || !text(body, "product", 32).equals("Auriga Desktop")
@@ -84,6 +95,13 @@ public final class DesktopReleases {
           || !ResourceSemver.valid(text(body, "minimumVersion", 128))
           || !body.path("notes").isString()
           || body.path("notes").asString().length() > 8192) throw invalid();
+      var components = body.path("components");
+      if (!components.isObject()
+          || !components
+              .propertyNames()
+              .equals(Set.of("dshVersion", "nodeVersion", "pluginVersion"))) throw invalid();
+      for (String field : components.propertyNames())
+        if (!ResourceSemver.valid(text(components, field, 128))) throw invalid();
       Instant published = Instant.parse(text(body, "publishedAt", 64)),
           expiry = Instant.parse(text(body, "notAfter", 64));
       if (published.isAfter(clock.instant())
@@ -105,11 +123,13 @@ public final class DesktopReleases {
 
   public ObjectNode list(AurigaPrincipal principal) {
     var actor = access.administrator(principal, MANAGE);
-    return store(actor.tenant()).read();
+    publisher(actor.tenant());
+    return store(publisherTenant).read();
   }
 
   public ObjectNode publish(AurigaPrincipal principal, ObjectNode envelope, InputStream input) {
     var actor = access.administrator(principal, MANAGE);
+    publisher(actor.tenant());
     var body = verify(envelope);
     var store = store(actor.tenant());
     Path temporary = null;
@@ -130,34 +150,38 @@ public final class DesktopReleases {
           || !HexFormat.of().formatHex(hash.digest()).equals(body.path("sha256").asString()))
         throw invalid();
       Path stage = temporary;
-      return store.change(
-          state -> {
-            access.administrator(principal, MANAGE);
-            verify(envelope);
-            long seq = body.path("sequence").asLong();
-            if (seq <= state.path("highestSequence").asLong()) throw new AurigaException(CONFLICT);
-            var items = state.withArray("items");
-            for (var item : items)
-              if (ResourceSemver.compare(
-                      body.path("version").asString(),
-                      item.path("manifest").path("version").asString())
-                  <= 0) throw new AurigaException(CONFLICT);
-            try {
-              Files.move(
-                  stage,
-                  store.root().resolve(body.path("sha256").asString() + ".zip"),
-                  StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-              throw new AurigaException(UNAVAILABLE);
-            }
-            ObjectNode item = JSON.createObjectNode();
-            item.set("manifest", envelope);
-            item.put("withdrawn", false);
-            items.add(item);
-            state.put("highestSequence", seq);
-            audit(state, principal, seq, "publish");
-            return envelope;
-          });
+      var result =
+          store.change(
+              state -> {
+                access.administrator(principal, MANAGE);
+                verify(envelope);
+                long seq = body.path("sequence").asLong();
+                if (seq <= state.path("highestSequence").asLong())
+                  throw new AurigaException(CONFLICT);
+                var items = state.withArray("items");
+                for (var item : items)
+                  if (ResourceSemver.compare(
+                          body.path("version").asString(),
+                          item.path("manifest").path("version").asString())
+                      <= 0) throw new AurigaException(CONFLICT);
+                try {
+                  Files.move(
+                      stage,
+                      store.root().resolve(body.path("sha256").asString() + ".zip"),
+                      StandardCopyOption.ATOMIC_MOVE);
+                } catch (IOException e) {
+                  throw new AurigaException(UNAVAILABLE);
+                }
+                ObjectNode item = JSON.createObjectNode();
+                item.set("manifest", envelope);
+                item.put("withdrawn", false);
+                items.add(item);
+                state.put("highestSequence", seq);
+                audit(state, principal, seq, "publish");
+                return envelope;
+              });
+      flushAudit();
+      return result;
     } catch (IOException | GeneralSecurityException e) {
       throw new AurigaException(UNAVAILABLE);
     } finally {
@@ -171,7 +195,8 @@ public final class DesktopReleases {
 
   public void withdraw(AurigaPrincipal principal, long sequence) {
     var actor = access.administrator(principal, MANAGE);
-    store(actor.tenant())
+    publisher(actor.tenant());
+    store(publisherTenant)
         .change(
             state -> {
               for (var item : state.withArray("items"))
@@ -182,6 +207,7 @@ public final class DesktopReleases {
                 }
               throw new AurigaException(NOT_FOUND);
             });
+    flushAudit();
   }
 
   private void audit(ObjectNode state, AurigaPrincipal actor, long seq, String action) {
@@ -189,16 +215,49 @@ public final class DesktopReleases {
         .withArray("audit")
         .add(
             JSON.createObjectNode()
+                .put("id", auriga.common.persistence.UuidV7.next(clock).toString())
                 .put("actor", actor.subject())
                 .put("sequence", seq)
                 .put("action", action)
                 .put("at", clock.instant().toString()));
   }
 
-  public ObjectNode latest(AurigaPrincipal principal) {
-    var actor = access.member(principal);
+  private void publisher(UUID tenant) {
+    if (!publisherTenant.equals(tenant)) throw new AurigaException(FORBIDDEN);
+  }
+
+  @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 30000)
+  public void flushAudit() {
+    try {
+      store(publisherTenant)
+          .change(
+              state -> {
+                for (var event : state.withArray("audit"))
+                  if (!event.has("id"))
+                    ((ObjectNode) event)
+                        .put("id", auriga.common.persistence.UuidV7.next(clock).toString());
+                return true;
+              });
+      store(publisherTenant)
+          .change(
+              state -> {
+                for (var event : state.withArray("audit")) {
+                  if (event.path("exported").asBoolean()) continue;
+                  if (!event.has("id")) continue;
+                  unifiedAudit.accept((ObjectNode) event);
+                  ((ObjectNode) event).put("exported", true);
+                }
+                return true;
+              });
+    } catch (RuntimeException e) {
+      org.slf4j.LoggerFactory.getLogger(DesktopReleases.class)
+          .warn("Desktop audit export pending", e);
+    }
+  }
+
+  public ObjectNode latest() {
     ObjectNode best = null;
-    for (var item : store(actor.tenant()).read().withArray("items")) {
+    for (var item : store(publisherTenant).read().withArray("items")) {
       if (item.path("withdrawn").asBoolean()) continue;
       var manifest = (ObjectNode) item.path("manifest");
       try {
@@ -215,9 +274,8 @@ public final class DesktopReleases {
 
   public record Download(InputStream stream, long size) {}
 
-  public Download download(AurigaPrincipal principal, long sequence) {
-    var actor = access.member(principal);
-    var store = store(actor.tenant());
+  public Download download(long sequence) {
+    var store = store(publisherTenant);
     return store.change(
         state -> {
           for (var item : state.withArray("items"))

@@ -5402,7 +5402,6 @@
         "tags": [
           "Resource"
         ],
-        "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
           "common.forbidden",
@@ -5422,7 +5421,9 @@
               }
             }
           }
-        }
+        },
+        "security": [],
+        "description": "Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge."
       }
     },
     "/api/resource/v1/desktop/packages/{sequence}": {
@@ -5431,7 +5432,6 @@
         "tags": [
           "Resource"
         ],
-        "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
           "common.forbidden",
@@ -5463,7 +5463,9 @@
               "minimum": 1
             }
           }
-        ]
+        ],
+        "security": [],
+        "description": "Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge."
       }
     },
     "/api/resource/v1/admin/desktop/releases": {
@@ -6834,7 +6836,8 @@
           "notAfter",
           "sequence",
           "notes",
-          "signature"
+          "signature",
+          "components"
         ],
         "properties": {
           "schema": {
@@ -6911,6 +6914,26 @@
               "value": {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9_-]{86}$"
+              }
+            }
+          },
+          "components": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "dshVersion",
+              "nodeVersion",
+              "pluginVersion"
+            ],
+            "properties": {
+              "dshVersion": {
+                "type": "string"
+              },
+              "nodeVersion": {
+                "type": "string"
+              },
+              "pluginVersion": {
+                "type": "string"
               }
             }
           }

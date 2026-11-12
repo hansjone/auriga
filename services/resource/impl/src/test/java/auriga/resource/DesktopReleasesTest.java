@@ -39,6 +39,7 @@ class DesktopReleasesTest {
           "jti");
   KeyPair keys;
   DesktopReleases releases;
+  final java.util.List<ObjectNode> exported = new java.util.ArrayList<>();
 
   @BeforeEach
   void setup() throws Exception {
@@ -51,7 +52,9 @@ class DesktopReleasesTest {
             root,
             Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()),
             Clock.fixed(now, ZoneOffset.UTC),
-            access);
+            access,
+            tenant,
+            event -> exported.add(event.deepCopy()));
   }
 
   ObjectNode envelope() throws Exception {
@@ -76,6 +79,13 @@ class DesktopReleasesTest {
             .put("notAfter", "2026-12-01T00:00:00Z")
             .put("sequence", 2)
             .put("notes", "");
+    body.set(
+        "components",
+        ResourceBody.JSON
+            .createObjectNode()
+            .put("dshVersion", "0.2.1-rc.3")
+            .put("nodeVersion", "24.0.0")
+            .put("pluginVersion", "1.0.0"));
     return sign(body);
   }
 
@@ -129,14 +139,59 @@ class DesktopReleasesTest {
   @Test
   void withdrawalHidesDownloadAndRetainsAuditAndWatermark() throws Exception {
     releases.publish(actor, envelope(), zip());
-    try (var stream = releases.download(actor, 2).stream()) {
+    try (var stream = releases.download(2).stream()) {
       assertArrayEquals("zip".getBytes(StandardCharsets.UTF_8), stream.readAllBytes());
     }
     releases.withdraw(actor, 2);
-    rejects(() -> releases.latest(actor), CommonErrors.NOT_FOUND);
-    rejects(() -> releases.download(actor, 2), CommonErrors.NOT_FOUND);
+    rejects(() -> releases.latest(), CommonErrors.NOT_FOUND);
+    rejects(() -> releases.download(2), CommonErrors.NOT_FOUND);
     assertEquals(2, releases.list(actor).path("audit").size());
     assertEquals(2, releases.list(actor).path("highestSequence").asInt());
+    assertEquals(2, exported.size());
+    releases.flushAudit();
+    assertEquals(2, exported.size());
+  }
+
+  @Test
+  void withdrawalReturnsPreviousPublicReleaseWithoutPrivateFields() throws Exception {
+    var first = envelope();
+    releases.publish(actor, first, zip());
+    var controller = new DesktopController(releases);
+    assertEquals(200, controller.latest().getStatusCode().value());
+    var response = controller.download(2);
+    assertEquals(200, response.getStatusCode().value());
+    response.getBody().getInputStream().close();
+    rejects(controller::list, CommonErrors.UNAUTHENTICATED);
+    var second = sign(envelope().put("version", "3.0.0").put("sequence", 3));
+    releases.publish(actor, second, zip());
+    assertEquals(3, releases.latest().path("sequence").asInt());
+    releases.withdraw(actor, 3);
+    assertEquals(first, releases.latest());
+    assertFalse(releases.latest().has("actor"));
+    assertFalse(releases.latest().has("audit"));
+    assertFalse(releases.latest().has("path"));
+    assertFalse(releases.latest().has("exported"));
+  }
+
+  @Test
+  void auditQueueSurvivesExporterFailureAndRetriesAfterRestart() throws Exception {
+    var pem = Base64.getEncoder().encodeToString(keys.getPublic().getEncoded());
+    var failing =
+        new DesktopReleases(
+            root,
+            pem,
+            Clock.fixed(now, ZoneOffset.UTC),
+            access,
+            tenant,
+            event -> {
+              throw new IllegalStateException("unavailable");
+            });
+    failing.publish(actor, envelope(), zip());
+    assertFalse(failing.list(actor).path("audit").get(0).path("exported").asBoolean());
+    releases.flushAudit();
+    assertEquals(1, exported.size());
+    releases.flushAudit();
+    assertEquals(1, exported.size());
   }
 
   @Test
@@ -147,11 +202,13 @@ class DesktopReleasesTest {
     rejects(() -> releases.publish(actor, valid, zip()), CommonErrors.FORBIDDEN);
     rejects(() -> releases.withdraw(actor, 2), CommonErrors.FORBIDDEN);
     var other = mock(AurigaPrincipal.class);
-    when(access.member(other))
+    when(access.administrator(other, DesktopReleases.MANAGE))
         .thenReturn(new ResourceAccess.Reader(UUID.randomUUID(), account, false, Set.of(), false));
-    rejects(() -> releases.latest(other), CommonErrors.NOT_FOUND);
+    rejects(() -> releases.list(other), CommonErrors.FORBIDDEN);
     for (var method : DesktopController.class.getDeclaredMethods()) {
-      assertNotNull(method.getAnnotation(RequiresPermission.class));
+      assertTrue(
+          method.isAnnotationPresent(RequiresPermission.class)
+              || method.isAnnotationPresent(PublicEndpoint.class));
       if (Set.of("publish", "withdraw", "list").contains(method.getName()))
         assertNotNull(method.getAnnotation(RequiresRecentStepUp.class));
     }

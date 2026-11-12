@@ -254,10 +254,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     broker,
     origin: config.platformOrigin,
   });
-  const desktop = await desktopUpdater({
-    origin: config.platformOrigin,
-    getAccess,
-  }).catch(() => undefined);
+  const desktop = await desktopUpdater({ origin: config.platformOrigin }).catch(
+    () => undefined,
+  );
   let profileRetryAt = 0;
   async function refreshMemberName() {
     if (closed || Date.now() < profileRetryAt) return;

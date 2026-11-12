@@ -4,8 +4,8 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** Installer-owned capability. An ordinary/plugin-only DSH has no updater.
- * @param {{origin:string,getAccess:()=>Promise<string>}} options */
-export async function desktopUpdater({ origin, getAccess }) {
+ * @param {{origin:string}} options */
+export async function desktopUpdater({ origin }) {
   const root = process.env.AURIGA_DESKTOP_ROOT;
   if (!root || !process.env.AURIGA_DESKTOP_RUNTIME) return undefined;
   const state = JSON.parse(await readFile(join(root, 'install.json'), 'utf8'));
@@ -40,12 +40,11 @@ export async function desktopUpdater({ origin, getAccess }) {
     request: async (/** @type {string} */ url, /** @type {any} */ init) => {
       if (new URL(url).origin !== origin)
         throw new Error('untrusted desktop download');
-      const token = await getAccess();
       return fetch(url, {
         ...init,
         credentials: 'omit',
         redirect: 'error',
-        headers: { Authorization: 'Bearer ' + token },
+        headers: { Accept: 'application/json' },
         signal: AbortSignal.any([
           lifetime.signal,
           AbortSignal.timeout(15 * 60 * 1000),

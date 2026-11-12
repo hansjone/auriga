@@ -11,6 +11,12 @@ import (
 
 var resourceUploadPath = regexp.MustCompile(`^/api/resource/v1/packages/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/versions$`)
 
+var desktopPackagePath = regexp.MustCompile(`^/api/resource/v1/desktop/packages/[1-9][0-9]{0,15}$`)
+
+func desktopPublicRead(r *http.Request) bool {
+	return r.Method == http.MethodGet && (r.URL.Path == "/api/resource/v1/desktop/latest" || desktopPackagePath.MatchString(r.URL.Path)) && r.URL.RawPath == ""
+}
+
 // Resource is a platform service and uses the same protected hop as IAM.
 func (c Config) parseResourceUpstream() (*url.URL, error) {
 	raw := c.Upstreams["resource"]

@@ -49,7 +49,7 @@ func (l *TokenBucketLimiter) Allow(key, path string) bool {
 	if l == nil || l.rate == 0 && l.burst == 0 {
 		return true
 	}
-	if l.prefix != "" && !strings.HasPrefix(path, l.prefix) {
+	if l.prefix != "" && !strings.HasPrefix(path, l.prefix) && path != "/api/resource/v1/desktop/latest" && !desktopPackagePath.MatchString(path) {
 		return true
 	}
 	key = rateLimitKey(key)

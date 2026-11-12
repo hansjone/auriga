@@ -18,7 +18,6 @@ test('Desktop 仅绑定首次 HTTPS 平台，普通 DSH 不挂更新器', async 
     assert.equal(
       await desktopUpdater({
         origin: 'https://example.com',
-        getAccess: async () => '',
       }),
       undefined,
     );
@@ -46,13 +45,11 @@ test('Desktop 仅绑定首次 HTTPS 平台，普通 DSH 不挂更新器', async 
     assert.equal(
       await desktopUpdater({
         origin: 'http://example.com',
-        getAccess: async () => '',
       }),
       undefined,
     );
     const updater = await desktopUpdater({
       origin: 'https://example.com',
-      getAccess: async () => '',
     });
     assert.equal(updater.status().enabled, true);
     updater.close();
@@ -64,7 +61,6 @@ test('Desktop 仅绑定首次 HTTPS 平台，普通 DSH 不挂更新器', async 
     assert.equal(
       await desktopUpdater({
         origin: 'https://other.example.com',
-        getAccess: async () => '',
       }),
       undefined,
     );

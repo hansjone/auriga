@@ -503,6 +503,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /** @description Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge. */
     get: operations['getDesktopLatest'];
     put?: never;
     post?: never;
@@ -519,6 +520,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /** @description Public stable Desktop release. Read-only, public signed metadata only. Rate limited at edge. */
     get: operations['downloadDesktopPackage'];
     put?: never;
     post?: never;
@@ -973,6 +975,11 @@ export interface components {
         /** @constant */
         kid: 'auriga-desktop-release-1';
         value: string;
+      };
+      components: {
+        dshVersion: string;
+        nodeVersion: string;
+        pluginVersion: string;
       };
     };
     DesktopReleaseItem: {
