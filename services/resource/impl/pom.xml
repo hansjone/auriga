@@ -9,6 +9,7 @@
   </parent>
   <artifactId>resource-impl</artifactId>
   <dependencies>
+    <dependency><groupId>org.yaml</groupId><artifactId>snakeyaml</artifactId></dependency>
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-compress</artifactId>
@@ -59,7 +60,7 @@
       <resource>
         <directory>../../../contracts/resource</directory>
         <targetPath>auriga/contracts/resource</targetPath>
-        <includes><include>signatures.schema.json</include></includes>
+        <includes><include>*.schema.json</include></includes>
       </resource>
     </resources>
     <plugins>
