@@ -85,7 +85,7 @@ func TestCordisPatchIsLoaderPatchList(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(strings.ReplaceAll(raw, "!!js", "")), &rows); err != nil {
 		t.Fatalf("not a YAML list: %v\n%s", err, raw)
 	}
-	if len(rows) != 4 {
+	if len(rows) != 5 {
 		t.Fatalf("rows=%d\n%s", len(rows), raw)
 	}
 	inserts, _ := rows[0]["insert"].([]any)
@@ -123,6 +123,12 @@ func TestCordisPatchIsLoaderPatchList(t *testing.T) {
 	ocfg := other["config"].(map[string]any)
 	if other["id"] != "session-query-sqlite" || ocfg["openAt"] != "first-search" || ocfg["limits"].(map[string]any)["max"] != 5 {
 		t.Fatalf("override row: %#v", other)
+	}
+	shared := rows[4]["insert"].([]any)[0].(map[string]any)
+	cfg := shared["config"].(map[string]any)
+	if shared["id"] != "auriga-shared-skills" || shared["name"] != "@deepseek-ai/dsh-skill-filesystem" ||
+		cfg["providerName"] != "auriga-shared" || cfg["includeDefaultRoots"] != false || cfg["watch"] != true {
+		t.Fatalf("shared provider: %#v", shared)
 	}
 }
 
@@ -205,7 +211,7 @@ func TestCordisPackageRootPreservesManagedConfigAndMcpTokens(t *testing.T) {
 					t.Fatalf("token_ref/header changed: %#v", cfg["headers"])
 				}
 			}
-			wantExpressions := 2 // Two lazy MCP token-file reads.
+			wantExpressions := 3 // Two lazy MCP token-file reads and the fixed shared skill root.
 			if tc.runtime == nodev1.RuntimeKind_RUNTIME_KIND_DOCKER {
 				wantExpressions++ // Container-local listener address.
 			}
