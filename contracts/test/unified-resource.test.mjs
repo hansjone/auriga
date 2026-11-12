@@ -303,6 +303,8 @@ for (const fixture of fixtureIndex.cases) {
       fixtureIndex.fixedRootExpression,
     );
     assert.equal(result.shared, fixture.expectShared);
+    if (fixture.expectShared && cordisValue(input).length)
+      assert(result.text.startsWith(input));
     if (!fixture.expectShared) {
       assert.equal(result.text, input);
       assert.equal(result.text, expected);
@@ -315,7 +317,7 @@ for (const fixture of fixtureIndex.cases) {
     );
     const repeat = mergeCordisFixture(
       result.text,
-      text(fixture.upstreamPath),
+      null,
       fixtureIndex.fixedRootExpression,
     );
     assert.equal(repeat.text, result.text);
@@ -453,7 +455,12 @@ test('guardian transition table covers all states and guards recovery', () => {
           transition.guards.includes('disableReceiptDurable'),
       );
   }
-  assert.equal(transitions.clock.rollbackToleranceMillis, 0);
+  assert.equal(transitions.clock.rollbackToleranceMillis, 120000);
+  assert(
+    transitions.transitions
+      .find((t) => t.from === 'verifying' && t.to === 'active')
+      .guards.includes('noPendingIsolation'),
+  );
 });
 
 for (const fixture of read('resource/local-file-fixtures.json').cases) {
@@ -463,4 +470,99 @@ for (const fixture of read('resource/local-file-fixtures.json').cases) {
       fixture.expect,
     ),
   );
+}
+
+import { evaluateHostLock } from '../../services/contracts/scripts/unified-host-lock-fixtures.mjs';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { join, dirname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+const locks = read('resource/host-lock-fixtures.json');
+for (const vector of locks.cases) {
+  test('directory lock policy ' + vector.id, () =>
+    assert.deepEqual(evaluateHostLock(vector.input), vector.expect),
+  );
+}
+test('Node mkdir arbitrates concurrent C/E processes and releases only after owner cleanup', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'p1k-lock-'));
+  const path = join(directory, 'host.lock.d');
+  assert.equal(dirname(directory), resolve(tmpdir()));
+  assert.equal(dirname(path), directory);
+  try {
+    const source =
+      "const {mkdir,rmdir}=require('node:fs/promises');let held;process.on('message',async p=>{try{if(p==='release'){if(!held)throw Error('not owner');await rmdir(held);held=undefined;process.send('released')}else{await mkdir(p);held=p;process.send('acquired')}}catch(e){process.send(e.code??e.message)}});process.send('ready')";
+    const contenders = locks.concurrentAcquire.contenders.map(() =>
+      spawn(process.execPath, ['-e', source], {
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      }),
+    );
+    try {
+      await Promise.all(
+        contenders.map(
+          (c) =>
+            new Promise((resolve, reject) => {
+              c.once('message', (m) =>
+                m === 'ready' ? resolve() : reject(new Error(m)),
+              );
+              c.once('error', reject);
+            }),
+        ),
+      );
+      const results = await Promise.all(
+        contenders.map(
+          (c) =>
+            new Promise((resolve, reject) => {
+              c.once('message', resolve);
+              c.once('error', reject);
+              c.send(path);
+            }),
+        ),
+      );
+      assert.equal(
+        results.filter((x) => x === 'acquired').length,
+        locks.concurrentAcquire.expect.winners,
+      );
+      assert.equal(
+        results.filter((x) => x === locks.concurrentAcquire.expect.loserError)
+          .length,
+        locks.concurrentAcquire.expect.losers,
+      );
+      const winner = contenders[results.indexOf('acquired')];
+      const released = new Promise((resolve) =>
+        winner.once('message', resolve),
+      );
+      winner.send('release');
+      assert.equal(await released, 'released');
+      await mkdir(path);
+    } finally {
+      await Promise.all(
+        contenders.map(
+          (c) =>
+            new Promise((resolve) => {
+              if (c.exitCode !== null) return resolve();
+              c.once('exit', resolve);
+              c.kill();
+            }),
+        ),
+      );
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+for (const fixture of transitions.cases) {
+  test('guardian recovery guard ' + fixture.id, () => {
+    const matched = transitions.transitions.filter(
+      (t) =>
+        t.from === fixture.from &&
+        t.event === fixture.event &&
+        t.guards.every((g) => fixture.facts[g] === true),
+    );
+    assert.equal(
+      matched.length === 1 ? matched[0].to : 'reject',
+      fixture.expect,
+    );
+  });
 }

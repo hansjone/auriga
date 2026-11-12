@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 import Ajv from '../node_modules/ajv/dist/2020.js';
 import addFormats from '../node_modules/ajv-formats/dist/index.js';
 const root = new URL('../../../contracts/', import.meta.url);
+const clockRules = JSON.parse(
+  readFileSync(new URL('resource/guardian-transitions.json', root), 'utf8'),
+).clock;
 const ajv = new Ajv({ strict: true, allErrors: true });
 addFormats(ajv);
 for (const name of ['signatures', 'package', 'unified']) {
@@ -290,7 +293,8 @@ function evaluate(operation, input, trust) {
       requireRule(input.bootId === c.bootId, 'clock_reverify');
       requireRule(
         input.monotonicNowMillis >= c.lastMonotonicMillis &&
-          Date.parse(input.wallNow) >= Date.parse(c.maxObservedTime),
+          Date.parse(input.wallNow) >=
+            Date.parse(c.maxObservedTime) - clockRules.rollbackToleranceMillis,
         'clock_rollback',
       );
       const effective = Math.max(

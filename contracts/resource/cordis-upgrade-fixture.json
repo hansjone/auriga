@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "source": "https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/bundle/web-app/presets/cordis.patch.yml",
-  "sourceScope": "Relevant preset-cordis and skill-filesystem excerpt; unrelated fixture plugins demonstrate full-row preservation.",
+  "sourceScope": "Host-level independent skill provider; shipped preset rows are never copied or replaced.",
   "installerSource": "clients/installer/runtime/core.mjs",
   "fixedRootExpression": "process.getBuiltinModule('node:path').join(process.env.DSH_HOME, 'auriga', 'skills-active', 'current')",
   "requiredEnvironment": "Trusted launcher sets DSH_HOME to its owned absolute home before interpreting config; absent/non-absolute values deny shared activation.",
@@ -9,31 +9,27 @@
     {
       "id": "minimal",
       "inputPath": "cordis-fixtures/minimal.input.cordis.patch.yml",
-      "upstreamPath": "cordis-fixtures/upstream.cordis.patch.yml",
       "expectedPath": "cordis-fixtures/minimal.expected.cordis.patch.yml",
       "expectShared": true,
-      "reason": "preserve-effective-preset-and-append-once"
+      "reason": "preserve-all-existing-bytes-and-append-host-provider-once"
     },
     {
       "id": "user-preset",
       "inputPath": "cordis-fixtures/user-preset.input.cordis.patch.yml",
-      "upstreamPath": "cordis-fixtures/upstream.cordis.patch.yml",
       "expectedPath": "cordis-fixtures/user-preset.expected.cordis.patch.yml",
       "expectShared": true,
-      "reason": "preserve-effective-preset-and-append-once"
+      "reason": "preserve-all-existing-bytes-and-append-host-provider-once"
     },
     {
       "id": "idempotent",
       "inputPath": "cordis-fixtures/idempotent.input.cordis.patch.yml",
-      "upstreamPath": "cordis-fixtures/upstream.cordis.patch.yml",
       "expectedPath": "cordis-fixtures/idempotent.expected.cordis.patch.yml",
       "expectShared": true,
-      "reason": "preserve-effective-preset-and-append-once"
+      "reason": "preserve-all-existing-bytes-and-append-host-provider-once"
     },
     {
       "id": "invalid-yaml",
       "inputPath": "cordis-fixtures/invalid-yaml.input.cordis.patch.yml",
-      "upstreamPath": "cordis-fixtures/upstream.cordis.patch.yml",
       "expectedPath": "cordis-fixtures/invalid-yaml.expected.cordis.patch.yml",
       "expectShared": false,
       "reason": "preserve-and-deny"
@@ -41,10 +37,32 @@
     {
       "id": "missing-preset",
       "inputPath": "cordis-fixtures/missing-preset.input.cordis.patch.yml",
-      "upstreamPath": null,
       "expectedPath": "cordis-fixtures/missing-preset.expected.cordis.patch.yml",
+      "expectShared": true,
+      "reason": "preserve-all-existing-bytes-and-append-host-provider-once"
+    },
+    {
+      "id": "provider-collision",
+      "inputPath": "cordis-fixtures/provider-collision.input.cordis.patch.yml",
+      "expectedPath": "cordis-fixtures/provider-collision.expected.cordis.patch.yml",
+      "expectShared": false,
+      "reason": "preserve-and-deny"
+    },
+    {
+      "id": "conflicting-owned-row",
+      "inputPath": "cordis-fixtures/conflicting-owned-row.input.cordis.patch.yml",
+      "expectedPath": "cordis-fixtures/conflicting-owned-row.expected.cordis.patch.yml",
+      "expectShared": false,
+      "reason": "preserve-and-deny"
+    },
+    {
+      "id": "duplicate-owned-row",
+      "inputPath": "cordis-fixtures/duplicate-owned-row.input.cordis.patch.yml",
+      "expectedPath": "cordis-fixtures/duplicate-owned-row.expected.cordis.patch.yml",
       "expectShared": false,
       "reason": "preserve-and-deny"
     }
-  ]
+  ],
+  "providerName": "auriga-shared",
+  "hostRowId": "auriga-shared-skills"
 }

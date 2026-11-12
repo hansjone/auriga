@@ -18,7 +18,8 @@
         "leaseValid",
         "clockValid",
         "identityMatches",
-        "verificationDurable"
+        "verificationDurable",
+        "noPendingIsolation"
       ],
       "to": "active",
       "action": "none"
@@ -172,9 +173,39 @@
     }
   ],
   "clock": {
-    "rollbackToleranceMillis": 0,
-    "sameBoot": "effectiveNow = max(wallNow, maxObservedTime + monotonicNowMillis - lastMonotonicMillis, lastTrustedTime); reject decreasing monotonic counter or wallNow < maxObservedTime; active requires effectiveNow < lease.expiresAt and monotonicNowMillis < leaseDeadlineMonotonicMillis",
+    "rollbackToleranceMillis": 120000,
+    "sameBoot": "effectiveNow = max(wallNow, maxObservedTime + monotonicNowMillis - lastMonotonicMillis, lastTrustedTime); reject decreasing monotonic counter or wallNow < maxObservedTime - 120000; monotonic deadline is the primary lease limit, tolerance never extends either deadline",
     "newBoot": "monotonic counters from different bootId values are incomparable; require fresh authenticated online time and trust before shared activation; offline restart must stop and quarantine shared content before private_only",
     "persist": "persist maxObservedTime, lastTrustedTime, lastTrustedTimeSource, bootId, lastMonotonicMillis and leaseDeadlineMonotonicMillis under host lock before acknowledging active; renewal never resets a package migration t0"
-  }
+  },
+  "cases": [
+    {
+      "id": "activation-after-complete-recovery",
+      "from": "verifying",
+      "event": "trust_valid",
+      "facts": {
+        "onlineVerified": true,
+        "leaseValid": true,
+        "clockValid": true,
+        "identityMatches": true,
+        "verificationDurable": true,
+        "noPendingIsolation": true
+      },
+      "expect": "active"
+    },
+    {
+      "id": "pending-isolation-denies-activation",
+      "from": "verifying",
+      "event": "trust_valid",
+      "facts": {
+        "onlineVerified": true,
+        "leaseValid": true,
+        "clockValid": true,
+        "identityMatches": true,
+        "verificationDurable": true,
+        "noPendingIsolation": false
+      },
+      "expect": "reject"
+    }
+  ]
 }

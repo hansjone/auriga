@@ -26,7 +26,7 @@ UnifiedMigrationProof 包含已签名 legacyEnvelope、unifiedEnvelope、legacyA
 
 ## 固定目录和 guardian
 
-静态 customSkillDirs 保留上游顺序、表达式、预设和 includeDefaultRoots，并去重追加由可信绝对 DSH_HOME 推导的 `auriga/skills-active/current/`。该根下一层直接为 `<name>/SKILL.md`。登录身份只在可信运行期记录中保存。真实 YAML 输入、上游预置行和期望输出由 cordis-upgrade-fixture.json 索引。D/E 必须逐项消费同一夹具，解析失败或缺少可信预置时保持旧文件并拒绝共享。
+不覆盖或复制任何上游预设行，也不向预设的 customSkillDirs 追加目录。只通过 Cordis 的 insert 操作新增宿主级 `auriga-shared-skills` 行，插件为 `@deepseek-ai/dsh-skill-filesystem`，独立 providerName 固定为 `auriga-shared`，includeDefaultRoots=false、watch=true、customSkillDirs 仅包含由可信绝对 DSH_HOME 推导的 `auriga/skills-active/current/`。宿主注册到全局层，cordis/standard/ptc 各自保留原提供者并合并读取共享目录；DSH 升级继续加载新的上游预设，不被我方快照冻结。该根下一层直接为 `<name>/SKILL.md`，登录身份只在可信运行期记录中保存。真实 YAML 输入和期望输出由 cordis-upgrade-fixture.json 索引；原文、已有表达式和用户配置保持不变。同一我方行且配置相同则不重复添加；我方行重复、配置冲突、providerName 被占用或 YAML 错误时保持原文件并拒绝共享。D/E 必须逐项消费夹具，并在受支持的真实宿主上核实各预设的共享与原有 Skill 均可见。
 
 身份根为 `<DSH_HOME>/auriga/resources/<tenant>/<owner>/<client或instance>/skills/`，内部包含 `cache/<sha256-hex>/`、`staging/<transactionId>/`、`ledger.json`、`receipts/<packageId>/<versionId>.json`、`transactions/<transactionId>.json`。五类文件都有必填 schemaVersion=1，拒绝未知版本、未知字段、符号链接和身份不匹配。
 
@@ -36,7 +36,13 @@ UnifiedMigrationProof 包含已签名 legacyEnvelope、unifiedEnvelope、legacyA
 - `<DSH_HOME>/auriga/guardian/state.json` 使用 UnifiedGuardianStateFile，E 唯一读写，C 可只读观察。
 - `<DSH_HOME>/auriga/guardian/high-watermarks.json` 使用 UnifiedHighWatermarksFile，E 唯一读写，C 只读。包含跨协议高水位、已验签迁移标记和已使用降级授权。C 暂存待激活数据，E 独立验签并原子持久化高水位后，C 重新获取锁核验 E 的 active 状态和完全相同的身份/代次/字节才切换 current；C 不直接写高水位，也不在等待 E 时占锁。
 
-所有 C/E 文件和 current 切换共用宿主级排他锁 `<DSH_HOME>/auriga/guardian/host.lock`。通过 OS 文件句柄锁实现，POSIX flock(LOCK_EX)、Windows LockFileEx 排他锁整文件；C 的适配器与 E 必须使用此文件的同一内核锁。锁文件存在不等于占锁，不能按 PID/时间猜测并删锁。进程退出由内核释放。获取失败允许退避重试，超时保持原状态且拒绝激活。若平台或 C 无法提供相同锁语义，阻止共享开放。
+所有 C/E 文件和 current 切换共用 `<DSH_HOME>/auriga/guardian/host.lock.d/` 目录锁，不依赖原生 Node 模块或额外二进制。Node fs.mkdir(path) 必须不带 recursive，只有创建成功者获锁，EEXIST 表示竞争失败；不得把已存在目录当作自己获锁。Windows 使用本地 NTFS、Linux 使用本地支持原子目录创建的文件系统，所有竞争者使用同一个已核验的绝对路径、同一卷；拒绝网络盘、链接、重解析点、路径别名和不能保证原子 mkdir 的文件系统。guardian 必须单实例，所有写者共同遵守本协议。
+
+获锁后写入 owner.json，格式为 UnifiedHostLockOwner：schemaVersion=1、随机 lockId、role=C/E、pid、processStartedAt、createdAt、bootId、monotonicMillis、leaseDurationMillis=30000。启动时间由当前进程记录，E 用自己可信的子进程启动记录核对，PID 存在并不能证明是原进程。owner.json 使用同目录临时文件原子替换；记录尚未完成、格式错误或进程身份无法确认时其他竞争者等待或放弃，不能进入临界区。租约从获锁时的单调计数开始，固定上限30秒，不续租；耗时下载、验签、停进程均在锁外，锁内只做最终复核及短持久化事务。
+
+正常释放者在锁内核对 lockId 与自身记录后移除 owner.json 并 rmdir 锁目录；任何一步失败都保留失败状态并拒绝假称已释放。C 遇到任何陈旧锁只能等待或放弃，不能删除、改名或覆盖他人的锁。只有 E 能回收：核实原持有进程已不存在，或同一 boot 的单调持锁时间严格超过30秒上限。仅凭墙钟、文件 mtime、PID 重用或未知身份不得回收。超租约但写者仍运行时，E 必须先阻止新激活，停止其受管写者并确认退出，才可清理锁；不能一边允许旧写者继续写一边重建锁。无法安全停写就 blocked。跨 boot 的计数不可比较，必须核实旧进程已退出。
+
+E 回收前通过可信宿主管理器阻止该宿主的新 C 启动，并确认所有受管 C 写者均已退出，消除检查与改名间出现新持有者的竞争。随后再次核对观察到的 lockId，变化则拒绝；先将陈旧锁原子改名为同目录独占的回收路径，再移除其中记录和目录，并重新通过 mkdir 竞争新锁，不继承旧锁所有权。C/E 每次提交前重新核对自己的 lockId 和租约，失去所有权后不得写入或释放他人的锁。E 对陈旧锁的处理串行，避免多个清理者竞争；缺失 owner 的崩溃目录须由 E 在确认所有受管写者均停机后恢复，不能由普通 C 猜测删除。策略与并发争锁预期见 host-lock-fixtures.json。
 
 首次激活时，C 先持锁将精确 ResourceRef 写入 ledger 的 applying 安装项，并持久化 prepared 事务及 staging 字节，然后释放锁。E 从这些文件独立验证完整待激活集合，持久化高水位后将 guardian 写为对应 selectionRevision/generation 的 active，表示该集合已获可信激活许可。C 再持锁复核许可、ledger 修订、完整资源集合和 staging 字节，才切换 current 并写 applied 回执；许可本身不能当作安装成功。E 不等待 C 的 applied 回执才授权，避免双方互等。失败或修订变化均重新验证，不能沿用旧许可。
 
@@ -46,9 +52,9 @@ Desktop 停用完全由 E 独立完成。E 先持锁将 guardian 状态设 stopp
 
 C 下次启动先持锁读取未处理 disable 回执，验证 tenant/owner/host 和路径归属，用 cleanup 事务清理隔离目录并标记 ledger.processedDisableReceiptIds。回执不得删除，高水位不得回退。清理失败保留回执和原状态。C 不得从旧安装记录自行恢复共享目录，必须等 E 联网重验并授权新激活。历史会话可查看，private_only 必须新建会话，原上下文不能恢复执行。
 
-guardian 全部转移、守卫和动作见 guardian-transitions.json。未列转移默认拒绝。验证失败且进程仍运行则 stopping，已停止则 isolating；blocked 可重试清理，private_only 恢复共享须在线重验并先停进程。active 的每次 tick 都要求租约、身份和时钟仍有效，任一失效立即停机。
+guardian 全部转移、守卫和动作见 guardian-transitions.json。未列转移默认拒绝。验证失败且进程仍运行则 stopping，已停止则 isolating；blocked 可重试清理，private_only 恢复共享须在线重验并先停进程。verifying → active 必须满足 noPendingIsolation：上次隔离日志已恢复，必要停用回执已持久化，遗留清理已对账完成；仅有新在线验签不能跳过恢复。active 的每次 tick 都要求租约、身份和时钟仍有效，任一失效立即停机。
 
-防回拨字段固定在 UnifiedTrustedClock，持久化已见最大可信时间、最后可信时间及来源、bootId、最后单调毫秒数和当前租约的单调截止。相同 bootId 下单调计数不得降低，墙钟小于已见最大可信时间即拒绝共享，容差为0；按转移文件中公式同时核对 UTC 与单调截止。不同 bootId 的计数不可比较，离线重启不重开窗口，必须先停机隔离才能以私有新会话启动，恢复共享需要新的在线可信时间。D 在云端执行等价行为，C/E 的 Desktop 文件所有权约定由 D 映射到自己的可信执行器。
+防回拨字段固定在 UnifiedTrustedClock，持久化已见最大可信时间、最后可信时间及来源、bootId、最后单调毫秒数和当前租约的单调截止。相同 bootId 下以单调截止为租约主判据，计数不得降低；墙钟回拨有120秒有界容差，wallNow < maxObservedTime - 120000ms 才按回拨触发停机隔离，边界内正常校时可继续。有效时间仍按转移文件公式单调推进，同时核对 UTC 截止；容差不能重置 maxObservedTime、降低可信时间或延长任一租约截止。不同 bootId 的计数不可比较，离线重启不重开窗口，必须先停机隔离才能以私有新会话启动，恢复共享需要新的在线可信时间。D 在云端执行等价行为，C/E 的 Desktop 文件所有权约定由 D 映射到自己的可信执行器。
 
 ## 服务端授权矩阵
 

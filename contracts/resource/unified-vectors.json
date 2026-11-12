@@ -2305,6 +2305,94 @@
       }
     },
     {
+      "id": "guardian-clock-small-wall-adjustment",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000014",
+        "wallNow": "2026-11-12T00:59:59Z",
+        "monotonicNowMillis": 2000,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "guardian-clock-wall-tolerance-boundary",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000014",
+        "wallNow": "2026-11-12T00:58:00Z",
+        "monotonicNowMillis": 2000,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "guardian-clock-wall-beyond-tolerance",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000014",
+        "wallNow": "2026-11-12T00:57:59.999Z",
+        "monotonicNowMillis": 2000,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "clock_rollback"
+      }
+    },
+    {
+      "id": "guardian-clock-tolerance-cannot-extend-lease",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000014",
+        "wallNow": "2026-11-12T00:59:59Z",
+        "monotonicNowMillis": 82801000,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "lease_expired"
+      }
+    },
+    {
       "id": "guardian-clock-wall-rollback",
       "operation": "clock",
       "input": {

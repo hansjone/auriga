@@ -1846,6 +1846,24 @@ export interface components {
       migrationMarkers: components['schemas']['UnifiedMigrationMarker'][];
       consumedDowngradeAuthorizationIds: string[];
     };
+    UnifiedHostLockOwner: {
+      /** @constant */
+      schemaVersion: 1;
+      /** Format: uuid */
+      lockId: string;
+      /** @enum {string} */
+      role: 'C' | 'E';
+      pid: number;
+      /** Format: date-time */
+      processStartedAt: string;
+      /** Format: date-time */
+      createdAt: string;
+      bootId: string;
+      /** Format: int64 */
+      monotonicMillis: number;
+      /** @constant */
+      leaseDurationMillis: 30000;
+    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;

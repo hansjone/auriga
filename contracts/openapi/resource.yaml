@@ -12136,6 +12136,9 @@
       },
       "UnifiedHighWatermarksFile": {
         "$ref": "../resource/unified.schema.json#/$defs/UnifiedHighWatermarksFile"
+      },
+      "UnifiedHostLockOwner": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedHostLockOwner"
       }
     }
   }

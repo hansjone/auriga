@@ -44,6 +44,7 @@
     "UnifiedTransactionFile": "unified.schema.json#/$defs/UnifiedTransactionFile",
     "UnifiedTrustedClock": "unified.schema.json#/$defs/UnifiedTrustedClock",
     "UnifiedGuardianStateFile": "unified.schema.json#/$defs/UnifiedGuardianStateFile",
-    "UnifiedHighWatermarksFile": "unified.schema.json#/$defs/UnifiedHighWatermarksFile"
+    "UnifiedHighWatermarksFile": "unified.schema.json#/$defs/UnifiedHighWatermarksFile",
+    "UnifiedHostLockOwner": "unified.schema.json#/$defs/UnifiedHostLockOwner"
   }
 }

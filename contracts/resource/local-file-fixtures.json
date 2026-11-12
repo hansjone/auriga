@@ -578,6 +578,86 @@
         "recordedAt": "2026-11-13T00:00:00Z"
       },
       "expect": false
+    },
+    {
+      "id": "host-lock-owner-valid",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "C",
+        "pid": 1234,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": 1000,
+        "leaseDurationMillis": 30000
+      },
+      "expect": true
+    },
+    {
+      "id": "host-lock-owner-invalid-role",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "admin",
+        "pid": 1234,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": 1000,
+        "leaseDurationMillis": 30000
+      },
+      "expect": false
+    },
+    {
+      "id": "host-lock-owner-invalid-leaseDurationMillis",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "C",
+        "pid": 1234,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": 1000,
+        "leaseDurationMillis": 30001
+      },
+      "expect": false
+    },
+    {
+      "id": "host-lock-owner-invalid-monotonicMillis",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "C",
+        "pid": 1234,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": -1,
+        "leaseDurationMillis": 30000
+      },
+      "expect": false
+    },
+    {
+      "id": "host-lock-owner-invalid-pid",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "C",
+        "pid": 0,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": 1000,
+        "leaseDurationMillis": 30000
+      },
+      "expect": false
     }
   ]
 }

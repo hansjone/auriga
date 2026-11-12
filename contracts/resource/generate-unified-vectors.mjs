@@ -536,6 +536,28 @@ const timing = {
   leaseExpiresAt: expiry,
 };
 add('guardian-clock-valid', 'clock', timing);
+add('guardian-clock-small-wall-adjustment', 'clock', {
+  ...timing,
+  wallNow: '2026-11-12T00:59:59Z',
+});
+add('guardian-clock-wall-tolerance-boundary', 'clock', {
+  ...timing,
+  wallNow: '2026-11-12T00:58:00Z',
+});
+add(
+  'guardian-clock-wall-beyond-tolerance',
+  'clock',
+  { ...timing, wallNow: '2026-11-12T00:57:59.999Z' },
+  'reject',
+  'clock_rollback',
+);
+add(
+  'guardian-clock-tolerance-cannot-extend-lease',
+  'clock',
+  { ...timing, wallNow: '2026-11-12T00:59:59Z', monotonicNowMillis: 82801000 },
+  'reject',
+  'lease_expired',
+);
 add(
   'guardian-clock-wall-rollback',
   'clock',

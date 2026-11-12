@@ -144,3 +144,5 @@ D8确定Node复用Desktop自带版本，Python采用python-build-standalone、Ja
 ## P1-K 统一协议
 
 统一类型登记在 `unified-registry.json`。完整信任、目录、锁与 guardian 行为见 `unified-protocol.md`，本地五类文件格式见 `unified.schema.json`。授权矩阵见 `unified-authorization.json`，跨语言输入及预期结果见 `unified-vectors.json`，真实 Cordis YAML 夹具由 `cordis-upgrade-fixture.json` 索引。
+
+共享 Skill 通过独立的宿主级 `auriga-shared` 提供者挂载，不改写任何上游预设。Node 目录锁持有者格式为 `UnifiedHostLockOwner`，争锁、陈旧锁及越权清理夹具见 `host-lock-fixtures.json`。真实 DSH 验证脚本为 `services/contracts/scripts/unified-real-dsh-smoke.mjs`，须先按仓库 `deploy/compose/real-dsh/package-lock.json` 在隔离 target 目录安装宿主，再从仓库根目录运行。
