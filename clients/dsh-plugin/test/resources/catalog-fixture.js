@@ -1,12 +1,22 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  realpathSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalize } from '../../src/resources/json.js';
 import { packSkill } from '../../src/resources/skill-package.js';
 import { sha, desktopSkills } from '../../src/resources/desktop-skills.js';
-export function catalogFixture(t) {
-  const home = mkdtempSync(join(tmpdir(), 'auriga-catalog-'));
+export function catalogFixture(t, temporaryRoot = tmpdir()) {
+  // Windows runner TEMP can contain an 8.3 user-directory alias. Production
+  // deliberately rejects aliases, so use the physical spelling in the fixture.
+  const home = realpathSync.native(
+    mkdtempSync(join(temporaryRoot, 'auriga-catalog-')),
+  );
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const who = {
     tenantId: '019a0000-0000-7000-8000-000000000001',

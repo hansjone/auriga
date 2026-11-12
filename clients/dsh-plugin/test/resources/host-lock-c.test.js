@@ -7,12 +7,15 @@ import {
   rmSync,
   rmdirSync,
   existsSync,
+  realpathSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireHostLock } from '../../src/resources/host-lock.js';
 test('C only acquires a new directory and leaves incomplete, contended and expired locks for E', (t) => {
-  const home = mkdtempSync(join(tmpdir(), 'auriga-clock-c-'));
+  const home = realpathSync.native(
+    mkdtempSync(join(tmpdir(), 'auriga-clock-c-')),
+  );
   t.after(() => rmSync(home, { recursive: true, force: true }));
   let mono = 1000;
   const time = () => ({
