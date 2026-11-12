@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "default": "deny",
+  "rules": [
+    {
+      "kind": "plugin",
+      "delivery": "legacy",
+      "entry": "legacy-only",
+      "basePermission": "resource.packages.upload"
+    },
+    {
+      "kind": "skill",
+      "delivery": "text-only",
+      "entry": "unified",
+      "basePermission": "resource.packages.upload",
+      "minimumRisk": "r1",
+      "commandMinimumRisk": "r2",
+      "level": "l3",
+      "p1Enabled": true
+    },
+    {
+      "kind": "tool",
+      "delivery": "online",
+      "entry": "unified",
+      "basePermission": "resource.packages.upload",
+      "minimumRisk": "r2",
+      "p1Enabled": false,
+      "requiredGates": [
+        "delivery-permission",
+        "endpoint-credential-authorization",
+        "network-authorization"
+      ]
+    },
+    {
+      "kind": "tool",
+      "delivery": "offline",
+      "entry": "unified",
+      "basePermission": "resource.packages.upload",
+      "minimumRisk": "r2",
+      "p1Enabled": false,
+      "requiredGates": [
+        "delivery-permission",
+        "platform-authorization",
+        "provenance"
+      ]
+    },
+    {
+      "kind": "tool",
+      "delivery": "git",
+      "entry": "unified",
+      "basePermission": "resource.packages.upload",
+      "minimumRisk": "r3",
+      "p1Enabled": false,
+      "requiredGates": [
+        "delivery-permission",
+        "commit-provenance",
+        "isolated-build-authorization"
+      ]
+    }
+  ],
+  "securityReviewRoleRequiresQualification": true,
+  "rawDownloadRequires": [
+    "authenticated-tenant",
+    "package-version-visibility",
+    "resource.packages.read"
+  ],
+  "distributionPermission": "resource.distributions.manage"
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "before": {
+    "plugins": {
+      "skill-filesystem": {
+        "customSkillDirs": ["${{ preset.skills }}", "/example/skills"],
+        "includeDefaultRoots": true
+      },
+      "example-provider": {
+        "enabled": true
+      }
+    },
+    "expression": "${{ env.EXAMPLE }}"
+  },
+  "after": {
+    "plugins": {
+      "skill-filesystem": {
+        "customSkillDirs": [
+          "${{ preset.skills }}",
+          "/example/skills",
+          "<DSH_HOME>/auriga/skills-active/current/"
+        ],
+        "includeDefaultRoots": true
+      },
+      "example-provider": {
+        "enabled": true
+      }
+    },
+    "expression": "${{ env.EXAMPLE }}"
+  },
+  "repeatAfter": "after",
+  "unparseable": "preserve-and-deny-shared",
+  "identityInStaticConfig": false
+}

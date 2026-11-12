@@ -503,10 +503,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListResourcePackages'];
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedCreateResourcePackage'];
     delete?: never;
     options?: never;
@@ -521,7 +521,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedGetResourcePackage'];
     put?: never;
     post?: never;
@@ -538,10 +538,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListResourceVersions'];
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedUploadResourceVersion'];
     delete?: never;
     options?: never;
@@ -556,7 +556,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedGetResourceVersion'];
     put?: never;
     post?: never;
@@ -575,7 +575,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedSubmitResourceVersion'];
     delete?: never;
     options?: never;
@@ -590,7 +590,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListMarketAdminReview'];
     put?: never;
     post?: never;
@@ -607,7 +607,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListMarketAdminPublished'];
     put?: never;
     post?: never;
@@ -626,7 +626,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedDecideResourceReview'];
     delete?: never;
     options?: never;
@@ -643,7 +643,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedPublishResourceVersion'];
     delete?: never;
     options?: never;
@@ -660,7 +660,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedWithdrawResourceVersion'];
     delete?: never;
     options?: never;
@@ -675,7 +675,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Return the exact stored immutable auriga-resource.json UTF-8 bytes, without JSON parsing, reserialization, newline or BOM changes. Locator does not grant access: check tenant/package/version ACL on every read. Caller hashes bytes and compares version digest and verified envelope before parsing. Plugin IDs return 404. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Return the exact stored immutable auriga-resource.json UTF-8 bytes, without JSON parsing, reserialization, newline or BOM changes. Locator does not grant access: check tenant/package/version ACL on every read. Caller hashes bytes and compares version digest and verified envelope before parsing. Plugin IDs return 404. */
     get: operations['UnifiedDownloadResourceManifest'];
     put?: never;
     post?: never;
@@ -692,8 +692,180 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedGetResourceReview'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/member/download-tickets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    post: operations['UnifiedCreateDownloadTicket'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/member/downloads': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    post: operations['UnifiedDownloadArtifact'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/member/installations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    get: operations['UnifiedListInstallations'];
+    put?: never;
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    post: operations['UnifiedSelectInstallation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/member/installation-reports': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    post: operations['UnifiedReportInstallation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/member/renewals': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    post: operations['UnifiedRenewInstallation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/distributions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    get: operations['UnifiedListDistributions'];
+    put?: never;
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    post: operations['UnifiedCreateDistribution'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/distributions/{distributionId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    get: operations['UnifiedGetDistribution'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/artifacts/{artifactId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    get: operations['UnifiedDownloadVersionArtifact'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/internal/resource/v1/catalog/downloads/{downloadId}/manifest': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description Exact immutable manifest bytes. Node mTLS SAN and tenant, owner, current instance scheduling, selectionRevision, generation, kind, exact version and digest authorization checked online for every read. Locator grants no access. Lease expiry or revoked version denies download. No redirects or Range. */
+    get: operations['UnifiedDownloadNodeManifest'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/internal/resource/v1/catalog/downloads/{downloadId}/artifacts/{artifactId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description Exact immutable artifact bytes. Node mTLS SAN and tenant, owner, current instance scheduling, selectionRevision, generation, kind, exact version and digest authorization checked online for every read. Locator grants no access. Lease expiry or revoked version denies download. No redirects or Range. */
+    get: operations['UnifiedDownloadNodeArtifact'];
     put?: never;
     post?: never;
     delete?: never;
@@ -1236,6 +1408,249 @@ export interface components {
     UnifiedReviewPage: {
       items: components['schemas']['UnifiedReview'][];
       nextCursor?: string;
+    };
+    UnifiedResourceIdentity: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      version: components['schemas']['$defs-Version'];
+      manifestDigest: components['schemas']['Digest'];
+    };
+    UnifiedLease: {
+      envelopeNotAfter: components['schemas']['Time'];
+      revocationsExpiresAt: components['schemas']['Time'];
+      expiresAt: components['schemas']['Time'];
+      /** Format: int64 */
+      revocationRevision: number;
+    };
+    UnifiedArtifactDownload: {
+      artifactId: string;
+      digest: components['schemas']['Digest'];
+      /** Format: int64 */
+      sizeBytes: number;
+      downloadPath: string;
+    };
+    UnifiedResourceRef: {
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      envelope: components['schemas']['Envelope'];
+      manifestDownloadPath: string;
+      artifacts: components['schemas']['UnifiedArtifactDownload'][];
+      lease: components['schemas']['UnifiedLease'];
+      /** Format: int64 */
+      releaseSequence: number;
+      enabled: boolean;
+    };
+    UnifiedSelection: {
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** @enum {string} */
+      action: 'install' | 'enable' | 'disable' | 'remove';
+    };
+    UnifiedDownloadTicketInput: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+    };
+    UnifiedDownloadTicket: {
+      ticket: string;
+      /** Format: uuid */
+      clientId: string;
+      expiresAt: components['schemas']['Time'];
+      resource: components['schemas']['UnifiedResourceRef'];
+      revocations: components['schemas']['RevocationList'];
+    };
+    UnifiedDownloadInput: {
+      /** Format: uuid */
+      clientId: string;
+      ticket: string;
+      artifactId: string;
+    };
+    UnifiedInstallationInput: {
+      /** Format: uuid */
+      clientId: string;
+      selection: components['schemas']['UnifiedSelection'];
+    };
+    UnifiedInstallationReport: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** Format: int64 */
+      observedGeneration: number;
+      /** @enum {string} */
+      state:
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'pending_restart'
+        | 'superseded'
+        | 'overridden'
+        | 'expired'
+        | 'revoked'
+        | 'disabled'
+        | 'removed';
+      /** @enum {string} */
+      reportSource: 'member' | 'node';
+      errorCode?: string;
+      observedAt: components['schemas']['Time'];
+    } & unknown;
+    UnifiedInstallation: {
+      /** Format: uuid */
+      clientId: string;
+      resource: components['schemas']['UnifiedResourceRef'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** @enum {string} */
+      state:
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'pending_restart'
+        | 'superseded'
+        | 'overridden'
+        | 'expired'
+        | 'revoked'
+        | 'disabled'
+        | 'removed';
+      /** @enum {string} */
+      reportSource: 'member' | 'node';
+      report?: components['schemas']['UnifiedInstallationReport'];
+    };
+    UnifiedInstallationPage: {
+      items: components['schemas']['UnifiedInstallation'][];
+      nextCursor?: string;
+    };
+    UnifiedDistributionInput: {
+      /** Format: uuid */
+      instanceId: string;
+      selections: components['schemas']['UnifiedSelection'][];
+    };
+    UnifiedDistribution: {
+      /** Format: uuid */
+      distributionId: string;
+      /** Format: uuid */
+      instanceId: string;
+      /** Format: uuid */
+      ownerId: string;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      selections: components['schemas']['UnifiedSelection'][];
+      /** @enum {string} */
+      state:
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'pending_restart'
+        | 'superseded'
+        | 'overridden'
+        | 'expired'
+        | 'revoked'
+        | 'disabled'
+        | 'removed';
+      /** @enum {string} */
+      reportSource: 'node';
+      reports: components['schemas']['UnifiedInstallationReport'][];
+    };
+    UnifiedDistributionPage: {
+      items: components['schemas']['UnifiedDistribution'][];
+      nextCursor?: string;
+    };
+    UnifiedRenewalInput: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      releaseSequence: number;
+    };
+    UnifiedGuardianState: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      ownerId: string;
+      /** Format: uuid */
+      hostId: string;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** @enum {string} */
+      state:
+        | 'verifying'
+        | 'active'
+        | 'stopping'
+        | 'isolating'
+        | 'private_only'
+        | 'blocked';
+      /** @enum {string} */
+      reason:
+        | 'startup'
+        | 'lease_expired'
+        | 'revoked'
+        | 'identity_changed'
+        | 'clock_rollback'
+        | 'verification_failed'
+        | 'cleanup_failed';
+      lease: components['schemas']['UnifiedLease'];
+      processStopped: boolean;
+      viewCleared: boolean;
+      newSessionRequired: boolean;
+    } & unknown;
+    UnifiedMigrationProof: {
+      /** @constant */
+      schemaVersion: 2;
+      legacyEnvelope: components['schemas']['ResourceEnvelope'];
+      unifiedEnvelope: components['schemas']['Envelope'];
+      legacyArtifactId: string;
+      activatedAt: components['schemas']['Time'];
+    };
+    UnifiedHighWatermark: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: int64 */
+      releaseSequence: number;
+      /** Format: uuid */
+      versionId: string;
+      verifiedDigestAliases: components['schemas']['Digest'][];
+    };
+    UnifiedDowngradeAuthorization: {
+      /** @constant */
+      schemaVersion: 2;
+      /** Format: uuid */
+      authorizationId: string;
+      /** Format: uuid */
+      instanceId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      fromReleaseSequence: number;
+      /** Format: int64 */
+      toReleaseSequence: number;
+      issuedAt: components['schemas']['Time'];
+      expiresAt: components['schemas']['Time'];
+      reason: string;
+      signature: components['schemas']['Signature'];
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -5859,10 +6274,8 @@ export interface operations {
   UnifiedUploadResourceVersion: {
     parameters: {
       query?: never;
-      header: {
+      header?: {
         'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
-        /** @description Exact current strong ETag; absent or stale values return 412. */
-        'If-Match': string;
       };
       path: {
         packageId: string;
@@ -6108,10 +6521,8 @@ export interface operations {
   UnifiedSubmitResourceVersion: {
     parameters: {
       query?: never;
-      header: {
+      header?: {
         'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
-        /** @description 当前资源ETag；缺失/不匹配返回common.precondition_failed。 */
-        'If-Match': string;
       };
       path: {
         packageId: string;
@@ -6460,10 +6871,8 @@ export interface operations {
   UnifiedDecideResourceReview: {
     parameters: {
       query?: never;
-      header: {
+      header?: {
         'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
-        /** @description 当前资源ETag；缺失/不匹配返回common.precondition_failed。 */
-        'If-Match': string;
       };
       path: {
         reviewId: string;
@@ -6581,10 +6990,8 @@ export interface operations {
   UnifiedPublishResourceVersion: {
     parameters: {
       query?: never;
-      header: {
+      header?: {
         'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
-        /** @description 当前资源ETag；缺失/不匹配返回common.precondition_failed。 */
-        'If-Match': string;
       };
       path: {
         packageId: string;
@@ -6712,10 +7119,8 @@ export interface operations {
   UnifiedWithdrawResourceVersion: {
     parameters: {
       query?: never;
-      header: {
+      header?: {
         'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
-        /** @description 当前资源ETag；缺失/不匹配返回common.precondition_failed。 */
-        'If-Match': string;
       };
       path: {
         packageId: string;
@@ -7047,6 +7452,1407 @@ export interface operations {
         };
       };
       /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedCreateDownloadTicket: {
+    parameters: {
+      query?: never;
+      header?: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedDownloadTicketInput'];
+      };
+    };
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedDownloadTicket'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedDownloadArtifact: {
+    parameters: {
+      query?: never;
+      header?: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedDownloadInput'];
+      };
+    };
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedListInstallations: {
+    parameters: {
+      query?: {
+        kind?: 'skill' | 'tool';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedInstallationPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedSelectInstallation: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        'If-Match': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedInstallationInput'];
+      };
+    };
+    responses: {
+      /** @description Exact revision accepted; 202 requires matching authenticated observation before applied. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedInstallation'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedReportInstallation: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        'If-Match': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedInstallationReport'];
+      };
+    };
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedInstallation'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedRenewInstallation: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        'If-Match': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedRenewalInput'];
+      };
+    };
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedDownloadTicket'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedListDistributions: {
+    parameters: {
+      query?: {
+        kind?: 'skill' | 'tool';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedDistributionPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedCreateDistribution: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        'If-Match': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedDistributionInput'];
+      };
+    };
+    responses: {
+      /** @description Exact revision accepted; 202 requires matching authenticated observation before applied. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedDistribution'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedGetDistribution: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        distributionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedDistribution'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedDownloadVersionArtifact: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        packageId: string;
+        versionId: string;
+        artifactId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedDownloadNodeManifest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        downloadId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 已授权的不可变归档，校验摘要/长度；不接受重定向。 */
+      200: {
+        headers: {
+          /** @description 固定摘要 */
+          ETag?: string;
+          /** @description 完整对象长度 */
+          'Content-Length'?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.level_locked, resource.download_denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.version_immutable, resource.review_required, resource.state_conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.digest_mismatch, resource.signature_invalid */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.storage_unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedDownloadNodeArtifact: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        downloadId: string;
+        artifactId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 已授权的不可变归档，校验摘要/长度；不接受重定向。 */
+      200: {
+        headers: {
+          /** @description 固定摘要 */
+          ETag?: string;
+          /** @description 完整对象长度 */
+          'Content-Length'?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.level_locked, resource.download_denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.version_immutable, resource.review_required, resource.state_conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.digest_mismatch, resource.signature_invalid */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description resource.storage_unavailable */
       503: {
         headers: {
           [name: string]: unknown;

@@ -657,6 +657,83 @@ export interface components {
         keys: components['schemas']['items'][];
       };
     };
+    UnifiedResourceRef: {
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      envelope: components['schemas']['Envelope'];
+      manifestDownloadPath: string;
+      artifacts: components['schemas']['UnifiedArtifactDownload'][];
+      lease: components['schemas']['UnifiedLease'];
+      /** Format: int64 */
+      releaseSequence: number;
+      enabled: boolean;
+    };
+    UnifiedSelection: {
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** @enum {string} */
+      action: 'install' | 'enable' | 'disable' | 'remove';
+    };
+    UnifiedInstallationReport: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** Format: int64 */
+      observedGeneration: number;
+      /** @enum {string} */
+      state:
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'pending_restart'
+        | 'superseded'
+        | 'overridden'
+        | 'expired'
+        | 'revoked'
+        | 'disabled'
+        | 'removed';
+      /** @enum {string} */
+      reportSource: 'member' | 'node';
+      errorCode?: string;
+      observedAt: components['schemas']['Time'];
+    } & unknown;
+    UnifiedGuardianState: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      ownerId: string;
+      /** Format: uuid */
+      hostId: string;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** @enum {string} */
+      state:
+        | 'verifying'
+        | 'active'
+        | 'stopping'
+        | 'isolating'
+        | 'private_only'
+        | 'blocked';
+      /** @enum {string} */
+      reason:
+        | 'startup'
+        | 'lease_expired'
+        | 'revoked'
+        | 'identity_changed'
+        | 'clock_rollback'
+        | 'verification_failed'
+        | 'cleanup_failed';
+      lease: components['schemas']['UnifiedLease'];
+      processStopped: boolean;
+      viewCleared: boolean;
+      newSessionRequired: boolean;
+    } & unknown;
     OpsUpgradeInventory: {
       /** Format: date-time */
       reportedAt: string;
@@ -811,6 +888,70 @@ export interface components {
       nbf?: number;
       /** @description 可选：过期时间（Unix 秒）。 */
       exp?: number;
+    };
+    Version: string;
+    Digest: string;
+    UnifiedResourceIdentity: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      version: components['schemas']['Version'];
+      manifestDigest: components['schemas']['Digest'];
+    };
+    /** Format: uuid */
+    '$defs-Uuid': string;
+    /** Format: int64 */
+    Counter: number;
+    /** Format: date-time */
+    Time: string;
+    Name: string;
+    Statement: {
+      /** @constant */
+      purpose: 'resource';
+      /** @enum {string} */
+      kind: 'plugin' | 'skill' | 'tool';
+      name: components['schemas']['Name'];
+      version: components['schemas']['Version'];
+      manifestDigest: components['schemas']['Digest'];
+      artifactDigests: components['schemas']['Digest'][];
+      issuedAt: components['schemas']['Time'];
+    };
+    Signature: {
+      /** @constant */
+      alg: 'Ed25519';
+      kid: string;
+      /** @description 64 字节签名的 base64url 无填充编码；解码后须重编码比较，拒绝非规范尾位。 */
+      value: string;
+    };
+    Envelope: {
+      /** @constant */
+      schemaVersion: 2;
+      tenantId: components['schemas']['$defs-Uuid'];
+      packageId: components['schemas']['$defs-Uuid'];
+      versionId: components['schemas']['$defs-Uuid'];
+      releaseSequence: components['schemas']['Counter'];
+      notAfter: components['schemas']['Time'];
+      statement: components['schemas']['Statement'];
+      signature: components['schemas']['Signature'];
+    };
+    UnifiedArtifactDownload: {
+      artifactId: string;
+      digest: components['schemas']['Digest'];
+      /** Format: int64 */
+      sizeBytes: number;
+      downloadPath: string;
+    };
+    UnifiedLease: {
+      envelopeNotAfter: components['schemas']['Time'];
+      revocationsExpiresAt: components['schemas']['Time'];
+      expiresAt: components['schemas']['Time'];
+      /** Format: int64 */
+      revocationRevision: number;
     };
   };
   responses: {

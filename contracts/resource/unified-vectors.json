@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "legacyArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+  "publicKey": "MCowBQYDK2VwAyEACfSMGq+gCqHL+v+DhqYAUJWcvrra66uun0GlfgMExAc=",
+  "rawManifest": "{\"schemaVersion\":1,\"kind\":\"plugin\",\"name\":\"example-plugin\",\"version\":\"1.2.3+build.1\",\"description\":\"Synthetic migration fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"artifacts\":[{\"id\":\"legacy\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":1,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+  "proof": {
+    "schemaVersion": 2,
+    "legacyEnvelope": {
+      "schemaVersion": 1,
+      "tenantId": "019a0000-0000-7000-8000-000000000001",
+      "packageId": "019a0000-0000-7000-8000-000000000002",
+      "versionId": "019a0000-0000-7000-8000-000000000003",
+      "releaseSequence": 7,
+      "notAfter": "2026-10-22T08:00:00.100000000Z",
+      "statement": {
+        "purpose": "plugin",
+        "name": "@example/plugin",
+        "version": "1.2.3+build.1",
+        "os": "any",
+        "arch": "any",
+        "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+        "issuedAt": "2026-10-21T08:00:00.100000000Z"
+      },
+      "signature": {
+        "alg": "Ed25519",
+        "kid": "vector-only",
+        "value": "SQUMhbVmFNkgRrNDWMSXCDP3iz5hvA4CyS4NO7ZDxRsvWQI3n9W6gOfEApGd5mwrV-Tu6VAYJ32is7sySY9ADQ"
+      }
+    },
+    "unifiedEnvelope": {
+      "schemaVersion": 2,
+      "tenantId": "019a0000-0000-7000-8000-000000000001",
+      "packageId": "019a0000-0000-7000-8000-000000000002",
+      "versionId": "019a0000-0000-7000-8000-000000000003",
+      "releaseSequence": 7,
+      "notAfter": "2026-10-22T08:00:00.100000000Z",
+      "statement": {
+        "purpose": "resource",
+        "kind": "plugin",
+        "name": "example-plugin",
+        "version": "1.2.3+build.1",
+        "manifestDigest": "sha256:b83079426356a58e3eda96cb989a7f5c8fab327a2b3ad21c58ce601724968cf6",
+        "artifactDigests": [
+          "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+        ],
+        "issuedAt": "2026-10-21T08:00:00.100000000Z"
+      },
+      "signature": {
+        "alg": "Ed25519",
+        "kid": "vector-only",
+        "value": "ABs1dacUNKDU7RVMUoQrnyRxp2TGpcoIt1rHu5IMoR8HqtnqBnHwR4Yjx2d0YOq8yjpOjkrInCKmpbava8kfDg"
+      }
+    },
+    "legacyArtifactId": "legacy",
+    "activatedAt": "2026-10-21T08:00:00.100000000Z"
+  },
+  "scenarios": [
+    "dual-revocation",
+    "only-A",
+    "only-M",
+    "artifact-reuse",
+    "equal-sequence-alias",
+    "forged-mapping",
+    "replacement-M",
+    "cross-tenant",
+    "cross-protocol-rollback",
+    "fixed-v1-cutoff",
+    "cross-version-downgrade"
+  ]
+}

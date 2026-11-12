@@ -272,3 +272,110 @@ var ResourceApplyService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "auriga/workspace/v1/workspace.proto",
 }
+
+const (
+	UnifiedResourceApplyService_CheckUnifiedResourceDownload_FullMethodName = "/auriga.workspace.v1.UnifiedResourceApplyService/CheckUnifiedResourceDownload"
+)
+
+// UnifiedResourceApplyServiceClient is the client API for UnifiedResourceApplyService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// svc:resource only, mTLS and delegated tenant required. Current scheduling is checked every read.
+type UnifiedResourceApplyServiceClient interface {
+	CheckUnifiedResourceDownload(ctx context.Context, in *CheckUnifiedResourceDownloadRequest, opts ...grpc.CallOption) (*CheckUnifiedResourceDownloadResponse, error)
+}
+
+type unifiedResourceApplyServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewUnifiedResourceApplyServiceClient(cc grpc.ClientConnInterface) UnifiedResourceApplyServiceClient {
+	return &unifiedResourceApplyServiceClient{cc}
+}
+
+func (c *unifiedResourceApplyServiceClient) CheckUnifiedResourceDownload(ctx context.Context, in *CheckUnifiedResourceDownloadRequest, opts ...grpc.CallOption) (*CheckUnifiedResourceDownloadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckUnifiedResourceDownloadResponse)
+	err := c.cc.Invoke(ctx, UnifiedResourceApplyService_CheckUnifiedResourceDownload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UnifiedResourceApplyServiceServer is the server API for UnifiedResourceApplyService service.
+// All implementations must embed UnimplementedUnifiedResourceApplyServiceServer
+// for forward compatibility.
+//
+// svc:resource only, mTLS and delegated tenant required. Current scheduling is checked every read.
+type UnifiedResourceApplyServiceServer interface {
+	CheckUnifiedResourceDownload(context.Context, *CheckUnifiedResourceDownloadRequest) (*CheckUnifiedResourceDownloadResponse, error)
+	mustEmbedUnimplementedUnifiedResourceApplyServiceServer()
+}
+
+// UnimplementedUnifiedResourceApplyServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedUnifiedResourceApplyServiceServer struct{}
+
+func (UnimplementedUnifiedResourceApplyServiceServer) CheckUnifiedResourceDownload(context.Context, *CheckUnifiedResourceDownloadRequest) (*CheckUnifiedResourceDownloadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckUnifiedResourceDownload not implemented")
+}
+func (UnimplementedUnifiedResourceApplyServiceServer) mustEmbedUnimplementedUnifiedResourceApplyServiceServer() {
+}
+func (UnimplementedUnifiedResourceApplyServiceServer) testEmbeddedByValue() {}
+
+// UnsafeUnifiedResourceApplyServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to UnifiedResourceApplyServiceServer will
+// result in compilation errors.
+type UnsafeUnifiedResourceApplyServiceServer interface {
+	mustEmbedUnimplementedUnifiedResourceApplyServiceServer()
+}
+
+func RegisterUnifiedResourceApplyServiceServer(s grpc.ServiceRegistrar, srv UnifiedResourceApplyServiceServer) {
+	// If the following call pancis, it indicates UnimplementedUnifiedResourceApplyServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&UnifiedResourceApplyService_ServiceDesc, srv)
+}
+
+func _UnifiedResourceApplyService_CheckUnifiedResourceDownload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckUnifiedResourceDownloadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UnifiedResourceApplyServiceServer).CheckUnifiedResourceDownload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UnifiedResourceApplyService_CheckUnifiedResourceDownload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UnifiedResourceApplyServiceServer).CheckUnifiedResourceDownload(ctx, req.(*CheckUnifiedResourceDownloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// UnifiedResourceApplyService_ServiceDesc is the grpc.ServiceDesc for UnifiedResourceApplyService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var UnifiedResourceApplyService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "auriga.workspace.v1.UnifiedResourceApplyService",
+	HandlerType: (*UnifiedResourceApplyServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CheckUnifiedResourceDownload",
+			Handler:    _UnifiedResourceApplyService_CheckUnifiedResourceDownload_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "auriga/workspace/v1/workspace.proto",
+}

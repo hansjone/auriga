@@ -704,3 +704,12 @@ components:
               items: { $ref: '../plugin/identity-keys.schema.json#/properties/keys/items' }
           required: [manifestUrl, keys]
       required: [protocol, account, mcpServers, modelProviders, panel]
+
+    UnifiedResourceRef:
+      $ref: ../resource/unified.schema.json#/$defs/UnifiedResourceRef
+    UnifiedSelection:
+      $ref: ../resource/unified.schema.json#/$defs/UnifiedSelection
+    UnifiedInstallationReport:
+      $ref: ../resource/unified.schema.json#/$defs/UnifiedInstallationReport
+    UnifiedGuardianState:
+      $ref: ../resource/unified.schema.json#/$defs/UnifiedGuardianState

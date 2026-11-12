@@ -38,3 +38,11 @@ M3新增`usage.recorded`、`resource.version_published`、`resource.version_with
 unknown用量显式null，不伪造0；事件不带prompt、响应正文、secret或bearer下载URL。
 现有common事件生产方白名单实现仍须后续接入此目录，不能因新增schema就声称消费方已支持。
 `knowledge.*`仍留未来里程碑另定。
+
+## 统一资源事件
+
+- `resource.catalog_version_published` 对应 `resource.schema.json#/$defs/UnifiedResourceVersionPublished`。
+- `resource.catalog_version_withdrawn` 对应 `resource.schema.json#/$defs/UnifiedResourceVersionWithdrawn`。
+- `resource.catalog_distribution_requested` 对应 `resource.schema.json#/$defs/UnifiedResourceDistributionRequested`。
+
+生产方均为 resource，消费方为 workspace、audit。统一事件仅使用 manifestDigest/artifactDigests，旧事件的 digest 继续表示插件归档摘要。分发选择携带精确 identity，重试同 selectionRevision 必须锁定同一组字节。

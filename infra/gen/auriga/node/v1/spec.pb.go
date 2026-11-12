@@ -267,8 +267,11 @@ type InstanceSpec struct {
 	// 不通过此字段替换根公钥。离线清单失效最迟 24h 停用受管资源，见 contracts/resource/README.md。
 	ResourceRevocations []*v1.ResourceRevocationList         `protobuf:"bytes,16,rep,name=resource_revocations,json=resourceRevocations,proto3" json:"resource_revocations,omitempty"`
 	ResourceDowngrades  []*v1.ResourceDowngradeAuthorization `protobuf:"bytes,17,rep,name=resource_downgrades,json=resourceDowngrades,proto3" json:"resource_downgrades,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Exact kind/version/manifest/artifacts/lease, sharing resource_selection_revision.
+	UnifiedResources  []*v1.UnifiedResourceRef            `protobuf:"bytes,18,rep,name=unified_resources,json=unifiedResources,proto3" json:"unified_resources,omitempty"`
+	UnifiedDowngrades []*v1.UnifiedDowngradeAuthorization `protobuf:"bytes,19,rep,name=unified_downgrades,json=unifiedDowngrades,proto3" json:"unified_downgrades,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *InstanceSpec) Reset() {
@@ -416,6 +419,20 @@ func (x *InstanceSpec) GetResourceRevocations() []*v1.ResourceRevocationList {
 func (x *InstanceSpec) GetResourceDowngrades() []*v1.ResourceDowngradeAuthorization {
 	if x != nil {
 		return x.ResourceDowngrades
+	}
+	return nil
+}
+
+func (x *InstanceSpec) GetUnifiedResources() []*v1.UnifiedResourceRef {
+	if x != nil {
+		return x.UnifiedResources
+	}
+	return nil
+}
+
+func (x *InstanceSpec) GetUnifiedDowngrades() []*v1.UnifiedDowngradeAuthorization {
+	if x != nil {
+		return x.UnifiedDowngrades
 	}
 	return nil
 }
@@ -1553,7 +1570,7 @@ var File_auriga_node_v1_spec_proto protoreflect.FileDescriptor
 
 const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\n" +
-	"\x19auriga/node/v1/spec.proto\x12\x0eauriga.node.v1\x1a\"auriga/node/v1/runtime_trust.proto\x1a\x1eauriga/resource/v1/trust.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdf\a\n" +
+	"\x19auriga/node/v1/spec.proto\x12\x0eauriga.node.v1\x1a\"auriga/node/v1/runtime_trust.proto\x1a\x1eauriga/resource/v1/trust.proto\x1a auriga/resource/v1/unified.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\t\n" +
 	"\fInstanceSpec\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x12\x1b\n" +
@@ -1575,7 +1592,9 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\x06labels\x18\x0e \x03(\v2(.auriga.node.v1.InstanceSpec.LabelsEntryR\x06labels\x12>\n" +
 	"\x1bresource_selection_revision\x18\x0f \x01(\x04R\x19resourceSelectionRevision\x12]\n" +
 	"\x14resource_revocations\x18\x10 \x03(\v2*.auriga.resource.v1.ResourceRevocationListR\x13resourceRevocations\x12c\n" +
-	"\x13resource_downgrades\x18\x11 \x03(\v22.auriga.resource.v1.ResourceDowngradeAuthorizationR\x12resourceDowngrades\x1a9\n" +
+	"\x13resource_downgrades\x18\x11 \x03(\v22.auriga.resource.v1.ResourceDowngradeAuthorizationR\x12resourceDowngrades\x12S\n" +
+	"\x11unified_resources\x18\x12 \x03(\v2&.auriga.resource.v1.UnifiedResourceRefR\x10unifiedResources\x12`\n" +
+	"\x12unified_downgrades\x18\x13 \x03(\v21.auriga.resource.v1.UnifiedDowngradeAuthorizationR\x11unifiedDowngrades\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd1\x02\n" +
@@ -1747,9 +1766,11 @@ var file_auriga_node_v1_spec_proto_goTypes = []any{
 	nil,                               // 23: auriga.node.v1.Profile.EnvEntry
 	(*v1.ResourceRevocationList)(nil), // 24: auriga.resource.v1.ResourceRevocationList
 	(*v1.ResourceDowngradeAuthorization)(nil), // 25: auriga.resource.v1.ResourceDowngradeAuthorization
-	(*RuntimeReleaseEnvelope)(nil),            // 26: auriga.node.v1.RuntimeReleaseEnvelope
-	(*v1.ResourceEnvelope)(nil),               // 27: auriga.resource.v1.ResourceEnvelope
-	(*timestamppb.Timestamp)(nil),             // 28: google.protobuf.Timestamp
+	(*v1.UnifiedResourceRef)(nil),             // 26: auriga.resource.v1.UnifiedResourceRef
+	(*v1.UnifiedDowngradeAuthorization)(nil),  // 27: auriga.resource.v1.UnifiedDowngradeAuthorization
+	(*RuntimeReleaseEnvelope)(nil),            // 28: auriga.node.v1.RuntimeReleaseEnvelope
+	(*v1.ResourceEnvelope)(nil),               // 29: auriga.resource.v1.ResourceEnvelope
+	(*timestamppb.Timestamp)(nil),             // 30: google.protobuf.Timestamp
 }
 var file_auriga_node_v1_spec_proto_depIdxs = []int32{
 	0,  // 0: auriga.node.v1.InstanceSpec.runtime:type_name -> auriga.node.v1.RuntimeKind
@@ -1764,34 +1785,36 @@ var file_auriga_node_v1_spec_proto_depIdxs = []int32{
 	20, // 9: auriga.node.v1.InstanceSpec.labels:type_name -> auriga.node.v1.InstanceSpec.LabelsEntry
 	24, // 10: auriga.node.v1.InstanceSpec.resource_revocations:type_name -> auriga.resource.v1.ResourceRevocationList
 	25, // 11: auriga.node.v1.InstanceSpec.resource_downgrades:type_name -> auriga.resource.v1.ResourceDowngradeAuthorization
-	19, // 12: auriga.node.v1.DshRuntime.signed:type_name -> auriga.node.v1.SignedArtifact
-	26, // 13: auriga.node.v1.DshRuntime.release_envelope:type_name -> auriga.node.v1.RuntimeReleaseEnvelope
-	2,  // 14: auriga.node.v1.PluginRef.level:type_name -> auriga.node.v1.PluginLevel
-	19, // 15: auriga.node.v1.PluginRef.signed:type_name -> auriga.node.v1.SignedArtifact
-	27, // 16: auriga.node.v1.PluginRef.resource_envelope:type_name -> auriga.resource.v1.ResourceEnvelope
-	9,  // 17: auriga.node.v1.Profile.patches:type_name -> auriga.node.v1.ConfigPatch
-	21, // 18: auriga.node.v1.Profile.mcp_servers:type_name -> auriga.node.v1.Profile.McpServersEntry
-	22, // 19: auriga.node.v1.Profile.model_providers:type_name -> auriga.node.v1.Profile.ModelProvidersEntry
-	23, // 20: auriga.node.v1.Profile.env:type_name -> auriga.node.v1.Profile.EnvEntry
-	3,  // 21: auriga.node.v1.McpServer.token_ref:type_name -> auriga.node.v1.TokenRef
-	3,  // 22: auriga.node.v1.ModelProvider.token_ref:type_name -> auriga.node.v1.TokenRef
-	12, // 23: auriga.node.v1.ModelProvider.models:type_name -> auriga.node.v1.ModelInfo
-	16, // 24: auriga.node.v1.Secrets.instance_token:type_name -> auriga.node.v1.SealedSecret
-	17, // 25: auriga.node.v1.Secrets.identity_keys:type_name -> auriga.node.v1.IdentityPublicKey
-	16, // 26: auriga.node.v1.Secrets.ai_gateway_token:type_name -> auriga.node.v1.SealedSecret
-	16, // 27: auriga.node.v1.Secrets.device_credential:type_name -> auriga.node.v1.SealedSecret
-	16, // 28: auriga.node.v1.Secrets.model_credential:type_name -> auriga.node.v1.SealedSecret
-	28, // 29: auriga.node.v1.IdentityPublicKey.not_before:type_name -> google.protobuf.Timestamp
-	28, // 30: auriga.node.v1.IdentityPublicKey.not_after:type_name -> google.protobuf.Timestamp
-	28, // 31: auriga.node.v1.ArtifactStatement.issued_at:type_name -> google.protobuf.Timestamp
-	18, // 32: auriga.node.v1.SignedArtifact.statement:type_name -> auriga.node.v1.ArtifactStatement
-	10, // 33: auriga.node.v1.Profile.McpServersEntry.value:type_name -> auriga.node.v1.McpServer
-	11, // 34: auriga.node.v1.Profile.ModelProvidersEntry.value:type_name -> auriga.node.v1.ModelProvider
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	26, // 12: auriga.node.v1.InstanceSpec.unified_resources:type_name -> auriga.resource.v1.UnifiedResourceRef
+	27, // 13: auriga.node.v1.InstanceSpec.unified_downgrades:type_name -> auriga.resource.v1.UnifiedDowngradeAuthorization
+	19, // 14: auriga.node.v1.DshRuntime.signed:type_name -> auriga.node.v1.SignedArtifact
+	28, // 15: auriga.node.v1.DshRuntime.release_envelope:type_name -> auriga.node.v1.RuntimeReleaseEnvelope
+	2,  // 16: auriga.node.v1.PluginRef.level:type_name -> auriga.node.v1.PluginLevel
+	19, // 17: auriga.node.v1.PluginRef.signed:type_name -> auriga.node.v1.SignedArtifact
+	29, // 18: auriga.node.v1.PluginRef.resource_envelope:type_name -> auriga.resource.v1.ResourceEnvelope
+	9,  // 19: auriga.node.v1.Profile.patches:type_name -> auriga.node.v1.ConfigPatch
+	21, // 20: auriga.node.v1.Profile.mcp_servers:type_name -> auriga.node.v1.Profile.McpServersEntry
+	22, // 21: auriga.node.v1.Profile.model_providers:type_name -> auriga.node.v1.Profile.ModelProvidersEntry
+	23, // 22: auriga.node.v1.Profile.env:type_name -> auriga.node.v1.Profile.EnvEntry
+	3,  // 23: auriga.node.v1.McpServer.token_ref:type_name -> auriga.node.v1.TokenRef
+	3,  // 24: auriga.node.v1.ModelProvider.token_ref:type_name -> auriga.node.v1.TokenRef
+	12, // 25: auriga.node.v1.ModelProvider.models:type_name -> auriga.node.v1.ModelInfo
+	16, // 26: auriga.node.v1.Secrets.instance_token:type_name -> auriga.node.v1.SealedSecret
+	17, // 27: auriga.node.v1.Secrets.identity_keys:type_name -> auriga.node.v1.IdentityPublicKey
+	16, // 28: auriga.node.v1.Secrets.ai_gateway_token:type_name -> auriga.node.v1.SealedSecret
+	16, // 29: auriga.node.v1.Secrets.device_credential:type_name -> auriga.node.v1.SealedSecret
+	16, // 30: auriga.node.v1.Secrets.model_credential:type_name -> auriga.node.v1.SealedSecret
+	30, // 31: auriga.node.v1.IdentityPublicKey.not_before:type_name -> google.protobuf.Timestamp
+	30, // 32: auriga.node.v1.IdentityPublicKey.not_after:type_name -> google.protobuf.Timestamp
+	30, // 33: auriga.node.v1.ArtifactStatement.issued_at:type_name -> google.protobuf.Timestamp
+	18, // 34: auriga.node.v1.SignedArtifact.statement:type_name -> auriga.node.v1.ArtifactStatement
+	10, // 35: auriga.node.v1.Profile.McpServersEntry.value:type_name -> auriga.node.v1.McpServer
+	11, // 36: auriga.node.v1.Profile.ModelProvidersEntry.value:type_name -> auriga.node.v1.ModelProvider
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_auriga_node_v1_spec_proto_init() }

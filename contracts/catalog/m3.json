@@ -549,6 +549,16 @@
         "audit"
       ],
       "publish": "auriga.evt.resource.catalog_version_withdrawn"
+    },
+    "resource.catalog_distribution_requested": {
+      "source": "auriga/resource",
+      "subject": "instanceId",
+      "schema": "../events/resource.schema.json#/$defs/UnifiedResourceDistributionRequested",
+      "consumers": [
+        "workspace",
+        "audit"
+      ],
+      "publish": "auriga.evt.resource.catalog_distribution_requested"
     }
   },
   "deviceMappings": {

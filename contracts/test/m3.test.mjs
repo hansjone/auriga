@@ -241,7 +241,7 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 76);
+  assert.equal(count, 88);
   assert(ids.has('listRelayProviderModels'));
   assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 33);
   for (const [key, p] of Object.entries(catalog.permissions)) {
@@ -770,11 +770,11 @@ test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留�
   const paths = Object.entries(spec.paths).filter(([p]) =>
     p.includes('/catalog/'),
   );
-  assert.equal(paths.length, 12);
+  assert.equal(paths.length, 22);
   for (const [path, methods] of paths) {
     for (const [method, operation] of Object.entries(methods)) {
       assert(operation.operationId.startsWith('Unified'));
-      assert.equal(operation['x-auriga-contract-stage'], 'draft');
+      assert.equal(operation['x-auriga-contract-stage'], 'frozen');
       if (method === 'get' && !path.includes('{')) {
         const kind = operation.parameters.find((p) => p.name === 'kind');
         assert.deepEqual(kind.schema.enum, ['skill', 'tool']);
