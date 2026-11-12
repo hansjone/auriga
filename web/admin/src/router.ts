@@ -1,6 +1,7 @@
 import EntriesView from './views/security/EntriesView.vue';
 import EgressView from './views/security/EgressView.vue';
 import { createRouter, createWebHistory } from 'vue-router';
+import AuditView from './views/AuditView.vue';
 import LoginView from './views/LoginView.vue';
 import AdminLayout from './layouts/AdminLayout.vue';
 import MembersView from './views/MembersView.vue';
@@ -11,6 +12,7 @@ import InvitationsView from './views/InvitationsView.vue';
 import QuotasView from './views/QuotasView.vue';
 import RolesView from './views/RolesView.vue';
 import ResourcesView from './views/ResourcesView.vue';
+import ResourceGovernanceView from './views/resources/ResourceGovernanceView.vue';
 import IdentityProvidersView from './views/IdentityProvidersView.vue';
 import SettingsView from './views/SettingsView.vue';
 import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
@@ -27,12 +29,16 @@ import NotificationsView from './views/ops/NotificationsView.vue';
 const existing = new Set([
   '/security/entries',
   '/security/egress',
+  '/audit',
   '/ops/alerts',
   '/ops/notifications',
   '/overview',
   '/models/providers',
   '/settings',
   '/resources',
+  '/resources/review',
+  '/resources/published',
+  '/resources/distribution',
   '/members',
   '/nodes',
   '/instances',
@@ -66,9 +72,15 @@ export const router = createRouter({
         { path: 'overview', component: OverviewView },
         { path: 'security/entries', component: EntriesView },
         { path: 'security/egress', component: EgressView },
+        { path: 'audit', component: AuditView },
         { path: 'ops/alerts', component: AlertsView },
         { path: 'ops/notifications', component: NotificationsView },
         { path: 'resources', component: ResourcesView },
+        ...(['review', 'published', 'distribution'] as const).map((phase) => ({
+          path: 'resources/' + phase,
+          component: ResourceGovernanceView,
+          props: { phase },
+        })),
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },
         { path: 'instances', component: InstancesView },

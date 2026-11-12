@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	"io"
 	"net"
@@ -98,6 +99,7 @@ func (c *Client) MemberKey(ctx context.Context, tenant, account string) (api.Rel
 	}
 	req.SetBasicAuth("auriga-member", password)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("traceparent", observability.Parent(ctx))
 	resp, e := c.http.Do(req)
 	if e != nil {
 		return out, errors.New("common.unavailable")

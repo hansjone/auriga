@@ -19,9 +19,12 @@ import org.springframework.web.bind.annotation.*;
 @RequiresPermission(ResourceAccess.READ)
 public class ResourceController {
   private final ResourceQueries queries;
+  private final auriga.resource.app.ResourceWorkflow workflow;
 
-  public ResourceController(ResourceQueries queries) {
+  public ResourceController(
+      ResourceQueries queries, auriga.resource.app.ResourceWorkflow workflow) {
     this.queries = queries;
+    this.workflow = workflow;
   }
 
   private AurigaPrincipal actor() {
@@ -57,12 +60,12 @@ public class ResourceController {
   }
 
   @GetMapping("/{packageId}/versions/{versionId}")
-  public ResponseEntity<Version> version(
+  public ResponseEntity<tools.jackson.databind.JsonNode> version(
       @PathVariable UUID packageId, @PathVariable UUID versionId) {
-    var result = queries.version(actor(), packageId, versionId);
+    var result = workflow.catalogVersion(actor(), packageId, versionId);
     return ResponseEntity.ok()
         .cacheControl(org.springframework.http.CacheControl.noStore())
-        .eTag("\"" + result.getRevision() + "\"")
+        .eTag("\"" + result.path("revision").asLong() + "\"")
         .body(result);
   }
 }

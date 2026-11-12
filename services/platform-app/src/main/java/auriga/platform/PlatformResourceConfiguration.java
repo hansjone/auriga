@@ -21,6 +21,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @ConditionalOnExpression(
     "${auriga.platform.combined:false} && ${auriga.services.resource.enabled:false}")
 public class PlatformResourceConfiguration {
+  @Bean
+  @ConditionalOnExpression("${auriga.services.workspace.enabled:true}")
+  auriga.resource.api.ResourceWorkspace resourceWorkspace(
+      auriga.workspace.app.WorkspaceService workspace,
+      auriga.workspace.api.WorkspaceInputs inputs,
+      auriga.workspace.app.NodeEnrollment enrollment) {
+    return new PlatformResourceWorkspace(workspace, inputs, enrollment);
+  }
+
   @Bean(destroyMethod = "close")
   DataSource resourceDataSource(Environment env) {
     String url = env.getRequiredProperty("auriga.platform.resource.jdbc-url");
@@ -97,6 +106,7 @@ public class PlatformResourceConfiguration {
                       .setStatus(status(value.path("status").asString()))
                       .setMemberType(type(value.path("memberType").asString()));
               value.path("groupIds").forEach(id -> member.addGroupIds(id.asString()));
+              value.path("roleKeys").forEach(key -> member.addRoleKeys(key.asString()));
               return member.build();
             });
       }
@@ -112,6 +122,16 @@ public class PlatformResourceConfiguration {
                   .setMemberType(type(value.memberType()))
                   .addAllPermissions(value.permissions())
                   .build();
+            });
+      }
+
+      @Override
+      public boolean groupExists(UUID tenantId, UUID groupId) {
+        return TenantContext.call(
+            tenantId,
+            () -> {
+              org.getGroup(groupId);
+              return true;
             });
       }
 

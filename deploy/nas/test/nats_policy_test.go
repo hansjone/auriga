@@ -24,7 +24,7 @@ func TestNASNATSPolicy(t *testing.T) {
 	}
 	dir := t.TempDir()
 	text := string(raw)
-	for _, name := range []string{"SYS", "PLATFORM", "ROUTES_RW", "EDGE"} {
+	for _, name := range []string{"SYS", "PLATFORM", "ROUTES_RW", "EDGE", "AUDIT"} {
 		text = strings.ReplaceAll(text, "__NATS_"+name+"_PASSWORD__", "test-only-password")
 	}
 	text = strings.Replace(text, "store_dir: /data", "store_dir: "+strconv.Quote(filepath.Join(dir, "js")), 1)
@@ -50,9 +50,13 @@ func TestNASNATSPolicy(t *testing.T) {
 	connect := func(user string) (*nats.Conn, jetstream.JetStream, <-chan error) {
 		t.Helper()
 		errors := make(chan error, 16)
-		nc, err := nats.Connect(srv.ClientURL(), nats.UserInfo(user, "test-only-password"),
+		options := []nats.Option{nats.UserInfo(user, "test-only-password"),
 			nats.NoReconnect(), nats.Timeout(time.Second),
-			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errors <- err }))
+			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errors <- err })}
+		if user == "bifrost_audit" {
+			options = append(options, nats.CustomInboxPrefix("_INBOX_bifrost_audit"))
+		}
+		nc, err := nats.Connect(srv.ClientURL(), options...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -71,6 +75,44 @@ func TestNASNATSPolicy(t *testing.T) {
 	for name, subject := range map[string]string{"AURIGA_EVENTS": "auriga.evt.>", "AURIGA_AUDIT": "auriga.audit.>"} {
 		if _, err := platform.CreateStream(ctx, jetstream.StreamConfig{Name: name, Subjects: []string{subject}}); err != nil {
 			t.Fatalf("platform first-boot stream %s: %v", name, err)
+		}
+	}
+
+	auditConn, auditJS, auditErrors := connect("bifrost_audit")
+	for _, subject := range []string{"_INBOX.>", "_INBOX.foreign.reply", "$KV.auriga-sessions.>"} {
+		sub, err := auditConn.SubscribeSync(subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := auditConn.FlushTimeout(time.Second); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-auditErrors:
+			if !strings.Contains(strings.ToLower(err.Error()), "permissions violation") || !strings.Contains(err.Error(), subject) {
+				t.Fatalf("expected subscription ACL violation for %s: %v", subject, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("audit publisher can eavesdrop on %s", subject)
+		}
+		if err := sub.Unsubscribe(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := auditJS.Publish(ctx, "auriga.audit.ai-gateway", []byte("audit")); err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range []string{"auriga.audit.org", "auriga.evt.user.created", "$JS.API.STREAM.DELETE.AURIGA_AUDIT", "$JS.API.DIRECT.GET.KV_auriga-sessions", "$KV.auriga-sessions.cookiehash"} {
+		if _, err := auditConn.Request(subject, []byte("{}"), 300*time.Millisecond); err == nil {
+			t.Fatalf("audit publisher accessed %s", subject)
+		}
+		select {
+		case err := <-auditErrors:
+			if !strings.Contains(strings.ToLower(err.Error()), "permissions violation") {
+				t.Fatal(err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("no ACL rejection for %s", subject)
 		}
 	}
 	// Java ensureStreams lists names on both first boot and restart.

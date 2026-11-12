@@ -74,7 +74,8 @@ public final class ProviderManager {
                       "updatedAt",
                       now),
                   null);
-          audit.record(AuditEntry.builder("iam.provider.create").target("provider", id).build());
+          IamAudit.record(
+              audit, AuditEntry.builder("iam.provider.create").target("provider", id).build());
           return view(row);
         });
   }
@@ -141,7 +142,8 @@ public final class ProviderManager {
                       e.getValue().properties().forEach(c -> fields.add("config." + c.getKey()));
                     else fields.add(e.getKey());
                   });
-          audit.record(
+          IamAudit.record(
+              audit,
               AuditEntry.builder("iam.provider.update")
                   .target("provider", id)
                   .detail("fields", fields)

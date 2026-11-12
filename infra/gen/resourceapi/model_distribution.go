@@ -11,7 +11,6 @@ API version: 1.0.0
 package resourceapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,16 +20,21 @@ var _ MappedNullable = &Distribution{}
 
 // Distribution struct for Distribution
 type Distribution struct {
-	Id                 string  `json:"id"`
-	InstanceId         string  `json:"instanceId"`
-	OwnerId            string  `json:"ownerId"`
-	SelectionRevision  int64   `json:"selectionRevision"`
-	State              string  `json:"state"`
-	Generation         *int64  `json:"generation,omitempty"`
-	ObservedGeneration *int64  `json:"observedGeneration,omitempty"`
-	Ready              *bool   `json:"ready,omitempty"`
-	ErrorCode          *string `json:"errorCode,omitempty"`
-	Revision           int64   `json:"revision"`
+	Id                string `json:"id"`
+	InstanceId        string `json:"instanceId"`
+	OwnerId           string `json:"ownerId"`
+	SelectionRevision int64  `json:"selectionRevision"`
+	// Once workspace accepts a newer selection revision, requested/resolved/applying becomes superseded. Already applied or failed rows keep the latest recorded outcome and error; appliedGeneration never replaces a later real failure.
+	State              string                             `json:"state"`
+	Generation         *int64                             `json:"generation,omitempty"`
+	ObservedGeneration *int64                             `json:"observedGeneration,omitempty"`
+	Ready              *bool                              `json:"ready,omitempty"`
+	ErrorCode          *string                            `json:"errorCode,omitempty"`
+	Revision           int64                              `json:"revision"`
+	Selections         []DistributionInputSelectionsInner `json:"selections,omitempty"`
+	// Last generation genuinely observed ready. Historical rows retain this successful observation after a newer selection replaces them.
+	AppliedGeneration    *int64 `json:"appliedGeneration,omitempty"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _Distribution Distribution
@@ -330,6 +334,70 @@ func (o *Distribution) SetRevision(v int64) {
 	o.Revision = v
 }
 
+// GetSelections returns the Selections field value if set, zero value otherwise.
+func (o *Distribution) GetSelections() []DistributionInputSelectionsInner {
+	if o == nil || IsNil(o.Selections) {
+		var ret []DistributionInputSelectionsInner
+		return ret
+	}
+	return o.Selections
+}
+
+// GetSelectionsOk returns a tuple with the Selections field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *Distribution) GetSelectionsOk() ([]DistributionInputSelectionsInner, bool) {
+	if o == nil || IsNil(o.Selections) {
+		return nil, false
+	}
+	return o.Selections, true
+}
+
+// HasSelections returns a boolean if a field has been set.
+func (o *Distribution) HasSelections() bool {
+	if o != nil && !IsNil(o.Selections) {
+		return true
+	}
+
+	return false
+}
+
+// SetSelections gets a reference to the given []DistributionInputSelectionsInner and assigns it to the Selections field.
+func (o *Distribution) SetSelections(v []DistributionInputSelectionsInner) {
+	o.Selections = v
+}
+
+// GetAppliedGeneration returns the AppliedGeneration field value if set, zero value otherwise.
+func (o *Distribution) GetAppliedGeneration() int64 {
+	if o == nil || IsNil(o.AppliedGeneration) {
+		var ret int64
+		return ret
+	}
+	return *o.AppliedGeneration
+}
+
+// GetAppliedGenerationOk returns a tuple with the AppliedGeneration field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *Distribution) GetAppliedGenerationOk() (*int64, bool) {
+	if o == nil || IsNil(o.AppliedGeneration) {
+		return nil, false
+	}
+	return o.AppliedGeneration, true
+}
+
+// HasAppliedGeneration returns a boolean if a field has been set.
+func (o *Distribution) HasAppliedGeneration() bool {
+	if o != nil && !IsNil(o.AppliedGeneration) {
+		return true
+	}
+
+	return false
+}
+
+// SetAppliedGeneration gets a reference to the given int64 and assigns it to the AppliedGeneration field.
+func (o *Distribution) SetAppliedGeneration(v int64) {
+	o.AppliedGeneration = &v
+}
+
 func (o Distribution) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -358,6 +426,17 @@ func (o Distribution) ToMap() (map[string]interface{}, error) {
 		toSerialize["errorCode"] = o.ErrorCode
 	}
 	toSerialize["revision"] = o.Revision
+	if !IsNil(o.Selections) {
+		toSerialize["selections"] = o.Selections
+	}
+	if !IsNil(o.AppliedGeneration) {
+		toSerialize["appliedGeneration"] = o.AppliedGeneration
+	}
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -390,15 +469,31 @@ func (o *Distribution) UnmarshalJSON(data []byte) (err error) {
 
 	varDistribution := _Distribution{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varDistribution)
+	err = json.Unmarshal(data, &varDistribution)
 
 	if err != nil {
 		return err
 	}
 
 	*o = Distribution(varDistribution)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "id")
+		delete(additionalProperties, "instanceId")
+		delete(additionalProperties, "ownerId")
+		delete(additionalProperties, "selectionRevision")
+		delete(additionalProperties, "state")
+		delete(additionalProperties, "generation")
+		delete(additionalProperties, "observedGeneration")
+		delete(additionalProperties, "ready")
+		delete(additionalProperties, "errorCode")
+		delete(additionalProperties, "revision")
+		delete(additionalProperties, "selections")
+		delete(additionalProperties, "appliedGeneration")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

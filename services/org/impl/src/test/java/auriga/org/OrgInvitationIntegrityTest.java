@@ -238,12 +238,13 @@ class OrgInvitationIntegrityTest {
   void invalidTargetCannotChangeExistingMemberOrConsumeAUse(String kind) {
     var invitation = create(kind, target(kind));
     delete(kind);
+    int eventsBefore = count("outbox_event", "true");
     var before = TenantContext.call(TENANT, () -> svc.memberJson(actor));
     assertError("org.not_found", () -> redeem(invitation, actor));
     assertEquals(before, TenantContext.call(TENANT, () -> svc.memberJson(actor)));
     assertEquals(0, count("invitation_redemption", "true"));
     assertEquals(0, count("invitation", "uses<>0"));
-    assertEquals(0, count("outbox_event", "true"));
+    assertEquals(eventsBefore, count("outbox_event", "true"));
     assertNoOrphans();
   }
 

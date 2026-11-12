@@ -19,6 +19,15 @@ accounts {
     jetstream: enabled
     users: [
       {
+        # Audit publication and its private ACK replies only; no other inbox or KV reads.
+        user: bifrost_audit
+        password: "__NATS_AUDIT_PASSWORD__"
+        permissions: {
+          publish: { allow: ["auriga.audit.ai-gateway"] }
+          subscribe: { allow: ["_INBOX_bifrost_audit.>"] }
+        }
+      }
+      {
         # Combined platform: business/audit streams and sessions KV, no arbitrary stream deletion.
         user: platform
         password: "__NATS_PLATFORM_PASSWORD__"
