@@ -33,6 +33,9 @@ PY
 then pass internal_dynamic_pool_excludes_edge
 else fail_msg internal_dynamic_pool_excludes_edge 'dynamic allocation must not consume the fixed peer address'; fi
 
+if python3 -m unittest discover -s "$ROOT/test" -p 'ops_runtime*test.py'; then pass runtime_operations_worker
+else fail_msg runtime_operations_worker 'upgrade receipts, backup archive, schedule or locking failed'; fi
+
 if sh "$ROOT/test/join-node.sh"; then pass join_node_boundary
 else fail_msg join_node_boundary 'private join token import failed'; fi
 if sh "$ROOT/test/message-edge-recovery.sh"; then pass message_edge_recovery_fixture

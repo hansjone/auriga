@@ -356,6 +356,7 @@ services:
       - ${AURIGA_DATA_ROOT}/config/materials/templates:/etc/auriga/templates:ro
       - ${AURIGA_DATA_ROOT}/config/materials/runtime-keys:/etc/auriga/runtime-keys:ro
       - ${AURIGA_DATA_ROOT}/enrollment:/var/auriga
+      - ${AURIGA_DATA_ROOT}/ops-runtime:/var/auriga-ops
     networks: [internal, publish]
     expose:
       - '8081'

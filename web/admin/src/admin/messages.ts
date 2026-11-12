@@ -1,4 +1,5 @@
 import { securityZh, securityEn } from './securityMessages';
+import { runtimeZh, runtimeEn } from './runtimeMessages';
 import { useI18n } from 'vue-i18n';
 import { orgZh, orgEn } from './orgMessages';
 import { quotaZh, quotaEn } from './quotaMessages';
@@ -9,6 +10,7 @@ import { settingsZh, settingsEn } from './settingsMessages';
 
 const zh = {
   ...securityZh,
+  ...runtimeZh,
   navRelayProviders: '模型与供应商',
   navRelayKeys: '虚拟 Key',
   navRelayUsage: '用量查询',
@@ -128,6 +130,7 @@ const zh = {
 };
 const en = {
   ...securityEn,
+  ...runtimeEn,
   navRelayProviders: 'Models and providers',
   navRelayKeys: 'Virtual keys',
   navRelayUsage: 'Usage',
