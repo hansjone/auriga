@@ -6,6 +6,8 @@ import { openLedger } from './host/ledger.js';
 import { formatAddress } from './host/address.js';
 import { registrationSession } from './host/native/host-port.js';
 
+export const DIAGNOSTIC_PATH = '/api/iam/v1/login/providers';
+
 export const BASE_TOOL_NAMES = [
   'auriga_net_status',
   'auriga_net_diagnose',
@@ -22,10 +24,24 @@ export const BUILTIN_TOOL_NAMES = new Set([
 export function connectionReason(error) {
   if (error?.status === 401 || error?.status === 403) return 'unauthorized';
   if (
-    ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'ETIMEDOUT'].includes(
-      error?.cause?.code ?? error?.code,
-    ) ||
-    ['TimeoutError', 'AbortError'].includes(error?.name)
+    [
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'EAI_AGAIN',
+      'ETIMEDOUT',
+      'UND_ERR_CONNECT_TIMEOUT',
+      'UND_ERR_HEADERS_TIMEOUT',
+      'CERT_HAS_EXPIRED',
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
+      'ERR_TLS_CERT_ALTNAME_INVALID',
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'SELF_SIGNED_CERT_IN_CHAIN',
+      'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+      'ERR_TLS_HANDSHAKE_TIMEOUT',
+    ].includes(error?.cause?.code ?? error?.code) ||
+    error?.name === 'TimeoutError'
   )
     return 'hq_unreachable';
   return 'unknown';
@@ -253,13 +269,30 @@ export function registerBaseTools({ ctx, getState, readLocal, probe }) {
               const local = await readLocal();
               native.check();
               check();
+              const now = Date.now();
               const rows = Object.values(local?.durable?.inbound ?? {})
-                .filter(
-                  (/** @type {any} */ r) =>
+                .filter((/** @type {any} */ r) => {
+                  const binding = local.bindings[r.local];
+                  const receive = local.durable?.receive?.[r.local];
+                  return (
                     r.hostSessionId === native.id &&
-                    local.bindings[r.local]?.bindingId === r.bindingId &&
-                    local.bindings[r.local]?.hostSessionId === native.id,
-                )
+                    binding?.bindingId === r.bindingId &&
+                    binding.hostSessionId === native.id &&
+                    binding.kind === 'session' &&
+                    binding.state === 'bound' &&
+                    binding.lifecycle === 'open' &&
+                    ['replies_only', 'thread_messages'].includes(
+                      binding.receiveMode,
+                    ) &&
+                    receive?.enabled === true &&
+                    receive.pending?.enabled !== false &&
+                    ['accepted', 'committed'].includes(r.stage) &&
+                    ['admitted', 'already_admitted'].includes(
+                      r.admission?.result,
+                    ) &&
+                    Date.parse(r.delivery.message?.expires_at) > now
+                  );
+                })
                 .sort((/** @type {any} */ a, /** @type {any} */ b) =>
                   a.recipientId.localeCompare(b.recipientId),
                 );
@@ -296,20 +329,29 @@ export function registerBaseTools({ ctx, getState, readLocal, probe }) {
                   firstFailure: 'ingress',
                 };
               for (const [segment, path] of [
-                ['ingress', '/actuator/health'],
-                ['hq_api', '/api/iam/v1/login/providers'],
+                ['ingress', DIAGNOSTIC_PATH],
+                ['hq_api', DIAGNOSTIC_PATH],
               ]) {
                 native.check();
                 check();
                 try {
-                  await probe(
+                  const result = await probe(
                     path,
                     AbortSignal.any([
                       ...(exec.signal ? [exec.signal] : []),
                       AbortSignal.timeout(3000),
                     ]),
                   );
-                  segments.push({ segment, status: 'ready', reason: null });
+                  const ready =
+                    segment === 'ingress'
+                      ? Number.isInteger(result?.httpStatus)
+                      : result?.apiReady === true;
+                  segments.push({
+                    segment,
+                    status: ready ? 'ready' : 'unavailable',
+                    reason: ready ? null : (result?.reason ?? 'unknown'),
+                  });
+                  if (!ready) break;
                 } catch (error) {
                   segments.push({
                     segment,

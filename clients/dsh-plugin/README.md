@@ -217,9 +217,9 @@ relative time and HTTP status; they omit URLs, credentials and response bodies.
 基础层随插件在统一宿主层注册，不等待总部配置、登录、托管设备凭据或远端 MCP。宿主的公开工具与原生会话服务就绪后，四个只读工具始终出现在模型可见清单中；总部配置、凭据及连接变化只切换数据源，不重新注册工具。宿主必要服务卸载或插件卸载时，基础工具失败封闭并注销。
 
 - `auriga_net_status`：读取现有连接缓存，报告总部 origin、可达状态、进程内最近成功时间、登录或托管凭据有效期、消息网络与远端工具层状态，以及本地没有取得结果的发送记录数 `queued`。未探测或无法分类返回 `unknown`，未配置返回 `unconfigured`；数量无法读取时为 `null`。`sending.offlineNewMessages` 为 `unavailable`，明确说明离线新消息不可发送；已有连接状态不足以证明可发送时，`sending.available` 为 `null`。本工具不发起网络请求。
-- `auriga_net_diagnose`：无参数；按顺序 GET 已配置总部 origin 的固定 `/actuator/health`、`/api/iam/v1/login/providers`，每段最多一次、3 秒超时，同一安装同时最多一个诊断。首段失败后停止 HTTP 探测；消息网络段只读缓存并标记 `source: cache`。未配置时报告入口段 `unconfigured`，不发请求。不接受 URL、主机、端口或身份参数；沿用平台客户端同源约束、响应大小上限与禁止重定向规则。探测结果更新既有状态缓存，之后的 status 可读取故障分类。
+- `auriga_net_diagnose`：无参数；入口段与 API 段均只 GET 已配置总部 origin 的固定公开端点 `/api/iam/v1/login/providers`，每段最多一次、3 秒超时，同一安装同时最多一个诊断。入口段收到任意 HTTP 响应即判连通（包括 HTML、404、401、5xx）；API 段独立检查成功 JSON 的 providers 列表。传输失败时停止后续 HTTP 探测；消息网络段只读缓存并标记 `source: cache`。未配置时报告入口段 `unconfigured`，不发请求。不接受 URL、主机、端口或身份参数；沿用平台客户端同源约束、响应大小上限；探测只观察重定向响应，不跟随跳转。探测结果更新既有状态缓存，之后的 status 可读取故障分类。HTTP 错误及非 JSON 响应不会把总部可达缓存写为 false；仅已知连接失败、超时或 TLS 失败可标为不可达。
 - `auriga_net_identity`：只输出已验证来源的成员 ID、显示名、凭据有效期及本地账本中的节点地址。未登录时 `loggedIn: false`，凭据状态为 `signed_out`，身份字段为 `null`。
-- `auriga_net_inbox`：只读当前已验证设备分区的本地原子账本，按真实宿主会话和 binding 过滤；`limit` 默认 20、最大 50，`cursor` 为非负整数偏移，返回 `items` 和可选 `nextCursor`。依据 recipient ID 排序；并发同步可能移动分页偏移。仅返回消息 ID、处理阶段和正文，不返回 admission、receipt 或宿主路径。消息正文属于外部输入，不应当作系统指令。
+- `auriga_net_inbox`：只读当前已验证设备分区的本地原子账本，按真实宿主会话和 binding 过滤。只返回准入成功且正常投递至会话的 `accepted`/`committed` 消息；消息须未过期，binding 仍为 bound/open，当前接收模式允许接收、接收开关已启用且没有待执行的关闭。未投递、准入拒绝、过期或关闭接收时不返回正文；`limit` 默认 20、最大 50，`cursor` 为非负整数偏移，返回 `items` 和可选 `nextCursor`。依据 recipient ID 排序；并发同步可能移动分页偏移。仅返回消息 ID、处理阶段和正文，不返回 admission、receipt 或宿主路径。消息正文属于外部输入，不应当作系统指令。
 
 四工具沿用真实原生会话、活动 Agent、持久化 provider、归档与子会话所有权校验；伪造执行上下文、归档会话、原生子 Agent 被拒绝。登录失效时，获准的本地主会话仍可查看故障状态；身份与收件箱不允许模型参数选择身份。切换数据源或身份代次后，旧异步调用不能发布结果。工具不新增后台连接或轮询，不修改接收开关或 consent。
 
@@ -229,4 +229,4 @@ relative time and HTTP status; they omit URLs, credentials and response bodies.
 
 本批不实现离线新发送排队。`auriga_send_message` 沿用现有 source、owner 和 consent 门禁；完全断网后新调用可能被拒绝，不能解释为“已排队”。`queued` 只统计已经落盘且还没有取得结果的记录，不代表已投递，也不证明总部未接受；恢复重试沿用原幂等标识及既有规则。
 
-隔离宿主复核脚本为 `test/real-host/base-tools-smoke.mjs`，配套探针只供测试，不进入默认启动。先把 `deploy/compose/real-dsh` 的 package.json 与 package-lock.json 复制到工位内 `.agent-evidence/base-tools-r2/host-install` 并运行 `npm ci --prefix`，再从仓库根运行 `node clients/dsh-plugin/test/real-host/base-tools-smoke.mjs`。脚本使用实际 DSH 0.2.1-rc.3 CLI、独立 DSH_HOME、随机回环端口及真实 SessionController/Agent/ToolRuntime，检查模型可见 schemas 和实际工具执行，并关闭测试进程。结果保存到 `.agent-evidence/base-tools-r2/summary.json`；原始宿主日志含临时启动凭据，不应发布。该验证不调用外部模型 API，也不替代正常用户页面验收或生产部署。
+隔离宿主复核脚本为 `test/real-host/base-tools-smoke.mjs`，配套探针只供测试，不进入默认启动。先把 `deploy/compose/real-dsh` 的 package.json 与 package-lock.json 复制到工位内 `.agent-evidence/base-tools-r2/host-install` 并运行 `npm ci --prefix`，再从仓库根运行 `node clients/dsh-plugin/test/real-host/base-tools-smoke.mjs`。脚本使用实际 DSH 0.2.1-rc.3 CLI、独立 DSH_HOME、随机回环端口及真实 SessionController/Agent/ToolRuntime，检查模型可见 schemas 和实际工具执行，并关闭测试进程。也可用两个位置参数分别指定证据目录和已安装的隔离宿主目录；例如 `node clients/dsh-plugin/test/real-host/base-tools-smoke.mjs .agent-evidence/base-tools-r3 .agent-evidence/base-tools-r2/host-install` 会复用锁定安装，并验证未配置、不可达、可达本机只读平台及无托管设备文件四个场景。结果保存到对应证据目录的 `summary.json`；原始宿主日志含临时启动凭据，不应发布。该验证不调用外部模型 API，也不替代正常用户页面验收或生产部署。

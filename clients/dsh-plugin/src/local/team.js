@@ -1,5 +1,5 @@
-import { BUILTIN_TOOL_NAMES, connectionReason } from '../network/base-tools.js';
 /* global AbortSignal */
+import { BUILTIN_TOOL_NAMES, connectionReason } from '../network/base-tools.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { setInterval, clearInterval } from 'node:timers';

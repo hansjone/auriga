@@ -41,8 +41,18 @@ function setup(t, overrides = {}) {
   };
   const local = {
     identity: { realm: '2', node: '64' },
-    bindings: { 1: { bindingId: 'b', hostSessionId: 'session-a' } },
+    bindings: {
+      1: {
+        bindingId: 'b',
+        hostSessionId: 'session-a',
+        kind: 'session',
+        state: 'bound',
+        lifecycle: 'open',
+        receiveMode: 'thread_messages',
+      },
+    },
     durable: {
+      receive: { 1: { enabled: true, pending: null } },
       submissions: { one: { result: null } },
       inbound: Object.fromEntries(
         Array.from({ length: 65 }, (_, i) => [
@@ -53,9 +63,13 @@ function setup(t, overrides = {}) {
             bindingId: 'b',
             local: '1',
             stage: 'committed',
-            admission: { token: 'secret-admission' },
+            admission: { result: 'admitted', token: 'secret-admission' },
             delivery: {
-              message: { message_id: String(i), body: { text: 'hello' } },
+              message: {
+                message_id: String(i),
+                expires_at: new Date(Date.now() + 60000).toISOString(),
+                body: { text: 'hello' },
+              },
             },
           },
         ]),
@@ -77,6 +91,7 @@ function setup(t, overrides = {}) {
       assert.ok(signal);
       if (state.reason === 'hq_unreachable')
         throw Object.assign(new Error('secret-path'), { code: 'ECONNREFUSED' });
+      return { httpStatus: 200, apiReady: true, reason: null };
     },
   });
   t.after(dispose);
@@ -124,8 +139,8 @@ for (const [scenario, overrides] of [
     assert.deepEqual(
       f.calls,
       scenario === 'offline'
-        ? ['/actuator/health']
-        : ['/actuator/health', '/api/iam/v1/login/providers'],
+        ? ['/api/iam/v1/login/providers']
+        : ['/api/iam/v1/login/providers', '/api/iam/v1/login/providers'],
     );
   });
 }
@@ -252,5 +267,83 @@ test('native subagent and disposed tool handles cannot read data', async (t) => 
   await assert.rejects(
     tool.execute({}, { agent: f.agent }),
     /network.unauthorized/,
+  );
+});
+
+for (const stage of ['received', 'admit_requested', 'admitted', 'invoking'])
+  test(`inbox never exposes a pre-delivery stage: ${stage}`, async (t) => {
+    const f = setup(t);
+    for (const row of Object.values(f.local.durable.inbound)) row.stage = stage;
+    assert.deepEqual(await f.call('inbox'), { items: [] });
+  });
+for (const [name, change] of [
+  [
+    'expired',
+    (f) => {
+      for (const row of Object.values(f.local.durable.inbound))
+        if (row.delivery)
+          row.delivery.message.expires_at = new Date(0).toISOString();
+    },
+  ],
+  [
+    'invalid expiry',
+    (f) => {
+      for (const row of Object.values(f.local.durable.inbound))
+        if (row.delivery) delete row.delivery.message.expires_at;
+    },
+  ],
+  [
+    'receive_none',
+    (f) => {
+      f.local.bindings[1].receiveMode = 'receive_none';
+    },
+  ],
+  [
+    'receive disabled',
+    (f) => {
+      f.local.durable.receive[1].enabled = false;
+    },
+  ],
+  [
+    'receive disabling',
+    (f) => {
+      f.local.durable.receive[1].pending = { enabled: false };
+    },
+  ],
+  [
+    'closed session',
+    (f) => {
+      f.local.bindings[1].lifecycle = 'closed';
+    },
+  ],
+  [
+    'unbound session',
+    (f) => {
+      f.local.bindings[1].state = 'reserved';
+    },
+  ],
+  [
+    'admission rejected',
+    (f) => {
+      for (const row of Object.values(f.local.durable.inbound))
+        row.admission = { result: 'denied' };
+    },
+  ],
+])
+  test(`inbox denies ${name} without exposing external text`, async (t) => {
+    const f = setup(t);
+    change(f);
+    assert.deepEqual(await f.call('inbox'), { items: [] });
+  });
+test('inbox permits durable accepted and committed messages only', async (t) => {
+  const f = setup(t);
+  const rows = Object.values(f.local.durable.inbound).filter((r) => r.delivery);
+  rows[0].stage = 'accepted';
+  rows[1].stage = 'committed';
+  for (const row of rows.slice(2)) row.stage = 'admitted';
+  const result = await f.call('inbox');
+  assert.deepEqual(
+    result.items.map((r) => r.status),
+    ['accepted', 'committed'],
   );
 });

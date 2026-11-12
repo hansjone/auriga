@@ -1,9 +1,10 @@
+/* global AbortSignal */
+import { probeEndpoint } from '../network/diagnostic-probe.js';
 import {
   readDeviceLedger,
   baseStatus,
   connectionReason,
 } from '../network/base-tools.js';
-/* global AbortSignal */
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { join } from 'node:path';
@@ -366,7 +367,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       onState(state) {
         if (closed || generation !== g) return;
         online = state.connected;
-        hqReachable = state.connected;
+        if (state.connected || state.unauthorized) hqReachable = true;
+        else if (state.reason === 'hq_unreachable') hqReachable = false;
         connectionFailure = state.reason ?? 'unknown';
         if (state.connected) lastSuccessAt = new Date().toISOString();
         communication = state.connected
@@ -459,7 +461,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     } catch (error) {
       if (!closed && generation === g) {
         connectionFailure = connectionReason(error);
-        hqReachable = false;
+        if (connectionFailure === 'hq_unreachable') hqReachable = false;
         online = false;
         communication = 'unavailable';
         restoreRetryAt = Date.now() + retryDelay(++restoreFailures);
@@ -595,15 +597,17 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     async probe(/** @type {string} */ path, /** @type {AbortSignal} */ signal) {
       const g = generation;
       try {
-        const result = await platform.request(path, { signal });
+        const result = await probeEndpoint(platform, path, signal);
         active(g);
         hqReachable = true;
+        connectionFailure = result.reason ?? 'unknown';
         lastSuccessAt = new Date().toISOString();
         return result;
       } catch (error) {
         if (!closed && g === generation) {
-          hqReachable = false;
-          connectionFailure = connectionReason(error);
+          const reason = connectionReason(error);
+          if (reason === 'hq_unreachable') hqReachable = false;
+          connectionFailure = reason;
         }
         throw error;
       }

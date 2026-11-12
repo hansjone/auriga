@@ -665,3 +665,35 @@ test('retired resource adapter cannot obtain a rotated device token for its old 
   await assert.rejects(before.getAccess());
   assert.equal(await f.network.resourceSession.getAccess(), 'device-access');
 });
+
+for (const code of [200, 401, 404, 500, 503])
+  test(`managed diagnostic HTTP ${code} never marks headquarters unreachable`, async (t) => {
+    const f = await fixture(t, (x) => x, true);
+    t.mock.method(
+      globalThis,
+      'fetch',
+      async () =>
+        new Response(code === 200 ? '<html>portal</html>' : '{}', {
+          status: code,
+        }),
+    );
+    await f.network.refresh(true);
+    const result = await f.network.baseTools.probe(
+      '/api/iam/v1/login/providers',
+      new AbortController().signal,
+    );
+    assert.equal(result.httpStatus, code);
+    assert.equal(f.network.baseTools.getState().reachable, true);
+    await f.network.refresh(true);
+    assert.equal(f.network.baseTools.getState().reachable, true);
+  });
+test('managed logout clears the verified ledger partition', async (t) => {
+  const f = await fixture(t);
+  await f.network.refresh();
+  assert.equal(await f.network.baseTools.readLocal(), null);
+  f.network.logout();
+  assert.throws(
+    () => f.network.baseTools.readLocal(),
+    /local identity unavailable/,
+  );
+});
