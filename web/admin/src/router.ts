@@ -9,6 +9,7 @@ import InvitationsView from './views/InvitationsView.vue';
 import QuotasView from './views/QuotasView.vue';
 import RolesView from './views/RolesView.vue';
 import ResourcesView from './views/ResourcesView.vue';
+import ResourceGovernanceView from './views/resources/ResourceGovernanceView.vue';
 import IdentityProvidersView from './views/IdentityProvidersView.vue';
 import SettingsView from './views/SettingsView.vue';
 import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
@@ -29,6 +30,9 @@ const existing = new Set([
   '/models/providers',
   '/settings',
   '/resources',
+  '/resources/review',
+  '/resources/published',
+  '/resources/distribution',
   '/members',
   '/nodes',
   '/instances',
@@ -63,6 +67,11 @@ export const router = createRouter({
         { path: 'ops/alerts', component: AlertsView },
         { path: 'ops/notifications', component: NotificationsView },
         { path: 'resources', component: ResourcesView },
+        ...(['review', 'published', 'distribution'] as const).map((phase) => ({
+          path: 'resources/' + phase,
+          component: ResourceGovernanceView,
+          props: { phase },
+        })),
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },
         { path: 'instances', component: InstancesView },

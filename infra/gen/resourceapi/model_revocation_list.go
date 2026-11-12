@@ -11,6 +11,7 @@ API version: 1.0.0
 package resourceapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -25,11 +26,10 @@ type RevocationList struct {
 	Revision      int64  `json:"revision"`
 	IssuedAt      string `json:"issuedAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
 	// issuedAt 之后且最多 24 小时；离线最迟于此失效并停用受管资源。
-	ExpiresAt            string            `json:"expiresAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
-	RevokedKids          []string          `json:"revokedKids"`
-	RevokedArtifacts     []RevokedArtifact `json:"revokedArtifacts"`
-	Signature            Signature         `json:"signature"`
-	AdditionalProperties map[string]interface{}
+	ExpiresAt        string            `json:"expiresAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
+	RevokedKids      []string          `json:"revokedKids"`
+	RevokedArtifacts []RevokedArtifact `json:"revokedArtifacts"`
+	Signature        Signature         `json:"signature"`
 }
 
 type _RevocationList RevocationList
@@ -269,11 +269,6 @@ func (o RevocationList) ToMap() (map[string]interface{}, error) {
 	toSerialize["revokedKids"] = o.RevokedKids
 	toSerialize["revokedArtifacts"] = o.RevokedArtifacts
 	toSerialize["signature"] = o.Signature
-
-	for key, value := range o.AdditionalProperties {
-		toSerialize[key] = value
-	}
-
 	return toSerialize, nil
 }
 
@@ -308,27 +303,15 @@ func (o *RevocationList) UnmarshalJSON(data []byte) (err error) {
 
 	varRevocationList := _RevocationList{}
 
-	err = json.Unmarshal(data, &varRevocationList)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varRevocationList)
 
 	if err != nil {
 		return err
 	}
 
 	*o = RevocationList(varRevocationList)
-
-	additionalProperties := make(map[string]interface{})
-
-	if err = json.Unmarshal(data, &additionalProperties); err == nil {
-		delete(additionalProperties, "schemaVersion")
-		delete(additionalProperties, "tenantId")
-		delete(additionalProperties, "revision")
-		delete(additionalProperties, "issuedAt")
-		delete(additionalProperties, "expiresAt")
-		delete(additionalProperties, "revokedKids")
-		delete(additionalProperties, "revokedArtifacts")
-		delete(additionalProperties, "signature")
-		o.AdditionalProperties = additionalProperties
-	}
 
 	return err
 }
