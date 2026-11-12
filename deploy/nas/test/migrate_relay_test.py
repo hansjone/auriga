@@ -23,6 +23,7 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(first, again)
         self.assertEqual(before, source.models)
         self.assertEqual(len(target.providers), 1)
+        self.assertEqual(target.providers[0]['kind'], 'openai-compatible')
         self.assertEqual(target.credentials, [secret])
         self.assertEqual(target.pools[0]['id'], 'old-model')
         self.assertEqual(target.bindings[0]['sha256'], 'a' * 64)

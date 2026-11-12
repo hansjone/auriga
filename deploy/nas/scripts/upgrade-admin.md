@@ -97,7 +97,8 @@ helper 只输出数量和固定错误信息，第三方库及子进程 stdout/st
 
 支持 OpenAI、Anthropic、Gemini、DeepSeek、MiniMax 的直接模型，api_base 为 origin 或
 `/v1`；保留旧公开模型名、供应商密钥和模型允许列表。高级模型参数、TPM/模型预算等
-无法对应的策略失败封闭，需先按目标能力明确转换，不会默默丢弃。
+无法对应的策略失败封闭，需先按目标能力明确转换，不会默默丢弃。旧 OpenAI 模型映射为
+`openai-compatible`，保持 Chat Completions 上游协议，不启用目标 native OpenAI 的 Responses 优先行为。
 旧数据库仅存调用 Key 的 SHA256；公开管理端 `PUT /api/legacy-key-bindings` 接受
 `{keyId, sha256, expiresAt?}`，要求安装管理员 Basic auth 与安装租户头，仅可绑定 external Key。
 同一摘要禁止改绑，保留旧过期时间；撤销、预算、RPM 与租户检查沿用目标 Key 的正常路径。

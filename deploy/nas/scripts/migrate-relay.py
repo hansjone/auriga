@@ -144,7 +144,8 @@ def plan(source):
             raise MigrationError('provider_secret_unavailable')
         identifier = str(info.get('id') or operation('model', alias + ':' + upstream))
         configuration = {'name': 'litellm-' + hashlib.sha256(identifier.encode()).hexdigest(),
-                         'kind': kind, 'baseUrl': base, 'enabled': True}
+                         'kind': 'openai-compatible' if kind == 'openai' else kind,
+                         'baseUrl': base, 'enabled': True}
         providers.append((identifier, configuration, secret))
         pools[alias].append((identifier, remote, info))
         # Validate the complete source before the first destination write.
