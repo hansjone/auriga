@@ -78,6 +78,8 @@ if sh "$ROOT/test/runtime-upgrade.sh"; then pass runtime_upgrade_transaction
 else fail_msg runtime_upgrade_transaction "runtime activation or rollback failed"; fi
 if sh "$ROOT/test/materials-upgrade.sh"; then pass materials_upgrade_boundary
 else fail_msg materials_upgrade_boundary "material activation arguments or failure handling failed"; fi
+if sh "$ROOT/test/upgrade-admin.sh"; then pass admin_database_upgrade_boundary
+else fail_msg admin_database_upgrade_boundary "admin role helper sequence or failure handling failed"; fi
 if sh "$ROOT/test/device-presence.sh"; then pass device_presence_upgrade
 else fail_msg device_presence_upgrade "old optional identity blocked init/render"; fi
 if sh "$ROOT/test/container-installer.sh"; then pass container_installer_regressions
@@ -257,6 +259,21 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
   else
     fail_msg init_first "init failed"
   fi
+  if grep -qx 'AURIGA_RESOURCE_ENABLED=true' "$DATA/config/platform.env" \
+    && [ -s "$DATA/secrets/pg_resource_owner_password" ] \
+    && [ -s "$DATA/secrets/pg_resource_app_password" ] \
+    && [ -s "$DATA/secrets/resource_cursor_signing_key" ] \
+    && grep -q 'CREATE SCHEMA IF NOT EXISTS resource AUTHORIZATION auriga_resource_owner' "$DATA/config/postgres/init.sql" \
+    && grep -q '"resource".*https://platform:8081' "$DATA/config/materials/edge.config.json"; then
+    pass resource_upgrade_database_wiring
+  else fail_msg resource_upgrade_database_wiring "resource catalog requires dedicated credentials, schema and enabled module"; fi
+  mv "$DATA/secrets/resource_cursor_signing_key" "$TMP/resource-cursor-backup"
+  if sh "$ROOT/scripts/render.sh" >"$TMP/resource-missing.log" 2>&1; then
+    fail_msg resource_missing_secret_refused "configured resource cursor key must be restored"
+  elif grep -q 'resource secret missing; restore' "$TMP/resource-missing.log"; then
+    pass resource_missing_secret_refused
+  else fail_msg resource_missing_secret_refused "unexpected rejection"; fi
+  mv "$TMP/resource-cursor-backup" "$DATA/secrets/resource_cursor_signing_key"
   if [ -d "$DATA/config/materials/templates" ] && [ -d "$DATA/config/materials/runtime-keys" ] \
     && [ -d "$DATA/config/materials/runtime-proofs" ] && [ ! -e "$DATA/config/templates" ] \
     && grep -qx 'AURIGA_WORKSPACE_ARTIFACT_KEYS_DIRECTORY=/etc/auriga/runtime-keys' "$DATA/config/platform.env" \
@@ -452,6 +469,9 @@ if sh "$ROOT/test/load-images.sh"; then pass load_images_regressions
 else fail_msg load_images_regressions "workflow artifact metadata failed"; fi
 
 # --- LF ---
+if python3 "$ROOT/test/migrate_relay_test.py"; then pass migrate_relay_regressions
+else fail_msg migrate_relay_regressions "relay migration failed"; fi
+
 cr=0
 for f in "$ROOT"/scripts/*.sh "$ROOT"/docker/agent-entrypoint.sh "$ROOT"/test/run-tests.sh; do
   [ -f "$f" ] || continue

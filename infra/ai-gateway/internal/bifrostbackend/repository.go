@@ -50,6 +50,7 @@ type Backend struct {
 	password       [32]byte
 	memberPassword [32]byte
 	allowPrivate   bool
+	legacyMisses   legacyMissCache
 }
 
 func New(db *store.Store, masterHex, password, memberPassword string, allowPrivate bool) (*Backend, error) {
@@ -96,7 +97,7 @@ func (b *Backend) token(tenant, id string) string {
 func (b *Backend) parseToken(raw string) (string, string, error) {
 	parts := strings.Split(strings.TrimPrefix(raw, "sk-bf-"), ".")
 	if !strings.HasPrefix(raw, "sk-bf-") || len(parts) != 3 || !validUUID(parts[0]) || !validUUID(parts[1]) || !hmac.Equal([]byte(raw), []byte(b.token(parts[0], parts[1]))) {
-		return "", "", fault("common.unauthenticated")
+		return b.legacyToken(raw)
 	}
 	if b.tenant != "" && parts[0] != b.tenant {
 		return "", "", denied

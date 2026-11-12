@@ -115,6 +115,25 @@ done
 PG_OPS_OWNER=$(read_secret pg_ops_owner_password)
 PG_OPS_APP=$(read_secret pg_ops_app_password)
 OPS_KEY=$(read_secret ops_notification_key)
+for _resource_name in pg_resource_owner_password pg_resource_app_password resource_cursor_signing_key; do
+  _resource_path="$SECRETS/$_resource_name"
+  [ ! -L "$_resource_path" ] || die 'resource secret symlink refused'
+  if [ ! -e "$_resource_path" ]; then
+    if [ -f "$CONFIG/platform.env" ] && grep -qx 'AURIGA_RESOURCE_ENABLED=true' "$CONFIG/platform.env"; then
+      die 'resource secret missing; restore the installation secret backup'
+    fi
+    require_cmd openssl
+    case "$_resource_name" in
+      resource_cursor_signing_key) _resource_value=$(openssl rand -base64 32 | tr -d '\n') ;;
+      *) _resource_value=$(openssl rand -hex 16) ;;
+    esac
+    [ "${#_resource_value}" -ge 32 ] || die 'resource secret generation failed'
+    (umask 077; set -C; printf '%s' "$_resource_value" >"$_resource_path") || die 'resource secret creation refused'
+  fi
+done
+PG_RESOURCE_OWNER=$(read_secret pg_resource_owner_password)
+PG_RESOURCE_APP=$(read_secret pg_resource_app_password)
+RESOURCE_CURSOR=$(read_secret resource_cursor_signing_key)
 PG_BOOT=$(read_secret pg_bootstrap_password)
 PG_IAM=$(read_secret pg_iam_password)
 PG_ORG=$(read_secret pg_org_password)
@@ -148,6 +167,8 @@ sed \
   -e "s|__PG_ORG_PASSWORD__|$(escape_sed "$PG_ORG")|g" \
   -e "s|__PG_OPS_OWNER_PASSWORD__|$(escape_sed "$PG_OPS_OWNER")|g" \
   -e "s|__PG_OPS_APP_PASSWORD__|$(escape_sed "$PG_OPS_APP")|g" \
+  -e "s|__PG_RESOURCE_OWNER_PASSWORD__|$(escape_sed "$PG_RESOURCE_OWNER")|g" \
+  -e "s|__PG_RESOURCE_APP_PASSWORD__|$(escape_sed "$PG_RESOURCE_APP")|g" \
   -e "s|__PG_WS_OWNER_PASSWORD__|$(escape_sed "$PG_WS_OWNER")|g" \
   -e "s|__PG_WS_APP_PASSWORD__|$(escape_sed "$PG_WS_APP")|g" \
   "$NAS_ROOT/postgres/init.sql.tmpl" >"$CONFIG/postgres/init.sql"
@@ -211,6 +232,13 @@ AURIGA_OPS_DB_PASSWORD=$PG_OPS_APP
 AURIGA_OPS_MIGRATION_USER=auriga_ops_owner
 AURIGA_OPS_MIGRATION_PASSWORD=$PG_OPS_OWNER
 AURIGA_OPS_NOTIFICATION_KEY=$OPS_KEY
+AURIGA_RESOURCE_ENABLED=true
+AURIGA_RESOURCE_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
+AURIGA_RESOURCE_DB_USER=auriga_resource_app
+AURIGA_RESOURCE_DB_PASSWORD=$PG_RESOURCE_APP
+AURIGA_RESOURCE_MIGRATION_USER=auriga_resource_owner
+AURIGA_RESOURCE_MIGRATION_PASSWORD=$PG_RESOURCE_OWNER
+AURIGA_RESOURCE_CURSOR_SIGNING_KEY=$RESOURCE_CURSOR
 AURIGA_WORKSPACE_ENABLED=true
 AURIGA_WORKSPACE_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_WORKSPACE_DB_USER=auriga_workspace_app

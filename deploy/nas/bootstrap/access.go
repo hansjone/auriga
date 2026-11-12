@@ -135,7 +135,7 @@ func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer st
 	edgeConfig := map[string]any{
 		"instanceControlIngress": map[string]any{"denyLocalIPv4": []string{lanIP}},
 		"accessConfigFile":       "/etc/auriga/access.json", "allowLocalIngress": true,
-		"upstreams":        map[string]string{"iam": "https://platform:8081", "org": "https://platform:8081", "workspace": "https://platform:8081", "network-submit": "https://network:18443", "ai-device": "https://ai-relay:18445"},
+		"upstreams":        map[string]string{"iam": "https://platform:8081", "org": "https://platform:8081", "workspace": "https://platform:8081", "resource": "https://platform:8081", "network-submit": "https://network:18443", "ai-device": "https://ai-relay:18445"},
 		"relay":            map[string]string{"origin": "http://bifrost:8080", "adminPasswordFile": "/run/secrets/bifrost_admin_password"},
 		"deviceHop":        map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "ai-relay"},
 		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/pki/network-edge.pem", "keyFile": "/etc/auriga/pki/network-edge.key", "caFile": "/etc/auriga/pki/network-server-ca.pem", "serverName": "submit.network.internal"},

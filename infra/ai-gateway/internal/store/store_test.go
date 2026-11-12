@@ -32,7 +32,7 @@ func TestPostgresMigrationAndIsolation(t *testing.T) {
 	defer func() { _ = conn.Close(ctx) }()
 	var count int
 	var versions []string
-	wantVersions := []string{"0001_admin.sql", "0010_budget.sql", "0011_recovery_scan.sql", "0020_bifrost_relay.sql", "0021_audit_outbox.sql"}
+	wantVersions := []string{"0001_admin.sql", "0010_budget.sql", "0011_recovery_scan.sql", "0020_bifrost_relay.sql", "0021_audit_outbox.sql", "0022_legacy_key_bindings.sql"}
 	if err = conn.QueryRow(ctx, "SELECT count(*),array_agg(name ORDER BY name) FROM ai.schema_migration").Scan(&count, &versions); err != nil || count != len(wantVersions) || !slices.Equal(versions, wantVersions) {
 		t.Fatalf("migration count %d, versions %v, want %v: %v", count, versions, wantVersions, err)
 	}

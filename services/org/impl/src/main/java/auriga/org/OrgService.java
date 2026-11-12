@@ -114,6 +114,21 @@ public final class OrgService {
   public record Effective(
       String memberType, String status, List<String> roleKeys, List<String> permissions) {}
 
+  public void initializeBuiltinPermissions() {
+    UUID tenant =
+        deploymentAccess == null
+            ? OrgIds.DEFAULT_TENANT
+            : UUID.fromString(deploymentAccess.tenantId());
+    TenantContext.run(
+        tenant,
+        () ->
+            store.tx(
+                () -> {
+                  m3Permissions.register();
+                  return null;
+                }));
+  }
+
   public Effective getEffectivePermissions(UUID accountId) {
     return store.tx(
         () -> {

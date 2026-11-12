@@ -2,6 +2,18 @@
   "schemaVersion": 1,
   "description": "M3权限、域错误和新增事件来源的单一定义；OpenAPI x-permission/x-error-codes/x-events 仅为引用。现有common.*与iam.step_up_required复用既有契约和common映射，不在此重定义。",
   "permissions": {
+    "iam.network.manage": {
+      "description": {
+        "en": "Manage registered devices",
+        "zh-CN": "管理已登记设备"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
     "ops.alerts.read": {
       "description": {
         "en": "Read operations alerts",

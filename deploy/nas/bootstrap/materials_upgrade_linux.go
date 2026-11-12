@@ -468,6 +468,22 @@ func bifrostEdgeProjection(source string) ([]byte, error) {
 	}
 	delete(doc, "litellmOrigin")
 	delete(doc, "litellmUI")
+	var upstreams map[string]json.RawMessage
+	if err := json.Unmarshal(doc["upstreams"], &upstreams); err != nil || upstreams == nil {
+		return nil, fmt.Errorf("invalid edge upstream projection")
+	}
+	if _, exists := upstreams["resource"]; !exists {
+		var iam string
+		if err := json.Unmarshal(upstreams["iam"], &iam); err != nil || iam == "" {
+			return nil, fmt.Errorf("resource projection requires the sealed IAM hop")
+		}
+		upstreams["resource"] = upstreams["iam"]
+	}
+	encoded, err := json.Marshal(upstreams)
+	if err != nil {
+		return nil, err
+	}
+	doc["upstreams"] = encoded
 	doc["relay"] = json.RawMessage(`{"origin":"http://bifrost:8080","adminPasswordFile":"/run/secrets/bifrost_admin_password"}`)
 	return json.Marshal(doc)
 }

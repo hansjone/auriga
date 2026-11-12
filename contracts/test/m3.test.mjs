@@ -153,6 +153,12 @@ test('实例AI token：允许内网IP issuer，但身份/权限/绑定严格拒�
 });
 
 const catalog = read('catalog/m3.json');
+test('IAM network administration has one authoritative security declaration', () => {
+  const permission = catalog.permissions['iam.network.manage'];
+  assert.equal(permission.adminOnly, true);
+  assert.equal(permission.sensitive, true);
+  assert.deepEqual([...permission.builtinRoles].sort(), ['admin', 'owner']);
+});
 const apiSpecs = Object.fromEntries(
   ['ai', 'resource'].map((service) => [
     service,
