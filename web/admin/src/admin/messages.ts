@@ -11,6 +11,15 @@ import { providersZh, providersEn } from './providersMessages';
 import { settingsZh, settingsEn } from './settingsMessages';
 
 const zh = {
+  desktopTitle: '客户端版本',
+  desktopVerify: '验证身份并刷新',
+  desktopManifest: '已签名清单',
+  desktopArchive: '安装包',
+  desktopPublish: '发布',
+  desktopWithdraw: '下架',
+  desktopWithdrawn: '已下架',
+  desktopEmpty: '暂无版本',
+  desktopFailed: '操作失败，请检查权限、签名或服务配置',
   ...securityZh,
   ...credentialsZh,
   ...devicesZh,
@@ -133,6 +142,16 @@ const zh = {
   },
 };
 const en = {
+  desktopTitle: 'Desktop releases',
+  desktopVerify: 'Verify and refresh',
+  desktopManifest: 'Signed manifest',
+  desktopArchive: 'Package',
+  desktopPublish: 'Publish',
+  desktopWithdraw: 'Withdraw',
+  desktopWithdrawn: 'Withdrawn',
+  desktopEmpty: 'No releases',
+  desktopFailed:
+    'Operation failed. Check permission, signature or service configuration',
   ...securityEn,
   ...credentialsEn,
   ...devicesEn,

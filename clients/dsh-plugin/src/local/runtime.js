@@ -1,3 +1,4 @@
+import { desktopUpdater } from './desktop.js';
 /* global AbortSignal */
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
@@ -253,6 +254,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     broker,
     origin: config.platformOrigin,
   });
+  const desktop = await desktopUpdater({
+    origin: config.platformOrigin,
+    getAccess,
+  }).catch(() => undefined);
   let profileRetryAt = 0;
   async function refreshMemberName() {
     if (closed || Date.now() < profileRetryAt) return;
@@ -578,6 +583,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     config,
     resolve,
     getAccess,
+    desktop,
     vault,
     attachModels: models.attach,
     get modelStatus() {
@@ -986,6 +992,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       closed = true;
       broker.invalidate('closed');
       models.close();
+      desktop?.close();
       clearInterval(expiryTimer);
       clearInterval(revokeTimer);
       clearInterval(restoreTimer);

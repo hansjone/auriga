@@ -43,6 +43,7 @@ export async function apply(ctx, config) {
       ? { mode: 'managed' }
       : {
           activeOrigin: () => binding?.runtime.config.platformOrigin ?? '',
+          desktop: () => binding?.runtime.desktop,
           nativeAuth: {
             requestRejection: (req) =>
               admission

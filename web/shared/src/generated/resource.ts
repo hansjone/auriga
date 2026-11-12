@@ -496,6 +496,72 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/resource/v1/desktop/latest': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getDesktopLatest'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/desktop/packages/{sequence}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['downloadDesktopPackage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/desktop/releases': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listDesktopReleases'];
+    put?: never;
+    /** @description Admin session and recent step-up required. Upload ZIP bytes and a base64url UTF-8 signed manifest in X-Desktop-Manifest. Signature and whole package digest verified before publication. Strictly increasing sequence and version. Signed bytes use integer canonical JSON; independent offline Ed25519 key. */
+    post: operations['publishDesktopRelease'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/desktop/releases/{sequence}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** @description Recent step-up required. Withdrawal is permanent; sequence high-water retained. */
+    delete: operations['withdrawDesktopRelease'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -878,6 +944,47 @@ export interface components {
       items: components['schemas']['MemberInstallation'][];
       /** Format: uuid */
       nextAfterPackageId?: string;
+    };
+    DesktopManifest: {
+      /** @constant */
+      schema: 1;
+      /** @constant */
+      product: 'Auriga Desktop';
+      version: string;
+      packageId: string;
+      /** @constant */
+      channel: 'stable';
+      /** @constant */
+      platform: 'win-x64';
+      /** Format: int64 */
+      sizeBytes: number;
+      sha256: string;
+      minimumVersion: string;
+      /** Format: date-time */
+      publishedAt: string;
+      /** Format: date-time */
+      notAfter: string;
+      /** Format: int64 */
+      sequence: number;
+      notes: string;
+      signature: {
+        /** @constant */
+        alg: 'Ed25519';
+        /** @constant */
+        kid: 'auriga-desktop-release-1';
+        value: string;
+      };
+    };
+    DesktopReleaseItem: {
+      manifest: components['schemas']['DesktopManifest'];
+      withdrawn: boolean;
+    };
+    DesktopReleaseLedger: {
+      highestSequence?: number;
+      items?: components['schemas']['DesktopReleaseItem'][];
+      audit?: {
+        [key: string]: unknown;
+      }[];
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -4831,6 +4938,114 @@ export interface operations {
         content: {
           'application/problem+json': components['schemas']['Problem'];
         };
+      };
+    };
+  };
+  getDesktopLatest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Success */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DesktopManifest'];
+        };
+      };
+    };
+  };
+  downloadDesktopPackage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        sequence: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Success */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/octet-stream': string;
+        };
+      };
+    };
+  };
+  listDesktopReleases: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Success */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DesktopReleaseLedger'];
+        };
+      };
+    };
+  };
+  publishDesktopRelease: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-Desktop-Manifest': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/octet-stream': string;
+      };
+    };
+    responses: {
+      /** @description Success */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DesktopManifest'];
+        };
+      };
+    };
+  };
+  withdrawDesktopRelease: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        sequence: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Success */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

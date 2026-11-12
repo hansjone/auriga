@@ -5395,6 +5395,189 @@
           }
         }
       }
+    },
+    "/api/resource/v1/desktop/latest": {
+      "get": {
+        "operationId": "getDesktopLatest",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopManifest"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/desktop/packages/{sequence}": {
+      "get": {
+        "operationId": "downloadDesktopPackage",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sequence",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/resource/v1/admin/desktop/releases": {
+      "get": {
+        "operationId": "listDesktopReleases",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.versions.publish",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopReleaseLedger"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "publishDesktopRelease",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.versions.publish",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable"
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopManifest"
+                }
+              }
+            }
+          }
+        },
+        "description": "Admin session and recent step-up required. Upload ZIP bytes and a base64url UTF-8 signed manifest in X-Desktop-Manifest. Signature and whole package digest verified before publication. Strictly increasing sequence and version. Signed bytes use integer canonical JSON; independent offline Ed25519 key.",
+        "parameters": [
+          {
+            "name": "X-Desktop-Manifest",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 43700
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/admin/desktop/releases/{sequence}": {
+      "delete": {
+        "operationId": "withdrawDesktopRelease",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.versions.publish",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable"
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sequence",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "description": "Recent step-up required. Withdrawal is permanent; sequence high-water retained."
+      }
     }
   },
   "components": {
@@ -6633,6 +6816,141 @@
           "items"
         ],
         "additionalProperties": false
+      },
+      "DesktopManifest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema",
+          "product",
+          "version",
+          "packageId",
+          "channel",
+          "platform",
+          "sizeBytes",
+          "sha256",
+          "minimumVersion",
+          "publishedAt",
+          "notAfter",
+          "sequence",
+          "notes",
+          "signature"
+        ],
+        "properties": {
+          "schema": {
+            "type": "integer",
+            "const": 1
+          },
+          "product": {
+            "type": "string",
+            "const": "Auriga Desktop"
+          },
+          "version": {
+            "type": "string"
+          },
+          "packageId": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "channel": {
+            "type": "string",
+            "const": "stable"
+          },
+          "platform": {
+            "type": "string",
+            "const": "win-x64"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967296,
+            "format": "int64"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "minimumVersion": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "signature": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "alg",
+              "kid",
+              "value"
+            ],
+            "properties": {
+              "alg": {
+                "type": "string",
+                "const": "Ed25519"
+              },
+              "kid": {
+                "type": "string",
+                "const": "auriga-desktop-release-1"
+              },
+              "value": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{86}$"
+              }
+            }
+          }
+        }
+      },
+      "DesktopReleaseItem": {
+        "type": "object",
+        "required": [
+          "manifest",
+          "withdrawn"
+        ],
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/DesktopManifest"
+          },
+          "withdrawn": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DesktopReleaseLedger": {
+        "type": "object",
+        "properties": {
+          "highestSequence": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesktopReleaseItem"
+            }
+          },
+          "audit": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
       }
     }
   }

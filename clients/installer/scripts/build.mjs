@@ -9,6 +9,7 @@
  * release. Nothing of upstream is modified; it is installed from npm as-is.
  */
 import { Buffer } from 'node:buffer';
+import { createPublicKey } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -356,6 +357,15 @@ export async function build(args) {
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });
+  if (args['release-public-key']) {
+    const key = createPublicKey(readFileSync(args['release-public-key']));
+    if (key.asymmetricKeyType !== 'ed25519')
+      throw new Error('Ed25519 release public key required');
+    writeFileSync(
+      join(payload, 'auriga', 'runtime', 'release-public-key.txt'),
+      key.export({ type: 'spki', format: 'pem' }),
+    );
+  }
   cpSync(
     join(installerDir, 'windows', 'launcher'),
     join(payload, 'auriga', 'launcher'),

@@ -2,6 +2,12 @@
 /** Native React settings. Status is supplied by the authenticated runtime. */
 const messages = {
   zh: {
+    desktop: '桌面更新',
+    update: '更新',
+    checkUpdate: '检查更新',
+    autoCheck: '自动检查',
+    updateRestart:
+      '下载后请关闭 Auriga Desktop，退出时安装，下次启动使用新版。',
     platform: '平台',
     address: '平台地址',
     save: '保存',
@@ -68,6 +74,12 @@ const messages = {
     retry: '重试',
   },
   en: {
+    desktop: 'Desktop updates',
+    update: 'Update',
+    checkUpdate: 'Check for updates',
+    autoCheck: 'Check automatically',
+    updateRestart:
+      'After download, close Auriga Desktop to install. Reopen to use the new version.',
     platform: 'Platform',
     address: 'Platform address',
     save: 'Save',
@@ -484,6 +496,49 @@ export function createSettingsView(
         !managed && (!loggedIn || !ready) && h('p', null, t.local),
         action,
       ),
+      !managed &&
+        state?.desktop &&
+        h(
+          'section',
+          null,
+          h('h3', null, t.desktop),
+          h(
+            'label',
+            null,
+            h('input', {
+              type: 'checkbox',
+              checked: state.desktop.enabled,
+              disabled: busy,
+              onChange: (/** @type {any} */ e) =>
+                run(async () => {
+                  await call('auriga/settings/desktop', {
+                    enabled: e.target.checked,
+                  });
+                  await readState();
+                }),
+            }),
+            t.autoCheck,
+          ),
+          state.desktop.available &&
+            h('p', null, state.desktop.available.version),
+          h('p', null, t.updateRestart),
+          button(t.checkUpdate, () =>
+            run(async () => {
+              await call('auriga/settings/desktop', { action: 'check' });
+              await readState();
+            }),
+          ),
+          state.desktop.available &&
+            !state.desktop.restartRequired &&
+            button(t.update, () =>
+              run(async () => {
+                await call('auriga/settings/desktop', { action: 'update' });
+                await readState();
+              }),
+            ),
+          state.desktop.restartRequired &&
+            h('p', { role: 'status' }, t.updateRestart),
+        ),
       !managed &&
         h(
           'section',
