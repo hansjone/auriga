@@ -1,6 +1,6 @@
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { open, constants, realpath } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { open, constants, realpath, lstat } from 'node:fs/promises';
+import { isAbsolute, dirname } from 'node:path';
 import { canonicalize, parseStrictJson } from './json.js';
 
 /** @param {string} [code] @returns {never} */
@@ -71,14 +71,18 @@ export function signed(value, roots) {
  * Shape: {schemaVersion:1,releaseKeys:[{kid,publicKeySpki}],revocationKeys:[...]}.
  * @param {string|undefined} file */
 async function loadResourceRoots(file) {
-  if (
-    !file ||
-    !isAbsolute(file) ||
-    resolve(await realpath(file)) !== resolve(file)
-  )
-    return refuse('resource.storage_unavailable');
+  if (!file || !isAbsolute(file)) return refuse('resource.storage_unavailable');
+  // Check links explicitly: Windows casing and native 8.3 names can identify
+  // the same regular file while differing from its realpath spelling.
+  for (let current = file; ;) {
+    if ((await lstat(current)).isSymbolicLink())
+      return refuse('resource.storage_unavailable');
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
   const handle = await open(
-    file,
+    await realpath(file),
     constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
   );
   try {
