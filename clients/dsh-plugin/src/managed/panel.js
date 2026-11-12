@@ -225,6 +225,8 @@ export async function fetchVerifiedManifest(opts) {
  *   getManifest: () => Promise<object>,
  *   pluginVersion: string,
  *   panelBase?: string,
+ *   resourceIdentity?: {instanceId: string, tenantId: string, ownerId: string},
+ *   resourceFetchBase?: string,
  * }} o
  */
 export function createAurigaRouteHandler(o) {
@@ -253,8 +255,14 @@ export function createAurigaRouteHandler(o) {
           pluginVersion: o.pluginVersion,
           manifest,
           panelBase: o.panelBase ?? '/panel/',
-          fetchBase: '/',
+          fetchBase: o.resourceFetchBase ?? '/',
+          // ResourceDistributions currently requires a USER portal/admin grant;
+          // the managed server adapter owns a DEVICE grant, suitable for reads.
+          resourceDistributionAvailable: false,
           platformUrl: null,
+          ...(o.resourceIdentity
+            ? { resourceIdentity: o.resourceIdentity }
+            : {}),
         };
         res.writeHead(200, {
           'content-type': 'application/json; charset=utf-8',

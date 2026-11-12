@@ -93,7 +93,9 @@ test('managed bootstrap returns actual package plugin version and independently 
       'platformUrl',
       'pluginVersion',
       'protocol',
+      'resourceDistributionAvailable',
     ]);
+    assert.equal(body.resourceDistributionAvailable, false);
     assert.doesNotMatch(
       res.body,
       /private\.example|private-instance-token|refreshToken|ownerId|instanceId/,

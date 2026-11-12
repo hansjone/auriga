@@ -30,6 +30,9 @@ export function createManagedNetwork(options) {
   let lifecycle;
   /** @type {{accessToken:string,claims:any}|undefined} */
   let access;
+  /** Resource-only server adapter; never exposed to the browser or public SDK.
+   * @type {{config:{platformOrigin:string},getAccess:()=>Promise<string>}|undefined} */
+  let resourceSession;
   /** @type {(()=>void)|undefined} */
   let detach;
   /** @type {import('./runtime-types.js').NetworkProvider|undefined} */
@@ -116,6 +119,7 @@ export function createManagedNetwork(options) {
   }
 
   function retire() {
+    resourceSession = undefined;
     generation++;
     controller?.abort();
     controller = undefined;
@@ -285,6 +289,15 @@ export function createManagedNetwork(options) {
           };
           await getDevice();
           if (closed || expected !== generation) return;
+          const resourceDevice = getDevice;
+          resourceSession = {
+            config: { platformOrigin: config.platformOrigin },
+            async getAccess() {
+              const device = await resourceDevice();
+              signal.throwIfAborted();
+              return device.accessToken;
+            },
+          };
           lifecycle = (options.createLifecycle ?? createNetworkLifecycle)({
             directory: join(options.directory, 'network', value.deviceId),
             ctx: options.ctx,
@@ -377,6 +390,15 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    get resourceSession() {
+      return !closed &&
+        raw !== rejected &&
+        access &&
+        access.claims.exp * 1000 > Date.now() &&
+        materialUntil > Date.now()
+        ? resourceSession
+        : undefined;
+    },
     get sessionRevoked() {
       return !!raw && (raw === rejected || materialUntil <= Date.now());
     },
