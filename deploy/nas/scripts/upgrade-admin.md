@@ -40,6 +40,11 @@ sh "$NEW/deploy-nas/scripts/materials-upgrade.sh" status
 sh "$NEW/deploy-nas/scripts/materials-upgrade.sh" stage "$RECEIPT"
 sh "$NEW/deploy-nas/scripts/render.sh"
 sh "$NEW/deploy-nas/scripts/upgrade-admin.sh"
+NAS_ROOT="$NEW/deploy-nas"
+export NAS_ROOT
+. "$NAS_ROOT/scripts/lib.sh"
+load_stack_env
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" kill --signal HUP nats
 ```
 
 原收据 SHA 应与备份中独立记录相同。首次 stage 创建追加材料，重跑复用同一秘密。
@@ -51,6 +56,8 @@ sh "$NEW/deploy-nas/scripts/upgrade-admin.sh"
 角色/库/schema。密码从已挂载的文件读取。任一步失败立即退出，修复原因后从该阶段重跑。
 确认原 postgres 在同一固定项目的 internal 网络可达，准备过程中持续验证旧服务请求。
 旧 postgres 缺少新版 entrypoint 挂载时 helper 仍使用新 bundle 的挂载与 SQL。
+NATS 收到 HUP 后重载生成的用户与权限，保留既有连接。
+Compose 的普通 up 无法通过绑定文件内容变化识别这次配置更新，须完成此重载再切换服务。
 
 ## 服务切换与提交
 
