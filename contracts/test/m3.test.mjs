@@ -747,7 +747,10 @@ test('在线和Git工具保留不同制品与runtime要求，源码禁止启用�
   assert.equal(check(git), true, JSON.stringify(check.errors));
   for (const mutate of [
     (v) => (v.tool.commit = 'main'),
-    (v) => (v.tool.installScripts = true),
+    ...[true, 'false', 'true', 0, 1, null, {}, []].map(
+      (value) => (v) => (v.tool.installScripts = value),
+    ),
+    (v) => delete v.tool.installScripts,
     (v) => (v.tool.lockArtifactIds = []),
     (v) => (v.runtimes = []),
     (v) => (v.tool.entrypoint.path = '../outside.js'),

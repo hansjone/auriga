@@ -1389,8 +1389,7 @@ export interface components {
       lockArtifactIds: components['schemas']['Name'][];
       /** @enum {string} */
       packageManager: 'npm' | 'pnpm' | 'pip' | 'maven' | 'gradle';
-      /** @constant */
-      installScripts: false;
+      installScripts: boolean;
       entrypoint: components['schemas']['EntryPoint'];
     };
     GitManifest: {

@@ -108,6 +108,8 @@ online/offline/git。清单位于制品外，制品按原字节SHA-256寻址，�
 
 统一清单严格区分plugin、text-only skill与三种工具，运行时支持Node/Python/Java声明。
 Git锁完整commit并引用源码快照/锁文件制品，installScripts=false；在线工具无本地制品。
+installScripts仍为必填且仅允许布尔false。Schema以boolean加not true表达，避开Java生成器
+对布尔const/单值enum生成错误字符串字面量的问题；生成模型不能替代服务端Schema校验。
 共享草案先用L3，私有/开发者侧载只在当前DSH使用，冻结快照后显式送审。
 跨制品引用、归档路径、平台/入口关系、runtime兼容性与时间窗口需服务端语义校验。
 

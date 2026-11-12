@@ -308,7 +308,10 @@
         },
         "installScripts": {
           "type": "boolean",
-          "const": false
+          "$comment": "Boolean plus not true is equivalent to const false; avoid the Java generator's invalid Boolean enum literal for const/enum false.",
+          "not": {
+            "const": true
+          }
         },
         "entrypoint": {
           "$ref": "#/$defs/EntryPoint"
