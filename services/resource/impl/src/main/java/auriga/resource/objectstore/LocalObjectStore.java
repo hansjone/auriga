@@ -248,6 +248,68 @@ public final class LocalObjectStore implements ObjectStore {
   }
 
   @Override
+  public List<GarbageCandidate> expiredObjects(Instant cutoff) {
+    return operation(
+        () -> {
+          var result = new ArrayList<GarbageCandidate>();
+          try {
+            Path namespace = root.resolve(NAMESPACE);
+            checkedDirectory(namespace);
+            try (var tenants = Files.newDirectoryStream(namespace)) {
+              for (Path tenant : tenants) {
+                UUID id;
+                try {
+                  id = UUID.fromString(tenant.getFileName().toString());
+                } catch (IllegalArgumentException e) {
+                  continue;
+                }
+                checkedDirectory(tenant);
+                Path objects = tenant.resolve("objects");
+                if (!Files.exists(objects, NOFOLLOW_LINKS)) continue;
+                checkedDirectory(objects);
+                try (var entries = Files.newDirectoryStream(objects)) {
+                  for (Path entry : entries) {
+                    if (!entry.getFileName().toString().matches("[0-9a-f]{64}")) continue;
+                    var attrs = regular(entry);
+                    if (attrs.lastModifiedTime().toInstant().isBefore(cutoff))
+                      result.add(new GarbageCandidate(id, "sha256:" + entry.getFileName()));
+                  }
+                }
+              }
+            }
+            return result;
+          } catch (IOException e) {
+            throw storage(e);
+          }
+        });
+  }
+
+  @Override
+  public boolean deleteExpired(
+      GarbageCandidate candidate, Instant cutoff, java.util.function.BooleanSupplier unreferenced) {
+    return operation(
+        () -> {
+          checkTenant(candidate.tenant());
+          checkDigest(candidate.digest());
+          try {
+            Path path = objectPath(candidate.tenant(), candidate.digest(), false);
+            var before = regular(path);
+            if (!before.lastModifiedTime().toInstant().isBefore(cutoff)
+                || !unreferenced.getAsBoolean()) return false;
+            var after = regular(path);
+            if (!Objects.equals(before.fileKey(), after.fileKey())
+                || !before.lastModifiedTime().equals(after.lastModifiedTime())) return false;
+            Files.delete(path);
+            return true;
+          } catch (NoSuchFileException e) {
+            return false;
+          } catch (IOException e) {
+            throw storage(e);
+          }
+        });
+  }
+
+  @Override
   public int cleanupExpiredStaging(UUID tenant) {
     return operation(
         () -> {

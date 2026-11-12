@@ -255,7 +255,10 @@ class OrgCoreTest {
       assertNull(link.getRawUserInfo());
       assertNotEquals(access.adminUrl(), access.portalUrl());
     }
-    assertTrue(events.all.isEmpty());
+    assertEquals(codes.size(), events.all.size());
+    assertEquals(codes.size(), events.ofType("audit.recorded").size());
+    for (String code : codes)
+      assertFalse(OrgJson.MAPPER.writeValueAsString(events.all).contains(code));
   }
 
   @Test
@@ -423,13 +426,14 @@ class OrgCoreTest {
 
   private void assertInvitationUnavailable(OrgService service, UUID owner) {
     long before = invitationCount();
+    var eventsBefore = List.copyOf(events.all);
     var error =
         assertThrows(AurigaException.class, () -> preflightInvitation(service, owner, null));
     assertEquals("common.unavailable", error.errorCode().code());
     assertEquals(503, error.errorCode().httpStatus());
     assertTrue(error.params().isEmpty());
     assertEquals(before, invitationCount());
-    assertTrue(events.all.isEmpty());
+    assertEquals(eventsBefore, events.all);
   }
 
   private long invitationCount() {

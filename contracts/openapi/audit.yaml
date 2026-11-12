@@ -1,0 +1,453 @@
+{
+  'openapi': '3.1.0',
+  'info':
+    {
+      'title': 'Auriga Audit',
+      'version': '1.0.0',
+      'license': { 'name': 'AGPL-3.0-only', 'identifier': 'AGPL-3.0-only' },
+    },
+  'servers': [{ 'url': '/api/audit/v1' }],
+  'tags': [{ 'name': 'Audit', 'description': 'Platform audit metadata' }],
+  'security': [{ 'bearerAuth': [] }],
+  'paths':
+    {
+      '/admin/events':
+        {
+          'get':
+            {
+              'operationId': 'listAuditEvents',
+              'summary': 'listAuditEvents',
+              'tags': ['Audit'],
+              'x-admin-only': true,
+              'x-permission': 'audit.events.read',
+              'description': 'Platform-wide audit metadata. Every successful access is recorded. Free-form details are omitted.',
+              'parameters':
+                [
+                  {
+                    'name': 'from',
+                    'in': 'query',
+                    'schema': { 'type': 'string', 'format': 'date-time' },
+                    'description': 'from',
+                  },
+                  {
+                    'name': 'to',
+                    'in': 'query',
+                    'schema': { 'type': 'string', 'format': 'date-time' },
+                    'description': 'to',
+                  },
+                  {
+                    'name': 'actor',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                    'description': 'actor',
+                  },
+                  {
+                    'name': 'action',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                    'description': 'action',
+                  },
+                  {
+                    'name': 'result',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                    'description': 'result',
+                  },
+                  {
+                    'name': 'q',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                    'description': 'q',
+                  },
+                  {
+                    'name': 'cursor',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                  },
+                  {
+                    'name': 'limit',
+                    'in': 'query',
+                    'schema':
+                      {
+                        'type': 'integer',
+                        'minimum': 1,
+                        'maximum': 100,
+                        'default': 50,
+                      },
+                  },
+                ],
+              'responses':
+                {
+                  '200':
+                    {
+                      'description': 'Success',
+                      'content':
+                        {
+                          'application/json':
+                            {
+                              'schema':
+                                { '$ref': '#/components/schemas/AuditPage' },
+                            },
+                        },
+                    },
+                  '400':
+                    {
+                      'description': 'Invalid filters or export exceeds 1000 rows',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '401':
+                    {
+                      'description': 'Unauthenticated',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '403':
+                    {
+                      'description': 'Admin context and exact audit.events.read permission required',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '404':
+                    {
+                      'description': 'Not found',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      '/admin/events/{id}':
+        {
+          'get':
+            {
+              'operationId': 'getAuditEvent',
+              'summary': 'getAuditEvent',
+              'tags': ['Audit'],
+              'x-admin-only': true,
+              'x-permission': 'audit.events.read',
+              'description': 'Platform-wide audit metadata. Every successful access is recorded. Free-form details are omitted.',
+              'parameters':
+                [
+                  {
+                    'name': 'id',
+                    'in': 'path',
+                    'required': true,
+                    'schema': { 'type': 'string', 'format': 'uuid' },
+                  },
+                ],
+              'responses':
+                {
+                  '200':
+                    {
+                      'description': 'Success',
+                      'content':
+                        {
+                          'application/json':
+                            {
+                              'schema':
+                                { '$ref': '#/components/schemas/AuditEvent' },
+                            },
+                        },
+                    },
+                  '400':
+                    {
+                      'description': 'Invalid filters or export exceeds 1000 rows',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '401':
+                    {
+                      'description': 'Unauthenticated',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '403':
+                    {
+                      'description': 'Admin context and exact audit.events.read permission required',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '404':
+                    {
+                      'description': 'Not found',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      '/admin/events/export':
+        {
+          'get':
+            {
+              'operationId': 'exportAuditEvents',
+              'summary': 'exportAuditEvents',
+              'tags': ['Audit'],
+              'x-admin-only': true,
+              'x-permission': 'audit.events.read',
+              'description': 'Platform-wide audit metadata. Every successful access is recorded. Free-form details are omitted.',
+              'parameters':
+                [
+                  {
+                    'name': 'from',
+                    'in': 'query',
+                    'schema': { 'type': 'string', 'format': 'date-time' },
+                    'description': 'from',
+                  },
+                  {
+                    'name': 'to',
+                    'in': 'query',
+                    'schema': { 'type': 'string', 'format': 'date-time' },
+                    'description': 'to',
+                  },
+                  {
+                    'name': 'actor',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                    'description': 'actor',
+                  },
+                  {
+                    'name': 'action',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                    'description': 'action',
+                  },
+                  {
+                    'name': 'result',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                    'description': 'result',
+                  },
+                  {
+                    'name': 'q',
+                    'in': 'query',
+                    'schema': { 'type': 'string' },
+                    'description': 'q',
+                  },
+                ],
+              'responses':
+                {
+                  '200':
+                    {
+                      'description': 'Success',
+                      'content':
+                        {
+                          'application/json':
+                            {
+                              'schema':
+                                {
+                                  'type': 'object',
+                                  'required': ['csv'],
+                                  'properties':
+                                    {
+                                      'csv':
+                                        {
+                                          'type': 'string',
+                                          'description': 'UTF-8 BOM CSV, maximum 1000 rows; spreadsheet formulas escaped. Download as audit.csv.',
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  '400':
+                    {
+                      'description': 'Invalid filters or export exceeds 1000 rows',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '401':
+                    {
+                      'description': 'Unauthenticated',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '403':
+                    {
+                      'description': 'Admin context and exact audit.events.read permission required',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                  '404':
+                    {
+                      'description': 'Not found',
+                      'content':
+                        {
+                          'application/problem+json':
+                            {
+                              'schema':
+                                {
+                                  '$ref': './common.yaml#/components/schemas/Problem',
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+  'components':
+    {
+      'securitySchemes':
+        {
+          'bearerAuth':
+            { 'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'JWT' },
+        },
+      'schemas':
+        {
+          'AuditEvent':
+            {
+              'type': 'object',
+              'required':
+                [
+                  'id',
+                  'tenantId',
+                  'time',
+                  'actor',
+                  'action',
+                  'result',
+                  'source',
+                  'traceId',
+                ],
+              'properties':
+                {
+                  'id': { 'type': 'string' },
+                  'tenantId': { 'type': 'string' },
+                  'time': { 'type': 'string' },
+                  'action': { 'type': 'string' },
+                  'source': { 'type': 'string' },
+                  'traceId': { 'type': 'string' },
+                  'actor':
+                    {
+                      'type': 'object',
+                      'properties':
+                        {
+                          'type': { 'type': 'string' },
+                          'id': { 'type': 'string' },
+                          'ip': { 'type': 'string' },
+                        },
+                    },
+                  'target':
+                    {
+                      'type': 'object',
+                      'properties':
+                        {
+                          'type': { 'type': 'string' },
+                          'id': { 'type': 'string' },
+                          'name': { 'type': 'string' },
+                        },
+                    },
+                  'result':
+                    {
+                      'type': 'string',
+                      'enum': ['success', 'failure', 'denied'],
+                    },
+                  'detailsRedacted': { 'type': 'boolean' },
+                },
+            },
+          'AuditPage':
+            {
+              'type': 'object',
+              'required': ['items'],
+              'properties':
+                {
+                  'items':
+                    {
+                      'type': 'array',
+                      'items': { '$ref': '#/components/schemas/AuditEvent' },
+                    },
+                  'nextCursor': { 'type': ['string', 'null'] },
+                },
+            },
+        },
+    },
+}

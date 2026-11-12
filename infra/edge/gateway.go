@@ -440,6 +440,9 @@ func (g *Gateway) matchUpstream(path string) *url.URL {
 		strings.HasPrefix(path, "/.well-known/"),
 		path == "/userinfo" || strings.HasPrefix(path, "/userinfo/"):
 		return g.iamURL
+		// Audit shares the combined platform's authenticated mTLS hop.
+	case strings.HasPrefix(path, "/api/audit/v1/"):
+		return g.iamURL
 	case strings.HasPrefix(path, "/api/org/v1/"):
 		return g.orgURL
 	case strings.HasPrefix(path, "/api/workspace/v1/"):

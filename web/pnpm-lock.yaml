@@ -88,6 +88,8 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
+  ../clients/installer: {}
+
   admin:
     dependencies:
       '@auriga/shared':

@@ -755,8 +755,7 @@ public final class OAuthProvider {
               || !device.path("sessionId").asString().equals(backing.path("sessionId").asString())
               || !device.path("accountId").asString().equals(backing.path("accountId").asString())
               || !device.path("clientId").asString().equals(c.id())) return Json.object();
-          device.put("revoked", true);
-          store.save("device", device);
+          sessions.revokeDevice(device);
           // All refresh generations point at this authority row and are now denied.
           // Do not revoke the backing session or any other device/session.
           return Json.object();

@@ -11,6 +11,7 @@ API version: 1.0.0
 package resourceapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -21,18 +22,17 @@ var _ MappedNullable = &DownloadAuthorization{}
 
 // DownloadAuthorization struct for DownloadAuthorization
 type DownloadAuthorization struct {
-	DownloadId           string    `json:"downloadId"`
-	TenantId             string    `json:"tenantId"`
-	NodeId               string    `json:"nodeId"`
-	InstanceId           string    `json:"instanceId"`
-	OwnerId              string    `json:"ownerId"`
-	PackageId            string    `json:"packageId"`
-	VersionId            string    `json:"versionId"`
-	Digest               string    `json:"digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
-	SelectionRevision    int64     `json:"selectionRevision"`
-	ExpiresAt            time.Time `json:"expiresAt"`
-	Url                  string    `json:"url"`
-	AdditionalProperties map[string]interface{}
+	DownloadId        string    `json:"downloadId"`
+	TenantId          string    `json:"tenantId"`
+	NodeId            string    `json:"nodeId"`
+	InstanceId        string    `json:"instanceId"`
+	OwnerId           string    `json:"ownerId"`
+	PackageId         string    `json:"packageId"`
+	VersionId         string    `json:"versionId"`
+	Digest            string    `json:"digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
+	SelectionRevision int64     `json:"selectionRevision"`
+	ExpiresAt         time.Time `json:"expiresAt"`
+	Url               string    `json:"url"`
 }
 
 type _DownloadAuthorization DownloadAuthorization
@@ -350,11 +350,6 @@ func (o DownloadAuthorization) ToMap() (map[string]interface{}, error) {
 	toSerialize["selectionRevision"] = o.SelectionRevision
 	toSerialize["expiresAt"] = o.ExpiresAt
 	toSerialize["url"] = o.Url
-
-	for key, value := range o.AdditionalProperties {
-		toSerialize[key] = value
-	}
-
 	return toSerialize, nil
 }
 
@@ -392,30 +387,15 @@ func (o *DownloadAuthorization) UnmarshalJSON(data []byte) (err error) {
 
 	varDownloadAuthorization := _DownloadAuthorization{}
 
-	err = json.Unmarshal(data, &varDownloadAuthorization)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varDownloadAuthorization)
 
 	if err != nil {
 		return err
 	}
 
 	*o = DownloadAuthorization(varDownloadAuthorization)
-
-	additionalProperties := make(map[string]interface{})
-
-	if err = json.Unmarshal(data, &additionalProperties); err == nil {
-		delete(additionalProperties, "downloadId")
-		delete(additionalProperties, "tenantId")
-		delete(additionalProperties, "nodeId")
-		delete(additionalProperties, "instanceId")
-		delete(additionalProperties, "ownerId")
-		delete(additionalProperties, "packageId")
-		delete(additionalProperties, "versionId")
-		delete(additionalProperties, "digest")
-		delete(additionalProperties, "selectionRevision")
-		delete(additionalProperties, "expiresAt")
-		delete(additionalProperties, "url")
-		o.AdditionalProperties = additionalProperties
-	}
 
 	return err
 }

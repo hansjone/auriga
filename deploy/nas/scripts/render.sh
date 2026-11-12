@@ -73,6 +73,20 @@ escape_sed() {
   printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
 }
 
+# Existing installations gain new audit-only credentials; never rotate an existing secret.
+for _audit_name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
+  _audit_path="$SECRETS/$_audit_name"
+  [ ! -L "$_audit_path" ] || die "audit secret symlink refused"
+  if [ ! -e "$_audit_path" ]; then
+    _audit_value=$(rand_alnum 32)
+    (umask 077; set -C; printf '%s' "$_audit_value" >"$_audit_path") || die "audit secret creation failed"
+    chmod 0600 "$_audit_path"
+  fi
+done
+PG_AUDIT_OWNER=$(read_secret pg_audit_owner_password)
+PG_AUDIT_APP=$(read_secret pg_audit_app_password)
+NATS_AUDIT=$(read_secret nats_audit_password)
+
 # Exclusive creation keeps missing/new feature secrets separate from existing keys.
 write_ops_secret() {
   _ops_path="$SECRETS/$1"
@@ -142,13 +156,28 @@ chmod 0600 "$CONFIG/postgres/init.sql"
 chown_required 999:999 "$CONFIG/postgres/init.sql"
 
 sed \
+  -e "s|__PG_AUDIT_OWNER_PASSWORD__|$(escape_sed "$PG_AUDIT_OWNER")|g" \
+  -e "s|__PG_AUDIT_APP_PASSWORD__|$(escape_sed "$PG_AUDIT_APP")|g" \
+  "$NAS_ROOT/postgres/audit.sql.tmpl" >"$CONFIG/postgres/audit.sql"
+chmod 0600 "$CONFIG/postgres/audit.sql"
+chown_required 999:999 "$CONFIG/postgres/audit.sql"
+printf 'PGPASSWORD=%s\n' "$PG_BOOT" >"$CONFIG/audit-db.env"
+chmod 0600 "$CONFIG/audit-db.env"
+chown_required 999:999 "$CONFIG/audit-db.env"
+
+sed \
   -e "s|__NATS_SYS_PASSWORD__|$(escape_sed "$NATS_SYS")|g" \
   -e "s|__NATS_PLATFORM_PASSWORD__|$(escape_sed "$NATS_PLATFORM")|g" \
   -e "s|__NATS_ROUTES_RW_PASSWORD__|$(escape_sed "$NATS_ROUTES_RW")|g" \
   -e "s|__NATS_EDGE_PASSWORD__|$(escape_sed "$NATS_EDGE")|g" \
+  -e "s|__NATS_AUDIT_PASSWORD__|$(escape_sed "$NATS_AUDIT")|g" \
   "$NAS_ROOT/nats/nats.conf.tmpl" >"$CONFIG/nats/nats.conf"
 chmod 0600 "$CONFIG/nats/nats.conf"
 chown_required 65532:65532 "$CONFIG/nats/nats.conf"
+
+printf 'AURIGA_AUDIT_NATS_URL=nats://bifrost_audit:%s@nats:4222\n' "$NATS_AUDIT" >"$CONFIG/bifrost-audit.env"
+chmod 0600 "$CONFIG/bifrost-audit.env"
+chown_required 10003:10003 "$CONFIG/bifrost-audit.env"
 
 cat >"$CONFIG/platform.env" <<EOF
 SPRING_PROFILES_ACTIVE=$PROFILES
@@ -158,6 +187,12 @@ AURIGA_IAM_DB_PASSWORD=$PG_IAM
 AURIGA_ORG_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_ORG_DB_USER=auriga_org
 AURIGA_ORG_DB_PASSWORD=$PG_ORG
+AURIGA_AUDIT_ENABLED=true
+AURIGA_AUDIT_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
+AURIGA_AUDIT_DB_USER=auriga_audit_app
+AURIGA_AUDIT_DB_PASSWORD=$PG_AUDIT_APP
+AURIGA_AUDIT_MIGRATION_USER=auriga_audit_owner
+AURIGA_AUDIT_MIGRATION_PASSWORD=$PG_AUDIT_OWNER
 AURIGA_OPS_ENABLED=true
 AURIGA_OPS_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_OPS_DB_USER=auriga_ops_app

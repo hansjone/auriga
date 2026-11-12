@@ -33,7 +33,11 @@ public final class TarGzipArchiveValidator {
       int files,
       int directories,
       long expandedBytes,
-      long fileBytes) {}
+      long fileBytes,
+      List<FileEntry> inventory,
+      byte[] packageManifest) {}
+
+  public record FileEntry(String path, long sizeBytes, String digest) {}
 
   public Result validate(
       UUID tenant, StageId stage, ObjectInfo object, String expectedDigest, OsEnum targetOs) {
@@ -69,12 +73,34 @@ public final class TarGzipArchiveValidator {
           try (var tar = new StrictUstarInputStream(expanded, targetOs != OsEnum.LINUX)) {
             byte[] bytes = new byte[65536];
             long payload = 0;
+            var inventory = new ArrayList<FileEntry>();
+            byte[] manifest = null;
             for (var entry = tar.getNextEntry(); entry != null; entry = tar.getNextEntry()) {
               long size = 0;
+              MessageDigest fileDigest;
+              try {
+                fileDigest = MessageDigest.getInstance("SHA-256");
+              } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException(e);
+              }
+              String path = entry.getName().replaceAll("^(?:\\./)+", "");
+              boolean packageJson =
+                  !entry.isDirectory()
+                      && (path.equals("package.json") || path.equals("package/package.json"));
+              var captured = packageJson ? new ByteArrayOutputStream() : null;
+              if (packageJson && (manifest != null || entry.getSize() > 1048576))
+                throw StrictUstarInputStream.bad();
               for (int count; (count = tar.read(bytes)) != -1; ) {
                 size += count;
                 payload += count;
+                fileDigest.update(bytes, 0, count);
+                if (captured != null) captured.write(bytes, 0, count);
               }
+              if (!entry.isDirectory())
+                inventory.add(
+                    new FileEntry(
+                        path, size, "sha256:" + HexFormat.of().formatHex(fileDigest.digest())));
+              if (captured != null) manifest = captured.toByteArray();
               if (size != entry.getSize()) throw StrictUstarInputStream.bad();
               expanded.paddingRemaining =
                   (StrictUstarInputStream.RECORD - size % StrictUstarInputStream.RECORD)
@@ -92,7 +118,15 @@ public final class TarGzipArchiveValidator {
               throw failure(DIGEST);
             if (expanded.count > raw.count * 100L) throw StrictUstarInputStream.bad();
             return new Result(
-                object, targetOs, tar.entries, tar.files, tar.directories, expanded.count, payload);
+                object,
+                targetOs,
+                tar.entries,
+                tar.files,
+                tar.directories,
+                expanded.count,
+                payload,
+                List.copyOf(inventory),
+                manifest);
           }
         }
       } catch (IOException e) {
