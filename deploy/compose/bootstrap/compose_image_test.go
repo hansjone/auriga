@@ -24,6 +24,26 @@ func composeImageService(t *testing.T, name string) string {
 	return body
 }
 
+func TestDeviceBrokerUsesUnpublishedInternalNetwork(t *testing.T) {
+	broker := composeImageService(t, "network-broker")
+	if strings.Contains(broker, "network_mode:") || strings.Contains(broker, "    ports:") || !strings.Contains(broker, "      network-control:") {
+		t.Fatal("Broker must use its private network without host networking or published ports")
+	}
+	if !strings.Contains(composeImageService(t, "edge"), "      network-control: {}") {
+		t.Fatal("edge cannot reach the private Broker listener")
+	}
+	platform := composeImageService(t, "platform")
+	for _, setting := range []string{"AURIGA_OPS_ENABLED: 'true'", "AURIGA_OPS_DB_USER: auriga_ops_app", "AURIGA_OPS_NOTIFICATION_KEY: ${AURIGA_OPS_NOTIFICATION_KEY}"} {
+		if !strings.Contains(platform, setting) {
+			t.Fatalf("ops platform configuration lost while isolating Broker: %s", setting)
+		}
+	}
+	raw, err := os.ReadFile("../docker-compose.yml")
+	if err != nil || !strings.Contains(string(raw), "  network-control:\n    driver: bridge\n    internal: true\n") {
+		t.Fatal("Broker network must prohibit external forwarding")
+	}
+}
+
 func TestEgressConsumesSingleBuiltEdgeImage(t *testing.T) {
 	edge, egress := composeImageService(t, "edge"), composeImageService(t, "egress")
 	image := func(service string) string {

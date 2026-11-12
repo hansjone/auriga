@@ -36,7 +36,7 @@ func legacyNASMaterialSet(https bool) materials.MaterialSet {
 
 func nasBaseMaterialSet(base string, https bool) materials.MaterialSet {
 	if _, err := os.Lstat(filepath.Join(base, "litellm-runtime.json")); err == nil {
-		return legacyNASMaterialSet(https)
+		return nasCompatibleNetworkMaterials(base, legacyNASMaterialSet(https))
 	}
-	return nasMaterialSet(https)
+	return nasCompatibleNetworkMaterials(base, nasMaterialSet(https))
 }

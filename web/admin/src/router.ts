@@ -1,3 +1,4 @@
+import DevicesView from './views/DevicesView.vue';
 import UpgradesView from './views/ops/UpgradesView.vue';
 import BackupsView from './views/ops/BackupsView.vue';
 import LifecycleView from './views/ops/LifecycleView.vue';
@@ -28,6 +29,7 @@ import AlertsView from './views/ops/AlertsView.vue';
 import NotificationsView from './views/ops/NotificationsView.vue';
 
 const existing = new Set([
+  '/runtime/devices',
   '/ops/upgrades',
   '/ops/backups',
   '/ops/lifecycle',
@@ -85,6 +87,7 @@ export const router = createRouter({
           props: { phase },
         })),
         { path: 'members', component: MembersView },
+        { path: 'runtime/devices', component: DevicesView },
         { path: 'nodes', component: NodesView },
         { path: 'instances', component: InstancesView },
         { path: 'groups', component: GroupsView },

@@ -32,6 +32,69 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /admin/devices:
+    get:
+      tags: [device]
+      operationId: listAdminDevices
+      summary: List tenant field terminals
+      x-admin-only: true
+      x-permission: iam.network.manage
+      parameters:
+        - { name: member, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: online, in: query, schema: { type: string, enum: [unknown, online, offline] } }
+      responses:
+        '200':
+          description: Field terminals with authoritative edge connection state; unknown on monitoring failure
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AdminDevicesDevice' } }
+        '403': { $ref: './common.yaml#/components/responses/Forbidden' }
+  /admin/devices/{deviceId}:
+    parameters:
+      - { name: deviceId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [device]
+      operationId: getAdminDevice
+      summary: Read field terminal
+      x-admin-only: true
+      x-permission: iam.network.manage
+      responses:
+        '200':
+          description: Terminal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminDevicesDevice' }
+        '403': { $ref: './common.yaml#/components/responses/Forbidden' }
+        '404': { $ref: './common.yaml#/components/responses/NotFound' }
+    delete:
+      tags: [device]
+      operationId: revokeAdminDevice
+      summary: Revoke terminal credentials and network node
+      description: Requires recent step-up. Idempotent; committed revocation is authoritative for device access and refresh. Read the terminal afterwards to confirm.
+      x-admin-only: true
+      x-permission: iam.network.manage
+      x-requires-recent-step-up: true
+      responses:
+        '204': { description: Revoked }
+        '202':
+          description: Credentials revoked, connection closure pending confirmation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, credentialRevoked, disconnectStatus]
+                properties:
+                  id: { type: string, format: uuid }
+                  # Preserve the true-only boolean while avoiding a Boolean enum in the pinned Java generator.
+                  credentialRevoked: { type: boolean, not: { const: false } }
+                  disconnectStatus: { type: string, const: pending }
+
+        '403': { $ref: './common.yaml#/components/responses/Forbidden' }
+        '404': { $ref: './common.yaml#/components/responses/NotFound' }
   /network/register:
     $ref: iam-network-client.yaml#/paths/~1network~1register
   /network/tickets:
@@ -1137,6 +1200,25 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    AdminDevicesDevice:
+      type: object
+      required: [id, accountId, memberName, name, status, online, accessMode]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        memberName: { type: string }
+        name: { type: string }
+        platform: { type: string }
+        clientVersion: { type: string }
+        createdAt: { type: string }
+        lastSeenAt: { type: string }
+        lastHeartbeatAt: { type: string, format: date-time, description: Actual client PING/PONG observed on the edge WSS connection; absent until observed }
+        revokedAt: { type: string }
+        networkNode: { type: string }
+        disconnectStatus: { type: string, enum: [pending, confirmed] }
+        accessMode: { type: string, enum: [native_tx, manual, unknown] }
+        status: { type: string, enum: [active, revoked] }
+        online: { type: string, enum: [unknown, online, offline], description: Authoritative broker connection snapshot; unknown on edge monitoring outage; lastSeenAt is activity rather than heartbeat }
     AdminCsrfTokenRegistration:
       type: object
       properties:

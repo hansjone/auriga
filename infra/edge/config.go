@@ -45,6 +45,7 @@ type Config struct {
 	NodeTLS                NodeTLSConfig                 `json:"nodeTLS"`
 	PublicPathPrefixes     []string                      `json:"publicPathPrefixes"`
 	NetworkWSS             NetworkWSSConfig              `json:"networkWss"`
+	DevicePresence         DevicePresenceConfig          `json:"devicePresence"`
 	ManagedIngress         ManagedIngressConfig          `json:"managedIngress"`
 }
 
@@ -167,6 +168,14 @@ func applyEnv(cfg *Config) {
 		set("AURIGA_NATS_URL", &cfg.NATSURL)
 	}
 	set("AURIGA_EDGE_NATS_CREDS_FILE", &cfg.NATSCredsFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_URL", &cfg.DevicePresence.URL)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_CREDS_FILE", &cfg.DevicePresence.CredsFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_USERNAME", &cfg.DevicePresence.Username)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_PASSWORD_FILE", &cfg.DevicePresence.PasswordFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_CA_FILE", &cfg.DevicePresence.CAFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_CERT_FILE", &cfg.DevicePresence.CertFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_KEY_FILE", &cfg.DevicePresence.KeyFile)
+	set("AURIGA_EDGE_DEVICE_PRESENCE_SERVER_NAME", &cfg.DevicePresence.ServerName)
 	if cfg.NATSCredsFile == "" {
 		set("AURIGA_NATS_CREDS_FILE", &cfg.NATSCredsFile)
 	}

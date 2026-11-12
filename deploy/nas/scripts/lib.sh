@@ -759,3 +759,20 @@ install_edge_material() {
   chmod "0$_mode" "$_temporary"
   mv -T "$_temporary" "$_target"
 }
+
+install_network_presence_materials() (
+  _presence_source="$AURIGA_DATA_ROOT/config/materials/network"
+  for _leaf in edge-presence.pem edge-presence.key edge-presence.password; do
+    if [ ! -e "$_presence_source/$_leaf" ] && [ ! -L "$_presence_source/$_leaf" ]; then
+      info 'device_presence=disabled reason=missing_optional_materials'
+      return 0
+    fi
+  done
+  for _leaf in edge-presence.pem edge-presence.key edge-presence.password; do
+    [ -f "$_presence_source/$_leaf" ] && [ ! -L "$_presence_source/$_leaf" ] && [ "$(stat -c '%h' "$_presence_source/$_leaf")" = 1 ] \
+      || die 'invalid device presence source'
+  done
+  install_edge_material "$_presence_source/edge-presence.pem" "$AURIGA_DATA_ROOT/config/pki-edge/network-presence.pem" 644
+  install_edge_material "$_presence_source/edge-presence.key" "$AURIGA_DATA_ROOT/config/pki-edge/network-presence.key" 600
+  install_edge_material "$_presence_source/edge-presence.password" "$AURIGA_DATA_ROOT/config/pki-edge/network-presence.password" 600
+)
