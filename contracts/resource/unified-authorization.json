@@ -64,5 +64,24 @@
     "package-version-visibility",
     "resource.packages.read"
   ],
-  "distributionPermission": "resource.distributions.manage"
+  "distributionPermission": "resource.distributions.manage",
+  "securityReviewQualification": {
+    "permission": "resource.versions.security_review",
+    "source": "ResourceAccessInputs.permissions",
+    "trustedInput": "server-resolved-current-tenant-permissions",
+    "clientRoleIsDeclarationOnly": true,
+    "independentlyGrantable": true,
+    "revocable": true,
+    "checkAt": [
+      "review-decision",
+      "publication"
+    ],
+    "requireSameTenant": true,
+    "authorMayReview": false,
+    "countDistinctBy": "tenantId+reviewerId",
+    "revokedSecurityReviewCounts": false,
+    "missingQualificationError": "common.forbidden",
+    "insufficientPublicationQuorumError": "resource.review_required",
+    "fixtures": "security-review-fixtures.json"
+  }
 }

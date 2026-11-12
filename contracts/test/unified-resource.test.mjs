@@ -566,3 +566,5 @@ for (const fixture of transitions.cases) {
     );
   });
 }
+
+import './security-review.test.mjs';

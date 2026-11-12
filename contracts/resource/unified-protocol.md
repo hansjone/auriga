@@ -62,6 +62,16 @@ guardian 全部转移、守卫和动作见 guardian-transitions.json。未列转
 
 审核/发布每次核验当前版本修订和原始摘要。R1 至少一名非作者，R2/R3 至少两名不同非作者且一名安全资格审核者。role=security 由服务端资格验证。同一人多个角色只计一次，作者禁止审核/发布。风险只可上调，内容或风险变更递增修订并清空旧审核。分发使用 resource.distributions.manage，且当前目标实例/主人/节点归属有效。原始清单和制品必须逐次授权，票据和 locator 均无法绕过 ACL。
 
+## 安全审核资格与发布复核
+
+安全审核资格唯一来源为权限 `resource.versions.security_review`。服务端从现有可信输入 `ResourceAccessInputs.permissions` 读取审核者在资源所属租户的当前有效权限，禁止从客户端请求、历史审核记录或其他租户权限推断资格。内置角色仅 owner 默认拥有，admin 不默认拥有；此权限可单独授予和撤销，不替代普通审核所需的 `resource.versions.review` 或其他既有授权门禁。owner 身份也不能绕过当前有效权限检查。
+
+客户端 `role=security` 只是职责声明。提交审核决定时核验当前资格，无资格、跨租户或作者自审返回 `common.forbidden`，不能降格为普通审核后接受。发布时再次按资源租户解析每名审核者的当前可信权限；资格被撤销、无法解析或租户不匹配的安全审核不再计入审核人数和安全审核人数，不沿用提交时的资格快照。有效普通审核仍可单独计数，但不能替代安全资格。资格无法确认或人数不足均拒绝发布，返回 `resource.review_required`。
+
+只计同一租户、当前修订与原始摘要一致的 approve 决定。作者不能审核自己的提交；按 tenantId + reviewerId 去重，同人同时具有 general/security 两种职责仅算一人，但有效 security 职责仍满足安全审核要求，记录顺序不影响结果。R1 至少一名不同于作者的审核者；R2/R3 至少两名不同的非作者，其中至少一名具有当前安全审核资格。发布的其他实时授权检查继续适用。
+
+机器规则见 `unified-authorization.json`，可复用的服务端输入与期望结果见 `security-review-fixtures.json`；夹具中的 principal/currentPrincipals 均为测试注入的可信服务端输入，不是 HTTP 请求允许提交的字段。
+
 ## HTTP 条件写入与分页
 
 所有 Unified 写操作必填 If-Match 和 Idempotency-Key，成功响应提供 ETag。初次创建使用 `"0"`，已有对象使用服务端当前修订的 ETag。缺失前置条件返回 common.validation_failed，旧 ETag 返回412 common.precondition_failed。票据/下载 POST 的 ETag 绑定当前安装修订，不能绕过撤销或实时授权。成员列表必填 clientId，可带 kind、limit、cursor；分发列表支持 instanceId、kind、limit、cursor。游标绑定认证租户、过滤条件和快照，拒绝换过滤条件复用。limit 默认50，范围1到200。

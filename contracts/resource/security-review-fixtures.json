@@ -1,0 +1,773 @@
+{
+  "schemaVersion": 1,
+  "description": "Trusted principal snapshots are server inputs, never client request fields. Publication snapshots are resolved again at publication, independently of the accepted historical review. All unrelated authorization gates are satisfied.",
+  "cases": [
+    {
+      "id": "qualified",
+      "operation": "review-decision",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "principal": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "permissions": [
+            "resource.versions.review",
+            "resource.versions.security_review"
+          ]
+        },
+        "review": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "role": "security",
+          "decision": "approve",
+          "versionRevision": 3,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "allowed": true,
+        "errorCode": null
+      }
+    },
+    {
+      "id": "unqualified-role-declaration",
+      "operation": "review-decision",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "principal": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "permissions": ["resource.versions.review"]
+        },
+        "review": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "role": "security",
+          "decision": "approve",
+          "versionRevision": 3,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "common.forbidden"
+      }
+    },
+    {
+      "id": "qualification-revoked-before-decision",
+      "operation": "review-decision",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "principal": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "permissions": ["resource.versions.review"]
+        },
+        "review": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "role": "security",
+          "decision": "approve",
+          "versionRevision": 3,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "common.forbidden"
+      }
+    },
+    {
+      "id": "cross-tenant-qualification",
+      "operation": "review-decision",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "principal": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000002",
+          "permissions": [
+            "resource.versions.review",
+            "resource.versions.security_review"
+          ]
+        },
+        "review": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "role": "security",
+          "decision": "approve",
+          "versionRevision": 3,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "common.forbidden"
+      }
+    },
+    {
+      "id": "cross-tenant-review",
+      "operation": "review-decision",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "principal": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "permissions": [
+            "resource.versions.review",
+            "resource.versions.security_review"
+          ]
+        },
+        "review": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000005",
+          "tenantId": "019a0000-0000-7000-8000-000000000002",
+          "role": "security",
+          "decision": "approve",
+          "versionRevision": 3,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "common.forbidden"
+      }
+    },
+    {
+      "id": "author-self-review",
+      "operation": "review-decision",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "principal": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000003",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "permissions": [
+            "resource.versions.review",
+            "resource.versions.security_review"
+          ]
+        },
+        "review": {
+          "reviewerId": "019a0000-0000-7000-8000-000000000003",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "role": "security",
+          "decision": "approve",
+          "versionRevision": 3,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "common.forbidden"
+      }
+    },
+    {
+      "id": "publication-current-qualification",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": true,
+        "errorCode": null,
+        "distinctReviewers": 2,
+        "securityReviewers": 1
+      }
+    },
+    {
+      "id": "publication-rechecks-revoked-qualification",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 1,
+        "securityReviewers": 0
+      }
+    },
+    {
+      "id": "publication-missing-current-principal",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 1,
+        "securityReviewers": 0
+      }
+    },
+    {
+      "id": "publication-cross-tenant-qualification",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000002",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 1,
+        "securityReviewers": 0
+      }
+    },
+    {
+      "id": "publication-author-self-review",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000003",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000003",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 1,
+        "securityReviewers": 0
+      }
+    },
+    {
+      "id": "same-person-two-roles-count-once",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 1,
+        "securityReviewers": 1
+      }
+    },
+    {
+      "id": "same-person-roles-reversed-count-once",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 1,
+        "securityReviewers": 1
+      }
+    },
+    {
+      "id": "two-people-with-dual-role",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": true,
+        "errorCode": null,
+        "distinctReviewers": 2,
+        "securityReviewers": 1
+      }
+    },
+    {
+      "id": "stale-revision-review",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 2,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 1,
+        "securityReviewers": 0
+      }
+    },
+    {
+      "id": "stale-digest-review",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r2",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 1,
+        "securityReviewers": 0
+      }
+    },
+    {
+      "id": "r3-requires-qualified-security",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r3",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": false,
+        "errorCode": "resource.review_required",
+        "distinctReviewers": 2,
+        "securityReviewers": 0
+      }
+    },
+    {
+      "id": "r3-qualified-security",
+      "operation": "publication",
+      "input": {
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "authorId": "019a0000-0000-7000-8000-000000000003",
+        "riskLevel": "r3",
+        "versionRevision": 3,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reviews": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "general",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "role": "security",
+            "decision": "approve",
+            "versionRevision": 3,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "currentPrincipals": [
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000004",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": ["resource.versions.review"]
+          },
+          {
+            "reviewerId": "019a0000-0000-7000-8000-000000000005",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "permissions": [
+              "resource.versions.review",
+              "resource.versions.security_review"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "allowed": true,
+        "errorCode": null,
+        "distinctReviewers": 2,
+        "securityReviewers": 1
+      }
+    }
+  ]
+}
