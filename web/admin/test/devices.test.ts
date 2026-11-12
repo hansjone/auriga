@@ -5,6 +5,9 @@ import { router } from '../src/router';
 import AlertsView from '../src/views/ops/AlertsView.vue';
 import NotificationsView from '../src/views/ops/NotificationsView.vue';
 import DevicesView from '../src/views/DevicesView.vue';
+import UpgradesView from '../src/views/ops/UpgradesView.vue';
+import BackupsView from '../src/views/ops/BackupsView.vue';
+import LifecycleView from '../src/views/ops/LifecycleView.vue';
 
 describe('merged administration routes', () => {
   it('resolves devices and both operations pages to their implemented views', () => {
@@ -12,6 +15,9 @@ describe('merged administration routes', () => {
       ['/runtime/devices', DevicesView],
       ['/ops/alerts', AlertsView],
       ['/ops/notifications', NotificationsView],
+      ['/ops/upgrades', UpgradesView],
+      ['/ops/backups', BackupsView],
+      ['/ops/lifecycle', LifecycleView],
     ] as const) {
       expect(router.resolve(path).matched.at(-1)?.components?.default).toBe(
         view,
