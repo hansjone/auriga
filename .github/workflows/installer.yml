@@ -1,0 +1,57 @@
+name: Installer
+
+# Windows installer prototype: build the package, run its tests and an isolated
+# install/launch/uninstall check. Nothing is published or signed.
+on:
+  pull_request:
+    paths:
+      - 'clients/installer/**'
+      - 'clients/dsh-plugin/**'
+      - 'web/panel/**'
+      - 'web/pnpm-lock.yaml'
+      - '.github/workflows/installer.yml'
+  workflow_dispatch:
+    inputs:
+      upstream:
+        description: 'Upstream @deepseek-ai/dsh version (default: clients/installer/upstream.json)'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --store-dir "$(pnpm store path)"
+        shell: bash
+      - name: Lint and unit tests (core, upgrade/rollback, version lock, secret scan)
+        run: pnpm --filter @auriga/installer lint && pnpm --filter @auriga/installer test
+      - name: Build package and single-file setup exe
+        working-directory: clients/installer
+        shell: bash
+        env:
+          UPSTREAM: ${{ inputs.upstream }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ -n "$UPSTREAM" ]; then extra=(--upstream "$UPSTREAM"); fi
+          node scripts/build.mjs "${extra[@]}" --out "$RUNNER_TEMP/installer" --no-zip --exe
+          echo "INSTALLER_STAGE=$(ls -d "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64)" >> "$GITHUB_ENV"
+          echo "INSTALLER_EXE=$(ls "$RUNNER_TEMP"/installer/Auriga-Desktop-Setup-*.exe)" >> "$GITHUB_ENV"
+      - name: Package checks (manifest, checksums, version lock, licences, pnpm, no secrets)
+        run: pnpm --filter @auriga/installer test
+      - name: Isolated install from the setup exe, launch, uninstall
+        working-directory: clients/installer
+        shell: bash
+        run: node scripts/e2e.mjs --old "$INSTALLER_EXE" --sandbox "$RUNNER_TEMP/sandbox"

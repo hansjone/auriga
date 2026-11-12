@@ -33,8 +33,9 @@ for (const name of ['iam', 'org', 'workspace', 'ai', 'resource']) {
   await writeFile(fileURLToPath(new URL(name + '.ts', output)), body);
 }
 
-// Ops contracts are consumed by the admin application only.
+// These contracts are consumed by the admin application only.
 for (const [name, filename] of [
+  ['audit', 'audit.generated'],
   ['ops', 'opsSchema'],
   ['ops-runtime', 'runtimeContract'],
 ]) {

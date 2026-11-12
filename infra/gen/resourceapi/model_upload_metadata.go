@@ -23,6 +23,7 @@ type UploadMetadata struct {
 	Version              string                 `json:"version"`
 	ExpectedDigest       string                 `json:"expectedDigest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
 	Manifest             UploadMetadataManifest `json:"manifest"`
+	ChangeNotes          *string                `json:"changeNotes,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -120,6 +121,38 @@ func (o *UploadMetadata) SetManifest(v UploadMetadataManifest) {
 	o.Manifest = v
 }
 
+// GetChangeNotes returns the ChangeNotes field value if set, zero value otherwise.
+func (o *UploadMetadata) GetChangeNotes() string {
+	if o == nil || IsNil(o.ChangeNotes) {
+		var ret string
+		return ret
+	}
+	return *o.ChangeNotes
+}
+
+// GetChangeNotesOk returns a tuple with the ChangeNotes field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UploadMetadata) GetChangeNotesOk() (*string, bool) {
+	if o == nil || IsNil(o.ChangeNotes) {
+		return nil, false
+	}
+	return o.ChangeNotes, true
+}
+
+// HasChangeNotes returns a boolean if a field has been set.
+func (o *UploadMetadata) HasChangeNotes() bool {
+	if o != nil && !IsNil(o.ChangeNotes) {
+		return true
+	}
+
+	return false
+}
+
+// SetChangeNotes gets a reference to the given string and assigns it to the ChangeNotes field.
+func (o *UploadMetadata) SetChangeNotes(v string) {
+	o.ChangeNotes = &v
+}
+
 func (o UploadMetadata) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -133,6 +166,9 @@ func (o UploadMetadata) ToMap() (map[string]interface{}, error) {
 	toSerialize["version"] = o.Version
 	toSerialize["expectedDigest"] = o.ExpectedDigest
 	toSerialize["manifest"] = o.Manifest
+	if !IsNil(o.ChangeNotes) {
+		toSerialize["changeNotes"] = o.ChangeNotes
+	}
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -181,6 +217,7 @@ func (o *UploadMetadata) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "version")
 		delete(additionalProperties, "expectedDigest")
 		delete(additionalProperties, "manifest")
+		delete(additionalProperties, "changeNotes")
 		o.AdditionalProperties = additionalProperties
 	}
 

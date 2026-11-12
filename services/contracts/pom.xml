@@ -267,6 +267,16 @@
             </configuration>
           </execution>
           <execution>
+            <id>audit-http</id>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <inputSpec>${project.build.directory}/bundled/audit.json</inputSpec>
+              <output>${project.build.directory}/generated-sources/openapi/audit</output>
+              <apiPackage>auriga.audit.web.api</apiPackage>
+              <modelPackage>auriga.audit.web.model</modelPackage>
+            </configuration>
+          </execution>
+          <execution>
             <id>ops-http</id>
             <goals><goal>generate</goal></goals>
             <configuration>

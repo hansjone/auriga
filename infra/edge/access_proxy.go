@@ -201,7 +201,11 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		bearer = ""
 	}
 	if r.Body != nil && r.Body != http.NoBody {
-		r.Body = http.MaxBytesReader(w, r.Body, maxAPIBodyBytes)
+		limit := int64(maxAPIBodyBytes)
+		if target == g.resourceURL && r.Method == http.MethodPost && resourceUploadPath.MatchString(r.URL.Path) {
+			limit = (64 << 20) + 131072 // Contract archive bytes plus bounded multipart metadata/framing.
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
 	transport := g.APITransports[target]
 	if iam {
