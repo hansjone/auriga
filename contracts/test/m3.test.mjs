@@ -62,12 +62,19 @@ ajv.addSchema({
 test('公开模型能力接受大容量与安全整数，缺失保持未知，非法数值拒绝', () => {
   const models = ajv.getSchema(aiUri + '#/$defs/ModelList');
   const entry = { id: 'auto', object: 'model', created: 0, owned_by: 'auriga' };
-  const response = (extra) => ({ object: 'list', data: [{ ...entry, ...extra }] });
+  const response = (extra) => ({
+    object: 'list',
+    data: [{ ...entry, ...extra }],
+  });
   for (const extra of [
     {},
     { context_window: 4000000, max_output_tokens: 256000 },
-    { context_window: Number.MAX_SAFE_INTEGER, max_output_tokens: Number.MAX_SAFE_INTEGER - 1 },
-  ]) assert.equal(models(response(extra)), true, JSON.stringify(models.errors));
+    {
+      context_window: Number.MAX_SAFE_INTEGER,
+      max_output_tokens: Number.MAX_SAFE_INTEGER - 1,
+    },
+  ])
+    assert.equal(models(response(extra)), true, JSON.stringify(models.errors));
   for (const extra of [
     { context_window: 1 },
     { context_window: 1.5 },
@@ -75,7 +82,8 @@ test('公开模型能力接受大容量与安全整数，缺失保持未知，�
     { max_output_tokens: 0 },
     { max_output_tokens: 1.5 },
     { max_output_tokens: Number.MAX_SAFE_INTEGER + 1 },
-  ]) assert.equal(models(response(extra)), false, JSON.stringify(extra));
+  ])
+    assert.equal(models(response(extra)), false, JSON.stringify(extra));
 });
 
 test('受限JSON与SSE golden逐帧校验，未知字段/单字符串stop/缺输出上限拒绝', () => {
@@ -233,9 +241,9 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 62);
+  assert.equal(count, 74);
   assert(ids.has('listRelayProviderModels'));
-  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 27);
+  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 32);
   for (const [key, p] of Object.entries(catalog.permissions)) {
     assert(p.description.en && p.description['zh-CN'], key);
     assert.equal(typeof p.adminOnly, 'boolean');
@@ -563,4 +571,75 @@ test('签名schema不接受缺省空数组、错purpose/租户/整数/时间表�
     validate('resource/signatures.schema.json', 'RevocationList')(rev),
     false,
   );
+});
+const skillUri = pathToFileURL(path.join(root, 'openapi/resource.yaml')).href;
+ajv.addSchema({
+  $id: skillUri,
+  $defs: schemaRefs(read('openapi/resource.yaml').components.schemas),
+});
+
+test('Skill草案限制共享L3与纯文本声明，不接受私有上传或客户端指定身份', () => {
+  const check = ajv.getSchema(skillUri + '#/$defs/SkillPackageInput');
+  const body = { name: 'network-guide', kind: 'skill', visibility: 'members' };
+  assert.equal(check(body), true, JSON.stringify(check.errors));
+  for (const extra of [
+    { kind: 'plugin' },
+    { visibility: 'private' },
+    { name: '../escape' },
+    { ownerId: uuid },
+    { tenantId: uuid },
+    { level: 'l1' },
+  ])
+    assert.equal(check({ ...body, ...extra }), false, JSON.stringify(extra));
+  const manifest = ajv.getSchema(skillUri + '#/$defs/SkillManifest');
+  const value = {
+    schemaVersion: 1,
+    name: 'network-guide',
+    version: '1.0.0',
+    description: 'Network guide',
+    dshVersionRange: '>=0.2.1-rc.3',
+    contentProfile: 'text-only',
+    license: 'MIT',
+    outboundHosts: [],
+    requiredTools: [],
+  };
+  assert.equal(manifest(value), true, JSON.stringify(manifest.errors));
+  for (const extra of [
+    { contentProfile: 'code' },
+    { scripts: ['run.sh'] },
+    { schemaVersion: 2 },
+  ])
+    assert.equal(manifest({ ...value, ...extra }), false);
+});
+
+test('Skill v2 envelope与plugin v1相互拒绝，禁止未知签名字段和错purpose', () => {
+  const check = ajv.getSchema(skillUri + '#/$defs/SkillEnvelope');
+  const plugin = read('resource/signature-vectors.json').cases[0].document;
+  const value = clone(plugin);
+  value.schemaVersion = 2;
+  Object.assign(value.statement, {
+    purpose: 'skill',
+    name: 'network-guide',
+    os: 'any',
+    arch: 'any',
+    manifestDigest: 'sha256:' + 'a'.repeat(64),
+  });
+  assert.equal(check(value), true, JSON.stringify(check.errors));
+  assert.equal(check(plugin), false);
+  assert.equal(
+    validate('resource/signatures.schema.json', 'ResourceEnvelope')(value),
+    false,
+  );
+  for (const mutate of [
+    (v) => (v.statement.purpose = 'plugin'),
+    (v) => delete v.statement.manifestDigest,
+    (v) => (v.statement.manifestDigest = 'sha256:INVALID'),
+    (v) => (v.unknown = true),
+    (v) => (v.statement.script = 'run.sh'),
+    (v) => (v.schemaVersion = 1),
+  ]) {
+    const invalid = clone(value);
+    mutate(invalid);
+    assert.equal(check(invalid), false);
+  }
 });

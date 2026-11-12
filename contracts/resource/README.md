@@ -91,3 +91,26 @@ resource事务记录意图和resource.distribution_requested；workspace复核�
 公网edge不路由 `/internal/resource/**`，浏览器下载另走已授权成员路径，禁止无鉴权blobs/digest入口。
 首批不支持Range，带Range返回400 common.validation_failed；断线重新下载整包并重新鉴权。
 过期授权由workspace重新解析同锁定选择续发，不能延长客户端提供的旧expiry。
+
+## Skill 市场契约草案（未实现）
+
+设计见 `docs/design/skill-market.zh.md`。本轮仅增 OpenAPI 的 `Skill*` schemas、
+operationId 和 `/api/resource/v1/skills/**`、`/api/resource/v1/admin/skills/**` 路径，
+操作标记 `x-auriga-contract-stage=draft`；不修改上文首批 plugin 边界或旧签名格式。
+草案覆盖共享 L3 包/版本/送审/审核/发布/下架，不表示服务路由或成员安装已支持。
+私有 skill 仅写当前 DSH 原生目录，不经总部上传或签名。
+
+单加 kind 枚举不足：归档校验、manifest、purpose、严格签名 schema、PluginRef 和
+客户端均限制 plugin。SkillManifest 使用 text-only profile；上限5MiB压缩、20MiB解压、
+512条目、100倍压缩比；禁脚本、链接与执行位。原始 gzip 字节 SHA-256 为 digest，
+原始 manifest.json 字节 SHA-256 为 manifestDigest；packageId/versionId 由服务端生成。
+SkillEnvelope 草案为 schemaVersion=2、purpose=skill，完整字段 JCS/Ed25519，
+继承身份、ACL、高水位、独立信任根和最长24小时有效期；旧v1验证器必须拒绝。
+
+实现前须补独立签名 JSON Schema/向量、proto/workspace spec、票据、分发、重签、
+安装回报、审核详情与风险策略，不能用本 OpenAPI 草案绕过旧签名验证。
+SkillSelection 仅表达后续精确选择，不接旧 PluginRef 或插件安装接口。
+技能不运行独立进程；目录移除仅阻止新加载，不能抹掉会话历史。
+共享技能的有效加载截止 envelope.notAfter 与撤销清单 expiresAt 的较早者；
+紧急撤销/离线到期须由可信 guardian/workspace 停止受影响 DSH 并在恢复时新建会话。
+缺少可信停用能力的外部宿主首期不开放共享安装。以上取舍待用户审阅，不构成部署承诺。
