@@ -32,6 +32,51 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /admin/credentials:
+    get:
+      tags: [admin-keys]
+      operationId: listCredentials
+      summary: List credential metadata without secret values
+      x-admin-only: true
+      x-permission: iam.keys.write
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [managed, signing, service, node, keyset] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, revoked, expired, next, retiring, instance_deleted] } }
+        - { name: expiringSoon, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Tenant devices and installation signing metadata; expiry window is seven days
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialList' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+  /admin/credentials/{instanceId}/revoke:
+    post:
+      tags: [admin-keys]
+      operationId: revokeCredential
+      summary: Revoke a managed credential and rotate its workspace version
+      description: Commits IAM device and session revocation before requesting workspace version rotation. Retries return the existing successor version. New material is issued on the existing startup or renewal reconciliation workflow.
+      x-admin-only: true
+      x-permission: iam.keys.write
+      x-step-up: true
+      parameters:
+        - { name: instanceId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CredentialRevoke' }
+      responses:
+        '200':
+          description: Revoked metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialMetadata' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
   /admin/devices:
     get:
       tags: [device]
@@ -1200,6 +1245,45 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    CredentialRevoke:
+      type: object
+      additionalProperties: false
+      required: [version, confirm]
+      properties:
+        version: { type: integer, format: int64, minimum: 1, maximum: 9007199254740991 }
+        confirm: { type: boolean, description: Must be true to acknowledge revocation }
+    CredentialMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, type, status, expiringSoon]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [managed, signing, service, node, keyset] }
+        status: { type: string, enum: [active, revoked, expired, next, retiring, instance_deleted] }
+        source: { type: string }
+        versionLabel: { type: string }
+        instanceDeleted: { type: boolean, description: Instance absent in workspace; status still reflects the IAM credential }
+        replacementVersion: { type: integer, format: int64, minimum: 1, maximum: 9007199254740991, description: Authoritative workspace version scheduled for issuance }
+        instanceId: { type: string, format: uuid }
+        version: { type: integer, format: int64 }
+        issuedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        expiringSoon: { type: boolean }
+    CredentialSourceGap:
+      type: object
+      additionalProperties: false
+      required: [source, reason]
+      properties:
+        source: { type: string }
+        reason: { type: string, enum: [not_configured, not_reported, issued_at_unavailable, validity_unavailable, key_validity_unavailable, unavailable, installation_scope] }
+    CredentialList:
+      type: object
+      additionalProperties: false
+      required: [items, serviceMetadataAvailable]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CredentialMetadata' } }
+        serviceMetadataAvailable: { type: boolean, description: Whether service and node credential metadata is connected }
+        sourceGaps: { type: array, items: { $ref: '#/components/schemas/CredentialSourceGap' } }
     AdminDevicesDevice:
       type: object
       required: [id, accountId, memberName, name, status, online, accessMode]

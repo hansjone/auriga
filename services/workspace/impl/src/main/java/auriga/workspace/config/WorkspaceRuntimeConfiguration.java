@@ -129,6 +129,11 @@ public class WorkspaceRuntimeConfiguration {
   }
 
   @Bean
+  WorkspaceCredentialControl workspaceCredentialControl(WorkspaceService service) {
+    return new WorkspaceCredentialControl(service);
+  }
+
+  @Bean
   WorkspaceQueries workspaceQueries(WorkspaceService service) {
     return new WorkspaceQueries(service);
   }

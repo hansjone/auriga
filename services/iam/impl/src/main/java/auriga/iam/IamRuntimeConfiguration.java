@@ -142,6 +142,12 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  auriga.iam.api.CredentialInstallationScope credentialInstallationScope(
+      auriga.contracts.deploymentconfig.DeploymentAccess access) {
+    return auriga.iam.api.CredentialInstallationScope.from(access);
+  }
+
+  @Bean
   TokenService iamTokens(
       SigningKeys keys,
       ContractSchemas schemas,
@@ -160,7 +166,8 @@ public class IamRuntimeConfiguration {
         Binder.get(env)
             .bind("auriga.iam.internal-secret-hashes", Bindable.mapOf(String.class, String.class))
             .orElse(Map.of()),
-        issuerOrigins(env));
+        issuerOrigins(env),
+        auriga.iam.api.CredentialInstallationScope.from(access));
   }
 
   private static List<String> issuerOrigins(Environment env) {
