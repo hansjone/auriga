@@ -284,6 +284,176 @@ export function createSettingsView(
       throw new Error('invalidState');
     }
   }
+  function PrivateSkillsView(/** @type {{locale:string}} */ { locale }) {
+    const zh = locale?.startsWith('zh');
+    const t = zh
+      ? {
+          title: '私有技能',
+          hint: '内容仅保存在当前 DSH。修改、关闭和卸载后请新建会话。导入可粘贴 SKILL.md；首期编辑器支持简单文本字段和 true/false 开关。',
+          refresh: '刷新',
+          create: '新建／导入',
+          edit: '打开',
+          save: '保存修改',
+          disable: '关闭',
+          enable: '启用',
+          remove: '卸载并保留本地副本',
+          freeze: '冻结本地快照',
+          frozen: '本地快照已冻结；尚未上传或送审',
+          conflict: '操作失败，请刷新检查内容是否已被修改或同名技能已存在。',
+          disabled: '已关闭',
+          unavailable: '内容格式不支持，请使用原生文件工具编辑',
+          source: 'SKILL.md 内容',
+        }
+      : {
+          title: 'Private skills',
+          hint: 'Stored only in this DSH. Start a new session after editing, disabling or removing. Paste SKILL.md to import. This editor accepts simple text fields and true/false flags.',
+          refresh: 'Refresh',
+          create: 'Create / import',
+          edit: 'Open',
+          save: 'Save changes',
+          disable: 'Disable',
+          enable: 'Enable',
+          remove: 'Remove and keep a local copy',
+          freeze: 'Freeze local snapshot',
+          frozen: 'Local snapshot frozen; not uploaded or submitted',
+          conflict:
+            'Operation failed. Refresh to check for edits or a name conflict.',
+          disabled: 'Disabled',
+          unavailable: 'Unsupported content; edit with native file tools',
+          source: 'SKILL.md content',
+        };
+    const [items, setItems] = React.useState([]);
+    const [selected, setSelected] = React.useState(null);
+    const [source, setSource] = React.useState(
+      '---\nname: my-skill\ndescription: "Describe this skill"\n---\n\n',
+    );
+    const [notice, setNotice] = React.useState('');
+    const [busy, setBusy] = React.useState(false);
+    const refresh = async () => {
+      const result = await call('auriga/settings/skills');
+      setItems(result.items);
+    };
+    React.useEffect(() => {
+      let live = true;
+      call('auriga/settings/skills')
+        .then((value) => {
+          if (live) setItems(value.items);
+        })
+        .catch(() => {
+          if (live) setNotice(t.conflict);
+        });
+      return () => {
+        live = false;
+      };
+    }, []);
+    const run = async (/** @type {()=>Promise<any>} */ work) => {
+      setBusy(true);
+      setNotice('');
+      try {
+        await work();
+        await refresh();
+      } catch {
+        setNotice(t.conflict);
+      } finally {
+        setBusy(false);
+      }
+    };
+    const change = (/** @type {any} */ item, /** @type {string} */ action) =>
+      run(async () => {
+        const result = await call('auriga/settings/skills', {
+          action,
+          name: item.name,
+          enabled: item.enabled,
+          revision: item.revision,
+        });
+        if (action === 'freeze')
+          setNotice(t.frozen + ' · ' + result.snapshotId);
+        else setSelected(null);
+      });
+    const button = (
+      /** @type {string} */ label,
+      /** @type {()=>any} */ onClick,
+      disabled = false,
+    ) =>
+      h(
+        'button',
+        { type: 'button', disabled: busy || disabled, onClick },
+        label,
+      );
+    return h(
+      'section',
+      { 'aria-label': t.title },
+      h('h3', null, t.title),
+      h('p', null, t.hint),
+      button(t.refresh, () => run(refresh)),
+      ...items.map((/** @type {any} */ item) =>
+        h(
+          'div',
+          { key: item.name + item.enabled },
+          h(
+            'p',
+            null,
+            item.name,
+            item.enabled ? '' : ' · ' + t.disabled,
+            item.unavailable ? ' · ' + t.unavailable : '',
+          ),
+          !item.unavailable &&
+            h(
+              'div',
+              null,
+              button(t.edit, () =>
+                run(async () => {
+                  const result = await call('auriga/settings/skills', {
+                    action: 'read',
+                    name: item.name,
+                    enabled: item.enabled,
+                  });
+                  setSelected(result);
+                  setSource(result.files['SKILL.md']);
+                }),
+              ),
+              button(item.enabled ? t.disable : t.enable, () =>
+                change(item, item.enabled ? 'disable' : 'enable'),
+              ),
+              button(t.remove, () => change(item, 'remove')),
+              button(t.freeze, () => change(item, 'freeze')),
+            ),
+        ),
+      ),
+      h(
+        'label',
+        null,
+        t.source,
+        h('textarea', {
+          value: source,
+          rows: 12,
+          style: { display: 'block', width: '100%' },
+          onChange: (/** @type {any} */ event) => setSource(event.target.value),
+        }),
+      ),
+      button(t.create, () =>
+        run(async () => {
+          await call('auriga/settings/skills', { action: 'create', source });
+          setSelected(null);
+        }),
+      ),
+      selected &&
+        button(t.save, () =>
+          run(async () => {
+            const result = await call('auriga/settings/skills', {
+              action: 'edit',
+              name: selected.name,
+              enabled: selected.enabled,
+              revision: selected.revision,
+              source,
+            });
+            setSelected(result);
+          }),
+        ),
+      notice && h('p', { role: 'status' }, notice),
+    );
+  }
+
   return function SettingsView(
     /** @type {{locale:string,boot?:any,consent?:any}} */ {
       locale,
@@ -661,6 +831,7 @@ export function createSettingsView(
           network?.reason ?? account?.communication ?? t.notProvided,
         ),
       ),
+      h(PrivateSkillsView, { locale }),
       notice && h('p', { role: 'status', 'aria-live': 'polite' }, notice),
     );
   };
