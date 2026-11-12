@@ -36,6 +36,14 @@
     "UnifiedResourceVersionPublished": "../events/resource.schema.json#/$defs/UnifiedResourceVersionPublished",
     "UnifiedResourceVersionWithdrawn": "../events/resource.schema.json#/$defs/UnifiedResourceVersionWithdrawn",
     "UnifiedResourceDistributionRequested": "../events/resource.schema.json#/$defs/UnifiedResourceDistributionRequested",
-    "UnifiedDowngradeAuthorization": "unified.schema.json#/$defs/UnifiedDowngradeAuthorization"
+    "UnifiedDowngradeAuthorization": "unified.schema.json#/$defs/UnifiedDowngradeAuthorization",
+    "UnifiedMemberInstallationReport": "unified.schema.json#/$defs/UnifiedMemberInstallationReport",
+    "UnifiedMigrationMarker": "unified.schema.json#/$defs/UnifiedMigrationMarker",
+    "UnifiedLedgerFile": "unified.schema.json#/$defs/UnifiedLedgerFile",
+    "UnifiedReceiptFile": "unified.schema.json#/$defs/UnifiedReceiptFile",
+    "UnifiedTransactionFile": "unified.schema.json#/$defs/UnifiedTransactionFile",
+    "UnifiedTrustedClock": "unified.schema.json#/$defs/UnifiedTrustedClock",
+    "UnifiedGuardianStateFile": "unified.schema.json#/$defs/UnifiedGuardianStateFile",
+    "UnifiedHighWatermarksFile": "unified.schema.json#/$defs/UnifiedHighWatermarksFile"
   }
 }

@@ -660,6 +660,7 @@ export interface components {
     UnifiedResourceRef: {
       identity: components['schemas']['UnifiedResourceIdentity'];
       envelope: components['schemas']['Envelope'];
+      /** @description Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments. */
       manifestDownloadPath: string;
       artifacts: components['schemas']['UnifiedArtifactDownload'][];
       lease: components['schemas']['UnifiedLease'];
@@ -944,6 +945,7 @@ export interface components {
       digest: components['schemas']['Digest'];
       /** Format: int64 */
       sizeBytes: number;
+      /** @description Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments. */
       downloadPath: string;
     };
     UnifiedLease: {

@@ -21,9 +21,10 @@ var _ MappedNullable = &UnifiedResourceRef{}
 
 // UnifiedResourceRef struct for UnifiedResourceRef
 type UnifiedResourceRef struct {
-	Identity             UnifiedResourceIdentity   `json:"identity"`
-	Envelope             Envelope                  `json:"envelope"`
-	ManifestDownloadPath string                    `json:"manifestDownloadPath"`
+	Identity UnifiedResourceIdentity `json:"identity"`
+	Envelope Envelope                `json:"envelope"`
+	// Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments.
+	ManifestDownloadPath string                    `json:"manifestDownloadPath" validate:"regexp=^/(api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+)|internal/resource/v1/catalog/downloads/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+))$"`
 	Artifacts            []UnifiedArtifactDownload `json:"artifacts"`
 	Lease                UnifiedLease              `json:"lease"`
 	ReleaseSequence      int64                     `json:"releaseSequence"`

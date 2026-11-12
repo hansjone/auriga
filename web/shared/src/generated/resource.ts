@@ -1433,11 +1433,13 @@ export interface components {
       digest: components['schemas']['Digest'];
       /** Format: int64 */
       sizeBytes: number;
+      /** @description Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments. */
       downloadPath: string;
     };
     UnifiedResourceRef: {
       identity: components['schemas']['UnifiedResourceIdentity'];
       envelope: components['schemas']['Envelope'];
+      /** @description Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments. */
       manifestDownloadPath: string;
       artifacts: components['schemas']['UnifiedArtifactDownload'][];
       lease: components['schemas']['UnifiedLease'];
@@ -1622,7 +1624,9 @@ export interface components {
       legacyEnvelope: components['schemas']['ResourceEnvelope'];
       unifiedEnvelope: components['schemas']['Envelope'];
       legacyArtifactId: string;
+      /** @description Must equal signed marker.activatedAt; immutable package migration t0. */
       activatedAt: components['schemas']['Time'];
+      marker: components['schemas']['UnifiedMigrationMarker'];
     };
     UnifiedHighWatermark: {
       /** Format: uuid */
@@ -1651,6 +1655,196 @@ export interface components {
       expiresAt: components['schemas']['Time'];
       reason: string;
       signature: components['schemas']['Signature'];
+      /** @constant */
+      purpose: 'downgrade';
+    };
+    UnifiedMemberInstallationReport: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** Format: int64 */
+      observedGeneration: number;
+      /** @enum {string} */
+      state:
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'pending_restart'
+        | 'superseded'
+        | 'overridden'
+        | 'expired'
+        | 'revoked'
+        | 'disabled'
+        | 'removed';
+      /** @constant */
+      reportSource: 'member';
+      errorCode?: string;
+      observedAt: components['schemas']['Time'];
+    } & unknown;
+    UnifiedMigrationMarker: {
+      /** @constant */
+      schemaVersion: 2;
+      /** @constant */
+      purpose: 'migration';
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      firstVersionId: string;
+      /** Format: int64 */
+      firstReleaseSequence: number;
+      activatedAt: components['schemas']['Time'];
+      signature: components['schemas']['Signature'];
+    };
+    UnifiedLedgerFile: {
+      /** @constant */
+      schemaVersion: 1;
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      ownerId: string;
+      /** Format: uuid */
+      hostId: string;
+      /** Format: int64 */
+      revision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      installations: components['schemas']['UnifiedInstallation'][];
+      processedDisableReceiptIds: string[];
+    };
+    UnifiedReceiptFile:
+      | {
+          /** @constant */
+          schemaVersion: 1;
+          /** Format: uuid */
+          tenantId: string;
+          /** Format: uuid */
+          ownerId: string;
+          /** Format: uuid */
+          hostId: string;
+          /** @constant */
+          recordType: 'installation';
+          /** @constant */
+          writer: 'plugin';
+          /** Format: uuid */
+          receiptId: string;
+          resource: components['schemas']['UnifiedResourceRef'];
+          /** Format: int64 */
+          installationRevision: number;
+          /** Format: int64 */
+          selectionRevision: number;
+          /** Format: int64 */
+          generation: number;
+          recordedAt: components['schemas']['Time'];
+        }
+      | {
+          /** @constant */
+          schemaVersion: 1;
+          /** Format: uuid */
+          tenantId: string;
+          /** Format: uuid */
+          ownerId: string;
+          /** Format: uuid */
+          hostId: string;
+          /** @constant */
+          recordType: 'disable';
+          /** @constant */
+          writer: 'guardian';
+          /** Format: uuid */
+          receiptId: string;
+          /** Format: uuid */
+          transactionId: string;
+          /** Format: int64 */
+          selectionRevision: number;
+          /** Format: int64 */
+          generation: number;
+          quarantinePath: string;
+          /** @enum {string} */
+          reason:
+            | 'lease_expired'
+            | 'revoked'
+            | 'identity_changed'
+            | 'clock_rollback'
+            | 'verification_failed';
+          processStopped: boolean;
+          viewCleared: boolean;
+          newSessionRequired: boolean;
+          recordedAt: components['schemas']['Time'];
+        };
+    UnifiedTransactionFile: {
+      /** @constant */
+      schemaVersion: 1;
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      ownerId: string;
+      /** Format: uuid */
+      hostId: string;
+      /** Format: uuid */
+      transactionId: string;
+      /** @constant */
+      writer: 'plugin';
+      /** @enum {string} */
+      operation: 'install' | 'activate' | 'remove' | 'cleanup';
+      /** @enum {string} */
+      phase: 'prepared' | 'switched' | 'committed' | 'rolled_back';
+      /** Format: int64 */
+      expectedLedgerRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** Format: uuid */
+      receiptId: string;
+      recordedAt: components['schemas']['Time'];
+    };
+    UnifiedTrustedClock: {
+      /** Format: uuid */
+      bootId: string;
+      maxObservedTime: components['schemas']['Time'];
+      lastTrustedTime: components['schemas']['Time'];
+      /** @enum {string} */
+      lastTrustedTimeSource:
+        'authenticated_server' | 'signed_release' | 'signed_revocations';
+      /** Format: int64 */
+      lastMonotonicMillis: number;
+      /** Format: int64 */
+      leaseDeadlineMonotonicMillis: number;
+    };
+    UnifiedGuardianStateFile: {
+      /** @constant */
+      schemaVersion: 1;
+      /** Format: int64 */
+      revision: number;
+      guardian: components['schemas']['UnifiedGuardianState'];
+      clock: components['schemas']['UnifiedTrustedClock'];
+      pendingIsolation?: {
+        /** Format: uuid */
+        transactionId: string;
+        quarantinePath: string;
+        /** @enum {string} */
+        phase: 'stopping' | 'rename_pending' | 'renamed' | 'receipt_written';
+      };
+      /** Format: uuid */
+      lastDisableReceiptId?: string;
+    };
+    UnifiedHighWatermarksFile: {
+      /** @constant */
+      schemaVersion: 1;
+      /** Format: int64 */
+      revision: number;
+      entries: components['schemas']['UnifiedHighWatermark'][];
+      migrationMarkers: components['schemas']['UnifiedMigrationMarker'][];
+      consumedDowngradeAuthorizationIds: string[];
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -5827,6 +6021,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -5928,8 +6124,11 @@ export interface operations {
   UnifiedCreateResourcePackage: {
     parameters: {
       query?: never;
-      header?: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
       };
       path?: never;
       cookie?: never;
@@ -5943,7 +6142,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       201: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6056,7 +6256,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6173,6 +6374,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6274,8 +6477,11 @@ export interface operations {
   UnifiedUploadResourceVersion: {
     parameters: {
       query?: never;
-      header?: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
       };
       path: {
         packageId: string;
@@ -6296,7 +6502,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       201: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6419,7 +6626,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6521,8 +6729,11 @@ export interface operations {
   UnifiedSubmitResourceVersion: {
     parameters: {
       query?: never;
-      header?: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
       };
       path: {
         packageId: string;
@@ -6539,7 +6750,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       201: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6655,6 +6867,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6770,6 +6984,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6871,8 +7087,11 @@ export interface operations {
   UnifiedDecideResourceReview: {
     parameters: {
       query?: never;
-      header?: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
       };
       path: {
         reviewId: string;
@@ -6888,7 +7107,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6990,8 +7210,11 @@ export interface operations {
   UnifiedPublishResourceVersion: {
     parameters: {
       query?: never;
-      header?: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
       };
       path: {
         packageId: string;
@@ -7008,7 +7231,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       201: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7119,8 +7343,11 @@ export interface operations {
   UnifiedWithdrawResourceVersion: {
     parameters: {
       query?: never;
-      header?: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
       };
       path: {
         packageId: string;
@@ -7137,7 +7364,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7261,6 +7489,8 @@ export interface operations {
       200: {
         headers: {
           'X-Auriga-Manifest-Digest'?: components['schemas']['Digest'];
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7373,6 +7603,8 @@ export interface operations {
       /** @description 成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。 */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7474,8 +7706,11 @@ export interface operations {
   UnifiedCreateDownloadTicket: {
     parameters: {
       query?: never;
-      header?: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
       };
       path?: never;
       cookie?: never;
@@ -7489,6 +7724,8 @@ export interface operations {
       /** @description Authorized response */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7590,8 +7827,11 @@ export interface operations {
   UnifiedDownloadArtifact: {
     parameters: {
       query?: never;
-      header?: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
       };
       path?: never;
       cookie?: never;
@@ -7605,6 +7845,8 @@ export interface operations {
       /** @description Authorized response */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7705,8 +7947,11 @@ export interface operations {
   };
   UnifiedListInstallations: {
     parameters: {
-      query?: {
+      query: {
         kind?: 'skill' | 'tool';
+        limit?: number;
+        cursor?: string;
+        clientId: string;
       };
       header?: never;
       path?: never;
@@ -7717,6 +7962,8 @@ export interface operations {
       /** @description Authorized response */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7819,7 +8066,9 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
         'If-Match': string;
       };
       path?: never;
@@ -7834,6 +8083,8 @@ export interface operations {
       /** @description Exact revision accepted; 202 requires matching authenticated observation before applied. */
       202: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -7936,7 +8187,9 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
         'If-Match': string;
       };
       path?: never;
@@ -7944,13 +8197,15 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['UnifiedInstallationReport'];
+        'application/json': components['schemas']['UnifiedMemberInstallationReport'];
       };
     };
     responses: {
       /** @description Authorized response */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -8053,7 +8308,9 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
         'If-Match': string;
       };
       path?: never;
@@ -8068,6 +8325,8 @@ export interface operations {
       /** @description Authorized response */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -8170,6 +8429,9 @@ export interface operations {
     parameters: {
       query?: {
         kind?: 'skill' | 'tool';
+        limit?: number;
+        cursor?: string;
+        instanceId?: string;
       };
       header?: never;
       path?: never;
@@ -8180,6 +8442,8 @@ export interface operations {
       /** @description Authorized response */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -8204,7 +8468,7 @@ export interface operations {
           'application/problem+json': components['schemas']['Problem'];
         };
       };
-      /** @description common.forbidden */
+      /** @description common.forbidden or iam.step_up_required */
       403: {
         headers: {
           [name: string]: unknown;
@@ -8282,7 +8546,9 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
         'If-Match': string;
       };
       path?: never;
@@ -8297,6 +8563,8 @@ export interface operations {
       /** @description Exact revision accepted; 202 requires matching authenticated observation before applied. */
       202: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -8321,7 +8589,7 @@ export interface operations {
           'application/problem+json': components['schemas']['Problem'];
         };
       };
-      /** @description common.forbidden */
+      /** @description common.forbidden or iam.step_up_required */
       403: {
         headers: {
           [name: string]: unknown;
@@ -8409,6 +8677,8 @@ export interface operations {
       /** @description Authorized response */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -8433,7 +8703,7 @@ export interface operations {
           'application/problem+json': components['schemas']['Problem'];
         };
       };
-      /** @description common.forbidden */
+      /** @description common.forbidden or iam.step_up_required */
       403: {
         headers: {
           [name: string]: unknown;
@@ -8523,6 +8793,8 @@ export interface operations {
       /** @description Authorized response */
       200: {
         headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -8635,7 +8907,7 @@ export interface operations {
       /** @description 已授权的不可变归档，校验摘要/长度；不接受重定向。 */
       200: {
         headers: {
-          /** @description 固定摘要 */
+          /** @description Current revision ETag for the next conditional request. */
           ETag?: string;
           /** @description 完整对象长度 */
           'Content-Length'?: number;
@@ -8761,7 +9033,7 @@ export interface operations {
       /** @description 已授权的不可变归档，校验摘要/长度；不接受重定向。 */
       200: {
         headers: {
-          /** @description 固定摘要 */
+          /** @description Current revision ETag for the next conditional request. */
           ETag?: string;
           /** @description 完整对象长度 */
           'Content-Length'?: number;

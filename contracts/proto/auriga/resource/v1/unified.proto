@@ -184,6 +184,7 @@ message UnifiedMigrationProof {
   UnifiedEnvelope unified_envelope = 3;
   string legacy_artifact_id = 4;
   string activated_at = 5;
+  UnifiedMigrationMarker marker = 6;
 }
 
 message UnifiedHighWatermark {
@@ -224,4 +225,17 @@ message UnifiedDowngradeAuthorization {
   string expires_at = 8;
   string reason = 9;
   ResourceSignature signature = 10;
+  string purpose = 11;
+}
+
+// Release-root signed immutable migration marker; activated_at is covered by its signature.
+message UnifiedMigrationMarker {
+  uint32 schema_version = 1;
+  string purpose = 2;
+  string tenant_id = 3;
+  string package_id = 4;
+  string first_version_id = 5;
+  uint64 first_release_sequence = 6;
+  string activated_at = 7;
+  ResourceSignature signature = 8;
 }

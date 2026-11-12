@@ -1,34 +1,50 @@
 {
-  "schemaVersion": 1,
-  "before": {
-    "plugins": {
-      "skill-filesystem": {
-        "customSkillDirs": ["${{ preset.skills }}", "/example/skills"],
-        "includeDefaultRoots": true
-      },
-      "example-provider": {
-        "enabled": true
-      }
+  "schemaVersion": 2,
+  "source": "https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/bundle/web-app/presets/cordis.patch.yml",
+  "sourceScope": "Relevant preset-cordis and skill-filesystem excerpt; unrelated fixture plugins demonstrate full-row preservation.",
+  "installerSource": "clients/installer/runtime/core.mjs",
+  "fixedRootExpression": "process.getBuiltinModule('node:path').join(process.env.DSH_HOME, 'auriga', 'skills-active', 'current')",
+  "requiredEnvironment": "Trusted launcher sets DSH_HOME to its owned absolute home before interpreting config; absent/non-absolute values deny shared activation.",
+  "cases": [
+    {
+      "id": "minimal",
+      "inputPath": "cordis-fixtures/minimal.input.cordis.patch.yml",
+      "upstreamPath": "cordis-fixtures/upstream.cordis.patch.yml",
+      "expectedPath": "cordis-fixtures/minimal.expected.cordis.patch.yml",
+      "expectShared": true,
+      "reason": "preserve-effective-preset-and-append-once"
     },
-    "expression": "${{ env.EXAMPLE }}"
-  },
-  "after": {
-    "plugins": {
-      "skill-filesystem": {
-        "customSkillDirs": [
-          "${{ preset.skills }}",
-          "/example/skills",
-          "<DSH_HOME>/auriga/skills-active/current/"
-        ],
-        "includeDefaultRoots": true
-      },
-      "example-provider": {
-        "enabled": true
-      }
+    {
+      "id": "user-preset",
+      "inputPath": "cordis-fixtures/user-preset.input.cordis.patch.yml",
+      "upstreamPath": "cordis-fixtures/upstream.cordis.patch.yml",
+      "expectedPath": "cordis-fixtures/user-preset.expected.cordis.patch.yml",
+      "expectShared": true,
+      "reason": "preserve-effective-preset-and-append-once"
     },
-    "expression": "${{ env.EXAMPLE }}"
-  },
-  "repeatAfter": "after",
-  "unparseable": "preserve-and-deny-shared",
-  "identityInStaticConfig": false
+    {
+      "id": "idempotent",
+      "inputPath": "cordis-fixtures/idempotent.input.cordis.patch.yml",
+      "upstreamPath": "cordis-fixtures/upstream.cordis.patch.yml",
+      "expectedPath": "cordis-fixtures/idempotent.expected.cordis.patch.yml",
+      "expectShared": true,
+      "reason": "preserve-effective-preset-and-append-once"
+    },
+    {
+      "id": "invalid-yaml",
+      "inputPath": "cordis-fixtures/invalid-yaml.input.cordis.patch.yml",
+      "upstreamPath": "cordis-fixtures/upstream.cordis.patch.yml",
+      "expectedPath": "cordis-fixtures/invalid-yaml.expected.cordis.patch.yml",
+      "expectShared": false,
+      "reason": "preserve-and-deny"
+    },
+    {
+      "id": "missing-preset",
+      "inputPath": "cordis-fixtures/missing-preset.input.cordis.patch.yml",
+      "upstreamPath": null,
+      "expectedPath": "cordis-fixtures/missing-preset.expected.cordis.patch.yml",
+      "expectShared": false,
+      "reason": "preserve-and-deny"
+    }
+  ]
 }

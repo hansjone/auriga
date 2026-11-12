@@ -20,11 +20,13 @@ var _ MappedNullable = &UnifiedMigrationProof{}
 
 // UnifiedMigrationProof struct for UnifiedMigrationProof
 type UnifiedMigrationProof struct {
-	SchemaVersion        int32            `json:"schemaVersion"`
-	LegacyEnvelope       ResourceEnvelope `json:"legacyEnvelope"`
-	UnifiedEnvelope      Envelope         `json:"unifiedEnvelope"`
-	LegacyArtifactId     string           `json:"legacyArtifactId"`
-	ActivatedAt          string           `json:"activatedAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
+	SchemaVersion    int32            `json:"schemaVersion"`
+	LegacyEnvelope   ResourceEnvelope `json:"legacyEnvelope"`
+	UnifiedEnvelope  Envelope         `json:"unifiedEnvelope"`
+	LegacyArtifactId string           `json:"legacyArtifactId"`
+	// Must equal signed marker.activatedAt; immutable package migration t0.
+	ActivatedAt          string                 `json:"activatedAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
+	Marker               UnifiedMigrationMarker `json:"marker"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -34,13 +36,14 @@ type _UnifiedMigrationProof UnifiedMigrationProof
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewUnifiedMigrationProof(schemaVersion int32, legacyEnvelope ResourceEnvelope, unifiedEnvelope Envelope, legacyArtifactId string, activatedAt string) *UnifiedMigrationProof {
+func NewUnifiedMigrationProof(schemaVersion int32, legacyEnvelope ResourceEnvelope, unifiedEnvelope Envelope, legacyArtifactId string, activatedAt string, marker UnifiedMigrationMarker) *UnifiedMigrationProof {
 	this := UnifiedMigrationProof{}
 	this.SchemaVersion = schemaVersion
 	this.LegacyEnvelope = legacyEnvelope
 	this.UnifiedEnvelope = unifiedEnvelope
 	this.LegacyArtifactId = legacyArtifactId
 	this.ActivatedAt = activatedAt
+	this.Marker = marker
 	return &this
 }
 
@@ -172,6 +175,30 @@ func (o *UnifiedMigrationProof) SetActivatedAt(v string) {
 	o.ActivatedAt = v
 }
 
+// GetMarker returns the Marker field value
+func (o *UnifiedMigrationProof) GetMarker() UnifiedMigrationMarker {
+	if o == nil {
+		var ret UnifiedMigrationMarker
+		return ret
+	}
+
+	return o.Marker
+}
+
+// GetMarkerOk returns a tuple with the Marker field value
+// and a boolean to check if the value has been set.
+func (o *UnifiedMigrationProof) GetMarkerOk() (*UnifiedMigrationMarker, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Marker, true
+}
+
+// SetMarker sets field value
+func (o *UnifiedMigrationProof) SetMarker(v UnifiedMigrationMarker) {
+	o.Marker = v
+}
+
 func (o UnifiedMigrationProof) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -187,6 +214,7 @@ func (o UnifiedMigrationProof) ToMap() (map[string]interface{}, error) {
 	toSerialize["unifiedEnvelope"] = o.UnifiedEnvelope
 	toSerialize["legacyArtifactId"] = o.LegacyArtifactId
 	toSerialize["activatedAt"] = o.ActivatedAt
+	toSerialize["marker"] = o.Marker
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -205,6 +233,7 @@ func (o *UnifiedMigrationProof) UnmarshalJSON(data []byte) (err error) {
 		"unifiedEnvelope",
 		"legacyArtifactId",
 		"activatedAt",
+		"marker",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -239,6 +268,7 @@ func (o *UnifiedMigrationProof) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "unifiedEnvelope")
 		delete(additionalProperties, "legacyArtifactId")
 		delete(additionalProperties, "activatedAt")
+		delete(additionalProperties, "marker")
 		o.AdditionalProperties = additionalProperties
 	}
 

@@ -30,6 +30,7 @@ type UnifiedDowngradeAuthorization struct {
 	ExpiresAt            string                  `json:"expiresAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
 	Reason               string                  `json:"reason"`
 	Signature            Signature               `json:"signature"`
+	Purpose              string                  `json:"purpose"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -39,7 +40,7 @@ type _UnifiedDowngradeAuthorization UnifiedDowngradeAuthorization
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewUnifiedDowngradeAuthorization(schemaVersion int32, authorizationId string, instanceId string, identity UnifiedResourceIdentity, fromReleaseSequence int64, toReleaseSequence int64, issuedAt string, expiresAt string, reason string, signature Signature) *UnifiedDowngradeAuthorization {
+func NewUnifiedDowngradeAuthorization(schemaVersion int32, authorizationId string, instanceId string, identity UnifiedResourceIdentity, fromReleaseSequence int64, toReleaseSequence int64, issuedAt string, expiresAt string, reason string, signature Signature, purpose string) *UnifiedDowngradeAuthorization {
 	this := UnifiedDowngradeAuthorization{}
 	this.SchemaVersion = schemaVersion
 	this.AuthorizationId = authorizationId
@@ -51,6 +52,7 @@ func NewUnifiedDowngradeAuthorization(schemaVersion int32, authorizationId strin
 	this.ExpiresAt = expiresAt
 	this.Reason = reason
 	this.Signature = signature
+	this.Purpose = purpose
 	return &this
 }
 
@@ -302,6 +304,30 @@ func (o *UnifiedDowngradeAuthorization) SetSignature(v Signature) {
 	o.Signature = v
 }
 
+// GetPurpose returns the Purpose field value
+func (o *UnifiedDowngradeAuthorization) GetPurpose() string {
+	if o == nil {
+		var ret string
+		return ret
+	}
+
+	return o.Purpose
+}
+
+// GetPurposeOk returns a tuple with the Purpose field value
+// and a boolean to check if the value has been set.
+func (o *UnifiedDowngradeAuthorization) GetPurposeOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Purpose, true
+}
+
+// SetPurpose sets field value
+func (o *UnifiedDowngradeAuthorization) SetPurpose(v string) {
+	o.Purpose = v
+}
+
 func (o UnifiedDowngradeAuthorization) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -322,6 +348,7 @@ func (o UnifiedDowngradeAuthorization) ToMap() (map[string]interface{}, error) {
 	toSerialize["expiresAt"] = o.ExpiresAt
 	toSerialize["reason"] = o.Reason
 	toSerialize["signature"] = o.Signature
+	toSerialize["purpose"] = o.Purpose
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -345,6 +372,7 @@ func (o *UnifiedDowngradeAuthorization) UnmarshalJSON(data []byte) (err error) {
 		"expiresAt",
 		"reason",
 		"signature",
+		"purpose",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -384,6 +412,7 @@ func (o *UnifiedDowngradeAuthorization) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "expiresAt")
 		delete(additionalProperties, "reason")
 		delete(additionalProperties, "signature")
+		delete(additionalProperties, "purpose")
 		o.AdditionalProperties = additionalProperties
 	}
 

@@ -1,70 +1,2396 @@
 {
-  "schemaVersion": 2,
-  "legacyArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
-  "publicKey": "MCowBQYDK2VwAyEAaa44RCkCAR9gxGk0iGhVb69ObML3oXXZoYM6wvhpZPM=",
-  "rawManifest": "{\"schemaVersion\":1,\"kind\":\"plugin\",\"name\":\"example-plugin\",\"version\":\"1.2.3+build.1\",\"description\":\"Synthetic migration fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"artifacts\":[{\"id\":\"legacy\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
-  "proof": {
-    "schemaVersion": 2,
-    "legacyEnvelope": {
-      "schemaVersion": 1,
-      "tenantId": "019a0000-0000-7000-8000-000000000001",
-      "packageId": "019a0000-0000-7000-8000-000000000002",
-      "versionId": "019a0000-0000-7000-8000-000000000003",
-      "releaseSequence": 7,
-      "notAfter": "2026-10-22T08:00:00.100000000Z",
-      "statement": {
-        "purpose": "plugin",
-        "name": "@example/plugin",
-        "version": "1.2.3+build.1",
-        "os": "any",
-        "arch": "any",
-        "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
-        "issuedAt": "2026-10-21T08:00:00.100000000Z"
-      },
-      "signature": {
-        "alg": "Ed25519",
-        "kid": "vector-only",
-        "value": "k8n4fw83f6yPE0Dh1pCAr-UmW9X0XcGTJUllv-KL4s7SkPiELvLhnDpNe3iHQM-q4VgAbDcVFjnpyA89ruLUBw"
-      }
-    },
-    "unifiedEnvelope": {
-      "schemaVersion": 2,
-      "tenantId": "019a0000-0000-7000-8000-000000000001",
-      "packageId": "019a0000-0000-7000-8000-000000000002",
-      "versionId": "019a0000-0000-7000-8000-000000000003",
-      "releaseSequence": 7,
-      "notAfter": "2026-10-22T08:00:00.100000000Z",
-      "statement": {
-        "purpose": "resource",
-        "kind": "plugin",
-        "name": "example-plugin",
-        "version": "1.2.3+build.1",
-        "manifestDigest": "sha256:6d8c465a887b5773027d5d64a5d91cbd6e0eb9f3b3ad5b7b7db8679574c2de9c",
-        "artifactDigests": [
-          "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
-        ],
-        "issuedAt": "2026-10-21T08:00:00.100000000Z"
-      },
-      "signature": {
-        "alg": "Ed25519",
-        "kid": "vector-only",
-        "value": "Ly4T3VFGJ9nfiodsQY7URP8HI-9f6oJRce74V6LHQ_abAe2QLC3oPXCa59BpQoQmnte5itUGRFisXyJK-wabBg"
-      }
-    },
-    "legacyArtifactId": "legacy",
-    "activatedAt": "2026-10-21T08:00:00.100000000Z"
+  "schemaVersion": 3,
+  "description": "Self-contained public TEST vectors. A/C/D/E must run every case id without reconstructing negative inputs. Never trust these test keys in deployments.",
+  "generation": {
+    "command": "node contracts/resource/generate-unified-vectors.mjs",
+    "method": "Ed25519 from SHA-256 of public test-only domain-separated seed, separate release/revocation/downgrade keys. RFC8785 JCS, original UTF-8 manifest bytes and base64 artifact bytes; all expected results are explicit data."
   },
-  "scenarios": [
-    "dual-revocation",
-    "only-A",
-    "only-M",
-    "artifact-reuse",
-    "equal-sequence-alias",
-    "forged-mapping",
-    "replacement-M",
-    "cross-tenant",
-    "cross-protocol-rollback",
-    "fixed-v1-cutoff",
-    "cross-version-downgrade"
+  "trust": {
+    "release": {
+      "kid": "test-only-release",
+      "publicKeySpkiBase64": "MCowBQYDK2VwAyEAZtUZhbklPWXGEEjU02rl96zKpi42vwc+JnFIYicf508="
+    },
+    "revocation": {
+      "kid": "test-only-revocation",
+      "publicKeySpkiBase64": "MCowBQYDK2VwAyEAwOD+2jBqCjk1aKHiUROl67UaD1xiY4QawyP/Aci5GF8="
+    },
+    "downgrade": {
+      "kid": "test-only-downgrade",
+      "publicKeySpkiBase64": "MCowBQYDK2VwAyEADVk/ROZWkyBw1VIobXHsWclOz9o4J3lzvDQX0HP6wos="
+    }
+  },
+  "cases": [
+    {
+      "id": "skill-v2-valid",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "artifactBytes": {
+          "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+        },
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill"
+        },
+        "protocol": 2,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "online-empty-artifacts-valid",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000005",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "tool",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:6530f280ce6499d9676e36bb7906af6c2a1c28a4d777a1fab1e53ed9addf160a",
+            "artifactDigests": [],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "Uyv0gEwRab35uxAITF8GXtIkxLYCml_fnRED9iJPTeLoaZT_EdMwg_qnZcS1jccDX3-rbcw4m8k9gj5dA7NoDA"
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"tool\",\"artifacts\":[],\"tool\":{\"delivery\":\"online\",\"url\":\"https://tools.example.com/mcp\",\"protocol\":\"mcp\",\"authentication\":\"none\"}}\n",
+        "artifactBytes": {},
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000005",
+          "kind": "tool"
+        },
+        "protocol": 2,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "plugin-v1-valid",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "plugin",
+            "name": "@example/plugin",
+            "version": "1.2.3",
+            "os": "any",
+            "arch": "any",
+            "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+          }
+        },
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "kind": "plugin"
+        },
+        "protocol": 1,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "v1-rejected-by-v2",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "plugin",
+            "name": "@example/plugin",
+            "version": "1.2.3",
+            "os": "any",
+            "arch": "any",
+            "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+          }
+        },
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "kind": "plugin"
+        },
+        "protocol": 2,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "schema"
+      }
+    },
+    {
+      "id": "v2-rejected-by-v1",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "artifactBytes": {
+          "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+        },
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill"
+        },
+        "protocol": 1,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "schema"
+      }
+    },
+    {
+      "id": "skill-tampered-kind",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "tool",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "artifactBytes": {
+          "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+        },
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill"
+        },
+        "protocol": 2,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "signature"
+      }
+    },
+    {
+      "id": "skill-tampered-artifact-digest",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:d121be3103007b41edf96f8262925f8c7d61894afe9a041843b631f69445bc57"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "artifactBytes": {
+          "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+        },
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill"
+        },
+        "protocol": 2,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "signature"
+      }
+    },
+    {
+      "id": "skill-signed-wrong-artifact-set",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "G18mr8o9_qD7I7KJn9S0ekPN_aKxLqM0xEvcP5hriCk_wRmHKb1o6hT_gtJ0w0Bbz7MqW3ILDia_-FkXHPhKDA"
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "artifactBytes": {
+          "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+        },
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill"
+        },
+        "protocol": 2,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "manifest_binding"
+      }
+    },
+    {
+      "id": "skill-raw-byte-change",
+      "operation": "release",
+      "input": {
+        "envelope": {
+          "schemaVersion": 2,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "resource",
+            "kind": "skill",
+            "name": "example-resource",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+            "artifactDigests": [
+              "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+            ],
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n ",
+        "artifactBytes": {
+          "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+        },
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill"
+        },
+        "protocol": 2,
+        "now": "2026-11-12T01:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "manifest_binding"
+      }
+    },
+    {
+      "id": "migration-proof-valid",
+      "operation": "migration",
+      "input": {
+        "proof": {
+          "schemaVersion": 2,
+          "legacyEnvelope": {
+            "schemaVersion": 1,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "plugin",
+              "name": "@example/plugin",
+              "version": "1.2.3",
+              "os": "any",
+              "arch": "any",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+            }
+          },
+          "unifiedEnvelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "legacyArtifactId": "payload",
+          "activatedAt": "2026-11-12T00:00:00Z",
+          "marker": {
+            "schemaVersion": 2,
+            "purpose": "migration",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+            "firstReleaseSequence": 7,
+            "activatedAt": "2026-11-12T00:00:00Z",
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+            }
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "artifactBytes": {
+          "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+        },
+        "now": "2026-11-12T01:00:00Z",
+        "previousManifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775"
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "migration-forged-mapping",
+      "operation": "migration",
+      "input": {
+        "proof": {
+          "schemaVersion": 2,
+          "legacyEnvelope": {
+            "schemaVersion": 1,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "plugin",
+              "name": "@example/plugin",
+              "version": "1.2.3",
+              "os": "any",
+              "arch": "any",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+            }
+          },
+          "unifiedEnvelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "legacyArtifactId": "missing",
+          "activatedAt": "2026-11-12T00:00:00Z",
+          "marker": {
+            "schemaVersion": 2,
+            "purpose": "migration",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+            "firstReleaseSequence": 7,
+            "activatedAt": "2026-11-12T00:00:00Z",
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+            }
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "artifactBytes": {
+          "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+        },
+        "now": "2026-11-12T01:00:00Z",
+        "previousManifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "migration_binding"
+      }
+    },
+    {
+      "id": "migration-replaced-M",
+      "operation": "migration",
+      "input": {
+        "proof": {
+          "schemaVersion": 2,
+          "legacyEnvelope": {
+            "schemaVersion": 1,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "plugin",
+              "name": "@example/plugin",
+              "version": "1.2.3",
+              "os": "any",
+              "arch": "any",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+            }
+          },
+          "unifiedEnvelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "legacyArtifactId": "payload",
+          "activatedAt": "2026-11-12T00:00:00Z",
+          "marker": {
+            "schemaVersion": 2,
+            "purpose": "migration",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+            "firstReleaseSequence": 7,
+            "activatedAt": "2026-11-12T00:00:00Z",
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+            }
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "artifactBytes": {
+          "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+        },
+        "now": "2026-11-12T01:00:00Z",
+        "previousManifestDigest": "sha256:8276578a6914fa51d3b246288c2bf421802408587117697a5c6b7661bd67e2d1"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "migration_binding"
+      }
+    },
+    {
+      "id": "migration-cross-tenant",
+      "operation": "migration",
+      "input": {
+        "proof": {
+          "schemaVersion": 2,
+          "legacyEnvelope": {
+            "schemaVersion": 1,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "plugin",
+              "name": "@example/plugin",
+              "version": "1.2.3",
+              "os": "any",
+              "arch": "any",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+            }
+          },
+          "unifiedEnvelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000099",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "Q1Ns4AaRVIDeK7VAZXMJHVqyn_Cb2K95jtYIVpfIOJjrC7DS98OyadhYuviBb54NU3yP7b-MIfwg8yx4rJbJDA"
+            }
+          },
+          "legacyArtifactId": "payload",
+          "activatedAt": "2026-11-12T00:00:00Z",
+          "marker": {
+            "schemaVersion": 2,
+            "purpose": "migration",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+            "firstReleaseSequence": 7,
+            "activatedAt": "2026-11-12T00:00:00Z",
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+            }
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "artifactBytes": {
+          "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+        },
+        "now": "2026-11-12T01:00:00Z",
+        "previousManifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "migration_binding"
+      }
+    },
+    {
+      "id": "migration-t0-tampered",
+      "operation": "migration",
+      "input": {
+        "proof": {
+          "schemaVersion": 2,
+          "legacyEnvelope": {
+            "schemaVersion": 1,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "plugin",
+              "name": "@example/plugin",
+              "version": "1.2.3",
+              "os": "any",
+              "arch": "any",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+            }
+          },
+          "unifiedEnvelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "legacyArtifactId": "payload",
+          "activatedAt": "2026-11-12T00:00:00Z",
+          "marker": {
+            "schemaVersion": 2,
+            "purpose": "migration",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+            "firstReleaseSequence": 7,
+            "activatedAt": "2026-11-12T01:00:00Z",
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+            }
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "artifactBytes": {
+          "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+        },
+        "now": "2026-11-12T01:00:00Z",
+        "previousManifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "migration_signature"
+      }
+    },
+    {
+      "id": "migration-t0-unmatched",
+      "operation": "migration",
+      "input": {
+        "proof": {
+          "schemaVersion": 2,
+          "legacyEnvelope": {
+            "schemaVersion": 1,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "plugin",
+              "name": "@example/plugin",
+              "version": "1.2.3",
+              "os": "any",
+              "arch": "any",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+            }
+          },
+          "unifiedEnvelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "legacyArtifactId": "payload",
+          "activatedAt": "2026-11-12T01:00:00Z",
+          "marker": {
+            "schemaVersion": 2,
+            "purpose": "migration",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+            "firstReleaseSequence": 7,
+            "activatedAt": "2026-11-12T00:00:00Z",
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+            }
+          }
+        },
+        "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "artifactBytes": {
+          "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+        },
+        "now": "2026-11-12T01:00:00Z",
+        "previousManifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "migration_binding"
+      }
+    },
+    {
+      "id": "revoked-dual-digest",
+      "operation": "revocation",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "kind": "plugin"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "list": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "revision": 3,
+          "issuedAt": "2026-11-12T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revokedKids": [],
+          "revokedArtifacts": [
+            {
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000003",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+            },
+            {
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000003",
+              "digest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775"
+            }
+          ],
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-revocation",
+            "value": "xV1UZcyw0Q3hPeuq8mGAHlzEUmAVER1NAa3FxeC7pMOUC5jU3nNckScNL-V7nhDHrF47m7Jsjs11f4NuDJ45Ag"
+          }
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "revoked"
+      }
+    },
+    {
+      "id": "revoked-only-A",
+      "operation": "revocation",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "kind": "plugin"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "list": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "revision": 3,
+          "issuedAt": "2026-11-12T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revokedKids": [],
+          "revokedArtifacts": [
+            {
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000003",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+            }
+          ],
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-revocation",
+            "value": "8VtAnZLru-UIpez03f5MSZ3p9Sx6lYo4zB3v_obxz93h4apfna-XedMG7HUhxd7kpTKEhdEcXr3POzsgE4o2DA"
+          }
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "revoked"
+      }
+    },
+    {
+      "id": "revoked-only-M",
+      "operation": "revocation",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "kind": "plugin"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "list": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "revision": 3,
+          "issuedAt": "2026-11-12T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revokedKids": [],
+          "revokedArtifacts": [
+            {
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000003",
+              "digest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775"
+            }
+          ],
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-revocation",
+            "value": "eBe-zm6zuwcMsn4po6gQ8jV625z8H0cYigSlMNe-0Ke1sTf8DFn_9yT4ArvokjaaTghemZmzCHhRYISz83ZmDw"
+          }
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "revoked"
+      }
+    },
+    {
+      "id": "revoked-artifact-reuse",
+      "operation": "revocation",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000008",
+            "releaseSequence": 8,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "-pQxOoDZ5-z_i2RjHKgeQoIh8yG2W3dvkOVXuZxo5tdKBvGreIOKOGsYCFQTSiyN7rwPWBwrEwz5ND_62LUVCg"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000008",
+            "kind": "plugin"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "list": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "revision": 3,
+          "issuedAt": "2026-11-12T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revokedKids": [],
+          "revokedArtifacts": [
+            {
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000003",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+            }
+          ],
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-revocation",
+            "value": "8VtAnZLru-UIpez03f5MSZ3p9Sx6lYo4zB3v_obxz93h4apfna-XedMG7HUhxd7kpTKEhdEcXr3POzsgE4o2DA"
+          }
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "revoked"
+      }
+    },
+    {
+      "id": "revocations-empty-valid",
+      "operation": "revocation",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "skill",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+              "artifactDigests": [
+                "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "list": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "revision": 3,
+          "issuedAt": "2026-11-12T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revokedKids": [],
+          "revokedArtifacts": [],
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-revocation",
+            "value": "pToXTrHJEaPq6fsw3x4jWRFspVYhLeKYKv7VwIj-LAFPfSOxMMXnHcUBQ_r_7B_BUDyqOyvmCqPvks2_SX77CQ"
+          }
+        }
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "revocations-tampered",
+      "operation": "revocation",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "skill",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+              "artifactDigests": [
+                "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "list": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "revision": 4,
+          "issuedAt": "2026-11-12T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revokedKids": [],
+          "revokedArtifacts": [],
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-revocation",
+            "value": "pToXTrHJEaPq6fsw3x4jWRFspVYhLeKYKv7VwIj-LAFPfSOxMMXnHcUBQ_r_7B_BUDyqOyvmCqPvks2_SX77CQ"
+          }
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "revocation_signature"
+      }
+    },
+    {
+      "id": "revocations-cross-tenant",
+      "operation": "revocation",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "skill",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+              "artifactDigests": [
+                "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"skill\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2\",\"sizeBytes\":33,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"skill\":{\"entry\":\"SKILL.md\",\"contentProfile\":\"text-only\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "IyBFeGFtcGxlIHNraWxsCgpQdWJsaWMgZml4dHVyZS4K"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "list": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000099",
+          "revision": 3,
+          "issuedAt": "2026-11-12T00:00:00Z",
+          "expiresAt": "2026-11-13T00:00:00Z",
+          "revokedKids": [],
+          "revokedArtifacts": [],
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-revocation",
+            "value": "Ezr-pyowEUU1RDnFOKljlVckkTArIOYP1GIhG8Ti80qbjNb723iHVYynUKIBeiUsGojfQUap7_iIPX6J3BiEDQ"
+          }
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "revocation_tenant"
+      }
+    },
+    {
+      "id": "same-sequence-proved-alias",
+      "operation": "watermark",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "kind": "plugin"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "watermark": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 7,
+          "verifiedDigestAliases": [
+            "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+          ]
+        },
+        "migration": {
+          "proof": {
+            "schemaVersion": 2,
+            "legacyEnvelope": {
+              "schemaVersion": 1,
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000003",
+              "releaseSequence": 7,
+              "notAfter": "2026-11-13T00:00:00Z",
+              "statement": {
+                "purpose": "plugin",
+                "name": "@example/plugin",
+                "version": "1.2.3",
+                "os": "any",
+                "arch": "any",
+                "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+                "issuedAt": "2026-11-12T00:00:00Z"
+              },
+              "signature": {
+                "alg": "Ed25519",
+                "kid": "test-only-release",
+                "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+              }
+            },
+            "unifiedEnvelope": {
+              "schemaVersion": 2,
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000003",
+              "releaseSequence": 7,
+              "notAfter": "2026-11-13T00:00:00Z",
+              "statement": {
+                "purpose": "resource",
+                "kind": "plugin",
+                "name": "example-resource",
+                "version": "1.2.3",
+                "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+                "artifactDigests": [
+                  "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+                ],
+                "issuedAt": "2026-11-12T00:00:00Z"
+              },
+              "signature": {
+                "alg": "Ed25519",
+                "kid": "test-only-release",
+                "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+              }
+            },
+            "legacyArtifactId": "payload",
+            "activatedAt": "2026-11-12T00:00:00Z",
+            "marker": {
+              "schemaVersion": 2,
+              "purpose": "migration",
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+              "firstReleaseSequence": 7,
+              "activatedAt": "2026-11-12T00:00:00Z",
+              "signature": {
+                "alg": "Ed25519",
+                "kid": "test-only-release",
+                "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+              }
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "now": "2026-11-12T01:00:00Z",
+          "previousManifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775"
+        }
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "same-sequence-unproved-alias",
+      "operation": "watermark",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "kind": "plugin"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "watermark": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 7,
+          "verifiedDigestAliases": [
+            "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "watermark_alias"
+      }
+    },
+    {
+      "id": "same-sequence-version-swap",
+      "operation": "watermark",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000008",
+            "releaseSequence": 8,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "-pQxOoDZ5-z_i2RjHKgeQoIh8yG2W3dvkOVXuZxo5tdKBvGreIOKOGsYCFQTSiyN7rwPWBwrEwz5ND_62LUVCg"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000008",
+            "kind": "plugin"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "watermark": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 8,
+          "verifiedDigestAliases": [
+            "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "watermark_alias"
+      }
+    },
+    {
+      "id": "cross-protocol-rollback-v1",
+      "operation": "watermark",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 1,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "plugin",
+              "name": "@example/plugin",
+              "version": "1.2.3",
+              "os": "any",
+              "arch": "any",
+              "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+            }
+          },
+          "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "kind": "plugin"
+          },
+          "protocol": 1,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "watermark": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 8,
+          "verifiedDigestAliases": [
+            "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "rollback"
+      }
+    },
+    {
+      "id": "cross-protocol-rollback-v2",
+      "operation": "watermark",
+      "input": {
+        "release": {
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "plugin",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:a7ca47a562ab2cbf46368bd90d9ee22988c017710a4c1193aa05d063a6f32775",
+              "artifactDigests": [
+                "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "X19845aerbW80cUzU61P5bibAGLmyDYaBweTJlstl-Lsi_MGGefW2plweqwUbaBYqoob4_VJEmuQGeNvDDcuCw"
+            }
+          },
+          "rawManifest": "{\"schemaVersion\":1,\"name\":\"example-resource\",\"version\":\"1.2.3\",\"description\":\"Synthetic public contract fixture\",\"author\":{\"displayName\":\"Example\"},\"license\":\"MIT\",\"permissions\":{\"tools\":[],\"outboundHosts\":[],\"dataAccess\":[]},\"runtimes\":[],\"signature\":{\"mode\":\"detached\",\"algorithm\":\"Ed25519\"},\"kind\":\"plugin\",\"artifacts\":[{\"id\":\"payload\",\"role\":\"payload\",\"digest\":\"sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af\",\"sizeBytes\":30,\"mediaType\":\"application/gzip\",\"os\":\"any\",\"arch\":\"any\"}],\"plugin\":{\"packageName\":\"@example/plugin\",\"dshVersionRange\":\">=0.2.0\"}}\n",
+          "artifactBytes": {
+            "payload": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz"
+          },
+          "expected": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "kind": "plugin"
+          },
+          "protocol": 2,
+          "now": "2026-11-12T01:00:00Z"
+        },
+        "watermark": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 8,
+          "verifiedDigestAliases": [
+            "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "rollback"
+      }
+    },
+    {
+      "id": "v1-renewal-at-fixed-deadline",
+      "operation": "renewal",
+      "input": {
+        "envelope": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "plugin",
+            "name": "@example/plugin",
+            "version": "1.2.3",
+            "os": "any",
+            "arch": "any",
+            "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+          }
+        },
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "kind": "plugin"
+        },
+        "protocol": 1,
+        "now": "2026-11-12T01:00:00Z",
+        "marker": {
+          "schemaVersion": 2,
+          "purpose": "migration",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+          "firstReleaseSequence": 7,
+          "activatedAt": "2026-11-12T00:00:00Z",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+          }
+        },
+        "persistedActivatedAt": "2026-11-12T00:00:00Z"
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "v1-renewal-past-fixed-deadline",
+      "operation": "renewal",
+      "input": {
+        "envelope": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:01Z",
+          "statement": {
+            "purpose": "plugin",
+            "name": "@example/plugin",
+            "version": "1.2.3",
+            "os": "any",
+            "arch": "any",
+            "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+            "issuedAt": "2026-11-12T01:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "ebs1uB5YXTJf1RjJ93HjMOJtGNiLKBLazrq2gTwOX1e8mqnMSvbvV_nmUOaQtlDhCW4BzWBTcuRYbFwIOu6iBw"
+          }
+        },
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "kind": "plugin"
+        },
+        "protocol": 1,
+        "now": "2026-11-12T01:00:00Z",
+        "marker": {
+          "schemaVersion": 2,
+          "purpose": "migration",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+          "firstReleaseSequence": 7,
+          "activatedAt": "2026-11-12T00:00:00Z",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+          }
+        },
+        "persistedActivatedAt": "2026-11-12T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "renewal_cutoff"
+      }
+    },
+    {
+      "id": "v1-renewal-after-cutoff",
+      "operation": "renewal",
+      "input": {
+        "envelope": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "plugin",
+            "name": "@example/plugin",
+            "version": "1.2.3",
+            "os": "any",
+            "arch": "any",
+            "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+          }
+        },
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "kind": "plugin"
+        },
+        "protocol": 1,
+        "now": "2026-11-13T00:00:00Z",
+        "marker": {
+          "schemaVersion": 2,
+          "purpose": "migration",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+          "firstReleaseSequence": 7,
+          "activatedAt": "2026-11-12T00:00:00Z",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+          }
+        },
+        "persistedActivatedAt": "2026-11-12T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "renewal_cutoff"
+      }
+    },
+    {
+      "id": "v1-renewal-cannot-reset-t0",
+      "operation": "renewal",
+      "input": {
+        "envelope": {
+          "schemaVersion": 1,
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "releaseSequence": 7,
+          "notAfter": "2026-11-13T00:00:00Z",
+          "statement": {
+            "purpose": "plugin",
+            "name": "@example/plugin",
+            "version": "1.2.3",
+            "os": "any",
+            "arch": "any",
+            "digest": "sha256:e9c1cf952325cc87b665adb48f37487a95d3364c14325e8037900093b2ec72af",
+            "issuedAt": "2026-11-12T00:00:00Z"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "mCJ6rpX86TTzn9vuBw2OcR81pkGZo8Kkes5DsNisQ_KNo3fGMdZK3SpR-z7MVCTT_D19cLe_9X3i4o8mTnGTDw"
+          }
+        },
+        "rawArchiveBase64": "c3ludGhldGljIGxlZ2FjeSBhcmNoaXZlIGJ5dGVz",
+        "expected": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000003",
+          "kind": "plugin"
+        },
+        "protocol": 1,
+        "now": "2026-11-12T01:00:00Z",
+        "marker": {
+          "schemaVersion": 2,
+          "purpose": "migration",
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+          "firstReleaseSequence": 7,
+          "activatedAt": "2026-11-12T01:00:00Z",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-release",
+            "value": "kx7_yECHShl7mBEXB5GRjqZLs2fcbw7OwTE3V-xxx-Ms6ScA4vN46dJfVTztBbIGOaH9cSlxCPZAPhVweYxNAA"
+          }
+        },
+        "persistedActivatedAt": "2026-11-12T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "migration_binding"
+      }
+    },
+    {
+      "id": "downgrade-signed-valid",
+      "operation": "downgrade",
+      "input": {
+        "authorization": {
+          "schemaVersion": 2,
+          "purpose": "downgrade",
+          "authorizationId": "019a0000-0000-7000-8000-000000000010",
+          "instanceId": "019a0000-0000-7000-8000-000000000011",
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "fromReleaseSequence": 8,
+          "toReleaseSequence": 7,
+          "issuedAt": "2026-11-12T01:00:00Z",
+          "expiresAt": "2026-11-12T01:10:00Z",
+          "reason": "Synthetic approved rollback",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-downgrade",
+            "value": "FputlNwUc0SQBSTLY-9f-HsOTxlwQlWwMVsmI1TAJYS-kVEevJOag2SIzp5mJAh8EWOVR3pJpx6669CEgA3tAw"
+          }
+        },
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "instanceId": "019a0000-0000-7000-8000-000000000011",
+        "fromReleaseSequence": 8,
+        "toReleaseSequence": 7,
+        "now": "2026-11-12T01:05:00Z",
+        "usedAuthorizationIds": []
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "downgrade-other-version",
+      "operation": "downgrade",
+      "input": {
+        "authorization": {
+          "schemaVersion": 2,
+          "purpose": "downgrade",
+          "authorizationId": "019a0000-0000-7000-8000-000000000010",
+          "instanceId": "019a0000-0000-7000-8000-000000000011",
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "fromReleaseSequence": 8,
+          "toReleaseSequence": 7,
+          "issuedAt": "2026-11-12T01:00:00Z",
+          "expiresAt": "2026-11-12T01:10:00Z",
+          "reason": "Synthetic approved rollback",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-downgrade",
+            "value": "FputlNwUc0SQBSTLY-9f-HsOTxlwQlWwMVsmI1TAJYS-kVEevJOag2SIzp5mJAh8EWOVR3pJpx6669CEgA3tAw"
+          }
+        },
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000099",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "instanceId": "019a0000-0000-7000-8000-000000000011",
+        "fromReleaseSequence": 8,
+        "toReleaseSequence": 7,
+        "now": "2026-11-12T01:05:00Z",
+        "usedAuthorizationIds": []
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "downgrade_scope"
+      }
+    },
+    {
+      "id": "downgrade-other-instance",
+      "operation": "downgrade",
+      "input": {
+        "authorization": {
+          "schemaVersion": 2,
+          "purpose": "downgrade",
+          "authorizationId": "019a0000-0000-7000-8000-000000000010",
+          "instanceId": "019a0000-0000-7000-8000-000000000011",
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "fromReleaseSequence": 8,
+          "toReleaseSequence": 7,
+          "issuedAt": "2026-11-12T01:00:00Z",
+          "expiresAt": "2026-11-12T01:10:00Z",
+          "reason": "Synthetic approved rollback",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-downgrade",
+            "value": "FputlNwUc0SQBSTLY-9f-HsOTxlwQlWwMVsmI1TAJYS-kVEevJOag2SIzp5mJAh8EWOVR3pJpx6669CEgA3tAw"
+          }
+        },
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "instanceId": "019a0000-0000-7000-8000-000000000012",
+        "fromReleaseSequence": 8,
+        "toReleaseSequence": 7,
+        "now": "2026-11-12T01:05:00Z",
+        "usedAuthorizationIds": []
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "downgrade_scope"
+      }
+    },
+    {
+      "id": "downgrade-expired",
+      "operation": "downgrade",
+      "input": {
+        "authorization": {
+          "schemaVersion": 2,
+          "purpose": "downgrade",
+          "authorizationId": "019a0000-0000-7000-8000-000000000010",
+          "instanceId": "019a0000-0000-7000-8000-000000000011",
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "fromReleaseSequence": 8,
+          "toReleaseSequence": 7,
+          "issuedAt": "2026-11-12T01:00:00Z",
+          "expiresAt": "2026-11-12T01:10:00Z",
+          "reason": "Synthetic approved rollback",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-downgrade",
+            "value": "FputlNwUc0SQBSTLY-9f-HsOTxlwQlWwMVsmI1TAJYS-kVEevJOag2SIzp5mJAh8EWOVR3pJpx6669CEgA3tAw"
+          }
+        },
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "instanceId": "019a0000-0000-7000-8000-000000000011",
+        "fromReleaseSequence": 8,
+        "toReleaseSequence": 7,
+        "now": "2026-11-12T01:10:00Z",
+        "usedAuthorizationIds": []
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "downgrade_expired"
+      }
+    },
+    {
+      "id": "downgrade-replayed",
+      "operation": "downgrade",
+      "input": {
+        "authorization": {
+          "schemaVersion": 2,
+          "purpose": "downgrade",
+          "authorizationId": "019a0000-0000-7000-8000-000000000010",
+          "instanceId": "019a0000-0000-7000-8000-000000000011",
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "fromReleaseSequence": 8,
+          "toReleaseSequence": 7,
+          "issuedAt": "2026-11-12T01:00:00Z",
+          "expiresAt": "2026-11-12T01:10:00Z",
+          "reason": "Synthetic approved rollback",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-downgrade",
+            "value": "FputlNwUc0SQBSTLY-9f-HsOTxlwQlWwMVsmI1TAJYS-kVEevJOag2SIzp5mJAh8EWOVR3pJpx6669CEgA3tAw"
+          }
+        },
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "instanceId": "019a0000-0000-7000-8000-000000000011",
+        "fromReleaseSequence": 8,
+        "toReleaseSequence": 7,
+        "now": "2026-11-12T01:05:00Z",
+        "usedAuthorizationIds": [
+          "019a0000-0000-7000-8000-000000000010"
+        ]
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "downgrade_replay"
+      }
+    },
+    {
+      "id": "downgrade-tampered",
+      "operation": "downgrade",
+      "input": {
+        "authorization": {
+          "schemaVersion": 2,
+          "purpose": "downgrade",
+          "authorizationId": "019a0000-0000-7000-8000-000000000010",
+          "instanceId": "019a0000-0000-7000-8000-000000000011",
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "fromReleaseSequence": 8,
+          "toReleaseSequence": 7,
+          "issuedAt": "2026-11-12T01:00:00Z",
+          "expiresAt": "2026-11-12T01:10:00Z",
+          "reason": "tampered",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-downgrade",
+            "value": "FputlNwUc0SQBSTLY-9f-HsOTxlwQlWwMVsmI1TAJYS-kVEevJOag2SIzp5mJAh8EWOVR3pJpx6669CEgA3tAw"
+          }
+        },
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "instanceId": "019a0000-0000-7000-8000-000000000011",
+        "fromReleaseSequence": 8,
+        "toReleaseSequence": 7,
+        "now": "2026-11-12T01:05:00Z",
+        "usedAuthorizationIds": []
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "downgrade_signature"
+      }
+    },
+    {
+      "id": "downgrade-wrong-purpose",
+      "operation": "downgrade",
+      "input": {
+        "authorization": {
+          "schemaVersion": 2,
+          "purpose": "resource",
+          "authorizationId": "019a0000-0000-7000-8000-000000000010",
+          "instanceId": "019a0000-0000-7000-8000-000000000011",
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "fromReleaseSequence": 8,
+          "toReleaseSequence": 7,
+          "issuedAt": "2026-11-12T01:00:00Z",
+          "expiresAt": "2026-11-12T01:10:00Z",
+          "reason": "Synthetic approved rollback",
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "test-only-downgrade",
+            "value": "jMugsUk0dkxAwgsNmbuRZFkq6fgoFAjQk-JMpLYEM6c8I9Z2l9Y-kYHLojvDL4yR_dgFeFyQ7OP1ngE6zsHNDg"
+          }
+        },
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "instanceId": "019a0000-0000-7000-8000-000000000011",
+        "fromReleaseSequence": 8,
+        "toReleaseSequence": 7,
+        "now": "2026-11-12T01:05:00Z",
+        "usedAuthorizationIds": []
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "schema"
+      }
+    },
+    {
+      "id": "guardian-clock-valid",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000014",
+        "wallNow": "2026-11-12T01:00:01Z",
+        "monotonicNowMillis": 2000,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "accept",
+        "reason": "ok"
+      }
+    },
+    {
+      "id": "guardian-clock-wall-rollback",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000014",
+        "wallNow": "2026-11-12T00:00:00Z",
+        "monotonicNowMillis": 2000,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "clock_rollback"
+      }
+    },
+    {
+      "id": "guardian-clock-monotonic-rollback",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000014",
+        "wallNow": "2026-11-12T01:00:01Z",
+        "monotonicNowMillis": 999,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "clock_rollback"
+      }
+    },
+    {
+      "id": "guardian-clock-new-boot-offline",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000099",
+        "wallNow": "2026-11-12T01:00:01Z",
+        "monotonicNowMillis": 2000,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "clock_reverify"
+      }
+    },
+    {
+      "id": "guardian-active-lease-expired",
+      "operation": "clock",
+      "input": {
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        },
+        "bootId": "019a0000-0000-7000-8000-000000000014",
+        "wallNow": "2026-11-13T00:00:00Z",
+        "monotonicNowMillis": 82801000,
+        "leaseExpiresAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "lease_expired"
+      }
+    }
   ]
 }

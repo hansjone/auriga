@@ -1519,12 +1519,13 @@ func (x *UnifiedGuardianState) GetNewSessionRequired() bool {
 }
 
 type UnifiedMigrationProof struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	SchemaVersion    uint64                 `protobuf:"varint,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
-	LegacyEnvelope   *ResourceEnvelope      `protobuf:"bytes,2,opt,name=legacy_envelope,json=legacyEnvelope,proto3" json:"legacy_envelope,omitempty"`
-	UnifiedEnvelope  *UnifiedEnvelope       `protobuf:"bytes,3,opt,name=unified_envelope,json=unifiedEnvelope,proto3" json:"unified_envelope,omitempty"`
-	LegacyArtifactId string                 `protobuf:"bytes,4,opt,name=legacy_artifact_id,json=legacyArtifactId,proto3" json:"legacy_artifact_id,omitempty"`
-	ActivatedAt      string                 `protobuf:"bytes,5,opt,name=activated_at,json=activatedAt,proto3" json:"activated_at,omitempty"`
+	state            protoimpl.MessageState  `protogen:"open.v1"`
+	SchemaVersion    uint64                  `protobuf:"varint,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	LegacyEnvelope   *ResourceEnvelope       `protobuf:"bytes,2,opt,name=legacy_envelope,json=legacyEnvelope,proto3" json:"legacy_envelope,omitempty"`
+	UnifiedEnvelope  *UnifiedEnvelope        `protobuf:"bytes,3,opt,name=unified_envelope,json=unifiedEnvelope,proto3" json:"unified_envelope,omitempty"`
+	LegacyArtifactId string                  `protobuf:"bytes,4,opt,name=legacy_artifact_id,json=legacyArtifactId,proto3" json:"legacy_artifact_id,omitempty"`
+	ActivatedAt      string                  `protobuf:"bytes,5,opt,name=activated_at,json=activatedAt,proto3" json:"activated_at,omitempty"`
+	Marker           *UnifiedMigrationMarker `protobuf:"bytes,6,opt,name=marker,proto3" json:"marker,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1592,6 +1593,13 @@ func (x *UnifiedMigrationProof) GetActivatedAt() string {
 		return x.ActivatedAt
 	}
 	return ""
+}
+
+func (x *UnifiedMigrationProof) GetMarker() *UnifiedMigrationMarker {
+	if x != nil {
+		return x.Marker
+	}
+	return nil
 }
 
 type UnifiedHighWatermark struct {
@@ -1827,6 +1835,7 @@ type UnifiedDowngradeAuthorization struct {
 	ExpiresAt           string                   `protobuf:"bytes,8,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	Reason              string                   `protobuf:"bytes,9,opt,name=reason,proto3" json:"reason,omitempty"`
 	Signature           *ResourceSignature       `protobuf:"bytes,10,opt,name=signature,proto3" json:"signature,omitempty"`
+	Purpose             string                   `protobuf:"bytes,11,opt,name=purpose,proto3" json:"purpose,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -1925,6 +1934,114 @@ func (x *UnifiedDowngradeAuthorization) GetReason() string {
 }
 
 func (x *UnifiedDowngradeAuthorization) GetSignature() *ResourceSignature {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
+func (x *UnifiedDowngradeAuthorization) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+// Release-root signed immutable migration marker; activated_at is covered by its signature.
+type UnifiedMigrationMarker struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	SchemaVersion        uint32                 `protobuf:"varint,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	Purpose              string                 `protobuf:"bytes,2,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	TenantId             string                 `protobuf:"bytes,3,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	PackageId            string                 `protobuf:"bytes,4,opt,name=package_id,json=packageId,proto3" json:"package_id,omitempty"`
+	FirstVersionId       string                 `protobuf:"bytes,5,opt,name=first_version_id,json=firstVersionId,proto3" json:"first_version_id,omitempty"`
+	FirstReleaseSequence uint64                 `protobuf:"varint,6,opt,name=first_release_sequence,json=firstReleaseSequence,proto3" json:"first_release_sequence,omitempty"`
+	ActivatedAt          string                 `protobuf:"bytes,7,opt,name=activated_at,json=activatedAt,proto3" json:"activated_at,omitempty"`
+	Signature            *ResourceSignature     `protobuf:"bytes,8,opt,name=signature,proto3" json:"signature,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *UnifiedMigrationMarker) Reset() {
+	*x = UnifiedMigrationMarker{}
+	mi := &file_auriga_resource_v1_unified_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnifiedMigrationMarker) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnifiedMigrationMarker) ProtoMessage() {}
+
+func (x *UnifiedMigrationMarker) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_resource_v1_unified_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnifiedMigrationMarker.ProtoReflect.Descriptor instead.
+func (*UnifiedMigrationMarker) Descriptor() ([]byte, []int) {
+	return file_auriga_resource_v1_unified_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *UnifiedMigrationMarker) GetSchemaVersion() uint32 {
+	if x != nil {
+		return x.SchemaVersion
+	}
+	return 0
+}
+
+func (x *UnifiedMigrationMarker) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+func (x *UnifiedMigrationMarker) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *UnifiedMigrationMarker) GetPackageId() string {
+	if x != nil {
+		return x.PackageId
+	}
+	return ""
+}
+
+func (x *UnifiedMigrationMarker) GetFirstVersionId() string {
+	if x != nil {
+		return x.FirstVersionId
+	}
+	return ""
+}
+
+func (x *UnifiedMigrationMarker) GetFirstReleaseSequence() uint64 {
+	if x != nil {
+		return x.FirstReleaseSequence
+	}
+	return 0
+}
+
+func (x *UnifiedMigrationMarker) GetActivatedAt() string {
+	if x != nil {
+		return x.ActivatedAt
+	}
+	return ""
+}
+
+func (x *UnifiedMigrationMarker) GetSignature() *ResourceSignature {
 	if x != nil {
 		return x.Signature
 	}
@@ -2083,13 +2200,14 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x0fprocess_stopped\x18\t \x01(\bR\x0eprocessStopped\x12!\n" +
 	"\fview_cleared\x18\n" +
 	" \x01(\bR\vviewCleared\x120\n" +
-	"\x14new_session_required\x18\v \x01(\bR\x12newSessionRequired\"\xae\x02\n" +
+	"\x14new_session_required\x18\v \x01(\bR\x12newSessionRequired\"\xf2\x02\n" +
 	"\x15UnifiedMigrationProof\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\x04R\rschemaVersion\x12M\n" +
 	"\x0flegacy_envelope\x18\x02 \x01(\v2$.auriga.resource.v1.ResourceEnvelopeR\x0elegacyEnvelope\x12N\n" +
 	"\x10unified_envelope\x18\x03 \x01(\v2#.auriga.resource.v1.UnifiedEnvelopeR\x0funifiedEnvelope\x12,\n" +
 	"\x12legacy_artifact_id\x18\x04 \x01(\tR\x10legacyArtifactId\x12!\n" +
-	"\factivated_at\x18\x05 \x01(\tR\vactivatedAt\"\xd4\x01\n" +
+	"\factivated_at\x18\x05 \x01(\tR\vactivatedAt\x12B\n" +
+	"\x06marker\x18\x06 \x01(\v2*.auriga.resource.v1.UnifiedMigrationMarkerR\x06marker\"\xd4\x01\n" +
 	"\x14UnifiedHighWatermark\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1d\n" +
 	"\n" +
@@ -2111,7 +2229,7 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x1fResolveUnifiedResourcesResponse\x12-\n" +
 	"\x12selection_revision\x18\x01 \x01(\x04R\x11selectionRevision\x12D\n" +
 	"\tresources\x18\x02 \x03(\v2&.auriga.resource.v1.UnifiedResourceRefR\tresources\x12L\n" +
-	"\vrevocations\x18\x03 \x01(\v2*.auriga.resource.v1.ResourceRevocationListR\vrevocations\"\xd8\x03\n" +
+	"\vrevocations\x18\x03 \x01(\v2*.auriga.resource.v1.ResourceRevocationListR\vrevocations\"\xf2\x03\n" +
 	"\x1dUnifiedDowngradeAuthorization\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\x12)\n" +
 	"\x10authorization_id\x18\x02 \x01(\tR\x0fauthorizationId\x12\x1f\n" +
@@ -2125,7 +2243,18 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"expires_at\x18\b \x01(\tR\texpiresAt\x12\x16\n" +
 	"\x06reason\x18\t \x01(\tR\x06reason\x12C\n" +
 	"\tsignature\x18\n" +
-	" \x01(\v2%.auriga.resource.v1.ResourceSignatureR\tsignature2\xa7\x01\n" +
+	" \x01(\v2%.auriga.resource.v1.ResourceSignatureR\tsignature\x12\x18\n" +
+	"\apurpose\x18\v \x01(\tR\apurpose\"\xdd\x02\n" +
+	"\x16UnifiedMigrationMarker\x12%\n" +
+	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\x12\x18\n" +
+	"\apurpose\x18\x02 \x01(\tR\apurpose\x12\x1b\n" +
+	"\ttenant_id\x18\x03 \x01(\tR\btenantId\x12\x1d\n" +
+	"\n" +
+	"package_id\x18\x04 \x01(\tR\tpackageId\x12(\n" +
+	"\x10first_version_id\x18\x05 \x01(\tR\x0efirstVersionId\x124\n" +
+	"\x16first_release_sequence\x18\x06 \x01(\x04R\x14firstReleaseSequence\x12!\n" +
+	"\factivated_at\x18\a \x01(\tR\vactivatedAt\x12C\n" +
+	"\tsignature\x18\b \x01(\v2%.auriga.resource.v1.ResourceSignatureR\tsignature2\xa7\x01\n" +
 	" UnifiedResourceResolutionService\x12\x82\x01\n" +
 	"\x17ResolveUnifiedResources\x122.auriga.resource.v1.ResolveUnifiedResourcesRequest\x1a3.auriga.resource.v1.ResolveUnifiedResourcesResponseBd\n" +
 	"\x1cauriga.contracts.resource.v1P\x01ZBgithub.com/hansjone/auriga/infra/gen/auriga/resource/v1;resourcev1b\x06proto3"
@@ -2142,7 +2271,7 @@ func file_auriga_resource_v1_unified_proto_rawDescGZIP() []byte {
 	return file_auriga_resource_v1_unified_proto_rawDescData
 }
 
-var file_auriga_resource_v1_unified_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_auriga_resource_v1_unified_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_auriga_resource_v1_unified_proto_goTypes = []any{
 	(*UnifiedStatement)(nil),                // 0: auriga.resource.v1.UnifiedStatement
 	(*UnifiedEnvelope)(nil),                 // 1: auriga.resource.v1.UnifiedEnvelope
@@ -2168,13 +2297,14 @@ var file_auriga_resource_v1_unified_proto_goTypes = []any{
 	(*ResolveUnifiedResourcesRequest)(nil),  // 21: auriga.resource.v1.ResolveUnifiedResourcesRequest
 	(*ResolveUnifiedResourcesResponse)(nil), // 22: auriga.resource.v1.ResolveUnifiedResourcesResponse
 	(*UnifiedDowngradeAuthorization)(nil),   // 23: auriga.resource.v1.UnifiedDowngradeAuthorization
-	(*ResourceSignature)(nil),               // 24: auriga.resource.v1.ResourceSignature
-	(*ResourceRevocationList)(nil),          // 25: auriga.resource.v1.ResourceRevocationList
-	(*ResourceEnvelope)(nil),                // 26: auriga.resource.v1.ResourceEnvelope
+	(*UnifiedMigrationMarker)(nil),          // 24: auriga.resource.v1.UnifiedMigrationMarker
+	(*ResourceSignature)(nil),               // 25: auriga.resource.v1.ResourceSignature
+	(*ResourceRevocationList)(nil),          // 26: auriga.resource.v1.ResourceRevocationList
+	(*ResourceEnvelope)(nil),                // 27: auriga.resource.v1.ResourceEnvelope
 }
 var file_auriga_resource_v1_unified_proto_depIdxs = []int32{
 	0,  // 0: auriga.resource.v1.UnifiedEnvelope.statement:type_name -> auriga.resource.v1.UnifiedStatement
-	24, // 1: auriga.resource.v1.UnifiedEnvelope.signature:type_name -> auriga.resource.v1.ResourceSignature
+	25, // 1: auriga.resource.v1.UnifiedEnvelope.signature:type_name -> auriga.resource.v1.ResourceSignature
 	2,  // 2: auriga.resource.v1.UnifiedResourceRef.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
 	1,  // 3: auriga.resource.v1.UnifiedResourceRef.envelope:type_name -> auriga.resource.v1.UnifiedEnvelope
 	4,  // 4: auriga.resource.v1.UnifiedResourceRef.artifacts:type_name -> auriga.resource.v1.UnifiedArtifactDownload
@@ -2182,7 +2312,7 @@ var file_auriga_resource_v1_unified_proto_depIdxs = []int32{
 	2,  // 6: auriga.resource.v1.UnifiedSelection.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
 	2,  // 7: auriga.resource.v1.UnifiedDownloadTicketInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
 	5,  // 8: auriga.resource.v1.UnifiedDownloadTicket.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
-	25, // 9: auriga.resource.v1.UnifiedDownloadTicket.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
+	26, // 9: auriga.resource.v1.UnifiedDownloadTicket.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
 	6,  // 10: auriga.resource.v1.UnifiedInstallationInput.selection:type_name -> auriga.resource.v1.UnifiedSelection
 	2,  // 11: auriga.resource.v1.UnifiedInstallationReport.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
 	5,  // 12: auriga.resource.v1.UnifiedInstallation.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
@@ -2194,20 +2324,22 @@ var file_auriga_resource_v1_unified_proto_depIdxs = []int32{
 	15, // 18: auriga.resource.v1.UnifiedDistributionPage.items:type_name -> auriga.resource.v1.UnifiedDistribution
 	2,  // 19: auriga.resource.v1.UnifiedRenewalInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
 	3,  // 20: auriga.resource.v1.UnifiedGuardianState.lease:type_name -> auriga.resource.v1.UnifiedLease
-	26, // 21: auriga.resource.v1.UnifiedMigrationProof.legacy_envelope:type_name -> auriga.resource.v1.ResourceEnvelope
+	27, // 21: auriga.resource.v1.UnifiedMigrationProof.legacy_envelope:type_name -> auriga.resource.v1.ResourceEnvelope
 	1,  // 22: auriga.resource.v1.UnifiedMigrationProof.unified_envelope:type_name -> auriga.resource.v1.UnifiedEnvelope
-	6,  // 23: auriga.resource.v1.ResolveUnifiedResourcesRequest.selections:type_name -> auriga.resource.v1.UnifiedSelection
-	5,  // 24: auriga.resource.v1.ResolveUnifiedResourcesResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
-	25, // 25: auriga.resource.v1.ResolveUnifiedResourcesResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
-	2,  // 26: auriga.resource.v1.UnifiedDowngradeAuthorization.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	24, // 27: auriga.resource.v1.UnifiedDowngradeAuthorization.signature:type_name -> auriga.resource.v1.ResourceSignature
-	21, // 28: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:input_type -> auriga.resource.v1.ResolveUnifiedResourcesRequest
-	22, // 29: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:output_type -> auriga.resource.v1.ResolveUnifiedResourcesResponse
-	29, // [29:30] is the sub-list for method output_type
-	28, // [28:29] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	24, // 23: auriga.resource.v1.UnifiedMigrationProof.marker:type_name -> auriga.resource.v1.UnifiedMigrationMarker
+	6,  // 24: auriga.resource.v1.ResolveUnifiedResourcesRequest.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	5,  // 25: auriga.resource.v1.ResolveUnifiedResourcesResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
+	26, // 26: auriga.resource.v1.ResolveUnifiedResourcesResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
+	2,  // 27: auriga.resource.v1.UnifiedDowngradeAuthorization.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	25, // 28: auriga.resource.v1.UnifiedDowngradeAuthorization.signature:type_name -> auriga.resource.v1.ResourceSignature
+	25, // 29: auriga.resource.v1.UnifiedMigrationMarker.signature:type_name -> auriga.resource.v1.ResourceSignature
+	21, // 30: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:input_type -> auriga.resource.v1.ResolveUnifiedResourcesRequest
+	22, // 31: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:output_type -> auriga.resource.v1.ResolveUnifiedResourcesResponse
+	31, // [31:32] is the sub-list for method output_type
+	30, // [30:31] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_auriga_resource_v1_unified_proto_init() }
@@ -2222,7 +2354,7 @@ func file_auriga_resource_v1_unified_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_resource_v1_unified_proto_rawDesc), len(file_auriga_resource_v1_unified_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

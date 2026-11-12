@@ -237,7 +237,16 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
           );
         for (const evt of o['x-events']) assert(catalog.events[evt], evt);
         if (method === 'post')
-          assert(o.parameters.some((p) => p.$ref?.endsWith('/IdempotencyKey')));
+          assert(
+            o.parameters.some(
+              (p) =>
+                p.$ref?.endsWith('/IdempotencyKey') ||
+                (o.operationId.startsWith('Unified') &&
+                  p.in === 'header' &&
+                  p.name === 'Idempotency-Key' &&
+                  p.required === true),
+            ),
+          );
       }
     }
   }

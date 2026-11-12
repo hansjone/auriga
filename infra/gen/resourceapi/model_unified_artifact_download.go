@@ -21,10 +21,11 @@ var _ MappedNullable = &UnifiedArtifactDownload{}
 
 // UnifiedArtifactDownload struct for UnifiedArtifactDownload
 type UnifiedArtifactDownload struct {
-	ArtifactId   string `json:"artifactId"`
-	Digest       string `json:"digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
-	SizeBytes    int64  `json:"sizeBytes"`
-	DownloadPath string `json:"downloadPath"`
+	ArtifactId string `json:"artifactId"`
+	Digest     string `json:"digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	// Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments.
+	DownloadPath string `json:"downloadPath" validate:"regexp=^/(api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+)|internal/resource/v1/catalog/downloads/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+))$"`
 }
 
 type _UnifiedArtifactDownload UnifiedArtifactDownload

@@ -85,8 +85,9 @@
         },
         "downloadPath": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
+          "maxLength": 2048,
+          "pattern": "^/(api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+)|internal/resource/v1/catalog/downloads/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+))$",
+          "description": "Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments."
         }
       },
       "required": ["artifactId", "digest", "sizeBytes", "downloadPath"],
@@ -103,8 +104,9 @@
         },
         "manifestDownloadPath": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
+          "maxLength": 2048,
+          "pattern": "^/(api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+)|internal/resource/v1/catalog/downloads/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+))$",
+          "description": "Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments."
         },
         "artifacts": {
           "type": "array",
@@ -686,7 +688,11 @@
           "maxLength": 64
         },
         "activatedAt": {
-          "$ref": "./signatures.schema.json#/$defs/Time"
+          "$ref": "./signatures.schema.json#/$defs/Time",
+          "description": "Must equal signed marker.activatedAt; immutable package migration t0."
+        },
+        "marker": {
+          "$ref": "#/$defs/UnifiedMigrationMarker"
         }
       },
       "required": [
@@ -694,7 +700,8 @@
         "legacyEnvelope",
         "unifiedEnvelope",
         "legacyArtifactId",
-        "activatedAt"
+        "activatedAt",
+        "marker"
       ],
       "additionalProperties": false
     },
@@ -781,6 +788,10 @@
         },
         "signature": {
           "$ref": "./signatures.schema.json#/$defs/Signature"
+        },
+        "purpose": {
+          "type": "string",
+          "const": "downgrade"
         }
       },
       "required": [
@@ -793,7 +804,618 @@
         "issuedAt",
         "expiresAt",
         "reason",
+        "signature",
+        "purpose"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedMemberInstallationReport": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "installationRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "observedGeneration": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "applying",
+            "applied",
+            "failed",
+            "pending_restart",
+            "superseded",
+            "overridden",
+            "expired",
+            "revoked",
+            "disabled",
+            "removed"
+          ]
+        },
+        "reportSource": {
+          "type": "string",
+          "const": "member"
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        }
+      },
+      "required": [
+        "clientId",
+        "identity",
+        "installationRevision",
+        "selectionRevision",
+        "generation",
+        "observedGeneration",
+        "state",
+        "reportSource",
+        "observedAt"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": ["failed", "expired", "revoked"]
+              }
+            },
+            "required": ["state"]
+          },
+          "then": {
+            "required": ["errorCode"],
+            "properties": {
+              "errorCode": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        }
+      ]
+    },
+    "UnifiedMigrationMarker": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "purpose": {
+          "type": "string",
+          "const": "migration"
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "firstVersionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "firstReleaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "activatedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "signature": {
+          "$ref": "./signatures.schema.json#/$defs/Signature"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "purpose",
+        "tenantId",
+        "packageId",
+        "firstVersionId",
+        "firstReleaseSequence",
+        "activatedAt",
         "signature"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedLedgerFile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hostId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "installations": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/UnifiedInstallation"
+          }
+        },
+        "processedDisableReceiptIds": {
+          "type": "array",
+          "maxItems": 8192,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "ownerId",
+        "hostId",
+        "revision",
+        "selectionRevision",
+        "generation",
+        "installations",
+        "processedDisableReceiptIds"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedReceiptFile": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "integer",
+              "const": 1
+            },
+            "tenantId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "ownerId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "hostId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "recordType": {
+              "type": "string",
+              "const": "installation"
+            },
+            "writer": {
+              "type": "string",
+              "const": "plugin"
+            },
+            "receiptId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "resource": {
+              "$ref": "#/$defs/UnifiedResourceRef"
+            },
+            "installationRevision": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "selectionRevision": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "generation": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "recordedAt": {
+              "$ref": "./signatures.schema.json#/$defs/Time"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "tenantId",
+            "ownerId",
+            "hostId",
+            "recordType",
+            "writer",
+            "receiptId",
+            "resource",
+            "installationRevision",
+            "selectionRevision",
+            "generation",
+            "recordedAt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "integer",
+              "const": 1
+            },
+            "tenantId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "ownerId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "hostId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "recordType": {
+              "type": "string",
+              "const": "disable"
+            },
+            "writer": {
+              "type": "string",
+              "const": "guardian"
+            },
+            "receiptId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "transactionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "selectionRevision": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "generation": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "quarantinePath": {
+              "type": "string",
+              "pattern": "^auriga/skills-active/quarantine/[0-9a-f-]{36}$"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "lease_expired",
+                "revoked",
+                "identity_changed",
+                "clock_rollback",
+                "verification_failed"
+              ]
+            },
+            "processStopped": {
+              "type": "boolean",
+              "not": {
+                "const": false
+              }
+            },
+            "viewCleared": {
+              "type": "boolean",
+              "not": {
+                "const": false
+              }
+            },
+            "newSessionRequired": {
+              "type": "boolean",
+              "not": {
+                "const": false
+              }
+            },
+            "recordedAt": {
+              "$ref": "./signatures.schema.json#/$defs/Time"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "tenantId",
+            "ownerId",
+            "hostId",
+            "recordType",
+            "writer",
+            "receiptId",
+            "transactionId",
+            "selectionRevision",
+            "generation",
+            "quarantinePath",
+            "reason",
+            "processStopped",
+            "viewCleared",
+            "newSessionRequired",
+            "recordedAt"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "UnifiedTransactionFile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hostId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "transactionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "writer": {
+          "type": "string",
+          "const": "plugin"
+        },
+        "operation": {
+          "type": "string",
+          "enum": ["install", "activate", "remove", "cleanup"]
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["prepared", "switched", "committed", "rolled_back"]
+        },
+        "expectedLedgerRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "receiptId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "recordedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "ownerId",
+        "hostId",
+        "transactionId",
+        "writer",
+        "operation",
+        "phase",
+        "expectedLedgerRevision",
+        "selectionRevision",
+        "generation",
+        "receiptId",
+        "recordedAt"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedTrustedClock": {
+      "type": "object",
+      "properties": {
+        "bootId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "maxObservedTime": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "lastTrustedTime": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "lastTrustedTimeSource": {
+          "type": "string",
+          "enum": [
+            "authenticated_server",
+            "signed_release",
+            "signed_revocations"
+          ]
+        },
+        "lastMonotonicMillis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "leaseDeadlineMonotonicMillis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        }
+      },
+      "required": [
+        "bootId",
+        "maxObservedTime",
+        "lastTrustedTime",
+        "lastTrustedTimeSource",
+        "lastMonotonicMillis",
+        "leaseDeadlineMonotonicMillis"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedGuardianStateFile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "guardian": {
+          "$ref": "#/$defs/UnifiedGuardianState"
+        },
+        "clock": {
+          "$ref": "#/$defs/UnifiedTrustedClock"
+        },
+        "pendingIsolation": {
+          "type": "object",
+          "properties": {
+            "transactionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "quarantinePath": {
+              "type": "string",
+              "pattern": "^auriga/skills-active/quarantine/[0-9a-f-]{36}$"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "stopping",
+                "rename_pending",
+                "renamed",
+                "receipt_written"
+              ]
+            }
+          },
+          "required": ["transactionId", "quarantinePath", "phase"],
+          "additionalProperties": false
+        },
+        "lastDisableReceiptId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": ["schemaVersion", "revision", "guardian", "clock"],
+      "additionalProperties": false
+    },
+    "UnifiedHighWatermarksFile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 8192,
+          "items": {
+            "$ref": "#/$defs/UnifiedHighWatermark"
+          }
+        },
+        "migrationMarkers": {
+          "type": "array",
+          "maxItems": 8192,
+          "items": {
+            "$ref": "#/$defs/UnifiedMigrationMarker"
+          }
+        },
+        "consumedDowngradeAuthorizationIds": {
+          "type": "array",
+          "maxItems": 8192,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "revision",
+        "entries",
+        "migrationMarkers",
+        "consumedDowngradeAuthorizationIds"
       ],
       "additionalProperties": false
     }

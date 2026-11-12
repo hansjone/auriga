@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createPublicKey, verify, createHash } from 'node:crypto';
 import Ajv from '../../services/contracts/node_modules/ajv/dist/2020.js';
 import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/index.js';
 const root = new URL('../', import.meta.url);
@@ -17,192 +16,19 @@ const check = (file, name, value) =>
     new URL(`resource/${file}.schema.json`, root).href + '#/$defs/' + name,
   )(value);
 const vectors = read('resource/unified-vectors.json');
-const canon = (v) =>
-  v === null || typeof v !== 'object'
-    ? JSON.stringify(v)
-    : Array.isArray(v)
-      ? '[' + v.map(canon).join(',') + ']'
-      : '{' +
-        Object.keys(v)
-          .sort()
-          .map((k) => JSON.stringify(k) + ':' + canon(v[k]))
-          .join(',') +
-        '}';
-const key = createPublicKey({
-  key: Buffer.from(vectors.publicKey, 'base64'),
-  format: 'der',
-  type: 'spki',
-});
-const signed = (doc) => {
-  const { signature, ...body } = doc;
-  return verify(
-    null,
-    Buffer.from(canon(body)),
-    key,
-    Buffer.from(signature.value, 'base64url'),
-  );
-};
-const sha = (raw) => 'sha256:' + createHash('sha256').update(raw).digest('hex');
-// Executable contract oracle. Consumer implementations must exercise the same vectors independently.
-function proofValid(
-  proof,
-  raw,
-  previousM = proof.unifiedEnvelope.statement.manifestDigest,
-) {
-  const a = proof.legacyEnvelope,
-    m = proof.unifiedEnvelope,
-    manifest = JSON.parse(raw);
-  return (
-    check('signatures', 'ResourceEnvelope', a) &&
-    check('package', 'Envelope', m) &&
-    signed(a) &&
-    signed(m) &&
-    ['tenantId', 'packageId', 'versionId', 'releaseSequence'].every(
-      (k) => a[k] === m[k],
-    ) &&
-    sha(Buffer.from(vectors.legacyArchiveBase64, 'base64')) ===
-      a.statement.digest &&
-    m.statement.kind === 'plugin' &&
-    m.statement.version === a.statement.version &&
-    manifest.kind === 'plugin' &&
-    manifest.plugin.packageName === a.statement.name &&
-    manifest.version === m.statement.version &&
-    sha(raw) === m.statement.manifestDigest &&
-    previousM === m.statement.manifestDigest &&
-    manifest.artifacts.some(
-      (x) =>
-        x.id === proof.legacyArtifactId &&
-        x.role === 'payload' &&
-        x.digest === a.statement.digest,
-    ) &&
-    JSON.stringify(
-      [...new Set(manifest.artifacts.map((x) => x.digest))].sort(),
-    ) === JSON.stringify(m.statement.artifactDigests)
-  );
+const canon = (value) => JSON.stringify(value);
+import { evaluateVector } from '../../services/contracts/scripts/unified-vector-runner.mjs';
+for (const vector of vectors.cases) {
+  test('shared trust vector ' + vector.id, () => {
+    assert.deepEqual(
+      evaluateVector(vector, vectors.trust),
+      vector.expect,
+      vector.id,
+    );
+  });
 }
-function revoked(envelope, entries) {
-  return entries.some(
-    (x) =>
-      (x.packageId === envelope.packageId &&
-        x.versionId === envelope.versionId) ||
-      [
-        envelope.statement.manifestDigest,
-        ...envelope.statement.artifactDigests,
-      ].includes(x.digest),
-  );
-}
-function accept(watermark, envelope, proof, raw) {
-  const digest =
-    envelope.schemaVersion === 1
-      ? envelope.statement.digest
-      : envelope.statement.manifestDigest;
-  if (
-    watermark.tenantId !== envelope.tenantId ||
-    watermark.packageId !== envelope.packageId
-  )
-    return false;
-  if (envelope.releaseSequence < watermark.releaseSequence) return false;
-  if (envelope.releaseSequence > watermark.releaseSequence) return true;
-  return (
-    watermark.versionId === envelope.versionId &&
-    (watermark.verifiedDigestAliases.includes(digest) ||
-      (proofValid(proof, raw) &&
-        watermark.verifiedDigestAliases.includes(
-          proof.legacyEnvelope.statement.digest,
-        ) &&
-        digest === proof.unifiedEnvelope.statement.manifestDigest))
-  );
-}
-test('v1/v2 schema mutual rejection, signatures and raw manifest binding', () => {
-  const { legacyEnvelope: a, unifiedEnvelope: m } = vectors.proof;
-  assert(check('signatures', 'ResourceEnvelope', a));
-  assert(check('package', 'Envelope', m));
-  assert(!check('signatures', 'ResourceEnvelope', m));
-  assert(!check('package', 'Envelope', a));
-  assert(proofValid(vectors.proof, vectors.rawManifest));
-  for (const mutate of [
-    (p) => (p.unifiedEnvelope.statement.manifestDigest = sha('replacement')),
-    (p) => (p.unifiedEnvelope.tenantId = p.unifiedEnvelope.packageId),
-    (p) => (p.legacyArtifactId = 'missing'),
-  ]) {
-    const p = structuredClone(vectors.proof);
-    mutate(p);
-    assert(!proofValid(p, vectors.rawManifest));
-  }
-  assert(!proofValid(vectors.proof, vectors.rawManifest + ' '));
-  assert(!proofValid(vectors.proof, vectors.rawManifest, sha('previous M')));
-});
-test('dual digest revocation, either alias disables version and artifact reuse disables another version', () => {
-  const { legacyEnvelope: a, unifiedEnvelope: m } = vectors.proof;
-  const entries = [a.statement.digest, m.statement.manifestDigest].map(
-    (digest) => ({ packageId: a.packageId, versionId: a.versionId, digest }),
-  );
-  for (const list of [entries, [entries[0]], [entries[1]]])
-    assert(revoked(m, list));
-  const other = structuredClone(m);
-  other.versionId = other.packageId;
-  assert(revoked(other, [entries[0]]));
-  assert(!revoked(other, []));
-});
-test('global watermark accepts proved equal-sequence aliases and rejects cross-protocol rollback or version substitution', () => {
-  const p = vectors.proof,
-    a = p.legacyEnvelope,
-    m = p.unifiedEnvelope;
-  const w = {
-    tenantId: a.tenantId,
-    packageId: a.packageId,
-    versionId: a.versionId,
-    releaseSequence: a.releaseSequence,
-    verifiedDigestAliases: [a.statement.digest],
-  };
-  assert(accept(w, m, p, vectors.rawManifest));
-  for (const e of [a, m]) {
-    const low = structuredClone(e);
-    low.releaseSequence--;
-    assert(!accept(w, low, p, vectors.rawManifest));
-  }
-  for (const field of ['tenantId', 'versionId']) {
-    const bad = structuredClone(m);
-    bad[field] = m.packageId;
-    assert(!accept(w, bad, p, vectors.rawManifest));
-  }
-});
-test('v1 renewal fixed cutoff and downgrade authorization exact version', () => {
-  const t0 = Date.parse(vectors.proof.activatedAt),
-    cutoff = t0 + 86400000;
-  const renewal = (now, notAfter) =>
-    now < cutoff && notAfter <= cutoff && notAfter > now;
-  assert(renewal(t0 + 1, cutoff));
-  assert(!renewal(cutoff, cutoff + 1));
-  assert(!renewal(t0 + 1, cutoff + 1));
-  const target = vectors.proof.legacyEnvelope;
-  const authorization = {
-    ...target,
-    instanceId: target.tenantId,
-    digest: target.statement.digest,
-    fromReleaseSequence: 8,
-    toReleaseSequence: 7,
-  };
-  const valid = (e) =>
-    ['tenantId', 'packageId', 'versionId'].every(
-      (k) => e[k] === authorization[k],
-    ) &&
-    e.statement.digest === authorization.digest &&
-    e.releaseSequence === authorization.toReleaseSequence;
-  assert(valid(target));
-  assert(!valid({ ...target, versionId: target.packageId }));
-});
-test('fixed mount configuration preserves preset roots, expressions and unrelated configuration', () => {
-  const f = read('resource/cordis-upgrade-fixture.json');
-  const before = structuredClone(f.before);
-  before.plugins['skill-filesystem'].customSkillDirs.push(
-    '<DSH_HOME>/auriga/skills-active/current/',
-  );
-  assert.deepEqual(before, f.after);
-  assert.equal(f.identityInStaticConfig, false);
-  const roots = f.after.plugins['skill-filesystem'].customSkillDirs;
-  assert.equal(new Set(roots).size, roots.length);
-});
+const sample = vectors.cases.find((c) => c.id === 'migration-proof-valid').input
+  .proof;
 test('public schema registry names and every definition compile', () => {
   const registry = read('resource/unified-registry.json');
   for (const name of Object.keys(registry.schemas))
@@ -268,7 +94,7 @@ test('risk floor, quorum and review role have machine-checked rejection cases', 
     decision: 'approve',
     reason: 'Reviewed',
     versionRevision: 1,
-    digest: vectors.proof.unifiedEnvelope.statement.manifestDigest,
+    digest: sample.unifiedEnvelope.statement.manifestDigest,
     role: 'security',
   };
   assert(decision(body));
@@ -336,10 +162,10 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
       eventFile.href + '#/$defs/UnifiedResourceVersionPublished',
     );
   const e = {
-    packageId: vectors.proof.legacyEnvelope.packageId,
-    versionId: vectors.proof.legacyEnvelope.versionId,
+    packageId: sample.legacyEnvelope.packageId,
+    versionId: sample.legacyEnvelope.versionId,
     version: '1.2.3',
-    digest: vectors.proof.legacyEnvelope.statement.digest,
+    digest: sample.legacyEnvelope.statement.digest,
     revision: 1,
   };
   assert(old(e));
@@ -349,7 +175,7 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
     ...common,
     kind: 'skill',
     signatureVersion: 2,
-    manifestDigest: vectors.proof.unifiedEnvelope.statement.manifestDigest,
+    manifestDigest: sample.unifiedEnvelope.statement.manifestDigest,
     artifactDigests: [digest],
   };
   assert(unified(next));
@@ -357,7 +183,7 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
   assert(!unified({ ...next, digest }));
 });
 test('guardian private-only state requires stopped process, cleared view and new session', () => {
-  const p = vectors.proof.legacyEnvelope;
+  const p = sample.legacyEnvelope;
   const value = {
     tenantId: p.tenantId,
     ownerId: p.packageId,
@@ -459,10 +285,182 @@ test('applied observations require current immutable identity and all three revi
   );
 });
 
-test('migration fixture artifact length matches original archive bytes', () => {
-  const manifest = JSON.parse(vectors.rawManifest);
-  assert.equal(
-    manifest.artifacts[0].sizeBytes,
-    Buffer.from(vectors.legacyArchiveBase64, 'base64').length,
+import {
+  mergeCordisFixture,
+  cordisValue,
+  cordisExpressions,
+} from '../../services/contracts/scripts/unified-cordis-fixtures.mjs';
+const fixtureIndex = read('resource/cordis-upgrade-fixture.json');
+for (const fixture of fixtureIndex.cases) {
+  test('Cordis YAML preservation ' + fixture.id, () => {
+    const text = (file) =>
+      readFileSync(new URL('resource/' + file, root), 'utf8');
+    const input = text(fixture.inputPath),
+      expected = text(fixture.expectedPath);
+    const result = mergeCordisFixture(
+      input,
+      fixture.upstreamPath ? text(fixture.upstreamPath) : null,
+      fixtureIndex.fixedRootExpression,
+    );
+    assert.equal(result.shared, fixture.expectShared);
+    if (!fixture.expectShared) {
+      assert.equal(result.text, input);
+      assert.equal(result.text, expected);
+      return;
+    }
+    assert.deepEqual(cordisValue(result.text), cordisValue(expected));
+    assert.deepEqual(
+      cordisExpressions(result.text),
+      cordisExpressions(expected),
+    );
+    const repeat = mergeCordisFixture(
+      result.text,
+      text(fixture.upstreamPath),
+      fixtureIndex.fixedRootExpression,
+    );
+    assert.equal(repeat.text, result.text);
+  });
+}
+
+test('all Unified mutations require If-Match and advertise success ETags', () => {
+  const spec = read('openapi/resource.yaml');
+  for (const methods of Object.values(spec.paths))
+    for (const [method, operation] of Object.entries(methods)) {
+      if (
+        !operation.operationId?.startsWith('Unified') ||
+        !['post', 'put', 'patch', 'delete'].includes(method)
+      )
+        continue;
+      assert(
+        operation.parameters.some(
+          (p) =>
+            p.in === 'header' && p.name === 'If-Match' && p.required === true,
+        ),
+        operation.operationId,
+      );
+      assert(
+        operation.parameters.some(
+          (p) =>
+            p.in === 'header' &&
+            p.name === 'Idempotency-Key' &&
+            p.required === true,
+        ),
+        operation.operationId,
+      );
+      for (const [status, response] of Object.entries(operation.responses))
+        if (status.startsWith('2'))
+          assert(response.headers?.ETag, operation.operationId);
+    }
+});
+test('Unified distribution operations retain equivalent legacy privilege and step-up', () => {
+  const spec = read('openapi/resource.yaml');
+  for (const [next, method, old, oldMethod] of [
+    [
+      '/api/resource/v1/admin/catalog/distributions',
+      'post',
+      '/api/resource/v1/distributions',
+      'post',
+    ],
+    [
+      '/api/resource/v1/admin/catalog/distributions',
+      'get',
+      '/api/resource/v1/admin/distributions',
+      'get',
+    ],
+    [
+      '/api/resource/v1/admin/catalog/distributions/{distributionId}',
+      'get',
+      '/api/resource/v1/admin/distributions',
+      'get',
+    ],
+  ]) {
+    const current = spec.paths[next][method],
+      baseline = spec.paths[old][oldMethod];
+    assert.equal(current['x-permission'], baseline['x-permission']);
+    assert.equal(
+      current['x-step-up-max-age-seconds'],
+      baseline['x-step-up-max-age-seconds'],
+    );
+    assert.equal(current['x-step-up-max-age-seconds'], 600);
+    assert(current['x-error-codes'].includes('iam.step_up_required'));
+  }
+});
+test('pagination binds member client and exposes limits and cursors', () => {
+  const spec = read('openapi/resource.yaml');
+  for (const path of [
+    '/api/resource/v1/catalog/member/installations',
+    '/api/resource/v1/admin/catalog/distributions',
+  ]) {
+    const params = spec.paths[path].get.parameters;
+    for (const name of ['limit', 'cursor'])
+      assert(params.some((p) => p.name === name));
+    if (path.includes('/member/'))
+      assert(params.some((p) => p.name === 'clientId' && p.required));
+  }
+});
+test('same-origin locators and member report source reject hostile inputs', () => {
+  const schema = read('resource/unified.schema.json').$defs;
+  for (const field of [
+    schema.UnifiedArtifactDownload.properties.downloadPath,
+    schema.UnifiedResourceRef.properties.manifestDownloadPath,
+  ]) {
+    const validate = ajv.compile(field);
+    assert(
+      validate(
+        '/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000001/manifest',
+      ),
+    );
+    for (const path of [
+      'https://other.example.com/manifest',
+      '//other.example.com/manifest',
+      '/api/resource/v1/catalog/../secret',
+      '/internal/resource/v1/catalog/downloads/%2e%2e/manifest',
+    ])
+      assert(!validate(path));
+  }
+  assert.deepEqual(
+    schema.UnifiedMemberInstallationReport.properties.reportSource,
+    { type: 'string', const: 'member' },
   );
 });
+const transitions = read('resource/guardian-transitions.json');
+test('guardian transition table covers all states and guards recovery', () => {
+  assert.equal(transitions.default, 'reject');
+  for (const state of transitions.states)
+    assert(
+      transitions.transitions.some(
+        (t) =>
+          t.from === state && t.event === 'restart' && t.to === 'verifying',
+      ),
+    );
+  const entries = new Set();
+  for (const transition of transitions.transitions) {
+    const key =
+      transition.from +
+      '/' +
+      transition.event +
+      '/' +
+      transition.guards.join(',');
+    assert(!entries.has(key));
+    entries.add(key);
+    assert(transitions.states.includes(transition.to));
+    if (transition.to === 'active')
+      assert(transition.guards.includes('leaseValid'));
+    if (transition.to === 'private_only' && transition.from !== 'private_only')
+      assert(
+        transition.guards.includes('processStopped') &&
+          transition.guards.includes('viewCleared') &&
+          transition.guards.includes('disableReceiptDurable'),
+      );
+  }
+  assert.equal(transitions.clock.rollbackToleranceMillis, 0);
+});
+
+for (const fixture of read('resource/local-file-fixtures.json').cases) {
+  test('local file schema ' + fixture.id, () =>
+    assert.equal(
+      check('unified', fixture.schema, fixture.input),
+      fixture.expect,
+    ),
+  );
+}
