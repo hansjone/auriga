@@ -41,9 +41,15 @@ for leaf in pg_bootstrap_password pg_iam_password pg_org_password pg_ws_owner_pa
   printf fixture >"$temp/data/secrets/$leaf"
 done
 : >"$temp/postgres/init.sql.tmpl"
+cp "$root/postgres/audit.sql.tmpl" "$temp/postgres/audit.sql.tmpl"
 : >"$temp/nats/nats.conf.tmpl"
 find "$temp/data/config/materials" -type f -exec sha256sum {} \; | sort >"$temp/source-before"
 sh "$temp/scripts/render.sh" >"$temp/render.log" 2>&1 || { cat "$temp/render.log"; exit 1; }
+for name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
+  [ "$(stat -c '%a:%h' "$temp/data/secrets/$name")" = '600:1' ]
+  [ "$(wc -c <"$temp/data/secrets/$name")" -eq 32 ]
+  cp "$temp/data/secrets/$name" "$temp/$name.saved"
+done
 sh "$temp/scripts/init.sh" >>"$temp/render.log" 2>&1 || { cat "$temp/render.log"; exit 1; }
 grep -q 'device_presence=disabled' "$temp/render.log"
 [ -s "$temp/data/config/edge.env" ]
@@ -52,6 +58,17 @@ grep -q 'device_presence=disabled' "$temp/render.log"
 find "$temp/data/config/materials" -type f -exec sha256sum {} \; | sort >"$temp/source-after"
 cmp "$temp/source-before" "$temp/source-after"
 echo 'PASS old_network_materials_render_and_init_without_rotation'
+
+grep -q 'CREATE SCHEMA IF NOT EXISTS audit AUTHORIZATION auriga_audit_owner' "$temp/data/config/postgres/audit.sql"
+if grep -q '__PG_AUDIT_' "$temp/data/config/postgres/audit.sql"; then exit 1; fi
+[ "$(stat -c '%u:%g:%a:%h' "$temp/data/config/postgres/audit.sql")" = '999:999:600:1' ]
+[ "$(stat -c '%u:%g:%a:%h' "$temp/data/config/audit-db.env")" = '999:999:600:1' ]
+[ "$(stat -c '%u:%g:%a:%h' "$temp/data/config/bifrost-audit.env")" = '10003:10003:600:1' ]
+grep -q '^AURIGA_AUDIT_ENABLED=true$' "$temp/data/config/platform.env"
+grep -Fxq "AURIGA_AUDIT_DB_PASSWORD=$(cat "$temp/data/secrets/pg_audit_app_password")" "$temp/data/config/platform.env"
+grep -Fxq "AURIGA_AUDIT_MIGRATION_PASSWORD=$(cat "$temp/data/secrets/pg_audit_owner_password")" "$temp/data/config/platform.env"
+grep -Fxq "AURIGA_AUDIT_NATS_URL=nats://bifrost_audit:$(cat "$temp/data/secrets/nats_audit_password")@nats:4222" "$temp/data/config/bifrost-audit.env"
+echo 'PASS audit_materials_generated_with_presence_disabled'
 
 printf fixture >"$temp/data/config/materials/network/edge-presence.pem"
 printf fixture >"$temp/data/config/materials/network/edge-presence.key"
@@ -72,6 +89,11 @@ sh "$temp/scripts/render.sh" >>"$temp/enabled.log" 2>&1 || { cat "$temp/enabled.
 stat -c '%i:%u:%g:%a:%h' "$temp/data/config/pki-edge"/network-presence.* >"$temp/leaves-after"
 cmp "$temp/leaves-before" "$temp/leaves-after"
 echo 'PASS complete_presence_materials_keep_permissions_and_inodes'
+
+for name in pg_audit_owner_password pg_audit_app_password nats_audit_password; do
+  cmp "$temp/data/secrets/$name" "$temp/$name.saved"
+done
+echo 'PASS audit_credentials_preserved_across_presence_upgrade'
 
 mv "$temp/data/config/materials/network/edge-presence.key" "$temp/key"
 ln -s "$temp/key" "$temp/data/config/materials/network/edge-presence.key"
