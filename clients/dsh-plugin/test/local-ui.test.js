@@ -74,11 +74,13 @@ test('local packaged routes expose only unconfigured package metadata and fixed 
       assert.deepEqual(Object.keys(body).sort(), [
         'fetchBase',
         'localPanel',
+        'memberResourcesAvailable',
         'mode',
         'pluginVersion',
         'protocol',
         'status',
       ]);
+      assert.equal(body.memberResourcesAvailable, false);
       assert.doesNotMatch(boot.body, /platformUrl|token|key|signature/i);
       const code = result();
       handler({ method: 'GET', url: '/auriga/local-panel.js' }, code);

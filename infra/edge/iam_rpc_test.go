@@ -104,9 +104,14 @@ func createAccessPKI(t *testing.T) accessPKI {
 
 type csrfRPCServer struct {
 	iamv1.UnimplementedSessionServiceServer
+	iamv1.UnimplementedAdminDeviceBindingsServiceServer
 	mode    atomic.Int32
 	calls   atomic.Int32
 	session *iamv1.Session
+}
+
+func (s *csrfRPCServer) ReadBindings(context.Context, *iamv1.ReadBindingsRequest) (*iamv1.ReadBindingsResponse, error) {
+	return &iamv1.ReadBindingsResponse{Items: []*iamv1.AdminDeviceConnectionBinding{{Device: "device", ServerId: "server", ClientId: "7", Account: "CLIENTS", Ingress: "ingress"}}}, nil
 }
 
 func (s *csrfRPCServer) VerifyAdminSessionCsrf(ctx context.Context, req *iamv1.VerifyAdminSessionCsrfRequest) (*iamv1.VerifyAdminSessionCsrfResponse, error) {
@@ -223,6 +228,7 @@ func TestIAMRPCRealMTLSServiceJWTAndFailureClosed(t *testing.T) {
 		return handler(ctx, req)
 	}))
 	iamv1.RegisterSessionServiceServer(server, backend)
+	iamv1.RegisterAdminDeviceBindingsServiceServer(server, backend)
 	go func() { _ = server.Serve(ln) }()
 	t.Cleanup(func() { server.Stop(); _ = ln.Close() })
 	file := filepath.Join(t.TempDir(), "service.jwt")
@@ -235,6 +241,13 @@ func TestIAMRPCRealMTLSServiceJWTAndFailureClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
+	bindings, err := client.ReadDeviceBindings(context.Background(), expected.TenantID)
+	if err != nil || len(bindings) != 1 || bindings[0] != (deviceBinding{Device: "device", Server: "server", Client: "7", Account: "CLIENTS", Ingress: "ingress"}) {
+		t.Fatalf("binding RPC did not use authenticated transport: %+v %v", bindings, err)
+	}
+	if _, err := client.ReadDeviceBindings(context.Background(), "other-tenant"); !errors.Is(err, errIAMUnavailable) {
+		t.Fatalf("binding RPC accepted the wrong tenant: %v", err)
+	}
 	for _, test := range []struct {
 		mode int32
 		want error
@@ -257,12 +270,18 @@ func TestIAMRPCRealMTLSServiceJWTAndFailureClosed(t *testing.T) {
 	if err := client.Verify(context.Background(), "actual-admin-cookie", "actual-tab-token", expected, time.Now()); !errors.Is(err, errIAMUnauthenticated) {
 		t.Fatal(err)
 	}
+	if _, err := client.ReadDeviceBindings(context.Background(), expected.TenantID); !errors.Is(err, errIAMUnavailable) {
+		t.Fatalf("binding RPC accepted a forged service token: %v", err)
+	}
 	backend.mode.Store(0)
 	if err := os.WriteFile(file, []byte(rotatedToken), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.Verify(context.Background(), "actual-admin-cookie", "actual-tab-token", expected, time.Now()); err != nil {
 		t.Fatalf("renewed service credential was not consumed: %v", err)
+	}
+	if _, err := client.ReadDeviceBindings(context.Background(), expected.TenantID); err != nil {
+		t.Fatalf("binding RPC ignored the rotated service token: %v", err)
 	}
 	if err := os.WriteFile(file, make([]byte, (16<<10)+1), 0o600); err != nil {
 		t.Fatal(err)

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestOpsAdminRoutes(t *testing.T) {
@@ -23,7 +25,14 @@ func TestOpsAdminRoutes(t *testing.T) {
 				w.WriteHeader(200)
 			}), func(c *Config, _ map[string]any) { c.Upstreams["resource"] = c.Upstreams["iam"] })
 			closeAIAdminTransports(t, g)
+			var bindingReads atomic.Int32
+			g.DevicesRPC = deviceBindingsFunc(func(context.Context, string) ([]deviceBinding, error) {
+				bindingReads.Add(1)
+				return nil, nil
+			})
 			backend, _ := browserRPCFixture(t, g, store)
+			// Exercise proxy policy with the production default RPC budget; this is not a deadline test.
+			g.SessionRPC.(*iamRPC).timeout = 2 * time.Second
 			putBrowserSession(g, backend, "admin", "admin").AccessToken = "admin-token"
 			store.Put("admin", backend.rows["admin"])
 			g.AdminCSRF = aiAdminCSRF{}
@@ -43,6 +52,9 @@ func TestOpsAdminRoutes(t *testing.T) {
 			requireEntryProblem(t, addresses["admin"], "GET", "/api/ops/v1/admin/alerts", g.Cfg.AdminHost, good, 401, "common.unauthenticated")
 			if calls.Load() != 3 {
 				t.Fatal("rejected request reached resource")
+			}
+			if bindingReads.Load() != 0 {
+				t.Fatal("ops proxy queried device connection bindings")
 			}
 		})
 	}

@@ -638,3 +638,30 @@ test('JWKS cannot revoke material by returning a revocation-looking error', asyn
   await f.network.refresh(true);
   assert.equal(f.network.sessionAvailable, true);
 });
+test('managed resource access is fenced by credential logout and never enters browser SDK', async (t) => {
+  const f = await fixture(t);
+  await f.network.refresh();
+  const session = f.network.resourceSession;
+  assert.equal(session.config.platformOrigin, 'https://portal.example.com');
+  assert.equal(await session.getAccess(), 'device-access');
+  f.network.logout();
+  assert.equal(f.network.resourceSession, undefined);
+  await assert.rejects(session.getAccess());
+});
+test('retired resource adapter cannot obtain a rotated device token for its old origin', async (t) => {
+  const f = await fixture(t);
+  await f.network.refresh();
+  const before = f.network.resourceSession;
+  await writeFile(
+    f.file,
+    JSON.stringify({
+      ...f.value,
+      deviceId: '00000000-0000-4000-8000-000000000005',
+      credential: 'b'.repeat(43),
+    }),
+  );
+  await f.network.refresh();
+  assert.notEqual(f.network.resourceSession, before);
+  await assert.rejects(before.getAccess());
+  assert.equal(await f.network.resourceSession.getAccess(), 'device-access');
+});

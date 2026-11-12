@@ -38,7 +38,13 @@ func readCertificate(path string) (*x509.Certificate, error) {
 // material. Output contains only fixed filenames, status labels and UTC expiry.
 func CheckCertificates(dir string, now time.Time, output io.Writer) error {
 	var result error
-	for _, name := range []string{"server-ca.pem", "client-ca.pem", "submit.pem", "edge.pem", "broker.pem", "broker-client.pem"} {
+	for _, name := range []string{"server-ca.pem", "client-ca.pem", "submit.pem", "edge.pem", "broker.pem", "broker-client.pem", "edge-presence.pem"} {
+		if name == "edge-presence.pem" {
+			if _, err := os.Lstat(filepath.Join(dir, name)); os.IsNotExist(err) {
+				_, _ = fmt.Fprintln(output, "network_certificate_optional_missing file=edge-presence.pem")
+				continue
+			}
+		}
 		cert, err := readCertificate(filepath.Join(dir, name))
 		if err != nil || now.Before(cert.NotBefore) {
 			_, _ = fmt.Fprintf(output, "network_certificate_invalid file=%s\n", name)

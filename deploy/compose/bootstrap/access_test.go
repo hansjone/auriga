@@ -45,6 +45,7 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		Upstreams        map[string]string `json:"upstreams"`
 		IAMHop           map[string]string `json:"iamHop"`
 		NetworkSubmitHop map[string]string `json:"networkSubmitHop"`
+		DevicePresence   map[string]string `json:"devicePresence"`
 		NetworkWSS       struct {
 			Enabled                               bool
 			Path, UpstreamURL, CAFile, ServerName string
@@ -63,12 +64,22 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		t.Fatal("edge must load shared access.json")
 	}
 	wss := edge.NetworkWSS
-	if !wss.Enabled || wss.Path != "/net/v1/ws" || wss.UpstreamURL != "wss://172.29.240.1:18444" || wss.CAFile != "/etc/auriga/network-edge/server-ca.pem" || wss.ServerName != "broker.network.internal" || len(wss.AllowedOrigins) != 1 || wss.AllowedOrigins[0] != access.PortalURL() { // gitleaks:allow disposable M2 network
+	if !wss.Enabled || wss.Path != "/net/v1/ws" || wss.UpstreamURL != "wss://172.29.241.2:18444" || wss.CAFile != "/etc/auriga/network-edge/server-ca.pem" || wss.ServerName != "broker.network.internal" || len(wss.AllowedOrigins) != 1 || wss.AllowedOrigins[0] != access.PortalURL() { // gitleaks:allow disposable M2 network
 		t.Fatal("missing exact WSS upstream/trust/portal Origin")
 	}
 	broker := string(read("network/broker.conf"))
-	if !strings.Contains(broker, "\nhost: \"127.0.0.1\"\nport: 14224\n") || !strings.Contains(broker, "websocket {host: \"172.29.240.1\", port: 18444,") { // gitleaks:allow disposable M2 network
-		t.Fatal("WSS must bind the compose bridge while TCP remains loopback")
+	if !strings.Contains(broker, "\nhost: \"0.0.0.0\"\nport: 14224\n") || !strings.Contains(broker, "websocket {host: \"0.0.0.0\", port: 18444,") { // gitleaks:allow disposable M2 network
+		t.Fatal("WSS and monitoring TCP must listen inside the isolated Broker container")
+	}
+	presence := edge.DevicePresence
+	if presence["url"] != "tls://172.29.241.2:14224" || presence["username"] != "edge-presence" || presence["serverName"] != "broker.network.internal" || presence["caFile"] != "/etc/auriga/network-edge/server-ca.pem" || presence["certFile"] != "/etc/auriga/network-edge/edge-presence.pem" || presence["keyFile"] != "/etc/auriga/network-edge/edge-presence.key" || presence["passwordFile"] != "/etc/auriga/network-edge/edge-presence.password" { // gitleaks:allow disposable M2 network
+		t.Fatal("monitoring must use the independent system user and mTLS materials")
+	}
+	for _, file := range []string{"network/edge-presence.pem", "network/edge-presence.key", "network/edge-presence.password"} {
+		read(file)
+	}
+	if strings.TrimSpace(string(read("iam-installation/ops.key"))) == strings.TrimSpace(string(read("network/edge-presence.password"))) {
+		t.Fatal("ops notification key must be independent of Broker credentials")
 	}
 	if edge.Upstreams["network-submit"] != "https://172.29.240.1:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] { // gitleaks:allow disposable M2 network
 		t.Fatal("submit must use an independent HTTPS listener and trust material")

@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package auriga.iam.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Only svc:edge with internal JWT, delegated tenant and the existing mTLS channel.
+service AdminDeviceBindingsService {
+  rpc ReadBindings(ReadBindingsRequest) returns (ReadBindingsResponse);
+}
+message ReadBindingsRequest {}
+message AdminDeviceConnectionBinding {
+  string device = 1;
+  string server_id = 2;
+  string client_id = 3;
+  string account = 4;
+  string ingress = 5;
+}
+message ReadBindingsResponse {
+  repeated AdminDeviceConnectionBinding items = 1;
+}

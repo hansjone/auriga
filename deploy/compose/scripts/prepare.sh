@@ -113,7 +113,7 @@ else
   mkdir "$VAR/network-edge"
 fi
 chmod 750 "$VAR/network-edge"
-for name in edge.pem edge.key server-ca.pem; do
+for name in edge.pem edge.key server-ca.pem edge-presence.pem edge-presence.key edge-presence.password; do
   if [ -e "$VAR/network-edge/$name" ] || [ -L "$VAR/network-edge/$name" ]; then
     [ -f "$VAR/network-edge/$name" ] && [ ! -L "$VAR/network-edge/$name" ] && [ "$(stat -c '%h' "$VAR/network-edge/$name")" = 1 ] && cmp -s "$VAR/network/$name" "$VAR/network-edge/$name" \
       || { echo 'existing network edge material differs; refusing rotation' >&2; exit 1; }
@@ -123,9 +123,9 @@ for name in edge.pem edge.key server-ca.pem; do
   chmod 640 "$VAR/network-edge/$name"
 done
 if [ "$(id -u)" -eq 0 ]; then
-  chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem"
+  chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem" "$VAR/network-edge/edge-presence.pem" "$VAR/network-edge/edge-presence.key" "$VAR/network-edge/edge-presence.password"
 else
-  sudo -n chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem"
+  sudo -n chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem" "$VAR/network-edge/edge-presence.pem" "$VAR/network-edge/edge-presence.key" "$VAR/network-edge/edge-presence.password"
 fi
 bash "$COMPOSE/scripts/https-materials.sh" "$VAR"
 if [ "$(id -u)" -eq 0 ]; then
