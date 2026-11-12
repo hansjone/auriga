@@ -32,6 +32,241 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  # AUTH-SHELL-DESIGN 草案，用户审阅后实施
+  /admin/providers/{providerId}/uac:
+    parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - admin-providers
+      operationId: getUacProviderConfig
+      summary: 读取 UAC 身份源配置草案
+      x-admin-only: true
+      x-permission: iam.providers.read
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacProviderConfig"
+          headers:
+            ETag:
+              description: 配置修订，后续 PUT 必须通过 If-Match 提交
+              schema:
+                type: string
+        "403":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "404":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+    put:
+      tags:
+        - admin-providers
+      operationId: putUacProviderConfig
+      summary: 配置已有 UAC 身份源草案
+      x-admin-only: true
+      x-permission: iam.providers.write
+      description: 既有 provider 创建后配置。必须 If-Match。仅受信 HTTPS 允许列表地址，禁止重定向。systemCode
+        的上游映射待确认。停用撤销该源事务与会话。
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacProviderConfig"
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacProviderConfig"
+          headers:
+            ETag:
+              description: 配置修订，后续 PUT 必须通过 If-Match 提交
+              schema:
+                type: string
+        "400":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "403":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "404":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "412":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+  /login/uac/challenges:
+    post:
+      tags:
+        - login
+      operationId: createUacChallenge
+      summary: 创建绑定入口事务的 UAC 挑战草案
+      security: []
+      description: 精确 Origin 校验后设置现有 portal/admin 分名 HttpOnly 登录事务
+        cookie，tenant/audience 由可信入口解析。一次一事务，新事务取消旧挑战。只返回公开扫码坐标，不返回绑定证明。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacChallengeCreate"
+      responses:
+        "201":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacChallenge"
+        "400":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "404":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "429":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "503":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+  /login/uac/challenges/{challengeId}:
+    parameters:
+      - name: challengeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - login
+      operationId: getUacChallenge
+      summary: 读取挑战状态草案
+      security: []
+      description: 需要正确登录事务 cookie、受信 Host 与同源 Fetch Metadata，存在 Origin 时校验精确值。GET
+        仅读状态，上游轮询由 IAM 调度。未知或绑定失败统一404。响应 Cache-Control no-store。
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacChallengeStatus"
+        "404":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "429":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+    delete:
+      tags:
+        - login
+      operationId: cancelUacChallenge
+      summary: 取消本次挑战草案
+      security: []
+      description: 绑定 cookie + 精确 Origin。仅取消该事务，禁止撤销其他已登录会话。
+      responses:
+        "204":
+          description: 已取消
+        "404":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+  /login/uac/challenges/{challengeId}/complete:
+    parameters:
+      - name: challengeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags:
+        - login
+      operationId: completeUacChallenge
+      summary: 原子消费已验证挑战草案
+      security: []
+      description: 需要绑定 cookie + 精确 Origin。验证身份和成员策略后才设置现有入口会话 cookie。若需 MFA 则继续既有
+        transaction advance。完成结果只在原事务发起端可重复读取，绝不重复创建会话。尚未 verified 返回409，过期返回404。
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacCompleteResult"
+        "404":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "409":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+        "503":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
   /admin/credentials:
     get:
       tags: [admin-keys]
@@ -1245,6 +1480,96 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    UacProviderConfig:
+      type: object
+      required:
+        - enabled
+        - baseUrl
+        - systemCode
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        baseUrl:
+          type: string
+          format: uri
+          pattern: ^https://
+        systemCode:
+          type: string
+          minLength: 1
+          maxLength: 128
+    UacChallengeCreate:
+      type: object
+      required:
+        - providerId
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        invitationCode:
+          type: string
+          maxLength: 256
+    UacChallenge:
+      type: object
+      required:
+        - id
+        - transactionId
+        - qrContent
+        - expiresAt
+        - pollIntervalSeconds
+      properties:
+        id:
+          type: string
+          format: uuid
+        transactionId:
+          type: string
+          format: uuid
+        qrContent:
+          type: string
+          maxLength: 2048
+        expiresAt:
+          type: string
+          format: date-time
+        pollIntervalSeconds:
+          type: integer
+          minimum: 2
+          maximum: 30
+    UacChallengeStatus:
+      type: object
+      required:
+        - id
+        - state
+        - expiresAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - waiting
+            - scanned
+            - verified
+            - expired
+            - denied
+            - unavailable
+        expiresAt:
+          type: string
+          format: date-time
+    UacCompleteResult:
+      type: object
+      required:
+        - transactionId
+        - state
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - authenticated
+            - additional_step_required
     CredentialRevoke:
       type: object
       additionalProperties: false

@@ -1,0 +1,46 @@
+openapi: 3.1.0
+info:
+  title: Auriga ShellAuth 本地通道草案
+  version: 1.0.0
+  description: 仅描述经 OS 身份验证后的 IPC 消息。/messages 是生成器投影路径，禁止注册为公网或 DSH HTTP
+    路由。订阅事件使用同一 ShellAuthEvent。
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://127.0.0.1
+security: []
+paths:
+  /messages:
+    post:
+      operationId: exchangeShellAuthMessage
+      summary: 受控本地 IPC 消息投影
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShellAuthCommand"
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthEvent"
+        "403":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+components:
+  schemas:
+    ShellAuthSnapshot:
+      $ref: ../plugin/shell-auth.schema.json#/$defs/ShellAuthSnapshot
+    ShellAuthIdentity:
+      $ref: ../plugin/shell-auth.schema.json#/$defs/ShellAuthIdentity
+    ShellAuthCommand:
+      $ref: ../plugin/shell-auth.schema.json#/$defs/ShellAuthCommand
+    ShellAuthEvent:
+      $ref: ../plugin/shell-auth.schema.json#/$defs/ShellAuthEvent

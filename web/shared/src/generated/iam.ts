@@ -1,4 +1,95 @@
 export interface paths {
+  '/admin/providers/{providerId}/uac': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    /** 读取 UAC 身份源配置草案 */
+    get: operations['getUacProviderConfig'];
+    /**
+     * 配置已有 UAC 身份源草案
+     * @description 既有 provider 创建后配置。必须 If-Match。仅受信 HTTPS 允许列表地址，禁止重定向。systemCode 的上游映射待确认。停用撤销该源事务与会话。
+     */
+    put: operations['putUacProviderConfig'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/login/uac/challenges': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 创建绑定入口事务的 UAC 挑战草案
+     * @description 精确 Origin 校验后设置现有 portal/admin 分名 HttpOnly 登录事务 cookie，tenant/audience 由可信入口解析。一次一事务，新事务取消旧挑战。只返回公开扫码坐标，不返回绑定证明。
+     */
+    post: operations['createUacChallenge'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/login/uac/challenges/{challengeId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * 读取挑战状态草案
+     * @description 需要正确登录事务 cookie、受信 Host 与同源 Fetch Metadata，存在 Origin 时校验精确值。GET 仅读状态，上游轮询由 IAM 调度。未知或绑定失败统一404。响应 Cache-Control no-store。
+     */
+    get: operations['getUacChallenge'];
+    put?: never;
+    post?: never;
+    /**
+     * 取消本次挑战草案
+     * @description 绑定 cookie + 精确 Origin。仅取消该事务，禁止撤销其他已登录会话。
+     */
+    delete: operations['cancelUacChallenge'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/login/uac/challenges/{challengeId}/complete': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 原子消费已验证挑战草案
+     * @description 需要绑定 cookie + 精确 Origin。验证身份和成员策略后才设置现有入口会话 cookie。若需 MFA 则继续既有 transaction advance。完成结果只在原事务发起端可重复读取，绝不重复创建会话。尚未 verified 返回409，过期返回404。
+     */
+    post: operations['completeUacChallenge'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/admin/credentials': {
     parameters: {
       query?: never;
@@ -1099,6 +1190,48 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    UacProviderConfig: {
+      /** @default false */
+      enabled: boolean;
+      /** Format: uri */
+      baseUrl: string;
+      systemCode: string;
+    };
+    UacChallengeCreate: {
+      /** Format: uuid */
+      providerId: string;
+      invitationCode?: string;
+    };
+    UacChallenge: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      transactionId: string;
+      qrContent: string;
+      /** Format: date-time */
+      expiresAt: string;
+      pollIntervalSeconds: number;
+    };
+    UacChallengeStatus: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      state:
+        | 'waiting'
+        | 'scanned'
+        | 'verified'
+        | 'expired'
+        | 'denied'
+        | 'unavailable';
+      /** Format: date-time */
+      expiresAt: string;
+    };
+    UacCompleteResult: {
+      /** Format: uuid */
+      transactionId: string;
+      /** @enum {string} */
+      state: 'authenticated' | 'additional_step_required';
+    };
     CredentialRevoke: {
       /** Format: int64 */
       version: number;
@@ -1930,6 +2063,292 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getUacProviderConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          /** @description 配置修订，后续 PUT 必须通过 If-Match 提交 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacProviderConfig'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  putUacProviderConfig: {
+    parameters: {
+      query?: never;
+      header: {
+        'If-Match': string;
+      };
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacProviderConfig'];
+      };
+    };
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          /** @description 配置修订，后续 PUT 必须通过 If-Match 提交 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacProviderConfig'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  createUacChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacChallengeCreate'];
+      };
+    };
+    responses: {
+      /** @description 草案响应 */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacChallenge'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  getUacChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacChallengeStatus'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  cancelUacChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 已取消 */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  completeUacChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacCompleteResult'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   listCredentials: {
     parameters: {
       query?: {

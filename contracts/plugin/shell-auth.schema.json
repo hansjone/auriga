@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ShellAuth IPC 草案",
+  "$defs": {
+    "ShellAuthSnapshot": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "shellEpoch",
+        "revision",
+        "state",
+        "expiresAt"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "signed_out",
+            "authenticating",
+            "authenticated",
+            "unreachable",
+            "reauth_required",
+            "revoked"
+          ]
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "identity": {
+          "$ref": "#/$defs/ShellAuthIdentity"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "user_action",
+            "expired",
+            "offline",
+            "source_disabled",
+            "account_changed",
+            "shell_restarted"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ShellAuthIdentity": {
+      "type": "object",
+      "required": [
+        "tenantId",
+        "memberId",
+        "deviceId",
+        "providerId"
+      ],
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "deviceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "empNo": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "ShellAuthCommand": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "shellEpoch",
+        "expectedRevision",
+        "action"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "snapshot",
+            "subscribe",
+            "open_login",
+            "cancel_login",
+            "logout"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ShellAuthEvent": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "type"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "snapshot",
+            "changed",
+            "ack",
+            "error"
+          ]
+        },
+        "snapshot": {
+          "$ref": "#/$defs/ShellAuthSnapshot"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "common.conflict",
+            "common.unauthenticated",
+            "common.forbidden",
+            "common.unavailable",
+            "common.validation_failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
