@@ -5,6 +5,7 @@
     "UnifiedLease": "unified.schema.json#/$defs/UnifiedLease",
     "UnifiedArtifactDownload": "unified.schema.json#/$defs/UnifiedArtifactDownload",
     "UnifiedResourceRef": "unified.schema.json#/$defs/UnifiedResourceRef",
+    "UnifiedResourceDispatchRef": "unified.schema.json#/$defs/UnifiedResourceDispatchRef",
     "UnifiedSelection": "unified.schema.json#/$defs/UnifiedSelection",
     "UnifiedDownloadTicketInput": "unified.schema.json#/$defs/UnifiedDownloadTicketInput",
     "UnifiedDownloadTicket": "unified.schema.json#/$defs/UnifiedDownloadTicket",

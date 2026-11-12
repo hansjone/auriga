@@ -340,6 +340,17 @@
         "owner",
         "admin"
       ]
+    },
+    "resource.versions.security_review": {
+      "description": {
+        "zh-CN": "作为安全审核者审核本租户精确资源版本和摘要",
+        "en": "Perform qualified security review of exact resource versions and digests within the tenant"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner"
+      ]
     }
   },
   "errors": {
