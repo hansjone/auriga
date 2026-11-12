@@ -140,7 +140,7 @@ class OrgRoleIntegrityTest {
     assertAll(
         () -> assertError("org.not_found", () -> create(OrgIds.ROLE_MEMBER, type, target)),
         () -> assertEquals(0, bindingsFor(target)),
-        () -> assertEquals(0, eventCount()));
+        () -> assertEquals(0, businessEventCount()));
   }
 
   static Stream<Arguments> ownerRaces() {
@@ -181,10 +181,10 @@ class OrgRoleIntegrityTest {
     }
     if (action.equals("enable")) setStatus(target, "disabled");
     var before = TenantContext.call(TENANT, () -> svc.memberJson(target));
-    int events = eventCount();
+    int events = businessEventCount();
     assertError("org.grant_exceeds_own", () -> asActor(operator, () -> lifecycle(action, target)));
     assertEquals(before, TenantContext.call(TENANT, () -> svc.memberJson(target)));
-    assertEquals(events, eventCount());
+    assertEquals(events, businessEventCount());
   }
 
   @ParameterizedTest
@@ -203,7 +203,7 @@ class OrgRoleIntegrityTest {
     assertEquals(
         action.equals("enable") ? "active" : action.equals("offboard") ? "offboarded" : "disabled",
         result.path("status").asString());
-    assertEquals(1, eventCount());
+    assertEquals(1, businessEventCount());
   }
 
   @ParameterizedTest
@@ -212,7 +212,7 @@ class OrgRoleIntegrityTest {
     if (action.equals("enable")) setStatus(firstOwner, "disabled");
     assertError(
         "org.not_found", () -> TenantContext.call(TENANT, () -> lifecycle(action, firstOwner)));
-    assertEquals(0, eventCount());
+    assertEquals(0, businessEventCount());
   }
 
   @Test
@@ -221,7 +221,7 @@ class OrgRoleIntegrityTest {
         "org.not_found",
         () -> TenantContext.run(TENANT, () -> svc.deleteRoleBinding(firstBinding)));
     assertEquals(1, bindingsFor(firstOwner));
-    assertEquals(0, eventCount());
+    assertEquals(0, businessEventCount());
   }
 
   private ObjectNode lifecycle(String action, UUID member) {
@@ -251,7 +251,7 @@ class OrgRoleIntegrityTest {
     UUID subject =
         type.equals("member") ? member() : type.equals("group") ? group() : UuidV7.next();
     var binding = create(OrgIds.ROLE_OWNER, type, subject);
-    int before = eventCount();
+    int before = businessEventCount();
     assertError(
         "org.grant_exceeds_own",
         () ->
@@ -262,7 +262,7 @@ class OrgRoleIntegrityTest {
                   return null;
                 }));
     assertEquals(1, bindingsFor(subject));
-    assertEquals(before, eventCount());
+    assertEquals(before, businessEventCount());
   }
 
   @Test
@@ -283,7 +283,7 @@ class OrgRoleIntegrityTest {
           return null;
         });
     assertEquals(1, owners());
-    assertEquals(3, eventCount());
+    assertEquals(3, businessEventCount());
   }
 
   @ParameterizedTest
@@ -301,7 +301,7 @@ class OrgRoleIntegrityTest {
         });
     assertError("org.conflict", () -> create(OrgIds.ROLE_MEMBER, "member", target));
     assertEquals(0, bindingsFor(target));
-    assertEquals(0, eventCount());
+    assertEquals(0, businessEventCount());
   }
 
   @ParameterizedTest
@@ -325,7 +325,7 @@ class OrgRoleIntegrityTest {
     assertAll(
         () -> assertEquals(repeatableRead ? "common.conflict" : "org.last_owner", outcome),
         () -> assertEquals(1, owners(), "active direct owners after " + first + "/" + second),
-        () -> assertEquals(1, eventCount(), "rejected writer cannot publish an event"),
+        () -> assertEquals(1, businessEventCount(), "rejected writer cannot publish an event"),
         () -> assertEquals(1, bindingsFor(secondOwner)),
         () ->
             assertEquals(
@@ -351,7 +351,7 @@ class OrgRoleIntegrityTest {
         race(
             () -> svc.deleteGroup(group), () -> create(OrgIds.ROLE_MEMBER, "group", group), false));
     assertEquals(0, bindingsFor(group));
-    assertEquals(0, eventCount());
+    assertEquals(0, businessEventCount());
   }
 
   @Test
@@ -404,7 +404,7 @@ class OrgRoleIntegrityTest {
     assertEquals(before, TenantContext.call(TENANT, () -> svc.memberJson(secondOwner)));
     assertEquals(1, bindingsFor(secondOwner));
     assertEquals(1, owners());
-    assertEquals(1, eventCount());
+    assertEquals(1, businessEventCount());
     assertError(
         "org.not_found",
         () -> TenantContext.run(TENANT, () -> svc.deleteRoleBinding(UuidV7.next())));
@@ -430,7 +430,7 @@ class OrgRoleIntegrityTest {
     var inherited = create(OrgIds.ROLE_ADMIN, "group", group);
     assertEquals(member.toString(), direct.path("subject").path("id").asString());
     assertEquals("group", inherited.path("subject").path("type").asString());
-    assertEquals(2, eventCount());
+    assertEquals(2, businessEventCount());
     var event = lastEvent();
     assertEquals("user.permissions_changed", event.path("type").asString());
     assertEquals(firstOwner.toString(), event.path("data").path("actorId").asString());
@@ -443,7 +443,7 @@ class OrgRoleIntegrityTest {
           svc.deleteRoleBinding(UUID.fromString(inherited.path("id").asString()));
           return null;
         });
-    assertEquals(4, eventCount());
+    assertEquals(4, businessEventCount());
     assertEquals(0, bindingsFor(member));
     assertEquals(0, bindingsFor(group));
     assertEquals(2, owners());
@@ -494,7 +494,7 @@ class OrgRoleIntegrityTest {
             asActor(
                 operator, () -> svc.disableMember(secondOwner, "inherited owner does not count")));
     assertEquals(1, owners());
-    assertEquals(1, eventCount());
+    assertEquals(1, businessEventCount());
   }
 
   @Test
@@ -515,7 +515,7 @@ class OrgRoleIntegrityTest {
               svc.offboardMember(member, firstOwner, "left").path("status").asString());
           return null;
         });
-    assertEquals(4, eventCount());
+    assertEquals(4, businessEventCount());
     assertEquals("user.offboarded", lastEvent().path("type").asString());
     assertEquals(operator.toString(), lastEvent().path("data").path("actorId").asString());
     assertEquals(2, owners());
@@ -536,7 +536,7 @@ class OrgRoleIntegrityTest {
                 () -> {
                   if (mutation.equals("create")) create(OrgIds.ROLE_ADMIN, "member", member);
                   else mutate(mutation, firstOwner, firstBinding);
-                  assertEquals(1, eventCount());
+                  assertEquals(1, businessEventCount());
                   throw new IllegalStateException("caller rollback");
                 }));
     assertEquals(2, owners());
@@ -544,7 +544,7 @@ class OrgRoleIntegrityTest {
     assertEquals(0, bindingsFor(member));
     assertEquals(memberBefore, TenantContext.call(TENANT, () -> svc.memberJson(firstOwner)));
     assertEquals(tenantBefore, TenantContext.call(TENANT, () -> svc.tenantJson(svc.getTenant())));
-    assertEquals(0, eventCount());
+    assertEquals(0, businessEventCount());
   }
 
   @ParameterizedTest
@@ -561,7 +561,7 @@ class OrgRoleIntegrityTest {
     assertEquals("disabled", member.path("status").asString());
     assertEquals(repeatableRead ? 2 : 3, member.path("version").asLong());
     assertEquals(1, owners());
-    assertEquals(repeatableRead ? 1 : 2, eventCount());
+    assertEquals(repeatableRead ? 1 : 2, businessEventCount());
   }
 
   @ParameterizedTest
@@ -585,7 +585,7 @@ class OrgRoleIntegrityTest {
         "active",
         TenantContext.call(TENANT, () -> svc.memberJson(member)).path("status").asString());
     assertEquals(2, owners());
-    assertEquals(repeatableRead ? 1 : 2, eventCount());
+    assertEquals(repeatableRead ? 1 : 2, businessEventCount());
   }
 
   @Test
@@ -617,7 +617,7 @@ class OrgRoleIntegrityTest {
         "committed",
         race(() -> create(secondRole, "member", member), () -> svc.deleteRole(secondRole), false));
     assertEquals(0, bindingsFor(member));
-    assertEquals(2, eventCount());
+    assertEquals(2, businessEventCount());
   }
 
   private void mutate(String mutation, UUID member, UUID binding) {
@@ -806,14 +806,17 @@ class OrgRoleIntegrityTest {
                     subject));
   }
 
-  private static int eventCount() {
+  // Existing role safety assertions count domain events; audit atomicity has its own regression.
+  private static int businessEventCount() {
     return store.tenant(
         TENANT,
         () ->
             store
                 .jdbc()
                 .queryForObject(
-                    "SELECT count(*) FROM outbox_event WHERE tenant_id=?", Integer.class, TENANT));
+                    "SELECT count(*) FROM outbox_event WHERE tenant_id=? AND event_type <> 'audit.recorded'",
+                    Integer.class,
+                    TENANT));
   }
 
   private static tools.jackson.databind.JsonNode lastEvent() {
@@ -824,7 +827,7 @@ class OrgRoleIntegrityTest {
                 store
                     .jdbc()
                     .queryForObject(
-                        "SELECT envelope::text FROM outbox_event WHERE tenant_id=? ORDER BY id DESC LIMIT 1",
+                        "SELECT envelope::text FROM outbox_event WHERE tenant_id=? AND event_type <> 'audit.recorded' ORDER BY id DESC LIMIT 1",
                         String.class,
                         TENANT)));
   }

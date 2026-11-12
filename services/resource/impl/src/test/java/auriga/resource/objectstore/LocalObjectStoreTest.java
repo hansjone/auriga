@@ -18,6 +18,29 @@ import org.junit.jupiter.api.condition.*;
 import org.junit.jupiter.api.io.TempDir;
 
 class LocalObjectStoreTest {
+  @Test
+  void garbageCollectionRequiresAgeAndRechecksReferencesUnderTheCallerLock() throws Exception {
+    try (var store = new LocalObjectStore(root)) {
+      var stage = stage(store, TENANT);
+      store.commitIfAbsent(TENANT, stage.id(), stage.object());
+      assertTrue(store.expiredObjects(Instant.now().minusSeconds(86400)).isEmpty());
+      Files.setLastModifiedTime(
+          committed(TENANT, stage.object().digest()),
+          java.nio.file.attribute.FileTime.from(Instant.now().minusSeconds(86401)));
+      var candidates = store.expiredObjects(Instant.now().minusSeconds(86400));
+      assertEquals(1, candidates.size());
+      assertFalse(
+          store.deleteExpired(
+              candidates.getFirst(), Instant.now().minusSeconds(86400), () -> false));
+      assertEquals(stage.object(), store.stat(TENANT, stage.object().digest()));
+      assertTrue(
+          store.deleteExpired(
+              candidates.getFirst(), Instant.now().minusSeconds(86400), () -> true));
+      assertTrue(store.expiredObjects(Instant.now()).isEmpty());
+      assertFalse(store.deleteExpired(candidates.getFirst(), Instant.now(), () -> true));
+    }
+  }
+
   static final UUID TENANT = UUID.fromString("01900000-0000-7000-8000-000000000001");
   static final UUID OTHER = UUID.fromString("01900000-0000-7000-8000-000000000002");
   static final Instant START = Instant.parse("2026-01-01T00:00:00Z");

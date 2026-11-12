@@ -50,9 +50,15 @@ auriga:
     collab:
       enabled: false
     audit:
-      enabled: false
+      enabled: ${AURIGA_AUDIT_ENABLED:false}
     ops:
       enabled: ${AURIGA_OPS_ENABLED:false}
+  audit:
+    jdbc-url: ${AURIGA_AUDIT_JDBC_URL:}
+    username: ${AURIGA_AUDIT_DB_USER:auriga_audit_app}
+    password: ${AURIGA_AUDIT_DB_PASSWORD:}
+    migration-username: ${AURIGA_AUDIT_MIGRATION_USER:auriga_audit_owner}
+    migration-password: ${AURIGA_AUDIT_MIGRATION_PASSWORD:}
   ops:
     notification-key: ${AURIGA_OPS_NOTIFICATION_KEY:}
   errors:

@@ -10,4 +10,5 @@ import org.springframework.context.annotation.Configuration;
     name = "enabled",
     havingValue = "true",
     matchIfMissing = true)
+@org.springframework.context.annotation.Import(AuditRuntimeConfiguration.class)
 public class AuditModuleConfiguration {}

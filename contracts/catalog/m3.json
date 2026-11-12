@@ -253,6 +253,18 @@
         "admin",
         "member"
       ]
+    },
+    "audit.events.read": {
+      "description": {
+        "en": "Read platform audit events",
+        "zh-CN": "查看平台审计事件"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
     }
   },
   "errors": {

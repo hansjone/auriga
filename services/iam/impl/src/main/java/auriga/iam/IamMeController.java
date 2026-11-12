@@ -316,8 +316,7 @@ public class IamMeController {
     store.tx(
         () -> {
           ObjectNode d = requireDevice(principal.subject(), deviceId);
-          d.put("revoked", true);
-          store.save("device", d);
+          sessions.revokeDevice(d);
           return null;
         });
   }

@@ -21,10 +21,12 @@ var _ MappedNullable = &AdminPackagePatch{}
 
 // AdminPackagePatch struct for AdminPackagePatch
 type AdminPackagePatch struct {
-	Level            *string `json:"level,omitempty"`
-	Enabled          *bool   `json:"enabled,omitempty"`
-	DefaultVersionId *string `json:"defaultVersionId,omitempty"`
-	Reason           string  `json:"reason"`
+	Level            *string  `json:"level,omitempty"`
+	Enabled          *bool    `json:"enabled,omitempty"`
+	DefaultVersionId *string  `json:"defaultVersionId,omitempty"`
+	Reason           string   `json:"reason"`
+	Visibility       *string  `json:"visibility,omitempty"`
+	GroupIds         []string `json:"groupIds,omitempty"`
 }
 
 type _AdminPackagePatch AdminPackagePatch
@@ -167,6 +169,70 @@ func (o *AdminPackagePatch) SetReason(v string) {
 	o.Reason = v
 }
 
+// GetVisibility returns the Visibility field value if set, zero value otherwise.
+func (o *AdminPackagePatch) GetVisibility() string {
+	if o == nil || IsNil(o.Visibility) {
+		var ret string
+		return ret
+	}
+	return *o.Visibility
+}
+
+// GetVisibilityOk returns a tuple with the Visibility field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *AdminPackagePatch) GetVisibilityOk() (*string, bool) {
+	if o == nil || IsNil(o.Visibility) {
+		return nil, false
+	}
+	return o.Visibility, true
+}
+
+// HasVisibility returns a boolean if a field has been set.
+func (o *AdminPackagePatch) HasVisibility() bool {
+	if o != nil && !IsNil(o.Visibility) {
+		return true
+	}
+
+	return false
+}
+
+// SetVisibility gets a reference to the given string and assigns it to the Visibility field.
+func (o *AdminPackagePatch) SetVisibility(v string) {
+	o.Visibility = &v
+}
+
+// GetGroupIds returns the GroupIds field value if set, zero value otherwise.
+func (o *AdminPackagePatch) GetGroupIds() []string {
+	if o == nil || IsNil(o.GroupIds) {
+		var ret []string
+		return ret
+	}
+	return o.GroupIds
+}
+
+// GetGroupIdsOk returns a tuple with the GroupIds field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *AdminPackagePatch) GetGroupIdsOk() ([]string, bool) {
+	if o == nil || IsNil(o.GroupIds) {
+		return nil, false
+	}
+	return o.GroupIds, true
+}
+
+// HasGroupIds returns a boolean if a field has been set.
+func (o *AdminPackagePatch) HasGroupIds() bool {
+	if o != nil && !IsNil(o.GroupIds) {
+		return true
+	}
+
+	return false
+}
+
+// SetGroupIds gets a reference to the given []string and assigns it to the GroupIds field.
+func (o *AdminPackagePatch) SetGroupIds(v []string) {
+	o.GroupIds = v
+}
+
 func (o AdminPackagePatch) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -187,6 +253,12 @@ func (o AdminPackagePatch) ToMap() (map[string]interface{}, error) {
 		toSerialize["defaultVersionId"] = o.DefaultVersionId
 	}
 	toSerialize["reason"] = o.Reason
+	if !IsNil(o.Visibility) {
+		toSerialize["visibility"] = o.Visibility
+	}
+	if !IsNil(o.GroupIds) {
+		toSerialize["groupIds"] = o.GroupIds
+	}
 	return toSerialize, nil
 }
 

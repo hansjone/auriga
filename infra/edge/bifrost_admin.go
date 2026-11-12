@@ -199,6 +199,8 @@ func (g *Gateway) proxyRelayAdmin(w http.ResponseWriter, r *http.Request, audien
 		pr.Out.Header.Set("Content-Type", "application/json")
 		pr.Out.Header.Set("Accept", "application/json")
 		pr.Out.Header.Set("X-Auriga-Tenant", fresh.TenantID)
+		pr.Out.Header.Set("X-Auriga-Audit-Actor", fresh.AccountID)
+		pr.Out.Header.Set("X-Auriga-Audit-IP", ResolveClientIP(r, g.Trusted))
 		pr.Out.Header.Set("Idempotency-Key", r.Header.Get("Idempotency-Key"))
 		if len(conditions) == 1 {
 			pr.Out.Header.Set("If-None-Match", "*")
