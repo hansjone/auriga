@@ -16,55 +16,30 @@ import (
 	"gopkg.in/validator.v2"
 )
 
-// Manifest - struct for Manifest
-type Manifest struct {
-	PluginManifest *PluginManifest
-	SkillManifest  *SkillManifest
-	ToolManifest   *ToolManifest
+// UnifiedManifest - Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections.
+type UnifiedManifest struct {
+	SkillManifest *SkillManifest
+	ToolManifest  *ToolManifest
 }
 
-// PluginManifestAsManifest is a convenience function that returns PluginManifest wrapped in Manifest
-func PluginManifestAsManifest(v *PluginManifest) Manifest {
-	return Manifest{
-		PluginManifest: v,
-	}
-}
-
-// SkillManifestAsManifest is a convenience function that returns SkillManifest wrapped in Manifest
-func SkillManifestAsManifest(v *SkillManifest) Manifest {
-	return Manifest{
+// SkillManifestAsUnifiedManifest is a convenience function that returns SkillManifest wrapped in UnifiedManifest
+func SkillManifestAsUnifiedManifest(v *SkillManifest) UnifiedManifest {
+	return UnifiedManifest{
 		SkillManifest: v,
 	}
 }
 
-// ToolManifestAsManifest is a convenience function that returns ToolManifest wrapped in Manifest
-func ToolManifestAsManifest(v *ToolManifest) Manifest {
-	return Manifest{
+// ToolManifestAsUnifiedManifest is a convenience function that returns ToolManifest wrapped in UnifiedManifest
+func ToolManifestAsUnifiedManifest(v *ToolManifest) UnifiedManifest {
+	return UnifiedManifest{
 		ToolManifest: v,
 	}
 }
 
 // Unmarshal JSON data into one of the pointers in the struct
-func (dst *Manifest) UnmarshalJSON(data []byte) error {
+func (dst *UnifiedManifest) UnmarshalJSON(data []byte) error {
 	var err error
 	match := 0
-	// try to unmarshal data into PluginManifest
-	err = newStrictDecoder(data).Decode(&dst.PluginManifest)
-	if err == nil {
-		jsonPluginManifest, _ := json.Marshal(dst.PluginManifest)
-		if string(jsonPluginManifest) == "{}" { // empty struct
-			dst.PluginManifest = nil
-		} else {
-			if err = validator.Validate(dst.PluginManifest); err != nil {
-				dst.PluginManifest = nil
-			} else {
-				match++
-			}
-		}
-	} else {
-		dst.PluginManifest = nil
-	}
-
 	// try to unmarshal data into SkillManifest
 	err = newStrictDecoder(data).Decode(&dst.SkillManifest)
 	if err == nil {
@@ -101,28 +76,23 @@ func (dst *Manifest) UnmarshalJSON(data []byte) error {
 
 	if match > 1 { // more than 1 match
 		// reset to nil
-		dst.PluginManifest = nil
 		dst.SkillManifest = nil
 		dst.ToolManifest = nil
 
-		return fmt.Errorf("data matches more than one schema in oneOf(Manifest)")
+		return fmt.Errorf("data matches more than one schema in oneOf(UnifiedManifest)")
 	} else if match == 1 {
 		return nil // exactly one match
 	} else { // no match
 		if err != nil {
-			return fmt.Errorf("data failed to match schemas in oneOf(Manifest): %v", err)
+			return fmt.Errorf("data failed to match schemas in oneOf(UnifiedManifest): %v", err)
 		}
 
-		return fmt.Errorf("data failed to match schemas in oneOf(Manifest)")
+		return fmt.Errorf("data failed to match schemas in oneOf(UnifiedManifest)")
 	}
 }
 
 // Marshal data from the first non-nil pointers in the struct to JSON
-func (src Manifest) MarshalJSON() ([]byte, error) {
-	if src.PluginManifest != nil {
-		return json.Marshal(&src.PluginManifest)
-	}
-
+func (src UnifiedManifest) MarshalJSON() ([]byte, error) {
 	if src.SkillManifest != nil {
 		return json.Marshal(&src.SkillManifest)
 	}
@@ -135,14 +105,10 @@ func (src Manifest) MarshalJSON() ([]byte, error) {
 }
 
 // Get the actual instance
-func (obj *Manifest) GetActualInstance() interface{} {
+func (obj *UnifiedManifest) GetActualInstance() interface{} {
 	if obj == nil {
 		return nil
 	}
-	if obj.PluginManifest != nil {
-		return obj.PluginManifest
-	}
-
 	if obj.SkillManifest != nil {
 		return obj.SkillManifest
 	}
@@ -156,11 +122,7 @@ func (obj *Manifest) GetActualInstance() interface{} {
 }
 
 // Get the actual instance value
-func (obj Manifest) GetActualInstanceValue() interface{} {
-	if obj.PluginManifest != nil {
-		return *obj.PluginManifest
-	}
-
+func (obj UnifiedManifest) GetActualInstanceValue() interface{} {
 	if obj.SkillManifest != nil {
 		return *obj.SkillManifest
 	}
@@ -173,38 +135,38 @@ func (obj Manifest) GetActualInstanceValue() interface{} {
 	return nil
 }
 
-type NullableManifest struct {
-	value *Manifest
+type NullableUnifiedManifest struct {
+	value *UnifiedManifest
 	isSet bool
 }
 
-func (v NullableManifest) Get() *Manifest {
+func (v NullableUnifiedManifest) Get() *UnifiedManifest {
 	return v.value
 }
 
-func (v *NullableManifest) Set(val *Manifest) {
+func (v *NullableUnifiedManifest) Set(val *UnifiedManifest) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableManifest) IsSet() bool {
+func (v NullableUnifiedManifest) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableManifest) Unset() {
+func (v *NullableUnifiedManifest) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableManifest(val *Manifest) *NullableManifest {
-	return &NullableManifest{value: val, isSet: true}
+func NewNullableUnifiedManifest(val *UnifiedManifest) *NullableUnifiedManifest {
+	return &NullableUnifiedManifest{value: val, isSet: true}
 }
 
-func (v NullableManifest) MarshalJSON() ([]byte, error) {
+func (v NullableUnifiedManifest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableManifest) UnmarshalJSON(src []byte) error {
+func (v *NullableUnifiedManifest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

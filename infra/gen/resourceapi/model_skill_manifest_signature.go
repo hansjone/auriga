@@ -16,38 +16,38 @@ import (
 	"fmt"
 )
 
-// checks if the PluginManifestSignature type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &PluginManifestSignature{}
+// checks if the SkillManifestSignature type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &SkillManifestSignature{}
 
-// PluginManifestSignature struct for PluginManifestSignature
-type PluginManifestSignature struct {
+// SkillManifestSignature struct for SkillManifestSignature
+type SkillManifestSignature struct {
 	Mode      string `json:"mode"`
 	Algorithm string `json:"algorithm"`
 }
 
-type _PluginManifestSignature PluginManifestSignature
+type _SkillManifestSignature SkillManifestSignature
 
-// NewPluginManifestSignature instantiates a new PluginManifestSignature object
+// NewSkillManifestSignature instantiates a new SkillManifestSignature object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewPluginManifestSignature(mode string, algorithm string) *PluginManifestSignature {
-	this := PluginManifestSignature{}
+func NewSkillManifestSignature(mode string, algorithm string) *SkillManifestSignature {
+	this := SkillManifestSignature{}
 	this.Mode = mode
 	this.Algorithm = algorithm
 	return &this
 }
 
-// NewPluginManifestSignatureWithDefaults instantiates a new PluginManifestSignature object
+// NewSkillManifestSignatureWithDefaults instantiates a new SkillManifestSignature object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewPluginManifestSignatureWithDefaults() *PluginManifestSignature {
-	this := PluginManifestSignature{}
+func NewSkillManifestSignatureWithDefaults() *SkillManifestSignature {
+	this := SkillManifestSignature{}
 	return &this
 }
 
 // GetMode returns the Mode field value
-func (o *PluginManifestSignature) GetMode() string {
+func (o *SkillManifestSignature) GetMode() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -58,7 +58,7 @@ func (o *PluginManifestSignature) GetMode() string {
 
 // GetModeOk returns a tuple with the Mode field value
 // and a boolean to check if the value has been set.
-func (o *PluginManifestSignature) GetModeOk() (*string, bool) {
+func (o *SkillManifestSignature) GetModeOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -66,12 +66,12 @@ func (o *PluginManifestSignature) GetModeOk() (*string, bool) {
 }
 
 // SetMode sets field value
-func (o *PluginManifestSignature) SetMode(v string) {
+func (o *SkillManifestSignature) SetMode(v string) {
 	o.Mode = v
 }
 
 // GetAlgorithm returns the Algorithm field value
-func (o *PluginManifestSignature) GetAlgorithm() string {
+func (o *SkillManifestSignature) GetAlgorithm() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -82,7 +82,7 @@ func (o *PluginManifestSignature) GetAlgorithm() string {
 
 // GetAlgorithmOk returns a tuple with the Algorithm field value
 // and a boolean to check if the value has been set.
-func (o *PluginManifestSignature) GetAlgorithmOk() (*string, bool) {
+func (o *SkillManifestSignature) GetAlgorithmOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,11 +90,11 @@ func (o *PluginManifestSignature) GetAlgorithmOk() (*string, bool) {
 }
 
 // SetAlgorithm sets field value
-func (o *PluginManifestSignature) SetAlgorithm(v string) {
+func (o *SkillManifestSignature) SetAlgorithm(v string) {
 	o.Algorithm = v
 }
 
-func (o PluginManifestSignature) MarshalJSON() ([]byte, error) {
+func (o SkillManifestSignature) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -102,14 +102,14 @@ func (o PluginManifestSignature) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o PluginManifestSignature) ToMap() (map[string]interface{}, error) {
+func (o SkillManifestSignature) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["mode"] = o.Mode
 	toSerialize["algorithm"] = o.Algorithm
 	return toSerialize, nil
 }
 
-func (o *PluginManifestSignature) UnmarshalJSON(data []byte) (err error) {
+func (o *SkillManifestSignature) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -132,53 +132,53 @@ func (o *PluginManifestSignature) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varPluginManifestSignature := _PluginManifestSignature{}
+	varSkillManifestSignature := _SkillManifestSignature{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varPluginManifestSignature)
+	err = decoder.Decode(&varSkillManifestSignature)
 
 	if err != nil {
 		return err
 	}
 
-	*o = PluginManifestSignature(varPluginManifestSignature)
+	*o = SkillManifestSignature(varSkillManifestSignature)
 
 	return err
 }
 
-type NullablePluginManifestSignature struct {
-	value *PluginManifestSignature
+type NullableSkillManifestSignature struct {
+	value *SkillManifestSignature
 	isSet bool
 }
 
-func (v NullablePluginManifestSignature) Get() *PluginManifestSignature {
+func (v NullableSkillManifestSignature) Get() *SkillManifestSignature {
 	return v.value
 }
 
-func (v *NullablePluginManifestSignature) Set(val *PluginManifestSignature) {
+func (v *NullableSkillManifestSignature) Set(val *SkillManifestSignature) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullablePluginManifestSignature) IsSet() bool {
+func (v NullableSkillManifestSignature) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullablePluginManifestSignature) Unset() {
+func (v *NullableSkillManifestSignature) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullablePluginManifestSignature(val *PluginManifestSignature) *NullablePluginManifestSignature {
-	return &NullablePluginManifestSignature{value: val, isSet: true}
+func NewNullableSkillManifestSignature(val *SkillManifestSignature) *NullableSkillManifestSignature {
+	return &NullableSkillManifestSignature{value: val, isSet: true}
 }
 
-func (v NullablePluginManifestSignature) MarshalJSON() ([]byte, error) {
+func (v NullableSkillManifestSignature) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullablePluginManifestSignature) UnmarshalJSON(src []byte) error {
+func (v *NullableSkillManifestSignature) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

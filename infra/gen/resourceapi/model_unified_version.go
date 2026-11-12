@@ -32,7 +32,12 @@ type UnifiedVersion struct {
 	ReleaseSequence  *int64    `json:"releaseSequence,omitempty"`
 	ResourceEnvelope *Envelope `json:"resourceEnvelope,omitempty"`
 	CreatedAt        time.Time `json:"createdAt"`
-	Manifest         Manifest  `json:"manifest"`
+	// Display only; not signed JSON bytes. Never reserialize this field for verification or installation. Download exact bytes using manifestDownloadPath, hash them against digest and the verified envelope before parsing.
+	Manifest UnifiedManifest       `json:"manifest"`
+	Kind     string                `json:"kind"`
+	Risk     UnifiedRiskAssessment `json:"risk"`
+	// Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL.
+	ManifestDownloadPath string `json:"manifestDownloadPath" validate:"regexp=^/api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/manifest$"`
 }
 
 type _UnifiedVersion UnifiedVersion
@@ -41,7 +46,7 @@ type _UnifiedVersion UnifiedVersion
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewUnifiedVersion(id string, packageId string, version string, digest string, state string, revision int64, createdAt time.Time, manifest Manifest) *UnifiedVersion {
+func NewUnifiedVersion(id string, packageId string, version string, digest string, state string, revision int64, createdAt time.Time, manifest UnifiedManifest, kind string, risk UnifiedRiskAssessment, manifestDownloadPath string) *UnifiedVersion {
 	this := UnifiedVersion{}
 	this.Id = id
 	this.PackageId = packageId
@@ -51,6 +56,9 @@ func NewUnifiedVersion(id string, packageId string, version string, digest strin
 	this.Revision = revision
 	this.CreatedAt = createdAt
 	this.Manifest = manifest
+	this.Kind = kind
+	this.Risk = risk
+	this.ManifestDownloadPath = manifestDownloadPath
 	return &this
 }
 
@@ -295,9 +303,9 @@ func (o *UnifiedVersion) SetCreatedAt(v time.Time) {
 }
 
 // GetManifest returns the Manifest field value
-func (o *UnifiedVersion) GetManifest() Manifest {
+func (o *UnifiedVersion) GetManifest() UnifiedManifest {
 	if o == nil {
-		var ret Manifest
+		var ret UnifiedManifest
 		return ret
 	}
 
@@ -306,7 +314,7 @@ func (o *UnifiedVersion) GetManifest() Manifest {
 
 // GetManifestOk returns a tuple with the Manifest field value
 // and a boolean to check if the value has been set.
-func (o *UnifiedVersion) GetManifestOk() (*Manifest, bool) {
+func (o *UnifiedVersion) GetManifestOk() (*UnifiedManifest, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -314,8 +322,80 @@ func (o *UnifiedVersion) GetManifestOk() (*Manifest, bool) {
 }
 
 // SetManifest sets field value
-func (o *UnifiedVersion) SetManifest(v Manifest) {
+func (o *UnifiedVersion) SetManifest(v UnifiedManifest) {
 	o.Manifest = v
+}
+
+// GetKind returns the Kind field value
+func (o *UnifiedVersion) GetKind() string {
+	if o == nil {
+		var ret string
+		return ret
+	}
+
+	return o.Kind
+}
+
+// GetKindOk returns a tuple with the Kind field value
+// and a boolean to check if the value has been set.
+func (o *UnifiedVersion) GetKindOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Kind, true
+}
+
+// SetKind sets field value
+func (o *UnifiedVersion) SetKind(v string) {
+	o.Kind = v
+}
+
+// GetRisk returns the Risk field value
+func (o *UnifiedVersion) GetRisk() UnifiedRiskAssessment {
+	if o == nil {
+		var ret UnifiedRiskAssessment
+		return ret
+	}
+
+	return o.Risk
+}
+
+// GetRiskOk returns a tuple with the Risk field value
+// and a boolean to check if the value has been set.
+func (o *UnifiedVersion) GetRiskOk() (*UnifiedRiskAssessment, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Risk, true
+}
+
+// SetRisk sets field value
+func (o *UnifiedVersion) SetRisk(v UnifiedRiskAssessment) {
+	o.Risk = v
+}
+
+// GetManifestDownloadPath returns the ManifestDownloadPath field value
+func (o *UnifiedVersion) GetManifestDownloadPath() string {
+	if o == nil {
+		var ret string
+		return ret
+	}
+
+	return o.ManifestDownloadPath
+}
+
+// GetManifestDownloadPathOk returns a tuple with the ManifestDownloadPath field value
+// and a boolean to check if the value has been set.
+func (o *UnifiedVersion) GetManifestDownloadPathOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.ManifestDownloadPath, true
+}
+
+// SetManifestDownloadPath sets field value
+func (o *UnifiedVersion) SetManifestDownloadPath(v string) {
+	o.ManifestDownloadPath = v
 }
 
 func (o UnifiedVersion) MarshalJSON() ([]byte, error) {
@@ -342,6 +422,9 @@ func (o UnifiedVersion) ToMap() (map[string]interface{}, error) {
 	}
 	toSerialize["createdAt"] = o.CreatedAt
 	toSerialize["manifest"] = o.Manifest
+	toSerialize["kind"] = o.Kind
+	toSerialize["risk"] = o.Risk
+	toSerialize["manifestDownloadPath"] = o.ManifestDownloadPath
 	return toSerialize, nil
 }
 
@@ -358,6 +441,9 @@ func (o *UnifiedVersion) UnmarshalJSON(data []byte) (err error) {
 		"revision",
 		"createdAt",
 		"manifest",
+		"kind",
+		"risk",
+		"manifestDownloadPath",
 	}
 
 	allProperties := make(map[string]interface{})

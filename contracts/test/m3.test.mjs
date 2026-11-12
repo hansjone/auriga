@@ -241,9 +241,9 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 74);
+  assert.equal(count, 76);
   assert(ids.has('listRelayProviderModels'));
-  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 32);
+  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 33);
   for (const [key, p] of Object.entries(catalog.permissions)) {
     assert(p.description.en && p.description['zh-CN'], key);
     assert.equal(typeof p.adminOnly, 'boolean');
@@ -624,7 +624,7 @@ function resourceManifest(kind) {
 
 test('通用草案按kind创建共享资源，拒绝私有上传与客户端指定身份', () => {
   const check = ajv.getSchema(unifiedUri + '#/$defs/UnifiedPackageInput');
-  for (const kind of ['plugin', 'skill', 'tool'])
+  for (const kind of ['skill', 'tool'])
     assert.equal(
       check({ name: 'network-guide', kind, visibility: 'members' }),
       true,
@@ -632,6 +632,7 @@ test('通用草案按kind创建共享资源，拒绝私有上传与客户端指�
     );
   const body = { name: 'network-guide', kind: 'skill', visibility: 'members' };
   for (const extra of [
+    { kind: 'plugin' },
     { kind: 'agent-preset' },
     { visibility: 'private' },
     { name: '../escape' },
@@ -769,14 +770,14 @@ test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留�
   const paths = Object.entries(spec.paths).filter(([p]) =>
     p.includes('/catalog/'),
   );
-  assert.equal(paths.length, 10);
+  assert.equal(paths.length, 12);
   for (const [path, methods] of paths) {
     for (const [method, operation] of Object.entries(methods)) {
       assert(operation.operationId.startsWith('Unified'));
       assert.equal(operation['x-auriga-contract-stage'], 'draft');
       if (method === 'get' && !path.includes('{')) {
         const kind = operation.parameters.find((p) => p.name === 'kind');
-        assert.deepEqual(kind.schema.enum, ['plugin', 'skill', 'tool']);
+        assert.deepEqual(kind.schema.enum, ['skill', 'tool']);
       }
     }
   }
@@ -785,4 +786,231 @@ test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留�
   const multipart = upload.requestBody.content['multipart/form-data'].schema;
   assert.equal(multipart.properties.manifest.format, 'binary');
   assert.equal(multipart.properties.artifacts.type, 'array');
+});
+
+test('catalog不投影旧插件，统一清单只接受Skill/tool且保持内部插件迁移格式', () => {
+  const catalogManifest = ajv.getSchema(unifiedUri + '#/$defs/UnifiedManifest');
+  assert.equal(catalogManifest(resourceManifest('skill')), true);
+  assert.equal(catalogManifest(resourceManifest('tool')), true);
+  assert.equal(catalogManifest(resourceManifest('plugin')), false);
+  assert.equal(
+    validate(unifiedSchema, 'PluginManifest')(resourceManifest('plugin')),
+    true,
+  );
+  const spec = read('openapi/resource.yaml');
+  assert.deepEqual(
+    spec.components.schemas.UnifiedPackage.properties.kind.enum,
+    ['skill', 'tool'],
+  );
+  assert.deepEqual(
+    spec.components.schemas.UnifiedPackage.properties.level.enum,
+    ['l3'],
+  );
+});
+
+test('风险下限不可降低，R2/R3所需人数和安全职责不能冒用R1', () => {
+  const assessment = ajv.getSchema(
+    unifiedUri + '#/$defs/UnifiedRiskAssessment',
+  );
+  for (const [
+    level,
+    minimumLevel,
+    requiredReviewers,
+    requiredSecurityReviewers,
+  ] of [
+    ['r1', 'r1', 1, 0],
+    ['r2', 'r1', 2, 1],
+    ['r2', 'r2', 2, 1],
+    ['r3', 'r1', 2, 1],
+    ['r3', 'r2', 2, 1],
+    ['r3', 'r3', 2, 1],
+  ])
+    assert.equal(
+      assessment({
+        level,
+        minimumLevel,
+        requiredReviewers,
+        requiredSecurityReviewers,
+      }),
+      true,
+      JSON.stringify(assessment.errors),
+    );
+  for (const invalid of [
+    {
+      level: 'r1',
+      minimumLevel: 'r2',
+      requiredReviewers: 1,
+      requiredSecurityReviewers: 0,
+    },
+    {
+      level: 'r2',
+      minimumLevel: 'r3',
+      requiredReviewers: 2,
+      requiredSecurityReviewers: 1,
+    },
+    {
+      level: 'r2',
+      minimumLevel: 'r2',
+      requiredReviewers: 1,
+      requiredSecurityReviewers: 1,
+    },
+    {
+      level: 'r3',
+      minimumLevel: 'r3',
+      requiredReviewers: 2,
+      requiredSecurityReviewers: 0,
+    },
+    {
+      level: 'r1',
+      minimumLevel: 'r1',
+      requiredReviewers: 0,
+      requiredSecurityReviewers: 0,
+    },
+  ])
+    assert.equal(assessment(invalid), false, JSON.stringify(invalid));
+  const decision = ajv.getSchema(unifiedUri + '#/$defs/UnifiedReviewDecision');
+  const value = {
+    decision: 'approve',
+    reason: 'Reviewed exact bytes',
+    versionRevision: 1,
+    digest: artifactDigest,
+    role: 'security',
+  };
+  assert.equal(decision(value), true, JSON.stringify(decision.errors));
+  for (const change of [
+    (v) => delete v.role,
+    (v) => (v.role = 'author'),
+    (v) => (v.reviewerId = uuid),
+    (v) => (v.riskLevel = 'r0'),
+  ]) {
+    const invalid = clone(value);
+    change(invalid);
+    assert.equal(decision(invalid), false);
+  }
+});
+
+const catalogVersion = () => ({
+  id: uuid,
+  packageId: uuid,
+  kind: 'skill',
+  version: '1.0.0',
+  digest: artifactDigest,
+  state: 'pending_review',
+  revision: 1,
+  createdAt: '2026-11-12T00:00:00Z',
+  manifest: resourceManifest('skill'),
+  risk: {
+    minimumLevel: 'r1',
+    level: 'r1',
+    requiredReviewers: 1,
+    requiredSecurityReviewers: 0,
+  },
+  manifestDownloadPath: `/api/resource/v1/catalog/packages/${uuid}/versions/${uuid}/manifest`,
+});
+test('审核队列与详情带reviewId及版本风险，原始清单下载不能变成任意URL', () => {
+  const review = {
+    reviewId: uuid,
+    authorId: uuid,
+    version: catalogVersion(),
+    revision: 1,
+    status: 'pending',
+    decisions: [],
+  };
+  const check = ajv.getSchema(unifiedUri + '#/$defs/UnifiedReviewPage');
+  assert.equal(check({ items: [review] }), true, JSON.stringify(check.errors));
+  for (const change of [
+    (v) => delete v.reviewId,
+    (v) => delete v.version.risk,
+    (v) => delete v.version.kind,
+    (v) => delete v.version.manifestDownloadPath,
+    (v) =>
+      (v.version.manifestDownloadPath = 'https://evil.example.com/manifest'),
+    (v) => (v.version.kind = 'plugin'),
+  ]) {
+    const invalid = clone(review);
+    change(invalid);
+    assert.equal(check({ items: [invalid] }), false);
+  }
+  const spec = read('openapi/resource.yaml');
+  const manifest =
+    spec.paths[
+      '/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/manifest'
+    ].get;
+  assert.equal(manifest['x-permission'], 'resource.packages.read');
+  assert.equal(
+    manifest.responses[200].content['application/octet-stream'].schema.format,
+    'binary',
+  );
+  assert.equal(
+    spec.paths['/api/resource/v1/admin/catalog/reviews/{reviewId}'].get
+      .responses[200].content['application/json'].schema.$ref,
+    '#/components/schemas/UnifiedReview',
+  );
+});
+
+test('新统一事件显式绑定kind和清单/制品摘要，不重载旧插件digest', () => {
+  const event = {
+    packageId: uuid,
+    versionId: uuid,
+    version: '1.0.0',
+    kind: 'skill',
+    signatureVersion: 2,
+    manifestDigest: artifactDigest,
+    artifactDigests: [artifactDigest],
+    revision: 1,
+  };
+  const published = validate(
+    'events/resource.schema.json',
+    'UnifiedResourceVersionPublished',
+  );
+  assert.equal(published(event), true, JSON.stringify(published.errors));
+  for (const change of [
+    (v) => delete v.kind,
+    (v) => (v.kind = 'plugin'),
+    (v) => (v.signatureVersion = 1),
+    (v) => (v.digest = v.manifestDigest),
+    (v) => delete v.manifestDigest,
+    (v) => v.artifactDigests.push(artifactDigest),
+  ]) {
+    const invalid = clone(event);
+    change(invalid);
+    assert.equal(published(invalid), false);
+  }
+  const legacy = {
+    packageId: uuid,
+    versionId: uuid,
+    version: '1.0.0',
+    digest: artifactDigest,
+    revision: 1,
+  };
+  assert.equal(
+    validate('events/resource.schema.json', 'ResourceVersionPublished')(legacy),
+    true,
+  );
+  assert.equal(published(legacy), false);
+  assert.equal(
+    validate('events/resource.schema.json', 'ResourceVersionPublished')(event),
+    false,
+  );
+  const withdrawn = validate(
+    'events/resource.schema.json',
+    'UnifiedResourceVersionWithdrawn',
+  );
+  assert.equal(
+    withdrawn({ ...event, mode: 'malicious', reason: 'Revoked' }),
+    true,
+  );
+  const spec = read('openapi/resource.yaml');
+  assert.deepEqual(
+    spec.paths[
+      '/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/publications'
+    ].post['x-events'],
+    ['resource.catalog_version_published'],
+  );
+  assert.deepEqual(
+    spec.paths[
+      '/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/withdrawals'
+    ].post['x-events'],
+    ['resource.catalog_version_withdrawn'],
+  );
 });

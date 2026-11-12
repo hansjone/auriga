@@ -32,13 +32,23 @@ JSON Schema草案在 `contracts/resource/package.schema.json`，根引用Manifes
 
 统一发行声明schemaVersion=2，statement.purpose=resource，绑定kind、name、version、manifestDigest、artifactDigests、issuedAt，外层绑定tenantId、packageId、versionId、releaseSequence、notAfter与signature。artifactDigests按去重后字典序排列并与清单精确相符。完整对象去除顶层signature后做RFC8785 JCS和Ed25519签名。
 
-沿用独立发行/撤销/降级密钥根、高水位、UTC原时间文本和最长24小时有效期。新版本撤销以versionId+manifestDigest定位，恶意制品需查询所有引用版本逐一撤销。旧插件撤销仍匹配原归档摘要。消费者按schemaVersion与purpose选择协议，两种签名协议在迁移期共存。
+沿用独立发行/撤销/降级密钥根、UTC原时间文本和最长24小时有效期。消费者按schemaVersion与purpose选择协议。迁移后同一版本可同时有v1归档摘要A和v2清单摘要M，必须遵守以下跨协议规则，不能按协议另开安全序号空间。
+
+- 关联表以tenant/package/version/releaseSequence绑定不可变的A、M及迁移状态，核验原v1签名、原归档字节、v2签名与原始清单，且清单的plugin payload必须包含A。仅凭ID相同或未验证的关联表响应不能建立等价；同一映射不得换M。该映射及撤销事实不得因回滚删掉。
+- 撤销已迁移版本时，resource在同一事务中登记A和M两条撤销项及outbox，不能只发M。原v1消费者继续按原归档摘要匹配；v2消费者对恶意撤销先按 `(packageId, versionId)` 匹配，任一摘要条目均足以禁用整个版本。普通withdrawn不写恶意撤销表。
+- v2消费者另将manifestDigest及每个artifactDigest与可信租户撤销表中的摘要逐项比对；任一命中均拒绝，避免相同恶意制品被另一个版本复用后继续加载。服务端仍须查全部引用版本逐一撤销，不能以客户端检查替代撤销传播。
+- 新消费者高水位按 `(tenant, package) → (最高seq, versionId, 已验证摘要别名)` 持久化；同序号只接受同versionId及相同摘要，或上述证明固定关联的A/M。低序号跨v1/v2一律拒绝，降级只能走既有独立授权且保留最高seq。仅支持v1的消费者维持原规则，不能把M当A使用。
+- 后续真正启用插件v2时，首个v2签发时刻t0写入不可回退的包迁移标记；此后不再用v1发布新版本。已应用版本的v1续签截止固定为t0+24小时，签发notAfter不得超过该截止，截止后停止v1续签并要求升级消费者，不能因回滚重新开启。P1的插件仍走旧接口，此截止仅在该包实际启用v2时开始计算。
+
+P1-K必须冻结映射证明格式与v2/撤销向量：A/M双条目、仅A或仅M仍禁用同版本、恶意制品跨版本复用、同序号合法迁移、伪造映射/替换M、跨租户关联、跨协议低序号回滚、续签截止及降级授权不得跨版本冒用。A实现事务和存储，C/D/E分别消费同一证明与高水位规则。
 
 ### 校验和预算
 
 清单最多256 KiB、32个制品、8条runtime需求、32个工具/域名声明。每制品最多512 MiB，单次上传总量最多1 GiB。通用归档解压最多2 GiB、20000条目、压缩比100、深度16。插件沿用原64 MiB压缩/256 MiB解压/4096条目更小上限，skill沿专项上限。接收与解压流式累计预算。
 
 归档拒绝绝对路径、点段、链接、设备、重复条目、Windows保留名、尾点空格、大小写和Unicode规范化碰撞。二进制工具只给声明入口执行权限。JSON清单拒绝重复键、无效UTF-8和未知字段。服务端还须校验artifact id唯一、平台目标唯一、入口存在、版本一致、引用角色匹配、runtime范围可解析和实际兼容性。清单的工具/数据/网络声明须经过独立授权才转为可用权限。
+
+RelativePath、URL和outboundHosts的Schema只作粗筛，不能替代A的语义校验：拒绝a//b、任何段尾点/空格，URL userinfo及带凭据查询；outboundHosts只接受规范化DNS名或IP字面量，不接受URL、userinfo、路径、端口或通配符。主机与重定向目标逐次授权，测试同时保留IP/HTTP合法部署。
 
 ## 3. 工具三种交付方式
 
@@ -86,11 +96,15 @@ Python采用python-build-standalone，Java采用Eclipse Temurin 21 LTS，均经�
 
 ## 6. 审核、离线和审计
 
-L0–L4表示治理控制，风险另记R1/R2/R3。R1用于纯资料技能，由至少一名非作者完整审核。R2用于命令型技能、插件、在线工具与普通离线工具，R3用于源码构建、特权与高敏操作，R2/R3均须两名非作者审核且至少一名承担安全审核。审核和发布时由服务端核对人数及职责。新通用共享路径首期只创建L3，既有插件等级通过原契约继续管理。
+L0–L4表示治理控制，风险另记R1/R2/R3。服务端在上传和送审时根据kind、delivery、permissions和正文扫描确定最低风险，写入risk.minimumLevel；审核人只能上调risk.level，不能降低下限。Skill的tools、outboundHosts、dataAccess任一非空，或正文含可执行命令/工具调用指示，即至少R2，命令型Skill不得自称纯资料R1。tool至少R2，git为R3，特权/高敏操作升R3。风险修改须提升修订并清空旧审核。
+
+R1须至少一名非作者完整审核；R2/R3均须至少两名不同非作者且至少一名具备安全审核资格。UnifiedRiskAssessment表达等级、下限、所需人数/安全人数；UnifiedReview及其列表给出reviewId、作者、版本和决定历史，UnifiedReviewDecision.role为general/security。安全职责由服务端核对审核者资格，不能由客户端自报获得；同一人多角色只计一人，作者不得审核或发布，人数与职责在审核和发布事务中再次核对。现有插件审核仍沿旧契约；通用共享只创建L3的Skill/tool。
 
 共享租约截止为发行声明notAfter与撤销清单expiresAt较早值，各自最长24小时。缺失、过期、回滚清单或可信时间不可用时阻止新的受管启动/加载。普通下架阻止新下载/安装/启用，已应用版本在当前租约内保留，续签按下架策略重新授权。
 
 恶意撤销立即禁用受影响资源。插件沿工作空间处置，工具停止受管进程树并撤销凭据，在线工具关闭受管入口和代理授权，外部页面配合服务端会话失效。Skill恶意撤销或租约到期时停止受影响DSH，重新授权并禁用被撤销内容后恢复，进入新会话并保留原历史。共享Skill首期仅在具备可信启动门禁/guardian的云端和Auriga Desktop开放，其他宿主提供私有技能。启动门禁在DSH进程启动前检查信任状态，guardian持续检查有效期，执行能力独立于可卸载的Auriga插件。
+
+离线到期后允许以不含受管共享内容的安全视图重新启动DSH并新建会话，私有原生Skill照常使用。启动器须先由唯一落盘方确认共享挂载点已清空、受管插件/工具已禁用且无残留受管进程；无法证明隔离则拒绝启动。不得恢复曾载入失效共享正文的旧会话继续执行。原历史只保留供查看，恢复共享功能须联网取得有效租约、撤销清单并重验；不得通过重装、移目录或本机时钟回拨复活过期内容。此离线私有模式不改变旧v1受管插件的租约门禁。
 
 审计记录资源/版本/制品摘要、固定commit、审核决策、发行/撤销修订、分发与回报，正文、令牌、私有文件和本机路径按脱敏规则处理。签名、扫描和运行隔离各自记录验证范围。
 
@@ -98,16 +112,18 @@ L0–L4表示治理控制，风险另记R1/R2/R3。R1用于纯资料技能，由
 
 PR304/308已实现的Package/Version、Review/Distribution、成员安装与节点下载可复用事务、对象暂存/提交、ACL、ETag、幂等、outbox、审核人分离、高水位与审计。需要改造的部位包括kind固定校验、多制品引用、新清单校验、两种摘要/签名、严格plugin客户端解码器和workspace规格。
 
-通用契约使用 `/api/resource/v1/catalog/**` 与 `/api/resource/v1/admin/catalog/**` 的10个路径、12个操作，operationId带Unified前缀。包列举、审核队列和已发布列表支持kind过滤。单对象操作由ID解析kind，并复核版本/审核归属。保留原主干插件接口和schemas的语义。
+通用契约使用 `/api/resource/v1/catalog/**` 与 `/api/resource/v1/admin/catalog/**`，operationId带Unified前缀。P1只开放Skill，tool保留后续期；通用输入、列表、详情与审核只表达skill/tool，不展示或接收plugin。管理台plugin视图继续读写旧插件接口，保留L0–L4/private语义，不塞进仅L3共享的UnifiedPackage。单对象操作由ID解析kind并复核归属，向通用端点提交旧插件ID返回404，不能绕过旧权限或级别控制。
 
-通用草案覆盖创建/读取资源、版本上传/列举/详情、送审、审核队列、已发布、审核决定、发布和下架。UnifiedManifest与UnifiedEnvelope引用新schema。新Version.digest为清单摘要，旧Version.digest为插件归档摘要，迁移通过来源关联表对应，验证器按协议处理。
+通用草案覆盖创建/读取资源、版本上传/列举/详情及原始清单下载、送审、审核队列/详情/决定、已发布、发布和下架。UnifiedManifest只引用Skill/Tool分支；公共包Schema保留PluginManifest供迁移校验。UnifiedVersion.manifest仅作展示，安装不得重序列化它计算摘要，必须从manifestDownloadPath按当前授权取得原始字节，核对版本digest和已验签Envelope的manifestDigest后才解析驱动安装。下载地址是同源locator，不是bearer凭据，逐次核对租户/包/版本可见性。
+
+通用发布/下架分别新增resource.catalog_version_published和resource.catalog_version_withdrawn事件，含kind、signatureVersion、manifestDigest、artifactDigests及版本修订。旧resource.version_*的digest始终是插件归档摘要，旧事件定义和消费者不变。后续通用分发事件也须新增类型，由K先定、A生产、D消费，不重载旧distribution事件。
 
 迁移依次进行以下工作。
 
-1. 为既有插件生成通用元数据投影，关联原归档artifact和versionId。缺失权限/依赖证据的标待补齐，内容补齐后重新审核。
-2. 新增清单与制品引用表和事务，核验旧归档与原审核证据后再签新声明，迁移保留旧撤销事实和安全高水位。
-3. 管理侧先读通用投影，写入口切换按package串行，防止新旧流程并发生成不同版本源。客户端plugin仍用公开PluginManager，skill用技能服务/目录，tool用受管执行入口。
-4. 扩workspace spec/proto、成员票据与回报、分发、重签和事件到kind/清单/制品引用，支持新协议的消费者部署后再开放相应kind发布。旧读取保留一个发布周期，回滚时关闭新写入口并保留对象和引用。
+1. P1仅在resource内部建立旧插件只读索引/关联投影，保留所有等级和可见性，不通过通用HTTP接口展示；管理/成员plugin视图仍用旧接口，不切换写入口。
+2. Skill新增清单与制品引用表和事务。插件的双签迁移格式与证明先由K冻结，实际v2启用另行验收；未开启迁移的插件不生成假v2记录。迁移时核验旧字节和审核证据，保留撤销事实与全局高水位。
+3. 后续插件真正迁移写入前，按package串行切换并遵守第2节的双摘要撤销和v1续签截止；完成正式投影契约前，B不得猜测或扩展通用响应字段。客户端plugin仍沿公开PluginManager。
+4. 扩workspace spec/proto、成员票据与回报、分发、重签和新增事件到kind/清单/制品引用，先部署消费者再开放Skill。回滚关闭通用写入口，保留新表/对象/映射/高水位和撤销记录，旧插件路径继续可用，不允许回滚复活已撤销内容。
 
 迁移的主要成本在多制品事务、摘要/签名消费和规格升级，页面与状态机可大量复用。当前为统一契约切片，正式上线前还需补成员下载票据/安装回报、制品下载、草稿恢复、审核详情/历史、runtime目录、构建来源证明、proto和密码学向量。这些接线进入分期契约线。
 
@@ -127,56 +143,58 @@ PR304/308已实现的Package/Version、Review/Distribution、成员安装与节�
 
 #### P1-K 公共契约与生成产物
 
-- 范围为补齐当前契约切片的P1接线，包括通用审核详情/历史与风险审核人数、成员票据/制品下载、安装修订/回报、分发/续签/撤销，以及ResourceRef、实例规格和事件字段。固定kind、清单/制品摘要、精确版本、selectionRevision/generation、租约、报告来源和失败状态。补v2签名正反向向量及v1/v2互拒。
+- 范围为冻结本轮已补的风险分级/审核详情/原始清单下载/新增统一事件，并补齐成员票据/制品下载、安装修订/回报、分发/续签/撤销、ResourceRef、实例规格。冻结第2节的跨协议关联证明、全局高水位及双摘要撤销；固定kind、精确版本、selectionRevision/generation、租约、报告来源和失败状态。固定共享扫描根 `<DSH_HOME>/auriga/skills-active/current/` 与身份缓存/回执布局，不把登录后身份写进静态配置。
 - 涉及目录为 `contracts/openapi/{resource,workspace}.yaml`、`contracts/resource/`、`contracts/proto/auriga/{resource,node,workspace}/v1/`、`contracts/events/`、`contracts/catalog/m3.json`、`contracts/test/`、`services/contracts/`，以及受影响的 `services/{resource,workspace}/api/` 公共端口声明。以新增消息/字段/接口承载通用模型。
 - 依赖本稿、Skill专项、`contracts/resource/package.schema.json`、`contracts/resource/signatures.schema.json`、现行OpenAPI、resource/node/workspace proto和事件目录。P1-K须形成可定位的冻结契约提交，各线按此提交消费。
-- 验收为schema全量校验、OpenAPI lint、proto lint/兼容性检查、类型生成及类型检查通过，跨租户/错kind/签名/过期/重放与代数负例通过，审核人数与下载权限有机器可校验的表达。
+- 验收为三套生成器与编译、schema全量校验、OpenAPI lint、proto兼容检查通过。v2向量须覆盖v1/v2互拒、第2节全部双摘要撤销/同序号别名证明/跨协议回滚负例、v1续签固定截止；冻结挂载路径和配置保留夹具。审核下限/所需人数/角色、原始清单下载ACL、新旧事件digest不混用均须有机器可校验的表达与负例。
 - 文件边界为独占上述公共契约、API端口和相关生成产物，包括 `web/shared/src/generated/`、`clients/dsh-plugin/src/generated/`、`infra/gen/`。其他线只消费这些产物。契约变化由K提交，主控通知消费线更新基线。
+
+K另冻结按kind/delivery的服务端授权矩阵：现有resource.packages.upload仅是基础权限，不能据此允许所有tool或安全审核职责；P2开放工具前补细分权限与负例。新增公开Schema名统一用Unified前缀，本轮不批量重命名已生成的包格式$defs，避免无关跨语言接口变动；其名称由K集中登记，新增前查重。
 
 #### P1-A resource后端与插件投影迁移
 
-- 范围为通用目录与kind、原字节清单/多制品存储引用、严格语义校验、R1/R2/R3审核、签名发布、分发意图、续签/撤销，以及旧插件投影与新旧写入串行化。资源事务写意图/outbox，消费workspace API完成交接。
-- 涉及目录为 `services/resource/impl/` 及该目录的迁移、归档/对象存储、工作流、HTTP与测试。新增迁移保留旧数据、原始插件归档、审核证据、撤销事实与高水位。
+- 范围为skill/tool通用目录、原字节清单/多制品引用、风险下限与R1/R2/R3审核、签名发布、新事件/分发意图、续签/撤销；P1实际开放Skill。旧插件仅建立内部只读关联投影，不接入通用HTTP接口或双写。按K冻结协议保存插件未来迁移证明；不提前启用插件v2。资源事务写意图/outbox，消费workspace公共API。
+- 涉及目录为 `services/resource/impl/` 的迁移、归档/对象存储、工作流、HTTP与测试，以及 `services/platform-app/src/main/java/auriga/platform/PlatformResourceConfiguration.java` 和对应resource装配测试。新增迁移保留旧数据、原始插件归档、审核证据、撤销事实与高水位。
 - 依赖K冻结的resource OpenAPI、清单/签名schema、ResourceResolution与公共端口、resource事件。目录、上传、审核和投影可先开发，分发联调依赖D的workspace接线。
-- 验收为真实PG测试覆盖租户/作者分离、审核人数、幂等/ETag、多制品部分失败回收、不可变发布、旧插件迁移和撤销不可复活。相同选择重试不解析latest。分发202展示已登记，目标代数观察成功后才标applied。
-- 文件边界为独占resource impl，API端口变更交K。workspace、PlatformResourceWorkspace适配器和节点执行器归D，管理台归B，成员界面与宿主安装归C。
+- 验收为真实PG覆盖租户/作者分离、风险下限与安全审核资格/不同人数、ETag/幂等、多制品失败回收、不可变发布、旧插件各等级/private原接口照常。显式测name/kind/package、metadata.version/manifest.version、制品角色引用一致，Envelope制品摘要去重排序后与清单集合完全相同。负例含a//b、尾点空格、userinfo/凭据查询、非法outboundHosts、跨协议撤销/伪造映射/回滚。关闭Unified写入口后旧插件正常、新表与对象/映射/高水位/撤销事实不丢。相同选择重试不解析latest，202不能当applied。
+- 文件边界为独占resource impl及整个PlatformResourceConfiguration.java，D只能经公共端口交接所需接线，由A串行落该文件。API端口变更交K。PlatformResourceWorkspace适配器和workspace/节点归D，管理台归B，成员界面归C。
 
 #### P1-B 管理台资源中心
 
-- 范围为现有审核、已发布和分发三页的统一kind筛选、共享详情、审核人数/职责、Skill安全文本预览/版本差异、插件投影、精确版本分发及下架/撤销反馈。实现中英文文案和服务端冲突后的刷新。
+- 范围为审核、已发布和分发页的kind导航与对应数据源：plugin视图完整复用旧接口/等级/私有可见性，Skill及后续tool走通用接口，不合成违反Schema的通用插件对象。Skill提供安全文本预览/差异、风险下限、审核人数/职责与历史、精确版本分发和下架/撤销反馈。实现中英文文案与冲突刷新。
 - 涉及目录为 `web/admin/src/views/resources/`、`web/admin/src/views/ResourcesView.vue`、`web/admin/src/admin/resource*`、资源相关路由/导航配置及 `web/admin/test/`。共享路由文件由B单独修改，资源相关修改限定在本任务项。
 - 依赖K冻结的resource管理OpenAPI、Problem/权限/step-up及生成类型，功能联调依赖A的管理API和D的分发回报。可先按契约做组件开发。
-- 验收为组件测试覆盖kind切换、跨类型详情、R2缺第二人禁止发布、作者自审拒绝、ETag冲突、202与applied区分、撤销原因与敏感再验证。部署后正常管理入口完成上传到审核/发布/分发追踪的实际操作。
+- 验收为组件测试覆盖kind切换的数据源分流、旧插件L0–L4/private完整显示、Skill审核队列可取reviewId/详情、命令型不能降R1、R2缺第二人/安全职责禁止发布、作者自审拒绝、ETag冲突、202与applied区分。部署后分别用旧插件和Skill入口完成上传到审核/发布/分发追踪。
 - 文件边界为独占admin资源页面和对应路由接线，生成类型交K，成员界面归C，共享组件若需改变先交主控指定唯一负责人。
 
 #### P1-C 成员侧与插件Skill安装
 
-- 范围为资源市场/我的资源按kind与位置展示，私有Skill创建/导入/编辑/关闭/卸载，显式冻结送审，共享Skill验签/票据下载/解包/ledger、customSkillDirs活跃视图、原子更新、同名覆盖与安装回报。插件安装沿公开PluginManager，Skill接入沿公开skills服务和目录。
+- 范围为资源市场/我的资源、私有Skill创建/导入/编辑/关闭/卸载和冻结送审。Desktop共享Skill由C完成原始清单/制品下载、验签、解包、ledger及固定挂载点内内容切换，身份子目录留扫描根外；C不改customSkillDirs配置。云端共享Skill由D唯一落盘，C只发选择/启停请求、显示和观察实际来源并回报，不下载解包或切换云端共享目录。插件安装沿公开PluginManager。
 - 涉及目录为 `web/panel/src/resources.ts`、panel资源/成员页面与测试，`clients/dsh-plugin/src/resources/` 及其测试、宿主原生资源页/设置/插槽接线（`src/settings/` 和 `src/index.js` 的资源部分）。插件共享注册入口由C负责资源部分接线，E通过明确的进程控制端口消费租约状态。
 - 依赖K冻结的成员资源API、统一清单/v2签名向量、身份通道和回报契约。私有技能独立于A/D可先验收，共享下载依赖A，云端规格与代数依赖D；共享功能开放分别依赖D证明云端guardian能力、E证明Desktop guardian能力。
-- 验收为真实DSH公开目录发现/调用、用户私有内容不上云、共享送审冻结、原始字节验签、同名私有/项目覆盖、跨身份隔离、Windows占用/崩溃恢复、并发修订与回报。云端和Desktop正常页面分别跑安装/更新/卸载与私有创建，收到撤销和离线到期分别触发D、E的停用端口。
-- 文件边界为独占panel资源页面和插件资源逻辑。K独占生成代码，E独占安装器和guardian进程生命周期。C不得另写一套guardian或跨目录改节点驱动。
+- 验收为真实DSH公开发现/调用、上游预置技能仍可见、私有内容不上云、冻结送审、原始字节验签、同名覆盖、跨身份切换清空旧活跃内容、Windows占用/崩溃恢复及并发回报。云端确认仅D写共享目录，C不得并发落盘。两端正常页面跑安装/更新/卸载与私有创建，撤销/到期触发D/E停用，离线私有新会话可用。
+- 文件边界为独占panel资源页面和插件资源逻辑。K独占生成代码和路径协议；customSkillDirs静态配置分别归D/E，云端共享落盘只归D。E独占Desktop guardian，C提供安装记录和原子停用操作端口，不能另写guardian或改节点驱动。
 
 #### P1-D workspace规格与分发事件消费
 
-- 范围为将已锁定kind/manifestDigest/artifact引用写入实例规格，消费资源分发意图并维护selectionRevision与generation，确定性下发、观察回报、续期对账和撤销停机传播。事件生产者由A实现，事件定义归K，D实现workspace消费与节点落地。
-- 涉及目录为 `services/workspace/impl/`，`services/platform-app/src/main/java/auriga/platform/` 下的 `PlatformResourceWorkspace.java`、`PlatformResourceConfiguration.java`、`PlatformWorkspaceConfiguration.java` 及对应测试。节点侧限定 `infra/agent/internal/` 下 `reconciler/`、`runtime/`、`renderer/`、`artifacts/`、`state/`、`observer/observer.go` 与对应测试，装配限 `app/app.go` 中资源相关部分。D负责规格消费、资源下载/渲染、应用观察和云端guardian进程控制；observer的CPU/内存采集文件不属于本任务。
+- 范围为通用实例规格、消费新增分发事件、selectionRevision/generation与观察回报、续期对账和撤销停机。D是云端共享Skill唯一落盘方：下载原始清单/制品、验签解包、ledger、固定扫描根内容原子切换与身份隔离。D的renderer写customSkillDirs固定挂载配置，保留所有上游预置目录；C只观察。云端guardian与离线私有启动门禁也归D。
+- 涉及目录为 `services/workspace/impl/`，platform-app下 `PlatformResourceWorkspace.java`、`PlatformWorkspaceConfiguration.java` 及对应测试；PlatformResourceConfiguration.java整个归A。节点侧限定 `infra/agent/internal/` 下 `reconciler/`、`runtime/`、`renderer/cordis.go` 及renderer资源部分、`artifacts/`、`state/`、`observer/observer.go` 与对应测试，装配限 `app/app.go` 资源部分。CPU/内存采集文件不属于本任务。
 - 依赖K冻结的node InstanceSpec/观察消息、ResourceResolution、workspace/resource公共端口、resource事件、v2签名和撤销schema。D可用固定契约fixture验证规格与事件消费，随后接A的真实生产事件。
-- 验收为重复/乱序事件不覆盖新选择、同selectionRevision重试锁定字节、generation匹配才applied、签名续期保持身份/摘要/序号、撤销失败可重试且最终停机。Linux/Windows节点分别验证清单过期和恶意撤销、断网到期/重启前门禁，云端恢复新会话。
+- 验收为重复/乱序事件不覆盖新选择、同selectionRevision锁定字节、generation匹配才applied、签名续期保持身份/摘要/序号、撤销失败重试最终停机。Linux/Windows节点验证固定扫描根、保留预置技能、唯一写者与身份清空、双摘要撤销/制品复用/跨协议回滚、离线到期先停机再清空受管视图，以私有Skill启动新会话；无法清空则失败封闭。
 - 文件边界为独占workspace impl、平台resource/workspace适配器与节点资源观察/执行路径。A只调用公共workspace端口，C消费回报，E负责Desktop安装器。K独占proto、事件、公共API和生成代码。D与E共用的guardian行为协议先在K冻结，两端执行实现各自归属。
 
 #### P1-E Desktop可信启动门禁与guardian
 
-- 范围为独立于可卸载插件的Desktop guardian、启动前信任核验、运行期租约计时、恶意撤销/到期停止受影响DSH、重启恢复门禁和新会话提示。保留独立DSH_HOME、应用升级/回滚和Node引用，不在P1实现Python/Java下载。
+- 范围为Desktop安装器写固定customSkillDirs挂载并保留上游预置目录；独立于可卸载插件的guardian、启动前信任核验、租约计时、恶意撤销/到期停DSH及新会话提示。E在停机后调用C的可信本地操作清空共享视图/禁用受管执行；C不可用时保守隔离受管目录并核验结果，不能依赖插件仍在运行。保留独立DSH_HOME、升级/回滚和Node引用，P1不实现Python/Java下载。
 - 涉及目录为 `clients/installer/runtime/`、`clients/installer/windows/`、其构建脚本和测试。E负责Desktop guardian入口及进程树控制，云端执行归D。
 - 依赖K冻结的租约/撤销/停用状态协议与v2向量、C提供的身份/安装记录观察端口。可与C并行做端口级验证，共享端到端验收等待C真实写入记录。
-- 验收为插件关闭/卸载后仍执行已安装共享资源的有效期门禁，进程重启或时钟回拨不绕过信任检查，断网在最早租约截止停DSH，恶意撤销后阻止旧内容恢复。真实Desktop通过正常启动器和页面验证，新会话进入及原历史保留可见。
+- 验收为插件关闭/卸载后仍执行有效期门禁，重启/时钟回拨不绕过信任，断网到最早租约截止停DSH。核验固定目录已隔离后允许离线只用私有Skill的新会话，原历史可查看但不恢复受污染上下文；无法清空则拒绝启动，联网重验才恢复共享。真实Desktop验证预置技能不丢、原历史保留、正常启动和身份切换。
 - 文件边界为独占installer，C独占插件/panel，D独占节点。影响共同信任协议时交K，部署脚本与环境修改交主控。
 
 #### P1-F 串行集成与开发部署
 
 - 范围为主控收取K/A/B/C/D/E产物，组合版本、构建/部署收据与正常入口验证。涉及 `e2e/` 的资源集成用例及 `docs/dev/` 资源使用说明，NAS部署走既有主控部署工具。
-- 依赖所有冻结契约和实现产物。验收包括旧插件路径、统一投影、Skill私有/共享、分发/重试、guardian到期和撤销，覆盖云端/Desktop和公开IP/HTTP访问边界。
+- 依赖所有冻结契约和实现产物。验收包括旧插件接口/内部只读投影、Skill私有/共享、分发/重试、双摘要撤销/跨协议回滚、guardian到期/离线私有启动，覆盖云端/Desktop和公开IP/HTTP访问。执行关闭通用写入口的回滚演练，正常旧插件页面仍可用，迁移数据、撤销事实和高水位保留。
 - 文件边界为各工人只交付可部署产物与证据，主控唯一执行真实PG/DSH全链和NAS部署。独立可验收改动经针对性测试可先小批部署，PR独审与完整CI沿现行合并门禁进行。
 
 P2交付online与offline工具。端点/凭据绑定、平台payload和进程回报契约先行，后端制品/审核、客户端执行/终止、管理/成员页面并行。依赖P1的统一版本与发行模型。代理授权、独立来源页面、进程回收通过正常入口分别验收。

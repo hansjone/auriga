@@ -16,36 +16,36 @@ import (
 	"fmt"
 )
 
-// checks if the PluginManifestAuthor type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &PluginManifestAuthor{}
+// checks if the SkillManifestAuthor type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &SkillManifestAuthor{}
 
-// PluginManifestAuthor struct for PluginManifestAuthor
-type PluginManifestAuthor struct {
+// SkillManifestAuthor struct for SkillManifestAuthor
+type SkillManifestAuthor struct {
 	DisplayName string `json:"displayName"`
 }
 
-type _PluginManifestAuthor PluginManifestAuthor
+type _SkillManifestAuthor SkillManifestAuthor
 
-// NewPluginManifestAuthor instantiates a new PluginManifestAuthor object
+// NewSkillManifestAuthor instantiates a new SkillManifestAuthor object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewPluginManifestAuthor(displayName string) *PluginManifestAuthor {
-	this := PluginManifestAuthor{}
+func NewSkillManifestAuthor(displayName string) *SkillManifestAuthor {
+	this := SkillManifestAuthor{}
 	this.DisplayName = displayName
 	return &this
 }
 
-// NewPluginManifestAuthorWithDefaults instantiates a new PluginManifestAuthor object
+// NewSkillManifestAuthorWithDefaults instantiates a new SkillManifestAuthor object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewPluginManifestAuthorWithDefaults() *PluginManifestAuthor {
-	this := PluginManifestAuthor{}
+func NewSkillManifestAuthorWithDefaults() *SkillManifestAuthor {
+	this := SkillManifestAuthor{}
 	return &this
 }
 
 // GetDisplayName returns the DisplayName field value
-func (o *PluginManifestAuthor) GetDisplayName() string {
+func (o *SkillManifestAuthor) GetDisplayName() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -56,7 +56,7 @@ func (o *PluginManifestAuthor) GetDisplayName() string {
 
 // GetDisplayNameOk returns a tuple with the DisplayName field value
 // and a boolean to check if the value has been set.
-func (o *PluginManifestAuthor) GetDisplayNameOk() (*string, bool) {
+func (o *SkillManifestAuthor) GetDisplayNameOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -64,11 +64,11 @@ func (o *PluginManifestAuthor) GetDisplayNameOk() (*string, bool) {
 }
 
 // SetDisplayName sets field value
-func (o *PluginManifestAuthor) SetDisplayName(v string) {
+func (o *SkillManifestAuthor) SetDisplayName(v string) {
 	o.DisplayName = v
 }
 
-func (o PluginManifestAuthor) MarshalJSON() ([]byte, error) {
+func (o SkillManifestAuthor) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -76,13 +76,13 @@ func (o PluginManifestAuthor) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o PluginManifestAuthor) ToMap() (map[string]interface{}, error) {
+func (o SkillManifestAuthor) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["displayName"] = o.DisplayName
 	return toSerialize, nil
 }
 
-func (o *PluginManifestAuthor) UnmarshalJSON(data []byte) (err error) {
+func (o *SkillManifestAuthor) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -104,53 +104,53 @@ func (o *PluginManifestAuthor) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varPluginManifestAuthor := _PluginManifestAuthor{}
+	varSkillManifestAuthor := _SkillManifestAuthor{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varPluginManifestAuthor)
+	err = decoder.Decode(&varSkillManifestAuthor)
 
 	if err != nil {
 		return err
 	}
 
-	*o = PluginManifestAuthor(varPluginManifestAuthor)
+	*o = SkillManifestAuthor(varSkillManifestAuthor)
 
 	return err
 }
 
-type NullablePluginManifestAuthor struct {
-	value *PluginManifestAuthor
+type NullableSkillManifestAuthor struct {
+	value *SkillManifestAuthor
 	isSet bool
 }
 
-func (v NullablePluginManifestAuthor) Get() *PluginManifestAuthor {
+func (v NullableSkillManifestAuthor) Get() *SkillManifestAuthor {
 	return v.value
 }
 
-func (v *NullablePluginManifestAuthor) Set(val *PluginManifestAuthor) {
+func (v *NullableSkillManifestAuthor) Set(val *SkillManifestAuthor) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullablePluginManifestAuthor) IsSet() bool {
+func (v NullableSkillManifestAuthor) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullablePluginManifestAuthor) Unset() {
+func (v *NullableSkillManifestAuthor) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullablePluginManifestAuthor(val *PluginManifestAuthor) *NullablePluginManifestAuthor {
-	return &NullablePluginManifestAuthor{value: val, isSet: true}
+func NewNullableSkillManifestAuthor(val *SkillManifestAuthor) *NullableSkillManifestAuthor {
+	return &NullableSkillManifestAuthor{value: val, isSet: true}
 }
 
-func (v NullablePluginManifestAuthor) MarshalJSON() ([]byte, error) {
+func (v NullableSkillManifestAuthor) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullablePluginManifestAuthor) UnmarshalJSON(src []byte) error {
+func (v *NullableSkillManifestAuthor) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

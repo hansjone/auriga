@@ -4798,7 +4798,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -4808,7 +4808,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -4938,7 +4938,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -4948,7 +4948,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5080,7 +5080,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5090,7 +5090,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5234,7 +5234,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5244,7 +5244,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5363,7 +5363,7 @@
               }
             }
           },
-          "503": {
+          "500": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5373,7 +5373,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "Request rejected.",
             "content": {
               "application/problem+json": {
@@ -5402,7 +5402,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5430,7 +5430,6 @@
             "schema": {
               "type": "string",
               "enum": [
-                "plugin",
                 "skill",
                 "tool"
               ]
@@ -5556,7 +5555,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.upload",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5711,7 +5710,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5862,7 +5861,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6012,7 +6011,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.upload",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6241,7 +6240,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6401,7 +6400,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.submit",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6456,7 +6455,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Review"
+                  "$ref": "#/components/schemas/UnifiedReview"
                 }
               }
             },
@@ -6587,7 +6586,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.review",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6616,7 +6615,6 @@
             "schema": {
               "type": "string",
               "enum": [
-                "plugin",
                 "skill",
                 "tool"
               ]
@@ -6629,7 +6627,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UnifiedVersionPage"
+                  "$ref": "#/components/schemas/UnifiedReviewPage"
                 }
               }
             }
@@ -6746,7 +6744,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6775,7 +6773,6 @@
             "schema": {
               "type": "string",
               "enum": [
-                "plugin",
                 "skill",
                 "tool"
               ]
@@ -6905,7 +6902,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.review",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6951,7 +6948,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Review"
+                  "$ref": "#/components/schemas/UnifiedReview"
                 }
               }
             },
@@ -7069,7 +7066,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReviewDecision"
+                "$ref": "#/components/schemas/UnifiedReviewDecision"
               }
             }
           }
@@ -7083,7 +7080,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7106,7 +7103,7 @@
           "iam.step_up_required"
         ],
         "x-events": [
-          "resource.version_published"
+          "resource.catalog_version_published"
         ],
         "parameters": [
           {
@@ -7289,7 +7286,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Unified resource workflow for plugin, skill and tool. Preserve live tenant ACL, ETag, idempotency, step-up and author separation. Legacy plugin routes retain their current behavior.",
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7312,7 +7309,7 @@
           "iam.step_up_required"
         ],
         "x-events": [
-          "resource.version_withdrawn"
+          "resource.catalog_version_withdrawn"
         ],
         "parameters": [
           {
@@ -7486,6 +7483,318 @@
             }
           }
         },
+        "x-auriga-contract-stage": "draft"
+      }
+    },
+    "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/manifest": {
+      "get": {
+        "operationId": "UnifiedDownloadResourceManifest",
+        "tags": [
+          "Resource"
+        ],
+        "description": "DRAFT, NOT IMPLEMENTED. Return the exact stored immutable auriga-resource.json UTF-8 bytes, without JSON parsing, reserialization, newline or BOM changes. Locator does not grant access: check tenant/package/version ACL on every read. Caller hashes bytes and compares version digest and verified envelope before parsing. Plugin IDs return 404.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact manifest bytes; X-Auriga-Manifest-Digest equals the raw SHA-256 version digest, but is not itself a signature.",
+            "headers": {
+              "X-Auriga-Manifest-Digest": {
+                "schema": {
+                  "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "draft"
+      }
+    },
+    "/api/resource/v1/admin/catalog/reviews/{reviewId}": {
+      "get": {
+        "operationId": "UnifiedGetResourceReview",
+        "tags": [
+          "Resource"
+        ],
+        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "x-permission": "resource.versions.review",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "reviewId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedReview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600,
         "x-auriga-contract-stage": "draft"
       }
     }
@@ -8728,7 +9037,15 @@
         "additionalProperties": false
       },
       "UnifiedManifest": {
-        "$ref": "../resource/package.schema.json#/$defs/Manifest"
+        "oneOf": [
+          {
+            "$ref": "../resource/package.schema.json#/$defs/SkillManifest"
+          },
+          {
+            "$ref": "../resource/package.schema.json#/$defs/ToolManifest"
+          }
+        ],
+        "description": "Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections."
       },
       "UnifiedEnvelope": {
         "$ref": "../resource/package.schema.json#/$defs/Envelope"
@@ -8745,7 +9062,6 @@
           "kind": {
             "type": "string",
             "enum": [
-              "plugin",
               "skill",
               "tool"
             ]
@@ -8774,7 +9090,7 @@
           "visibility"
         ],
         "additionalProperties": false,
-        "description": "Draft shared L3 resource. Tenant, owner and level are server-derived. Local private and developer sideloads are not uploaded automatically."
+        "description": "Shared L3 skill/tool only. Server derives tenant, owner and level. Private skill stays local. Plugin CRUD uses legacy APIs; catalog rejects plugin kind/IDs."
       },
       "UnifiedPackage": {
         "type": "object",
@@ -8796,7 +9112,6 @@
           "kind": {
             "type": "string",
             "enum": [
-              "plugin",
               "skill",
               "tool"
             ]
@@ -8864,7 +9179,7 @@
           "defaultVersionId"
         ],
         "additionalProperties": false,
-        "description": "Draft shared L3 resource. Legacy plugin levels remain available through their existing contracts."
+        "description": "Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection."
       },
       "UnifiedVersion": {
         "type": "object",
@@ -8918,7 +9233,26 @@
             "format": "date-time"
           },
           "manifest": {
-            "$ref": "#/components/schemas/UnifiedManifest"
+            "$ref": "#/components/schemas/UnifiedManifest",
+            "description": "Display only; not signed JSON bytes. Never reserialize this field for verification or installation. Download exact bytes using manifestDownloadPath, hash them against digest and the verified envelope before parsing."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "skill",
+              "tool"
+            ]
+          },
+          "risk": {
+            "$ref": "#/components/schemas/UnifiedRiskAssessment",
+            "readOnly": true
+          },
+          "manifestDownloadPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^/api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/manifest$",
+            "description": "Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL."
           }
         },
         "required": [
@@ -8929,7 +9263,10 @@
           "state",
           "revision",
           "createdAt",
-          "manifest"
+          "manifest",
+          "kind",
+          "risk",
+          "manifestDownloadPath"
         ],
         "additionalProperties": false,
         "description": "Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable."
@@ -8985,6 +9322,298 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/UnifiedVersion"
+            },
+            "minItems": 0,
+            "maxItems": 200
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "UnifiedRiskAssessment": {
+        "type": "object",
+        "properties": {
+          "minimumLevel": {
+            "type": "string",
+            "enum": [
+              "r1",
+              "r2",
+              "r3"
+            ],
+            "description": "Server-derived floor: command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content."
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "r1",
+              "r2",
+              "r3"
+            ],
+            "description": "Effective server risk. Authorized reviewers may raise it only; changes increment revision and invalidate earlier reviews."
+          },
+          "requiredReviewers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2,
+            "description": "Distinct non-author reviewers; one for r1, two for r2/r3. Repeated identities count once."
+          },
+          "requiredSecurityReviewers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Zero for r1; at least one qualified security reviewer for r2/r3. Server verifies qualification independently of input role."
+          }
+        },
+        "required": [
+          "minimumLevel",
+          "level",
+          "requiredReviewers",
+          "requiredSecurityReviewers"
+        ],
+        "additionalProperties": false,
+        "description": "Read-only server assessment, recalculated on content/permission changes. Publication transaction checks the current assessment and review identities.",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "level": {
+                  "const": "r1"
+                }
+              },
+              "required": [
+                "level"
+              ]
+            },
+            "then": {
+              "properties": {
+                "minimumLevel": {
+                  "const": "r1"
+                },
+                "requiredReviewers": {
+                  "const": 1
+                },
+                "requiredSecurityReviewers": {
+                  "const": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "level": {
+                  "const": "r2"
+                }
+              },
+              "required": [
+                "level"
+              ]
+            },
+            "then": {
+              "properties": {
+                "minimumLevel": {
+                  "enum": [
+                    "r1",
+                    "r2"
+                  ]
+                },
+                "requiredReviewers": {
+                  "const": 2
+                },
+                "requiredSecurityReviewers": {
+                  "const": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "level": {
+                  "const": "r3"
+                }
+              },
+              "required": [
+                "level"
+              ]
+            },
+            "then": {
+              "properties": {
+                "requiredReviewers": {
+                  "const": 2
+                },
+                "requiredSecurityReviewers": {
+                  "const": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "UnifiedReviewDecision": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "versionRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "digest": {
+            "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "general",
+              "security"
+            ],
+            "description": "Claimed review duty; server must verify the authenticated reviewer qualification. Identity is never supplied by this body."
+          },
+          "riskLevel": {
+            "type": "string",
+            "enum": [
+              "r1",
+              "r2",
+              "r3"
+            ],
+            "description": "Optional raise-only risk proposal. Server rejects lower than current/floor; an accepted change invalidates prior decisions and requires review of the new revision."
+          }
+        },
+        "required": [
+          "decision",
+          "reason",
+          "versionRevision",
+          "digest",
+          "role"
+        ],
+        "additionalProperties": false,
+        "description": "Decision binds exact versionRevision and raw manifest digest. Author cannot review/publish. Required role is server-authorized; publication counts distinct qualified non-author identities."
+      },
+      "UnifiedReviewRecord": {
+        "type": "object",
+        "properties": {
+          "reviewerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "general",
+              "security"
+            ]
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "versionRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "digest": {
+            "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reviewerId",
+          "role",
+          "decision",
+          "reason",
+          "versionRevision",
+          "digest",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "UnifiedReview": {
+        "type": "object",
+        "properties": {
+          "reviewId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "$ref": "#/components/schemas/UnifiedVersion"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnifiedReviewRecord"
+            },
+            "maxItems": 200
+          }
+        },
+        "required": [
+          "reviewId",
+          "authorId",
+          "version",
+          "revision",
+          "status",
+          "decisions"
+        ],
+        "additionalProperties": false,
+        "description": "Review identity and immutable decision history for the exact version revision. Version contains kind and server risk/quorum. Failed author/qualification/quorum checks cannot approve/publish."
+      },
+      "UnifiedReviewPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnifiedReview"
             },
             "minItems": 0,
             "maxItems": 200

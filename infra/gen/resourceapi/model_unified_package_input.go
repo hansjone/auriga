@@ -19,7 +19,7 @@ import (
 // checks if the UnifiedPackageInput type satisfies the MappedNullable interface at compile time
 var _ MappedNullable = &UnifiedPackageInput{}
 
-// UnifiedPackageInput Draft shared L3 resource. Tenant, owner and level are server-derived. Local private and developer sideloads are not uploaded automatically.
+// UnifiedPackageInput Shared L3 skill/tool only. Server derives tenant, owner and level. Private skill stays local. Plugin CRUD uses legacy APIs; catalog rejects plugin kind/IDs.
 type UnifiedPackageInput struct {
 	Name       string   `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
 	Kind       string   `json:"kind"`

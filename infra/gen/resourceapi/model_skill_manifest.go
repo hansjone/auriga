@@ -20,18 +20,18 @@ var _ MappedNullable = &SkillManifest{}
 
 // SkillManifest struct for SkillManifest
 type SkillManifest struct {
-	SchemaVersion        int32                   `json:"schemaVersion"`
-	Name                 string                  `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
-	Version              string                  `json:"version" validate:"regexp=^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"`
-	Description          string                  `json:"description"`
-	Author               PluginManifestAuthor    `json:"author"`
-	License              string                  `json:"license"`
-	Permissions          Permissions             `json:"permissions"`
-	Runtimes             []Runtime               `json:"runtimes"`
-	Artifacts            []SkillArtifact         `json:"artifacts"`
-	Signature            PluginManifestSignature `json:"signature"`
-	Kind                 string                  `json:"kind"`
-	Skill                Skill                   `json:"skill"`
+	SchemaVersion        int32                  `json:"schemaVersion"`
+	Name                 string                 `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
+	Version              string                 `json:"version" validate:"regexp=^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"`
+	Description          string                 `json:"description"`
+	Author               SkillManifestAuthor    `json:"author"`
+	License              string                 `json:"license"`
+	Permissions          Permissions            `json:"permissions"`
+	Runtimes             []Runtime              `json:"runtimes"`
+	Artifacts            []SkillArtifact        `json:"artifacts"`
+	Signature            SkillManifestSignature `json:"signature"`
+	Kind                 string                 `json:"kind"`
+	Skill                Skill                  `json:"skill"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -41,7 +41,7 @@ type _SkillManifest SkillManifest
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewSkillManifest(schemaVersion int32, name string, version string, description string, author PluginManifestAuthor, license string, permissions Permissions, runtimes []Runtime, artifacts []SkillArtifact, signature PluginManifestSignature, kind string, skill Skill) *SkillManifest {
+func NewSkillManifest(schemaVersion int32, name string, version string, description string, author SkillManifestAuthor, license string, permissions Permissions, runtimes []Runtime, artifacts []SkillArtifact, signature SkillManifestSignature, kind string, skill Skill) *SkillManifest {
 	this := SkillManifest{}
 	this.SchemaVersion = schemaVersion
 	this.Name = name
@@ -163,9 +163,9 @@ func (o *SkillManifest) SetDescription(v string) {
 }
 
 // GetAuthor returns the Author field value
-func (o *SkillManifest) GetAuthor() PluginManifestAuthor {
+func (o *SkillManifest) GetAuthor() SkillManifestAuthor {
 	if o == nil {
-		var ret PluginManifestAuthor
+		var ret SkillManifestAuthor
 		return ret
 	}
 
@@ -174,7 +174,7 @@ func (o *SkillManifest) GetAuthor() PluginManifestAuthor {
 
 // GetAuthorOk returns a tuple with the Author field value
 // and a boolean to check if the value has been set.
-func (o *SkillManifest) GetAuthorOk() (*PluginManifestAuthor, bool) {
+func (o *SkillManifest) GetAuthorOk() (*SkillManifestAuthor, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -182,7 +182,7 @@ func (o *SkillManifest) GetAuthorOk() (*PluginManifestAuthor, bool) {
 }
 
 // SetAuthor sets field value
-func (o *SkillManifest) SetAuthor(v PluginManifestAuthor) {
+func (o *SkillManifest) SetAuthor(v SkillManifestAuthor) {
 	o.Author = v
 }
 
@@ -283,9 +283,9 @@ func (o *SkillManifest) SetArtifacts(v []SkillArtifact) {
 }
 
 // GetSignature returns the Signature field value
-func (o *SkillManifest) GetSignature() PluginManifestSignature {
+func (o *SkillManifest) GetSignature() SkillManifestSignature {
 	if o == nil {
-		var ret PluginManifestSignature
+		var ret SkillManifestSignature
 		return ret
 	}
 
@@ -294,7 +294,7 @@ func (o *SkillManifest) GetSignature() PluginManifestSignature {
 
 // GetSignatureOk returns a tuple with the Signature field value
 // and a boolean to check if the value has been set.
-func (o *SkillManifest) GetSignatureOk() (*PluginManifestSignature, bool) {
+func (o *SkillManifest) GetSignatureOk() (*SkillManifestSignature, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -302,7 +302,7 @@ func (o *SkillManifest) GetSignatureOk() (*PluginManifestSignature, bool) {
 }
 
 // SetSignature sets field value
-func (o *SkillManifest) SetSignature(v PluginManifestSignature) {
+func (o *SkillManifest) SetSignature(v SkillManifestSignature) {
 	o.Signature = v
 }
 

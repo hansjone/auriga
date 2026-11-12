@@ -10,6 +10,8 @@
 
 上游顺序包含项目.dsh/skills、项目.agents/skills、customSkillDirs、用户DSH根和用户agents根，作用域也影响同名选择。公开catalog用于观察当前cwd生效来源。旧oclaw H3的目录、版本、送审和驳回交互保留为页面参考。[技能子系统契约](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/skills.md)
 
+本轮再次核实公开README的Mount and configure：customSkillDirs是额外扫描根数组，watch支持目录变化；这是provider的配置能力，不是配置补丁自动追加数组的承诺。上游web-app预置的skill-filesystem已在customSkillDirs中挂载agent-preset的skills。D/E必须在各自控制的Cordis配置层生成“已有数组原条目＋Auriga固定根”的完整数组，保留原顺序、表达式、插件/预设声明和includeDefaultRoots设置，不能用只含Auriga的一项覆盖。无法解析公开配置或定位目标预设时保持旧配置并阻止共享开放，不猜内部字段。[上游预置配置](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/bundle/web-app/presets/cordis.patch.yml)
+
 ## 制品约束
 
 统一清单kind=skill，skill段含entry=SKILL.md、contentProfile=text-only、dshVersionRange。一个payload，os/arch为any，runtimes为空。制品为严格ustar+gzip，根含SKILL.md，可附references/与assets/文本。外置auriga-resource.json替代第1轮manifest.json，版本摘要与制品摘要依主文档分别计算。
@@ -22,7 +24,9 @@
 
 私有技能在 `<DSH_HOME>/skills/<name>/SKILL.md`。Desktop默认 `%LOCALAPPDATA%\AurigaDesktop\home\skills`，普通DSH跟随实际DSH_HOME，默认home时为~/.dsh/skills。云端写本人实例DSH_HOME对应的持久卷。
 
-共享缓存和ledger在 `<DSH_HOME>/auriga/resources/<tenant>/<owner>/<client或instance>/skills/`。活跃根为 `<DSH_HOME>/auriga/skills-active/<tenant>/<owner>/<client或instance>/`，下一层为 `<name>/SKILL.md`，用公开customSkillDirs挂接。切换身份关闭旧视图，缓存版本留在扫描根外。宿主catalog确认名称和来源后回报应用，需要重启时显示待重启。
+共享缓存和ledger在 `<DSH_HOME>/auriga/resources/<tenant>/<owner>/<client或instance>/skills/`。K冻结唯一静态挂载点 `<DSH_HOME>/auriga/skills-active/current/`，下一层直接为 `<name>/SKILL.md`，不含身份层级。身份缓存/暂存目录在扫描根外，运行时按可信身份和安装修订将选中内容物化到current，在锁与事务日志下原子切换；身份切换先清空旧视图，未确认清空不能加载新身份。宿主catalog确认名称和来源后才回报applied，需要重启时显示待重启。
+
+云端由D的renderer（infra/agent/internal/renderer/cordis.go）唯一写customSkillDirs配置；D节点执行器也是共享清单/制品下载、验签、解包、ledger和活跃视图的唯一写者。C只发送共享选择/启停请求、显示来源和观察结果，不写云端共享目录。Desktop由E的installer（clients/installer/runtime/core.mjs）唯一写静态配置，C负责固定挂载点内的下载/验签/内容切换，E只在进程停机后的可信guardian隔离流程介入。C不改两端Cordis配置，也不通过私有宿主接口动态改customSkillDirs。私有Skill仍由C在原生user根管理。
 
 安装前检查同frontmatter.name的私有与已知根占用，有冲突先提示。项目来源可覆盖共享技能，UI显示实际来源和被覆盖状态。改名须重新打包送审，安装器遵循已签名称。依D3首期共享为L3，用户可关闭/卸载，接受项目覆盖边界。
 
@@ -38,7 +42,7 @@
 
 ## 到期、撤销和安全
 
-共享租约取notAfter与撤销expiresAt较早值，各最多24小时。到期移出受管视图并停止受影响DSH，联网重新授权和验签后恢复。私有原生技能依DSH规则离线使用。
+共享租约取notAfter与撤销expiresAt较早值，各最多24小时。到期先停止受影响DSH，再由云端D或Desktop可信清理流程移出受管视图；确认所有失效受管内容均已隔离后，离线也允许用私有Skill启动新会话。清理失败则阻止启动，不能从旧会话恢复已载入正文。原历史保留供查看，联网重新授权和验签后才恢复共享；私有原生技能依DSH规则离线使用。
 
 依D4，恶意撤销时云端由workspace/agent停止受影响DSH，本地由可信启动器/guardian停止对应进程，重验并禁用被撤销内容后恢复新会话，保留原历史。提示该动作可能中断DSH中的其他任务。依D5，共享Skill首期仅在具备可信guardian的云端和Auriga Desktop开放，外部DSH提供私有技能。guardian独立于可卸载的Auriga插件，在启动前和运行期间核验租约与撤销，DSH重启不能绕过。
 
@@ -48,4 +52,4 @@ description与正文可能注入指令、诱导终端、读取凭据和外传。
 
 管理中心skill面板展示纯文本正文、资料、差异和工具/域名声明。成员市场按kind筛选，详情显示适配与当前位置。我的资源支持私有创建/编辑/提交共享、共享更新/关闭/卸载，显示同名来源、待重启、新会话生效、撤销和过期。
 
-P1专项测目录层级、非法frontmatter、篡改、同名项目覆盖、身份切换、更新占用、撤销已载入会话和离线超期。对应主文档P1-C成员/安装、P1-D云端规格/事件、P1-E Desktop guardian工作线。D的规格回报先于云端联调；共享功能开放前，云端须通过D的可信停用验收，Desktop须通过E的可信停用验收。原生发现和调用由正常DSH页面验收，部署交主控串行执行。
+P1专项测固定根层级、预置agent-preset技能保留、非法frontmatter、原始字节验签、同名覆盖、身份切换清空、Windows占用、撤销已载入会话、离线到期后的私有新会话及清理失败拒绝启动。对应主文档C成员/Desktop安装、D云端唯一落盘/规格/事件、E Desktop配置/guardian。D规格回报和D/E静态挂载接线先于对应端共享联调；两端可信停用通过才开放共享。原生发现和调用由正常DSH页面验收，部署交主控串行执行。

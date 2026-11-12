@@ -20,7 +20,7 @@ import (
 // checks if the UnifiedPackage type satisfies the MappedNullable interface at compile time
 var _ MappedNullable = &UnifiedPackage{}
 
-// UnifiedPackage Draft shared L3 resource. Legacy plugin levels remain available through their existing contracts.
+// UnifiedPackage Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection.
 type UnifiedPackage struct {
 	Id               string         `json:"id"`
 	TenantId         string         `json:"tenantId"`

@@ -124,7 +124,11 @@
       },
       "adminOnly": false,
       "sensitive": false,
-      "builtinRoles": ["owner", "admin", "member"]
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
     },
     "auriga.connect.collab.use": {
       "description": {
@@ -133,7 +137,11 @@
       },
       "adminOnly": false,
       "sensitive": false,
-      "builtinRoles": ["owner", "admin", "member"]
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
     },
     "ai.providers.read": {
       "description": {
@@ -521,6 +529,26 @@
         "audit"
       ],
       "publish": "auriga.evt.instance.ai_credential_revoked"
+    },
+    "resource.catalog_version_published": {
+      "source": "auriga/resource",
+      "subject": "versionId",
+      "schema": "../events/resource.schema.json#/$defs/UnifiedResourceVersionPublished",
+      "consumers": [
+        "workspace",
+        "audit"
+      ],
+      "publish": "auriga.evt.resource.catalog_version_published"
+    },
+    "resource.catalog_version_withdrawn": {
+      "source": "auriga/resource",
+      "subject": "versionId",
+      "schema": "../events/resource.schema.json#/$defs/UnifiedResourceVersionWithdrawn",
+      "consumers": [
+        "workspace",
+        "audit"
+      ],
+      "publish": "auriga.evt.resource.catalog_version_withdrawn"
     }
   },
   "deviceMappings": {
