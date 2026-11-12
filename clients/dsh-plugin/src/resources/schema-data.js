@@ -1,4 +1,4 @@
-// Packaged runtime copies of the frozen schemas; freshness is checked by schema-runtime.test.js.
+// Packaged runtime copies of the frozen schemas; freshness is checked by unified-trust.test.js.
 export default {
   signatures: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -887,6 +887,20 @@ export default {
             maximum: 9007199254740991,
           },
           enabled: { type: 'boolean' },
+          installationRevision: {
+            type: 'integer',
+            format: 'int64',
+            minimum: 1,
+            maximum: 9007199254740991,
+            description:
+              'Resource-assigned persisted per-installation CAS revision. Preserved by signature renewal and echoed by node/Desktop reports. Omission is transport-compatible only: never accept applied without a positive expected revision.',
+          },
+          desiredState: {
+            type: 'string',
+            enum: ['ENABLED', 'DISABLED', 'REMOVED'],
+            description:
+              'Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values.',
+          },
         },
         required: [
           'identity',
@@ -898,6 +912,18 @@ export default {
           'enabled',
         ],
         additionalProperties: false,
+      },
+      UnifiedResourceDispatchRef: {
+        description:
+          'Resource service outbound validation. Legacy readers use UnifiedResourceRef; every new dispatch must carry a positive installationRevision.',
+        allOf: [{ $ref: '#/$defs/UnifiedResourceRef' }],
+        type: 'object',
+        properties: {
+          installationRevision: {
+            $ref: '#/$defs/UnifiedResourceRef/properties/installationRevision',
+          },
+        },
+        required: ['installationRevision'],
       },
       UnifiedSelection: {
         type: 'object',

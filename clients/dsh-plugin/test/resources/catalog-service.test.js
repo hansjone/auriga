@@ -78,6 +78,13 @@ test('Desktop writes frozen prepared files, waits outside the lock for E, then s
   );
   assert.equal((await s.observe(f.packageId, 'standard')).state, 'applied');
   assert.equal(
+    f.desktop.confirm(f.who, {
+      ...f.getRow(),
+      generation: f.getRow().generation + 1,
+    }),
+    undefined,
+  );
+  assert.equal(
     json(join(f.directory, 'ledger.json')).installations[0].state,
     'applied',
   );

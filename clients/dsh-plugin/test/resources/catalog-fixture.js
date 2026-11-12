@@ -146,6 +146,8 @@ export function catalogFixture(t, temporaryRoot = tmpdir()) {
     },
     releaseSequence: 7,
     enabled: true,
+    desiredState: 'ENABLED',
+    installationRevision: 1,
   };
   let row = {
     clientId: who.hostId,
@@ -199,7 +201,20 @@ export function catalogFixture(t, temporaryRoot = tmpdir()) {
           selectionRevision: row.selectionRevision + 1,
           generation: row.generation + 1,
         };
-      row = { ...row, resource: { ...resource, enabled }, state: 'applying' };
+      row = {
+        ...row,
+        resource: {
+          ...resource,
+          enabled,
+          desiredState: enabled
+            ? 'ENABLED'
+            : input.selection.action === 'remove'
+              ? 'REMOVED'
+              : 'DISABLED',
+          installationRevision: row.installationRevision,
+        },
+        state: 'applying',
+      };
       return Response.json(row, { status: 202 });
     }
     if (path === base + '/member/installations')
@@ -209,7 +224,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir()) {
         clientId: who.hostId,
         ticket: 'test-ticket',
         expiresAt: new Date(Date.now() + 60000).toISOString(),
-        resource,
+        resource: row.resource,
         revocations: revoked,
       });
     if (path === vp + '/manifest')

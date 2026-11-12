@@ -1,3 +1,8 @@
+import {
+  desiredState,
+  requireInstallation,
+  assertSelectionProgress,
+} from './selection-state.js';
 import { commitMoves } from './file-commit.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -105,6 +110,7 @@ export function desktopSkills({ home, time = hostTime }) {
     if (!existsSync(file)) return undefined;
     const value = record(file, 'UnifiedLedgerFile');
     if (!same(who, value)) refuse('resource.storage_unavailable');
+    for (const row of value.installations) requireInstallation(row);
     return value;
   }
   /** Preserve interrupted owned files outside all discovery/cache readers.
@@ -200,9 +206,11 @@ export function desktopSkills({ home, time = hostTime }) {
     /** @type {Map<string,Buffer>} */ const files = new Map();
     const names = new Set();
     for (const row of rows.filter(
-      (r) => r.resource.enabled && !['removed', 'disabled'].includes(r.state),
+      (r) =>
+        desiredState(r.resource) === 'ENABLED' &&
+        !['removed', 'disabled'].includes(r.state),
     )) {
-      requireSchema('UnifiedInstallation', row);
+      requireInstallation(row);
       const ref = row.resource,
         manifest = parseStrictJson(cached(who, ref.identity.manifestDigest));
       if (
@@ -300,7 +308,7 @@ export function desktopSkills({ home, time = hostTime }) {
           value.generation === receipt.generation &&
           value.installations.some(
             (/** @type {any} */ row) =>
-              row.resource.enabled &&
+              desiredState(row.resource) === 'ENABLED' &&
               !['removed', 'disabled'].includes(row.state),
           ),
       )
@@ -472,10 +480,7 @@ export function desktopSkills({ home, time = hostTime }) {
      * @param {any} who @param {any[]} rows */
     needsPreparation(who, rows) {
       return locked((lock) => {
-        if (
-          !rows.length ||
-          !rows.some((r) => r.resource.enabled && r.state === 'applying')
-        )
+        if (!rows.length || !rows.some((r) => r.state === 'applying'))
           return false;
         recoverRecordTemps(who, lock);
         const value = ledger(who);
@@ -490,15 +495,18 @@ export function desktopSkills({ home, time = hostTime }) {
                   old.installationRevision === r.installationRevision &&
                   canonicalize(old.resource.identity) ===
                     canonicalize(r.resource.identity) &&
-                  old.resource.enabled === r.resource.enabled,
+                  desiredState(old.resource) === desiredState(r.resource),
               ),
           )
         )
           return true;
         if (
           !value.installations.some(
-            (/** @type {any} */ r) =>
-              r.resource.enabled && r.state === 'applying',
+            (/** @type {any} */ r) => r.state === 'applying',
+          ) &&
+          !rows.some(
+            (r) =>
+              desiredState(r.resource) !== 'ENABLED' && r.state === 'applying',
           )
         )
           return false;
@@ -527,8 +535,13 @@ export function desktopSkills({ home, time = hostTime }) {
               t.operation === 'install' &&
               t.selectionRevision === value.selectionRevision &&
               t.generation === value.generation &&
-              ((t.phase === 'prepared' &&
-                t.expectedLedgerRevision === value.revision) ||
+              ((t.phase === 'committed' &&
+                t.expectedLedgerRevision + 1 === value.revision &&
+                !value.installations.some(
+                  (/** @type {any} */ r) => r.state === 'applying',
+                )) ||
+                (t.phase === 'prepared' &&
+                  t.expectedLedgerRevision === value.revision) ||
                 (t.phase === 'switched' &&
                   [value.revision, value.revision - 1].includes(
                     t.expectedLedgerRevision,
@@ -547,7 +560,7 @@ export function desktopSkills({ home, time = hostTime }) {
       )
         refuse('resource.storage_unavailable');
       for (const row of rows) {
-        requireSchema('UnifiedInstallation', row);
+        requireInstallation(row);
         if (
           row.clientId !== who.hostId ||
           row.resource.identity.tenantId !== who.tenantId ||
@@ -566,8 +579,7 @@ export function desktopSkills({ home, time = hostTime }) {
           transactionId = randomUUID();
         if (!previous && existsSync(active) && readdirSync(active).length)
           refuse('resource.state_conflict');
-        if (previous && previous.selectionRevision > rows[0].selectionRevision)
-          refuse('common.conflict');
+        assertSelectionProgress(previous, rows);
         const value = {
           schemaVersion: 1,
           ...identity(who),
@@ -576,7 +588,12 @@ export function desktopSkills({ home, time = hostTime }) {
           generation: rows[0].generation,
           installations: rows.map((r) => ({
             ...r,
-            state: r.resource.enabled ? 'applying' : r.state,
+            state:
+              desiredState(r.resource) === 'ENABLED'
+                ? 'applying'
+                : desiredState(r.resource) === 'REMOVED'
+                  ? 'removed'
+                  : 'disabled',
           })),
           processedDisableReceiptIds:
             previous?.processedDisableReceiptIds ?? [],
@@ -667,7 +684,7 @@ export function desktopSkills({ home, time = hostTime }) {
         );
         const g = state.guardian;
         const enabled = value.installations.filter(
-          (/** @type {any} */ r) => r.resource.enabled,
+          (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
         );
         if (
           !currentIdentity() ||
@@ -751,7 +768,8 @@ export function desktopSkills({ home, time = hostTime }) {
         } else checkTree(active, expected);
         /** @type {[string,any][]} */ const receiptsToCommit = [];
         for (const row of value.installations) {
-          if (row.resource.enabled) row.state = 'pending_restart'; // Public host observation, not the permit, decides applied.
+          if (desiredState(row.resource) === 'ENABLED')
+            row.state = 'pending_restart'; // Public host observation, not the permit, decides applied.
           const ref = row.resource,
             path = join(
               directory,
@@ -875,6 +893,9 @@ export function desktopSkills({ home, time = hostTime }) {
         if (
           !local ||
           local.installationRevision !== row.installationRevision ||
+          local.selectionRevision !== row.selectionRevision ||
+          local.generation !== row.generation ||
+          desiredState(local.resource) !== desiredState(row.resource) ||
           !['pending_restart', 'applied'].includes(local.state)
         )
           return undefined;
@@ -939,7 +960,8 @@ export function desktopSkills({ home, time = hostTime }) {
           !['disabled', 'removed'].includes(local.state) ||
           local.installationRevision !== row.installationRevision ||
           local.selectionRevision !== row.selectionRevision ||
-          local.generation !== row.generation
+          local.generation !== row.generation ||
+          desiredState(local.resource) !== desiredState(row.resource)
         )
           return false;
         const receipt = record(

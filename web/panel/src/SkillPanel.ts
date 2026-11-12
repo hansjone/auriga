@@ -284,7 +284,8 @@ export class SkillPanel {
           this.button(
             this.text('在新会话检查来源', 'Check source in a new session'),
             () => this.observe(row),
-            !row.resource.enabled,
+            (row.resource.desiredState ??
+              (row.resource.enabled ? 'ENABLED' : 'DISABLED')) !== 'ENABLED',
           ),
         );
         if (this.source.has(id.packageId))

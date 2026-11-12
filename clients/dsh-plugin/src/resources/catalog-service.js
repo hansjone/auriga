@@ -1,3 +1,4 @@
+import { desiredState } from './selection-state.js';
 import { existsSync } from 'node:fs';
 /* global FormData, Blob */
 import { join, resolve } from 'node:path';
@@ -136,11 +137,13 @@ export function catalogService(options) {
     if (!desktop) refuse('resource.storage_unavailable');
     desktop.available();
     const downloads = [];
-    const roots = rows.some((r) => r.resource.enabled)
+    const roots = rows.some((r) => desiredState(r.resource) === 'ENABLED')
       ? await trust()
       : undefined;
     const { verifyTrust } = await import('./unified-trust.js');
-    for (const installation of rows.filter((r) => r.resource.enabled)) {
+    for (const installation of rows.filter(
+      (r) => desiredState(r.resource) === 'ENABLED',
+    )) {
       const download = await api.download(installation),
         manifest = parseStrictJson(download.manifest);
       const release = {
@@ -230,7 +233,8 @@ export function catalogService(options) {
             ?.read(who)
             ?.installations.some(
               (/** @type {any} */ row) =>
-                row.resource.enabled && row.state === 'applying',
+                desiredState(row.resource) === 'ENABLED' &&
+                row.state === 'applying',
             );
         return {
           identity: who,
@@ -247,7 +251,7 @@ export function catalogService(options) {
       const local = desktop?.read(who);
       pending = !!local?.installations.some(
         (/** @type {any} */ row) =>
-          row.resource.enabled && row.state === 'applying',
+          desiredState(row.resource) === 'ENABLED' && row.state === 'applying',
       );
       if (pending && desktop?.needsPreparation(who, local.installations))
         await this.list();
@@ -317,7 +321,7 @@ export function catalogService(options) {
         for (const candidate of rows)
           if (
             candidate.resource.identity.packageId === input.packageId &&
-            !candidate.resource.enabled
+            desiredState(candidate.resource) !== 'ENABLED'
           )
             candidate.state =
               input.action === 'remove' ? 'removed' : 'disabled';
@@ -372,6 +376,7 @@ export function catalogService(options) {
         const rows = await api.list(),
           row = rows.find((r) => r.resource.identity.packageId === packageId);
         if (!row) refuse('common.not_found');
+        if (desiredState(row.resource) !== 'ENABLED') refuse('common.conflict');
         const name = row.resource.envelope.statement.name,
           observed = await options.host.observe(name, preset);
         api.check();

@@ -1,3 +1,4 @@
+import { desiredState, requireInstallation } from './selection-state.js';
 /* global AbortSignal */
 import { randomUUID } from 'node:crypto';
 import { memberIdentity } from './member-api.js';
@@ -128,6 +129,7 @@ export function catalogApi({ runtime, current, fetchImpl = fetch }) {
         );
         requireSchema('UnifiedInstallationPage', value);
         for (const row of value.items) {
+          requireInstallation(row);
           if (
             row.clientId !== who.hostId ||
             row.resource.identity.tenantId !== who.tenantId ||
@@ -157,13 +159,18 @@ export function catalogApi({ runtime, current, fetchImpl = fetch }) {
         etag: '"' + revision + '"',
         key,
       });
-      const row = requireSchema('UnifiedInstallation', result.value);
+      const row = requireInstallation(result.value);
       if (
         canonicalize(row.resource.identity) !==
           canonicalize(selection.identity) ||
         row.clientId !== who.hostId ||
-        row.resource.enabled !==
-          ['install', 'enable'].includes(selection.action)
+        desiredState(row.resource) !==
+          (['install', 'enable'].includes(selection.action)
+            ? 'ENABLED'
+            : selection.action === 'remove' &&
+                Object.hasOwn(row.resource, 'desiredState')
+              ? 'REMOVED'
+              : 'DISABLED')
       )
         refuse('common.validation_failed');
       return row;
