@@ -1,4 +1,7 @@
 import { cleanupDownloads } from './update-state.mjs';
+import { createRequire } from 'node:module';
+import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
+import { assertUnmanagedStart } from './guardian.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -169,7 +172,7 @@ function assertOwned(root) {
 // --------------------------------------------------------------- profile --
 
 /** Seed profile manifest and (only when absent) the patch with the platform address. */
-function seedProfile(dataHome, { platformOrigin }) {
+function seedProfile(dataHome, { platformOrigin, target }) {
   const dir = profileDir(dataHome);
   mkdirSync(join(dir, 'node_modules'), { recursive: true });
   writeFileSync(join(dir, DATA_MARKER), 'Auriga Desktop profile\n');
@@ -209,6 +212,16 @@ function seedProfile(dataHome, { platformOrigin }) {
       rows.push('  config: {}');
     }
     writeFileSync(patch, rows.join('\n') + '\n');
+  }
+  // Use the locked upstream parser, preserving !!js as inert scalar text.
+  // Invalid/conflicting patches keep their original bytes and cannot enable sharing.
+  try {
+    const yaml = createRequire(join(target, 'upstream', 'app', 'package.json'))(
+      'yaml',
+    );
+    upgradeSkillPatch(patch, yamlParser(yaml), dataHome);
+  } catch (error) {
+    console.error(`Auriga 共享技能配置未启用：${error.message}`);
   }
 }
 
@@ -540,7 +553,7 @@ export function install({
     target,
     fault,
     apply() {
-      seedProfile(dataHome, { platformOrigin });
+      seedProfile(dataHome, { platformOrigin, target });
       syncPlugin(target, dataHome);
       smoke(target, dataHome);
     },
@@ -573,7 +586,7 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
     fault,
     apply() {
       if (!restorePluginParts(state.dataHome, state.previous)) {
-        seedProfile(state.dataHome, {});
+        seedProfile(state.dataHome, { target: dir });
         syncPlugin(dir, state.dataHome);
       }
       smoke(dir, state.dataHome);
@@ -676,6 +689,7 @@ export async function launch({ root, args = [], env = process.env }) {
     await apply();
     const state = readState(root);
     if (!state) throw new Error(`no installation state in ${root}`);
+    assertUnmanagedStart(state.dataHome);
     const dir = versionDir(root, state.current);
     const child = spawn(
       nodeBin(dir),
