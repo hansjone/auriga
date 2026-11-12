@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "lockDirectory": "auriga/guardian/host.lock.d",
+  "ownerFile": "owner.json",
+  "leaseUpperBoundMillis": 30000,
+  "concurrentAcquire": {
+    "contenders": ["C", "E"],
+    "expect": {
+      "winners": 1,
+      "losers": 1,
+      "loserError": "EEXIST"
+    }
+  },
+  "cases": [
+    {
+      "id": "E-live-owner-within-lease",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "alive",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "wait",
+        "reason": "owner_alive"
+      }
+    },
+    {
+      "id": "C-cannot-reclaim-dead-owner",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "C",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "dead",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "guardian_only"
+      }
+    },
+    {
+      "id": "C-cannot-reclaim-expired-owner",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "C",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31001,
+        "holderStatus": "alive",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "guardian_only"
+      }
+    },
+    {
+      "id": "E-reclaims-dead-owner",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "dead",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "allow",
+        "reason": "owner_dead"
+      }
+    },
+    {
+      "id": "E-expired-live-owner-needs-stop",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31001,
+        "holderStatus": "alive",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "wait",
+        "reason": "stop_writer_first"
+      }
+    },
+    {
+      "id": "E-expired-stopped-owner",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31001,
+        "holderStatus": "alive",
+        "writerStopped": true,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "allow",
+        "reason": "lease_expired"
+      }
+    },
+    {
+      "id": "unknown-process-fails-closed",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "unknown",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "wait",
+        "reason": "unverifiable_owner"
+      }
+    },
+    {
+      "id": "replaced-owner-token-refused",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "dead",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000099",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "owner_changed"
+      }
+    },
+    {
+      "id": "missing-owner-record-waits",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": null,
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "alive",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "wait",
+        "reason": "unverifiable_owner"
+      }
+    },
+    {
+      "id": "different-boot-live-owner-not-compared",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "new-boot",
+        "monotonicNowMillis": 999999,
+        "holderStatus": "alive",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "wait",
+        "reason": "owner_alive"
+      }
+    },
+    {
+      "id": "release-by-other-owner-refused",
+      "input": {
+        "operation": "release",
+        "callerRole": "C",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "alive",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000099",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "owner_changed"
+      }
+    },
+    {
+      "id": "release-by-current-owner",
+      "input": {
+        "operation": "release",
+        "callerRole": "C",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "alive",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "allow",
+        "reason": "owner_release"
+      }
+    },
+    {
+      "id": "reclaim-requires-host-quiescence",
+      "input": {
+        "operation": "reclaim",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "dead",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": false,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "wait",
+        "reason": "quiesce_host_first"
+      }
+    },
+    {
+      "id": "release-role-mismatch",
+      "input": {
+        "operation": "release",
+        "callerRole": "E",
+        "owner": {
+          "schemaVersion": 1,
+          "lockId": "019a0000-0000-7000-8000-000000000041",
+          "role": "C",
+          "pid": 1234,
+          "processStartedAt": "2026-11-12T00:00:00Z",
+          "createdAt": "2026-11-12T01:00:00Z",
+          "bootId": "example-boot",
+          "monotonicMillis": 1000,
+          "leaseDurationMillis": 30000
+        },
+        "bootId": "example-boot",
+        "monotonicNowMillis": 31000,
+        "holderStatus": "alive",
+        "writerStopped": false,
+        "observedLockId": "019a0000-0000-7000-8000-000000000041",
+        "newStartsBlocked": true,
+        "otherWritersStopped": true,
+        "callerPid": 1234
+      },
+      "expect": {
+        "decision": "reject",
+        "reason": "not_owner"
+      }
+    }
+  ]
+}

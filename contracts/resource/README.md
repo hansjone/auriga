@@ -93,12 +93,12 @@ resource事务记录意图和resource.distribution_requested；workspace复核�
 首批不支持Range，带Range返回400 common.validation_failed；断线重新下载整包并重新鉴权。
 过期授权由workspace重新解析同锁定选择续发，不能延长客户端提供的旧expiry。
 
-## 统一资源包契约草案
+## 统一资源包契约
 
 统一主文档为 `docs/design/resource-package.zh.md`，skill专项为
 `docs/design/skill-market.zh.md`。本轮将第1轮Skill草案改成通用catalog命名空间，
 新增 `/api/resource/v1/catalog/**`、`/api/resource/v1/admin/catalog/**`，
-本轮补审核详情和原始清单下载后共14个操作，kind筛选只支持skill/tool，均标记 `x-auriga-contract-stage=draft`。
+P1-K 已冻结 catalog 的目录、审核、原始清单、成员安装与分发接口，kind 筛选只支持 skill/tool；具体操作以 OpenAPI 为准。
 plugin不在通用接口展示或写入，旧L0–L4/private使用原接口；内部只读关联投影不冒充UnifiedPackage。
 
 `package.schema.json` 定义auriga-resource.json公共字段与kind专属段，tool覆盖
@@ -135,10 +135,14 @@ resource.catalog_version_published/catalog_version_withdrawn，带kind、signatu
 Desktop E写配置、C切换内容，保留上游预置目录。超期离线先停DSH并隔离失效受管内容，确认清理后
 允许私有Skill新会话；无法隔离则拒绝启动。历史只供查看，共享恢复必须联网重新授权与验签。
 
-后续契约线补充密码学向量、proto/workspace引用、票据/制品下载、分发、安装回报、
-重签、runtime目录与构建来源证明。审核详情/职责/人数、原始清单下载和新发布/下架事件已在本轮补入。
-当前草案不代表这些服务已实现。
+P1-K 已补齐密码学向量、proto/workspace 引用、票据与制品下载、分发、安装回报、重签、runtime 目录与构建来源证明。公共契约冻结不代表对应服务已实现。
 用户2026-11-12确认D1-D11按推荐执行。D4/D5要求Skill恶意撤销或租约到期时停止受影响DSH，
 恢复使用新会话，共享Skill首期仅在具备可信guardian的云端与Desktop开放。
 D8确定Node复用Desktop自带版本，Python采用python-build-standalone、Java采用Eclipse Temurin
 21 LTS，经平台审核签名后按需下载。机器契约沿本轮已有定义，P1契约补齐与各实现线边界见主文档。
+
+## P1-K 统一协议
+
+统一类型登记在 `unified-registry.json`。完整信任、目录、锁与 guardian 行为见 `unified-protocol.md`，本地五类文件格式见 `unified.schema.json`。授权矩阵见 `unified-authorization.json`，跨语言输入及预期结果见 `unified-vectors.json`，真实 Cordis YAML 夹具由 `cordis-upgrade-fixture.json` 索引。
+
+共享 Skill 通过独立的宿主级 `auriga-shared` 提供者挂载，不改写任何上游预设。Node 目录锁持有者格式为 `UnifiedHostLockOwner`，争锁、陈旧锁及越权清理夹具见 `host-lock-fixtures.json`。真实 DSH 验证脚本为 `services/contracts/scripts/unified-real-dsh-smoke.mjs`，须先按仓库 `deploy/compose/real-dsh/package-lock.json` 在隔离 target 目录安装宿主，再从仓库根目录运行。

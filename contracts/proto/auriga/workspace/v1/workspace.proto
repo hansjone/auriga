@@ -4,6 +4,7 @@ package auriga.workspace.v1;
 
 import "google/protobuf/timestamp.proto";
 import "auriga/node/v1/node_control.proto";
+import "auriga/resource/v1/unified.proto";
 
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1;workspacev1";
 option java_multiple_files = true;
@@ -71,4 +72,25 @@ message CheckResourceDownloadRequest {
 message CheckResourceDownloadResponse {
   bool allowed = 1;
   int64 generation = 2;
+}
+
+// svc:resource only, mTLS and delegated tenant required. Current scheduling is checked every read.
+service UnifiedResourceApplyService {
+  rpc CheckUnifiedResourceDownload(CheckUnifiedResourceDownloadRequest) returns (CheckUnifiedResourceDownloadResponse);
+}
+message CheckUnifiedResourceDownloadRequest {
+  string tenant_id = 1;
+  string node_id = 2;
+  string instance_id = 3;
+  string owner_id = 4;
+  uint64 selection_revision = 5;
+  uint64 generation = 6;
+  auriga.resource.v1.UnifiedResourceIdentity identity = 7;
+  string artifact_id = 8;
+  string artifact_digest = 9;
+}
+message CheckUnifiedResourceDownloadResponse {
+  bool allowed = 1;
+  uint64 generation = 2;
+  uint64 selection_revision = 3;
 }

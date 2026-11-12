@@ -3,6 +3,7 @@ syntax = "proto3";
 package auriga.node.v1;
 
 import "auriga/node/v1/spec.proto";
+import "auriga/resource/v1/unified.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -134,6 +135,9 @@ message InstanceStatus {
   InstanceError error = 7;
   google.protobuf.Timestamp started_at = 8;
   google.protobuf.Timestamp updated_at = 9;
+  // Node-authenticated reports, exact selection and generation required before applied.
+  repeated auriga.resource.v1.UnifiedInstallationReport unified_resource_reports = 10;
+  auriga.resource.v1.UnifiedGuardianState unified_guardian = 11;
 }
 
 enum RestartReason {

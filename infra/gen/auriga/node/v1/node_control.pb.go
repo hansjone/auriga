@@ -7,6 +7,7 @@
 package nodev1
 
 import (
+	v1 "github.com/hansjone/auriga/infra/gen/auriga/resource/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -866,8 +867,11 @@ type InstanceStatus struct {
 	Error          *InstanceError         `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
 	StartedAt      *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	UpdatedAt      *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Node-authenticated reports, exact selection and generation required before applied.
+	UnifiedResourceReports []*v1.UnifiedInstallationReport `protobuf:"bytes,10,rep,name=unified_resource_reports,json=unifiedResourceReports,proto3" json:"unified_resource_reports,omitempty"`
+	UnifiedGuardian        *v1.UnifiedGuardianState        `protobuf:"bytes,11,opt,name=unified_guardian,json=unifiedGuardian,proto3" json:"unified_guardian,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *InstanceStatus) Reset() {
@@ -959,6 +963,20 @@ func (x *InstanceStatus) GetStartedAt() *timestamppb.Timestamp {
 func (x *InstanceStatus) GetUpdatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.UpdatedAt
+	}
+	return nil
+}
+
+func (x *InstanceStatus) GetUnifiedResourceReports() []*v1.UnifiedInstallationReport {
+	if x != nil {
+		return x.UnifiedResourceReports
+	}
+	return nil
+}
+
+func (x *InstanceStatus) GetUnifiedGuardian() *v1.UnifiedGuardianState {
+	if x != nil {
+		return x.UnifiedGuardian
 	}
 	return nil
 }
@@ -2344,7 +2362,7 @@ var File_auriga_node_v1_node_control_proto protoreflect.FileDescriptor
 
 const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"\n" +
-	"!auriga/node/v1/node_control.proto\x12\x0eauriga.node.v1\x1a\x19auriga/node/v1/spec.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8a\x03\n" +
+	"!auriga/node/v1/node_control.proto\x12\x0eauriga.node.v1\x1a\x19auriga/node/v1/spec.proto\x1a auriga/resource/v1/unified.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8a\x03\n" +
 	"\x0eSessionRequest\x12-\n" +
 	"\x05hello\x18\x01 \x01(\v2\x15.auriga.node.v1.HelloH\x00R\x05hello\x129\n" +
 	"\tinventory\x18\x02 \x01(\v2\x19.auriga.node.v1.InventoryH\x00R\tinventory\x128\n" +
@@ -2396,7 +2414,7 @@ const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"size_bytes\x18\x02 \x01(\x03R\tsizeBytes\x12\x1e\n" +
 	"\n" +
 	"references\x18\x03 \x01(\x03R\n" +
-	"references\"\xc5\x03\n" +
+	"references\"\x83\x05\n" +
 	"\x0eInstanceStatus\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x123\n" +
@@ -2409,7 +2427,10 @@ const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"\n" +
 	"started_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xb7\x01\n" +
+	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12g\n" +
+	"\x18unified_resource_reports\x18\n" +
+	" \x03(\v2-.auriga.resource.v1.UnifiedInstallationReportR\x16unifiedResourceReports\x12S\n" +
+	"\x10unified_guardian\x18\v \x01(\v2(.auriga.resource.v1.UnifiedGuardianStateR\x0funifiedGuardian\"\xb7\x01\n" +
 	"\rInstanceError\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
@@ -2570,43 +2591,45 @@ func file_auriga_node_v1_node_control_proto_rawDescGZIP() []byte {
 var file_auriga_node_v1_node_control_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_auriga_node_v1_node_control_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_auriga_node_v1_node_control_proto_goTypes = []any{
-	(InstancePhase)(0),            // 0: auriga.node.v1.InstancePhase
-	(RestartReason)(0),            // 1: auriga.node.v1.RestartReason
-	(LogStream)(0),                // 2: auriga.node.v1.LogStream
-	(*SessionRequest)(nil),        // 3: auriga.node.v1.SessionRequest
-	(*SessionResponse)(nil),       // 4: auriga.node.v1.SessionResponse
-	(*Hello)(nil),                 // 5: auriga.node.v1.Hello
-	(*Capacity)(nil),              // 6: auriga.node.v1.Capacity
-	(*Inventory)(nil),             // 7: auriga.node.v1.Inventory
-	(*CachedArtifact)(nil),        // 8: auriga.node.v1.CachedArtifact
-	(*InstanceStatus)(nil),        // 9: auriga.node.v1.InstanceStatus
-	(*InstanceError)(nil),         // 10: auriga.node.v1.InstanceError
-	(*NodeUsage)(nil),             // 11: auriga.node.v1.NodeUsage
-	(*NodeResources)(nil),         // 12: auriga.node.v1.NodeResources
-	(*InstanceUsage)(nil),         // 13: auriga.node.v1.InstanceUsage
-	(*WakeSchedule)(nil),          // 14: auriga.node.v1.WakeSchedule
-	(*CommandResult)(nil),         // 15: auriga.node.v1.CommandResult
-	(*LogChunk)(nil),              // 16: auriga.node.v1.LogChunk
-	(*Welcome)(nil),               // 17: auriga.node.v1.Welcome
-	(*ApplySpec)(nil),             // 18: auriga.node.v1.ApplySpec
-	(*DeleteInstance)(nil),        // 19: auriga.node.v1.DeleteInstance
-	(*Command)(nil),               // 20: auriga.node.v1.Command
-	(*RestartCommand)(nil),        // 21: auriga.node.v1.RestartCommand
-	(*SnapshotCommand)(nil),       // 22: auriga.node.v1.SnapshotCommand
-	(*RestoreCommand)(nil),        // 23: auriga.node.v1.RestoreCommand
-	(*ArchiveCommand)(nil),        // 24: auriga.node.v1.ArchiveCommand
-	(*ExportCommand)(nil),         // 25: auriga.node.v1.ExportCommand
-	(*TailLogCommand)(nil),        // 26: auriga.node.v1.TailLogCommand
-	(*DrainCommand)(nil),          // 27: auriga.node.v1.DrainCommand
-	(*PolicyHint)(nil),            // 28: auriga.node.v1.PolicyHint
-	(*UpdateAgent)(nil),           // 29: auriga.node.v1.UpdateAgent
-	nil,                           // 30: auriga.node.v1.Hello.LabelsEntry
-	nil,                           // 31: auriga.node.v1.CommandResult.OutputEntry
-	(RuntimeKind)(0),              // 32: auriga.node.v1.RuntimeKind
-	(*timestamppb.Timestamp)(nil), // 33: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 34: google.protobuf.Duration
-	(*InstanceSpec)(nil),          // 35: auriga.node.v1.InstanceSpec
-	(*SignedArtifact)(nil),        // 36: auriga.node.v1.SignedArtifact
+	(InstancePhase)(0),                   // 0: auriga.node.v1.InstancePhase
+	(RestartReason)(0),                   // 1: auriga.node.v1.RestartReason
+	(LogStream)(0),                       // 2: auriga.node.v1.LogStream
+	(*SessionRequest)(nil),               // 3: auriga.node.v1.SessionRequest
+	(*SessionResponse)(nil),              // 4: auriga.node.v1.SessionResponse
+	(*Hello)(nil),                        // 5: auriga.node.v1.Hello
+	(*Capacity)(nil),                     // 6: auriga.node.v1.Capacity
+	(*Inventory)(nil),                    // 7: auriga.node.v1.Inventory
+	(*CachedArtifact)(nil),               // 8: auriga.node.v1.CachedArtifact
+	(*InstanceStatus)(nil),               // 9: auriga.node.v1.InstanceStatus
+	(*InstanceError)(nil),                // 10: auriga.node.v1.InstanceError
+	(*NodeUsage)(nil),                    // 11: auriga.node.v1.NodeUsage
+	(*NodeResources)(nil),                // 12: auriga.node.v1.NodeResources
+	(*InstanceUsage)(nil),                // 13: auriga.node.v1.InstanceUsage
+	(*WakeSchedule)(nil),                 // 14: auriga.node.v1.WakeSchedule
+	(*CommandResult)(nil),                // 15: auriga.node.v1.CommandResult
+	(*LogChunk)(nil),                     // 16: auriga.node.v1.LogChunk
+	(*Welcome)(nil),                      // 17: auriga.node.v1.Welcome
+	(*ApplySpec)(nil),                    // 18: auriga.node.v1.ApplySpec
+	(*DeleteInstance)(nil),               // 19: auriga.node.v1.DeleteInstance
+	(*Command)(nil),                      // 20: auriga.node.v1.Command
+	(*RestartCommand)(nil),               // 21: auriga.node.v1.RestartCommand
+	(*SnapshotCommand)(nil),              // 22: auriga.node.v1.SnapshotCommand
+	(*RestoreCommand)(nil),               // 23: auriga.node.v1.RestoreCommand
+	(*ArchiveCommand)(nil),               // 24: auriga.node.v1.ArchiveCommand
+	(*ExportCommand)(nil),                // 25: auriga.node.v1.ExportCommand
+	(*TailLogCommand)(nil),               // 26: auriga.node.v1.TailLogCommand
+	(*DrainCommand)(nil),                 // 27: auriga.node.v1.DrainCommand
+	(*PolicyHint)(nil),                   // 28: auriga.node.v1.PolicyHint
+	(*UpdateAgent)(nil),                  // 29: auriga.node.v1.UpdateAgent
+	nil,                                  // 30: auriga.node.v1.Hello.LabelsEntry
+	nil,                                  // 31: auriga.node.v1.CommandResult.OutputEntry
+	(RuntimeKind)(0),                     // 32: auriga.node.v1.RuntimeKind
+	(*timestamppb.Timestamp)(nil),        // 33: google.protobuf.Timestamp
+	(*v1.UnifiedInstallationReport)(nil), // 34: auriga.resource.v1.UnifiedInstallationReport
+	(*v1.UnifiedGuardianState)(nil),      // 35: auriga.resource.v1.UnifiedGuardianState
+	(*durationpb.Duration)(nil),          // 36: google.protobuf.Duration
+	(*InstanceSpec)(nil),                 // 37: auriga.node.v1.InstanceSpec
+	(*SignedArtifact)(nil),               // 38: auriga.node.v1.SignedArtifact
 }
 var file_auriga_node_v1_node_control_proto_depIdxs = []int32{
 	5,  // 0: auriga.node.v1.SessionRequest.hello:type_name -> auriga.node.v1.Hello
@@ -2633,34 +2656,36 @@ var file_auriga_node_v1_node_control_proto_depIdxs = []int32{
 	10, // 21: auriga.node.v1.InstanceStatus.error:type_name -> auriga.node.v1.InstanceError
 	33, // 22: auriga.node.v1.InstanceStatus.started_at:type_name -> google.protobuf.Timestamp
 	33, // 23: auriga.node.v1.InstanceStatus.updated_at:type_name -> google.protobuf.Timestamp
-	33, // 24: auriga.node.v1.InstanceError.next_retry_at:type_name -> google.protobuf.Timestamp
-	33, // 25: auriga.node.v1.NodeUsage.sampled_at:type_name -> google.protobuf.Timestamp
-	12, // 26: auriga.node.v1.NodeUsage.node:type_name -> auriga.node.v1.NodeResources
-	13, // 27: auriga.node.v1.NodeUsage.instances:type_name -> auriga.node.v1.InstanceUsage
-	33, // 28: auriga.node.v1.WakeSchedule.next_wake_at:type_name -> google.protobuf.Timestamp
-	10, // 29: auriga.node.v1.CommandResult.error:type_name -> auriga.node.v1.InstanceError
-	31, // 30: auriga.node.v1.CommandResult.output:type_name -> auriga.node.v1.CommandResult.OutputEntry
-	2,  // 31: auriga.node.v1.LogChunk.stream:type_name -> auriga.node.v1.LogStream
-	33, // 32: auriga.node.v1.Welcome.server_time:type_name -> google.protobuf.Timestamp
-	34, // 33: auriga.node.v1.Welcome.heartbeat_interval:type_name -> google.protobuf.Duration
-	35, // 34: auriga.node.v1.ApplySpec.spec:type_name -> auriga.node.v1.InstanceSpec
-	21, // 35: auriga.node.v1.Command.restart:type_name -> auriga.node.v1.RestartCommand
-	22, // 36: auriga.node.v1.Command.snapshot:type_name -> auriga.node.v1.SnapshotCommand
-	23, // 37: auriga.node.v1.Command.restore:type_name -> auriga.node.v1.RestoreCommand
-	24, // 38: auriga.node.v1.Command.archive:type_name -> auriga.node.v1.ArchiveCommand
-	25, // 39: auriga.node.v1.Command.export:type_name -> auriga.node.v1.ExportCommand
-	26, // 40: auriga.node.v1.Command.tail_log:type_name -> auriga.node.v1.TailLogCommand
-	27, // 41: auriga.node.v1.Command.drain:type_name -> auriga.node.v1.DrainCommand
-	34, // 42: auriga.node.v1.RestartCommand.grace:type_name -> google.protobuf.Duration
-	34, // 43: auriga.node.v1.TailLogCommand.max_duration:type_name -> google.protobuf.Duration
-	36, // 44: auriga.node.v1.UpdateAgent.signed:type_name -> auriga.node.v1.SignedArtifact
-	3,  // 45: auriga.node.v1.NodeControlService.Session:input_type -> auriga.node.v1.SessionRequest
-	4,  // 46: auriga.node.v1.NodeControlService.Session:output_type -> auriga.node.v1.SessionResponse
-	46, // [46:47] is the sub-list for method output_type
-	45, // [45:46] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	34, // 24: auriga.node.v1.InstanceStatus.unified_resource_reports:type_name -> auriga.resource.v1.UnifiedInstallationReport
+	35, // 25: auriga.node.v1.InstanceStatus.unified_guardian:type_name -> auriga.resource.v1.UnifiedGuardianState
+	33, // 26: auriga.node.v1.InstanceError.next_retry_at:type_name -> google.protobuf.Timestamp
+	33, // 27: auriga.node.v1.NodeUsage.sampled_at:type_name -> google.protobuf.Timestamp
+	12, // 28: auriga.node.v1.NodeUsage.node:type_name -> auriga.node.v1.NodeResources
+	13, // 29: auriga.node.v1.NodeUsage.instances:type_name -> auriga.node.v1.InstanceUsage
+	33, // 30: auriga.node.v1.WakeSchedule.next_wake_at:type_name -> google.protobuf.Timestamp
+	10, // 31: auriga.node.v1.CommandResult.error:type_name -> auriga.node.v1.InstanceError
+	31, // 32: auriga.node.v1.CommandResult.output:type_name -> auriga.node.v1.CommandResult.OutputEntry
+	2,  // 33: auriga.node.v1.LogChunk.stream:type_name -> auriga.node.v1.LogStream
+	33, // 34: auriga.node.v1.Welcome.server_time:type_name -> google.protobuf.Timestamp
+	36, // 35: auriga.node.v1.Welcome.heartbeat_interval:type_name -> google.protobuf.Duration
+	37, // 36: auriga.node.v1.ApplySpec.spec:type_name -> auriga.node.v1.InstanceSpec
+	21, // 37: auriga.node.v1.Command.restart:type_name -> auriga.node.v1.RestartCommand
+	22, // 38: auriga.node.v1.Command.snapshot:type_name -> auriga.node.v1.SnapshotCommand
+	23, // 39: auriga.node.v1.Command.restore:type_name -> auriga.node.v1.RestoreCommand
+	24, // 40: auriga.node.v1.Command.archive:type_name -> auriga.node.v1.ArchiveCommand
+	25, // 41: auriga.node.v1.Command.export:type_name -> auriga.node.v1.ExportCommand
+	26, // 42: auriga.node.v1.Command.tail_log:type_name -> auriga.node.v1.TailLogCommand
+	27, // 43: auriga.node.v1.Command.drain:type_name -> auriga.node.v1.DrainCommand
+	36, // 44: auriga.node.v1.RestartCommand.grace:type_name -> google.protobuf.Duration
+	36, // 45: auriga.node.v1.TailLogCommand.max_duration:type_name -> google.protobuf.Duration
+	38, // 46: auriga.node.v1.UpdateAgent.signed:type_name -> auriga.node.v1.SignedArtifact
+	3,  // 47: auriga.node.v1.NodeControlService.Session:input_type -> auriga.node.v1.SessionRequest
+	4,  // 48: auriga.node.v1.NodeControlService.Session:output_type -> auriga.node.v1.SessionResponse
+	48, // [48:49] is the sub-list for method output_type
+	47, // [47:48] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_auriga_node_v1_node_control_proto_init() }

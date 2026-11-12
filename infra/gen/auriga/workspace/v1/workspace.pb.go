@@ -8,6 +8,7 @@ package workspacev1
 
 import (
 	v1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	v11 "github.com/hansjone/auriga/infra/gen/auriga/resource/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -474,11 +475,179 @@ func (x *CheckResourceDownloadResponse) GetGeneration() int64 {
 	return 0
 }
 
+type CheckUnifiedResourceDownloadRequest struct {
+	state             protoimpl.MessageState       `protogen:"open.v1"`
+	TenantId          string                       `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	NodeId            string                       `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	InstanceId        string                       `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	OwnerId           string                       `protobuf:"bytes,4,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	SelectionRevision uint64                       `protobuf:"varint,5,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	Generation        uint64                       `protobuf:"varint,6,opt,name=generation,proto3" json:"generation,omitempty"`
+	Identity          *v11.UnifiedResourceIdentity `protobuf:"bytes,7,opt,name=identity,proto3" json:"identity,omitempty"`
+	ArtifactId        string                       `protobuf:"bytes,8,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	ArtifactDigest    string                       `protobuf:"bytes,9,opt,name=artifact_digest,json=artifactDigest,proto3" json:"artifact_digest,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) Reset() {
+	*x = CheckUnifiedResourceDownloadRequest{}
+	mi := &file_auriga_workspace_v1_workspace_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckUnifiedResourceDownloadRequest) ProtoMessage() {}
+
+func (x *CheckUnifiedResourceDownloadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_workspace_v1_workspace_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckUnifiedResourceDownloadRequest.ProtoReflect.Descriptor instead.
+func (*CheckUnifiedResourceDownloadRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_workspace_v1_workspace_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
+	}
+	return ""
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetSelectionRevision() uint64 {
+	if x != nil {
+		return x.SelectionRevision
+	}
+	return 0
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetGeneration() uint64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetIdentity() *v11.UnifiedResourceIdentity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *CheckUnifiedResourceDownloadRequest) GetArtifactDigest() string {
+	if x != nil {
+		return x.ArtifactDigest
+	}
+	return ""
+}
+
+type CheckUnifiedResourceDownloadResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Allowed           bool                   `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
+	Generation        uint64                 `protobuf:"varint,2,opt,name=generation,proto3" json:"generation,omitempty"`
+	SelectionRevision uint64                 `protobuf:"varint,3,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *CheckUnifiedResourceDownloadResponse) Reset() {
+	*x = CheckUnifiedResourceDownloadResponse{}
+	mi := &file_auriga_workspace_v1_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckUnifiedResourceDownloadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckUnifiedResourceDownloadResponse) ProtoMessage() {}
+
+func (x *CheckUnifiedResourceDownloadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_workspace_v1_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckUnifiedResourceDownloadResponse.ProtoReflect.Descriptor instead.
+func (*CheckUnifiedResourceDownloadResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_workspace_v1_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *CheckUnifiedResourceDownloadResponse) GetAllowed() bool {
+	if x != nil {
+		return x.Allowed
+	}
+	return false
+}
+
+func (x *CheckUnifiedResourceDownloadResponse) GetGeneration() uint64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *CheckUnifiedResourceDownloadResponse) GetSelectionRevision() uint64 {
+	if x != nil {
+		return x.SelectionRevision
+	}
+	return 0
+}
+
 var File_auriga_workspace_v1_workspace_proto protoreflect.FileDescriptor
 
 const file_auriga_workspace_v1_workspace_proto_rawDesc = "" +
 	"\n" +
-	"#auriga/workspace/v1/workspace.proto\x12\x13auriga.workspace.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!auriga/node/v1/node_control.proto\"[\n" +
+	"#auriga/workspace/v1/workspace.proto\x12\x13auriga.workspace.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!auriga/node/v1/node_control.proto\x1a auriga/resource/v1/unified.proto\"[\n" +
 	"\x1bGetInstanceAiBindingRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1f\n" +
 	"\vinstance_id\x18\x02 \x01(\tR\n" +
@@ -525,12 +694,34 @@ const file_auriga_workspace_v1_workspace_proto_rawDesc = "" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x02 \x01(\x03R\n" +
-	"generation2\x97\x01\n" +
+	"generation\"\xf9\x02\n" +
+	"#CheckUnifiedResourceDownloadRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x1f\n" +
+	"\vinstance_id\x18\x03 \x01(\tR\n" +
+	"instanceId\x12\x19\n" +
+	"\bowner_id\x18\x04 \x01(\tR\aownerId\x12-\n" +
+	"\x12selection_revision\x18\x05 \x01(\x04R\x11selectionRevision\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x06 \x01(\x04R\n" +
+	"generation\x12G\n" +
+	"\bidentity\x18\a \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12\x1f\n" +
+	"\vartifact_id\x18\b \x01(\tR\n" +
+	"artifactId\x12'\n" +
+	"\x0fartifact_digest\x18\t \x01(\tR\x0eartifactDigest\"\x8f\x01\n" +
+	"$CheckUnifiedResourceDownloadResponse\x12\x18\n" +
+	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x02 \x01(\x04R\n" +
+	"generation\x12-\n" +
+	"\x12selection_revision\x18\x03 \x01(\x04R\x11selectionRevision2\x97\x01\n" +
 	"\x18InstanceAiBindingService\x12{\n" +
 	"\x14GetInstanceAiBinding\x120.auriga.workspace.v1.GetInstanceAiBindingRequest\x1a1.auriga.workspace.v1.GetInstanceAiBindingResponse2\x9a\x02\n" +
 	"\x14ResourceApplyService\x12\x81\x01\n" +
 	"\x16GetResourceApplyStatus\x122.auriga.workspace.v1.GetResourceApplyStatusRequest\x1a3.auriga.workspace.v1.GetResourceApplyStatusResponse\x12~\n" +
-	"\x15CheckResourceDownload\x121.auriga.workspace.v1.CheckResourceDownloadRequest\x1a2.auriga.workspace.v1.CheckResourceDownloadResponseBg\n" +
+	"\x15CheckResourceDownload\x121.auriga.workspace.v1.CheckResourceDownloadRequest\x1a2.auriga.workspace.v1.CheckResourceDownloadResponse2\xb3\x01\n" +
+	"\x1bUnifiedResourceApplyService\x12\x93\x01\n" +
+	"\x1cCheckUnifiedResourceDownload\x128.auriga.workspace.v1.CheckUnifiedResourceDownloadRequest\x1a9.auriga.workspace.v1.CheckUnifiedResourceDownloadResponseBg\n" +
 	"\x1dauriga.contracts.workspace.v1P\x01ZDgithub.com/hansjone/auriga/infra/gen/auriga/workspace/v1;workspacev1b\x06proto3"
 
 var (
@@ -545,31 +736,37 @@ func file_auriga_workspace_v1_workspace_proto_rawDescGZIP() []byte {
 	return file_auriga_workspace_v1_workspace_proto_rawDescData
 }
 
-var file_auriga_workspace_v1_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_auriga_workspace_v1_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_auriga_workspace_v1_workspace_proto_goTypes = []any{
-	(*GetInstanceAiBindingRequest)(nil),    // 0: auriga.workspace.v1.GetInstanceAiBindingRequest
-	(*GetInstanceAiBindingResponse)(nil),   // 1: auriga.workspace.v1.GetInstanceAiBindingResponse
-	(*GetResourceApplyStatusRequest)(nil),  // 2: auriga.workspace.v1.GetResourceApplyStatusRequest
-	(*GetResourceApplyStatusResponse)(nil), // 3: auriga.workspace.v1.GetResourceApplyStatusResponse
-	(*CheckResourceDownloadRequest)(nil),   // 4: auriga.workspace.v1.CheckResourceDownloadRequest
-	(*CheckResourceDownloadResponse)(nil),  // 5: auriga.workspace.v1.CheckResourceDownloadResponse
-	(*timestamppb.Timestamp)(nil),          // 6: google.protobuf.Timestamp
-	(v1.InstancePhase)(0),                  // 7: auriga.node.v1.InstancePhase
+	(*GetInstanceAiBindingRequest)(nil),          // 0: auriga.workspace.v1.GetInstanceAiBindingRequest
+	(*GetInstanceAiBindingResponse)(nil),         // 1: auriga.workspace.v1.GetInstanceAiBindingResponse
+	(*GetResourceApplyStatusRequest)(nil),        // 2: auriga.workspace.v1.GetResourceApplyStatusRequest
+	(*GetResourceApplyStatusResponse)(nil),       // 3: auriga.workspace.v1.GetResourceApplyStatusResponse
+	(*CheckResourceDownloadRequest)(nil),         // 4: auriga.workspace.v1.CheckResourceDownloadRequest
+	(*CheckResourceDownloadResponse)(nil),        // 5: auriga.workspace.v1.CheckResourceDownloadResponse
+	(*CheckUnifiedResourceDownloadRequest)(nil),  // 6: auriga.workspace.v1.CheckUnifiedResourceDownloadRequest
+	(*CheckUnifiedResourceDownloadResponse)(nil), // 7: auriga.workspace.v1.CheckUnifiedResourceDownloadResponse
+	(*timestamppb.Timestamp)(nil),                // 8: google.protobuf.Timestamp
+	(v1.InstancePhase)(0),                        // 9: auriga.node.v1.InstancePhase
+	(*v11.UnifiedResourceIdentity)(nil),          // 10: auriga.resource.v1.UnifiedResourceIdentity
 }
 var file_auriga_workspace_v1_workspace_proto_depIdxs = []int32{
-	6, // 0: auriga.workspace.v1.GetInstanceAiBindingResponse.overlap_expires_at:type_name -> google.protobuf.Timestamp
-	7, // 1: auriga.workspace.v1.GetResourceApplyStatusResponse.phase:type_name -> auriga.node.v1.InstancePhase
-	0, // 2: auriga.workspace.v1.InstanceAiBindingService.GetInstanceAiBinding:input_type -> auriga.workspace.v1.GetInstanceAiBindingRequest
-	2, // 3: auriga.workspace.v1.ResourceApplyService.GetResourceApplyStatus:input_type -> auriga.workspace.v1.GetResourceApplyStatusRequest
-	4, // 4: auriga.workspace.v1.ResourceApplyService.CheckResourceDownload:input_type -> auriga.workspace.v1.CheckResourceDownloadRequest
-	1, // 5: auriga.workspace.v1.InstanceAiBindingService.GetInstanceAiBinding:output_type -> auriga.workspace.v1.GetInstanceAiBindingResponse
-	3, // 6: auriga.workspace.v1.ResourceApplyService.GetResourceApplyStatus:output_type -> auriga.workspace.v1.GetResourceApplyStatusResponse
-	5, // 7: auriga.workspace.v1.ResourceApplyService.CheckResourceDownload:output_type -> auriga.workspace.v1.CheckResourceDownloadResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	8,  // 0: auriga.workspace.v1.GetInstanceAiBindingResponse.overlap_expires_at:type_name -> google.protobuf.Timestamp
+	9,  // 1: auriga.workspace.v1.GetResourceApplyStatusResponse.phase:type_name -> auriga.node.v1.InstancePhase
+	10, // 2: auriga.workspace.v1.CheckUnifiedResourceDownloadRequest.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	0,  // 3: auriga.workspace.v1.InstanceAiBindingService.GetInstanceAiBinding:input_type -> auriga.workspace.v1.GetInstanceAiBindingRequest
+	2,  // 4: auriga.workspace.v1.ResourceApplyService.GetResourceApplyStatus:input_type -> auriga.workspace.v1.GetResourceApplyStatusRequest
+	4,  // 5: auriga.workspace.v1.ResourceApplyService.CheckResourceDownload:input_type -> auriga.workspace.v1.CheckResourceDownloadRequest
+	6,  // 6: auriga.workspace.v1.UnifiedResourceApplyService.CheckUnifiedResourceDownload:input_type -> auriga.workspace.v1.CheckUnifiedResourceDownloadRequest
+	1,  // 7: auriga.workspace.v1.InstanceAiBindingService.GetInstanceAiBinding:output_type -> auriga.workspace.v1.GetInstanceAiBindingResponse
+	3,  // 8: auriga.workspace.v1.ResourceApplyService.GetResourceApplyStatus:output_type -> auriga.workspace.v1.GetResourceApplyStatusResponse
+	5,  // 9: auriga.workspace.v1.ResourceApplyService.CheckResourceDownload:output_type -> auriga.workspace.v1.CheckResourceDownloadResponse
+	7,  // 10: auriga.workspace.v1.UnifiedResourceApplyService.CheckUnifiedResourceDownload:output_type -> auriga.workspace.v1.CheckUnifiedResourceDownloadResponse
+	7,  // [7:11] is the sub-list for method output_type
+	3,  // [3:7] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_auriga_workspace_v1_workspace_proto_init() }
@@ -584,9 +781,9 @@ func file_auriga_workspace_v1_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_workspace_v1_workspace_proto_rawDesc), len(file_auriga_workspace_v1_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   3,
 		},
 		GoTypes:           file_auriga_workspace_v1_workspace_proto_goTypes,
 		DependencyIndexes: file_auriga_workspace_v1_workspace_proto_depIdxs,

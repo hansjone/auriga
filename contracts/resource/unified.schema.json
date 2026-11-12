@@ -1,0 +1,1480 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/resource/unified.schema.json",
+  "title": "Unified resource transport and guardian protocol",
+  "$defs": {
+    "UnifiedResourceIdentity": {
+      "type": "object",
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["skill", "tool"]
+        },
+        "version": {
+          "$ref": "./package.schema.json#/$defs/Version"
+        },
+        "manifestDigest": {
+          "$ref": "./signatures.schema.json#/$defs/Digest"
+        }
+      },
+      "required": [
+        "tenantId",
+        "packageId",
+        "versionId",
+        "kind",
+        "version",
+        "manifestDigest"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedLease": {
+      "type": "object",
+      "properties": {
+        "envelopeNotAfter": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "revocationsExpiresAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "expiresAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "revocationRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "envelopeNotAfter",
+        "revocationsExpiresAt",
+        "expiresAt",
+        "revocationRevision"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedArtifactDownload": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "digest": {
+          "$ref": "./signatures.schema.json#/$defs/Digest"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 536870912,
+          "format": "int64"
+        },
+        "downloadPath": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^/(api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+)|internal/resource/v1/catalog/downloads/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+))$",
+          "description": "Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments."
+        }
+      },
+      "required": ["artifactId", "digest", "sizeBytes", "downloadPath"],
+      "additionalProperties": false
+    },
+    "UnifiedResourceRef": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "envelope": {
+          "$ref": "./package.schema.json#/$defs/Envelope"
+        },
+        "manifestDownloadPath": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^/(api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+)|internal/resource/v1/catalog/downloads/[0-9a-f-]{36}/(manifest|artifacts/[A-Za-z0-9_-]+))$",
+          "description": "Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments."
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedArtifactDownload"
+          },
+          "maxItems": 32
+        },
+        "lease": {
+          "$ref": "#/$defs/UnifiedLease"
+        },
+        "releaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "identity",
+        "envelope",
+        "manifestDownloadPath",
+        "artifacts",
+        "lease",
+        "releaseSequence",
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedSelection": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["install", "enable", "disable", "remove"]
+        }
+      },
+      "required": ["identity", "action"],
+      "additionalProperties": false
+    },
+    "UnifiedDownloadTicketInput": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "installationRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["clientId", "identity", "installationRevision"],
+      "additionalProperties": false
+    },
+    "UnifiedDownloadTicket": {
+      "type": "object",
+      "properties": {
+        "ticket": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expiresAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "resource": {
+          "$ref": "#/$defs/UnifiedResourceRef"
+        },
+        "revocations": {
+          "$ref": "./signatures.schema.json#/$defs/RevocationList"
+        }
+      },
+      "required": [
+        "ticket",
+        "clientId",
+        "expiresAt",
+        "resource",
+        "revocations"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedDownloadInput": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ticket": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": ["clientId", "ticket", "artifactId"],
+      "additionalProperties": false
+    },
+    "UnifiedInstallationInput": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "selection": {
+          "$ref": "#/$defs/UnifiedSelection"
+        }
+      },
+      "required": ["clientId", "selection"],
+      "additionalProperties": false
+    },
+    "UnifiedInstallationReport": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "installationRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "observedGeneration": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "applying",
+            "applied",
+            "failed",
+            "pending_restart",
+            "superseded",
+            "overridden",
+            "expired",
+            "revoked",
+            "disabled",
+            "removed"
+          ]
+        },
+        "reportSource": {
+          "type": "string",
+          "enum": ["member", "node"]
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        }
+      },
+      "required": [
+        "clientId",
+        "identity",
+        "installationRevision",
+        "selectionRevision",
+        "generation",
+        "observedGeneration",
+        "state",
+        "reportSource",
+        "observedAt"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": ["failed", "expired", "revoked"]
+              }
+            },
+            "required": ["state"]
+          },
+          "then": {
+            "required": ["errorCode"],
+            "properties": {
+              "errorCode": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        }
+      ]
+    },
+    "UnifiedInstallation": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "resource": {
+          "$ref": "#/$defs/UnifiedResourceRef"
+        },
+        "installationRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "applying",
+            "applied",
+            "failed",
+            "pending_restart",
+            "superseded",
+            "overridden",
+            "expired",
+            "revoked",
+            "disabled",
+            "removed"
+          ]
+        },
+        "reportSource": {
+          "type": "string",
+          "enum": ["member", "node"]
+        },
+        "report": {
+          "$ref": "#/$defs/UnifiedInstallationReport"
+        }
+      },
+      "required": [
+        "clientId",
+        "resource",
+        "installationRevision",
+        "selectionRevision",
+        "generation",
+        "state",
+        "reportSource"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedInstallationPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedInstallation"
+          },
+          "maxItems": 200
+        },
+        "nextCursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "UnifiedDistributionInput": {
+      "type": "object",
+      "properties": {
+        "instanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "selections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedSelection"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": ["instanceId", "selections"],
+      "additionalProperties": false
+    },
+    "UnifiedDistribution": {
+      "type": "object",
+      "properties": {
+        "distributionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedSelection"
+          },
+          "maxItems": 128
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "applying",
+            "applied",
+            "failed",
+            "pending_restart",
+            "superseded",
+            "overridden",
+            "expired",
+            "revoked",
+            "disabled",
+            "removed"
+          ]
+        },
+        "reportSource": {
+          "type": "string",
+          "enum": ["node"]
+        },
+        "reports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedInstallationReport"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "distributionId",
+        "instanceId",
+        "ownerId",
+        "selectionRevision",
+        "generation",
+        "selections",
+        "state",
+        "reportSource",
+        "reports"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedDistributionPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedDistribution"
+          },
+          "maxItems": 200
+        },
+        "nextCursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "UnifiedRenewalInput": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "installationRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "releaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clientId",
+        "identity",
+        "installationRevision",
+        "selectionRevision",
+        "releaseSequence"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedGuardianState": {
+      "type": "object",
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hostId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "verifying",
+            "active",
+            "stopping",
+            "isolating",
+            "private_only",
+            "blocked"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "startup",
+            "lease_expired",
+            "revoked",
+            "identity_changed",
+            "clock_rollback",
+            "verification_failed",
+            "cleanup_failed"
+          ]
+        },
+        "lease": {
+          "$ref": "#/$defs/UnifiedLease"
+        },
+        "processStopped": {
+          "type": "boolean"
+        },
+        "viewCleared": {
+          "type": "boolean"
+        },
+        "newSessionRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tenantId",
+        "ownerId",
+        "hostId",
+        "selectionRevision",
+        "generation",
+        "state",
+        "reason",
+        "lease",
+        "processStopped",
+        "viewCleared",
+        "newSessionRequired"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "private_only"
+              }
+            },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "processStopped": {
+                "const": true
+              },
+              "viewCleared": {
+                "const": true
+              },
+              "newSessionRequired": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "UnifiedMigrationProof": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "legacyEnvelope": {
+          "$ref": "./signatures.schema.json#/$defs/ResourceEnvelope"
+        },
+        "unifiedEnvelope": {
+          "$ref": "./package.schema.json#/$defs/Envelope"
+        },
+        "legacyArtifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "activatedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time",
+          "description": "Must equal signed marker.activatedAt; immutable package migration t0."
+        },
+        "marker": {
+          "$ref": "#/$defs/UnifiedMigrationMarker"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "legacyEnvelope",
+        "unifiedEnvelope",
+        "legacyArtifactId",
+        "activatedAt",
+        "marker"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedHighWatermark": {
+      "type": "object",
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "releaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "verifiedDigestAliases": {
+          "type": "array",
+          "items": {
+            "$ref": "./signatures.schema.json#/$defs/Digest"
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "tenantId",
+        "packageId",
+        "releaseSequence",
+        "versionId",
+        "verifiedDigestAliases"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedDowngradeAuthorization": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "authorizationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "fromReleaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "toReleaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "issuedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "expiresAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "signature": {
+          "$ref": "./signatures.schema.json#/$defs/Signature"
+        },
+        "purpose": {
+          "type": "string",
+          "const": "downgrade"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "authorizationId",
+        "instanceId",
+        "identity",
+        "fromReleaseSequence",
+        "toReleaseSequence",
+        "issuedAt",
+        "expiresAt",
+        "reason",
+        "signature",
+        "purpose"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedMemberInstallationReport": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "installationRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "observedGeneration": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "applying",
+            "applied",
+            "failed",
+            "pending_restart",
+            "superseded",
+            "overridden",
+            "expired",
+            "revoked",
+            "disabled",
+            "removed"
+          ]
+        },
+        "reportSource": {
+          "type": "string",
+          "const": "member"
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        }
+      },
+      "required": [
+        "clientId",
+        "identity",
+        "installationRevision",
+        "selectionRevision",
+        "generation",
+        "observedGeneration",
+        "state",
+        "reportSource",
+        "observedAt"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": ["failed", "expired", "revoked"]
+              }
+            },
+            "required": ["state"]
+          },
+          "then": {
+            "required": ["errorCode"],
+            "properties": {
+              "errorCode": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        }
+      ]
+    },
+    "UnifiedMigrationMarker": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "purpose": {
+          "type": "string",
+          "const": "migration"
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "firstVersionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "firstReleaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "activatedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "signature": {
+          "$ref": "./signatures.schema.json#/$defs/Signature"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "purpose",
+        "tenantId",
+        "packageId",
+        "firstVersionId",
+        "firstReleaseSequence",
+        "activatedAt",
+        "signature"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedLedgerFile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hostId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "installations": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/UnifiedInstallation"
+          }
+        },
+        "processedDisableReceiptIds": {
+          "type": "array",
+          "maxItems": 8192,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "ownerId",
+        "hostId",
+        "revision",
+        "selectionRevision",
+        "generation",
+        "installations",
+        "processedDisableReceiptIds"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedReceiptFile": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "integer",
+              "const": 1
+            },
+            "tenantId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "ownerId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "hostId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "recordType": {
+              "type": "string",
+              "const": "installation"
+            },
+            "writer": {
+              "type": "string",
+              "const": "plugin"
+            },
+            "receiptId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "resource": {
+              "$ref": "#/$defs/UnifiedResourceRef"
+            },
+            "installationRevision": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "selectionRevision": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "generation": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "recordedAt": {
+              "$ref": "./signatures.schema.json#/$defs/Time"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "tenantId",
+            "ownerId",
+            "hostId",
+            "recordType",
+            "writer",
+            "receiptId",
+            "resource",
+            "installationRevision",
+            "selectionRevision",
+            "generation",
+            "recordedAt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "integer",
+              "const": 1
+            },
+            "tenantId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "ownerId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "hostId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "recordType": {
+              "type": "string",
+              "const": "disable"
+            },
+            "writer": {
+              "type": "string",
+              "const": "guardian"
+            },
+            "receiptId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "transactionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "selectionRevision": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "generation": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "quarantinePath": {
+              "type": "string",
+              "pattern": "^auriga/skills-active/quarantine/[0-9a-f-]{36}$"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "lease_expired",
+                "revoked",
+                "identity_changed",
+                "clock_rollback",
+                "verification_failed"
+              ]
+            },
+            "processStopped": {
+              "type": "boolean",
+              "not": {
+                "const": false
+              }
+            },
+            "viewCleared": {
+              "type": "boolean",
+              "not": {
+                "const": false
+              }
+            },
+            "newSessionRequired": {
+              "type": "boolean",
+              "not": {
+                "const": false
+              }
+            },
+            "recordedAt": {
+              "$ref": "./signatures.schema.json#/$defs/Time"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "tenantId",
+            "ownerId",
+            "hostId",
+            "recordType",
+            "writer",
+            "receiptId",
+            "transactionId",
+            "selectionRevision",
+            "generation",
+            "quarantinePath",
+            "reason",
+            "processStopped",
+            "viewCleared",
+            "newSessionRequired",
+            "recordedAt"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "UnifiedTransactionFile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hostId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "transactionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "writer": {
+          "type": "string",
+          "const": "plugin"
+        },
+        "operation": {
+          "type": "string",
+          "enum": ["install", "activate", "remove", "cleanup"]
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["prepared", "switched", "committed", "rolled_back"]
+        },
+        "expectedLedgerRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "generation": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "receiptId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "recordedAt": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "ownerId",
+        "hostId",
+        "transactionId",
+        "writer",
+        "operation",
+        "phase",
+        "expectedLedgerRevision",
+        "selectionRevision",
+        "generation",
+        "receiptId",
+        "recordedAt"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedTrustedClock": {
+      "type": "object",
+      "properties": {
+        "bootId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "maxObservedTime": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "lastTrustedTime": {
+          "$ref": "./signatures.schema.json#/$defs/Time"
+        },
+        "lastTrustedTimeSource": {
+          "type": "string",
+          "enum": [
+            "authenticated_server",
+            "signed_release",
+            "signed_revocations"
+          ]
+        },
+        "lastMonotonicMillis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "leaseDeadlineMonotonicMillis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        }
+      },
+      "required": [
+        "bootId",
+        "maxObservedTime",
+        "lastTrustedTime",
+        "lastTrustedTimeSource",
+        "lastMonotonicMillis",
+        "leaseDeadlineMonotonicMillis"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedGuardianStateFile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "guardian": {
+          "$ref": "#/$defs/UnifiedGuardianState"
+        },
+        "clock": {
+          "$ref": "#/$defs/UnifiedTrustedClock"
+        },
+        "pendingIsolation": {
+          "type": "object",
+          "properties": {
+            "transactionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "quarantinePath": {
+              "type": "string",
+              "pattern": "^auriga/skills-active/quarantine/[0-9a-f-]{36}$"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "stopping",
+                "rename_pending",
+                "renamed",
+                "receipt_written"
+              ]
+            }
+          },
+          "required": ["transactionId", "quarantinePath", "phase"],
+          "additionalProperties": false
+        },
+        "lastDisableReceiptId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": ["schemaVersion", "revision", "guardian", "clock"],
+      "additionalProperties": false
+    },
+    "UnifiedHighWatermarksFile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 8192,
+          "items": {
+            "$ref": "#/$defs/UnifiedHighWatermark"
+          }
+        },
+        "migrationMarkers": {
+          "type": "array",
+          "maxItems": 8192,
+          "items": {
+            "$ref": "#/$defs/UnifiedMigrationMarker"
+          }
+        },
+        "consumedDowngradeAuthorizationIds": {
+          "type": "array",
+          "maxItems": 8192,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "revision",
+        "entries",
+        "migrationMarkers",
+        "consumedDowngradeAuthorizationIds"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedHostLockOwner": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "lockId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["C", "E"]
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "processStartedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "bootId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "monotonicMillis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "leaseDurationMillis": {
+          "type": "integer",
+          "const": 30000
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "lockId",
+        "role",
+        "pid",
+        "processStartedAt",
+        "createdAt",
+        "bootId",
+        "monotonicMillis",
+        "leaseDurationMillis"
+      ]
+    }
+  }
+}

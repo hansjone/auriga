@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "default": "reject",
+  "states": [
+    "verifying",
+    "active",
+    "stopping",
+    "isolating",
+    "private_only",
+    "blocked"
+  ],
+  "transitions": [
+    {
+      "from": "verifying",
+      "event": "trust_valid",
+      "guards": [
+        "onlineVerified",
+        "leaseValid",
+        "clockValid",
+        "identityMatches",
+        "verificationDurable",
+        "noPendingIsolation"
+      ],
+      "to": "active",
+      "action": "none"
+    },
+    {
+      "from": "verifying",
+      "event": "trust_invalid",
+      "guards": ["processRunning"],
+      "to": "stopping",
+      "action": "stop_process_tree"
+    },
+    {
+      "from": "verifying",
+      "event": "trust_invalid",
+      "guards": ["processStopped"],
+      "to": "isolating",
+      "action": "quarantine_current"
+    },
+    {
+      "from": "active",
+      "event": "lease_expired",
+      "guards": [],
+      "to": "stopping",
+      "action": "stop_process_tree"
+    },
+    {
+      "from": "active",
+      "event": "revoked",
+      "guards": [],
+      "to": "stopping",
+      "action": "stop_process_tree"
+    },
+    {
+      "from": "active",
+      "event": "identity_changed",
+      "guards": [],
+      "to": "stopping",
+      "action": "stop_process_tree"
+    },
+    {
+      "from": "active",
+      "event": "clock_rollback",
+      "guards": [],
+      "to": "stopping",
+      "action": "stop_process_tree"
+    },
+    {
+      "from": "active",
+      "event": "tick",
+      "guards": ["leaseValid", "clockValid", "identityMatches"],
+      "to": "active",
+      "action": "none"
+    },
+    {
+      "from": "stopping",
+      "event": "stop_confirmed",
+      "guards": ["processStopped"],
+      "to": "isolating",
+      "action": "quarantine_current"
+    },
+    {
+      "from": "stopping",
+      "event": "stop_failed",
+      "guards": [],
+      "to": "blocked",
+      "action": "deny_start"
+    },
+    {
+      "from": "isolating",
+      "event": "isolation_confirmed",
+      "guards": ["processStopped", "viewCleared", "disableReceiptDurable"],
+      "to": "private_only",
+      "action": "require_new_session"
+    },
+    {
+      "from": "isolating",
+      "event": "isolation_failed",
+      "guards": [],
+      "to": "blocked",
+      "action": "deny_start"
+    },
+    {
+      "from": "private_only",
+      "event": "tick",
+      "guards": ["viewCleared", "newSession"],
+      "to": "private_only",
+      "action": "none"
+    },
+    {
+      "from": "private_only",
+      "event": "retry_shared",
+      "guards": ["onlineVerified", "processStopped", "viewCleared"],
+      "to": "verifying",
+      "action": "verify_fresh_trust"
+    },
+    {
+      "from": "blocked",
+      "event": "retry_cleanup",
+      "guards": ["processStopped"],
+      "to": "isolating",
+      "action": "quarantine_current"
+    },
+    {
+      "from": "blocked",
+      "event": "retry_shared",
+      "guards": ["onlineVerified", "processStopped", "viewCleared"],
+      "to": "verifying",
+      "action": "verify_fresh_trust"
+    },
+    {
+      "from": "active",
+      "event": "restart",
+      "guards": [],
+      "to": "verifying",
+      "action": "verify_persistent_state"
+    },
+    {
+      "from": "private_only",
+      "event": "restart",
+      "guards": [],
+      "to": "verifying",
+      "action": "verify_persistent_state"
+    },
+    {
+      "from": "blocked",
+      "event": "restart",
+      "guards": [],
+      "to": "verifying",
+      "action": "verify_persistent_state"
+    },
+    {
+      "from": "verifying",
+      "event": "restart",
+      "guards": [],
+      "to": "verifying",
+      "action": "verify_persistent_state"
+    },
+    {
+      "from": "stopping",
+      "event": "restart",
+      "guards": [],
+      "to": "verifying",
+      "action": "verify_persistent_state"
+    },
+    {
+      "from": "isolating",
+      "event": "restart",
+      "guards": [],
+      "to": "verifying",
+      "action": "verify_persistent_state"
+    }
+  ],
+  "clock": {
+    "rollbackToleranceMillis": 120000,
+    "sameBoot": "effectiveNow = max(wallNow, maxObservedTime + monotonicNowMillis - lastMonotonicMillis, lastTrustedTime); reject decreasing monotonic counter or wallNow < maxObservedTime - 120000; monotonic deadline is the primary lease limit, tolerance never extends either deadline",
+    "newBoot": "monotonic counters from different bootId values are incomparable; require fresh authenticated online time and trust before shared activation; offline restart must stop and quarantine shared content before private_only",
+    "persist": "persist maxObservedTime, lastTrustedTime, lastTrustedTimeSource, bootId, lastMonotonicMillis and leaseDeadlineMonotonicMillis under host lock before acknowledging active; renewal never resets a package migration t0"
+  },
+  "cases": [
+    {
+      "id": "activation-after-complete-recovery",
+      "from": "verifying",
+      "event": "trust_valid",
+      "facts": {
+        "onlineVerified": true,
+        "leaseValid": true,
+        "clockValid": true,
+        "identityMatches": true,
+        "verificationDurable": true,
+        "noPendingIsolation": true
+      },
+      "expect": "active"
+    },
+    {
+      "id": "pending-isolation-denies-activation",
+      "from": "verifying",
+      "event": "trust_valid",
+      "facts": {
+        "onlineVerified": true,
+        "leaseValid": true,
+        "clockValid": true,
+        "identityMatches": true,
+        "verificationDurable": true,
+        "noPendingIsolation": false
+      },
+      "expect": "reject"
+    }
+  ]
+}

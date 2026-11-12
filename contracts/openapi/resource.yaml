@@ -5650,7 +5650,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5691,6 +5691,14 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UnifiedPackagePage"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -5796,14 +5804,14 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       },
       "post": {
         "operationId": "UnifiedCreateResourcePackage",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.upload",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5819,7 +5827,26 @@
         "x-events": [],
         "parameters": [
           {
-            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
           }
         ],
         "responses": {
@@ -5834,7 +5861,10 @@
             },
             "headers": {
               "ETag": {
-                "$ref": "./common.yaml#/components/headers/ETag"
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -5949,7 +5979,7 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/catalog/packages/{packageId}": {
@@ -5958,7 +5988,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -5995,7 +6025,10 @@
             },
             "headers": {
               "ETag": {
-                "$ref": "./common.yaml#/components/headers/ETag"
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -6100,7 +6133,7 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/catalog/packages/{packageId}/versions": {
@@ -6109,7 +6142,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6149,6 +6182,14 @@
                   "$ref": "#/components/schemas/UnifiedVersionPage"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -6252,14 +6293,14 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       },
       "post": {
         "operationId": "UnifiedUploadResourceVersion",
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.upload",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6293,17 +6334,26 @@
             }
           },
           {
-            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
           },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
             "schema": {
               "type": "string",
-              "minLength": 1
-            },
-            "description": "Exact current strong ETag; absent or stale values return 412."
+              "minLength": 1,
+              "maxLength": 128
+            }
           }
         ],
         "responses": {
@@ -6318,7 +6368,10 @@
             },
             "headers": {
               "ETag": {
-                "$ref": "./common.yaml#/components/headers/ETag"
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -6479,7 +6532,7 @@
           }
         },
         "x-step-up-max-age-seconds": 600,
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}": {
@@ -6488,7 +6541,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6534,7 +6587,10 @@
             },
             "headers": {
               "ETag": {
-                "$ref": "./common.yaml#/components/headers/ETag"
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -6639,7 +6695,7 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/submissions": {
@@ -6648,7 +6704,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.submit",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6684,17 +6740,26 @@
             }
           },
           {
-            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
           },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
             "schema": {
               "type": "string",
-              "minLength": 1
-            },
-            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+              "minLength": 1,
+              "maxLength": 128
+            }
           }
         ],
         "responses": {
@@ -6709,7 +6774,10 @@
             },
             "headers": {
               "ETag": {
-                "$ref": "./common.yaml#/components/headers/ETag"
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -6825,7 +6893,7 @@
           }
         },
         "x-step-up-max-age-seconds": 600,
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/admin/catalog/review": {
@@ -6834,7 +6902,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.review",
         "x-error-codes": [
           "common.unauthenticated",
@@ -6878,6 +6946,14 @@
                   "$ref": "#/components/schemas/UnifiedReviewPage"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -6983,7 +7059,7 @@
         },
         "x-admin-only": true,
         "x-step-up-max-age-seconds": 600,
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/admin/catalog/published": {
@@ -6992,7 +7068,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7036,6 +7112,14 @@
                   "$ref": "#/components/schemas/UnifiedVersionPage"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -7141,7 +7225,7 @@
         },
         "x-admin-only": true,
         "x-step-up-max-age-seconds": 600,
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/admin/catalog/reviews/{reviewId}/decisions": {
@@ -7150,7 +7234,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.review",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7177,17 +7261,26 @@
             }
           },
           {
-            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
           },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
             "schema": {
               "type": "string",
-              "minLength": 1
-            },
-            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+              "minLength": 1,
+              "maxLength": 128
+            }
           }
         ],
         "responses": {
@@ -7202,7 +7295,10 @@
             },
             "headers": {
               "ETag": {
-                "$ref": "./common.yaml#/components/headers/ETag"
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -7319,7 +7415,7 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/publications": {
@@ -7328,7 +7424,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7373,17 +7469,26 @@
             }
           },
           {
-            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
           },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
             "schema": {
               "type": "string",
-              "minLength": 1
-            },
-            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+              "minLength": 1,
+              "maxLength": 128
+            }
           }
         ],
         "responses": {
@@ -7398,7 +7503,10 @@
             },
             "headers": {
               "ETag": {
-                "$ref": "./common.yaml#/components/headers/ETag"
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -7525,7 +7633,7 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/admin/catalog/packages/{packageId}/versions/{versionId}/withdrawals": {
@@ -7534,7 +7642,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.publish",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7579,17 +7687,26 @@
             }
           },
           {
-            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
           },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
             "schema": {
               "type": "string",
-              "minLength": 1
-            },
-            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+              "minLength": 1,
+              "maxLength": 128
+            }
           }
         ],
         "responses": {
@@ -7604,7 +7721,10 @@
             },
             "headers": {
               "ETag": {
-                "$ref": "./common.yaml#/components/headers/ETag"
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -7731,7 +7851,7 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
       }
     },
     "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/manifest": {
@@ -7740,7 +7860,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Return the exact stored immutable auriga-resource.json UTF-8 bytes, without JSON parsing, reserialization, newline or BOM changes. Locator does not grant access: check tenant/package/version ACL on every read. Caller hashes bytes and compares version digest and verified envelope before parsing. Plugin IDs return 404.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Return the exact stored immutable auriga-resource.json UTF-8 bytes, without JSON parsing, reserialization, newline or BOM changes. Locator does not grant access: check tenant/package/version ACL on every read. Caller hashes bytes and compares version digest and verified envelope before parsing. Plugin IDs return 404.",
         "x-permission": "resource.packages.read",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7781,6 +7901,12 @@
               "X-Auriga-Manifest-Digest": {
                 "schema": {
                   "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+                }
+              },
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
                 }
               }
             },
@@ -7894,7 +8020,19 @@
             }
           }
         },
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        }
       }
     },
     "/api/resource/v1/admin/catalog/reviews/{reviewId}": {
@@ -7903,7 +8041,7 @@
         "tags": [
           "Resource"
         ],
-        "description": "DRAFT, NOT IMPLEMENTED. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
+        "description": "P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them.",
         "x-permission": "resource.versions.review",
         "x-error-codes": [
           "common.unauthenticated",
@@ -7936,6 +8074,14 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UnifiedReview"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -8043,7 +8189,2285 @@
         },
         "x-admin-only": true,
         "x-step-up-max-age-seconds": 600,
-        "x-auriga-contract-stage": "draft"
+        "x-auriga-contract-stage": "frozen"
+      }
+    },
+    "/api/resource/v1/catalog/member/download-tickets": {
+      "post": {
+        "operationId": "UnifiedCreateDownloadTicket",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedDownloadTicket"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedDownloadTicketInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/catalog/member/downloads": {
+      "post": {
+        "operationId": "UnifiedDownloadArtifact",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedDownloadInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/catalog/member/installations": {
+      "post": {
+        "operationId": "UnifiedSelectInstallation",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Exact revision accepted; 202 requires matching authenticated observation before applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedInstallation"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedInstallationInput"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "UnifiedListInstallations",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "skill",
+                "tool"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          {
+            "name": "clientId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedInstallationPage"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        }
+      }
+    },
+    "/api/resource/v1/catalog/member/installation-reports": {
+      "post": {
+        "operationId": "UnifiedReportInstallation",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedInstallation"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedMemberInstallationReport"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/catalog/member/renewals": {
+      "post": {
+        "operationId": "UnifiedRenewInstallation",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedDownloadTicket"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedRenewalInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resource/v1/admin/catalog/distributions": {
+      "post": {
+        "operationId": "UnifiedCreateDistribution",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.distributions.manage",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [
+          "resource.catalog_distribution_requested"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden or iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Exact revision accepted; 202 requires matching authenticated observation before applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedDistribution"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedDistributionInput"
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      },
+      "get": {
+        "operationId": "UnifiedListDistributions",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.distributions.manage",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "skill",
+                "tool"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          {
+            "name": "instanceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden or iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedDistributionPage"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/resource/v1/admin/catalog/distributions/{distributionId}": {
+      "get": {
+        "operationId": "UnifiedGetDistribution",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.distributions.manage",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "distributionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden or iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedDistribution"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/artifacts/{artifactId}": {
+      "get": {
+        "operationId": "UnifiedDownloadVersionArtifact",
+        "tags": [
+          "Resource"
+        ],
+        "description": "P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled.",
+        "x-permission": "resource.packages.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "skill",
+            "tool"
+          ],
+          "pluginStatus": 404,
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        }
+      }
+    },
+    "/internal/resource/v1/catalog/downloads/{downloadId}/manifest": {
+      "get": {
+        "operationId": "UnifiedDownloadNodeManifest",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Exact immutable manifest bytes. Node mTLS SAN and tenant, owner, current instance scheduling, selectionRevision, generation, kind, exact version and digest authorization checked online for every read. Locator grants no access. Lease expiry or revoked version denies download. No redirects or Range.",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "resource.version_immutable",
+          "resource.review_required",
+          "resource.state_conflict",
+          "resource.level_locked",
+          "resource.digest_mismatch",
+          "resource.signature_invalid",
+          "resource.download_denied",
+          "resource.storage_unavailable"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "downloadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已授权的不可变归档，校验摘要/长度；不接受重定向。",
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "description": "完整对象长度"
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "resource.level_locked, resource.download_denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "resource.version_immutable, resource.review_required, resource.state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "resource.digest_mismatch, resource.signature_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "resource.storage_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "nodeMtls": []
+          }
+        ],
+        "x-authorization": "node-bound-grant",
+        "x-internal-only": true,
+        "x-auriga-contract-stage": "frozen"
+      }
+    },
+    "/internal/resource/v1/catalog/downloads/{downloadId}/artifacts/{artifactId}": {
+      "get": {
+        "operationId": "UnifiedDownloadNodeArtifact",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Exact immutable artifact bytes. Node mTLS SAN and tenant, owner, current instance scheduling, selectionRevision, generation, kind, exact version and digest authorization checked online for every read. Locator grants no access. Lease expiry or revoked version denies download. No redirects or Range.",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "resource.version_immutable",
+          "resource.review_required",
+          "resource.state_conflict",
+          "resource.level_locked",
+          "resource.digest_mismatch",
+          "resource.signature_invalid",
+          "resource.download_denied",
+          "resource.storage_unavailable"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "downloadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已授权的不可变归档，校验摘要/长度；不接受重定向。",
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "description": "完整对象长度"
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "resource.level_locked, resource.download_denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "resource.version_immutable, resource.review_required, resource.state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "resource.digest_mismatch, resource.signature_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "resource.storage_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "nodeMtls": []
+          }
+        ],
+        "x-authorization": "node-bound-grant",
+        "x-internal-only": true,
+        "x-auriga-contract-stage": "frozen"
       }
     }
   },
@@ -10032,6 +12456,93 @@
           "items"
         ],
         "additionalProperties": false
+      },
+      "UnifiedResourceIdentity": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedResourceIdentity"
+      },
+      "UnifiedLease": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedLease"
+      },
+      "UnifiedArtifactDownload": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedArtifactDownload"
+      },
+      "UnifiedResourceRef": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedResourceRef"
+      },
+      "UnifiedSelection": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedSelection"
+      },
+      "UnifiedDownloadTicketInput": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedDownloadTicketInput"
+      },
+      "UnifiedDownloadTicket": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedDownloadTicket"
+      },
+      "UnifiedDownloadInput": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedDownloadInput"
+      },
+      "UnifiedInstallationInput": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedInstallationInput"
+      },
+      "UnifiedInstallationReport": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedInstallationReport"
+      },
+      "UnifiedInstallation": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedInstallation"
+      },
+      "UnifiedInstallationPage": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedInstallationPage"
+      },
+      "UnifiedDistributionInput": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedDistributionInput"
+      },
+      "UnifiedDistribution": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedDistribution"
+      },
+      "UnifiedDistributionPage": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedDistributionPage"
+      },
+      "UnifiedRenewalInput": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedRenewalInput"
+      },
+      "UnifiedGuardianState": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedGuardianState"
+      },
+      "UnifiedMigrationProof": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedMigrationProof"
+      },
+      "UnifiedHighWatermark": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedHighWatermark"
+      },
+      "UnifiedDowngradeAuthorization": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedDowngradeAuthorization"
+      },
+      "UnifiedMemberInstallationReport": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedMemberInstallationReport"
+      },
+      "UnifiedMigrationMarker": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedMigrationMarker"
+      },
+      "UnifiedLedgerFile": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedLedgerFile"
+      },
+      "UnifiedReceiptFile": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedReceiptFile"
+      },
+      "UnifiedTransactionFile": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedTransactionFile"
+      },
+      "UnifiedTrustedClock": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedTrustedClock"
+      },
+      "UnifiedGuardianStateFile": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedGuardianStateFile"
+      },
+      "UnifiedHighWatermarksFile": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedHighWatermarksFile"
+      },
+      "UnifiedHostLockOwner": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedHostLockOwner"
       }
     }
   }

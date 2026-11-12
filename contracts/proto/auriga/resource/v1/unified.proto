@@ -1,0 +1,241 @@
+syntax = "proto3";
+
+package auriga.resource.v1;
+
+import "auriga/resource/v1/trust.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/resource/v1;resourcev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.resource.v1";
+
+// JSON mapping and normative validation: contracts/resource/unified.schema.json and unified-protocol.md.
+// Counters map to safe JSON numbers, times retain original UTC text. Never sign protojson output.
+message UnifiedStatement {
+  string purpose = 1;
+  // plugin / skill / tool
+  string kind = 2;
+  string name = 3;
+  string version = 4;
+  string manifest_digest = 5;
+  repeated string artifact_digests = 6;
+  string issued_at = 7;
+}
+
+message UnifiedEnvelope {
+  uint64 schema_version = 1;
+  string tenant_id = 2;
+  string package_id = 3;
+  string version_id = 4;
+  uint64 release_sequence = 5;
+  string not_after = 6;
+  UnifiedStatement statement = 7;
+  ResourceSignature signature = 8;
+}
+
+message UnifiedResourceIdentity {
+  string tenant_id = 1;
+  string package_id = 2;
+  string version_id = 3;
+  // skill / tool
+  string kind = 4;
+  string version = 5;
+  string manifest_digest = 6;
+}
+
+message UnifiedLease {
+  string envelope_not_after = 1;
+  string revocations_expires_at = 2;
+  string expires_at = 3;
+  uint64 revocation_revision = 4;
+}
+
+message UnifiedArtifactDownload {
+  string artifact_id = 1;
+  string digest = 2;
+  uint64 size_bytes = 3;
+  string download_path = 4;
+}
+
+message UnifiedResourceRef {
+  UnifiedResourceIdentity identity = 1;
+  UnifiedEnvelope envelope = 2;
+  string manifest_download_path = 3;
+  repeated UnifiedArtifactDownload artifacts = 4;
+  UnifiedLease lease = 5;
+  uint64 release_sequence = 6;
+  bool enabled = 7;
+}
+
+message UnifiedSelection {
+  UnifiedResourceIdentity identity = 1;
+  // install / enable / disable / remove
+  string action = 2;
+}
+
+message UnifiedDownloadTicketInput {
+  string client_id = 1;
+  UnifiedResourceIdentity identity = 2;
+  uint64 installation_revision = 3;
+}
+
+message UnifiedDownloadTicket {
+  string ticket = 1;
+  string client_id = 2;
+  string expires_at = 3;
+  UnifiedResourceRef resource = 4;
+  ResourceRevocationList revocations = 5;
+}
+
+message UnifiedDownloadInput {
+  string client_id = 1;
+  string ticket = 2;
+  string artifact_id = 3;
+}
+
+message UnifiedInstallationInput {
+  string client_id = 1;
+  UnifiedSelection selection = 2;
+}
+
+message UnifiedInstallationReport {
+  string client_id = 1;
+  UnifiedResourceIdentity identity = 2;
+  uint64 installation_revision = 3;
+  uint64 selection_revision = 4;
+  uint64 generation = 5;
+  uint64 observed_generation = 6;
+  // applying / applied / failed / pending_restart / superseded / overridden / expired / revoked / disabled / removed
+  string state = 7;
+  // member / node
+  string report_source = 8;
+  string error_code = 9;
+  string observed_at = 10;
+}
+
+message UnifiedInstallation {
+  string client_id = 1;
+  UnifiedResourceRef resource = 2;
+  uint64 installation_revision = 3;
+  uint64 selection_revision = 4;
+  uint64 generation = 5;
+  // applying / applied / failed / pending_restart / superseded / overridden / expired / revoked / disabled / removed
+  string state = 6;
+  // member / node
+  string report_source = 7;
+  UnifiedInstallationReport report = 8;
+}
+
+message UnifiedInstallationPage {
+  repeated UnifiedInstallation items = 1;
+  string next_cursor = 2;
+}
+
+message UnifiedDistributionInput {
+  string instance_id = 1;
+  repeated UnifiedSelection selections = 2;
+}
+
+message UnifiedDistribution {
+  string distribution_id = 1;
+  string instance_id = 2;
+  string owner_id = 3;
+  uint64 selection_revision = 4;
+  uint64 generation = 5;
+  repeated UnifiedSelection selections = 6;
+  // applying / applied / failed / pending_restart / superseded / overridden / expired / revoked / disabled / removed
+  string state = 7;
+  // node
+  string report_source = 8;
+  repeated UnifiedInstallationReport reports = 9;
+}
+
+message UnifiedDistributionPage {
+  repeated UnifiedDistribution items = 1;
+  string next_cursor = 2;
+}
+
+message UnifiedRenewalInput {
+  string client_id = 1;
+  UnifiedResourceIdentity identity = 2;
+  uint64 installation_revision = 3;
+  uint64 selection_revision = 4;
+  uint64 release_sequence = 5;
+}
+
+message UnifiedGuardianState {
+  string tenant_id = 1;
+  string owner_id = 2;
+  string host_id = 3;
+  uint64 selection_revision = 4;
+  uint64 generation = 5;
+  // verifying / active / stopping / isolating / private_only / blocked
+  string state = 6;
+  // startup / lease_expired / revoked / identity_changed / clock_rollback / verification_failed / cleanup_failed
+  string reason = 7;
+  UnifiedLease lease = 8;
+  bool process_stopped = 9;
+  bool view_cleared = 10;
+  bool new_session_required = 11;
+}
+
+message UnifiedMigrationProof {
+  uint64 schema_version = 1;
+  ResourceEnvelope legacy_envelope = 2;
+  UnifiedEnvelope unified_envelope = 3;
+  string legacy_artifact_id = 4;
+  string activated_at = 5;
+  UnifiedMigrationMarker marker = 6;
+}
+
+message UnifiedHighWatermark {
+  string tenant_id = 1;
+  string package_id = 2;
+  uint64 release_sequence = 3;
+  string version_id = 4;
+  repeated string verified_digest_aliases = 5;
+}
+
+// Authenticated svc:workspace + mTLS, delegated tenant must match body tenant.
+service UnifiedResourceResolutionService {
+  rpc ResolveUnifiedResources(ResolveUnifiedResourcesRequest) returns (ResolveUnifiedResourcesResponse);
+}
+message ResolveUnifiedResourcesRequest {
+  string tenant_id = 1;
+  string owner_id = 2;
+  string instance_id = 3;
+  string node_id = 4;
+  uint64 selection_revision = 5;
+  repeated UnifiedSelection selections = 6;
+}
+message ResolveUnifiedResourcesResponse {
+  uint64 selection_revision = 1;
+  repeated UnifiedResourceRef resources = 2;
+  ResourceRevocationList revocations = 3;
+}
+
+// Independent downgrade-root signature over JCS. Exact identity and instance scope are mandatory.
+message UnifiedDowngradeAuthorization {
+  uint32 schema_version = 1;
+  string authorization_id = 2;
+  string instance_id = 3;
+  UnifiedResourceIdentity identity = 4;
+  uint64 from_release_sequence = 5;
+  uint64 to_release_sequence = 6;
+  string issued_at = 7;
+  string expires_at = 8;
+  string reason = 9;
+  ResourceSignature signature = 10;
+  string purpose = 11;
+}
+
+// Release-root signed immutable migration marker; activated_at is covered by its signature.
+message UnifiedMigrationMarker {
+  uint32 schema_version = 1;
+  string purpose = 2;
+  string tenant_id = 3;
+  string package_id = 4;
+  string first_version_id = 5;
+  uint64 first_release_sequence = 6;
+  string activated_at = 7;
+  ResourceSignature signature = 8;
+}

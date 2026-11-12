@@ -237,11 +237,20 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
           );
         for (const evt of o['x-events']) assert(catalog.events[evt], evt);
         if (method === 'post')
-          assert(o.parameters.some((p) => p.$ref?.endsWith('/IdempotencyKey')));
+          assert(
+            o.parameters.some(
+              (p) =>
+                p.$ref?.endsWith('/IdempotencyKey') ||
+                (o.operationId.startsWith('Unified') &&
+                  p.in === 'header' &&
+                  p.name === 'Idempotency-Key' &&
+                  p.required === true),
+            ),
+          );
       }
     }
   }
-  assert.equal(count, 81);
+  assert.equal(count, 93);
   assert(ids.has('listRelayProviderModels'));
   assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 36);
   for (const [key, p] of Object.entries(catalog.permissions)) {
@@ -281,17 +290,32 @@ test('目录驱动的全部敏感管理操作逐项删除stepup或错误声明�
 });
 
 test('Desktop 匿名目录仅含两个精确只读入口，权限分类不授予管理能力', () => {
-  const anonymous = operations(apiSpecs).filter(({ operation }) =>
-    Array.isArray(operation.security) && operation.security.length === 0,
+  const anonymous = operations(apiSpecs).filter(
+    ({ operation }) =>
+      Array.isArray(operation.security) && operation.security.length === 0,
   );
-  assert.deepEqual(anonymous.map(({ url, method, operation }) => [url, method, operation.operationId]), [
-    ['/api/resource/v1/desktop/latest', 'get', 'getDesktopLatest'],
-    ['/api/resource/v1/desktop/packages/{sequence}', 'get', 'downloadDesktopPackage'],
-  ]);
+  assert.deepEqual(
+    anonymous.map(({ url, method, operation }) => [
+      url,
+      method,
+      operation.operationId,
+    ]),
+    [
+      ['/api/resource/v1/desktop/latest', 'get', 'getDesktopLatest'],
+      [
+        '/api/resource/v1/desktop/packages/{sequence}',
+        'get',
+        'downloadDesktopPackage',
+      ],
+    ],
+  );
   for (const { operation } of anonymous) {
     assert.equal(operation['x-authorization'], 'anonymous');
     assert.equal(operation['x-permission'], 'resource.packages.read');
-    assert.equal(catalog.permissions[operation['x-permission']].adminOnly, false);
+    assert.equal(
+      catalog.permissions[operation['x-permission']].adminOnly,
+      false,
+    );
     assert.equal(Boolean(operation['x-admin-only']), false);
     assert.equal(Boolean(operation['x-internal-only']), false);
     assert.deepEqual(operation['x-events'], []);
@@ -789,11 +813,11 @@ test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留�
   const paths = Object.entries(spec.paths).filter(([p]) =>
     p.includes('/catalog/'),
   );
-  assert.equal(paths.length, 12);
+  assert.equal(paths.length, 22);
   for (const [path, methods] of paths) {
     for (const [method, operation] of Object.entries(methods)) {
       assert(operation.operationId.startsWith('Unified'));
-      assert.equal(operation['x-auriga-contract-stage'], 'draft');
+      assert.equal(operation['x-auriga-contract-stage'], 'frozen');
       if (method === 'get' && !path.includes('{')) {
         const kind = operation.parameters.find((p) => p.name === 'kind');
         assert.deepEqual(kind.schema.enum, ['skill', 'tool']);

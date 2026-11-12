@@ -1,0 +1,663 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "UnifiedLedgerFile-valid",
+      "schema": "UnifiedLedgerFile",
+      "input": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "revision": 1,
+        "selectionRevision": 1,
+        "generation": 1,
+        "installations": [
+          {
+            "clientId": "019a0000-0000-7000-8000-000000000011",
+            "resource": {
+              "identity": {
+                "tenantId": "019a0000-0000-7000-8000-000000000001",
+                "packageId": "019a0000-0000-7000-8000-000000000002",
+                "versionId": "019a0000-0000-7000-8000-000000000004",
+                "kind": "skill",
+                "version": "1.2.3",
+                "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+              },
+              "envelope": {
+                "schemaVersion": 2,
+                "tenantId": "019a0000-0000-7000-8000-000000000001",
+                "packageId": "019a0000-0000-7000-8000-000000000002",
+                "versionId": "019a0000-0000-7000-8000-000000000004",
+                "releaseSequence": 7,
+                "notAfter": "2026-11-13T00:00:00Z",
+                "statement": {
+                  "purpose": "resource",
+                  "kind": "skill",
+                  "name": "example-resource",
+                  "version": "1.2.3",
+                  "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+                  "artifactDigests": [
+                    "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+                  ],
+                  "issuedAt": "2026-11-12T00:00:00Z"
+                },
+                "signature": {
+                  "alg": "Ed25519",
+                  "kid": "test-only-release",
+                  "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+                }
+              },
+              "manifestDownloadPath": "/api/resource/v1/catalog/packages/019a0000-0000-7000-8000-000000000002/versions/019a0000-0000-7000-8000-000000000004/manifest",
+              "artifacts": [
+                {
+                  "artifactId": "payload",
+                  "digest": "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2",
+                  "sizeBytes": 33,
+                  "downloadPath": "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000013/artifacts/payload"
+                }
+              ],
+              "lease": {
+                "envelopeNotAfter": "2026-11-13T00:00:00Z",
+                "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+                "expiresAt": "2026-11-13T00:00:00Z",
+                "revocationRevision": 3
+              },
+              "releaseSequence": 7,
+              "enabled": true
+            },
+            "installationRevision": 1,
+            "selectionRevision": 1,
+            "generation": 1,
+            "state": "applying",
+            "reportSource": "member"
+          }
+        ],
+        "processedDisableReceiptIds": []
+      },
+      "expect": true
+    },
+    {
+      "id": "UnifiedLedgerFile-unknown-version",
+      "schema": "UnifiedLedgerFile",
+      "input": {
+        "schemaVersion": 99,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "revision": 1,
+        "selectionRevision": 1,
+        "generation": 1,
+        "installations": [
+          {
+            "clientId": "019a0000-0000-7000-8000-000000000011",
+            "resource": {
+              "identity": {
+                "tenantId": "019a0000-0000-7000-8000-000000000001",
+                "packageId": "019a0000-0000-7000-8000-000000000002",
+                "versionId": "019a0000-0000-7000-8000-000000000004",
+                "kind": "skill",
+                "version": "1.2.3",
+                "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+              },
+              "envelope": {
+                "schemaVersion": 2,
+                "tenantId": "019a0000-0000-7000-8000-000000000001",
+                "packageId": "019a0000-0000-7000-8000-000000000002",
+                "versionId": "019a0000-0000-7000-8000-000000000004",
+                "releaseSequence": 7,
+                "notAfter": "2026-11-13T00:00:00Z",
+                "statement": {
+                  "purpose": "resource",
+                  "kind": "skill",
+                  "name": "example-resource",
+                  "version": "1.2.3",
+                  "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+                  "artifactDigests": [
+                    "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+                  ],
+                  "issuedAt": "2026-11-12T00:00:00Z"
+                },
+                "signature": {
+                  "alg": "Ed25519",
+                  "kid": "test-only-release",
+                  "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+                }
+              },
+              "manifestDownloadPath": "/api/resource/v1/catalog/packages/019a0000-0000-7000-8000-000000000002/versions/019a0000-0000-7000-8000-000000000004/manifest",
+              "artifacts": [
+                {
+                  "artifactId": "payload",
+                  "digest": "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2",
+                  "sizeBytes": 33,
+                  "downloadPath": "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000013/artifacts/payload"
+                }
+              ],
+              "lease": {
+                "envelopeNotAfter": "2026-11-13T00:00:00Z",
+                "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+                "expiresAt": "2026-11-13T00:00:00Z",
+                "revocationRevision": 3
+              },
+              "releaseSequence": 7,
+              "enabled": true
+            },
+            "installationRevision": 1,
+            "selectionRevision": 1,
+            "generation": 1,
+            "state": "applying",
+            "reportSource": "member"
+          }
+        ],
+        "processedDisableReceiptIds": []
+      },
+      "expect": false
+    },
+    {
+      "id": "UnifiedReceiptFile-valid",
+      "schema": "UnifiedReceiptFile",
+      "input": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "recordType": "disable",
+        "writer": "guardian",
+        "receiptId": "019a0000-0000-7000-8000-000000000015",
+        "transactionId": "019a0000-0000-7000-8000-000000000016",
+        "selectionRevision": 1,
+        "generation": 1,
+        "quarantinePath": "auriga/skills-active/quarantine/019a0000-0000-7000-8000-000000000016",
+        "reason": "lease_expired",
+        "processStopped": true,
+        "viewCleared": true,
+        "newSessionRequired": true,
+        "recordedAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": true
+    },
+    {
+      "id": "UnifiedReceiptFile-unknown-version",
+      "schema": "UnifiedReceiptFile",
+      "input": {
+        "schemaVersion": 99,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "recordType": "disable",
+        "writer": "guardian",
+        "receiptId": "019a0000-0000-7000-8000-000000000015",
+        "transactionId": "019a0000-0000-7000-8000-000000000016",
+        "selectionRevision": 1,
+        "generation": 1,
+        "quarantinePath": "auriga/skills-active/quarantine/019a0000-0000-7000-8000-000000000016",
+        "reason": "lease_expired",
+        "processStopped": true,
+        "viewCleared": true,
+        "newSessionRequired": true,
+        "recordedAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": false
+    },
+    {
+      "id": "UnifiedTransactionFile-valid",
+      "schema": "UnifiedTransactionFile",
+      "input": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "transactionId": "019a0000-0000-7000-8000-000000000016",
+        "writer": "plugin",
+        "operation": "cleanup",
+        "phase": "prepared",
+        "expectedLedgerRevision": 1,
+        "selectionRevision": 1,
+        "generation": 1,
+        "receiptId": "019a0000-0000-7000-8000-000000000015",
+        "recordedAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": true
+    },
+    {
+      "id": "UnifiedTransactionFile-unknown-version",
+      "schema": "UnifiedTransactionFile",
+      "input": {
+        "schemaVersion": 99,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "transactionId": "019a0000-0000-7000-8000-000000000016",
+        "writer": "plugin",
+        "operation": "cleanup",
+        "phase": "prepared",
+        "expectedLedgerRevision": 1,
+        "selectionRevision": 1,
+        "generation": 1,
+        "receiptId": "019a0000-0000-7000-8000-000000000015",
+        "recordedAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": false
+    },
+    {
+      "id": "UnifiedGuardianStateFile-valid",
+      "schema": "UnifiedGuardianStateFile",
+      "input": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "guardian": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "ownerId": "019a0000-0000-7000-8000-000000000012",
+          "hostId": "019a0000-0000-7000-8000-000000000011",
+          "selectionRevision": 1,
+          "generation": 1,
+          "state": "private_only",
+          "reason": "lease_expired",
+          "lease": {
+            "envelopeNotAfter": "2026-11-13T00:00:00Z",
+            "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+            "expiresAt": "2026-11-13T00:00:00Z",
+            "revocationRevision": 3
+          },
+          "processStopped": true,
+          "viewCleared": true,
+          "newSessionRequired": true
+        },
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        }
+      },
+      "expect": true
+    },
+    {
+      "id": "UnifiedGuardianStateFile-unknown-version",
+      "schema": "UnifiedGuardianStateFile",
+      "input": {
+        "schemaVersion": 99,
+        "revision": 1,
+        "guardian": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "ownerId": "019a0000-0000-7000-8000-000000000012",
+          "hostId": "019a0000-0000-7000-8000-000000000011",
+          "selectionRevision": 1,
+          "generation": 1,
+          "state": "private_only",
+          "reason": "lease_expired",
+          "lease": {
+            "envelopeNotAfter": "2026-11-13T00:00:00Z",
+            "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+            "expiresAt": "2026-11-13T00:00:00Z",
+            "revocationRevision": 3
+          },
+          "processStopped": true,
+          "viewCleared": true,
+          "newSessionRequired": true
+        },
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        }
+      },
+      "expect": false
+    },
+    {
+      "id": "UnifiedHighWatermarksFile-valid",
+      "schema": "UnifiedHighWatermarksFile",
+      "input": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "entries": [
+          {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "releaseSequence": 7,
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "verifiedDigestAliases": [
+              "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            ]
+          }
+        ],
+        "migrationMarkers": [
+          {
+            "schemaVersion": 2,
+            "purpose": "migration",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+            "firstReleaseSequence": 7,
+            "activatedAt": "2026-11-12T00:00:00Z",
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+            }
+          }
+        ],
+        "consumedDowngradeAuthorizationIds": []
+      },
+      "expect": true
+    },
+    {
+      "id": "UnifiedHighWatermarksFile-unknown-version",
+      "schema": "UnifiedHighWatermarksFile",
+      "input": {
+        "schemaVersion": 99,
+        "revision": 1,
+        "entries": [
+          {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "releaseSequence": 7,
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "verifiedDigestAliases": [
+              "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            ]
+          }
+        ],
+        "migrationMarkers": [
+          {
+            "schemaVersion": 2,
+            "purpose": "migration",
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "firstVersionId": "019a0000-0000-7000-8000-000000000003",
+            "firstReleaseSequence": 7,
+            "activatedAt": "2026-11-12T00:00:00Z",
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LCMRy444r6CDk0FhAY48Bqwb61KqKV88vPs4Oy3SDV4KStxC-1P8cKPYc-k-C-PtVGktR563xJADTSph0PlTDA"
+            }
+          }
+        ],
+        "consumedDowngradeAuthorizationIds": []
+      },
+      "expect": false
+    },
+    {
+      "id": "disable-receipt-path-traversal",
+      "schema": "UnifiedReceiptFile",
+      "input": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "recordType": "disable",
+        "writer": "guardian",
+        "receiptId": "019a0000-0000-7000-8000-000000000015",
+        "transactionId": "019a0000-0000-7000-8000-000000000016",
+        "selectionRevision": 1,
+        "generation": 1,
+        "quarantinePath": "../current",
+        "reason": "lease_expired",
+        "processStopped": true,
+        "viewCleared": true,
+        "newSessionRequired": true,
+        "recordedAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": false
+    },
+    {
+      "id": "private-only-before-isolation",
+      "schema": "UnifiedGuardianStateFile",
+      "input": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "guardian": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "ownerId": "019a0000-0000-7000-8000-000000000012",
+          "hostId": "019a0000-0000-7000-8000-000000000011",
+          "selectionRevision": 1,
+          "generation": 1,
+          "state": "private_only",
+          "reason": "lease_expired",
+          "lease": {
+            "envelopeNotAfter": "2026-11-13T00:00:00Z",
+            "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+            "expiresAt": "2026-11-13T00:00:00Z",
+            "revocationRevision": 3
+          },
+          "processStopped": true,
+          "viewCleared": false,
+          "newSessionRequired": true
+        },
+        "clock": {
+          "bootId": "019a0000-0000-7000-8000-000000000014",
+          "maxObservedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTime": "2026-11-12T01:00:00Z",
+          "lastTrustedTimeSource": "authenticated_server",
+          "lastMonotonicMillis": 1000,
+          "leaseDeadlineMonotonicMillis": 82801000
+        }
+      },
+      "expect": false
+    },
+    {
+      "id": "plugin-installation-receipt",
+      "schema": "UnifiedReceiptFile",
+      "input": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "recordType": "installation",
+        "writer": "plugin",
+        "receiptId": "019a0000-0000-7000-8000-000000000017",
+        "resource": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "envelope": {
+            "schemaVersion": 2,
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "releaseSequence": 7,
+            "notAfter": "2026-11-13T00:00:00Z",
+            "statement": {
+              "purpose": "resource",
+              "kind": "skill",
+              "name": "example-resource",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817",
+              "artifactDigests": [
+                "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2"
+              ],
+              "issuedAt": "2026-11-12T00:00:00Z"
+            },
+            "signature": {
+              "alg": "Ed25519",
+              "kid": "test-only-release",
+              "value": "LEPsMVPfFWsKhMLEREyyJWqK3Rhvzo8Lv6JRzuFPg5sCGkIy_mGwDVKIkiMvG94CEVh0zXMO0aYxBdsk3cx-Ag"
+            }
+          },
+          "manifestDownloadPath": "/api/resource/v1/catalog/packages/019a0000-0000-7000-8000-000000000002/versions/019a0000-0000-7000-8000-000000000004/manifest",
+          "artifacts": [
+            {
+              "artifactId": "payload",
+              "digest": "sha256:b5c31d441a62d00e0683849154a53d1be2657742cbf582aa7f82702ea31ac8f2",
+              "sizeBytes": 33,
+              "downloadPath": "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000013/artifacts/payload"
+            }
+          ],
+          "lease": {
+            "envelopeNotAfter": "2026-11-13T00:00:00Z",
+            "revocationsExpiresAt": "2026-11-13T00:00:00Z",
+            "expiresAt": "2026-11-13T00:00:00Z",
+            "revocationRevision": 3
+          },
+          "releaseSequence": 7,
+          "enabled": true
+        },
+        "installationRevision": 1,
+        "selectionRevision": 1,
+        "generation": 1,
+        "recordedAt": "2026-11-12T01:00:00Z"
+      },
+      "expect": true
+    },
+    {
+      "id": "disable-receipt-reject-false-processStopped",
+      "schema": "UnifiedReceiptFile",
+      "input": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "recordType": "disable",
+        "writer": "guardian",
+        "receiptId": "019a0000-0000-7000-8000-000000000015",
+        "transactionId": "019a0000-0000-7000-8000-000000000016",
+        "selectionRevision": 1,
+        "generation": 1,
+        "quarantinePath": "auriga/skills-active/quarantine/019a0000-0000-7000-8000-000000000016",
+        "reason": "lease_expired",
+        "processStopped": false,
+        "viewCleared": true,
+        "newSessionRequired": true,
+        "recordedAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": false
+    },
+    {
+      "id": "disable-receipt-reject-false-viewCleared",
+      "schema": "UnifiedReceiptFile",
+      "input": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "recordType": "disable",
+        "writer": "guardian",
+        "receiptId": "019a0000-0000-7000-8000-000000000015",
+        "transactionId": "019a0000-0000-7000-8000-000000000016",
+        "selectionRevision": 1,
+        "generation": 1,
+        "quarantinePath": "auriga/skills-active/quarantine/019a0000-0000-7000-8000-000000000016",
+        "reason": "lease_expired",
+        "processStopped": true,
+        "viewCleared": false,
+        "newSessionRequired": true,
+        "recordedAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": false
+    },
+    {
+      "id": "disable-receipt-reject-false-newSessionRequired",
+      "schema": "UnifiedReceiptFile",
+      "input": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "ownerId": "019a0000-0000-7000-8000-000000000012",
+        "hostId": "019a0000-0000-7000-8000-000000000011",
+        "recordType": "disable",
+        "writer": "guardian",
+        "receiptId": "019a0000-0000-7000-8000-000000000015",
+        "transactionId": "019a0000-0000-7000-8000-000000000016",
+        "selectionRevision": 1,
+        "generation": 1,
+        "quarantinePath": "auriga/skills-active/quarantine/019a0000-0000-7000-8000-000000000016",
+        "reason": "lease_expired",
+        "processStopped": true,
+        "viewCleared": true,
+        "newSessionRequired": false,
+        "recordedAt": "2026-11-13T00:00:00Z"
+      },
+      "expect": false
+    },
+    {
+      "id": "host-lock-owner-valid",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "C",
+        "pid": 1234,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": 1000,
+        "leaseDurationMillis": 30000
+      },
+      "expect": true
+    },
+    {
+      "id": "host-lock-owner-invalid-role",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "admin",
+        "pid": 1234,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": 1000,
+        "leaseDurationMillis": 30000
+      },
+      "expect": false
+    },
+    {
+      "id": "host-lock-owner-invalid-leaseDurationMillis",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "C",
+        "pid": 1234,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": 1000,
+        "leaseDurationMillis": 30001
+      },
+      "expect": false
+    },
+    {
+      "id": "host-lock-owner-invalid-monotonicMillis",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "C",
+        "pid": 1234,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": -1,
+        "leaseDurationMillis": 30000
+      },
+      "expect": false
+    },
+    {
+      "id": "host-lock-owner-invalid-pid",
+      "schema": "UnifiedHostLockOwner",
+      "input": {
+        "schemaVersion": 1,
+        "lockId": "019a0000-0000-7000-8000-000000000041",
+        "role": "C",
+        "pid": 0,
+        "processStartedAt": "2026-11-12T00:00:00Z",
+        "createdAt": "2026-11-12T01:00:00Z",
+        "bootId": "example-boot",
+        "monotonicMillis": 1000,
+        "leaseDurationMillis": 30000
+      },
+      "expect": false
+    }
+  ]
+}

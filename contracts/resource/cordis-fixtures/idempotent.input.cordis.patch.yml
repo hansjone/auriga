@@ -1,0 +1,31 @@
+- id: auriga-dsh
+  disabled: false
+  config: {}
+- id: preset-cordis
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: cordis
+    order: 4
+    plugins:
+      - id: skill-filesystem
+        name: '@deepseek-ai/dsh-skill-filesystem'
+        config:
+          customSkillDirs:
+            - !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')), 'skills')
+            - /example/user-skills
+          includeDefaultRoots: false
+      - id: tool-skill
+        name: '@deepseek-ai/dsh-tool-skill'
+      - id: example-user-plugin
+        name: '@example/user-plugin'
+        config:
+          enabled: true
+- insert:
+    - id: auriga-shared-skills
+      name: '@deepseek-ai/dsh-skill-filesystem'
+      config:
+        providerName: auriga-shared
+        includeDefaultRoots: false
+        customSkillDirs:
+          - !!js process.getBuiltinModule('node:path').join(process.env.DSH_HOME, 'auriga', 'skills-active', 'current')
+        watch: true
