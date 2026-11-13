@@ -8,6 +8,10 @@ import { createEnterpriseAuth } from '../src/local/enterprise.js';
 import { createEnterpriseEnvironment } from '../src/local/enterprise-environment.js';
 
 async function fixture(t) {
+  let sent;
+  const sending = new Promise((resolve) => {
+    sent = resolve;
+  });
   let snapshot = {
     state: 'authenticated',
     shellEpoch: 'epoch',
@@ -40,6 +44,7 @@ async function fixture(t) {
       assert.equal(options.headers.cookie, undefined);
       assert.equal(options.headers.origin, undefined);
       assert.equal(options.timeoutMs, 60000);
+      sent();
       await pending;
       return {
         statusCode: 500,
@@ -96,11 +101,15 @@ async function fixture(t) {
     outbound,
     base,
     port,
+    sending,
     rotate() {
       token = 'synthetic-v2';
     },
     disable() {
       config = { ...config, allowRawAgentToken: false };
+    },
+    enable() {
+      config = { ...config, allowRawAgentToken: true };
     },
     logout() {
       snapshot = { state: 'signed_out', shellEpoch: 'epoch', revision: 2 };
@@ -140,6 +149,12 @@ test('raw live disable denies existing cap, outbound continues, new caps lack cr
   f.disable();
   assert.equal((await (await f.raw()).json()).error, 'raw_token_disabled');
   assert.equal((await f.outbound()).status, 500);
+  const limited = f.auth.mint('session');
+  f.enable();
+  assert.equal(
+    (await f.raw({ 'X-Dsh-Team-Task-Capability': limited })).status,
+    401,
+  );
 });
 test('forged, conflicting aliases and cross session capabilities fail closed', async (t) => {
   const f = await fixture(t);
@@ -211,6 +226,7 @@ test('late outbound result after logout never reaches skill', async (t) => {
     }),
   );
   const pending = f.outbound();
+  await f.sending;
   f.logout();
   release();
   assert.equal((await pending).status, 401);

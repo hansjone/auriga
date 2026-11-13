@@ -10,6 +10,17 @@ const requestHeaders = new Set([
   'x-lang-id',
   'x-requested-with',
 ]);
+const localErrors = new Set([
+  'caller_unauthenticated',
+  'raw_token_disabled',
+  'invalid_json',
+  'loopback_only',
+  'method_not_allowed',
+  'no_skill_credentials',
+  'invalid_url',
+  'host_not_allowed',
+  'not_ready',
+]);
 const loopback = (/** @type {string} */ address) =>
   ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
 const binding = (/** @type {any} */ s) =>
@@ -45,7 +56,15 @@ const failure = (/** @type {number} */ status, /** @type {string} */ error) =>
  * selected by installation config, never by a caller's headers or DNS override.
  * @param {URL} url @param {any} options */
 export async function enterpriseRequest(url, options) {
-  const address = await lookup(url.hostname, { family: 0 });
+  options.signal.throwIfAborted();
+  /** @type {Awaited<ReturnType<typeof lookup>>} */
+  const address = await new Promise((resolve, reject) => {
+    const abort = () => reject(new Error('request cancelled'));
+    options.signal.addEventListener('abort', abort, { once: true });
+    lookup(url.hostname, { family: 0 })
+      .then(resolve, reject)
+      .finally(() => options.signal.removeEventListener('abort', abort));
+  });
   options.check();
   return new Promise((resolve, reject) => {
     const req = httpsRequest(
@@ -53,10 +72,13 @@ export async function enterpriseRequest(url, options) {
       {
         method: options.method,
         headers: options.headers,
-        lookup: (_hostname, _options, callback) =>
-          callback(null, [
-            { address: address.address, family: address.family },
-          ]),
+        lookup: (_hostname, lookupOptions, callback) => {
+          if (/** @type {any} */ (lookupOptions).all)
+            callback(null, [
+              { address: address.address, family: address.family },
+            ]);
+          else callback(null, address.address, address.family);
+        },
         signal: options.signal,
       },
       (res) => {
@@ -210,16 +232,31 @@ export function createEnterpriseAuth(options) {
           throw failure(403, 'loopback_only');
         if (credentials && !raw()) throw failure(403, 'raw_token_disabled');
         if (!(credentials ? ['GET', 'POST'] : ['POST']).includes(req.method))
-          throw failure(400, 'method_not_allowed');
+          throw failure(405, 'method_not_allowed');
         const input = await body(req);
         const check = authorize(
           req,
           input,
           credentials ? 'credentials' : 'outbound',
         );
-        const material = await options.credentials();
+        let material;
+        try {
+          material = await options.credentials();
+        } catch {
+          check();
+          throw failure(503, 'no_skill_credentials');
+        }
         check();
-        if (!material?.empNo || !material?.token)
+        if (
+          typeof material?.empNo !== 'string' ||
+          !material.empNo ||
+          material.empNo.length > 128 ||
+          typeof material?.token !== 'string' ||
+          !material.token ||
+          material.token.length > 16384 ||
+          (material.updatedAt != null &&
+            !Number.isFinite(Date.parse(material.updatedAt)))
+        )
           throw failure(503, 'no_skill_credentials');
         if (credentials)
           return json(res, 200, {
@@ -311,7 +348,9 @@ export function createEnterpriseAuth(options) {
         }
       } catch (error) {
         const e = /** @type {any} */ (error);
-        const known = e?.status && e?.code;
+        const known =
+          [400, 401, 403, 405, 503].includes(e?.status) &&
+          localErrors.has(e?.code);
         return json(res, known ? e.status : 502, {
           error: known ? e.code : 'upstream_failed',
           message: 'Enterprise request unavailable',
