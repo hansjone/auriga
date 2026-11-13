@@ -1,0 +1,1366 @@
+[
+  {
+    "id": "local-reload-complete",
+    "expected": "accept",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-exact-retry",
+    "expected": "accept",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-generation-rollback",
+    "expected": "version_rollback",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "2",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-keyset-rollback",
+    "expected": "version_rollback",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "11",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-bundle-rollback",
+    "expected": "version_rollback",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "3",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-material-rollback",
+    "expected": "version_rollback",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "4",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-same-revision-different-bytes",
+    "expected": "same_version_conflict",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-unknown-digest",
+    "expected": "invalid_chain",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-corrupt-file",
+    "expected": "invalid_chain",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "corrupt",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-missing-file",
+    "expected": "invalid_chain",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-extra-file",
+    "expected": "invalid_chain",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}",
+        "protocol.json": "extra"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-not-persisted",
+    "expected": "projection_pending",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": false,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-retry-failed",
+    "expected": "projection_pending",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": false,
+      "failed": true
+    }
+  },
+  {
+    "id": "local-confirm-unloaded",
+    "expected": "projection_pending",
+    "input": {
+      "request": {
+        "operation": "confirm",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-confirm-loaded",
+    "expected": "accept",
+    "input": {
+      "request": {
+        "operation": "confirm",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": true,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-restart-exact-generation",
+    "expected": "accept",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "persisted": true,
+      "loaded": true,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-stale-published-selector",
+    "expected": "invalid_chain",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0001",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "3",
+          "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "2",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "previous": null,
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  },
+  {
+    "id": "local-same-keyset-bundle-new-material",
+    "expected": "accept",
+    "input": {
+      "request": {
+        "operation": "reload",
+        "selector": {
+          "tenant_id": "synthetic-tenant",
+          "realm": "1",
+          "installation_id": "synthetic-projector",
+          "component": "network",
+          "nonce": "synthetic-projection-nonce-0002",
+          "generation": "1",
+          "keyset_version": "10",
+          "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bundle_version": "2",
+          "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "material_revision": "4",
+          "manifest_digest": "sha256:bb61a959ac20fa346dd227d0a917a5bb911b31766f70e22522474cddf99fcd1b"
+        }
+      },
+      "manifest": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0002",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "4",
+        "files": [
+          {
+            "name": "bundle.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          },
+          {
+            "name": "publication.json",
+            "size": 18,
+            "sha256": "sha256:a8198524f58e72b56283ab71ebddada22840f108b46ef7165bb3fca9919c5558"
+          }
+        ]
+      },
+      "files": {
+        "bundle.json": "{\"synthetic\":true}",
+        "publication.json": "{\"synthetic\":true}"
+      },
+      "published": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0002",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "4",
+        "manifest_digest": "sha256:bb61a959ac20fa346dd227d0a917a5bb911b31766f70e22522474cddf99fcd1b"
+      },
+      "previous": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "installation_id": "synthetic-projector",
+        "component": "network",
+        "nonce": "synthetic-projection-nonce-0001",
+        "generation": "1",
+        "keyset_version": "10",
+        "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bundle_version": "2",
+        "bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "material_revision": "3",
+        "manifest_digest": "sha256:63fbb19408c3bfae55bf6ebc4dea79db2ddbb887acda630f36b01ab7e0e55fd4"
+      },
+      "persisted": true,
+      "loaded": false,
+      "failed": false
+    }
+  }
+]

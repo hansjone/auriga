@@ -1357,6 +1357,9 @@
         },
         "identity_auth": {
           "$ref": "#/$defs/Signature"
+        },
+        "local_selector": {
+          "$ref": "#/$defs/LocalProjectionSelector"
         }
       },
       "required": [
@@ -2021,6 +2024,234 @@
         "authority_id",
         "authority_digest",
         "first_version"
+      ],
+      "additionalProperties": false
+    },
+    "LocalProjectionFile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^(publication\\.json|bundle\\.json|protocol\\.json|leaf-[0-9]{3}\\.(cert|key)\\.pem)$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        }
+      },
+      "required": [
+        "name",
+        "sha256",
+        "size"
+      ],
+      "additionalProperties": false
+    },
+    "LocalProjectionManifest": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "component": {
+          "type": "string",
+          "enum": [
+            "network",
+            "edge",
+            "broker"
+          ]
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "publication_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "bundle_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "material_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/LocalProjectionFile"
+          }
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "installation_id",
+        "component",
+        "nonce",
+        "generation",
+        "keyset_version",
+        "publication_digest",
+        "bundle_version",
+        "bundle_digest",
+        "material_revision",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "LocalProjectionSelector": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "component": {
+          "type": "string",
+          "enum": [
+            "network",
+            "edge",
+            "broker"
+          ]
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "publication_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "bundle_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "material_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "installation_id",
+        "component",
+        "nonce",
+        "generation",
+        "keyset_version",
+        "publication_digest",
+        "bundle_version",
+        "bundle_digest",
+        "material_revision",
+        "manifest_digest"
+      ],
+      "additionalProperties": false
+    },
+    "LocalProjectionRequest": {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "reload",
+            "confirm"
+          ]
+        },
+        "selector": {
+          "$ref": "#/$defs/LocalProjectionSelector"
+        }
+      },
+      "required": [
+        "operation",
+        "selector"
+      ],
+      "additionalProperties": false
+    },
+    "LocalProjectionResponse": {
+      "type": "object",
+      "properties": {
+        "selector": {
+          "$ref": "#/$defs/LocalProjectionSelector"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "loaded",
+            "handshake_verified",
+            "failed"
+          ]
+        },
+        "failure_code": {
+          "type": "string",
+          "enum": [
+            "none",
+            "version_rollback",
+            "same_version_conflict",
+            "invalid_chain",
+            "projection_pending"
+          ]
+        }
+      },
+      "required": [
+        "selector",
+        "phase",
+        "failure_code"
       ],
       "additionalProperties": false
     }

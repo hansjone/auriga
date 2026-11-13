@@ -439,3 +439,13 @@ components:
       $ref: ../network/auto-renewal-v2.schema.json#/$defs/PrivateKeyAad
     EncryptedPrivateKey:
       $ref: ../network/auto-renewal-v2.schema.json#/$defs/EncryptedPrivateKey
+    LocalProjectionFile:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/LocalProjectionFile
+    LocalProjectionManifest:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/LocalProjectionManifest
+    LocalProjectionSelector:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/LocalProjectionSelector
+    LocalProjectionRequest:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/LocalProjectionRequest
+    LocalProjectionResponse:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/LocalProjectionResponse

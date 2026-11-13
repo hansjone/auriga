@@ -86,3 +86,19 @@ capabilities允许非空子集；每个对象/转换按其实际能力校验，�
 OpenAPI生成接口/模型只表达数据和权限，不承载mTLS握手实现。生成器在既有其他API的mutualTLS类型上有不支持提示；禁止将生成存根当作已实现mTLS。N/I负责在固定安装网关/监听器强制验证证书、安装身份与组件scope，C再次核材料权限；公有bootstrap运输只提供根链及应用层密封对象，不因存根缺少安全定义而输出明文秘密。
 
 共享向量输入、错误优先级、三语言adapter边界与可复现命令见[向量规范](msgnet-v2-vectors.md)。Java/Go的契约测试会传入同一JSON并逐例比较参考adapter结果，另独立验签与验X.509链；这不替代C/N/P各自生产验证器的同数据测试。上线门禁必须由实现线接生产adapter重跑全部三组，不得把Node参考判定器引入生产。
+
+## 本地投影协议（K2 增补）
+
+N 的 projector、network reader、broker 同 UID 监督器和 I 的 edge reader 共用 LocalProjectionManifest / LocalProjectionSelector / LocalProjectionRequest / LocalProjectionResponse 生成模型。D 为每个安装身份与组件配置独立卷根和 Unix stream socket，固定卷内 `selector.json`、`generations/` 与 `reload.sock`。这些位置来自受控装配，消息字段只携带标识符。Unix peer credentials 必须匹配装配的 projector/reader UID，卷权限沿上文规定。
+
+selector.json 为无 BOM、无换行的 UTF-8 JCS(LocalProjectionSelector)，最大 16384 字节。manifest.json 为 UTF-8 JCS(LocalProjectionManifest)，最大 65536 字节。代目录固定为 `generations/<manifest_digest去掉sha256:前缀>/`。读取时固定根目录、拒绝符号链接与非普通文件，每个文件限制 1048576 字节，整代至多 128 个数据文件。目录内仅有 manifest.json 和 manifest.files 列出的文件。files 按 name 的 ASCII 顺序排列且名称唯一，长度和 sha256 分别核原始文件字节数和 SHA256 原始字节。manifest_digest 是 SHA256(JCS(完整 manifest))。selector 除 manifest_digest 外逐字段等于 manifest 的绑定字段。
+
+`publication.json` 是完整 Publication 的 JCS，`publication_digest` 保持现有完整 SignedKeysetV2 摘要语义。`bundle.json` 是完整 SignedTransportTrustBundle 的 JCS，bundle_digest 摘要完整受签 bundle。两文件必须存在，分别核根链、安装 scope 和本地最新控制。network 有 protocol 时额外包含 `protocol.json`（ProtocolMaterial 的 JCS）。叶子按 ProjectionMaterial.leaves 原数组顺序编码为 leaf-000.cert.pem / leaf-000.key.pem 至 leaf-125，逐项核证书、对应私钥公钥匹配、SAN/EKU/组件/安装授权和 bundle CA。PEM 为规范 LF、64 列 base64、尾换行，无附加块。不得出现未授权用途材料。manifest 的文件摘要覆盖完整实际材料，签名清单摘要、bundle 摘要各保留原语义。
+
+本地 material_revision 为每安装身份/组件独立持久单调 uint64，业务清单和 bundle 未变而叶子替换也必须增加。任一材料字节、绑定字段变化都创建新代。发布前持久保存 revision、ProjectionMaterial 绑定的 nonce、完整 manifest 和 selector，随后 fsync 文件、代目录、原子替换 selector 并 fsync 父目录。重启从已持久事务恢复，同代精确重试复用 nonce/字节；新代使用新材料请求的随机 nonce，不能以旧 nonce 关联新叶子。失败请求的重试保持相同代，不以新 revision 掩盖失败。
+
+Unix stream 每条消息为 4 字节无符号大端长度加 UTF-8 JCS JSON，长度 1..16384，长度只计 JSON。每连接一请求一响应，完整读写支持分片，拒绝截断、超长、重复键、未知字段、非规范编码与尾随字节，5 秒读写截止后关闭。请求 operation 固定 reload 或 confirm。reload 要求 selector 精确匹配磁盘已验证发布值，先校验完整文件集再原子切换活动句柄。confirm 查询该精确代已持久加载/握手状态，不能触发加载其他代。响应逐字段回显 selector，phase 为 loaded / handshake_verified / failed，成功 failure_code=none，失败必须为枚举中的非 none。真实握手必须实际使用这代叶子及对端验证链才能确认 handshake_verified。
+
+每个 reader 持久保存最高 generation/keyset_version、bundle_version、material_revision 与该 revision 的 selector。低代际、同代际低 keyset_version、低 bundle_version 或低 material_revision 拒绝 version_rollback。同 revision 不同 selector 拒绝 same_version_conflict，陌生 manifest 摘要/字节拒绝 invalid_chain，尚未落盘/加载/握手返回 projection_pending。同代精确重试返回持久状态，失败不覆盖最近成功状态，按 1..60 秒退避持续重试，5 秒发现和60秒退流量沿现有规则。回执只确认精确 selector，不能用更早一次的成功解锁新代。
+
+N 从匹配的本地响应生成发 C 的签名 ProjectionReceipt，附 local_selector，nonce、generation、keyset_version、publication_digest、bundle_version、bundle_digest 与其逐字段一致。C 将 nonce 对应的已授权 ProjectionMaterial、完整叶子集与 local_selector 绑定持久化，同一 nonce 的其他 selector 拒绝。仅在同代 loaded 后接受 handshake_verified，同字节回执可幂等重试。I 采用相同生成模型、peer/文件校验与状态机消费 edge 卷。D 按固定布局配置 UID/卷/socket，并保留事务文件和 reader 账本跨重启。上述局部模型供本地协议消费，公有 bootstrap 仍遵循原密封材料流程。

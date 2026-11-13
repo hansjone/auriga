@@ -10,7 +10,10 @@ import {
   evaluateBoundary,
 } from '../network/fixtures/msgnet-v2-boundary-oracle.mjs';
 import YAML from '../../services/contracts/node_modules/yaml/dist/index.js';
-import { checkMutations } from '../network/fixtures/check-msgnet-v2-mutations.mjs';
+import {
+  checkMutations,
+  discoverPredicates,
+} from '../network/fixtures/check-msgnet-v2-mutations.mjs';
 const fixture = JSON.parse(
   readFileSync(
     new URL(
@@ -138,4 +141,55 @@ test('old/new internal CA leaf chains and foreign CA refusal', () => {
     assert.equal(chain.leaf.checkHost('foreign.example.com'), undefined);
   }
   assert.equal(chains[0].leaf.verify(chains[1].ca.publicKey), false);
+});
+
+// N/I/D 同读本地投影向量，实现线须换成其生产 reader adapter。
+const localVectors = JSON.parse(
+  readFileSync(
+    new URL(
+      '../network/fixtures/msgnet-local-projection-vectors.json',
+      import.meta.url,
+    ),
+  ),
+);
+const { evaluateLocalProjection } =
+  await import('../network/fixtures/msgnet-local-projection-oracle.mjs');
+for (const v of localVectors)
+  test(v.id, () => {
+    for (const [name, value] of [
+      ['LocalProjectionRequest', v.input.request],
+      ['LocalProjectionManifest', v.input.manifest],
+    ]) {
+      const validate = ajv.getSchema(schema.$id + '#/$defs/' + name);
+      assert.ok(validate(value), JSON.stringify(validate.errors));
+    }
+    assert.equal(evaluateLocalProjection(v), v.expected);
+  });
+test('local IPC rejects path, exec and unknown operations', () => {
+  const valid = localVectors[0].input.request;
+  const validate = ajv.getSchema(schema.$id + '#/$defs/LocalProjectionRequest');
+  for (const extra of [
+    { path: '../arbitrary' },
+    { exec: 'arbitrary' },
+    { operation: 'restart' },
+  ])
+    assert.equal(validate({ ...valid, ...extra }), false);
+});
+test('plugin runtime schema is fresh and preserves every source constraint', async () => {
+  const { schema: runtimeSchema } =
+    await import('../../clients/dsh-plugin/src/generated/network/auto-renewal-v2-schema.js');
+  assert.deepEqual(runtimeSchema, schema);
+});
+
+test('comparison discovery includes callbacks and skips literals and comments', () => {
+  const source =
+    "const selected = items.some(x => x.purpose === purpose); const end = now <= expiry; // a > b\nconst text = 'x !== y';";
+  const targets = discoverPredicates(source);
+  assert.deepEqual(
+    targets.map((t) => [source.slice(t.start, t.end), t.replacement]),
+    [
+      ['===', '!=='],
+      ['<=', '<'],
+    ],
+  );
 });

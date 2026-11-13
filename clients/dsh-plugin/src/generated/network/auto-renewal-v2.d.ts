@@ -634,6 +634,25 @@ export interface ProjectionReceipt {
   phase: 'persisted' | 'loaded' | 'handshake_verified' | 'failed';
   observed_at: string;
   identity_auth: Signature;
+  local_selector?: LocalProjectionSelector;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "LocalProjectionSelector".
+ */
+export interface LocalProjectionSelector {
+  tenant_id: string;
+  realm: string;
+  installation_id: string;
+  component: 'network' | 'edge' | 'broker';
+  nonce: string;
+  generation: string;
+  keyset_version: string;
+  publication_digest: string;
+  bundle_version: string;
+  bundle_digest: string;
+  material_revision: string;
+  manifest_digest: string;
 }
 /**
  * This interface was referenced by `AurigaV2`'s JSON-Schema
@@ -809,4 +828,57 @@ export interface EncryptedPrivateKey {
   nonce: string;
   aad: PrivateKeyAad;
   ciphertext: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "LocalProjectionFile".
+ */
+export interface LocalProjectionFile {
+  name: string;
+  sha256: string;
+  size: number;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "LocalProjectionManifest".
+ */
+export interface LocalProjectionManifest {
+  tenant_id: string;
+  realm: string;
+  installation_id: string;
+  component: 'network' | 'edge' | 'broker';
+  nonce: string;
+  generation: string;
+  keyset_version: string;
+  publication_digest: string;
+  bundle_version: string;
+  bundle_digest: string;
+  material_revision: string;
+  /**
+   * @minItems 2
+   * @maxItems 128
+   */
+  files: [LocalProjectionFile, LocalProjectionFile, ...LocalProjectionFile[]];
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "LocalProjectionRequest".
+ */
+export interface LocalProjectionRequest {
+  operation: 'reload' | 'confirm';
+  selector: LocalProjectionSelector;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "LocalProjectionResponse".
+ */
+export interface LocalProjectionResponse {
+  selector: LocalProjectionSelector;
+  phase: 'loaded' | 'handshake_verified' | 'failed';
+  failure_code:
+    | 'none'
+    | 'version_rollback'
+    | 'same_version_conflict'
+    | 'invalid_chain'
+    | 'projection_pending';
 }

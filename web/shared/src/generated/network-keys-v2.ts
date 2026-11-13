@@ -581,6 +581,7 @@ export interface components {
       /** Format: date-time */
       observed_at: string;
       identity_auth: components['schemas']['Signature'];
+      local_selector?: components['schemas']['LocalProjectionSelector'];
     };
     MigrationPermit: {
       /** @constant */
@@ -735,6 +736,58 @@ export interface components {
       nonce: string;
       aad: components['schemas']['PrivateKeyAad'];
       ciphertext: string;
+    };
+    LocalProjectionFile: {
+      name: string;
+      sha256: string;
+      size: number;
+    };
+    LocalProjectionManifest: {
+      tenant_id: string;
+      realm: string;
+      installation_id: string;
+      /** @enum {string} */
+      component: 'network' | 'edge' | 'broker';
+      nonce: string;
+      generation: string;
+      keyset_version: string;
+      publication_digest: string;
+      bundle_version: string;
+      bundle_digest: string;
+      material_revision: string;
+      files: components['schemas']['LocalProjectionFile'][];
+    };
+    LocalProjectionSelector: {
+      tenant_id: string;
+      realm: string;
+      installation_id: string;
+      /** @enum {string} */
+      component: 'network' | 'edge' | 'broker';
+      nonce: string;
+      generation: string;
+      keyset_version: string;
+      publication_digest: string;
+      bundle_version: string;
+      bundle_digest: string;
+      material_revision: string;
+      manifest_digest: string;
+    };
+    LocalProjectionRequest: {
+      /** @enum {string} */
+      operation: 'reload' | 'confirm';
+      selector: components['schemas']['LocalProjectionSelector'];
+    };
+    LocalProjectionResponse: {
+      selector: components['schemas']['LocalProjectionSelector'];
+      /** @enum {string} */
+      phase: 'loaded' | 'handshake_verified' | 'failed';
+      /** @enum {string} */
+      failure_code:
+        | 'none'
+        | 'version_rollback'
+        | 'same_version_conflict'
+        | 'invalid_chain'
+        | 'projection_pending';
     };
   };
   responses: never;
