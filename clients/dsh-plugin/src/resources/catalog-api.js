@@ -21,6 +21,8 @@ export function catalogApi({ runtime, current, fetchImpl = fetch }) {
   const who = catalogIdentity(runtime),
     origin = runtime.config.platformOrigin;
   function check() {
+    if (runtime.vault?.snapshot?.().resourceIsolationPending)
+      refuse('resource.storage_unavailable');
     if (
       current() !== runtime ||
       canonicalize(catalogIdentity(runtime)) !== canonicalize(who)

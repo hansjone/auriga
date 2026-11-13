@@ -145,3 +145,82 @@ it('discards an old identity response after the panel context changes', async ()
   );
   expect(panel.shadowRoot!.textContent).not.toContain('old-identity');
 });
+it('shows readable Chinese guardian and file-occupation hints, without replacement question marks', async () => {
+  const fetch = vi.fn(async (path: string) =>
+    Response.json({
+      items: [],
+      ...(path === 'catalog/installations'
+        ? { sharedAvailable: false, pendingRestart: true }
+        : {}),
+    }),
+  );
+  const panel = document.createElement('auriga-test-skills') as AurigaTeamPanel;
+  panel.context = { mode: 'connect', protocol: 1, locale: 'zh-CN', fetch };
+  document.body.append(panel);
+  await settle();
+  click(panel, '技能');
+  await vi.waitFor(() =>
+    expect(panel.shadowRoot!.textContent).toContain('共享安装暂不可用'),
+  );
+  expect(panel.shadowRoot!.textContent).toContain('共享目录正在被占用');
+  expect(panel.shadowRoot!.textContent).not.toMatch(/\?{3,}/);
+});
+it('waits for explicit collision confirmation before retrying an exact install', async () => {
+  const actions: Record<string, unknown>[] = [];
+  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === 'catalog/actions') {
+      const input = JSON.parse(String(init?.body));
+      actions.push(input);
+      return Response.json(
+        input.confirmation
+          ? { accepted: true, installation: row }
+          : {
+              confirmationRequired: true,
+              confirmation: 'owner-bound-proof',
+              conflicts: [{ provider: 'private' }],
+            },
+      );
+    }
+    if (path.includes('/versions?'))
+      return Response.json({
+        items: [
+          {
+            id: versionId,
+            packageId,
+            kind: 'skill',
+            state: 'published',
+            version: '1.0.0',
+            manifest: { description: 'Example' },
+          },
+        ],
+      });
+    return Response.json({
+      items:
+        path === 'catalog/packages?limit=50'
+          ? [{ id: packageId, kind: 'skill', name: 'example' }]
+          : [],
+    });
+  });
+  const panel = document.createElement('auriga-test-skills') as AurigaTeamPanel;
+  panel.context = { mode: 'connect', protocol: 1, locale: 'zh-CN', fetch };
+  document.body.append(panel);
+  await settle();
+  click(panel, '技能');
+  await vi.waitFor(() =>
+    expect(panel.shadowRoot!.textContent).toContain('选择版本／更新'),
+  );
+  click(panel, '选择版本／更新');
+  await vi.waitFor(() =>
+    expect(panel.shadowRoot!.textContent).toContain('安装此精确版本'),
+  );
+  click(panel, '安装此精确版本');
+  await vi.waitFor(() =>
+    expect(panel.shadowRoot!.textContent).toContain('发现同名私有或宿主技能'),
+  );
+  expect(actions).toHaveLength(1);
+  expect(panel.shadowRoot!.textContent).not.toContain('已接受请求');
+  click(panel, '仍然安装此精确版本');
+  await vi.waitFor(() => expect(actions).toHaveLength(2));
+  expect(actions[1].confirmation).toBe('owner-bound-proof');
+  expect(actions[1].key).toBe(actions[0].key);
+});

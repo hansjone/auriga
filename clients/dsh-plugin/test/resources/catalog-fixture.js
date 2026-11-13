@@ -1,3 +1,4 @@
+import { clockBootId } from '../../src/resources/host-lock.js';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import {
   mkdtempSync,
@@ -11,7 +12,7 @@ import { join } from 'node:path';
 import { canonicalize } from '../../src/resources/json.js';
 import { packSkill } from '../../src/resources/skill-package.js';
 import { sha, desktopSkills } from '../../src/resources/desktop-skills.js';
-export function catalogFixture(t, temporaryRoot = tmpdir()) {
+export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
   // Windows runner TEMP can contain an 8.3 user-directory alias. Production
   // deliberately rejects aliases, so use the physical spelling in the fixture.
   const home = realpathSync.native(
@@ -23,10 +24,10 @@ export function catalogFixture(t, temporaryRoot = tmpdir()) {
     ownerId: '019a0000-0000-7000-8000-000000000012',
     hostId: '019a0000-0000-7000-8000-000000000011',
   };
-  const packageId = '019a0000-0000-7000-8000-000000000002',
-    versionId = '019a0000-0000-7000-8000-000000000004';
-  const release = generateKeyPairSync('ed25519'),
-    revocation = generateKeyPairSync('ed25519');
+  const packageId = config.packageId ?? '019a0000-0000-7000-8000-000000000002',
+    versionId = config.versionId ?? '019a0000-0000-7000-8000-000000000004';
+  const release = config.release ?? generateKeyPairSync('ed25519'),
+    revocation = config.revocation ?? generateKeyPairSync('ed25519');
   const roots = async () => ({
     releaseKeys: new Map([['release-test', release.publicKey]]),
     revocationKeys: new Map([['revoke-test', revocation.publicKey]]),
@@ -43,20 +44,23 @@ export function catalogFixture(t, temporaryRoot = tmpdir()) {
       ).toString('base64url'),
     },
   });
-  const now = new Date().toISOString(),
-    issuedAt = new Date(Date.now() - 1000).toISOString(),
-    notAfter = new Date(Date.now() + 7200000).toISOString(),
-    expiresAt = new Date(Date.now() + 3600000).toISOString();
+  const sampleNow = config.nowMillis ?? Date.now();
+  const now = new Date(sampleNow).toISOString(),
+    issuedAt = new Date(sampleNow - 1000).toISOString(),
+    notAfter = new Date(sampleNow + 7200000).toISOString(),
+    expiresAt = new Date(sampleNow + 3600000).toISOString();
   const source =
-    '---\nname: example\ndescription: "Public fixture"\n---\nVerified body.\n';
+    '---\nname: ' +
+    (config.name ?? 'example') +
+    '\ndescription: "Public fixture"\n---\nVerified body.\n';
   const archive = packSkill(
-    { 'SKILL.md': source },
-    { name: 'example', description: 'Public fixture' },
+    { 'SKILL.md': source, ...config.files },
+    { name: config.name ?? 'example', description: 'Public fixture' },
   );
   const manifest = {
     schemaVersion: 1,
     kind: 'skill',
-    name: 'example',
+    name: config.name ?? 'example',
     version: '1.0.0',
     description: 'Public fixture',
     author: { displayName: 'Example' },
@@ -101,7 +105,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir()) {
       statement: {
         purpose: 'resource',
         kind: 'skill',
-        name: 'example',
+        name: config.name ?? 'example',
         version: '1.0.0',
         manifestDigest: sha(raw),
         artifactDigests: [sha(archive)],
@@ -189,6 +193,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir()) {
         kind: 'skill',
         state: 'published',
         digest: id.manifestDigest,
+        manifest,
         version: '1.0.0',
       });
     if (path === base + '/member/installations' && options.method === 'POST') {
@@ -259,7 +264,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir()) {
       newSessionRequired: true,
     },
     clock: {
-      bootId: '019a0000-0000-7000-8000-000000000014',
+      bootId: clockBootId('2026-11-12T00:00:00.000Z'),
       maxObservedTime: now,
       lastTrustedTime: now,
       lastTrustedTimeSource: 'authenticated_server',

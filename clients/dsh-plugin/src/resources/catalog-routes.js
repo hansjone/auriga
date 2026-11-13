@@ -194,7 +194,21 @@ export function catalogRoutes(options) {
       let result;
       if (
         path === 'actions' &&
-        exact(input, ['packageId', 'versionId', 'action', 'revision', 'key'])
+        (exact(input, [
+          'packageId',
+          'versionId',
+          'action',
+          'revision',
+          'key',
+        ]) ||
+          exact(input, [
+            'packageId',
+            'versionId',
+            'action',
+            'revision',
+            'key',
+            'confirmation',
+          ]))
       )
         result = await s.apply(input);
       else if (path === 'observe' && exact(input, ['packageId', 'preset']))

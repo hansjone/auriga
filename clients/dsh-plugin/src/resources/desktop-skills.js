@@ -25,6 +25,7 @@ import {
   durableJson,
   durableRecords,
   hostTime,
+  clockBootId,
 } from './host-lock.js';
 import { requireSchema, schemaValid } from './schema.js';
 import { parseStrictJson, canonicalize } from './json.js';
@@ -78,6 +79,7 @@ export function desktopSkills({ home, time = hostTime }) {
       stamp = time(),
       wall = Date.now();
     return (
+      clockBootId(stamp.bootId) === c.bootId &&
       !state.pendingIsolation &&
       same(who, g) &&
       g.state === 'active' &&
@@ -123,12 +125,14 @@ export function desktopSkills({ home, time = hostTime }) {
     mkdirSync(directory, { recursive: true });
     commitMoves([[file, join(directory, 'interrupted-file')]]);
   }
-  /** @param {any} who @param {Buffer} bytes */
-  function cache(who, bytes) {
+  /** @param {any} who @param {Buffer} bytes @param {[string,string][]} [moves] */
+  function cache(who, bytes, moves) {
     const digest = sha(bytes),
       dir = join(root(who), 'cache', digest.slice(7));
     assertLocalPath(dir);
     mkdirSync(dir, { recursive: true });
+    if (moves?.some(([, destination]) => destination === join(dir, 'bytes')))
+      return;
     for (const name of readdirSync(dir))
       if (/^bytes\.[a-f0-9-]{36}\.tmp$/.test(name))
         orphan(who, join(dir, name));
@@ -151,7 +155,8 @@ export function desktopSkills({ home, time = hostTime }) {
     } finally {
       closeSync(fd);
     }
-    commitMoves([[temporary, target]]);
+    if (moves) moves.push([temporary, target]);
+    else commitMoves([[temporary, target]]);
   }
   /** @param {any} who @param {{check:()=>void}} lock */
   function recoverRecordTemps(who, lock) {
@@ -208,7 +213,9 @@ export function desktopSkills({ home, time = hostTime }) {
     for (const row of rows.filter(
       (r) =>
         desiredState(r.resource) === 'ENABLED' &&
-        !['removed', 'disabled'].includes(r.state),
+        ['applying', 'applied', 'pending_restart', 'overridden'].includes(
+          r.state,
+        ),
     )) {
       requireInstallation(row);
       const ref = row.resource,
@@ -223,8 +230,10 @@ export function desktopSkills({ home, time = hostTime }) {
       names.add(manifest.name);
       for (const [path, bytes] of Object.entries(
         unpackSkill(cached(who, manifest.artifacts[0].digest), manifest),
-      ))
+      )) {
+        if (/~[0-9]/i.test(path)) refuse('common.validation_failed');
         files.set(manifest.name + '/' + path, bytes);
+      }
     }
     return files;
   }
@@ -309,7 +318,9 @@ export function desktopSkills({ home, time = hostTime }) {
           value.installations.some(
             (/** @type {any} */ row) =>
               desiredState(row.resource) === 'ENABLED' &&
-              !['removed', 'disabled'].includes(row.state),
+              ['applying', 'applied', 'pending_restart', 'overridden'].includes(
+                row.state,
+              ),
           ),
       )
       .sort((a, b) => b.revision - a.revision);
@@ -325,6 +336,9 @@ export function desktopSkills({ home, time = hostTime }) {
     if (!existsSync(receipts)) return;
     const entries = readdirSync(receipts);
     if (entries.length > 8192) refuse('resource.storage_unavailable');
+    value.processedDisableReceiptIds = value.processedDisableReceiptIds.filter(
+      (/** @type {string} */ id) => entries.includes(id + '.json'),
+    );
     for (const name of entries) {
       if (!/^[a-f0-9-]{36}\.json$/.test(name))
         refuse('resource.storage_unavailable');
@@ -361,9 +375,31 @@ export function desktopSkills({ home, time = hostTime }) {
       const path = resolve(home, receipt.quarantinePath);
       assertLocalPath(path);
       if (existsSync(path)) {
-        checkTree(path, receiptTree(who, receipt, value));
-        lock.check();
-        rmSync(path, { recursive: true });
+        try {
+          checkTree(path, receiptTree(who, receipt, value));
+          lock.check();
+          rmSync(path, { recursive: true });
+        } catch (error) {
+          if (
+            ![
+              'resource.state_conflict',
+              'resource.digest_mismatch',
+              'ENOENT',
+            ].includes(/** @type {any} */ (error).code)
+          )
+            throw error;
+          const parent = join(root(who), 'staging', receipt.transactionId),
+            conflict = join(parent, 'conflict-view');
+          assertLocalPath(conflict);
+          mkdirSync(parent, { recursive: true });
+          lock.check();
+          commitMoves([[path, conflict]]);
+          durableJson(join(parent, 'conflict.json'), {
+            receiptId: receipt.receiptId,
+            transactionId: receipt.transactionId,
+            source: receipt.quarantinePath,
+          });
+        }
       }
       const transactions = join(root(who), 'transactions');
       for (const name of readdirSync(transactions)) {
@@ -388,13 +424,18 @@ export function desktopSkills({ home, time = hostTime }) {
         value.installations = value.installations.map(
           (/** @type {any} */ r) => ({
             ...r,
-            state: /** @type {Record<string,string>} */ ({
-              revoked: 'revoked',
-              lease_expired: 'expired',
-              identity_changed: 'superseded',
-              clock_rollback: 'failed',
-              verification_failed: 'failed',
-            })[receipt.reason],
+            state:
+              desiredState(r.resource) === 'REMOVED'
+                ? 'removed'
+                : desiredState(r.resource) === 'DISABLED'
+                  ? 'disabled'
+                  : /** @type {Record<string,string>} */ ({
+                      revoked: 'revoked',
+                      lease_expired: 'expired',
+                      identity_changed: 'superseded',
+                      clock_rollback: 'failed',
+                      verification_failed: 'failed',
+                    })[receipt.reason],
           }),
         );
       save(who, value, lock);
@@ -444,7 +485,168 @@ export function desktopSkills({ home, time = hostTime }) {
       durableJson(join(directory, name), { ...tx, phase: 'committed' });
     }
   }
+  /** Collect only proven unmodified owned backups after a committed transaction. Conflicts are retained.
+   * @param {any} who @param {any} keep @param {{check:()=>void}} lock */
+  function collectViews(who, keep, lock) {
+    const dir = root(who),
+      cacheDir = join(dir, 'cache'),
+      history = [];
+    for (const name of readdirSync(cacheDir)) {
+      if (!/^[a-f0-9]{64}$/.test(name)) continue;
+      const p = join(cacheDir, name, 'bytes');
+      assertLocalPath(p);
+      if (!existsSync(p) || lstatSync(p).size > 2097152) continue;
+      const bytes = readFileSync(p);
+      if (bytes[0] !== 123 || sha(bytes) !== 'sha256:' + name) continue;
+      let v;
+      try {
+        v = parseStrictJson(bytes, true);
+      } catch {
+        continue;
+      }
+      if (schemaValid('unified', 'UnifiedLedgerFile', v) && same(who, v))
+        history.push(v);
+    }
+    for (const name of readdirSync(join(dir, 'transactions'))) {
+      const tx = record(
+        join(dir, 'transactions', name),
+        'UnifiedTransactionFile',
+      );
+      if (
+        tx.phase !== 'committed' ||
+        !['install', 'remove'].includes(tx.operation) ||
+        tx.transactionId === keep.transactionId
+      )
+        continue;
+      const backup = join(
+        dir,
+        'staging',
+        tx.operation === 'install'
+          ? previousId(tx.transactionId)
+          : tx.transactionId,
+      );
+      assertLocalPath(backup);
+      if (!existsSync(backup)) continue;
+      const prior = history.find(
+        (v) =>
+          v.revision ===
+          tx.expectedLedgerRevision - (tx.operation === 'install' ? 1 : 0),
+      );
+      if (!prior) continue;
+      let unchanged = true;
+      try {
+        checkTree(backup, tree(who, prior.installations));
+      } catch {
+        unchanged = false;
+      }
+      lock.check();
+      if (unchanged) rmSync(backup, { recursive: true });
+      else {
+        const parent = join(dir, 'staging', randomUUID());
+        mkdirSync(parent);
+        commitMoves([[backup, join(parent, 'conflict-view')]]);
+        durableJson(join(parent, 'conflict.json'), {
+          transactionId: tx.transactionId,
+          reason: 'modified-backup',
+        });
+      }
+    }
+  }
   return {
+    /** @param {any} who @param {Buffer[]} lists */
+    acceptRevocations(who, lists) {
+      return locked((lock) => {
+        const directory = join(root(who), 'cache');
+        assertLocalPath(directory);
+        mkdirSync(directory, { recursive: true });
+        let greatest;
+        const names = readdirSync(directory);
+        if (names.length > 8192) refuse('resource.storage_unavailable');
+        for (const name of names) {
+          if (!/^[a-f0-9]{64}$/.test(name)) continue;
+          const path = join(directory, name, 'bytes');
+          assertLocalPath(path);
+          if (!existsSync(path) || lstatSync(path).size > 2097152) continue;
+          const bytes = readFileSync(path);
+          if (sha(bytes) !== 'sha256:' + name || bytes[0] !== 123) continue;
+          let list;
+          try {
+            list = parseStrictJson(bytes, true);
+          } catch {
+            continue;
+          }
+          if (
+            schemaValid('signatures', 'RevocationList', list) &&
+            list.tenantId === who.tenantId &&
+            (!greatest || list.revision > greatest.revision)
+          )
+            greatest = list;
+        }
+        /** @type {[string,string][]} */ const moves = [];
+        for (const bytes of lists) {
+          const list = parseStrictJson(bytes, true);
+          if (
+            !schemaValid('signatures', 'RevocationList', list) ||
+            list.tenantId !== who.tenantId
+          )
+            refuse('resource.signature_invalid');
+          if (
+            greatest &&
+            (list.revision < greatest.revision ||
+              (list.revision === greatest.revision &&
+                canonicalize(list) !== canonicalize(greatest)))
+          )
+            refuse('resource.signature_invalid');
+          greatest = list;
+          lock.check();
+          cache(who, bytes, moves);
+        }
+        lock.check();
+        commitMoves(moves);
+      });
+    },
+    /** Identity publication must not trust E's new identity while old unowned bytes remain.
+     * @param {any} who */
+    assertIdentityView(who) {
+      return locked(() => {
+        const state = record(
+          join(guardian, 'state.json'),
+          'UnifiedGuardianStateFile',
+        );
+        if (
+          !same(who, state.guardian) ||
+          !existsSync(active) ||
+          !readdirSync(active).length
+        )
+          return;
+        const value = ledger(who);
+        if (!value || !permitted(who, value, state))
+          refuse('resource.storage_unavailable');
+        checkTree(active, tree(who, value.installations));
+        for (const row of value.installations.filter(
+          (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
+        )) {
+          if (!['applied', 'pending_restart'].includes(row.state))
+            refuse('resource.storage_unavailable');
+          const receipt = record(
+            join(
+              root(who),
+              'receipts',
+              row.resource.identity.packageId,
+              row.resource.identity.versionId + '.json',
+            ),
+            'UnifiedReceiptFile',
+          );
+          if (
+            receipt.recordType !== 'installation' ||
+            !same(who, receipt) ||
+            canonicalize(receipt.resource) !== canonicalize(row.resource) ||
+            receipt.installationRevision !== row.installationRevision
+          )
+            refuse('resource.storage_unavailable');
+        }
+      });
+    },
     available() {
       return locked(() => {
         record(join(guardian, 'state.json'), 'UnifiedGuardianStateFile');
@@ -500,6 +702,14 @@ export function desktopSkills({ home, time = hostTime }) {
           )
         )
           return true;
+        if (
+          value.installations.some(
+            (/** @type {any} */ r) =>
+              desiredState(r.resource) === 'ENABLED' &&
+              ['expired', 'revoked', 'superseded', 'failed'].includes(r.state),
+          )
+        )
+          return false;
         if (
           !value.installations.some(
             (/** @type {any} */ r) => r.state === 'applying',
@@ -601,6 +811,7 @@ export function desktopSkills({ home, time = hostTime }) {
         const directory = root(who);
         assertLocalPath(directory);
         mkdirSync(directory, { recursive: true });
+        /** @type {[string,string][]} */ const cacheMoves = [];
         for (const download of downloads)
           for (const bytes of [
             download.manifest,
@@ -608,8 +819,10 @@ export function desktopSkills({ home, time = hostTime }) {
             download.revocations,
           ]) {
             lock.check();
-            cache(who, bytes);
+            cache(who, bytes, cacheMoves);
           }
+        lock.check();
+        commitMoves(cacheMoves);
         const staging = join(directory, 'staging', transactionId);
         mkdirSync(staging, { recursive: true });
         for (const [path, bytes] of tree(who, value.installations)) {
@@ -807,6 +1020,7 @@ export function desktopSkills({ home, time = hostTime }) {
           join(directory, 'transactions', tx.transactionId + '.json'),
           { ...tx, phase: 'committed' },
         );
+        collectViews(who, tx, lock);
         return value;
       });
     },
@@ -964,15 +1178,35 @@ export function desktopSkills({ home, time = hostTime }) {
           desiredState(local.resource) !== desiredState(row.resource)
         )
           return false;
-        const receipt = record(
-          join(
-            root(who),
-            'receipts',
-            row.resource.identity.packageId,
-            row.resource.identity.versionId + '.json',
-          ),
-          'UnifiedReceiptFile',
+        const ownReceipt = join(
+          root(who),
+          'receipts',
+          row.resource.identity.packageId,
+          row.resource.identity.versionId + '.json',
         );
+        {
+          const cleared = value.processedDisableReceiptIds.some(
+            (/** @type {string} */ id) => {
+              const path = join(guardian, 'disable-receipts', id + '.json');
+              if (!existsSync(path)) return false;
+              const r = record(path, 'UnifiedReceiptFile');
+              return (
+                r.recordType === 'disable' &&
+                same(who, r) &&
+                r.selectionRevision === row.selectionRevision &&
+                r.generation === row.generation
+              );
+            },
+          );
+          if (cleared) {
+            const expected = tree(who, value.installations);
+            if (existsSync(active)) checkTree(active, expected);
+            else if (expected.size) return false;
+            return true;
+          }
+        }
+        if (!existsSync(ownReceipt)) return false;
+        const receipt = record(ownReceipt, 'UnifiedReceiptFile');
         if (
           receipt.recordType !== 'installation' ||
           !same(who, receipt) ||

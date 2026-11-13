@@ -305,6 +305,8 @@ export function createSettingsView(
           freeze: '冻结本地快照',
           frozen: '本地快照已冻结；尚未上传或送审',
           conflict: '操作失败，请刷新检查内容是否已被修改或同名技能已存在。',
+          writeLock:
+            '私有写锁仍存在。若重启后仍不能写入，请先关闭此 DSH 的全部进程，确认没有写操作，再用文件管理器把下列私有锁目录移到备份位置后重启。不要处理 guardian 的共享锁：',
           disabled: '已关闭',
           unavailable: '内容格式不支持，请使用原生文件工具编辑',
           source: 'SKILL.md 内容',
@@ -323,6 +325,8 @@ export function createSettingsView(
           frozen: 'Local snapshot frozen; not uploaded or submitted',
           conflict:
             'Operation failed. Refresh to check for edits or a name conflict.',
+          writeLock:
+            'A private write lock remains. If writes still fail after restart, close all processes for this DSH, confirm no writer remains, move this private lock directory to a backup location and restart. Do not touch the guardian shared lock:',
           disabled: 'Disabled',
           unavailable: 'Unsupported content; edit with native file tools',
           source: 'SKILL.md content',
@@ -351,13 +355,19 @@ export function createSettingsView(
       const result = await call('auriga/settings/skills');
       if (!Array.isArray(result.items)) throw new Error('invalidState');
       setItems(result.items);
+      if (result.writeLock)
+        setNotice(t.writeLock + ' ' + result.writeLock.path);
     };
     React.useEffect(() => {
       let live = true;
       call('auriga/settings/skills')
         .then((value) => {
           if (!Array.isArray(value.items)) throw new Error('invalidState');
-          if (live) setItems(value.items);
+          if (live) {
+            setItems(value.items);
+            if (value.writeLock)
+              setNotice(t.writeLock + ' ' + value.writeLock.path);
+          }
         })
         .catch(() => {
           if (live) setNotice(t.conflict);
@@ -374,6 +384,11 @@ export function createSettingsView(
         await refresh();
       } catch {
         setNotice(t.conflict);
+        try {
+          await refresh();
+        } catch {
+          /* Preserve the original failure. */
+        }
       } finally {
         setBusy(false);
       }

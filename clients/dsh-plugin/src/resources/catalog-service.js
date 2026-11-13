@@ -13,13 +13,21 @@ export function catalogService(options) {
   const api = catalogApi(options),
     who = api.who,
     cloud = !!options.runtime.resourceIdentity;
-  const desktop = cloud
-    ? undefined
-    : (options.desktop ??
-      (options.home &&
-      existsSync(join(options.home, 'auriga/guardian/state.json'))
-        ? desktopSkills({ home: options.home })
-        : undefined));
+  /** @type {ReturnType<typeof desktopSkills>|undefined} */ let desktop;
+  /** @type {string|undefined} */ let storageReason;
+  if (!cloud) {
+    try {
+      desktop =
+        options.desktop ??
+        (options.home &&
+        existsSync(join(options.home, 'auriga/guardian/state.json'))
+          ? desktopSkills({ home: options.home })
+          : undefined);
+    } catch {
+      storageReason = 'local_storage_path';
+    }
+  }
+  const confirmations = new Map();
   /** @type {Promise<any>} */ let tail = Promise.resolve();
   /** @template T @param {()=>Promise<T>} work */
   function serial(work) {
@@ -205,6 +213,11 @@ export function catalogService(options) {
     }
 
     api.check();
+    desktop?.acceptRevocations(
+      who,
+      downloads.map((d) => d.revocations),
+    );
+    api.check();
     desktop?.prepare(who, rows, downloads);
   }
   return {
@@ -240,6 +253,9 @@ export function catalogService(options) {
           identity: who,
           cloud,
           sharedAvailable: cloud || !!desktop,
+          sharedUnavailableReason:
+            storageReason ??
+            (!cloud && !desktop ? 'guardian_missing' : undefined),
           pendingRestart,
           ...(await syncReports(items)),
         };
@@ -256,7 +272,7 @@ export function catalogService(options) {
       if (pending && desktop?.needsPreparation(who, local.installations))
         await this.list();
     },
-    /** @param {{packageId:string,versionId:string,action:string,revision:number,key:string}} input */
+    /** @param {{packageId:string,versionId:string,action:string,revision:number,key:string,confirmation?:string}} input */
     apply(input) {
       return serial(async () => {
         if (
@@ -295,6 +311,55 @@ export function catalogService(options) {
             version.state !== 'published'
           )
             refuse('common.validation_failed');
+          const name = version.manifest?.name;
+          if (typeof name !== 'string') refuse('common.validation_failed');
+          const conflicts = [];
+          if (typeof options.privateSkills.list === 'function')
+            for (const item of await options.privateSkills.list())
+              if (item.name === name && item.enabled)
+                conflicts.push({ provider: 'private', name });
+          if (typeof options.host.inspect === 'function') {
+            const observed = await options.host.inspect(name);
+            const ownsShared =
+              observed.some(
+                (/** @type {any} */ item) => item.provider === 'auriga-shared',
+              ) &&
+              (await api.list()).some(
+                (r) => r.resource.identity.packageId === input.packageId,
+              );
+            for (const item of observed)
+              if (item.provider !== 'auriga-shared' || !ownsShared)
+                conflicts.push({
+                  provider: String(item.provider ?? 'unknown'),
+                  name,
+                  ...(typeof item.path === 'string' ? { path: item.path } : {}),
+                });
+          }
+          conflicts.sort((a, b) =>
+            canonicalize(a).localeCompare(canonicalize(b)),
+          );
+          if (conflicts.length) {
+            const proof = canonicalize({
+              who,
+              packageId: input.packageId,
+              versionId: input.versionId,
+              revision: input.revision,
+              conflicts,
+            });
+            const prior =
+              input.confirmation && confirmations.get(input.confirmation);
+            if (!prior || prior.proof !== proof || prior.expires < Date.now()) {
+              for (const [key, value] of confirmations)
+                if (value.expires < Date.now()) confirmations.delete(key);
+              if (confirmations.size >= 128) refuse('common.conflict');
+              const confirmation = globalThis.crypto.randomUUID();
+              confirmations.set(confirmation, {
+                proof,
+                expires: Date.now() + 300000,
+              });
+              return { confirmationRequired: true, confirmation, conflicts };
+            }
+          }
           identity = {
             tenantId: who.tenantId,
             kind: 'skill',

@@ -49,10 +49,19 @@ for (const locale of ['zh', 'en'])
       let source =
         '---\nname: example\ndescription: "Example"\n---\nsecret private text';
       let row = { name: 'example', enabled: true, revision: 'sha256:old' };
+      let blocked = false;
       const sent = [];
       const fetcher = async (url, options) => {
         assert.equal(url, 'http://localhost/auriga/settings/skills');
-        if (!options.body) return Response.json({ items: [row] });
+        if (!options.body)
+          return Response.json({
+            items: [row],
+            ...(blocked
+              ? {
+                  writeLock: { path: 'C:/fixture/private-skills/write.lock.d' },
+                }
+              : {}),
+          });
         const input = JSON.parse(options.body);
         sent.push(input);
         if (input.action === 'edit') {
@@ -100,5 +109,12 @@ for (const locale of ['zh', 'en'])
       assert.equal(sent.at(-1).revision, 'sha256:old');
       assert.match(sent.at(-1).source, /Changed$/);
       assert.match(text(tree), locale === 'zh' ? /新建会话/ : /new session/);
+      blocked = true;
+      await click(locale === 'zh' ? '刷新' : 'Refresh');
+      assert.match(text(tree), /C:\/fixture\/private-skills\/write.lock.d/);
+      assert.match(
+        text(tree),
+        locale === 'zh' ? /关闭此 DSH 的全部进程/ : /close all processes/i,
+      );
     },
   );

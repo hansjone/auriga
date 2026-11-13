@@ -1,6 +1,6 @@
 import { commitMoves } from './file-commit.js';
 import { uptime } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
   closeSync,
@@ -38,7 +38,7 @@ export function hostTime() {
               '-NoProfile',
               '-NonInteractive',
               '-Command',
-              "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')",
+              "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')",
             ],
             { encoding: 'utf8', windowsHide: true, timeout: 10000 },
           ).trim()
@@ -46,6 +46,27 @@ export function hostTime() {
   if (!bootId) throw new Error('unsupported host boot clock');
   cachedBootId = bootId;
   return { bootId, monotonicMillis: Math.floor(uptime() * 1000) };
+}
+
+/** Same encoding as E's trustedClockTime: UUID Linux boot identity, Windows SHA-256 prefix.
+ * The raw host-lock identity remains untouched.
+ * @param {string} raw */
+export function clockBootId(raw) {
+  if (/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(raw)) return raw;
+  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3,7}Z$/.test(raw))
+    throw new Error('unverifiable boot identity');
+  const h = createHash('sha256').update(raw).digest('hex').slice(0, 32);
+  return (
+    h.slice(0, 8) +
+    '-' +
+    h.slice(8, 12) +
+    '-' +
+    h.slice(12, 16) +
+    '-' +
+    h.slice(16, 20) +
+    '-' +
+    h.slice(20)
+  );
 }
 
 /** @param {string} path */

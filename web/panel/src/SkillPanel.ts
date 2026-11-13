@@ -16,6 +16,14 @@ export class SkillPanel {
   private busy = false;
   private sharedAvailable = true;
   private pendingRestart = false;
+  private sharedReason?: string;
+  private confirmation?: {
+    packageId: string;
+    versionId: string;
+    action: string;
+    key: string;
+    token: string;
+  };
   private notice = '';
   private source = new Map<string, string>();
   constructor(
@@ -113,6 +121,7 @@ export class SkillPanel {
           throw new Error('invalid');
         this.rows = value.items;
         this.sharedAvailable = value.sharedAvailable !== false;
+        this.sharedReason = value.sharedUnavailableReason;
         this.pendingRestart = !!value.pendingRestart;
       } else {
         const value = await this.request(
@@ -134,6 +143,7 @@ export class SkillPanel {
         if (epoch !== this.epoch) return;
         this.rows = installed.items;
         this.sharedAvailable = installed.sharedAvailable !== false;
+        this.sharedReason = installed.sharedUnavailableReason;
         this.pendingRestart = !!installed.pendingRestart;
       }
     });
@@ -167,8 +177,15 @@ export class SkillPanel {
       this.versions = value.items;
     });
   }
-  private action(packageId: string, versionId: string, action: string) {
+  private action(
+    packageId: string,
+    versionId: string,
+    action: string,
+    confirmation?: string,
+    key: string = crypto.randomUUID(),
+  ) {
     void this.run(async () => {
+      this.confirmation = undefined;
       const old = this.rows.find(
         (row) => row.resource.identity.packageId === packageId,
       );
@@ -177,8 +194,31 @@ export class SkillPanel {
         versionId,
         action,
         revision: old?.installationRevision ?? 0,
-        key: crypto.randomUUID(),
+        key,
+        ...(confirmation ? { confirmation } : {}),
       });
+      if (result.confirmationRequired) {
+        this.confirmation = {
+          packageId,
+          versionId,
+          action,
+          key,
+          token: result.confirmation,
+        };
+        this.notice =
+          this.text(
+            '发现同名私有或宿主技能，安装后可能被覆盖。请确认后继续：',
+            'A private or host skill has the same name and may take precedence. Confirm to continue:',
+          ) +
+          ' ' +
+          result.conflicts
+            .map(
+              (item: { provider: string; path?: string }) =>
+                item.provider + (item.path ? ' · ' + item.path : ''),
+            )
+            .join('；');
+        return;
+      }
       this.notice = this.text(
         '已接受请求，等待实际安装回报。关闭或卸载后请新建会话。',
         'Request accepted; waiting for observed installation. Start a new session after disabling or removing.',
@@ -323,8 +363,12 @@ export class SkillPanel {
         this.element(
           'p',
           this.text(
-            '???????? guardian??????????',
-            'Shared installation is unavailable until a trusted guardian is present.',
+            this.sharedReason === 'local_storage_path'
+              ? '共享路径不可用：请使用本机文件系统的真实绝对路径；不支持短文件名、目录联接或符号链接。'
+              : '当前宿主尚无可信 guardian，共享安装暂不可用。',
+            this.sharedReason === 'local_storage_path'
+              ? 'Shared storage requires a real absolute local filesystem path; short names, junctions and symbolic links are not supported.'
+              : 'Shared installation is unavailable until a trusted guardian is present.',
           ),
         ),
       );
@@ -333,7 +377,7 @@ export class SkillPanel {
         this.element(
           'p',
           this.text(
-            '???????????????????????',
+            '共享目录正在被占用，请关闭相关会话后刷新重试。',
             'Shared files are in use. Close affected sessions and refresh.',
           ),
         ),
@@ -344,6 +388,22 @@ export class SkillPanel {
       const notice = this.element('p', this.notice);
       notice.setAttribute('role', 'status');
       this.root.append(notice);
+    }
+    if (this.confirmation) {
+      const pending = this.confirmation;
+      this.root.append(
+        this.button(
+          this.text('仍然安装此精确版本', 'Install this exact version anyway'),
+          () =>
+            this.action(
+              pending.packageId,
+              pending.versionId,
+              pending.action,
+              pending.token,
+              pending.key,
+            ),
+        ),
+      );
     }
   }
 }

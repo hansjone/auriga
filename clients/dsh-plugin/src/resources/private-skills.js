@@ -192,12 +192,43 @@ export function createPrivateSkills({ home }) {
     /** @param {string} parent @param {string} prefix */
     async function visit(parent, prefix) {
       for (const entry of await readdir(parent, { withFileTypes: true })) {
+        // Preserve a legacy editor temporary outside discovery once no private
+        // writer lock remains. Never remove or traverse an unknown user file.
+        if (
+          !prefix &&
+          /^\.auriga-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(
+            entry.name,
+          ) &&
+          entry.isFile()
+        ) {
+          try {
+            await lstat(join(hidden, 'write.lock.d'));
+          } catch (error) {
+            if (/** @type {any} */ (error).code !== 'ENOENT') throw error;
+            const temporaryRoot = join(hidden, 'temporary');
+            await safe(temporaryRoot, true);
+            await mkdir(temporaryRoot, { recursive: true });
+            const source = join(parent, entry.name);
+            await safe(source);
+            try {
+              await rename(
+                source,
+                join(temporaryRoot, randomUUID() + '.recovered'),
+              );
+            } catch (moveError) {
+              if (/** @type {any} */ (moveError).code !== 'ENOENT')
+                throw moveError;
+            }
+            continue;
+          }
+        }
         const path = prefix + entry.name;
         if (
           ++entries > 512 ||
           Buffer.byteLength(path) > 240 ||
           path.split('/').length > 8 ||
           /[\\:]/.test(path) ||
+          /~[0-9]/i.test(path) ||
           [...path].some((c) => c.charCodeAt(0) < 32) ||
           /[. ]$/.test(entry.name) ||
           /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(entry.name)
@@ -250,6 +281,17 @@ export function createPrivateSkills({ home }) {
     return { ...value, enabled };
   }
   return {
+    async writeLock() {
+      await initialize();
+      const path = join(hidden, 'write.lock.d');
+      try {
+        await safe(path);
+        return { path };
+      } catch (error) {
+        if (/** @type {any} */ (error).code === 'ENOENT') return undefined;
+        throw error;
+      }
+    },
     /** Read only an explicitly frozen immutable local snapshot.
      * @param {string} id */
     async frozen(id) {
@@ -338,7 +380,10 @@ export function createPrivateSkills({ home }) {
         if (action === 'edit') {
           if (validatePrivateSkill(input.source ?? '').name !== name)
             refuse('common.validation_failed');
-          const temp = join(dir, '.auriga-' + randomUUID());
+          const temporaryRoot = join(hidden, 'temporary');
+          await safe(temporaryRoot, true);
+          await mkdir(temporaryRoot, { recursive: true });
+          const temp = join(temporaryRoot, randomUUID() + '.tmp');
           const handle = await open(temp, 'wx', 0o600);
           try {
             await handle.writeFile(input.source ?? '', 'utf8');

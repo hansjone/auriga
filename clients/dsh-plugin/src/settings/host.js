@@ -176,7 +176,12 @@ export function createSettingsHandler({
         return json(200, snapshot());
       if (req.method === 'GET' && path === '/auriga/settings/skills')
         return privateSkills
-          ? json(200, { items: await privateSkills.list() })
+          ? json(200, {
+              items: await privateSkills.list(),
+              ...((await privateSkills.writeLock?.())
+                ? { writeLock: await privateSkills.writeLock() }
+                : {}),
+            })
           : json(503, { reason: 'unavailable' });
       if (write && path === '/auriga/settings/skills') {
         if (!privateSkills) return json(503, { reason: 'unavailable' });

@@ -8,6 +8,21 @@ import { createHash } from 'node:crypto';
  * @param {any} ctx */
 export function catalogHost(ctx) {
   return {
+    /** Public, read-only known-root check; never creates a session. @param {string} name */
+    async inspect(name) {
+      if (typeof ctx?.skills?.list !== 'function')
+        return [{ provider: 'unknown' }];
+      try {
+        return (await ctx.skills.list({ cwd: process.cwd() }))
+          .filter((/** @type {any} */ row) => row.name === name)
+          .map((/** @type {any} */ row) => ({
+            provider: row.provider,
+            path: row.path,
+          }));
+      } catch {
+        return [{ provider: 'unknown' }];
+      }
+    },
     /** @param {string} name @param {string} preset */
     async observe(name, preset = 'standard') {
       if (

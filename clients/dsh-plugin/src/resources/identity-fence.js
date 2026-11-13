@@ -29,12 +29,16 @@ export function createCatalogIdentityFence({
         refuse('common.unauthenticated');
       const key = canonicalize(next ?? null);
       if (key === fingerprint) return;
+      // A failed logout must invalidate the old success cache, including a later
+      // sign-in to the same account while durable isolation is still pending.
+      fingerprint = 'unseen';
       const end = Math.floor(uptime() * 1000) + timeout;
       for (;;) {
         if (closed) throw new Error('resource identity fence closed');
         try {
           const writer = desktop ?? desktopSkills({ home });
           writer.startup();
+          if (next) writer.assertIdentityView(next);
           writer.switchIdentity(next);
           fingerprint = key;
           return;
