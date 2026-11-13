@@ -201,6 +201,7 @@ final class UacNavigation {
                   tx.path("correlationId"),
                   "providerRevision",
                   UacProviderService.etag(configured));
+          nav.set("configRevision", configured.path("revision"));
           if (device != null) nav.put("deviceGrantId", device.path("id").asString());
           store.insert("uac_navigation", Secrets.hash(proof), nav, expires);
           store.uacTenant();
@@ -436,7 +437,11 @@ final class UacNavigation {
                     providers.row(prepared.navigation().path("providerId").asString(), false)));
     JsonNode result =
         uac.observe(
-            metadata, "token_verify", "login_sso", pair, () -> uac.adapter.verify(config, pair));
+            metadata,
+            "token_verify",
+            "login_sso",
+            ((ObjectNode) pair).deepCopy().set("systemCode", config.path("systemCode")),
+            () -> uac.adapter.verify(config, pair));
     if (!result.path("success").asBoolean()
         || !result.path("token").isString()
         || result.path("token").asString().isBlank()

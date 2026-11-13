@@ -257,14 +257,14 @@ class UacFlowPostgresTest {
                           null);
                       store.insert(
                           "identity",
-                          id + ":001AB",
+                          id + ":001Ab",
                           Json.object(
                               "providerId",
                               id,
                               "accountId",
                               account.toString(),
                               "subject",
-                              "001AB"),
+                              "001Ab"),
                           null);
                       return null;
                     });
@@ -338,6 +338,74 @@ class UacFlowPostgresTest {
       if (verifyRelease.get() != null) verifyRelease.get().countDown();
       worker.destroy();
       server.stop(0);
+    }
+  }
+
+  @Test
+  void mfaCompletionIsRecordedOnTransactionAndReplacementFencesItsLateSession() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var row = store.get("idp_provider", f.provider, true);
+                    row.withObject("/admission").put("mfa", "always");
+                    store.save("idp_provider", row);
+                    return null;
+                  }));
+      when(f.hooks.verifyMfa(any(), any())).thenReturn(true);
+      var challenge = f.begin();
+      f.run();
+      var pending = f.complete(challenge);
+      assertNull(pending.session());
+      assertEquals("pending", pending.transaction().path("status").asString());
+      assertEquals("platform_totp", pending.transaction().path("step").path("formId").asString());
+      var completed =
+          f.call(
+              () ->
+                  f.login.advance(
+                      pending.transaction().path("id").asString(),
+                      challenge.binding(),
+                      Json.object(
+                          "type",
+                          "form",
+                          "formId",
+                          "platform_totp",
+                          "values",
+                          Json.object("otp", "000000")),
+                      false));
+      assertNotNull(completed.session());
+      String sid = completed.session().session().path("sessionId").asString();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        sid,
+                        store
+                            .get("login_tx", pending.transaction().path("id").asString(), false)
+                            .path("uacIssuedSessionId")
+                            .asString());
+                    assertFalse(
+                        store
+                            .get(
+                                "uac_challenge", challenge.challenge().path("id").asString(), false)
+                            .has("issuedSessionId"));
+                    return null;
+                  }));
+      f.call(
+          () ->
+              f.flow.create(
+                  Json.object("providerId", f.provider),
+                  "portal",
+                  "https://portal.example.com",
+                  "127.0.0.1",
+                  challenge.binding(),
+                  null));
+      assertTrue(f.session(sid).path("revoked").asBoolean());
+      assertThrows(AurigaException.class, () -> f.complete(challenge));
+      f.run();
+      assertEquals(0, f.departments.get());
     }
   }
 
@@ -814,6 +882,20 @@ class UacFlowPostgresTest {
               Map.of("next", nextKey));
       var guard = new UacKeyRotation(store, nextOnly);
       var rotation = new UacKeyRotation(store, cipher);
+      var wrong =
+          new UacCredentialCipher(
+              new ContractSchemas(),
+              Json.object(
+                  "activeKeyId", "initial", "decryptKeyIds", List.of("initial"), "revision", 0),
+              Map.of("initial", UacProviderPostgresTest.key()));
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              f.call(
+                  () -> {
+                    new UacKeyRotation(store, wrong).verifyTenantKeys();
+                    return null;
+                  }));
       assertThrows(
           IllegalStateException.class,
           () ->
@@ -936,14 +1018,14 @@ class UacFlowPostgresTest {
           () ->
               store.tx(
                   () -> {
-                    store.delete("identity", f.provider + ":001AB");
+                    store.delete("identity", f.provider + ":001Ab");
                     return null;
                   }));
       AtomicReference<UUID> canonical = new AtomicReference<>();
       when(f.hooks.resolveUacEmployee(any(), any()))
           .thenAnswer(i -> Optional.ofNullable(canonical.get()));
       when(f.hooks.consumeUacInvitation(
-              eq("trusted-invite"), eq(UUID.fromString(f.provider)), eq("001AB"), any()))
+              eq("trusted-invite"), eq(UUID.fromString(f.provider)), eq("001Ab"), any()))
           .thenAnswer(
               i -> {
                 assertTrue(canonical.compareAndSet(null, i.getArgument(3)));
@@ -1016,7 +1098,7 @@ class UacFlowPostgresTest {
           () ->
               store.tx(
                   () -> {
-                    store.delete("identity", f.provider + ":001AB");
+                    store.delete("identity", f.provider + ":001Ab");
                     return null;
                   }));
       assertEquals(
@@ -1160,6 +1242,39 @@ class UacFlowPostgresTest {
       assertEquals("unavailable", f.session(sid).path("uacLoginInfo").path("status").asString());
       assertEquals(next, f.session(sid).path("nextRevalidateAt").asString());
       assertFalse(f.session(sid).path("revoked").asBoolean());
+    }
+  }
+
+  @Test
+  void interruptedInformationLeaseIsNotRepeatedAndLeavesWarningEvidence() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String sid = f.login().session().session().path("sessionId").asString();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    for (ObjectNode job : store.all("uac_job")) {
+                      if (!"info".equals(job.path("kind").asString())) continue;
+                      job.put("started", true);
+                      job.put("leaseUntil", f.time.instant().minusSeconds(1).toString());
+                      job.put("leaseToken", UUID.randomUUID().toString());
+                      store.save("uac_job", job);
+                    }
+                    return null;
+                  }));
+      f.run();
+      f.run();
+      assertEquals(0, f.departments.get());
+      assertEquals("unavailable", f.session(sid).path("uacLoginInfo").path("status").asString());
+      assertFalse(f.session(sid).path("revoked").asBoolean());
+      assertTrue(
+          stageEvents(f).stream()
+              .anyMatch(
+                  e ->
+                      "department_lookup".equals(e.path("stage").asString())
+                          && "end".equals(e.path("phase").asString())
+                          && "WARN".equals(e.path("level").asString())
+                          && "interrupted".equals(e.path("faultReason").asString())));
     }
   }
 

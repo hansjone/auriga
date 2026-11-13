@@ -57,7 +57,11 @@ final class UacAuditProjection {
           "logout",
           "security",
           "revalidation_failed",
+          "revalidation_rejected",
           "revalidation_unreachable",
+          "interrupted",
+          "late_result",
+          "not_accepted",
           "portal",
           "uds",
           "none",
@@ -68,6 +72,7 @@ final class UacAuditProjection {
 
   static ObjectNode project(JsonNode data) {
     String action = data.path("action").asString();
+    if (action.equals("iam.uac.diagnostics.export")) return export(data.path("details"));
     if (!action.startsWith("iam.uac.") || !ACTIONS.contains(action.substring(8))) return null;
     ObjectNode out = JsonMapper.builder().build().createObjectNode();
     JsonNode input = data.path("details");
@@ -122,6 +127,31 @@ final class UacAuditProjection {
     // Only identifier syntax; names, URLs, messages and arbitrary free text never pass.
     if (input.path("empNo").asString().matches("[A-Za-z0-9_-]{1,128}"))
       out.set("empNo", input.path("empNo"));
+    return out;
+  }
+
+  private static ObjectNode export(JsonNode input) {
+    ObjectNode out = JsonMapper.builder().build().createObjectNode();
+    for (String field : List.of("from", "to"))
+      try {
+        out.put(field, java.time.Instant.parse(input.path(field).asString()).toString());
+      } catch (RuntimeException ignored) {
+      }
+    if (input.path("correlationId").asString().matches("[a-fA-F0-9-]{36}"))
+      try {
+        out.put(
+            "correlationId", UUID.fromString(input.path("correlationId").asString()).toString());
+      } catch (RuntimeException ignored) {
+      }
+    if (input.path("partial").isBoolean()) out.set("partial", input.path("partial"));
+    var providers = out.putArray("providerIds");
+    if (input.path("providerIds").isArray() && input.path("providerIds").size() <= 100)
+      for (JsonNode id : input.path("providerIds"))
+        try {
+          if (id.asString().matches("[a-fA-F0-9-]{36}"))
+            providers.add(UUID.fromString(id.asString()).toString());
+        } catch (RuntimeException ignored) {
+        }
     return out;
   }
 

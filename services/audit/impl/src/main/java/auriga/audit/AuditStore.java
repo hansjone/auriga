@@ -119,7 +119,7 @@ public class AuditStore implements auriga.audit.api.UacAuditEvents {
               new ArrayList<Object>(
                   List.of(tenant, Timestamp.from(from), Timestamp.from(to), provider.toString()));
           String sql =
-              "SELECT payload::text FROM audit.event WHERE tenant_id=? AND occurred_at>=? AND occurred_at<? AND action LIKE 'iam.uac.%' AND (payload->'details'->>'providerId'=? OR payload->'target'->>'id'=?)";
+              "SELECT jsonb_build_object('id',id,'tenantId',tenant_id,'time',occurred_at,'action',action,'result',result,'details',payload->'details','target',jsonb_build_object('type','provider','id',payload->'target'->'id'),'actor',jsonb_build_object('type',payload->'actor'->'type','id',payload->'actor'->'id'))::text FROM audit.event WHERE tenant_id=? AND occurred_at>=? AND occurred_at<? AND action LIKE 'iam.uac.%' AND (payload->'details'->>'providerId'=? OR payload->'target'->>'id'=?)";
           values.add(provider.toString());
           if (correlation != null) {
             sql += " AND payload->'details'->>'correlationId'=?";

@@ -1,6 +1,6 @@
 package auriga.iam.api;
 
-/** Employee identifiers preserve leading zeroes and fold ASCII case only. */
+/** Verified identity keys preserve leading zeroes and case; only outer whitespace is removed. */
 public final class UacEmployee {
   private UacEmployee() {}
 
@@ -11,8 +11,6 @@ public final class UacEmployee {
         || normalized.length() > 128
         || normalized.chars().anyMatch(Character::isISOControl))
       throw new IllegalArgumentException("Invalid verified employee identifier");
-    StringBuilder result = new StringBuilder();
-    normalized.chars().forEach(c -> result.append((char) (c >= 'a' && c <= 'z' ? c - 32 : c)));
-    return result.toString();
+    return normalized;
   }
 }

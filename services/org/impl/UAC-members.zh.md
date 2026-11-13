@@ -2,7 +2,7 @@
 
 UAC 不按姓名、邮箱或用户填写的员工号匹配团队成员。已有成员可在新近认证的团队会话中完成 UAC 双认证绑定。管理员预先核实员工号时，也可在受保护部署文件中准备以下记录，由 `auriga.org.uac-verifications-file` 指定文件位置；不向浏览器或公开配置接口暴露该文件。
 
-文件为 JSON 数组，每条都须包含 `tenantId`、`providerId`、`employee`、`verified: true`、`verifiedBy`（核实管理员的内部 UUID）和 `verifiedAt`（UTC 时间）。管理员必须先实际核实员工号，文件本身是受信部署输入，不能用用户表单直接生成。工号去首尾空白、仅折叠 ASCII 大小写、保留前导零。
+文件为 JSON 数组，每条都须包含 `tenantId`、`providerId`、`employee`、`verified: true`、`verifiedBy`（核实管理员的内部 UUID）和 `verifiedAt`（UTC 时间）。管理员必须先实际核实员工号，文件本身是受信部署输入，不能用用户表单直接生成。身份主键只去首尾空白，保留前导零及大小写。忽略 ASCII 大小写仅用于 token-verify 响应身份比较，不能用于合并两条成员身份。
 
 既有成员记录另含 `accountId`，且成员必须存在并处于 active 状态。专用邀请记录另含 `invitationId` 和 `purpose: "uac_login"`，邀请必须只允许使用一次；受邀人由验证得到的员工号精确核对，普通团队账号注册不能消费该邀请。不能同时填写 accountId 和 invitationId。部署文件中的员工号/UUID 均由部署方实际填写，不提交仓库。
 

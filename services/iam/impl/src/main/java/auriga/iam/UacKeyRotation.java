@@ -52,6 +52,37 @@ final class UacKeyRotation {
             if (ids.stream().anyMatch(id -> !cipher.canDecrypt(id)))
               throw new IllegalStateException(
                   "UAC decryption keys are missing; retain all referenced historical keys");
+            UUID after = new UUID(0, 0);
+            for (; ; ) {
+              var rows =
+                  store
+                      .networkJdbc()
+                      .query(
+                          "SELECT id,data->>'providerId' AS provider,data->'"
+                              + envelope.field()
+                              + "' AS envelope FROM iam."
+                              + envelope.table()
+                              + " WHERE tenant_id=? AND id>? AND jsonb_exists(data,'"
+                              + envelope.field()
+                              + "') ORDER BY id LIMIT 500",
+                          (rs, i) ->
+                              Json.object(
+                                  "id",
+                                  rs.getString("id"),
+                                  "provider",
+                                  rs.getString("provider"),
+                                  "envelope",
+                                  Json.MAPPER.readTree(rs.getString("envelope"))),
+                          TenantContext.require(),
+                          after);
+              for (var row : rows)
+                cipher.decrypt(
+                    row.path("envelope"),
+                    TenantContext.require(),
+                    UUID.fromString(row.path("provider").asString()));
+              if (rows.size() < 500) break;
+              after = UUID.fromString(rows.getLast().path("id").asString());
+            }
           }
           return null;
         });

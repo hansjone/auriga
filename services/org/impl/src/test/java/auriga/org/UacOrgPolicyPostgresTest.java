@@ -73,7 +73,7 @@ class UacOrgPolicyPostgresTest {
         "providerId",
         provider.toString(),
         "employee",
-        "001aB",
+        "001Ab",
         "verified",
         true,
         "verifiedBy",
@@ -134,13 +134,14 @@ class UacOrgPolicyPostgresTest {
   void verifiedMappingRequiresExactProviderTenantAndActiveMemberAndPreservesZeroes()
       throws Exception {
     UUID account = member("active");
-    assertTrue(store.tenant(tenant, () -> policy.resolve(provider, "001ab")).isEmpty());
+    assertTrue(store.tenant(tenant, () -> policy.resolve(provider, "001Ab")).isEmpty());
     provision(record().put("accountId", account.toString()));
     assertEquals(
         account, store.tenant(tenant, () -> policy.resolve(provider, " 001Ab ")).orElseThrow());
+    assertTrue(store.tenant(tenant, () -> policy.resolve(provider, "001AB")).isEmpty());
     assertTrue(store.tenant(tenant, () -> policy.resolve(provider, "1ab")).isEmpty());
-    assertTrue(store.tenant(tenant, () -> policy.resolve(UUID.randomUUID(), "001ab")).isEmpty());
-    assertTrue(store.tenant(UUID.randomUUID(), () -> policy.resolve(provider, "001ab")).isEmpty());
+    assertTrue(store.tenant(tenant, () -> policy.resolve(UUID.randomUUID(), "001Ab")).isEmpty());
+    assertTrue(store.tenant(UUID.randomUUID(), () -> policy.resolve(provider, "001Ab")).isEmpty());
     assertThrows(
         RuntimeException.class,
         () -> provision(record().put("accountId", member("active").toString())));
@@ -155,7 +156,7 @@ class UacOrgPolicyPostgresTest {
                   account);
           return null;
         });
-    assertTrue(store.tenant(tenant, () -> policy.resolve(provider, "001ab")).isEmpty());
+    assertTrue(store.tenant(tenant, () -> policy.resolve(provider, "001Ab")).isEmpty());
     assertTrue(store.tenant(tenant, () -> policy.member(account)).isEmpty());
   }
 
@@ -188,14 +189,14 @@ class UacOrgPolicyPostgresTest {
               () -> store.tenant(tenant, () -> policy.consume(code, provider, "001Ab", account)));
       var b =
           pool.submit(
-              () -> store.tenant(tenant, () -> policy.consume(code, provider, "001AB", account)));
+              () -> store.tenant(tenant, () -> policy.consume(code, provider, "001Ab", account)));
       assertTrue(a.get(20, TimeUnit.SECONDS));
       assertTrue(b.get(20, TimeUnit.SECONDS));
     }
     assertFalse(
         store.tenant(tenant, () -> policy.consume(code, provider, "001Ab", UUID.randomUUID())));
     assertEquals(
-        account, store.tenant(tenant, () -> policy.resolve(provider, "001ab")).orElseThrow());
+        account, store.tenant(tenant, () -> policy.resolve(provider, "001Ab")).orElseThrow());
     assertEquals(
         "external", store.tenant(tenant, () -> policy.member(account)).orElseThrow().memberType());
     store.tenant(

@@ -18,4 +18,9 @@ public interface UacEnterpriseAdapter extends IdentityConnector {
   default Boolean ssoCookiePresent(JsonNode cookies) {
     return null;
   }
+
+  /** Fixed capability booleans only; no private names, values or protocol mappings. */
+  default java.util.Map<String, Boolean> diagnosticCapabilities() {
+    return java.util.Map.of();
+  }
 }

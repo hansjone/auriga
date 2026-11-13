@@ -21,6 +21,10 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
   private final UacHttp http;
 
   UacConfiguredAdapter(JsonNode settings, boolean testLoopback) {
+    String ip = settings.path("clientIP").asString("");
+    if (settings.has("clientIP") && !settings.path("clientIP").isString())
+      throw new IllegalArgumentException("Invalid private UAC client IP");
+    literalIp(ip);
     this.settings = settings.deepCopy();
     this.http = new UacHttp(settings, testLoopback);
   }
@@ -72,6 +76,33 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
         !settings.path("qr").path("path").asString().isBlank()
             && !settings.path("department").path("url").asString().isBlank()
             && !settings.path("tokenVerifyUrl").asString().isBlank());
+    try {
+      http.validate(URI.create(settings.path("tokenVerifyUrl").asString()), false);
+      http.validate(URI.create(settings.path("department").path("url").asString()), false);
+      http.validate(
+          URI.create(
+              config.path("baseUrl").asString() + settings.path("qr").path("path").asString()),
+          false);
+      ObjectNode coordinates = Json.object("x", "0".repeat(32), "y", "0".repeat(32));
+      expand(settings.path("qr").path("body"), values(config, coordinates, settings.path("qr")));
+      qrContent(config, coordinates);
+      expand(
+          settings.path("department").path("body"),
+          values(
+              config,
+              Json.object(
+                  "token",
+                  "validation",
+                  "empNo",
+                  "validation",
+                  "clientIP",
+                  "",
+                  "purpose",
+                  "login_info"),
+              settings.path("department")));
+    } catch (RuntimeException e) {
+      throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    }
   }
 
   @Override
@@ -84,15 +115,81 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
     throw new AurigaException(CommonErrors.UNAVAILABLE);
   }
 
-  private ObjectNode values(JsonNode config, JsonNode input) {
+  private static void literalIp(String value) {
+    if (value.isEmpty()) return;
+    if (value.length() > 64 || !value.matches("[0-9a-fA-F:.]+"))
+      throw new IllegalArgumentException("Invalid private UAC client IP");
+    InetAddress.ofLiteral(value);
+  }
+
+  private ObjectNode values(JsonNode config, JsonNode input, JsonNode operation) {
     ObjectNode values = input.isObject() ? ((ObjectNode) input).deepCopy() : Json.object();
     values.put("systemCode", config.path("systemCode").asString());
+    if (!values.has("clientIP")) values.put("clientIP", settings.path("clientIP").asString(""));
+    if (settings.has("constants")) {
+      IamError.validate(
+          settings.path("constants").isObject() && settings.path("constants").size() <= 32);
+      for (var constant : settings.path("constants").properties()) {
+        privateVariable(constant.getKey());
+        IamError.validate(
+            constant.getValue().isString() && constant.getValue().asString().length() <= 16384);
+        values.set(constant.getKey(), constant.getValue());
+      }
+    }
+    if (operation.has("derived")) {
+      IamError.validate(
+          operation.path("derived").isObject() && operation.path("derived").size() <= 16);
+      for (var field : operation.path("derived").properties()) {
+        privateVariable(field.getKey());
+        JsonNode definition = field.getValue();
+        IamError.validate(
+            definition.isObject()
+                && definition.path("template").isString()
+                && Set.of("md5", "sha256").contains(definition.path("algorithm").asString()));
+        String raw = render(definition.path("template").asString(), values);
+        try {
+          values.put(
+              field.getKey(),
+              HexFormat.of()
+                  .formatHex(
+                      java.security.MessageDigest.getInstance(
+                              definition.path("algorithm").asString().equals("md5")
+                                  ? "MD5"
+                                  : "SHA-256")
+                          .digest(raw.getBytes(StandardCharsets.UTF_8))));
+        } catch (java.security.NoSuchAlgorithmException e) {
+          throw new IllegalStateException("Required protocol digest unavailable");
+        }
+      }
+    }
     return values;
   }
 
+  private static void privateVariable(String name) {
+    IamError.validate(
+        name.matches("[A-Za-z][A-Za-z0-9]{0,63}")
+            && !Set.of("x", "y", "systemCode", "token", "empNo", "clientIP", "purpose")
+                .contains(name));
+  }
+
+  private static String render(String template, JsonNode values) {
+    IamError.validate(template.length() <= 48 * 1024);
+    var matcher =
+        java.util.regex.Pattern.compile("\\$\\{([A-Za-z][A-Za-z0-9]{0,63})}").matcher(template);
+    StringBuilder output = new StringBuilder();
+    while (matcher.find()) {
+      JsonNode value = values.path(matcher.group(1));
+      IamError.validate(value.isString());
+      matcher.appendReplacement(output, java.util.regex.Matcher.quoteReplacement(value.asString()));
+    }
+    matcher.appendTail(output);
+    IamError.validate(output.length() <= 48 * 1024 && !output.toString().contains("${"));
+    return output.toString();
+  }
+
   private JsonNode expand(JsonNode template, JsonNode values) {
-    if (template.isString() && template.asString().matches("\\$\\{[A-Za-z0-9]+}"))
-      return values.path(template.asString().substring(2, template.asString().length() - 1));
+    if (template.isString() && template.asString().contains("${"))
+      return JSON.valueToTree(render(template.asString(), values));
     if (template.isObject()) {
       ObjectNode output = Json.object();
       template.properties().forEach(e -> output.set(e.getKey(), expand(e.getValue(), values)));
@@ -109,7 +206,7 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
   @Override
   public String qrContent(JsonNode config, JsonNode coordinates) {
     String template = settings.path("qr").path("contentTemplate").asString();
-    for (var entry : values(config, coordinates).properties())
+    for (var entry : values(config, coordinates, settings.path("qr")).properties())
       template =
           template.replace(
               "${" + entry.getKey() + "}",
@@ -126,8 +223,8 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
       var response =
           http.post(
               target,
-              expand(mapping.path("body"), values(config, coordinates)),
-              headers(mapping, values(config, coordinates)),
+              expand(mapping.path("body"), values(config, coordinates, mapping)),
+              headers(mapping, values(config, coordinates, mapping)),
               25);
       UacTelemetry.capture(response.status(), response.body());
       if (response.status() < 200 || response.status() >= 300)
@@ -166,8 +263,9 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
   public JsonNode department(JsonNode config, JsonNode credential, String purpose) {
     IamError.validate(Set.of("login_info", "revalidate").contains(purpose));
     JsonNode mapping = settings.path("department");
-    ObjectNode values = values(config, credential);
-    values.put("purpose", purpose);
+    ObjectNode context = ((ObjectNode) credential).deepCopy();
+    context.put("purpose", purpose);
+    ObjectNode values = values(config, context, mapping);
     try {
       var response =
           http.post(
@@ -279,6 +377,21 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
     return false;
   }
 
+  @Override
+  public Map<String, Boolean> diagnosticCapabilities() {
+    Map<String, Boolean> result = new LinkedHashMap<>();
+    for (String family : List.of("portal", "uds")) {
+      JsonNode roles = settings.path("cookies").path(family);
+      result.put(
+          family + "CookieConfigured",
+          !roles.path("token").path("cookie").asString().isBlank()
+              && !roles.path("account").path("cookie").asString().isBlank());
+    }
+    JsonNode empty = settings.path("diagnostics").path("originSystemCodeEmpty");
+    if (empty.isBoolean()) result.put("originSystemCodeEmpty", empty.asBoolean());
+    return Map.copyOf(result);
+  }
+
   private JsonNode selectCookies(JsonNode cookies) {
     for (String source : List.of("portal", "uds"))
       for (var role : settings.path("cookies").path(source).properties()) {
@@ -300,14 +413,7 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
           || account.strip().length() > 128) return Json.object();
       String ip = cookieValue(cookies, settings.path("cookies").path("uds").path("clientIP"));
       if (ip == null) ip = settings.path("clientIP").asString("");
-      if (!ip.isEmpty()) {
-        try {
-          if (ip.length() > 64 || !ip.matches("[0-9a-fA-F:.]+")) return Json.object();
-          InetAddress.getByName(ip);
-        } catch (UnknownHostException e) {
-          return Json.object();
-        }
-      }
+      literalIp(ip);
       return Json.object(
           "empNo", account.strip(), "token", token, "clientIP", ip, "cookieFamily", system);
     }

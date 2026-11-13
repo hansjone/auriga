@@ -119,6 +119,12 @@ final class UacTelemetry {
       if (credential.path("empNo").isString()) this.metadata.set("empNo", credential.path("empNo"));
       if (credential.has("token"))
         this.metadata.put("tokenMissing", credential.path("token").asString().isEmpty());
+      if (stage.equals("token_acquire"))
+        this.metadata.put(
+            "tokenMissing",
+            !credential.path("token").isString() || credential.path("token").asString().isEmpty());
+      if (credential.has("cookieFamily"))
+        this.metadata.set("cookieFamily", credential.path("cookieFamily"));
       detailRevision = settings.capture(metadata.path("providerId").asString());
       emit(event("start", "start", 0, Json.object()), false, false);
     }
@@ -138,6 +144,7 @@ final class UacTelemetry {
         ObjectNode detailed = result.deepCopy();
         detailed.put("eventId", UUID.randomUUID().toString());
         detailed.put("level", "DEBUG");
+        detailed.put("diagnosticRevision", detailRevision);
         detailed.setAll(detail);
         emit(detailed, false, true);
       }
@@ -275,6 +282,11 @@ final class UacTelemetry {
                   ? "success"
                   : "failure";
       span.end(outcome, result);
+      if (result.isObject()) {
+        var projected = ((ObjectNode) result).deepCopy();
+        projected.set("_uacHttp", span.exchange.deepCopy());
+        return projected;
+      }
       return result;
     } catch (RuntimeException e) {
       span.end("failure", Json.object("faultReason", "transport_error"));
@@ -309,7 +321,7 @@ final class UacTelemetry {
             "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}");
   }
 
-  private static void copySafe(JsonNode input, ObjectNode event, boolean identifiers) {
+  static void copySafe(JsonNode input, ObjectNode event, boolean identifiers) {
     if (identifiers)
       for (String key :
           List.of("correlationId", "parentCorrelationId", "transactionId", "pollId", "providerId"))
@@ -385,6 +397,10 @@ final class UacTelemetry {
   }
 
   private boolean persist(Pending pending) {
+    if ("DEBUG".equals(pending.event().path("level").asString())
+        && !settings.permits(
+            pending.event().path("providerId").asString(),
+            pending.event().path("diagnosticRevision").asLong(-1))) return true;
     try {
       return store.tx(
           () -> {

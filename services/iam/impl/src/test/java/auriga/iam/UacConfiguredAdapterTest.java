@@ -13,6 +13,82 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 class UacConfiguredAdapterTest {
+  @Test
+  void privateDerivedQrIntegrityAndStaticIpAreValidatedWithoutBrowserOverrides() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    AtomicReference<JsonNode> observed = new AtomicReference<>();
+    server.createContext(
+        "/qr",
+        exchange -> {
+          observed.set(Json.MAPPER.readTree(exchange.getRequestBody().readAllBytes()));
+          byte[] body = Json.object("state", "waiting").toString().getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    server.start();
+    try {
+      String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+      var privateConfig = settings(origin);
+      privateConfig.put("clientIP", "192.0.2.10");
+      privateConfig.set("constants", Json.object("origin", ""));
+      var qr = (ObjectNode) privateConfig.path("qr");
+      qr.set(
+          "derived",
+          Json.object(
+              "integrity",
+              Json.object(
+                  "algorithm", "md5", "template", "${x}${y}${clientIP}${systemCode}${origin}")));
+      ((ObjectNode) qr.path("body")).put("checksum", "${integrity}");
+      var adapter = new UacConfiguredAdapter(privateConfig, true);
+      assertEquals(
+          Set.of("portalCookieConfigured", "udsCookieConfigured"),
+          adapter.diagnosticCapabilities().keySet());
+      privateConfig.set("diagnostics", Json.object("originSystemCodeEmpty", true));
+      assertEquals(
+          Boolean.TRUE,
+          new UacConfiguredAdapter(privateConfig, true)
+              .diagnosticCapabilities()
+              .get("originSystemCodeEmpty"));
+      var config = Json.object("baseUrl", origin, "systemCode", "test-system");
+      adapter.validateConfig(config);
+      String x = Secrets.hash(Secrets.random()).substring(0, 32),
+          y = Secrets.hash(Secrets.random()).substring(0, 32);
+      adapter.scan(config, Json.object("x", x, "y", y));
+      assertEquals(
+          HexFormat.of()
+              .formatHex(
+                  java.security.MessageDigest.getInstance("MD5")
+                      .digest(
+                          (x + y + "192.0.2.10" + "test-system").getBytes(StandardCharsets.UTF_8))),
+          observed.get().path("checksum").asString());
+      ((ObjectNode) qr.path("derived").path("integrity"))
+          .put("template", "${untrustedBrowserValue}");
+      assertEquals(
+          "common.validation_failed",
+          assertThrows(
+                  AurigaException.class,
+                  () -> new UacConfiguredAdapter(privateConfig, true).validateConfig(config))
+              .errorCode()
+              .code());
+      for (String invalid : List.of("example.com", "1.2.3.999", "127.0.0.1%zone"))
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new UacConfiguredAdapter(settings(origin).put("clientIP", invalid), true));
+      var escaped = settings(origin);
+      escaped.put("tokenVerifyUrl", "https://elsewhere.example.com/verify");
+      assertEquals(
+          "common.validation_failed",
+          assertThrows(
+                  AurigaException.class,
+                  () -> new UacConfiguredAdapter(escaped, true).validateConfig(config))
+              .errorCode()
+              .code());
+    } finally {
+      server.stop(0);
+    }
+  }
+
   static ObjectNode settings(String origin) {
     return Json.object(
         "allowedDestinations",

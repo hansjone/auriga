@@ -143,6 +143,12 @@ final class UacWorker
       }
       if (kind.equals("info") && job.path("started").asBoolean()) {
         job.put("reason", "interrupted");
+        uac.observe(
+            job,
+            "department_lookup",
+            "login_info",
+            Json.object(),
+            () -> Json.object("available", false, "faultReason", "interrupted"));
         info(job, Json.object("available", false));
         done(job);
         continue;
@@ -303,6 +309,22 @@ final class UacWorker
                     || !uac.clock
                         .instant()
                         .isBefore(Instant.parse(challenge.path("expiresAt").asString()))) {
+                  uac.observe(
+                      job,
+                      "scan_status",
+                      null,
+                      Json.object(),
+                      () ->
+                          Json.object(
+                              "state",
+                              challenge == null
+                                  ? "stopped"
+                                  : !uac.clock
+                                          .instant()
+                                          .isBefore(
+                                              Instant.parse(challenge.path("expiresAt").asString()))
+                                      ? "expired"
+                                      : "cancelled"));
                   done(job);
                   return null;
                 }
@@ -325,6 +347,11 @@ final class UacWorker
                   uac.open(credential.path("envelope"), job.path("providerId").asString()));
             });
     if (input == null) return;
+    ObjectNode traceCredential =
+        input.path("credential").isObject()
+            ? ((ObjectNode) input.path("credential")).deepCopy()
+            : Json.object();
+    traceCredential.set("systemCode", input.path("config").path("systemCode"));
     ObjectNode metadata = snapshot.deepCopy();
     if (kind.equals("scan")) {
       metadata.put("pollId", UUID.randomUUID().toString());
@@ -340,8 +367,7 @@ final class UacWorker
                 : "token_verify";
     UacTelemetry.Span round =
         uac.telemetry != null && kind.equals("revalidate")
-            ? uac.telemetry.begin(
-                metadata, "session_revalidate", "revalidate", input.path("credential"))
+            ? uac.telemetry.begin(metadata, "session_revalidate", "revalidate", traceCredential)
             : null;
     try {
       JsonNode result =
@@ -349,7 +375,7 @@ final class UacWorker
               metadata,
               stage,
               purpose,
-              input.path("credential"),
+              traceCredential,
               () ->
                   switch (kind) {
                     case "scan" ->
@@ -368,7 +394,10 @@ final class UacWorker
       if (kind.equals("scan")
           && !Set.of("waiting", "scanned", "unavailable").contains(result.path("state").asString())
           && uac.telemetry != null) {
-        var acquired = uac.telemetry.begin(metadata, "token_acquire", null, result);
+        ObjectNode acquiredMetadata = metadata.deepCopy();
+        if (result.path("_uacHttp").isObject())
+          acquiredMetadata.setAll((ObjectNode) result.path("_uacHttp"));
+        var acquired = uac.telemetry.begin(acquiredMetadata, "token_acquire", null, result);
         acquired.end(
             "verified".equals(result.path("state").asString()) ? "success" : "failure", result);
       }

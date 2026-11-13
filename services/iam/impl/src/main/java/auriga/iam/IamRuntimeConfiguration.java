@@ -162,6 +162,39 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  UacLokiSource iamUacLokiSource(Environment env) {
+    return new UacLokiSource(env.getProperty("auriga.iam.uac.diagnostics.loki-origin"));
+  }
+
+  @Bean
+  UacDiagnosticBundles iamUacDiagnosticBundles(
+      IamStore store,
+      UacProviderService providers,
+      UacSessions uac,
+      UacDiagnosticSettings settings,
+      UacLokiSource loki,
+      Clock clock,
+      Environment env,
+      org.springframework.beans.factory.ObjectProvider<auriga.audit.api.UacAuditEvents> audit,
+      org.springframework.beans.factory.ObjectProvider<auriga.ops.api.UacOpsAlerts> ops,
+      @org.springframework.beans.factory.annotation.Qualifier("iamEventPublisher")
+          org.springframework.beans.factory.ObjectProvider<EventPublisher> iamEvents,
+      org.springframework.beans.factory.ObjectProvider<EventPublisher> events) {
+    return new UacDiagnosticBundles(
+        store,
+        providers,
+        uac,
+        settings,
+        audit.getIfAvailable(),
+        ops.getIfAvailable(),
+        loki,
+        iamEvents.getIfAvailable(events::getObject),
+        clock,
+        env.getProperty("auriga.iam.uac.sso-cookie.enabled", Boolean.class, true),
+        java.nio.file.Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize());
+  }
+
+  @Bean
   UacTelemetry iamUacTelemetry(
       IamStore store,
       UacDiagnosticSettings settings,

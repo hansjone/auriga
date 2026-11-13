@@ -23,18 +23,21 @@ public class UacDiagnosticController {
   private final SessionManager sessions;
   private final UacDiagnosticSettings settings;
   private final PermissionResolver permissions;
+  private final UacDiagnosticBundles bundles;
 
   UacDiagnosticController(
       IamStore store,
       RequestIdentity requests,
       SessionManager sessions,
       UacDiagnosticSettings settings,
-      PermissionResolver permissions) {
+      PermissionResolver permissions,
+      UacDiagnosticBundles bundles) {
     this.store = store;
     this.requests = requests;
     this.sessions = sessions;
     this.settings = settings;
     this.permissions = permissions;
+    this.bundles = bundles;
   }
 
   void authorize(HttpServletRequest request, boolean csrf, Set<String> required) {
@@ -65,6 +68,32 @@ public class UacDiagnosticController {
         () -> {
           authorize(request, false, Set.of("iam.providers.read"));
           return output(settings.get(providerId), response);
+        });
+  }
+
+  @PostMapping(value = "/uac/diagnostic-bundles", produces = "application/zip")
+  @RequiresPermission({"iam.providers.read", "audit.events.read", "ops.alerts.read"})
+  public org.springframework.http.ResponseEntity<byte[]> download(
+      @RequestBody JsonNode input, HttpServletRequest request) {
+    return requests.call(
+        request,
+        () -> {
+          var result =
+              bundles.build(
+                  input,
+                  () ->
+                      authorize(
+                          request,
+                          true,
+                          Set.of("iam.providers.read", "audit.events.read", "ops.alerts.read")));
+          return org.springframework.http.ResponseEntity.ok()
+              .header("Cache-Control", "no-store")
+              .header("Pragma", "no-cache")
+              .header("X-Auriga-Diagnostic-Partial", Boolean.toString(result.partial()))
+              .header("Content-Disposition", "attachment; filename=\"" + result.filename() + "\"")
+              .contentType(org.springframework.http.MediaType.parseMediaType("application/zip"))
+              .contentLength(result.bytes().length)
+              .body(result.bytes());
         });
   }
 
