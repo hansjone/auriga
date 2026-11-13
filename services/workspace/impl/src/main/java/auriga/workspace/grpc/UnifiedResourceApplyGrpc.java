@@ -7,8 +7,13 @@ import auriga.contracts.workspace.v1.*;
 import auriga.workspace.api.UnifiedResourceDownloadAuthority;
 import io.grpc.stub.StreamObserver;
 
-/** The resource service must already authenticate the node's mTLS download channel. */
-public final class UnifiedResourceApplyGrpc
+/**
+ * The resource service must already authenticate the node's mTLS download channel.
+ *
+ * <p>Like the other gRPC endpoints, this class must allow the authorization advisor's subclass
+ * proxy. Workspace transactions remain in the application service.
+ */
+public class UnifiedResourceApplyGrpc
     extends UnifiedResourceApplyServiceGrpc.UnifiedResourceApplyServiceImplBase {
   private final UnifiedResourceDownloadAuthority authority;
 
