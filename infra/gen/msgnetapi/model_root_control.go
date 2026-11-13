@@ -21,16 +21,17 @@ var _ MappedNullable = &RootControl{}
 
 // RootControl struct for RootControl
 type RootControl struct {
-	SchemaVersion          interface{}          `json:"schema_version"`
-	TenantId               string               `json:"tenant_id"`
-	Realm                  string               `json:"realm" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	ControlRevision        string               `json:"control_revision" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	IssuedAt               string               `json:"issued_at" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"`
-	AllowedAuthorities     []AuthorityReference `json:"allowed_authorities"`
-	RevokedAuthorityIds    []string             `json:"revoked_authority_ids"`
-	RevokedInstallationIds []string             `json:"revoked_installation_ids"`
-	MinimumGeneration      string               `json:"minimum_generation" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	MinimumKeysetVersion   string               `json:"minimum_keyset_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	SchemaVersion          interface{}           `json:"schema_version"`
+	TenantId               string                `json:"tenant_id"`
+	Realm                  string                `json:"realm" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	ControlRevision        string                `json:"control_revision" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	IssuedAt               string                `json:"issued_at" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"`
+	AllowedAuthorities     []AuthorityReference  `json:"allowed_authorities"`
+	RevokedAuthorityIds    []string              `json:"revoked_authority_ids"`
+	RevokedInstallationIds []string              `json:"revoked_installation_ids"`
+	MinimumGeneration      string                `json:"minimum_generation" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	MinimumKeysetVersion   string                `json:"minimum_keyset_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	GenerationTransition   *GenerationTransition `json:"generation_transition,omitempty"`
 }
 
 type _RootControl RootControl
@@ -304,6 +305,38 @@ func (o *RootControl) SetMinimumKeysetVersion(v string) {
 	o.MinimumKeysetVersion = v
 }
 
+// GetGenerationTransition returns the GenerationTransition field value if set, zero value otherwise.
+func (o *RootControl) GetGenerationTransition() GenerationTransition {
+	if o == nil || IsNil(o.GenerationTransition) {
+		var ret GenerationTransition
+		return ret
+	}
+	return *o.GenerationTransition
+}
+
+// GetGenerationTransitionOk returns a tuple with the GenerationTransition field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RootControl) GetGenerationTransitionOk() (*GenerationTransition, bool) {
+	if o == nil || IsNil(o.GenerationTransition) {
+		return nil, false
+	}
+	return o.GenerationTransition, true
+}
+
+// HasGenerationTransition returns a boolean if a field has been set.
+func (o *RootControl) HasGenerationTransition() bool {
+	if o != nil && !IsNil(o.GenerationTransition) {
+		return true
+	}
+
+	return false
+}
+
+// SetGenerationTransition gets a reference to the given GenerationTransition and assigns it to the GenerationTransition field.
+func (o *RootControl) SetGenerationTransition(v GenerationTransition) {
+	o.GenerationTransition = &v
+}
+
 func (o RootControl) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -326,6 +359,9 @@ func (o RootControl) ToMap() (map[string]interface{}, error) {
 	toSerialize["revoked_installation_ids"] = o.RevokedInstallationIds
 	toSerialize["minimum_generation"] = o.MinimumGeneration
 	toSerialize["minimum_keyset_version"] = o.MinimumKeysetVersion
+	if !IsNil(o.GenerationTransition) {
+		toSerialize["generation_transition"] = o.GenerationTransition
+	}
 	return toSerialize, nil
 }
 

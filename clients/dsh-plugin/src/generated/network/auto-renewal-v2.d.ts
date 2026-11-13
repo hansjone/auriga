@@ -37,7 +37,13 @@ export interface KeysetPayload {
   keyset_version: string;
   issued_at: string;
   valid_until: string;
-  mode: 'bootstrap' | 'refresh' | 'activate' | 'restart_recovery' | 'migration';
+  mode:
+    | 'bootstrap'
+    | 'refresh'
+    | 'activate'
+    | 'restart_recovery'
+    | 'migration'
+    | 'authority_transition';
   /**
    * @maxItems 128
    */
@@ -111,59 +117,188 @@ export interface RuntimeAuthority {
   expiry_policy: 'no_hard_expiry';
   review_period_days: 365;
   /**
-   * @minItems 6
+   * @minItems 1
    * @maxItems 6
    */
-  capabilities: [
-    (
-      | 'keyset'
-      | 'announcement'
-      | 'business_rotation'
-      | 'restart_recovery'
-      | 'history_archive'
-      | 'network_transport'
-    ),
-    (
-      | 'keyset'
-      | 'announcement'
-      | 'business_rotation'
-      | 'restart_recovery'
-      | 'history_archive'
-      | 'network_transport'
-    ),
-    (
-      | 'keyset'
-      | 'announcement'
-      | 'business_rotation'
-      | 'restart_recovery'
-      | 'history_archive'
-      | 'network_transport'
-    ),
-    (
-      | 'keyset'
-      | 'announcement'
-      | 'business_rotation'
-      | 'restart_recovery'
-      | 'history_archive'
-      | 'network_transport'
-    ),
-    (
-      | 'keyset'
-      | 'announcement'
-      | 'business_rotation'
-      | 'restart_recovery'
-      | 'history_archive'
-      | 'network_transport'
-    ),
-    (
-      | 'keyset'
-      | 'announcement'
-      | 'business_rotation'
-      | 'restart_recovery'
-      | 'history_archive'
-      | 'network_transport'
-    ),
-  ];
+  capabilities:
+    | [
+        | 'keyset'
+        | 'announcement'
+        | 'business_rotation'
+        | 'restart_recovery'
+        | 'history_archive'
+        | 'network_transport',
+      ]
+    | [
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+      ]
+    | [
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+      ]
+    | [
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+      ]
+    | [
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+      ]
+    | [
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+        (
+          | 'keyset'
+          | 'announcement'
+          | 'business_rotation'
+          | 'restart_recovery'
+          | 'history_archive'
+          | 'network_transport'
+        ),
+      ];
   limits: Limits;
   /**
    * @maxItems 32
@@ -233,6 +368,7 @@ export interface RootControl {
   revoked_installation_ids: string[];
   minimum_generation: string;
   minimum_keyset_version: string;
+  generation_transition?: GenerationTransition;
 }
 /**
  * This interface was referenced by `AurigaV2`'s JSON-Schema
@@ -241,6 +377,18 @@ export interface RootControl {
 export interface AuthorityReference {
   authority_id: string;
   authority_digest: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "GenerationTransition".
+ */
+export interface GenerationTransition {
+  predecessor_digest: string;
+  from_generation: string;
+  to_generation: string;
+  authority_id: string;
+  authority_digest: string;
+  first_version: string;
 }
 /**
  * This interface was referenced by `AurigaV2`'s JSON-Schema

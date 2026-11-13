@@ -361,6 +361,8 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    GenerationTransition:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/GenerationTransition
     Signature:
       $ref: ../network/auto-renewal-v2.schema.json#/$defs/Signature
     Limits:

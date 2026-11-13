@@ -263,6 +263,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    GenerationTransition: {
+      predecessor_digest: string;
+      from_generation: string;
+      to_generation: string;
+      authority_id: string;
+      authority_digest: string;
+      first_version: string;
+    };
     Signature: {
       /** @constant */
       alg: 'Ed25519';
@@ -327,6 +335,7 @@ export interface components {
       revoked_installation_ids: string[];
       minimum_generation: string;
       minimum_keyset_version: string;
+      generation_transition?: components['schemas']['GenerationTransition'];
     };
     SignedRuntimeAuthority: {
       payload: components['schemas']['RuntimeAuthority'];
@@ -377,7 +386,12 @@ export interface components {
       valid_until: string;
       /** @enum {string} */
       mode:
-        'bootstrap' | 'refresh' | 'activate' | 'restart_recovery' | 'migration';
+        | 'bootstrap'
+        | 'refresh'
+        | 'activate'
+        | 'restart_recovery'
+        | 'migration'
+        | 'authority_transition';
       keys: components['schemas']['PublicKey'][];
       first_publications: components['schemas']['FirstPublication'][];
       archive: components['schemas']['Archive'];

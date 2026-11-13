@@ -174,7 +174,7 @@
               "network_transport"
             ]
           },
-          "minItems": 6,
+          "minItems": 1,
           "maxItems": 6,
           "uniqueItems": true
         },
@@ -282,6 +282,9 @@
         "minimum_keyset_version": {
           "type": "string",
           "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "generation_transition": {
+          "$ref": "#/$defs/GenerationTransition"
         }
       },
       "required": [
@@ -487,7 +490,8 @@
             "refresh",
             "activate",
             "restart_recovery",
-            "migration"
+            "migration",
+            "authority_transition"
           ]
         },
         "keys": {
@@ -1978,6 +1982,45 @@
         "nonce",
         "aad",
         "ciphertext"
+      ],
+      "additionalProperties": false
+    },
+    "GenerationTransition": {
+      "type": "object",
+      "properties": {
+        "predecessor_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "from_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "to_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "first_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        }
+      },
+      "required": [
+        "predecessor_digest",
+        "from_generation",
+        "to_generation",
+        "authority_id",
+        "authority_digest",
+        "first_version"
       ],
       "additionalProperties": false
     }

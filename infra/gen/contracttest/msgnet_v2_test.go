@@ -1,11 +1,13 @@
 package contracttest
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"testing"
 )
 
@@ -81,9 +83,66 @@ func TestMsgnetV2Signatures(t *testing.T) {
 			if ed25519.Verify(pub, []byte(v.Domain+"\x00"+v.Canonical), sig) != v.Valid {
 				t.Fatal("signature verdict")
 			}
-			if ed25519.Verify(pub, []byte("Auriga.Business.v1\x00"+v.Canonical), sig) {
+			if ed25519.Verify(pub, []byte("Auriga.ServerEnvelope.v1\x00"+v.Canonical), sig) {
 				t.Fatal("accepted wrong purpose domain")
 			}
 		})
+	}
+}
+
+// 契约参考adapter全量跑数据；N/P的生产验证器必须独立跑同一三组输入。
+func TestMsgnetV2EverySemanticCase(t *testing.T) {
+	data, err := os.ReadFile("../../../contracts/network/fixtures/auto-renewal-v2-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups map[string]json.RawMessage
+	if err := json.Unmarshal(data, &groups); err != nil {
+		t.Fatal(err)
+	}
+	expected := make(map[string]string)
+	for _, group := range []string{"cases", "issuer_cases", "boundary_cases"} {
+		var vectors []struct {
+			ID       string                     `json:"id"`
+			Expected string                     `json:"expected"`
+			Input    map[string]json.RawMessage `json:"input"`
+		}
+		if err := json.Unmarshal(groups[group], &vectors); err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range vectors {
+			key := group + "/" + v.ID
+			if _, ok := expected[key]; ok || len(v.Input) == 0 {
+				t.Fatal("duplicate or missing input", key)
+			}
+			expected[key] = v.Expected
+		}
+	}
+	cmd := exec.Command("node", "../../../contracts/network/fixtures/run-msgnet-v2-cases.mjs", "--stdin")
+	cmd.Stdin = bytes.NewReader(data)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var results []struct {
+		ID     string `json:"id"`
+		Group  string `json:"group"`
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(output, &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != len(expected) {
+		t.Fatal("missing case results")
+	}
+	for _, r := range results {
+		key := r.Group + "/" + r.ID
+		if expected[key] != r.Result {
+			t.Fatalf("%s: got %s want %s", key, r.Result, expected[key])
+		}
+		delete(expected, key)
+	}
+	if len(expected) != 0 {
+		t.Fatal("unconsumed cases")
 	}
 }

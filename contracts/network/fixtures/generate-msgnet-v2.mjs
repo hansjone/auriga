@@ -1,7 +1,29 @@
 // 合成向量：密钥每次运行在内存中生成，输出仅含公钥/签名，无私钥。
-import { generateKeyPairSync, sign } from 'node:crypto';
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign,
+} from 'node:crypto';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { jcs, digest, purposes } from './msgnet-v2-oracle.mjs';
+import { extendVectors } from './msgnet-v2-extra-vectors.mjs';
+let counter = 0;
+// 明示合成种子，绝不可用于安装/生产；私钥只在内存构造。
+function generateKeyPairSync() {
+  const seed = createHash('sha256')
+    .update('Auriga synthetic MSGNET v2 test only ' + counter++)
+    .digest();
+  const privateKey = createPrivateKey({
+    key: Buffer.concat([
+      Buffer.from('302e020100300506032b657004220420', 'hex'),
+      seed,
+    ]),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  return { privateKey, publicKey: createPublicKey(privateKey) };
+}
 const root = generateKeyPairSync('ed25519'),
   runtime = generateKeyPairSync('ed25519');
 const pub = (k) =>
@@ -134,6 +156,7 @@ const input = {
   seen_version: '9',
   seen_digest: digest(previous),
   previous_digest: digest(previous),
+  first_publication_ledger: base.first_publications,
   publication: {
     keyset: signed(base),
     authority,
@@ -151,6 +174,20 @@ function add(id, expected, change = () => {}, resign = true) {
   const i = JSON.parse(JSON.stringify(input));
   change(i);
   if (resign) {
+    const k = i.publication.keyset.payload;
+    for (const key of k.keys.filter(
+      (x) =>
+        !i.publication.predecessor?.keyset.payload.keys.some(
+          (y) => y.kid === x.kid,
+        ),
+    )) {
+      if (!k.first_publications.some((x) => x.kid === key.kid))
+        k.first_publications.push({
+          kid: key.kid,
+          committed_version: k.keyset_version,
+          committed_at: k.issued_at,
+        });
+    }
     i.publication.keyset = signed(i.publication.keyset.payload);
     i.latest_control = auth(
       i.latest_control.payload,
@@ -175,6 +212,7 @@ add('review-past-365-days-still-authorized', 'accept', (i) => {
   };
   shift(i.publication.keyset.payload);
   shift(i.publication.predecessor.keyset.payload);
+  shift(i.first_publication_ledger);
   i.now = i.publication.keyset.payload.issued_at;
   i.publication.predecessor.keyset = signed(
     i.publication.predecessor.keyset.payload,
@@ -235,7 +273,7 @@ add(
   (i) => (i.publication.keyset.payload.tenant_id = 'another-tenant'),
 );
 add(
-  'runtime-key-wrong-purpose',
+  'runtime-kid-mismatch',
   'scope_denied',
   (i) => (i.publication.keyset.runtime_auth.kid = 'business-key'),
   false,
@@ -328,6 +366,7 @@ add('restart-missing-purpose', 'invalid_transition', (i) => {
 add('restart-earlier-issued-higher-version', 'accept', (i) => {
   restart(i);
   i.publication.predecessor.keyset.payload.issued_at = '2026-11-15T00:00:00Z';
+  i.publication.predecessor.keyset.payload.valid_until = '2026-11-16T00:00:00Z';
   i.publication.predecessor.keyset = signed(
     i.publication.predecessor.keyset.payload,
   );
@@ -365,6 +404,7 @@ function activation(i) {
     state: x.state === 'next' ? 'active' : 'retired',
   }));
   k.first_publications = p.first_publications;
+  i.first_publication_ledger = structuredClone(p.first_publications);
 }
 add('mature-next-activation', 'accept', activation);
 add('mature-next-restart-unnecessary', 'invalid_transition', (i) => {
@@ -416,7 +456,7 @@ const transport = (i) => {
         not_before: '2026-11-13T23:55:00Z',
         not_after: '2036-11-14T00:00:00Z',
       })),
-      scope: authority.payload.transport_scope,
+      scope: structuredClone(authority.payload.transport_scope),
       required_reader_ids: ['synthetic-projector'],
       previous_bundle_digest: 'sha256:' + '0'.repeat(64),
     },
@@ -435,6 +475,33 @@ add('internal-ca-trust-rollback', 'version_rollback', (i) => {
   i.seen_bundle_version = '2';
 });
 const signatures = [];
+const issuer_cases = [];
+for (let n = cases.length - 1; n >= 0; n--)
+  if (cases[n].input.clock) {
+    const v = cases.splice(n, 1)[0];
+    issuer_cases.unshift({
+      id: v.id,
+      expected: v.expected,
+      input: { clock: v.input.clock, write_first_publication: false },
+    });
+  }
+const boundary_cases = [];
+extendVectors({
+  cases,
+  issuer_cases,
+  boundary_cases,
+  add,
+  input,
+  root,
+  runtime,
+  auth,
+  pub,
+  signed,
+  transport,
+  digest,
+  jcs,
+  generateKeyPairSync,
+});
 for (const v of cases)
   for (const [field, domain] of [
     ['keyset', 'Auriga.NetworkKeyset.v2'],
@@ -446,7 +513,10 @@ for (const v of cases)
       id: v.id + '-' + field,
       domain,
       canonical: jcs(s.payload),
-      public_key_spki: field === 'keyset' ? pub(runtime) : pub(root),
+      public_key_spki:
+        field === 'keyset'
+          ? v.input.publication.authority.payload.public_key_spki
+          : pub(root),
       signature: (s.root_auth ?? s.runtime_auth).signature,
       valid: !(v.id === 'tampered-runtime-signature' && field === 'keyset'),
     });
@@ -463,17 +533,22 @@ for (const v of cases)
       valid: true,
     });
   }
-writeFileSync(
-  new URL('auto-renewal-v2-vectors.json', import.meta.url),
+const serialized =
   JSON.stringify(
     {
       synthetic: true,
       producer: 'Node Ed25519 runtime generated; no private keys persisted',
       cases,
+      issuer_cases,
+      boundary_cases,
       signatures,
       certificates,
     },
     null,
     2,
-  ) + '\n',
-);
+  ) + '\n';
+const destination = new URL('auto-renewal-v2-vectors.json', import.meta.url);
+if (process.argv.includes('--check')) {
+  if (readFileSync(destination, 'utf8') !== serialized)
+    throw Error('v2 vectors drift; regenerate with documented commands');
+} else writeFileSync(destination, serialized);
