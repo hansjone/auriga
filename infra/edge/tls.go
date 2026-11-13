@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -76,8 +75,12 @@ func (s *Server) Run(ctx context.Context) error {
 		if serveTLS == nil {
 			serveTLS = func(ln net.Listener, h http.Handler, certFile, keyFile string) error {
 				srv.Handler = h
-				srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-				return srv.ServeTLS(ln, certFile, keyFile)
+				config, err := reloadingServerTLS(certFile, keyFile)
+				if err != nil {
+					return err
+				}
+				srv.TLSConfig = config
+				return srv.ServeTLS(ln, "", "")
 			}
 		}
 		err = serveTLS(ln, s.Handler, s.Cfg.TLS.CertFile, s.Cfg.TLS.KeyFile)

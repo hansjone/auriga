@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -84,6 +86,16 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 		TLSClientConfig:     tlsConfig,
+	}
+	if tlsConfig != nil {
+		// Read the committed trust projection for every new upstream connection.
+		tr.DialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			current, err := networkWSSTLS(cfg, u.Scheme)
+			if err != nil {
+				return nil, err
+			}
+			return (&tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: current}).DialContext(ctx, network, address)
+		}
 	}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {

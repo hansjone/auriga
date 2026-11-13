@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,19 +96,11 @@ func openDevicePresence(cfg DevicePresenceConfig, heartbeats *deviceHeartbeats) 
 	}
 	opts := []nats.Option{nats.Name("auriga-edge-device-presence"), nats.Timeout(500 * time.Millisecond), nats.NoReconnect()}
 	if cfg.CAFile != "" {
-		ca, err := os.ReadFile(cfg.CAFile)
+		option, err := reloadingPresenceTLS(cfg)
 		if err != nil {
 			return nil, errDevicePresence
 		}
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(ca) {
-			return nil, errDevicePresence
-		}
-		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
-		if err != nil {
-			return nil, errDevicePresence
-		}
-		opts = append(opts, nats.Secure(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, Certificates: []tls.Certificate{cert}, ServerName: cfg.ServerName}))
+		opts = append(opts, option)
 	}
 	if cfg.CredsFile != "" {
 		opts = append(opts, nats.UserCredentials(cfg.CredsFile))
