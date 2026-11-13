@@ -24,6 +24,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
+import { buildBroker } from '../../shell-auth/build.mjs';
 import { parse as parseVersion } from '../runtime/semver-lite.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
 import {
@@ -394,6 +395,7 @@ export async function build(args) {
   }
 
   // 4. Our own runtime and Windows wrappers.
+  const shellAuthManifest = buildBroker(join(payload, 'auriga', 'shell-auth'));
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });
@@ -439,6 +441,12 @@ export async function build(args) {
     id: '',
     bundleVersion: desktopVersion,
     product: 'Auriga Desktop',
+    shellAuth: {
+      version: shellAuthManifest.version,
+      manifestSha256: sha256File(
+        join(payload, 'auriga/shell-auth/broker-manifest.json'),
+      ),
+    },
     target: 'win-x64',
     size: {
       upstreamAndPluginBeforeTrim: sizeBefore,

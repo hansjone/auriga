@@ -261,6 +261,35 @@ export class Supervisor {
     const snapshot = this.snapshot(),
       old = snapshot.state;
     this.lastState = old;
+    if (this.shellSnapshot) {
+      const shell = this.shellSnapshot();
+      const identity = shell.identity;
+      const current =
+        shell.state === 'authenticated' &&
+        Date.parse(shell.expiresAt) > this.now();
+      const matches =
+        current &&
+        identity &&
+        snapshot.ledgers.every(
+          (entry) =>
+            !entry.ledger.installations.some(installationEnabled) ||
+            (entry.ledger.tenantId === identity.tenantId &&
+              entry.ledger.ownerId === identity.memberId &&
+              entry.ledger.hostId === identity.deviceId),
+        );
+      if (!matches) {
+        let restart = false;
+        if (
+          old &&
+          (old.guardian.state !== 'private_only' || !this.guardian.cleared())
+        ) {
+          await this.guardian.disable(current ? 'identity_changed' : 'revoked');
+          restart = true;
+        }
+        this.privateOnly = true;
+        return { privateOnly: true, restart };
+      }
+    }
     if (
       (!old || old.guardian.state === 'private_only') &&
       this.guardian.cleared() &&

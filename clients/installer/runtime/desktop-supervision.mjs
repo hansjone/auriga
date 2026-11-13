@@ -9,6 +9,7 @@ export async function superviseDsh({
   supervisor,
   session,
   notify,
+  attach = async () => {},
   poll = () => delay(1000),
   now = () => Math.floor(uptime() * 1000),
 }) {
@@ -28,6 +29,7 @@ export async function superviseDsh({
     if (child.pid) {
       tree.attach(child.pid);
       session.child(child.pid);
+      await attach(child);
     }
     let restart = false,
       refreshed = 0;

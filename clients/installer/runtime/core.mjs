@@ -50,6 +50,7 @@ import {
 } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { verifyPackage } from './verify.mjs';
 
 export const PROFILE = 'auriga';
@@ -718,7 +719,13 @@ export async function launch({ root, args = [], env = process.env }) {
     packagedTrust(versionDir(root, initial.current)),
   );
   const releaseSingleton = tree.singleton();
-  let session;
+  let session, shellAuth;
+  const hasShell = existsSync(
+    join(versionDir(root, initial.current), 'auriga/shell-auth/desktop.mjs'),
+  );
+  if (hasShell)
+    supervisor.shellSnapshot = () =>
+      shellAuth?.snapshot() ?? { state: 'signed_out' };
 
   try {
     await supervisor.prepare();
@@ -744,6 +751,18 @@ export async function launch({ root, args = [], env = process.env }) {
     // The update transaction may have changed packaged trust or profile bytes.
     verifyPackage(dir, { trees: false });
     supervisor.trust = packagedTrust(dir);
+    if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
+      supervisor.shellSnapshot = () =>
+        shellAuth?.snapshot() ?? { state: 'signed_out' };
+      try {
+        const { startDesktopAuth } = await import(
+          pathToFileURL(join(dir, 'auriga/shell-auth/desktop.mjs')).href
+        );
+        shellAuth = await startDesktopAuth({ root, dataHome: state.dataHome });
+      } catch {
+        console.error('Auriga 平台认证暂不可用，继续使用本地 DSH。');
+      }
+    }
     await supervisor.reconcile(true);
     if (
       supervisor.privateOnly ||
@@ -755,9 +774,21 @@ export async function launch({ root, args = [], env = process.env }) {
       supervisor,
       session,
       notify: notifySharedRestart,
+      attach: async (child) => {
+        if (shellAuth) {
+          try {
+            await shellAuth.attach(child);
+          } catch {
+            child.stdio[3]?.destroy();
+            console.error('Auriga 平台通道不可用，本地 DSH 继续运行。');
+          }
+        }
+      },
       start: () =>
         spawn(nodeBin(dir), [dshBin(dir), '--profile', PROFILE, ...args], {
-          stdio: 'inherit',
+          stdio: shellAuth
+            ? ['inherit', 'inherit', 'inherit', 'pipe']
+            : 'inherit',
           env: launchEnv(dir, state.dataHome, {
             ...env,
             AURIGA_DESKTOP_ROOT: root,
@@ -770,6 +801,7 @@ export async function launch({ root, args = [], env = process.env }) {
     return status;
   } finally {
     try {
+      await shellAuth?.close();
       await tree.stopTree();
     } finally {
       session?.close();

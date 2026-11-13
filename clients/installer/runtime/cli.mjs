@@ -1,7 +1,7 @@
 /** Command line entry of the installer core, run with the bundled Node. */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { install, launch, rollback, uninstall } from './core.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -57,11 +57,28 @@ try {
         }),
       ),
     );
+  } else if (command === 'diagnostics' && positional[0] === 'export') {
+    const packaged = join(here, '../shell-auth/diagnostics.mjs');
+    const source = existsSync(packaged)
+      ? packaged
+      : join(here, '../../shell-auth/diagnostics.mjs');
+    const { exportDiagnostics } = await import(pathToFileURL(source).href);
+    const result = await exportDiagnostics({
+      root: values.root,
+      output: values.output,
+      helper: join(here, '../shell-auth/windows/shell-helper.exe'),
+      from: values.from,
+      to: values.to,
+      tenantId: values.tenant,
+      providerId: values.provider,
+    });
+    console.log(JSON.stringify(result));
+    if (result.partial) process.exitCode = 3;
   } else if (command === 'launch') {
     process.exitCode = await launch({ root: values.root, args: positional });
   } else {
     console.error(
-      'usage: cli.mjs install|rollback|uninstall|launch --root <dir> ...',
+      'usage: cli.mjs install|rollback|uninstall|launch|diagnostics export --root <dir> --output <dir> ...',
     );
     process.exitCode = 2;
   }
