@@ -10,6 +10,7 @@ import {
   evaluateBoundary,
 } from '../network/fixtures/msgnet-v2-boundary-oracle.mjs';
 import YAML from '../../services/contracts/node_modules/yaml/dist/index.js';
+import { checkMutations } from '../network/fixtures/check-msgnet-v2-mutations.mjs';
 const fixture = JSON.parse(
   readFileSync(
     new URL(
@@ -32,6 +33,11 @@ const vectorSchema = JSON.parse(
   ),
 );
 ajv.addSchema(vectorSchema);
+test('every oracle guard deletion is detected by a shared vector', async () => {
+  const result = await checkMutations();
+  assert.ok(result.count > 0);
+  assert.equal(result.coverage.length, result.count);
+});
 test('all shared input groups conform to vector schema', () => {
   const validate = ajv.getSchema(vectorSchema.$id);
   assert.ok(validate(fixture), JSON.stringify(validate.errors));

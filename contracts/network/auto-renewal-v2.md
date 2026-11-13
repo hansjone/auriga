@@ -37,11 +37,13 @@
 - activate：前驱 next 仍有效，首发距 issued_at >=86400秒，该用途旧 active 已过期或至少还剩360秒；原 next 身份/期限不变，原 active→retired。
 - restart_recovery：仅对没有有效 active 且没有成熟有效 next 的用途新增全新 active；not_before=issued_at，0<寿命<=604800秒，未来生效/过期/不成熟 next→retired 或 revoked。其余仍有效用途 active 必须保持。成熟有效 next 必须走 activate，不能生成替代新钥。全部三用途不可用时才新增三把 active。拒绝缺用途、缺前驱、伪首发、无必要恢复、7天超限和历史冲突。
 - migration：仅一次根签许可及下述屏障允许；保持原有效 active、kid、期限和真实首发。
-- authority_transition：正常换授权、旧新均在当前控制允许列表时，使用根签新授权对应的运行钥签第一份新清单；前驱使用前驱自己的运行公钥和其当时的根签控制验链，同代际版本仍须递增。若旧授权已撤销或需要重设版本空间，最新根控制必须带 GenerationTransition，精确绑定 predecessor_digest、from_generation、to_generation、新 authority_id/完整摘要和 first_version；to_generation严格大于from_generation，并等于本控制minimum_generation，first_version等于minimum_keyset_version。转换第一份清单必须逐字段匹配该锚点，可重置版本为first_version；只比较同代际的版本，不用旧代际版本阻止根授权的重新起步。后续版本按通常单调规则。根签锚点只许可历史证明，不恢复旧授权的签发权；用被撤销旧授权签任何新快照都先被拒。事故恢复应生成新的业务钥并将旧钥撤销，原材料与首发留审计；仍受用途、寿命、墓碑与撤销不复活约束。
+- authority_transition：正常换授权、旧新均在当前控制允许列表时，使用根签新授权对应的运行钥签第一份新清单；前驱使用前驱自己的运行公钥和其当时的根签控制验链，同代际版本仍须递增。若旧授权已撤销或需要重设版本空间，最新根控制必须带 GenerationTransition，精确绑定 predecessor_digest、from_generation、to_generation、新 authority_id/完整摘要和 first_version；to_generation严格大于from_generation，并等于本控制minimum_generation，first_version等于minimum_keyset_version。转换第一份清单必须逐字段匹配该锚点，可重置版本为first_version；只比较同代际的版本，不用旧代际版本阻止根授权的重新起步。后续版本按通常单调规则。根签锚点只许可历史证明，不恢复旧授权的签发权；用被撤销旧授权签任何新快照都先被拒。事故恢复必须生成新的业务钥并将旧钥撤销，原材料与首发留审计；仍受用途、寿命、墓碑与撤销不复活约束。
 
 首发证明是持久账本的一部分：新kid的committed_version必须等于它在已提交清单中首次出现的keyset_version，committed_at等于该发布事务经校验的issued_at。首次写入后，后续清单/前驱中的记录不可更改；消费端须逐kid与本地first_publication_ledger核对，不以新收到的前驱自报取代已有记录。新/长期离线端对未曾见过的kid验证前驱签名记录后建立账本，仍保留对已见kid的核对。成熟期按该不可变记录计算。clock_error时既不签清单也不落首发记录，稳定后首次正常提交才锚定。
 
 正常同代际换授权的authority_transition必须保留原active，不能借换授权绕过业务钥的next成熟与重叠窗口。只有根控制精确锚定的新代际事故恢复才允许在该起点替换新的active；旧材料必须保持原身份/期限并进入不可逆终态。
+
+前驱授权已被最新根控制撤销时，转换清单必须保留前驱全部active和next的原身份与期限，并将它们全部置为revoked。新清单的每把active必须使用前驱从未出现的全新kid。遗漏旧钥、仅置retired、原样保留旧active或继续使用旧next均拒绝。该检查在根锚点验证成功后执行，先于一般业务钥转换检查。
 
 过期至少360秒且不用于实时验签的钥才允许移出传输。archive.before 不得超过 issued_at-360秒；本地每把移出钥须满足 not_after<=archive.before。完整材料、终态、首发与唯一索引留追加审计历史；消费者留持久 Tombstone，不受128条传输上限约束。跨年离线可直接验证当前集，不能清墓碑或要求逐版补齐。历史审计只读，不重新执行业务。
 

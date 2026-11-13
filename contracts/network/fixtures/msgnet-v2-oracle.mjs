@@ -179,6 +179,19 @@ export function evaluate(v) {
           BigInt(k.generation) <= BigInt(qk.generation)
         )
           err('invalid_transition');
+        if (c.revoked_authority_ids.includes(qa.authority_id)) {
+          const oldKeysRevoked = qk.keys
+            .filter((key) => ['active', 'next'].includes(key.state))
+            .every((old) =>
+              k.keys.some(
+                (key) => key.kid === old.kid && key.state === 'revoked',
+              ),
+            );
+          const newActiveKids = k.keys
+            .filter((key) => key.state === 'active')
+            .every((key) => !qk.keys.some((old) => old.kid === key.kid));
+          if (!oldKeysRevoked || !newActiveKids) err('invalid_transition');
+        }
       } else if (
         k.mode === 'authority_transition' &&
         qa.authority_id === a.authority_id
@@ -291,6 +304,9 @@ export function evaluate(v) {
       if (
         k.mode === 'authority_transition' &&
         p.predecessor.keyset.payload.generation === k.generation &&
+        !c.revoked_authority_ids.includes(
+          p.predecessor.authority.payload.authority_id,
+        ) &&
         old?.kid !== next.kid
       )
         err('invalid_transition');

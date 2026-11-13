@@ -1,4 +1,5 @@
 import { sealTest } from './msgnet-v2-hpke.mjs';
+import { extendRoundThree } from './msgnet-v2-r3-vectors.mjs';
 export function extendVectors(c) {
   const {
     add,
@@ -176,12 +177,17 @@ export function extendVectors(c) {
       a.runtime_kid,
     );
   }
+  // 第3轮在函数尾追加，保留既有确定性生成顺序。
   transition('revocation-new-authority-first-generation-snapshot', 'accept');
   transition('normal-authority-overlap-same-generation', 'accept', (i) => {
     i.publication.keyset.payload.generation = '1';
     i.publication.keyset.payload.keyset_version = '10';
-      i.publication.keyset.payload.keys=clone(input.publication.keyset.payload.keys);
-      i.publication.keyset.payload.first_publications=clone(input.publication.keyset.payload.first_publications);
+    i.publication.keyset.payload.keys = clone(
+      input.publication.keyset.payload.keys,
+    );
+    i.publication.keyset.payload.first_publications = clone(
+      input.publication.keyset.payload.first_publications,
+    );
     i.publication.keyset.payload.first_publications
       .filter((x) => x.kid.startsWith('synthetic-new-generation'))
       .forEach((x) => (x.committed_version = '10'));
@@ -732,4 +738,5 @@ export function extendVectors(c) {
     change(value);
     push(id, 'config', expected, { config: value });
   }
+  extendRoundThree({ ...c, transition, sealTest });
 }
