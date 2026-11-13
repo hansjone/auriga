@@ -83,6 +83,7 @@ class UacFlowPostgresTest {
     final UacFlow flow;
     final UacWorker worker;
     final LoginManager login;
+    final IdentityPolicyHooks hooks = mock(IdentityPolicyHooks.class);
     final AtomicInteger scans = new AtomicInteger(),
         departments = new AtomicInteger(),
         verifications = new AtomicInteger();
@@ -99,6 +100,7 @@ class UacFlowPostgresTest {
     final AtomicReference<CountDownLatch> verifyEntered = new AtomicReference<>(),
         verifyRelease = new AtomicReference<>();
     final String token = Secrets.random(), replacement = Secrets.random();
+    final String envelopeKey = UacProviderPostgresTest.key();
 
     Fixture(String strategy, int retries) throws Exception {
       server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -189,8 +191,10 @@ class UacFlowPostgresTest {
               new ContractSchemas(),
               Json.object(
                   "activeKeyId", "initial", "decryptKeyIds", List.of("initial"), "revision", 0),
-              Map.of("initial", UacProviderPostgresTest.key()));
+              Map.of("initial", envelopeKey));
       uac = new UacSessions(store, cipher, adapter, providers, sessions, time, policy);
+      when(hooks.uacMember(any()))
+          .thenReturn(Optional.of(new IdentityPolicyHooks.UacMember("Test member", "member")));
       login =
           new LoginManager(
               store,
@@ -200,7 +204,7 @@ class UacFlowPostgresTest {
               mock(EmergencyAccounts.class),
               mock(TeamAccounts.class),
               sessions,
-              mock(IdentityPolicyHooks.class),
+              hooks,
               events,
               audit,
               time,
@@ -245,14 +249,14 @@ class UacFlowPostgresTest {
                           null);
                       store.insert(
                           "identity",
-                          id + ":001Ab",
+                          id + ":001AB",
                           Json.object(
                               "providerId",
                               id,
                               "accountId",
                               account.toString(),
                               "subject",
-                              "001Ab"),
+                              "001AB"),
                           null);
                       return null;
                     });
@@ -326,6 +330,314 @@ class UacFlowPostgresTest {
       if (verifyRelease.get() != null) verifyRelease.get().countDown();
       worker.destroy();
       server.stop(0);
+    }
+  }
+
+  @Test
+  void onlineEnvelopeRotationIsBoundedAndHistoricalKeyRemovalFailsUntilAllPathsMigrate()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String sid = f.login().session().session().path("sessionId").asString();
+      var nav = navigation(f, "true");
+      f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      String nextKey = UacProviderPostgresTest.key();
+      var ring =
+          Json.object(
+              "activeKeyId", "next", "decryptKeyIds", List.of("initial", "next"), "revision", 1);
+      var cipher =
+          new UacCredentialCipher(
+              new ContractSchemas(), ring, Map.of("initial", f.envelopeKey, "next", nextKey));
+      var nextOnly =
+          new UacCredentialCipher(
+              new ContractSchemas(),
+              Json.object("activeKeyId", "next", "decryptKeyIds", List.of("next"), "revision", 2),
+              Map.of("next", nextKey));
+      var guard = new UacKeyRotation(store, nextOnly);
+      var rotation = new UacKeyRotation(store, cipher);
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              f.call(
+                  () -> {
+                    guard.verifyTenantKeys();
+                    return null;
+                  }));
+      f.call(
+          () -> {
+            rotation.verifyTenantKeys();
+            return null;
+          });
+      int changed = 0;
+      for (int i = 0; i < 20; i++) {
+        int batch = f.call(() -> rotation.rotateBatch(1));
+        assertTrue(batch <= 1);
+        changed += batch;
+        if (batch == 0) break;
+      }
+      assertTrue(changed >= 3);
+      f.call(
+          () -> {
+            guard.verifyTenantKeys();
+            return null;
+          });
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var session = store.byId("session", sid, false);
+                    var credential =
+                        store.byId(
+                            "uac_credential", session.path("uacCredentialId").asString(), false);
+                    assertEquals("next", credential.path("envelope").path("keyId").asString());
+                    assertEquals(
+                        f.token,
+                        Json.read(
+                                nextOnly.decrypt(
+                                    credential.path("envelope"),
+                                    f.tenant,
+                                    UUID.fromString(f.provider)))
+                            .path("token")
+                            .asString());
+                    assertEquals(1, credential.path("version").asLong());
+                    return null;
+                  }));
+    }
+  }
+
+  @Test
+  void diagnosticsRevisionIsIndependentCrossReplicaAndExpiryAndStorageFaultsFailClosed()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var providers =
+          new UacProviderService(
+              store, f.uac.providers, f.uac.adapter, f.sessions, f.audit, f.time);
+      var first = new UacDiagnosticSettings(store, providers, f.audit, f.time);
+      var second = new UacDiagnosticSettings(store, providers, f.audit, f.time);
+      String before =
+          f.call(() -> store.tx(() -> UacProviderService.etag(providers.row(f.provider, false))));
+      var off = f.call(() -> first.get(f.provider));
+      assertFalse(off.path("enabled").asBoolean());
+      assertEquals(-1L, f.call(() -> first.capture(f.provider)));
+      assertEquals(
+          "common.precondition_failed",
+          assertThrows(
+                  AurigaException.class,
+                  () -> f.call(() -> first.put(f.provider, Json.object("enabled", true), null)))
+              .errorCode()
+              .code());
+      var on =
+          f.call(
+              () ->
+                  first.put(
+                      f.provider,
+                      Json.object("enabled", true, "ttlSeconds", 3),
+                      UacDiagnosticSettings.etag(off)));
+      assertEquals(on, f.call(() -> second.get(f.provider)));
+      long revision = on.path("revision").asLong();
+      assertTrue(f.call(() -> second.permits(f.provider, revision)));
+      assertEquals(
+          before,
+          f.call(() -> store.tx(() -> UacProviderService.etag(providers.row(f.provider, false)))));
+      f.time.advance(3);
+      assertFalse(f.call(() -> second.get(f.provider)).path("enabled").asBoolean());
+      assertFalse(f.call(() -> first.permits(f.provider, revision)));
+      var restarted = new UacDiagnosticSettings(store, providers, f.audit, f.time);
+      var newOn =
+          f.call(
+              () ->
+                  restarted.put(
+                      f.provider, Json.object("enabled", true), UacDiagnosticSettings.etag(on)));
+      assertEquals(
+          900,
+          Duration.between(f.time.instant(), Instant.parse(newOn.path("expiresAt").asString()))
+              .toSeconds());
+      assertFalse(f.call(() -> first.permits(f.provider, revision)));
+      f.call(
+          () ->
+              second.put(
+                  f.provider, Json.object("enabled", false), UacDiagnosticSettings.etag(newOn)));
+      assertFalse(f.call(() -> restarted.get(f.provider)).path("enabled").asBoolean());
+      TenantContext.run(
+          UUID.randomUUID(),
+          () -> assertThrows(AurigaException.class, () -> first.get(f.provider)));
+      var broken = mock(IamStore.class);
+      when(broken.tx(any())).thenThrow(new IllegalStateException("storage unavailable"));
+      assertEquals(
+          -1, new UacDiagnosticSettings(broken, providers, f.audit, f.time).capture(f.provider));
+      verify(f.audit, atLeast(3)).record(argThat(e -> e.action().equals("iam.provider.update")));
+    }
+  }
+
+  @Test
+  void invitationOwnerCommitCanSurviveIamRollbackWithoutSecondRedemptionOrNewAccount()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    store.delete("identity", f.provider + ":001AB");
+                    return null;
+                  }));
+      AtomicReference<UUID> canonical = new AtomicReference<>();
+      when(f.hooks.resolveUacEmployee(any(), any()))
+          .thenAnswer(i -> Optional.ofNullable(canonical.get()));
+      when(f.hooks.consumeUacInvitation(
+              eq("trusted-invite"), eq(UUID.fromString(f.provider)), eq("001AB"), any()))
+          .thenAnswer(
+              i -> {
+                assertTrue(canonical.compareAndSet(null, i.getArgument(3)));
+                return true;
+              });
+      AtomicBoolean fail = new AtomicBoolean(true);
+      when(f.hooks.uacMember(any()))
+          .thenAnswer(
+              i -> {
+                if (fail.getAndSet(false))
+                  throw new IllegalStateException("simulated IAM commit boundary failure");
+                return Optional.of(new IdentityPolicyHooks.UacMember("Owner member", "external"));
+              });
+      var c =
+          f.call(
+              () ->
+                  f.flow.create(
+                      Json.object("providerId", f.provider, "invitationCode", "trusted-invite"),
+                      "portal",
+                      "https://portal.example.com",
+                      "127.0.0.1",
+                      null,
+                      null));
+      f.run();
+      assertThrows(IllegalStateException.class, () -> f.complete(c));
+      assertNotNull(canonical.get());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertNull(store.get("account", canonical.get().toString(), false));
+                    assertEquals(
+                        "verified",
+                        store
+                            .get("uac_challenge", c.challenge().path("id").asString(), false)
+                            .path("state")
+                            .asString());
+                    return null;
+                  }));
+      var result = f.complete(c);
+      assertEquals(
+          canonical.get().toString(), result.session().session().path("accountId").asString());
+      verify(f.hooks, times(1)).consumeUacInvitation(any(), any(), any(), any());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        "external",
+                        store
+                            .get("account", canonical.get().toString(), false)
+                            .path("memberType")
+                            .asString());
+                    return null;
+                  }));
+    }
+  }
+
+  @Test
+  void unknownEmployeeCannotJoinWithoutVerifiedInvitationAndInactiveOwnerCannotLogin()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var c = f.begin();
+      f.run();
+      when(f.hooks.uacMember(any())).thenReturn(Optional.empty());
+      assertEquals(
+          "iam.account_disabled",
+          assertThrows(AurigaException.class, () -> f.complete(c)).errorCode().code());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    store.delete("identity", f.provider + ":001AB");
+                    return null;
+                  }));
+      assertEquals(
+          "iam.admission_denied",
+          assertThrows(AurigaException.class, () -> f.complete(c)).errorCode().code());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertTrue(store.all("session").isEmpty());
+                    return null;
+                  }));
+    }
+  }
+
+  @Test
+  void linkCompletionRechecksSourceGenerationAndAuthenticationFreshness() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var source = f.login().session().session();
+      var c =
+          f.call(
+              () ->
+                  f.flow.create(
+                      Json.object("providerId", f.provider, "purpose", "link"),
+                      "portal",
+                      "https://portal.example.com",
+                      "127.0.0.1",
+                      null,
+                      source));
+      f.run();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var row = store.byId("session", source.path("id").asString(), true);
+                    row.put("authGeneration", row.path("authGeneration").asLong() + 1);
+                    row.withObject("/uacSessionBinding")
+                        .put("authGeneration", row.path("authGeneration").asLong());
+                    store.save("session", row);
+                    return null;
+                  }));
+      assertEquals(
+          "iam.unauthenticated",
+          assertThrows(AurigaException.class, () -> f.complete(c)).errorCode().code());
+      var stale = source.deepCopy().put("authTime", f.time.instant().minusSeconds(601).toString());
+      assertEquals(
+          "iam.step_up_required",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              f.flow.create(
+                                  Json.object("providerId", f.provider, "purpose", "link"),
+                                  "portal",
+                                  "https://portal.example.com",
+                                  "127.0.0.1",
+                                  null,
+                                  stale)))
+              .errorCode()
+              .code());
+      assertEquals(
+          "iam.step_up_required",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              f.flow.create(
+                                  Json.object("providerId", f.provider, "purpose", "link"),
+                                  "portal",
+                                  "https://portal.example.com",
+                                  "127.0.0.1",
+                                  null,
+                                  source
+                                      .deepCopy()
+                                      .put(
+                                          "authTime",
+                                          f.time.instant().plusSeconds(31).toString()))))
+              .errorCode()
+              .code());
     }
   }
 

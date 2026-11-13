@@ -615,13 +615,16 @@ public final class LoginManager {
   }
 
   private Result finish(ObjectNode tx, ObjectNode provider, JsonNode profile, boolean coreMfa) {
+    boolean uac = "uac".equals(provider.path("connectorType").asString());
     String pid = provider.path("providerId").asString(),
-        subject = profile.path("subject").asString();
+        subject =
+            uac
+                ? auriga.iam.api.UacEmployee.canonical(profile.path("subject").asString())
+                : profile.path("subject").asString();
     store.lock("identity:" + pid + ":" + subject);
     ObjectNode identity = store.get("identity", pid + ":" + subject, true),
         policy = (ObjectNode) provider.path("admission");
     String purpose = tx.path("purpose").asString();
-    boolean uac = "uac".equals(provider.path("connectorType").asString());
     if (uac) {
       IamError.validate(tx.path("uacVerified").asBoolean() && tx.has("uacCredential"));
       if (!purpose.equals("login")) {
@@ -652,11 +655,20 @@ public final class LoginManager {
           "identity_already_linked",
           409);
       accountId = tx.path("accountId").asString();
+      if (uac)
+        for (ObjectNode other : store.all("identity"))
+          IamError.require(
+              !pid.equals(other.path("providerId").asString())
+                  || !accountId.equals(other.path("accountId").asString())
+                  || subject.equals(other.path("subject").asString()),
+              "identity_already_linked",
+              409);
     }
     if (accountId.isEmpty()) {
       if (uac && purpose.equals("login"))
         accountId =
             hooks.resolveUacEmployee(UUID.fromString(pid), subject).map(UUID::toString).orElse("");
+      if (uac && !accountId.isEmpty()) tx.put("uacResolved", true);
     }
     if (accountId.isEmpty()) {
       boolean admit =
@@ -666,11 +678,13 @@ public final class LoginManager {
               || policy.path("mode").asString().equals("invite_only")
                   && !tx.path("invitationCode").asString("").isBlank();
       IamError.require(admit, "admission_denied", 403);
-      accountId = UuidV7.next().toString();
+      accountId = uac ? tx.path("uacPendingAccountId").asString() : UuidV7.next().toString();
+      IamError.require(!accountId.isBlank(), "admission_denied", 403);
       tx.put("pendingAccount", accountId);
       tx.put("newAccount", true);
     }
     ObjectNode account = store.get("account", accountId, true);
+    if (uac && account == null && tx.path("uacResolved").asBoolean()) tx.put("newAccount", true);
     if (account == null && tx.path("newAccount").asBoolean()) {
       account =
           Json.object(
@@ -729,7 +743,8 @@ public final class LoginManager {
     }
     if (identity == null) {
       if (tx.path("newAccount").asBoolean() && store.get("account", accountId, false) == null) {
-        if (policy.path("mode").asString().equals("invite_only")) {
+        if (policy.path("mode").asString().equals("invite_only")
+            && !tx.path("uacResolved").asBoolean()) {
           ObjectNode inviteProfile =
               profile.isObject() ? ((ObjectNode) profile).deepCopy() : Json.object();
           inviteProfile.put("accountId", accountId);
@@ -781,6 +796,16 @@ public final class LoginManager {
               "action",
               "linked"),
           null);
+    }
+    if (uac) {
+      var member =
+          hooks
+              .uacMember(UUID.fromString(accountId))
+              .orElseThrow(() -> IamError.error("account_disabled", 403));
+      IamError.require(
+          Set.of("member", "external").contains(member.memberType()), "admission_denied", 403);
+      account.put("displayName", member.displayName());
+      account.put("memberType", member.memberType());
     }
     identity.set("profile", profile);
     identity.put("lastLoginAt", clock.instant().toString());

@@ -100,6 +100,14 @@ final class UacCredentialCipher {
     return encrypt(decrypt(envelope, tenant, provider), tenant, provider);
   }
 
+  String activeKeyId() {
+    return keyring.path("activeKeyId").asString();
+  }
+
+  boolean canDecrypt(String id) {
+    return id != null && keys.containsKey(id);
+  }
+
   private static ObjectNode aad(UUID tenant, UUID provider) {
     return Json.object(
         "tenantId",

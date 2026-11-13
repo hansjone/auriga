@@ -156,6 +156,12 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  UacDiagnosticSettings iamUacDiagnosticSettings(
+      IamStore store, UacProviderService providers, AuditLogger audit, Clock clock) {
+    return new UacDiagnosticSettings(store, providers, audit, clock);
+  }
+
+  @Bean
   UacSessions iamUacSessions(
       IamStore store,
       UacCredentialCipher cipher,
@@ -208,7 +214,7 @@ public class IamRuntimeConfiguration {
     return bean;
   }
 
-  @Bean(initMethod = "start", destroyMethod = "destroy")
+  @Bean(destroyMethod = "destroy")
   @ConditionalOnProperty(
       prefix = "auriga.iam.uac.worker",
       name = "enabled",
@@ -216,6 +222,12 @@ public class IamRuntimeConfiguration {
       matchIfMissing = true)
   UacWorker iamUacWorker(UacSessions uac, AuditLogger audit) {
     return new UacWorker(uac, audit);
+  }
+
+  @Bean
+  org.springframework.boot.ApplicationRunner iamUacKeyGuard(
+      IamStore store, UacCredentialCipher cipher) {
+    return args -> new UacKeyRotation(store, cipher).verifyKeys();
   }
 
   @Bean

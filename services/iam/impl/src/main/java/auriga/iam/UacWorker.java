@@ -10,7 +10,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /** Shared leases fence results; all upstream requests run outside database transactions. */
-final class UacWorker implements org.springframework.beans.factory.DisposableBean {
+final class UacWorker
+    implements org.springframework.beans.factory.DisposableBean,
+        org.springframework.context.ApplicationListener<
+            org.springframework.boot.context.event.ApplicationReadyEvent> {
+  private final java.util.concurrent.atomic.AtomicBoolean started =
+      new java.util.concurrent.atomic.AtomicBoolean();
   private final UacSessions uac;
   private final IamStore store;
   private final AuditLogger audit;
@@ -29,6 +34,7 @@ final class UacWorker implements org.springframework.beans.factory.DisposableBea
   }
 
   void start() {
+    if (!started.compareAndSet(false, true)) return;
     executor.scheduleWithFixedDelay(
         () -> {
           try {
@@ -50,6 +56,7 @@ final class UacWorker implements org.springframework.beans.factory.DisposableBea
   }
 
   int runOnce() {
+    new UacKeyRotation(store, uac.cipher).rotateBatch(50);
     store.tx(
         () -> {
           int expired = 0;
@@ -139,6 +146,12 @@ final class UacWorker implements org.springframework.beans.factory.DisposableBea
       return job.deepCopy();
     }
     return null;
+  }
+
+  @Override
+  public void onApplicationEvent(
+      org.springframework.boot.context.event.ApplicationReadyEvent event) {
+    start();
   }
 
   private boolean prepareRevalidation(ObjectNode job, String token, Instant now) {

@@ -65,6 +65,8 @@ final class UacFlow {
             "pending",
             "uacPending",
             true,
+            "uacPendingAccountId",
+            UuidV7.next().toString(),
             "audience",
             audience,
             "origin",
