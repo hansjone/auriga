@@ -356,7 +356,9 @@
         },
         "verificationRequired": {
           "type": "boolean",
-          "const": true
+          "not": {
+            "const": false
+          }
         }
       },
       "description": "broker只向发起控制页投影本次公开用户码；pageOwner来自票据交换的服务端页面会话，不接受命令自报。必须提示用户在可信门户人工核对本次用户码。无device_code、令牌或URL。"

@@ -1,4 +1,24 @@
 export interface paths {
+  '/me/device-session': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 读取当前标准设备的权威身份及来源绑定
+     * @description 只接受aud=auriga、ptyp=ctx=device的标准设备Bearer，在线核client/tenant/account/member/device及来源状态；无查询/body选择器。UAC绑定必须由IAM生成且与JWT及权威grant一致。返回值不含平台凭据或浏览器session。契约补充见../auth/standard-device.md。
+     */
+    get: operations['getStandardDeviceSession'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/internal/uac/device-navigation-proofs': {
     parameters: {
       query?: never;
@@ -1317,6 +1337,72 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @description 表单解码后的单值结构；解析原始表单先拒绝重复参数。scope只可缩小授权范围，resource省略为平台刷新；AI resource必须使用标准设备lineage及在线来源绑定。 */
+    StandardDeviceRefreshRequest: {
+      /** @constant */
+      grant_type: 'refresh_token';
+      client_id: string;
+      refresh_token: string;
+      scope?: string;
+      /** @constant */
+      resource?: 'urn:auriga:ai-gateway';
+    };
+    /** @description 已登记平台公共RFC8628客户端，以本client token作为possession proof，只撤该device及所有refresh代际/派生连接；不能选择did或撤来源会话。未知、过期、重复token均200空对象。 */
+    StandardDeviceRevokeRequest: {
+      client_id: string;
+      token: string;
+      /** @enum {string} */
+      token_type_hint?: 'access_token' | 'refresh_token';
+    };
+    /** @description GET /me/device-session由当前设备Bearer在线定位，不能传设备ID；UAC来源必须有IAM权威绑定且与JWT一致，其他来源省略。无需浏览器sid；不能捏造Me.session。 */
+    StandardDeviceIdentity: {
+      /** Format: uuid */
+      accountId: string;
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      memberId: string;
+      /** Format: uuid */
+      deviceId: string;
+      /** Format: uuid */
+      providerId: string;
+      clientId: string;
+      /** @constant */
+      authorizationMode: 'standard_device';
+      /** Format: date-time */
+      expiresAt: string;
+      uacSessionBinding?: components['schemas']['UacSessionBinding'];
+    };
+    /** @description 标准设备AI票，不改变native_tx模型专票。IAM按当前授权交集签发，至少一种权限；实际验签、<=300秒/来源期限、UAC来源必带绑定及在线检查见standard-device.md；schema不能替代这些运行时检查。 */
+    StandardDeviceAiClaims: {
+      /** Format: uri */
+      iss: string;
+      /** Format: uuid */
+      sub: string;
+      /** Format: uuid */
+      tid: string;
+      /** Format: uuid */
+      did: string;
+      jti: string;
+      /** @constant */
+      aud: 'auriga.ai-gateway';
+      /** @constant */
+      ptyp: 'device';
+      /** @constant */
+      ctx: 'device';
+      scope: string;
+      iat: number;
+      nbf?: number;
+      exp: number;
+      auth_time?: number;
+      /** @enum {string} */
+      mtyp: 'member' | 'external';
+      perms: ('auriga.connect.models.invoke' | 'auriga.connect.collab.use')[];
+      roles?: unknown[];
+      sid?: never;
+      instanceId?: never;
+      uacSessionBinding?: components['schemas']['UacSessionBinding'];
+    };
     /** @enum {string} */
     UacRevalidationFailureClass:
       | 'business_rejected'
@@ -1551,6 +1637,13 @@ export interface components {
       }[];
     };
     UacEnterpriseCredentials: {
+      /** @description 新broker读取必须提供IAM权威绑定；可选仅兼容旧消费者，不接受请求自报身份 */
+      readonly binding?: components['schemas']['UacCredentialBinding'];
+      /**
+       * Format: int64
+       * @description 当前材料换新/CAS元数据，不作为设备或外壳准入代次
+       */
+      readonly credentialVersion?: number;
       empNo: string;
       /** @description 最新有效企业token，skill进程内即时使用，禁止输出到工具结果、日志或会话记录 */
       token: string;
@@ -2415,8 +2508,8 @@ export interface components {
     };
   };
   responses: {
-    /** @description 请求无效（common.validation_failed 等）。 */
-    BadRequest: {
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
       headers: {
         [name: string]: unknown;
       };
@@ -2426,6 +2519,15 @@ export interface components {
     };
     /** @description 没有权限（common.forbidden 或更具体的码）。 */
     Forbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 请求无效（common.validation_failed 等）。 */
+    BadRequest: {
       headers: {
         [name: string]: unknown;
       };
@@ -2444,15 +2546,6 @@ export interface components {
     };
     /** @description 状态冲突（common.conflict 等）。 */
     Conflict: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
       headers: {
         [name: string]: unknown;
       };
@@ -2507,6 +2600,38 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getStandardDeviceSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 当前设备只读身份投影 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StandardDeviceIdentity'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      /** @description 权威来源无法确认，失败关闭 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   issueUacDeviceNavigationProof: {
     parameters: {
       query?: never;

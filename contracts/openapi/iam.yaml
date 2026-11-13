@@ -32,6 +32,36 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /me/device-session:
+    get:
+      tags:
+        - me
+      operationId: getStandardDeviceSession
+      summary: 读取当前标准设备的权威身份及来源绑定
+      description: 只接受aud=auriga、ptyp=ctx=device的标准设备Bearer，在线核client/tenant/account/member/device及来源状态；无查询/body选择器。UAC绑定必须由IAM生成且与JWT及权威grant一致。返回值不含平台凭据或浏览器session。契约补充见../auth/standard-device.md。
+      responses:
+        "200":
+          description: 当前设备只读身份投影
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardDeviceIdentity"
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "503":
+          description: 权威来源无法确认，失败关闭
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
   /internal/uac/device-navigation-proofs:
     post:
       operationId: issueUacDeviceNavigationProof
@@ -2153,6 +2183,14 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    StandardDeviceRefreshRequest:
+      $ref: ../auth/standard-device.schema.json#/$defs/StandardDeviceRefreshRequest
+    StandardDeviceRevokeRequest:
+      $ref: ../auth/standard-device.schema.json#/$defs/StandardDeviceRevokeRequest
+    StandardDeviceIdentity:
+      $ref: ../auth/standard-device.schema.json#/$defs/StandardDeviceIdentity
+    StandardDeviceAiClaims:
+      $ref: ../auth/standard-device.schema.json#/$defs/StandardDeviceAiClaims
     UacRevalidationFailureClass:
       $ref: ../auth/uac-control.schema.json#/$defs/UacRevalidationFailureClass
     UacDeviceNavigationIssueRequest:
@@ -2193,6 +2231,17 @@ components:
         - token
         - updatedAt
       properties:
+        binding:
+          $ref: '#/components/schemas/UacCredentialBinding'
+          readOnly: true
+          description: 新broker读取必须提供IAM权威绑定；可选仅兼容旧消费者，不接受请求自报身份
+        credentialVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          readOnly: true
+          description: 当前材料换新/CAS元数据，不作为设备或外壳准入代次
         empNo:
           type: string
           minLength: 1

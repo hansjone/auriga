@@ -2,6 +2,8 @@
 
 本契约与 `docs/design/auth-shell.zh.md` 第8节共同约束 A/B/C/D/E。现有 UacChallenge、UacLoginInfo、ShellAuthCommand/Event/Snapshot 及 UacSessionBinding 保留；新增均使用 Uac/ShellAuth 前缀。此处只定义端口，尚无运行时实现。
 
+AUTH-K2 增补优先见 [导航与 Cookie](../auth/navigation-cookie-policy.md)、[插件后端宿主 IPC](shell-auth-host.md) 和 [标准设备来源/刷新/撤销](../auth/standard-device.md)。下面的首轮全文摘要规则不再作为门禁；迁移状态按 navigation-cookie-policy 执行。设备用户码入口使用新增 device-navigation-proofs，浏览器不提供 grant ID。
+
 ## 固定业务代理
 
 `shell-business-operations.json` 是固定操作、路由、输入/输出定义、audience、权限和重试规则的清单；`shell-business.schema.json` 是对应生产方校验契约。运行 `node contracts/plugin/generate-shell-business.mjs` 生成，`--check` 检查漂移。资源和 AI 请求/结果从已有 OpenAPI 引用投影，不另造业务字段。跨版本消费响应允许额外字段；请求操作名和输入始终严格校验。清单中权限是最低要求，不赋予调用者权限，远端现有每项权限检查照常执行。

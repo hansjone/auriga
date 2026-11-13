@@ -20,6 +20,7 @@ for (const file of [
   'plugin/shell-business.schema.json',
   'plugin/shell-auth-control.schema.json',
   'auth/uac-control.schema.json',
+  'auth/standard-device.schema.json',
   'auth/uac-diagnostic-log.schema.json',
   'auth/uac-session-binding.schema.json',
   'auth/uac-login-info.schema.json',
@@ -721,7 +722,14 @@ test('enterprise credential reads use only the authenticated caller and return a
   }
   assert.equal(request(null), false);
   assert.deepEqual(operation.security, [{ bearerAuth: [] }]);
-  const value = ajv.compile(spec.components.schemas.UacEnterpriseCredentials);
+  const credentialSchema = structuredClone(
+    spec.components.schemas.UacEnterpriseCredentials,
+  );
+  // This test compiles an extracted schema, so resolve its new component reference.
+  credentialSchema.properties.binding.$ref =
+    new URL('auth/uac-control.schema.json', root).href +
+    '#/$defs/UacCredentialBinding';
+  const value = ajv.compile(credentialSchema);
   const valid = {
     empNo: '00123',
     token: 'synthetic',
@@ -1342,4 +1350,328 @@ test('K2 anonymous CSRF bootstrap remains bounded and internal only', () => {
     '终态',
   ])
     assert.ok(policy.includes(value));
+});
+
+test('K2 host registration hands back broker-owned handles without accepting caller ownership', () => {
+  const command = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthHostContextCommand',
+  );
+  const envelope = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    expectedRevision: 0,
+    expiresAt: base.expiresAt,
+  };
+  const context = {
+    kind: 'session',
+    hostSessionId: 'synthetic-host-session',
+    expiresAt: base.expiresAt,
+  };
+  const register = { ...envelope, action: 'register', context };
+  assert.equal(command(register), true);
+  assert.equal(
+    command({
+      ...register,
+      context: {
+        ...context,
+        kind: 'tool',
+        parentExecutionContextId: id,
+        toolCallId: 'call',
+        rootCallId: 'root',
+      },
+    }),
+    true,
+  );
+  for (const patch of [
+    { executionContextId: id },
+    { ownerId: id },
+    { peerRole: 'plugin-backend' },
+    { token: 'synthetic' },
+    { url: 'https://example.com' },
+  ])
+    assert.equal(command({ ...register, ...patch }), false);
+  assert.equal(
+    command({ ...register, context: { ...context, kind: 'tool' } }),
+    false,
+  );
+  assert.equal(
+    command({ ...register, context: { ...context, endpointId: id } }),
+    false,
+  );
+  assert.equal(
+    command({ ...envelope, action: 'revoke', executionContextId: id }),
+    true,
+  );
+  assert.equal(
+    command({ ...register, action: 'revoke', executionContextId: id }),
+    false,
+  );
+  const result = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthHostContextResult',
+  );
+  const response = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    revision: 0,
+    action: 'register',
+    context: {
+      executionContextId: id,
+      ownerId: id,
+      hostSessionId: context.hostSessionId,
+      kind: 'session',
+      expiresAt: base.expiresAt,
+    },
+  };
+  assert.equal(result(response), true);
+  assert.equal(
+    result({
+      ...response,
+      error: {
+        code: 'common.forbidden',
+        reason: 'owner_mismatch',
+        retryable: false,
+      },
+    }),
+    false,
+  );
+  const spec = YAML.parse(read('openapi/shell-auth.yaml'));
+  for (const path of ['/host/contexts', '/host/credentials']) {
+    assert.equal(spec.paths[path].post['x-local-ipc-only'], true);
+    assert.equal(spec.paths[path].post['x-peer-role'], 'plugin-backend');
+  }
+  const page = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthPageCommand',
+  );
+  for (const action of ['register', 'revoke', 'read_credentials'])
+    assert.equal(page({ ...envelope, action }), false);
+});
+
+test('K2 host enterprise reads are identity-bound, purpose-limited and never expose platform credentials', () => {
+  const request = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthHostCredentialsRequest',
+  );
+  const input = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    expectedRevision: 0,
+    expiresAt: base.expiresAt,
+    executionContextId: id,
+    purpose: 'raw',
+  };
+  assert.equal(request(input), true);
+  assert.equal(request({ ...input, purpose: 'outbound' }), true);
+  for (const patch of [
+    { purpose: 'model' },
+    { empNo: 'other' },
+    { tenantId: id },
+    { sourceSessionId: id },
+    { ownerId: id },
+    { accessToken: 'synthetic' },
+  ])
+    assert.equal(request({ ...input, ...patch }), false);
+  const result = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthHostCredentialsResult',
+  );
+  const credentials = {
+    binding: {
+      tenantId: id,
+      memberId: id,
+      deviceId: id,
+      sourceSessionId: id,
+      providerId: id,
+      authGeneration: 3,
+      expiresAt: base.expiresAt,
+    },
+    credentialVersion: 1,
+    empNo: 'synthetic-employee',
+    token: 'synthetic-enterprise-value',
+    updatedAt: base.expiresAt,
+  };
+  const response = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    revision: 0,
+    executionContextId: id,
+    purpose: 'raw',
+    credentials,
+  };
+  assert.equal(result(response), true);
+  assert.equal(
+    result({
+      ...response,
+      credentials: {
+        ...credentials,
+        credentialVersion: 2,
+        token: 'synthetic-rotated-value',
+      },
+    }),
+    true,
+  );
+  for (const patch of [
+    { access_token: 'synthetic' },
+    { refresh_token: 'synthetic' },
+    { cookies: { x: 3 } },
+    { binding: { ...credentials.binding, authGeneration: 0 } },
+  ])
+    assert.equal(
+      result({ ...response, credentials: { ...credentials, ...patch } }),
+      false,
+    );
+  const missing = { ...credentials };
+  delete missing.binding;
+  assert.equal(result({ ...response, credentials: missing }), false);
+  const error = {
+    code: 'common.forbidden',
+    reason: 'raw_token_disabled',
+    retryable: false,
+  };
+  assert.equal(result({ ...response, credentials: undefined, error }), true);
+  assert.equal(result({ ...response, error }), false);
+  assert.equal(
+    result({
+      ...response,
+      credentials: undefined,
+      error: { ...error, retryable: true },
+    }),
+    false,
+  );
+  assert.equal(
+    result({
+      ...response,
+      credentials: undefined,
+      error: { ...error, token: 'synthetic' },
+    }),
+    false,
+  );
+});
+
+test('K2 authority vectors cover owner, epoch, expiry, logout, rotation and raw shutdown', () => {
+  const fixture = JSON.parse(read('test/auth-k2-host-fixtures.json'));
+  const accepts = ajv.compile(fixture.acceptanceSchema);
+  for (const vector of fixture.vectors)
+    assert.equal(accepts(vector.input), vector.accepted, vector.name);
+});
+
+test('K2 standard devices have a fixed AI resource, token-possession revocation and device-only identity', () => {
+  const refresh = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceRefreshRequest',
+  );
+  const input = {
+    grant_type: 'refresh_token',
+    client_id: 'auriga-dsh',
+    refresh_token: 'synthetic-refresh',
+  };
+  assert.equal(refresh(input), true);
+  assert.equal(refresh({ ...input, resource: 'urn:auriga:ai-gateway' }), true);
+  for (const patch of [
+    { resource: 'auriga.ai-gateway' },
+    { resource: ['urn:auriga:ai-gateway'] },
+    { audience: 'auriga' },
+    { deviceId: id },
+    { uacSessionBinding: {} },
+    { grant_type: 'token-exchange' },
+  ])
+    assert.equal(refresh({ ...input, ...patch }), false);
+  const revoke = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceRevokeRequest',
+  );
+  assert.equal(
+    revoke({
+      client_id: 'auriga-dsh',
+      token: 'synthetic-access',
+      token_type_hint: 'access_token',
+    }),
+    true,
+  );
+  assert.equal(
+    revoke({
+      client_id: 'auriga-dsh',
+      token: 'synthetic-refresh',
+      token_type_hint: 'refresh_token',
+    }),
+    true,
+  );
+  assert.equal(
+    revoke({
+      client_id: 'auriga-dsh',
+      token: 'synthetic-access',
+      deviceId: id,
+    }),
+    false,
+  );
+  const claims = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceAiClaims',
+  );
+  const jwt = {
+    iss: 'https://portal.example.com',
+    sub: id,
+    tid: id,
+    did: id,
+    jti: id,
+    aud: 'auriga.ai-gateway',
+    ptyp: 'device',
+    ctx: 'device',
+    scope: 'auriga.connect',
+    iat: 1,
+    exp: 301,
+    perms: ['auriga.connect.collab.use'],
+    mtyp: 'member',
+  };
+  assert.equal(claims(jwt), true);
+  assert.equal(
+    claims({ ...jwt, perms: ['auriga.connect.models.invoke'] }),
+    true,
+  );
+  for (const patch of [
+    { aud: 'auriga' },
+    { aud: ['auriga', 'auriga.ai-gateway'] },
+    { perms: ['iam.accounts.write'] },
+    { perms: [] },
+    { sid: id },
+    { ctx: 'portal' },
+  ])
+    assert.equal(claims({ ...jwt, ...patch }), false);
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  assert.ok(spec.paths['/me/device-session'].get.responses['200']);
+  const deviceIdentity = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceIdentity',
+  );
+  const identity = {
+    accountId: id,
+    tenantId: id,
+    memberId: id,
+    deviceId: id,
+    providerId: id,
+    clientId: 'auriga-dsh',
+    authorizationMode: 'standard_device',
+    expiresAt: base.expiresAt,
+  };
+  assert.equal(deviceIdentity(identity), true);
+  for (const patch of [
+    { authorizationMode: 'native_tx' },
+    { access_token: 'synthetic' },
+    { session: { id } },
+    { uacSessionBinding: { sourceSessionId: id } },
+  ])
+    assert.equal(deviceIdentity({ ...identity, ...patch }), false);
+  assert.equal(
+    spec.paths['/me'].get.responses['200'].content['application/json'].schema
+      .$ref,
+    '#/components/schemas/Me',
+  );
+  const proto = read('proto/auriga/iam/v1/iam.proto');
+  assert.match(proto, /rpc VerifyStandardDeviceAiAccess\(/);
 });
