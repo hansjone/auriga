@@ -162,7 +162,14 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
                       Set.of(OAuthProvider.DEVICE, "refresh_token"),
                       true)));
       var devices = new DeviceAccessAuthority(store, sessions, tokens);
-      network = new IamNetworkAuthority(store, devices, audit, clock, Set.of("server-a"));
+      network =
+          new IamNetworkAuthority(
+              store,
+              devices,
+              audit,
+              clock,
+              Set.of("server-a"),
+              (controlTenant, controlRealm, controlTarget) -> true);
       var sources =
           new IamNetworkSourceAuthority(
               store,

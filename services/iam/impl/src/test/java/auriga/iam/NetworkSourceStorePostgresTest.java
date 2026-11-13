@@ -760,7 +760,14 @@ class NetworkSourceStorePostgresTest {
             })
         .when(observedStore)
         .lock("network-authority");
-    var network = new IamNetworkAuthority(observedStore, credentials, null, clock, Set.of("test"));
+    var network =
+        new IamNetworkAuthority(
+            observedStore,
+            credentials,
+            null,
+            clock,
+            Set.of("test"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     try (var executor = Executors.newFixedThreadPool(2)) {
       var source =
           executor.submit(
@@ -830,7 +837,14 @@ class NetworkSourceStorePostgresTest {
         });
     assertEquals(
         clock.instant().plusSeconds(1800),
-        resolve(new IamNetworkAuthority(store, realCredentials(), null, clock, Set.of("test"))));
+        resolve(
+            new IamNetworkAuthority(
+                store,
+                realCredentials(),
+                null,
+                clock,
+                Set.of("test"),
+                (controlTenant, controlRealm, controlTarget) -> true)));
     for (String[] change :
         List.of(
             new String[] {"device", device.toString(), "accountId", otherOwner.toString()},
@@ -870,7 +884,14 @@ class NetworkSourceStorePostgresTest {
           .credential(tenant.toString(), owner.toString(), device.toString());
       try {
         assertNull(
-            resolve(new IamNetworkAuthority(store, credentials, null, clock, Set.of("test"))),
+            resolve(
+                new IamNetworkAuthority(
+                    store,
+                    credentials,
+                    null,
+                    clock,
+                    Set.of("test"),
+                    (controlTenant, controlRealm, controlTarget) -> true)),
             change[0] + "." + change[2]);
       } finally {
         tx(

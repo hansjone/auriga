@@ -98,7 +98,14 @@ class NetworkPolicyRevisionPostgresTest {
     kv = new PostgresSessionKv(store, schemas, clock);
     sessions = new SessionManager(store, kv, tokens, clock, published, audit);
     devices = new DeviceAccessAuthority(store, sessions, tokens);
-    network = new IamNetworkAuthority(store, devices, audit, clock, Set.of("server-a"));
+    network =
+        new IamNetworkAuthority(
+            store,
+            devices,
+            audit,
+            clock,
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     handler = new IamAccountEvents(store, sessions);
     issued =
         tx(

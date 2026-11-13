@@ -115,7 +115,8 @@ class NetworkClientPostgresTest {
             new DeviceAccessAuthority(store, sessions, tokens),
             mock(AuditLogger.class),
             clock,
-            Set.of("server-a"));
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     client = new IamNetworkClient(authority, store, clock, "server-a", Set.of("server-a"));
     devicePrincipal();
   }

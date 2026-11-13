@@ -9,6 +9,7 @@ final class ServiceTokenExportIsolation {
   private ServiceTokenExportIsolation() {}
 
   static void verify(Environment env) {
+    verifyProjectors(env);
     String edge = "auriga.iam.edge-token-export.";
     String gateway = "auriga.iam.ai-gateway-token-export.";
     if (!env.getProperty(gateway + "enabled", Boolean.class, false)) return;
@@ -25,6 +26,29 @@ final class ServiceTokenExportIsolation {
       for (Path b : gatewayPaths)
         if (a.getParent().startsWith(b.getParent()) || b.getParent().startsWith(a.getParent()))
           throw invalid();
+  }
+
+  private static void verifyProjectors(Environment env) {
+    var prefixes = new java.util.ArrayList<String>();
+    for (String component : List.of("network", "edge", "broker")) {
+      String prefix = "auriga.iam.msgnet-projector-token-export." + component + ".";
+      if (env.getProperty(prefix + "enabled", Boolean.class, false)) {
+        if (env.getRequiredProperty(prefix + "reader-group", Integer.class) < 0) throw invalid();
+        prefixes.add(prefix);
+      }
+    }
+    if (prefixes.isEmpty()) return;
+    for (String existing :
+        List.of("auriga.iam.edge-token-export.", "auriga.iam.ai-gateway-token-export."))
+      if (env.getProperty(existing + "enabled", Boolean.class, false)) prefixes.add(existing);
+    for (int i = 0; i < prefixes.size(); i++)
+      for (int j = i + 1; j < prefixes.size(); j++)
+        for (String a : List.of("token-file", "installation-secret-file"))
+          for (String b : List.of("token-file", "installation-secret-file")) {
+            Path left = path(env, prefixes.get(i) + a).getParent();
+            Path right = path(env, prefixes.get(j) + b).getParent();
+            if (left.startsWith(right) || right.startsWith(left)) throw invalid();
+          }
   }
 
   private static Path path(Environment env, String property) {

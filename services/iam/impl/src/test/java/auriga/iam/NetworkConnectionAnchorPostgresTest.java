@@ -112,7 +112,8 @@ class NetworkConnectionAnchorPostgresTest {
             new DeviceAccessAuthority(store, sessions, tokens),
             mock(AuditLogger.class),
             clock,
-            Set.of("server-a"));
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     rpc = new IamGrpcNetworkAuthority(authority, clock, mock(IamNetworkSourceAuthority.class));
     TenantContext.run(
         tenant,
@@ -554,7 +555,8 @@ class NetworkConnectionAnchorPostgresTest {
             new DeviceAccessAuthority(failingStore, sessions, tokens),
             mock(AuditLogger.class),
             clock,
-            Set.of("server-a"));
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     TenantContext.run(
         tenant,
         () -> {

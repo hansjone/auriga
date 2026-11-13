@@ -317,7 +317,9 @@ public class IamRuntimeConfiguration {
       TokenService tokens,
       AuditLogger audit,
       Clock clock,
-      Environment env) {
+      Environment env,
+      org.springframework.beans.factory.ObjectProvider<auriga.iam.api.MessageNetworkAdmission>
+          admission) {
     return new IamNetworkAuthority(
         store,
         new DeviceAccessAuthority(store, sessions, tokens),
@@ -326,7 +328,8 @@ public class IamRuntimeConfiguration {
         Set.copyOf(
             Binder.get(env)
                 .bind("auriga.iam.network.server-audiences", Bindable.listOf(String.class))
-                .orElse(List.of())));
+                .orElse(List.of())),
+        admission.getIfAvailable(() -> (tenant, realm, target) -> false));
   }
 
   @Bean

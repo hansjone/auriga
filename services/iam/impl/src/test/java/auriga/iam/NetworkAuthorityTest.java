@@ -68,6 +68,7 @@ class NetworkAuthorityTest {
   final DataSource dataSource = mock(DataSource.class);
   final ReentrantLock lock = new ReentrantLock();
   BigInteger next = BigInteger.ONE;
+  boolean msgnetReady = true;
   IamNetworkAuthority network;
   DeviceAccessAuthority.Identity identity;
 
@@ -269,7 +270,14 @@ class NetworkAuthorityTest {
                     ? new DeviceAccessAuthority.Identity(
                         i.getArgument(0), i.getArgument(1), i.getArgument(2), identity.expiresAt())
                     : null);
-    network = new IamNetworkAuthority(store, devices, audit, clock, Set.of("server-a", "server-b"));
+    network =
+        new IamNetworkAuthority(
+            store,
+            devices,
+            audit,
+            clock,
+            Set.of("server-a", "server-b"),
+            (controlTenant, controlRealm, controlTarget) -> msgnetReady);
   }
 
   Object atomic(Supplier<?> work) {
@@ -410,6 +418,36 @@ class NetworkAuthorityTest {
     assertEquals(
         "aur1:ffffffffffffffff.ffffffffffffffff.0",
         new Node("18446744073709551615", "18446744073709551615", "a", "d", false).systemAddress());
+  }
+
+  @Test
+  void unconfirmedControlRejectsUnexpiredCredentialsAndBurnsOutstandingTicket() {
+    business(
+        () -> {
+          register();
+          var ticket = network.prepare("access", "1", "server-a");
+          msgnetReady = false;
+          forbidden(() -> network.prepare("access", "1", "server-a"));
+          service("svc:ai-gateway");
+          assertFalse(network.active("1", "1"));
+          forbidden(
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
+          msgnetReady = true;
+          forbidden(
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
+        });
   }
 
   @Test

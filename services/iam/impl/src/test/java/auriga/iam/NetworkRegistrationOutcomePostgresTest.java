@@ -140,7 +140,8 @@ class NetworkRegistrationOutcomePostgresTest {
             new DeviceAccessAuthority(store, sessions, tokens),
             audit,
             clock,
-            Set.of("server-a"));
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     var settings =
         new AccessTokenSettings(
             tokens.issuer(),

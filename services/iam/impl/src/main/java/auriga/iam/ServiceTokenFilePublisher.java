@@ -37,7 +37,13 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
       Path tokenFile,
       int readerGroup,
       int installationOwner) {
-    if (!Set.of("edge", "ai-gateway").contains(service)) throw invalid();
+    if (!Set.of(
+            "edge",
+            "ai-gateway",
+            "msgnet-projector-network",
+            "msgnet-projector-edge",
+            "msgnet-projector-broker")
+        .contains(service)) throw invalid();
     this.service = service;
     this.issuer = Objects.requireNonNull(issuer);
     this.secretFile = absolute(secretFile);

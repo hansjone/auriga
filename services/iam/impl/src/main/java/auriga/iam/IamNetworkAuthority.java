@@ -31,13 +31,16 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   private final AuditLogger audit;
   private final Clock clock;
   private final Set<String> servers;
+  private final auriga.iam.api.MessageNetworkAdmission admission;
 
   public IamNetworkAuthority(
       IamStore store,
       DeviceAccessAuthority devices,
       AuditLogger audit,
       Clock clock,
-      Set<String> servers) {
+      Set<String> servers,
+      auriga.iam.api.MessageNetworkAdmission admission) {
+    this.admission = java.util.Objects.requireNonNull(admission);
     this.store = store;
     this.jdbc = store.networkJdbc();
     this.policyRevision = new IamNetworkPolicyRevision(store);
@@ -125,6 +128,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
           Node node = node(nodeId);
           if (node == null
               || node.revoked()
+              || !admission.ready(TenantContext.require(), node.realm(), node.node())
               || !node.device().equals(identity.device())
               || !node.account().equals(identity.account())) return denied();
           var current =
@@ -207,6 +211,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
               Node node = node(nodeId);
               if (node == null
                   || node.revoked()
+                  || !admission.ready(TenantContext.require(), node.realm(), node.node())
                   || !node.device().equals(device)
                   || !node.account().equals(ticket.path("account").asString())
                   || !node.realm().equals(ticket.path("realm").asString())) return null;
@@ -379,6 +384,11 @@ public final class IamNetworkAuthority implements NetworkAuthority {
           for (var entry : result.entrySet()) {
             if (!entry.getValue()) continue;
             Node n = node(entry.getKey().node());
+            if (!admission.ready(
+                TenantContext.require(), entry.getKey().realm(), entry.getKey().node())) {
+              entry.setValue(false);
+              continue;
+            }
             var device = store.get("device", n.device(), false);
             if (device != null
                 && "managed".equals(device.path("deviceType").asString())
@@ -523,7 +533,10 @@ public final class IamNetworkAuthority implements NetworkAuthority {
 
   private TargetSnapshot targetIdentity(TargetBinding b, boolean lock) {
     Node n = node(b.node());
-    if (n == null || n.revoked() || !n.realm().equals(b.realm())) return null;
+    if (n == null
+        || n.revoked()
+        || !n.realm().equals(b.realm())
+        || !admission.ready(TenantContext.require(), b.realm(), b.node())) return null;
     // Shared identity -> ingress order also used by source transactions and device refresh.
     // Read the device without a lock only to locate the backing session, then re-read under locks.
     ObjectNode device = store.get("device", n.device(), false);
@@ -821,7 +834,10 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   }
 
   private boolean live(Node node, String realm) {
-    if (node == null || node.revoked() || !node.realm().equals(realm)) return false;
+    if (node == null
+        || node.revoked()
+        || !node.realm().equals(realm)
+        || !admission.ready(TenantContext.require(), realm, node.node())) return false;
     var credential =
         devices.credential(TenantContext.require().toString(), node.account(), node.device());
     return credential != null && clock.instant().isBefore(credential.expiresAt());

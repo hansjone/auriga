@@ -31,6 +31,8 @@ class NetworkAuthorityPostgresTest {
   final UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
   final Clock clock = Clock.systemUTC();
   final DeviceAccessAuthority devices = mock(DeviceAccessAuthority.class);
+  final java.util.concurrent.atomic.AtomicBoolean controlReady =
+      new java.util.concurrent.atomic.AtomicBoolean(true);
   IamNetworkAuthority network;
   DeviceAccessAuthority.Identity identity;
 
@@ -92,7 +94,13 @@ class NetworkAuthorityPostgresTest {
                   return null;
                 }));
     network =
-        new IamNetworkAuthority(store, devices, mock(AuditLogger.class), clock, Set.of("server-a"));
+        new IamNetworkAuthority(
+            store,
+            devices,
+            mock(AuditLogger.class),
+            clock,
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> controlReady.get());
   }
 
   @AfterEach
@@ -116,6 +124,57 @@ class NetworkAuthorityPostgresTest {
             null,
             null);
     SecurityContextHolder.getContext().setAuthentication(new AurigaAuthentication(p));
+  }
+
+  @Test
+  void quarantinedControlDeniesLiveBatchAndBurnsAlreadyIssuedTicket() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          Node node = network.register("access");
+          store.tx(
+              () -> {
+                var d = store.get("device", device.toString(), true);
+                d.put("scope", "auriga.connect");
+                var session = store.get("session", d.path("sessionId").asString(), true);
+                session.put("audience", "portal");
+                session.put("expiresAt", clock.instant().plusSeconds(3600).toString());
+                session.put("idleExpiresAt", clock.instant().plusSeconds(1800).toString());
+                store.save("session", session);
+                store.save("device", d);
+                return null;
+              });
+          var ticket = network.prepare("access", node.node(), "server-a");
+          gateway();
+          var reference =
+              new auriga.iam.api.NetworkAuthority.NodeReference(node.realm(), node.node());
+          assertTrue(network.activeBatch(List.of(reference)).get(reference));
+          controlReady.set(false);
+          assertFalse(network.activeBatch(List.of(reference)).get(reference));
+          assertFalse(network.active(node.realm(), node.node()));
+          assertThrows(
+              AurigaException.class, () -> network.prepare("access", node.node(), "server-a"));
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      node.node(),
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
+          controlReady.set(true);
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      node.node(),
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
+          assertTrue(network.activeBatch(List.of(reference)).get(reference));
+        });
   }
 
   @Test
