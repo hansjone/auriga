@@ -183,7 +183,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   private void saveInstallation(Map<String, Object> row, ObjectNode document, long revision) {
     db.update(
-        "UPDATE resource.catalog_installation SET document=CAST(:doc AS jsonb),revision=:rev,version_id=:v WHERE tenant_id=:tenant AND id=:id",
+        "UPDATE resource.catalog_installation SET document=CAST(:doc AS jsonb),revision=:rev,version_id=:v,collected_generation=NULL WHERE tenant_id=:tenant AND id=:id",
         db.args(
             "id",
             row.get("id"),
@@ -230,18 +230,19 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               Set.of("disable", "remove").contains(action)
                   ? old.path("resource").deepCopy()
                   : ref(r, v);
-          ((ObjectNode) resource).put("enabled", !Set.of("disable", "remove").contains(action));
+          CatalogStatePolicy.dispatch(
+              (ObjectNode) resource,
+              CatalogStatePolicy.advance(rev, rev),
+              CatalogStatePolicy.stateForAction(action));
           var n =
               JSON.createObjectNode()
                   .put("clientId", c.toString())
                   .put("installationRevision", rev + 1)
-                  .put("selectionRevision", rev + 1)
-                  .put("generation", rev + 1)
                   .put(
-                      "state",
-                      action.equals("disable")
-                          ? "disabled"
-                          : action.equals("remove") ? "removed" : "applying")
+                      "selectionRevision",
+                      old == null ? 1 : old.path("selectionRevision").asLong() + 1)
+                  .put("generation", old == null ? 1 : old.path("generation").asLong() + 1)
+                  .put("state", "applying")
                   .put("reportSource", "member");
           n.set("resource", resource);
           if (rows.isEmpty())
@@ -276,9 +277,12 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     match(etag, number(row, "revision"));
     var doc = (ObjectNode) json(row, "document");
     if (!doc.path("resource").path("identity").equals(id)
-        || number(row, "revision") != counter(body, "installationRevision")) throw conflict();
-    if (!Set.of("applying", "applied", "pending_restart", "overridden", "failed")
-        .contains(doc.path("state").asString())) throw missing();
+        || number(row, "revision") != counter(body, "installationRevision"))
+      throw CatalogStatePolicy.conflict();
+    if (active
+        && (!CatalogStatePolicy.desired(doc.path("resource")).equals("ENABLED")
+            || !Set.of("applying", "applied", "pending_restart", "overridden", "failed")
+                .contains(doc.path("state").asString()))) throw missing();
     return doc;
   }
 
@@ -301,7 +305,11 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
   }
 
   private JsonNode mintTicket(ResourceAccess.Reader r, UUID c, JsonNode doc) {
-    var resource = doc.path("resource");
+    var resource =
+        CatalogStatePolicy.dispatch(
+            (ObjectNode) doc.path("resource").deepCopy(),
+            doc.path("installationRevision").asLong(),
+            CatalogStatePolicy.desired(doc.path("resource")));
     Instant lease = Instant.parse(resource.path("lease").path("expiresAt").asString());
     if (!clock.instant().isBefore(lease)) throw missing();
     byte[] random = new byte[32];
@@ -397,6 +405,10 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           var updated = ref(r, v);
           if (updated.path("releaseSequence").asLong() != counter(body, "releaseSequence"))
             throw conflict();
+          CatalogStatePolicy.dispatch(
+              updated,
+              doc.path("resource").path("installationRevision").asLong(),
+              CatalogStatePolicy.desired(doc.path("resource")));
           doc.set("resource", updated);
           saveInstallation(
               installation(r, c, uuid(body.path("identity"), "packageId")),
@@ -420,12 +432,23 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
         r -> bound(r, c, body, etag, false),
         r -> {
           var doc = bound(r, c, body, etag, false);
-          if (counter(body, "selectionRevision") != doc.path("selectionRevision").asLong()
-              || counter(body, "generation") != doc.path("generation").asLong()) throw conflict();
+          if (installation(r, c, uuid(body.path("identity"), "packageId"))
+                  .get("collected_generation")
+              != null) throw CatalogStatePolicy.conflict();
+          if (!CatalogStatePolicy.tuple(
+              doc.path("resource"),
+              doc.path("selectionRevision").asLong(),
+              doc.path("generation").asLong(),
+              body,
+              "member")) throw CatalogStatePolicy.conflict();
           String state = body.path("state").asString();
-          if (state.equals("applied")
-              && body.path("observedGeneration").asLong() != doc.path("generation").asLong())
-            throw conflict();
+          if (Set.of("applied", "disabled", "removed").contains(state)
+              && !CatalogStatePolicy.acknowledged(
+                  doc.path("resource"),
+                  doc.path("selectionRevision").asLong(),
+                  doc.path("generation").asLong(),
+                  body,
+                  "member")) throw CatalogStatePolicy.conflict();
           // The contract requires member; the server never derives node trust from this body.
           var report = body.deepCopy();
           report.put("reportSource", "member");
@@ -435,6 +458,24 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               installation(r, c, uuid(body.path("identity"), "packageId")),
               doc,
               counter(body, "installationRevision"));
+          if (state.equals("removed")) {
+            var next = doc.deepCopy().put("generation", doc.path("generation").asLong() + 1);
+            db.update(
+                "UPDATE resource.catalog_installation SET document=CAST(:doc AS jsonb),collected_generation=:generation WHERE tenant_id=:tenant AND owner_id=:owner AND client_id=:client AND package_id=:pkg AND revision=:revision",
+                db.args(
+                    "doc",
+                    next.toString(),
+                    "generation",
+                    next.path("generation").asLong(),
+                    "owner",
+                    r.account(),
+                    "client",
+                    c,
+                    "pkg",
+                    uuid(body.path("identity"), "packageId"),
+                    "revision",
+                    counter(body, "installationRevision")));
+          }
           return doc;
         });
   }
@@ -511,6 +552,49 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
         });
   }
 
+  private Map<String, Object> cloudRow(UUID instance, UUID pkg) {
+    var rows =
+        db.rows(
+            "SELECT * FROM resource.catalog_instance_installation WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg FOR UPDATE",
+            db.args("instance", instance, "pkg", pkg));
+    return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  private LinkedHashMap<UUID, ObjectNode> cloudResources(UUID instance, UUID owner) {
+    var resources = new LinkedHashMap<UUID, ObjectNode>();
+    for (var row :
+        db.rows(
+            "SELECT * FROM resource.catalog_instance_installation WHERE tenant_id=:tenant AND instance_id=:instance ORDER BY package_id FOR UPDATE",
+            db.args("instance", instance))) {
+      if (!owner.equals(row.get("owner_id"))) throw missing();
+      resources.put((UUID) row.get("package_id"), (ObjectNode) json(row, "resource"));
+    }
+    return resources;
+  }
+
+  private void saveCloud(
+      UUID instance, UUID owner, long selection, ObjectNode resource, boolean changed) {
+    db.update(
+        "INSERT INTO resource.catalog_instance_installation(id,tenant_id,instance_id,owner_id,package_id,revision,resource,selection_revision) VALUES(:id,:tenant,:instance,:owner,:pkg,:revision,CAST(:resource AS jsonb),:selection) ON CONFLICT(tenant_id,instance_id,package_id) DO UPDATE SET owner_id=EXCLUDED.owner_id,revision=EXCLUDED.revision,resource=EXCLUDED.resource,selection_revision=EXCLUDED.selection_revision,collected_generation=CASE WHEN :changed THEN NULL ELSE catalog_instance_installation.collected_generation END",
+        db.args(
+            "id",
+            UuidV7.next(),
+            "instance",
+            instance,
+            "owner",
+            owner,
+            "pkg",
+            uuid(resource.path("identity"), "packageId"),
+            "revision",
+            resource.path("installationRevision").asLong(),
+            "resource",
+            resource.toString(),
+            "selection",
+            selection,
+            "changed",
+            changed));
+  }
+
   public JsonNode distribute(AurigaPrincipal actor, ObjectNode body, String key, String etag) {
     validate("UnifiedDistributionInput", body);
     UUID instance = uuid(body, "instanceId");
@@ -533,6 +617,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           UUID id = UuidV7.next();
           var resolution = JSON.createObjectNode().put("selectionRevision", revision);
           var resources = resolution.putArray("resources");
+          var retained = cloudResources(instance, snapshot.owner());
           var selected = new HashSet<UUID>();
           var grants = new LinkedHashMap<UUID, JsonNode>();
           for (var s : body.path("selections")) {
@@ -545,32 +630,44 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               fresh(owner, v);
               resource = ref(owner, v);
             } else {
-              resource = null;
-              for (var previous :
-                  db.rows(
-                      "SELECT resolution FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance ORDER BY selection_revision DESC",
-                      db.args("instance", instance)))
-                for (var old : json(previous, "resolution").path("resources"))
-                  if (old.path("identity").equals(s.path("identity")) && resource == null)
-                    resource = (ObjectNode) old.deepCopy();
-              if (resource == null) throw missing();
+              var previous = retained.get(p);
+              if (previous == null || !previous.path("identity").equals(s.path("identity")))
+                throw missing();
+              resource = previous.deepCopy();
             }
-            resource.put(
-                "enabled", !Set.of("disable", "remove").contains(s.path("action").asString()));
-            // Download grants are scoped to this exact persisted intent and authenticated node.
+            var previous = retained.get(p);
+            long installRevision =
+                previous == null ? 0 : previous.path("installationRevision").asLong();
+            CatalogStatePolicy.dispatch(
+                resource,
+                CatalogStatePolicy.advance(installRevision, installRevision),
+                CatalogStatePolicy.stateForAction(s.path("action").asString()));
+            retained.put(p, resource);
+          }
+          for (var entry : retained.entrySet()) {
+            var resource = entry.getValue();
+            var persisted = cloudRow(instance, entry.getKey());
+            boolean changed = selected.contains(entry.getKey());
+            if (!changed && persisted != null && persisted.get("collected_generation") != null)
+              continue;
             UUID grant = UuidV7.next();
-            grants.put(grant, s.path("identity"));
+            grants.put(grant, resource.path("identity"));
             resource.put(
                 "manifestDownloadPath",
                 "/internal/resource/v1/catalog/downloads/" + grant + "/manifest");
-            for (var a : resource.path("artifacts"))
-              ((ObjectNode) a)
+            for (var artifact : resource.path("artifacts"))
+              ((ObjectNode) artifact)
                   .put(
                       "downloadPath",
                       "/internal/resource/v1/catalog/downloads/"
                           + grant
                           + "/artifacts/"
-                          + a.path("artifactId").asString());
+                          + artifact.path("artifactId").asString());
+            CatalogStatePolicy.dispatch(
+                resource,
+                resource.path("installationRevision").asLong(),
+                CatalogStatePolicy.desired(resource));
+            saveCloud(instance, snapshot.owner(), revision, resource, changed);
             resources.add(resource);
           }
           resolution.set("revocations", legacy.revocations());
@@ -642,37 +739,68 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
       doc.put("generation", Math.max(1, snapshot.generation()));
       var reports = doc.putArray("reports");
       boolean applied = snapshot.ready() && snapshot.observedGeneration() == snapshot.generation();
+      var successes = new HashSet<String>();
       for (var s : doc.path("selections")) {
-        var id = CatalogProtocol.identity(s.path("identity"));
+        var identity = CatalogProtocol.identity(s.path("identity"));
+        var expected =
+            snapshot.resources().stream().filter(x -> x.getIdentity().equals(identity)).toList();
+        var durable =
+            cloudRow((UUID) row.get("instance_id"), uuid(s.path("identity"), "packageId"));
+        if (expected.size() != 1
+            || durable == null
+            || expected.getFirst().getInstallationRevision() != number(durable, "revision")
+            || number(durable, "selection_revision") != snapshot.selectionRevision()) {
+          // A collected tombstone is complete only after a verified later-generation refresh.
+          if (durable != null
+              && durable.get("collected_generation") != null
+              && snapshot.generation() >= number(durable, "collected_generation")
+              && CatalogStatePolicy.desired(json(durable, "resource")).equals("REMOVED")) {
+            successes.add("removed");
+            continue;
+          }
+          applied = false;
+          continue;
+        }
+        var resource = expected.getFirst();
+        if (!CatalogStatePolicy.desired(resource)
+            .equals(CatalogStatePolicy.desired(json(durable, "resource")))) {
+          applied = false;
+          continue;
+        }
         var report =
             snapshot.reports().stream()
                 .filter(
                     x ->
-                        x.getIdentity().equals(id)
-                            && x.getSelectionRevision() == snapshot.selectionRevision()
-                            && x.getGeneration() == snapshot.generation()
-                            && x.getObservedGeneration() == snapshot.generation()
-                            && x.getReportSource().equals("node"))
+                        CatalogStatePolicy.acknowledged(
+                            resource,
+                            snapshot.selectionRevision(),
+                            snapshot.generation(),
+                            x,
+                            "node"))
                 .findFirst();
-        if (report.isEmpty() || !report.get().getState().equals("applied")) applied = false;
-        if (report.isPresent()) {
-          var x = report.get();
-          var n =
-              JSON.createObjectNode()
-                  .put("clientId", x.getClientId())
-                  .put("installationRevision", x.getInstallationRevision())
-                  .put("selectionRevision", x.getSelectionRevision())
-                  .put("generation", x.getGeneration())
-                  .put("observedGeneration", x.getObservedGeneration())
-                  .put("state", x.getState())
-                  .put("reportSource", "node")
-                  .put("observedAt", x.getObservedAt());
-          n.set("identity", s.path("identity"));
-          if (!x.getErrorCode().isEmpty()) n.put("errorCode", x.getErrorCode());
-          reports.add(n);
+        if (report.isEmpty()) {
+          applied = false;
+          continue;
         }
+        var x = report.get();
+        var n =
+            JSON.createObjectNode()
+                .put("clientId", x.getClientId())
+                .put("installationRevision", x.getInstallationRevision())
+                .put("selectionRevision", x.getSelectionRevision())
+                .put("generation", x.getGeneration())
+                .put("observedGeneration", x.getObservedGeneration())
+                .put("state", x.getState())
+                .put("reportSource", "node")
+                .put("observedAt", x.getObservedAt());
+        n.set("identity", s.path("identity"));
+        if (!x.getErrorCode().isEmpty()) n.put("errorCode", x.getErrorCode());
+        reports.add(n);
+        successes.add(x.getState());
       }
-      doc.put("state", applied ? "applied" : "applying");
+      doc.put(
+          "state",
+          applied ? (successes.size() == 1 ? successes.iterator().next() : "applied") : "applying");
     }
     return doc;
   }
@@ -709,6 +837,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     if (!tenant.toString().equals(request.getTenantId())) throw missing();
     return tx.write(
         () -> {
+          db.lock("catalog-distribution/" + request.getInstanceId());
           var row =
               db.row(
                   "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision=:rev",
@@ -728,14 +857,14 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               || !snapshot.owner().equals(row.get("owner_id"))
               || !Objects.equals(snapshot.node(), row.get("node_id"))) throw conflict();
           var owner = access.target(tenant, (UUID) row.get("owner_id"));
-          var resolution = json(row, "resolution");
+          var resolution = hydrateExpectations(row);
           var out =
               ResolveUnifiedResourcesResponse.newBuilder()
                   .setSelectionRevision(request.getSelectionRevision())
                   .setRevocations(ResourceProtocol.revocations(legacy.revocations()));
           var refreshed = JSON.createArrayNode();
           for (var resource : resolution.path("resources")) {
-            boolean enabling = resource.path("enabled").asBoolean();
+            boolean enabling = CatalogStatePolicy.desired(resource).equals("ENABLED");
             var version = admit(owner, resource.path("identity"), enabling);
             var current = (ObjectNode) resource.deepCopy();
             if (enabling
@@ -747,8 +876,18 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               current.set("envelope", renewal.path("envelope"));
               current.set("lease", renewal.path("lease"));
             }
+            CatalogStatePolicy.dispatch(
+                current,
+                current.path("installationRevision").asLong(),
+                CatalogStatePolicy.desired(current));
             out.addResources(CatalogProtocol.ref(current));
             refreshed.add(current);
+            saveCloud(
+                (UUID) row.get("instance_id"),
+                (UUID) row.get("owner_id"),
+                number(row, "selection_revision"),
+                current,
+                false);
           }
           var saved = (ObjectNode) resolution.deepCopy();
           saved.set("resources", refreshed);
@@ -758,6 +897,133 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               db.args("id", row.get("id"), "resolution", saved.toString()));
           return out.build();
         });
+  }
+
+  private ObjectNode hydrateExpectations(Map<String, Object> row) {
+    var resolution = (ObjectNode) json(row, "resolution");
+    for (var item : resolution.path("resources")) {
+      var resource = (ObjectNode) item;
+      UUID pkg = uuid(resource.path("identity"), "packageId");
+      var persisted = cloudRow((UUID) row.get("instance_id"), pkg);
+      if (!resource.has("installationRevision")
+          || resource.path("installationRevision").asLong() == 0) {
+        long revision =
+            persisted == null ? CatalogStatePolicy.advance(0, 0) : number(persisted, "revision");
+        String desired = CatalogStatePolicy.desired(resource);
+        for (var selection : json(row, "document").path("selections"))
+          if (selection.path("identity").equals(resource.path("identity")))
+            desired = CatalogStatePolicy.stateForAction(selection.path("action").asString());
+        CatalogStatePolicy.dispatch(resource, revision, desired);
+      }
+      CatalogStatePolicy.dispatch(
+          resource,
+          resource.path("installationRevision").asLong(),
+          CatalogStatePolicy.desired(resource));
+      if (persisted == null)
+        saveCloud(
+            (UUID) row.get("instance_id"),
+            (UUID) row.get("owner_id"),
+            number(row, "selection_revision"),
+            resource,
+            false);
+      else if (number(persisted, "revision") != resource.path("installationRevision").asLong()
+          || number(persisted, "selection_revision") != number(row, "selection_revision"))
+        throw CatalogStatePolicy.conflict();
+    }
+    return resolution;
+  }
+
+  /**
+   * Publish a new generation only after exact, trusted removed acknowledgements. Retain CAS rows.
+   */
+  private boolean collectTombstones(
+      Map<String, Object> row, UnifiedResourceWorkspace.Snapshot snapshot) {
+    if (!snapshot.ready() || snapshot.observedGeneration() != snapshot.generation()) return false;
+    UUID instance = (UUID) row.get("instance_id");
+    var resolution = hydrateExpectations(row);
+    var removed = new LinkedHashMap<UUID, Long>();
+    var remaining = JSON.createArrayNode();
+    for (var resource : resolution.path("resources")) {
+      UUID pkg = uuid(resource.path("identity"), "packageId");
+      boolean collect = false;
+      if (CatalogStatePolicy.desired(resource).equals("REMOVED")) {
+        var expected =
+            snapshot.resources().stream()
+                .filter(
+                    x ->
+                        x.getIdentity().equals(CatalogProtocol.identity(resource.path("identity")))
+                            && x.getInstallationRevision()
+                                == resource.path("installationRevision").asLong()
+                            && CatalogStatePolicy.desired(x).equals("REMOVED"))
+                .toList();
+        if (expected.size() == 1)
+          collect =
+              snapshot.reports().stream()
+                  .anyMatch(
+                      report ->
+                          CatalogStatePolicy.acknowledged(
+                              expected.getFirst(),
+                              snapshot.selectionRevision(),
+                              snapshot.generation(),
+                              report,
+                              "node"));
+      }
+      if (collect) removed.put(pkg, resource.path("installationRevision").asLong());
+      else remaining.add(resource);
+    }
+    if (removed.isEmpty()) return false;
+    var next =
+        ResolveUnifiedResourcesResponse.newBuilder()
+            .setSelectionRevision(snapshot.selectionRevision())
+            .setRevocations(ResourceProtocol.revocations(legacy.revocations()));
+    remaining.forEach(resource -> next.addResources(CatalogProtocol.ref(resource)));
+    var observed =
+        workspace()
+            .refresh(
+                TenantContext.require(),
+                instance,
+                snapshot.owner(),
+                snapshot.selectionRevision(),
+                next.build());
+    if (observed == null
+        || !observed.instance().equals(instance)
+        || !observed.owner().equals(snapshot.owner())
+        || !Objects.equals(observed.node(), snapshot.node())
+        || observed.selectionRevision() != snapshot.selectionRevision()
+        || observed.generation() != snapshot.generation() + 1) throw CatalogStatePolicy.conflict();
+    if (observed.resources().size() != next.getResourcesCount()
+        || !new HashSet<>(observed.resources()).equals(new HashSet<>(next.getResourcesList())))
+      throw CatalogStatePolicy.conflict();
+    for (var entry : removed.entrySet()) {
+      if (observed.resources().stream()
+          .anyMatch(
+              resource -> resource.getIdentity().getPackageId().equals(entry.getKey().toString())))
+        throw CatalogStatePolicy.conflict();
+      var durable = cloudRow(instance, entry.getKey());
+      if (durable == null
+          || number(durable, "revision") != entry.getValue()
+          || number(durable, "selection_revision") != snapshot.selectionRevision()
+          || !CatalogStatePolicy.desired(json(durable, "resource")).equals("REMOVED"))
+        throw CatalogStatePolicy.conflict();
+      db.update(
+          "UPDATE resource.catalog_instance_installation SET collected_generation=:generation WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg AND revision=:revision AND selection_revision=:selection",
+          db.args(
+              "generation",
+              observed.generation(),
+              "instance",
+              instance,
+              "pkg",
+              entry.getKey(),
+              "revision",
+              entry.getValue(),
+              "selection",
+              snapshot.selectionRevision()));
+    }
+    resolution.set("resources", remaining);
+    db.update(
+        "UPDATE resource.catalog_distribution SET resolution=CAST(:resolution AS jsonb) WHERE tenant_id=:tenant AND id=:id",
+        db.args("id", row.get("id"), "resolution", resolution.toString()));
+    return true;
   }
 
   public InputStream nodeDownload(UUID tenant, UUID node, UUID id, String artifact, boolean range) {
@@ -849,14 +1115,30 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   tx.write(
                       () -> {
                         UUID instance = (UUID) row.get("instance_id");
+                        db.lock("catalog-distribution/" + instance);
                         var snapshot = workspace().snapshot(tenant, instance);
                         if (snapshot.selectionRevision() != number(row, "selection_revision")
                             || !snapshot.owner().equals(row.get("owner_id"))
                             || !Objects.equals(snapshot.node(), row.get("node_id"))) return false;
+                        if (collectTombstones(row, snapshot)) return true;
                         boolean renew = false;
                         for (var resource : json(row, "resolution").path("resources"))
                           if (Instant.parse(resource.path("lease").path("expiresAt").asString())
                               .isBefore(clock.instant().plusSeconds(300))) renew = true;
+                        for (var resource : json(row, "resolution").path("resources"))
+                          if (!resource.has("installationRevision")
+                              || snapshot.resources().stream()
+                                  .noneMatch(
+                                      expected ->
+                                          expected
+                                                  .getIdentity()
+                                                  .equals(
+                                                      CatalogProtocol.identity(
+                                                          resource.path("identity")))
+                                              && expected.getInstallationRevision()
+                                                  == resource
+                                                      .path("installationRevision")
+                                                      .asLong())) renew = true;
                         if (!renew) return false;
                         var request =
                             ResolveUnifiedResourcesRequest.newBuilder()

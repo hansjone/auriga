@@ -60,7 +60,7 @@
       <resource>
         <directory>../../../contracts/resource</directory>
         <targetPath>auriga/contracts/resource</targetPath>
-        <includes><include>*.schema.json</include></includes>
+        <includes><include>*.schema.json</include><include>unified-authorization.json</include></includes>
       </resource>
     </resources>
     <plugins>

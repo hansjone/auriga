@@ -61,6 +61,16 @@ public final class CatalogProtocol {
                     .setRevocationsExpiresAt(l.path("revocationsExpiresAt").asString())
                     .setExpiresAt(l.path("expiresAt").asString())
                     .setRevocationRevision(l.path("revocationRevision").asLong()));
+    if (n.has("installationRevision"))
+      b.setInstallationRevision(n.path("installationRevision").asLong());
+    if (n.has("desiredState"))
+      b.setDesiredState(
+          switch (CatalogStatePolicy.desired(n)) {
+            case "ENABLED" -> UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_ENABLED;
+            case "DISABLED" -> UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_DISABLED;
+            case "REMOVED" -> UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_REMOVED;
+            default -> throw auriga.resource.web.ResourceBody.invalid();
+          });
     n.path("artifacts")
         .forEach(
             a ->

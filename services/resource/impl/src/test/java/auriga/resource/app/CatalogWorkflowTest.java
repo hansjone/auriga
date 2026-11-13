@@ -52,7 +52,7 @@ class CatalogWorkflowTest {
           "resource.versions.review",
           "resource.versions.publish",
           "resource.distributions.manage",
-          CatalogWorkflow.SECURITY_REVIEW);
+          CatalogReviewPolicy.permission());
   @TempDir Path objects;
   LocalObjectStore store;
   CatalogWorkflow catalog;
@@ -104,7 +104,7 @@ class CatalogWorkflowTest {
                         .setMemberType(MemberType.MEMBER_TYPE_MEMBER)
                         .setStatus(MemberStatus.MEMBER_STATUS_ACTIVE);
                 for (String p : PERMS)
-                  if (!p.equals(CatalogWorkflow.SECURITY_REVIEW) || security.contains(a))
+                  if (!p.equals(CatalogReviewPolicy.permission()) || security.contains(a))
                     b.addPermissions(p);
                 return b.build();
               }
@@ -377,7 +377,10 @@ class CatalogWorkflowTest {
             assertEquals("approved", review.path("status").asString());
             security.remove(SECURITY);
             JsonNode approved = review;
-            assertError(CommonErrors.CONFLICT, () -> publish(u, approved));
+            assertError(
+                auriga.common.error.ErrorCode.of(
+                    "resource.review_required", 409, io.grpc.Status.Code.FAILED_PRECONDITION),
+                () -> publish(u, approved));
             security.add(SECURITY);
             assertEquals("published", publish(u, review).path("state").asString());
             return null;
@@ -550,7 +553,8 @@ class CatalogWorkflowTest {
                     .put("observedAt", clock.instant().toString())
                     .put("state", "applied");
             assertError(
-                CommonErrors.CONFLICT, () -> d.report(actor(GENERAL), report, key(), "\"1\""));
+                CatalogStatePolicy.conflict().errorCode(),
+                () -> d.report(actor(GENERAL), report, key(), "\"1\""));
             report.put("observedGeneration", 1);
             assertEquals(
                 "applied",
@@ -593,7 +597,7 @@ class CatalogWorkflowTest {
             when(workspace.snapshot(TENANT, instance))
                 .thenReturn(
                     new UnifiedResourceWorkspace.Snapshot(
-                        instance, GENERAL, node, 1, 2, 1, false, List.of()));
+                        instance, GENERAL, node, 1, 2, 1, false, List.of(), List.of()));
             var d = delivery(workspace);
             var body = JSON.createObjectNode().put("instanceId", instance.toString());
             body.putArray("selections")
@@ -633,7 +637,15 @@ class CatalogWorkflowTest {
             when(workspace.snapshot(TENANT, instance))
                 .thenReturn(
                     new UnifiedResourceWorkspace.Snapshot(
-                        instance, GENERAL, node, 2, 3, 2, true, List.of(report)));
+                        instance,
+                        GENERAL,
+                        node,
+                        2,
+                        3,
+                        2,
+                        true,
+                        List.of(report),
+                        List.of(resolution.getResources(0))));
             assertEquals(
                 "applying",
                 d.distribution(
@@ -644,7 +656,15 @@ class CatalogWorkflowTest {
             when(workspace.snapshot(TENANT, instance))
                 .thenReturn(
                     new UnifiedResourceWorkspace.Snapshot(
-                        instance, GENERAL, node, 2, 3, 3, true, List.of(report)));
+                        instance,
+                        GENERAL,
+                        node,
+                        2,
+                        3,
+                        3,
+                        true,
+                        List.of(report),
+                        List.of(resolution.getResources(0))));
             assertEquals(
                 "applied",
                 d.distribution(
@@ -802,6 +822,277 @@ class CatalogWorkflowTest {
                                     db.args("id", first.pkg))
                                 .size())
                     >= 4);
+            return null;
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  ObjectNode selection(Upload u, String action) {
+    var n = JSON.createObjectNode().put("action", action);
+    n.set("identity", identity(u));
+    return n;
+  }
+
+  ObjectNode memberSelection(Upload u, UUID client, String action) {
+    var n = JSON.createObjectNode().put("clientId", client.toString());
+    n.set("selection", selection(u, action));
+    return n;
+  }
+
+  ObjectNode memberReport(JsonNode installed, String state) {
+    var n =
+        JSON.createObjectNode()
+            .put("clientId", installed.path("clientId").asString())
+            .put("installationRevision", installed.path("installationRevision").asLong())
+            .put("selectionRevision", installed.path("selectionRevision").asLong())
+            .put("generation", installed.path("generation").asLong())
+            .put("observedGeneration", installed.path("generation").asLong())
+            .put("reportSource", "member")
+            .put("observedAt", clock.instant().toString())
+            .put("state", state);
+    n.set("identity", installed.path("resource").path("identity"));
+    return n;
+  }
+
+  @Test
+  void memberRemovalAcknowledgementAndReinstallKeepPersistentCas() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          try {
+            var u = upload(false);
+            publish(u, decide(submit(u), GENERAL, "general"));
+            var d = delivery(null);
+            UUID client = UUID.randomUUID();
+            var installed =
+                d.select(actor(GENERAL), memberSelection(u, client, "install"), key(), "\"0\"");
+            assertEquals(1, installed.path("resource").path("installationRevision").asLong());
+            String removeKey = key();
+            var remove = memberSelection(u, client, "remove");
+            var tombstone = d.select(actor(GENERAL), remove, removeKey, "\"1\"");
+            assertEquals("applying", tombstone.path("state").asString());
+            assertEquals("REMOVED", tombstone.path("resource").path("desiredState").asString());
+            assertEquals(2, tombstone.path("resource").path("installationRevision").asLong());
+            assertFalse(tombstone.path("resource").path("enabled").asBoolean());
+            assertEquals(
+                ResourceSigning.canonical(tombstone),
+                ResourceSigning.canonical(d.select(actor(GENERAL), remove, removeKey, "\"1\"")));
+            assertError(
+                CatalogStatePolicy.conflict().errorCode(),
+                () -> d.report(actor(GENERAL), memberReport(tombstone, "applied"), key(), "\"2\""));
+            assertError(
+                CatalogStatePolicy.conflict().errorCode(),
+                () ->
+                    d.report(actor(GENERAL), memberReport(tombstone, "disabled"), key(), "\"2\""));
+            var removed =
+                d.report(actor(GENERAL), memberReport(tombstone, "removed"), key(), "\"2\"");
+            assertEquals("removed", removed.path("state").asString());
+            var history =
+                d.installations(actor(GENERAL), client, null, 50, null).path("items").get(0);
+            assertEquals(2, history.path("installationRevision").asLong());
+            assertEquals(
+                tombstone.path("generation").asLong() + 1, history.path("generation").asLong());
+            assertError(
+                CatalogStatePolicy.conflict().errorCode(),
+                () -> d.report(actor(GENERAL), memberReport(history, "removed"), key(), "\"2\""));
+            var reinstalled =
+                d.select(actor(GENERAL), memberSelection(u, client, "install"), key(), "\"2\"");
+            assertEquals(3, reinstalled.path("resource").path("installationRevision").asLong());
+            assertEquals("ENABLED", reinstalled.path("resource").path("desiredState").asString());
+            assertError(
+                CatalogStatePolicy.conflict().errorCode(),
+                () -> d.report(actor(GENERAL), memberReport(tombstone, "removed"), key(), "\"3\""));
+            var renew =
+                JSON.createObjectNode()
+                    .put("clientId", client.toString())
+                    .put("installationRevision", 3)
+                    .put("selectionRevision", reinstalled.path("selectionRevision").asLong())
+                    .put("releaseSequence", 1);
+            renew.set("identity", identity(u));
+            var renewed = d.renew(actor(GENERAL), renew, key(), "\"3\"");
+            assertEquals(3, renewed.path("resource").path("installationRevision").asLong());
+            assertEquals(
+                "applied",
+                d.report(actor(GENERAL), memberReport(reinstalled, "applied"), key(), "\"3\"")
+                    .path("state")
+                    .asString());
+            return null;
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  auriga.contracts.resource.v1.ResolveUnifiedResourcesRequest resolveRequest(
+      UUID instance, UUID node, long revision, JsonNode selections) {
+    var request =
+        auriga.contracts.resource.v1.ResolveUnifiedResourcesRequest.newBuilder()
+            .setTenantId(TENANT.toString())
+            .setOwnerId(GENERAL.toString())
+            .setInstanceId(instance.toString())
+            .setNodeId(node.toString())
+            .setSelectionRevision(revision);
+    selections.forEach(selection -> request.addSelections(CatalogProtocol.selection(selection)));
+    return request.build();
+  }
+
+  ObjectNode distributionBody(UUID instance, ObjectNode... selections) {
+    var body = JSON.createObjectNode().put("instanceId", instance.toString());
+    var values = body.putArray("selections");
+    for (var s : selections) values.add(s);
+    return body;
+  }
+
+  @Test
+  void cloudTombstonesRequireExpectedRevisionAndRetireOnlyNextGeneration() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          try {
+            var u = upload(false);
+            publish(u, decide(submit(u), GENERAL, "general"));
+            UUID instance = UUID.randomUUID(), node = UUID.randomUUID();
+            var workspace = mock(UnifiedResourceWorkspace.class);
+            var current =
+                new java.util.concurrent.atomic.AtomicReference<>(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        instance, GENERAL, node, 1, 2, 2, true, List.of(), List.of()));
+            when(workspace.snapshot(TENANT, instance)).thenAnswer(call -> current.get());
+            var d = delivery(workspace);
+            var install = distributionBody(instance, selection(u, "install"));
+            d.distribute(actor(PUBLISHER), install, key(), "\"1\"");
+            var initial = d.resolve(resolveRequest(instance, node, 2, install.path("selections")));
+            current.set(
+                new UnifiedResourceWorkspace.Snapshot(
+                    instance, GENERAL, node, 2, 3, 3, true, List.of(), initial.getResourcesList()));
+            var remove = distributionBody(instance, selection(u, "remove"));
+            String removalKey = key();
+            var intent = d.distribute(actor(PUBLISHER), remove, removalKey, "\"2\"");
+            var removal = d.resolve(resolveRequest(instance, node, 3, remove.path("selections")));
+            var tombstone = removal.getResources(0);
+            assertEquals(2, tombstone.getInstallationRevision());
+            assertEquals("REMOVED", CatalogStatePolicy.desired(tombstone));
+            var report =
+                auriga.contracts.resource.v1.UnifiedInstallationReport.newBuilder()
+                    .setIdentity(tombstone.getIdentity())
+                    .setClientId(instance.toString())
+                    .setInstallationRevision(2)
+                    .setSelectionRevision(3)
+                    .setGeneration(4)
+                    .setObservedGeneration(4)
+                    .setState("applied")
+                    .setReportSource("node")
+                    .setObservedAt(clock.instant().toString())
+                    .build();
+            current.set(
+                new UnifiedResourceWorkspace.Snapshot(
+                    instance, GENERAL, node, 3, 4, 4, true, List.of(report), List.of(tombstone)));
+            assertEquals(
+                "applying",
+                d.distribution(
+                        actor(PUBLISHER), UUID.fromString(intent.path("distributionId").asString()))
+                    .path("state")
+                    .asString());
+            d.reconcile();
+            verify(workspace, never()).refresh(any(), any(), any(), anyLong(), any());
+            report = report.toBuilder().setState("removed").build();
+            current.set(
+                new UnifiedResourceWorkspace.Snapshot(
+                    instance, GENERAL, node, 3, 4, 4, true, List.of(report), List.of()));
+            assertEquals(
+                "applying",
+                d.distribution(
+                        actor(PUBLISHER), UUID.fromString(intent.path("distributionId").asString()))
+                    .path("state")
+                    .asString());
+            d.reconcile();
+            verify(workspace, never())
+                .refresh(
+                    any(),
+                    any(),
+                    any(),
+                    anyLong(),
+                    argThat(
+                        (auriga.contracts.resource.v1.ResolveUnifiedResourcesResponse response) ->
+                            response.getResourcesCount() == 0));
+            var acknowledged =
+                new UnifiedResourceWorkspace.Snapshot(
+                    instance, GENERAL, node, 3, 4, 4, true, List.of(report), List.of(tombstone));
+            current.set(acknowledged);
+            when(workspace.refresh(eq(TENANT), eq(instance), eq(GENERAL), eq(3L), any()))
+                .thenAnswer(
+                    call -> {
+                      var resolution =
+                          (auriga.contracts.resource.v1.ResolveUnifiedResourcesResponse)
+                              call.getArgument(4);
+                      assertEquals(0, resolution.getResourcesCount());
+                      var next =
+                          new UnifiedResourceWorkspace.Snapshot(
+                              instance,
+                              GENERAL,
+                              node,
+                              3,
+                              5,
+                              5,
+                              true,
+                              List.of(),
+                              resolution.getResourcesList());
+                      current.set(next);
+                      return next;
+                    });
+            d.reconcile();
+            assertEquals(1, acknowledged.resources().size());
+            assertEquals(4, acknowledged.generation());
+            assertEquals(
+                0,
+                d.resolve(resolveRequest(instance, node, 3, remove.path("selections")))
+                    .getResourcesCount());
+            assertEquals(
+                "removed",
+                d.distribution(
+                        actor(PUBLISHER), UUID.fromString(intent.path("distributionId").asString()))
+                    .path("state")
+                    .asString());
+            var reinstall = distributionBody(instance, selection(u, "install"));
+            d.distribute(actor(PUBLISHER), reinstall, key(), "\"3\"");
+            var again = d.resolve(resolveRequest(instance, node, 4, reinstall.path("selections")));
+            assertEquals(3, again.getResources(0).getInstallationRevision());
+            current.set(
+                new UnifiedResourceWorkspace.Snapshot(
+                    instance,
+                    GENERAL,
+                    node,
+                    4,
+                    6,
+                    6,
+                    true,
+                    List.of(report),
+                    again.getResourcesList()));
+            var other = upload(false);
+            publish(other, decide(submit(other), GENERAL, "general"));
+            var batch =
+                distributionBody(instance, selection(u, "enable"), selection(other, "install"));
+            d.distribute(actor(PUBLISHER), batch, key(), "\"4\"");
+            var resources =
+                d.resolve(resolveRequest(instance, node, 5, batch.path("selections")))
+                    .getResourcesList();
+            assertEquals(2, resources.size());
+            assertEquals(
+                4,
+                resources.stream()
+                    .filter(x -> x.getIdentity().getPackageId().equals(u.pkg.toString()))
+                    .findFirst()
+                    .orElseThrow()
+                    .getInstallationRevision());
+            assertEquals(
+                1,
+                resources.stream()
+                    .filter(x -> x.getIdentity().getPackageId().equals(other.pkg.toString()))
+                    .findFirst()
+                    .orElseThrow()
+                    .getInstallationRevision());
             return null;
           } catch (Exception e) {
             throw new RuntimeException(e);

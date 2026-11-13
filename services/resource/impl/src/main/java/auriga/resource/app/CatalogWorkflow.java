@@ -21,7 +21,6 @@ import tools.jackson.databind.node.ObjectNode;
 
 /** Separate catalog storage/workflow: legacy plugin IDs never resolve through this service. */
 public final class CatalogWorkflow {
-  public static final String SECURITY_REVIEW = "resource.versions.security_review";
   private final ResourceStore tx;
   private final ResourceWorkflowStore db;
   private final ResourceAccess access;
@@ -540,30 +539,47 @@ public final class CatalogWorkflow {
       access.target(r.tenant(), reviewer, permission);
       return true;
     } catch (AurigaException e) {
-      if (e.errorCode().equals(CommonErrors.FORBIDDEN)) return false;
-      throw e;
+      return false;
     }
   }
 
   private boolean quorum(ResourceAccess.Reader r, Map<String, Object> v, UUID review) {
-    var latest = new LinkedHashMap<UUID, Map<String, Object>>();
+    var input =
+        JSON.createObjectNode()
+            .put("tenantId", r.tenant().toString())
+            .put("authorId", v.get("author_id").toString())
+            .put("versionRevision", number(v, "revision"))
+            .put("digest", v.get("digest").toString());
+    var reviews = input.putArray("reviews");
+    var principals = input.putArray("currentPrincipals");
+    var seen = new HashSet<UUID>();
     for (var d :
         db.rows(
-            "SELECT * FROM resource.catalog_decision WHERE tenant_id=:tenant AND review_id=:id AND version_revision=:rev AND digest=:digest ORDER BY id",
-            db.args("id", review, "rev", number(v, "revision"), "digest", v.get("digest"))))
-      latest.put((UUID) d.get("reviewer_id"), d);
-    int count = 0;
-    boolean security = false;
-    for (var e : latest.entrySet()) {
-      if (e.getKey().equals(v.get("author_id"))
-          || !e.getValue().get("decision").equals("approve")
-          || !qualified(r, e.getKey(), "resource.versions.review")) continue;
-      boolean sec = e.getValue().get("role").equals("security");
-      if (sec && !qualified(r, e.getKey(), SECURITY_REVIEW)) continue;
-      count++;
-      security |= sec;
+            "SELECT * FROM resource.catalog_decision WHERE tenant_id=:tenant AND review_id=:id ORDER BY id",
+            db.args("id", review))) {
+      UUID reviewer = (UUID) d.get("reviewer_id");
+      reviews.add(
+          JSON.createObjectNode()
+              .put("tenantId", r.tenant().toString())
+              .put("reviewerId", reviewer.toString())
+              .put("role", d.get("role").toString())
+              .put("decision", d.get("decision").toString())
+              .put("versionRevision", number(d, "version_revision"))
+              .put("digest", d.get("digest").toString()));
+      if (seen.add(reviewer)) {
+        var p =
+            JSON.createObjectNode()
+                .put("tenantId", r.tenant().toString())
+                .put("reviewerId", reviewer.toString());
+        var permissions = p.putArray("permissions");
+        if (qualified(r, reviewer, "resource.versions.review"))
+          permissions.add("resource.versions.review");
+        if (qualified(r, reviewer, CatalogReviewPolicy.permission()))
+          permissions.add(CatalogReviewPolicy.permission());
+        principals.add(p);
+      }
     }
-    return v.get("risk").equals("r1") ? count >= 1 : count >= 2 && security;
+    return CatalogReviewPolicy.count(input).allowed(v.get("risk").toString());
   }
 
   public JsonNode decide(AurigaPrincipal actor, UUID id, ObjectNode body, String key, String etag) {
@@ -581,7 +597,8 @@ public final class CatalogWorkflow {
         etag,
         body,
         r -> {
-          if (role.equals("security")) access.target(r.tenant(), r.account(), SECURITY_REVIEW);
+          if (role.equals("security"))
+            access.target(r.tenant(), r.account(), CatalogReviewPolicy.permission());
           review(r, id);
         },
         r -> {
@@ -691,7 +708,9 @@ public final class CatalogWorkflow {
           match(etag, number(v, "revision"));
           if (r.account().equals(v.get("author_id"))) throw forbidden();
           if (!v.get("state").equals("approved") || !quorum(r, v, (UUID) v.get("review_id")))
-            throw conflict();
+            throw new AurigaException(
+                ErrorCode.of(
+                    "resource.review_required", 409, io.grpc.Status.Code.FAILED_PRECONDITION));
           if (revoked(v)) throw forbidden();
           long seq = number(pack, "release_high_water") + 1;
           if (seq > ResourceWorkflow.MAX) throw conflict();
