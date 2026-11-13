@@ -38,9 +38,9 @@ public class UacAdminController {
     return requests.call(
         request,
         () -> {
-          requests.browserSession(request, sessions, false);
           return store.tx(
               () -> {
+                requests.browserSession(request, sessions, false);
                 ObjectNode result = providers.get(providerId);
                 response.setHeader(
                     "ETag", UacProviderService.etag(providers.row(providerId, false)));
@@ -61,9 +61,9 @@ public class UacAdminController {
     return requests.call(
         request,
         () -> {
-          requests.browserSession(request, sessions, true);
           return store.tx(
               () -> {
+                requests.browserSession(request, sessions, true);
                 var result = providers.put(providerId, body, match);
                 response.setHeader(
                     "ETag", UacProviderService.etag(providers.row(providerId, false)));

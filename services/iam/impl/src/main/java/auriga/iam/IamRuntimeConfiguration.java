@@ -180,6 +180,34 @@ public class IamRuntimeConfiguration {
     return new UacFlow(store, providers, generic, adapter, uac, login, sessions, clock);
   }
 
+  @Bean
+  UacNavigation iamUacNavigation(
+      IamStore store,
+      UacFlow flow,
+      UacSessions uac,
+      UacProviderService providers,
+      LoginManager login,
+      Clock clock,
+      Environment env) {
+    return new UacNavigation(
+        store,
+        flow,
+        uac,
+        providers,
+        login,
+        clock,
+        env.getProperty("auriga.iam.uac.sso-cookie.enabled", "true"));
+  }
+
+  @Bean
+  org.springframework.boot.web.servlet.FilterRegistrationBean<UacCorrelation>
+      iamUacCorrelationFilter() {
+    var bean =
+        new org.springframework.boot.web.servlet.FilterRegistrationBean<>(new UacCorrelation());
+    bean.setOrder(org.springframework.core.Ordered.HIGHEST_PRECEDENCE + 10);
+    return bean;
+  }
+
   @Bean(initMethod = "start", destroyMethod = "destroy")
   @ConditionalOnProperty(
       prefix = "auriga.iam.uac.worker",
@@ -694,7 +722,7 @@ public class IamRuntimeConfiguration {
 
   @Bean
   RequestIdentity iamRequestIdentity(
-      Environment env, auriga.contracts.deploymentconfig.DeploymentAccess access) {
+      Environment env, auriga.contracts.deploymentconfig.DeploymentAccess access, IamStore store) {
     boolean loopbackHttp =
         env.getProperty("auriga.iam.edge-hop.allow-loopback-http", Boolean.class, false);
     if (!"none".equalsIgnoreCase(env.getProperty("server.forward-headers-strategy", "none")))
@@ -715,10 +743,13 @@ public class IamRuntimeConfiguration {
         && peers.stream().anyMatch(p -> !Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(p)))
       throw new IllegalStateException(
           "IAM insecure development hop must have only numeric loopback peers");
-    return new RequestIdentity(
-        access,
-        new RequestIdentity.Hop(
-            peers, env.getProperty("auriga.iam.edge-hop.dns-san"), loopbackHttp));
+    RequestIdentity identity =
+        new RequestIdentity(
+            access,
+            new RequestIdentity.Hop(
+                peers, env.getProperty("auriga.iam.edge-hop.dns-san"), loopbackHttp));
+    identity.uacStore(store);
+    return identity;
   }
 
   @Bean
@@ -735,6 +766,24 @@ public class IamRuntimeConfiguration {
                 s.sessionCreationPolicy(
                     org.springframework.security.config.http.SessionCreationPolicy.STATELESS));
     return http.build();
+  }
+
+  @Bean
+  @Order(0)
+  @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+  SecurityFilterChain iamUacInternalChain(
+      HttpSecurity http,
+      auriga.common.security.AccessTokenSettings settings,
+      com.nimbusds.jose.jwk.source.JWKSource<com.nimbusds.jose.proc.SecurityContext> source,
+      auriga.common.security.ProblemSecurityHandlers handlers)
+      throws Exception {
+    http.securityMatcher("/api/iam/v1/internal/uac/**");
+    return auriga.common.security.AurigaWebSecurity.build(
+        http,
+        auriga.common.security.AccessTokenDecoders.createInternal(settings, source),
+        handlers,
+        List.of(),
+        null);
   }
 
   @Bean

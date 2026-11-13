@@ -115,6 +115,15 @@ final class UacWorker implements org.springframework.beans.factory.DisposableBea
                   provider,
                   java.sql.Timestamp.from(now));
       if (active != null && active >= 4) continue;
+      if (kind.equals("info")) {
+        ObjectNode source = store.byId("session", job.path("sessionId").asString(), true);
+        if (source == null
+            || !uac.sessions.valid(source)
+            || source.path("authGeneration").asLong() != job.path("authGeneration").asLong()) {
+          done(job);
+          continue;
+        }
+      }
       if (kind.equals("info") && job.path("started").asBoolean()) {
         job.put("reason", "interrupted");
         info(job, Json.object("available", false));
@@ -168,8 +177,19 @@ final class UacWorker implements org.springframework.beans.factory.DisposableBea
       return false;
     }
     if (credential.has("roundSessions") && !UacSessions.roundContains(credential, session)) {
-      release(job, now.plusSeconds(1));
-      return false;
+      boolean live = false;
+      for (JsonNode member : credential.path("roundSessions")) {
+        ObjectNode source = store.byId("session", member.path("id").asString(), false);
+        if (source != null
+            && UacSessions.roundContains(credential, source)
+            && uac.sessions.valid(source)) live = true;
+      }
+      if (live) {
+        release(job, now.plusSeconds(1));
+        return false;
+      }
+      clearRound(credential);
+      store.save("uac_credential", credential);
     }
     if (!credential.has("roundPolicy")) {
       credential.set("roundPolicy", uac.policy.policy());
@@ -199,7 +219,7 @@ final class UacWorker implements org.springframework.beans.factory.DisposableBea
     job.put("credentialVersion", credential.path("version").asLong());
     job.set("roundPolicy", policy);
     var dueSessions = Json.MAPPER.createArrayNode();
-    for (ObjectNode candidate : store.all("session"))
+    for (ObjectNode candidate : store.uacDueSessions(credential.path("id").asString(), now))
       if (candidate.path("uacCredentialId").equals(credential.path("id"))
           && !candidate.path("revoked").asBoolean()
           && candidate.has("nextRevalidateAt")) {

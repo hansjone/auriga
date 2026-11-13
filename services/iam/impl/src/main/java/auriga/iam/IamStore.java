@@ -79,6 +79,16 @@ public final class IamStore {
         java.sql.Timestamp.from(now));
   }
 
+  List<ObjectNode> uacDueSessions(String credential, Instant now) {
+    return jdbc.query(
+        "SELECT data::text FROM iam.session WHERE tenant_id=? AND uac_credential_id=? AND data->>'revoked'='false'"
+            + " AND (data->>'nextRevalidateAt')::timestamptz<=? ORDER BY (data->>'nextRevalidateAt')::timestamptz,id LIMIT 50",
+        (rs, i) -> Json.read(rs.getString(1)),
+        TenantContext.require(),
+        UUID.fromString(credential),
+        java.sql.Timestamp.from(now));
+  }
+
   public <T> T tx(Supplier<T> work) {
     TenantContext.require();
     TenantTransactionManager.verifyTransactionTenant();

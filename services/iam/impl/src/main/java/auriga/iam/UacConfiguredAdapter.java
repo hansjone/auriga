@@ -251,6 +251,14 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
 
   @Override
   public JsonNode ssoCookies(JsonNode cookies) {
+    try {
+      return selectCookies(cookies);
+    } catch (IllegalArgumentException error) {
+      return Json.object();
+    }
+  }
+
+  private JsonNode selectCookies(JsonNode cookies) {
     for (String source : List.of("portal", "uds"))
       for (var role : settings.path("cookies").path(source).properties()) {
         JsonNode values = cookies.path(role.getValue().path("cookie").asString());
@@ -261,6 +269,9 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
       JsonNode roles = settings.path("cookies").path(system);
       String token = cookieValue(cookies, roles.path("token")),
           account = cookieValue(cookies, roles.path("account"));
+      if (token != null && (token.isBlank() || token.length() > 16384)
+          || account != null && (account.strip().isEmpty() || account.strip().length() > 128))
+        return Json.object();
       if (token == null || account == null) continue;
       if (token.isBlank()
           || token.length() > 16384
@@ -283,18 +294,22 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
 
   private String cookieValue(JsonNode cookies, JsonNode role) {
     JsonNode entries = cookies.path(role.path("cookie").asString());
-    if (!entries.isArray() || entries.size() != 1 || !entries.get(0).isString()) return null;
+    if (entries.isMissingNode()) return null;
+    if (!entries.isArray() || entries.size() != 1 || !entries.get(0).isString())
+      throw new IllegalArgumentException("Invalid SSO Cookie");
     try {
       String raw = entries.get(0).asString();
-      if (raw.length() > 32768) return null;
+      if (raw.length() > 32768) throw new IllegalArgumentException("Invalid SSO Cookie");
       if (role.path("urlEncoded").asBoolean()) raw = URLDecoder.decode(raw, StandardCharsets.UTF_8);
       if (role.has("pointer")) {
         JsonNode value = JSON.readTree(raw).at(role.path("pointer").asString());
-        return value.isString() ? value.asString() : null;
+        if (value.isMissingNode() || value.isNull()) return null;
+        if (!value.isString()) throw new IllegalArgumentException("Invalid SSO Cookie");
+        return value.asString();
       }
       return raw;
     } catch (RuntimeException e) {
-      return null;
+      throw new IllegalArgumentException("Invalid SSO Cookie");
     }
   }
 }

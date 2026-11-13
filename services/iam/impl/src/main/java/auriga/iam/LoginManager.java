@@ -633,6 +633,13 @@ public final class LoginManager {
                 && source.path("authGeneration").asLong() == tx.path("uacLinkGeneration").asLong(),
             "unauthenticated",
             401);
+        Instant now = clock.instant(), auth = Instant.parse(source.path("authTime").asString());
+        boolean fresh = !auth.isBefore(now.minusSeconds(600)) && !auth.isAfter(now.plusSeconds(30));
+        if (source.has("stepUpAt")) {
+          Instant step = Instant.parse(source.path("stepUpAt").asString());
+          fresh |= !step.isBefore(now.minusSeconds(600)) && !step.isAfter(now.plusSeconds(30));
+        }
+        IamError.require(fresh, "step_up_required", 403);
       }
     }
     String accountId =

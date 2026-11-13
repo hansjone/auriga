@@ -130,6 +130,26 @@ final class UacFlow {
               404);
           if (previous != null) {
             store.lock("uac-binding:" + audience + ":" + Secrets.hash(previous));
+            for (ObjectNode navigation : store.all("uac_navigation"))
+              if (origin.equals(navigation.path("origin").asString())
+                  && audience.equals(navigation.path("audience").asString())
+                  && Secrets.same(
+                      navigation.path("bindingHash").asString(), Secrets.hash(previous))) {
+                navigation = store.byId("uac_navigation", navigation.path("id").asString(), true);
+                IamError.require(
+                    !navigation.path("replaced").asBoolean(), "login_tx_finished", 409);
+                navigation.put("replaced", true);
+                navigation.put("cancelled", true);
+                navigation.put("consumed", true);
+                store.save("uac_navigation", navigation);
+                replaceTransaction(navigation.path("transactionId").asString());
+                if (navigation.has("issuedSessionId")) {
+                  ObjectNode issued =
+                      store.byId("session", navigation.path("issuedSessionId").asString(), true);
+                  if (issued != null && !issued.path("revoked").asBoolean())
+                    sessions.revokeOne(issued, "security");
+                }
+              }
             for (ObjectNode old : store.all("uac_challenge"))
               if (Secrets.same(old.path("bindingHash").asString(), Secrets.hash(previous))
                   && origin.equals(old.path("origin").asString())
@@ -140,7 +160,13 @@ final class UacFlow {
                 if (!old.path("consumed").asBoolean()) {
                   old.put("state", "cancelled");
                   old.remove("credential");
-                  login.cancel(old.path("transactionId").asString(), previous);
+                }
+                replaceTransaction(old.path("transactionId").asString());
+                if (old.has("issuedSessionId")) {
+                  ObjectNode issued =
+                      store.byId("session", old.path("issuedSessionId").asString(), true);
+                  if (issued != null && !issued.path("revoked").asBoolean())
+                    sessions.revokeOne(issued, "security");
                 }
                 store.save("uac_challenge", old);
               }
@@ -219,14 +245,33 @@ final class UacFlow {
     return HexFormat.of().formatHex(raw);
   }
 
+  private void replaceTransaction(String id) {
+    ObjectNode tx = store.get("login_tx", id, true);
+    if (tx == null) return;
+    if ("pending".equals(tx.path("status").asString())) {
+      tx.put("status", "cancelled");
+      tx.remove("uacCredential");
+      tx.remove("pendingProfile");
+      tx.set("step", Json.object("type", "fail", "code", "iam.login_tx_cancelled"));
+      store.save("login_tx", tx);
+    }
+    if (tx.has("uacIssuedSessionId")) {
+      ObjectNode issued = store.byId("session", tx.path("uacIssuedSessionId").asString(), true);
+      if (issued != null && !issued.path("revoked").asBoolean())
+        sessions.revokeOne(issued, "security");
+    }
+  }
+
   private void fresh(ObjectNode source) {
     if (source == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     Instant now = clock.instant();
+    Instant auth = Instant.parse(source.path("authTime").asString());
     boolean authenticated =
-        !Instant.parse(source.path("authTime").asString()).isBefore(now.minusSeconds(600));
+        !auth.isBefore(now.minusSeconds(600)) && !auth.isAfter(now.plusSeconds(30));
     boolean stepped =
         source.has("stepUpAt")
-            && !Instant.parse(source.path("stepUpAt").asString()).isBefore(now.minusSeconds(600));
+            && !Instant.parse(source.path("stepUpAt").asString()).isBefore(now.minusSeconds(600))
+            && !Instant.parse(source.path("stepUpAt").asString()).isAfter(now.plusSeconds(30));
     IamError.require(authenticated || stepped, "step_up_required", 403);
   }
 
@@ -255,6 +300,18 @@ final class UacFlow {
             output.set("failureCode", row.path("failureCode"));
           return output;
         });
+  }
+
+  ObjectNode linkTransaction(String id, String binding, String audience, String origin) {
+    ObjectNode challenge = bound(id, binding, audience, origin, false);
+    ObjectNode tx =
+        login.checkEntry(challenge.path("transactionId").asString(), binding, audience, origin);
+    return "link".equals(tx.path("purpose").asString()) ? tx : null;
+  }
+
+  String correlation(String id, String binding, String audience, String origin) {
+    return store.tx(
+        () -> bound(id, binding, audience, origin, false).path("correlationId").asString());
   }
 
   void cancel(String id, String binding, String audience, String origin) {
@@ -289,6 +346,7 @@ final class UacFlow {
               "provider_unavailable",
               404);
           String transaction = row.path("transactionId").asString();
+          IamError.require(!row.path("replaced").asBoolean(), "login_tx_finished", 409);
           if (row.path("consumed").asBoolean()) {
             LoginManager.Result existing = login.get(transaction, binding);
             if (!row.has("issued")) return existing;
@@ -317,7 +375,8 @@ final class UacFlow {
               login.finishUac(transaction, Json.object("subject", credential.path("empNo")));
           row.put("consumed", true);
           row.remove("credential");
-          if (result.session() != null)
+          if (result.session() != null) {
+            row.put("issuedSessionId", result.session().session().path("sessionId").asString());
             row.set(
                 "issued",
                 uac.seal(
@@ -329,6 +388,7 @@ final class UacFlow {
                         "csrf",
                         result.session().csrf()),
                     row.path("providerId").asString()));
+          }
           store.save("uac_challenge", row);
           return result;
         });

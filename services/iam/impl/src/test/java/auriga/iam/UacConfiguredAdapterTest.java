@@ -165,6 +165,25 @@ class UacConfiguredAdapterTest {
   }
 
   @Test
+  void malformedPresentPortalCookieDoesNotSilentlySwitchToUds() {
+    var mapping = settings("https://idp.example.com");
+    ((ObjectNode) mapping.path("cookies").path("portal").path("account"))
+        .put("pointer", "/account");
+    var adapter = new UacConfiguredAdapter(mapping, false);
+    var cookies =
+        Json.object(
+            "test_portal_token",
+            List.of("portal-token"),
+            "test_portal_account",
+            List.of("invalid-json"),
+            "test_uds_token",
+            List.of("uds-token"),
+            "test_uds_account",
+            List.of("uds-account"));
+    assertTrue(adapter.ssoCookies(cookies).isEmpty());
+  }
+
+  @Test
   void destinationAndAddressAllowlistFailClosedAndRedirectsAreNotFollowed() throws Exception {
     var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     var reached = new AtomicInteger();

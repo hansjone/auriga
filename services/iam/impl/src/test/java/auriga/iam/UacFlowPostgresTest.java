@@ -82,6 +82,7 @@ class UacFlowPostgresTest {
     final UacSessions uac;
     final UacFlow flow;
     final UacWorker worker;
+    final LoginManager login;
     final AtomicInteger scans = new AtomicInteger(),
         departments = new AtomicInteger(),
         verifications = new AtomicInteger();
@@ -190,7 +191,7 @@ class UacFlowPostgresTest {
                   "activeKeyId", "initial", "decryptKeyIds", List.of("initial"), "revision", 0),
               Map.of("initial", UacProviderPostgresTest.key()));
       uac = new UacSessions(store, cipher, adapter, providers, sessions, time, policy);
-      var login =
+      login =
           new LoginManager(
               store,
               secrets,
@@ -474,6 +475,445 @@ class UacFlowPostgresTest {
       assertTrue(f.session(sid).path("revoked").asBoolean());
       f.run();
       assertEquals(2, f.departments.get());
+    }
+  }
+
+  static UacNavigation navigation(Fixture f, String enabled) {
+    return new UacNavigation(
+        store,
+        f.flow,
+        f.uac,
+        new UacProviderService(store, f.uac.providers, f.uac.adapter, f.sessions, f.audit, f.time),
+        f.login,
+        f.time,
+        enabled);
+  }
+
+  static ObjectNode navigationInput(Fixture f, String continuation) {
+    return Json.object(
+        "requestId",
+        UUID.randomUUID().toString(),
+        "providerId",
+        f.provider,
+        "origin",
+        "https://portal.example.com",
+        "continuation",
+        continuation,
+        "fetchMetadata",
+        Json.object("dest", "document", "mode", "navigate", "site", "none", "user", "?1"));
+  }
+
+  static ObjectNode ssoInput(Fixture f, ObjectNode issued, String mode) {
+    return Json.object(
+        "providerId",
+        f.provider,
+        "navigationProof",
+        issued.path("context").path("navigationProof"),
+        "mode",
+        mode);
+  }
+
+  static UacNavigation.Prepared prepare(
+      Fixture f,
+      UacNavigation nav,
+      ObjectNode issued,
+      String mode,
+      String suppression,
+      String session) {
+    return f.call(
+        () ->
+            nav.prepare(
+                ssoInput(f, issued, mode),
+                issued.path("transactionCookie").asString(),
+                issued.path("csrfCookie").asString(),
+                issued.path("csrfCookie").asString(),
+                suppression,
+                session,
+                "https://portal.example.com"));
+  }
+
+  static ObjectNode ssoCookies(Fixture f) {
+    return Json.object(
+        "test_portal_token", List.of(f.token), "test_portal_account", List.of("001Ab"));
+  }
+
+  @Test
+  void portalSsoSavesVerifiedNewTokenAndSharesTheInformationJobWithoutQr() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var nav = navigation(f, "true");
+      ObjectNode input = navigationInput(f, "portal");
+      var issued = f.call(() -> nav.issue(input, false));
+      assertEquals(issued, f.call(() -> nav.issue(input, false)));
+      assertTrue(issued.path("context").path("autoEligible").asBoolean());
+      assertFalse(issued.path("context").path("autoSuppressed").asBoolean());
+      assertTrue(SessionManager.canonicalCsrf(issued.path("csrfCookie").asString()));
+      var prepared = prepare(f, nav, issued, "auto", null, null);
+      JsonNode verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
+      var completed =
+          f.call(() -> nav.finish(prepared, verified, issued.path("transactionCookie").asString()));
+      assertEquals("authenticated", completed.state());
+      assertEquals(0, f.scans.get());
+      assertEquals(1, f.verifications.get());
+      String sid = completed.result().session().session().path("sessionId").asString();
+      assertEquals(f.replacement, f.read(sid).path("token").asString());
+      assertEquals(0, f.departments.get());
+      f.run();
+      f.run();
+      assertEquals(1, f.departments.get());
+      assertEquals(
+          issued.path("context").path("transactionId").asString(),
+          completed.result().transaction().path("id").asString());
+      assertEquals(
+          completed.correlation(),
+          f.call(
+              () ->
+                  nav.correlation(
+                      ssoInput(f, issued, "auto"),
+                      issued.path("transactionCookie").asString(),
+                      "https://portal.example.com")));
+      assertEquals(
+          "common.conflict",
+          assertThrows(AurigaException.class, () -> prepare(f, nav, issued, "auto", null, null))
+              .errorCode()
+              .code());
+    }
+  }
+
+  @Test
+  void replacementFencesLateSsoAndCompletedQrAndOnlyOneSuccessorWins() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var nav = navigation(f, "true");
+      var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var prepared = prepare(f, nav, issued, "auto", null, null);
+      var verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
+      var qr =
+          f.call(
+              () ->
+                  f.flow.create(
+                      Json.object("providerId", f.provider),
+                      "portal",
+                      "https://portal.example.com",
+                      "127.0.0.1",
+                      issued.path("transactionCookie").asString(),
+                      null));
+      assertEquals(
+          "common.conflict",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              nav.finish(
+                                  prepared, verified, issued.path("transactionCookie").asString())))
+              .errorCode()
+              .code());
+      f.run();
+      var completed = f.complete(qr);
+      String sid = completed.session().session().path("sessionId").asString();
+      var next = navigationInput(f, "portal");
+      next.put("transactionCookie", qr.binding());
+      f.call(() -> nav.issue(next, false));
+      assertTrue(f.session(sid).path("revoked").asBoolean());
+      assertThrows(AurigaException.class, () -> f.complete(qr));
+      assertThrows(
+          AurigaException.class,
+          () ->
+              f.call(
+                  () ->
+                      nav.issue(
+                          next.deepCopy().put("requestId", UUID.randomUUID().toString()), false)));
+      assertEquals(1, f.verifications.get());
+    }
+  }
+
+  @Test
+  void navigationKeepsAcknowledgedSsoSessionButRevokesUnacknowledgedResponse() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var nav = navigation(f, "true");
+      var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var prepared = prepare(f, nav, issued, "auto", null, null);
+      var verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
+      var completed =
+          f.call(() -> nav.finish(prepared, verified, issued.path("transactionCookie").asString()));
+      String sid = completed.result().session().session().path("sessionId").asString();
+      var next = navigationInput(f, "portal");
+      next.put("transactionCookie", issued.path("transactionCookie").asString());
+      next.put("csrfCookie", completed.result().session().csrf());
+      var acknowledged = f.call(() -> nav.issue(next, false));
+      assertFalse(f.session(sid).path("revoked").asBoolean());
+      assertEquals(completed.result().session().csrf(), acknowledged.path("csrfCookie").asString());
+      var other = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var p = prepare(f, nav, other, "auto", null, null);
+      var result =
+          f.call(
+              () ->
+                  nav.finish(
+                      p, nav.verify(p, ssoCookies(f)), other.path("transactionCookie").asString()));
+      var retry = navigationInput(f, "portal");
+      retry.put("transactionCookie", other.path("transactionCookie").asString());
+      f.call(() -> nav.issue(retry, false));
+      assertTrue(
+          f.session(result.result().session().session().path("sessionId").asString())
+              .path("revoked")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  void rejectedPortalCookieDoesNotTryAnotherAccountOrRestoreOldToken() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.verifyBody.set(
+          Json.object("code", Json.object("code", "0000"), "bo", Json.object("code", "denied")));
+      var nav = navigation(f, "true");
+      var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var p = prepare(f, nav, issued, "auto", null, null);
+      var cookies = ssoCookies(f);
+      cookies.set("test_uds_token", Json.MAPPER.valueToTree(List.of(Secrets.random())));
+      cookies.set("test_uds_account", Json.MAPPER.valueToTree(List.of("AnotherUser")));
+      var verified = f.call(() -> nav.verify(p, cookies));
+      assertFalse(verified.path("success").asBoolean());
+      assertEquals(
+          "scan_required",
+          f.call(() -> nav.finish(p, verified, issued.path("transactionCookie").asString()))
+              .state());
+      assertEquals(1, f.verifications.get());
+      assertEquals(0, f.departments.get());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertTrue(store.all("session").isEmpty());
+                    return null;
+                  }));
+    }
+  }
+
+  @Test
+  void navigationCsrfOriginBindingAndReplacementFailClosed() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var nav = navigation(f, "true");
+      var input = navigationInput(f, "portal");
+      var issued = f.call(() -> nav.issue(input, false));
+      var body = ssoInput(f, issued, "auto");
+      String binding = issued.path("transactionCookie").asString(),
+          csrf = issued.path("csrfCookie").asString();
+      assertEquals(
+          "common.forbidden",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              nav.prepare(
+                                  body,
+                                  binding,
+                                  csrf,
+                                  Secrets.random(),
+                                  null,
+                                  null,
+                                  "https://portal.example.com")))
+              .errorCode()
+              .code());
+      assertEquals(
+          "common.forbidden",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              nav.prepare(
+                                  body,
+                                  binding,
+                                  csrf,
+                                  csrf,
+                                  null,
+                                  null,
+                                  "https://other.example.com")))
+              .errorCode()
+              .code());
+      assertEquals(
+          "common.forbidden",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              nav.prepare(
+                                  body,
+                                  Secrets.random(),
+                                  csrf,
+                                  csrf,
+                                  null,
+                                  null,
+                                  "https://portal.example.com")))
+              .errorCode()
+              .code());
+      var next = navigationInput(f, "portal");
+      next.put("transactionCookie", binding);
+      next.put("csrfCookie", csrf);
+      var replacement = f.call(() -> nav.issue(next, false));
+      assertEquals(csrf, replacement.path("csrfCookie").asString());
+      assertNotEquals(binding, replacement.path("transactionCookie").asString());
+      assertThrows(AurigaException.class, () -> prepare(f, nav, issued, "auto", null, null));
+      assertEquals(0, f.verifications.get());
+      TenantContext.run(
+          UUID.randomUUID(),
+          () ->
+              assertThrows(
+                  AurigaException.class,
+                  () ->
+                      nav.prepare(
+                          body, binding, csrf, csrf, null, null, "https://portal.example.com")));
+    }
+  }
+
+  @Test
+  void logoutSuppressionPersistsAcrossExplicitLoginAndExpiredOldCookieNeverRestoresAuto()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var nav = navigation(f, "true");
+      String suppression = f.call(() -> store.tx(() -> nav.suppress("https://portal.example.com")));
+      var input = navigationInput(f, "portal");
+      input.put("suppressionCookie", suppression);
+      var issued = f.call(() -> nav.issue(input, false));
+      assertTrue(issued.path("context").path("autoSuppressed").asBoolean());
+      var auto = prepare(f, nav, issued, "auto", suppression, null);
+      assertFalse(auto.attempt());
+      var skipped =
+          f.call(
+              () ->
+                  nav.finish(
+                      auto,
+                      nav.verify(auto, ssoCookies(f)),
+                      issued.path("transactionCookie").asString()));
+      assertEquals("scan_required", skipped.state());
+      assertEquals(0, f.verifications.get());
+      var second = navigationInput(f, "portal");
+      second.put("suppressionCookie", suppression);
+      var explicit = f.call(() -> nav.issue(second, false));
+      var prepared = prepare(f, nav, explicit, "continue", suppression, null);
+      var verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
+      assertEquals(
+          "authenticated",
+          f.call(
+                  () ->
+                      nav.finish(prepared, verified, explicit.path("transactionCookie").asString()))
+              .state());
+      assertTrue(
+          f.call(() -> store.tx(() -> nav.suppressed(suppression, "https://portal.example.com"))));
+      f.time.advance(86401);
+      assertTrue(
+          f.call(() -> store.tx(() -> nav.suppressed(suppression, "https://portal.example.com"))));
+    }
+  }
+
+  @Test
+  void deviceNavigationResolvesOnlyPendingOwnUserCodeAndNeverAutomaticallyVerifiesOrApproves()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var nav = navigation(f, "true");
+      String id = UUID.randomUUID().toString();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    store.insert(
+                        "oauth_grant",
+                        id,
+                        Json.object(
+                            "kind",
+                            "device",
+                            "clientId",
+                            "test-client",
+                            "userCode",
+                            "BCDF-GHJK",
+                            "status",
+                            "pending",
+                            "used",
+                            false,
+                            "expiresAt",
+                            f.time.instant().plusSeconds(600).toString()),
+                        f.time.instant().plusSeconds(600));
+                    return null;
+                  }));
+      var input = navigationInput(f, "device");
+      input.put("userCode", "BCDF-GHJK");
+      var issued = f.call(() -> nav.issue(input, true));
+      assertFalse(issued.toString().contains("deviceGrantId"));
+      assertFalse(issued.path("context").path("autoEligible").asBoolean());
+      var auto = prepare(f, nav, issued, "auto", null, null);
+      assertFalse(auto.attempt());
+      assertFalse(f.call(() -> nav.verify(auto, ssoCookies(f))).path("success").asBoolean());
+      assertEquals(0, f.verifications.get());
+      var next = navigationInput(f, "device");
+      next.put("userCode", "BCDF-GHJK");
+      var explicit = f.call(() -> nav.issue(next, true));
+      var prepared = prepare(f, nav, explicit, "continue", null, null);
+      JsonNode verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
+      assertEquals(
+          "authenticated",
+          f.call(
+                  () ->
+                      nav.finish(prepared, verified, explicit.path("transactionCookie").asString()))
+              .state());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        "pending", store.get("oauth_grant", id, false).path("status").asString());
+                    return null;
+                  }));
+      var forged = navigationInput(f, "device");
+      forged.put("userCode", "BCDF-GHJK");
+      forged.put("deviceGrantId", id);
+      assertThrows(AurigaException.class, () -> f.call(() -> nav.issue(forged, true)));
+      TenantContext.run(
+          UUID.randomUUID(),
+          () ->
+              assertEquals(
+                  "common.not_found",
+                  assertThrows(AurigaException.class, () -> nav.issue(input, true))
+                      .errorCode()
+                      .code()));
+    }
+  }
+
+  @Test
+  void missingCookiesDisabledSsoAndExistingSessionDoNotCallUpstreamOrSwitchIdentity()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var off = navigation(f, "false");
+      var issued = f.call(() -> off.issue(navigationInput(f, "portal"), false));
+      var skipped = prepare(f, off, issued, "continue", null, null);
+      assertFalse(skipped.attempt());
+      assertFalse(f.call(() -> off.verify(skipped, ssoCookies(f))).path("success").asBoolean());
+      var nav = navigation(f, "true");
+      var empty = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var noCookies = prepare(f, nav, empty, "auto", null, null);
+      assertFalse(f.call(() -> nav.verify(noCookies, Json.object())).path("success").asBoolean());
+      assertEquals(0, f.verifications.get());
+      var existing = f.login();
+      var next = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var keep = prepare(f, nav, next, "auto", null, existing.session().cookie());
+      assertFalse(keep.attempt());
+      var kept =
+          f.call(
+              () ->
+                  nav.finish(
+                      keep,
+                      nav.verify(keep, ssoCookies(f)),
+                      next.path("transactionCookie").asString()));
+      assertEquals("authenticated", kept.state());
+      assertNull(kept.result().session());
+      assertEquals(0, f.verifications.get());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(1, store.all("session").size());
+                    return null;
+                  }));
     }
   }
 

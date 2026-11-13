@@ -65,6 +65,10 @@ final class UacSessions {
   void established(ObjectNode tx, SessionManager.Issued issued) {
     if (!tx.has("uacCredential")) return;
     ObjectNode session = issued.session();
+    // Keep the final MFA result on the transaction too. Replacement must fence a
+    // session even when the challenge/navigation completed before MFA did.
+    tx.put("uacIssuedSessionId", session.path("sessionId").asString());
+    store.save("login_tx", tx);
     String provider = tx.path("providerId").asString(),
         account = session.path("accountId").asString();
     ObjectNode secret = open(tx.path("uacCredential"), provider);
@@ -211,19 +215,25 @@ final class UacSessions {
     ObjectNode session;
     if (principal.type() == PrincipalType.USER)
       session = sessions.activeById(principal.sessionId());
-    else if (principal.type() == PrincipalType.DEVICE && principal.deviceId() != null) {
+    else if (principal.type() == PrincipalType.DEVICE
+        && principal.deviceId() != null
+        && principal.context() == TokenContext.DEVICE) {
       ObjectNode snapshot = store.get("device", principal.deviceId(), false);
       if (snapshot == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
       session = sessions.activeById(snapshot.path("sessionId").asString());
       ObjectNode device = store.get("device", principal.deviceId(), true);
       if (device == null
           || device.path("revoked").asBoolean()
+          || !"auriga.connect".equals(device.path("scope").asString())
           || session == null
+          || !"portal".equals(session.path("audience").asString())
           || !device.path("uacSessionBinding").equals(session.path("uacSessionBinding"))
           || !device.path("accountId").asString().equals(principal.subject()))
         throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     } else throw new AurigaException(CommonErrors.FORBIDDEN);
     if (session == null
+        || principal.type() == PrincipalType.USER
+            && !principal.context().name().equalsIgnoreCase(session.path("audience").asString())
         || !session.path("accountId").asString().equals(principal.subject())
         || !session.has("uacCredentialId")) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     ObjectNode credential =
