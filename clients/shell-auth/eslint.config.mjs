@@ -2,6 +2,25 @@ import config from '../installer/eslint.config.mjs';
 export default [
   ...config,
   {
+    languageOptions: {
+      globals: Object.fromEntries(
+        [
+          'structuredClone',
+          'AbortController',
+          'AbortSignal',
+          'setInterval',
+          'clearInterval',
+          'clearTimeout',
+          'globalThis',
+          'URLSearchParams',
+          'FormData',
+          'Blob',
+          'Response',
+        ].map((name) => [name, 'readonly']),
+      ),
+    },
+  },
+  {
     files: ['**/public/*.js'],
     languageOptions: {
       globals: Object.fromEntries(
