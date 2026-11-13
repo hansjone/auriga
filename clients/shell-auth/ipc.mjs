@@ -85,7 +85,9 @@ export async function startIpc({ helper, broker, business }) {
       // schemas. This endpoint is never registered as browser HTTP.
       if (payload.path === '/dsh-team/agent-credentials') {
         requireValid('ShellAuthAgentCredentialsRequest', payload.body);
+        const context = broker.guard();
         const credentials = await broker.enterprise();
+        broker.assert(context);
         send({
           id,
           payload: { requestId: payload.requestId, body: credentials },

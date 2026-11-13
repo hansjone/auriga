@@ -801,8 +801,11 @@ export async function launch({ root, args = [], env = process.env }) {
     return status;
   } finally {
     try {
-      await shellAuth?.close();
-      await tree.stopTree();
+      try {
+        await shellAuth?.close();
+      } finally {
+        await tree.stopTree();
+      }
     } finally {
       session?.close();
       releaseSingleton();

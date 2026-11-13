@@ -39,7 +39,8 @@ export async function startDesktopAuth({
 }) {
   const originFile = safePath(join(root, 'desktop-origin.json'));
   if (!existsSync(originFile)) return undefined;
-  const origin = JSON.parse(readFileSync(originFile, 'utf8')).origin;
+  const installation = JSON.parse(readFileSync(originFile, 'utf8'));
+  const origin = installation.origin;
   const helper = fileURLToPath(
     new URL('./windows/shell-helper.exe', import.meta.url),
   );
@@ -53,7 +54,13 @@ export async function startDesktopAuth({
   });
   try {
     broker = new Broker({
-      platform: createPlatform(trustedConfig({ platformOrigin: origin })),
+      platform: createPlatform(
+        trustedConfig({
+          platformOrigin: origin,
+          issuer: installation.issuer,
+          clientId: installation.clientId,
+        }),
+      ),
       vault,
       openBrowser,
       log,
