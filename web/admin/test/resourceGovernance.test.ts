@@ -4,6 +4,7 @@ import { createAurigaI18n } from '@auriga/shared';
 import { adminApi } from '../src/admin/api';
 import { resourceApi } from '../src/admin/resourceApi';
 import ResourceGovernanceView from '../src/views/resources/ResourceGovernanceView.vue';
+import ResourceCenterView from '../src/views/resources/ResourceCenterView.vue';
 import { router } from '../src/router';
 
 const membership = (permissions: string[]) =>
@@ -28,7 +29,7 @@ describe('resource governance', () => {
       expect(
         router.resolve('/resources/' + phase).matched.at(-1)?.components
           ?.default,
-      ).toBe(ResourceGovernanceView);
+      ).toBe(ResourceCenterView);
   });
   it('does not read a review queue without explicit permission', async () => {
     membership(['resource.packages.read']);
