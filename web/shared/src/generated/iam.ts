@@ -1,4 +1,24 @@
 export interface paths {
+  '/me/uac/credentials': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 本人skill按调用读取当前企业登录信息草案
+     * @description 复用现有本人会话认证与来源设备绑定。只接受当前user会话或绑定该用户UAC来源会话的device凭据，拒绝服务主体。IAM从认证上下文取tenant、member及sourceSessionId/authGeneration，校验来源会话、设备、成员与provider均有效后读取该凭据记录的最新版本。请求为空对象，不能指定工号、用户、其他session或provider。仅由插件既有凭据handler为本人DSH会话skill调用，插件沿用宿主执行上下文与owner核对。token换发提交后读取新值，退出/失效后不可读。响应含工号、最新有效token及更新时间，cookies仅为内部应用所需私有映射项。响应Cache-Control no-store，响应体/原始Cookie不进入访问日志、追踪、诊断、静态配置或工具会话记录，skill只在进程内使用并输出业务结果。
+     */
+    post: operations['readMyUacCredentials'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/login/uac/sso': {
     parameters: {
       query?: never;
@@ -10,7 +30,7 @@ export interface paths {
     put?: never;
     /**
      * 门户服务端尝试SSO免扫码登录草案
-     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存bo.token，执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。 补充硬约束：SSO请求开启不等于生效，IAM/edge启动和配置更新须核公司Cookie域与门户/实例/预览等拓扑隔离，不安全时强制scan_required并告警，显式continue也不能绕过。设备确认及其登录续接禁止auto，即使导航资格与Cookie齐全；须展示权威设备信息与用户码，由用户点击继续并核码。设备目的和拓扑修订从服务端事务读取，不接受客户端声明。edge向任何上游一律剥离企业Cookie头，认证必要字段仅走受信内部认证通道，不能直接接受公网凭据。
+     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存bo.token，执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。 设备确认及其登录续接禁止auto，即使导航证明与Cookie齐全也须由用户点击继续并核码，发起设备与用户码取服务端权威事务。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效，同域Cookie可读风险已由用户接受。
      */
     post: operations['loginUacSso'];
     delete?: never;
@@ -1234,6 +1254,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    UacEnterpriseCredentials: {
+      empNo: string;
+      /** @description 最新有效企业token，skill进程内即时使用，禁止输出到工具结果、日志或会话记录 */
+      token: string;
+      /** Format: date-time */
+      updatedAt: string;
+      /** @description 仅内部应用需要的私有配置Cookie键值，token项随权威凭据版本更新 */
+      cookies?: {
+        [key: string]: string;
+      };
+    };
     UacSsoLogin: {
       /** Format: uuid */
       providerId: string;
@@ -2097,6 +2128,15 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
     /** @description 没有权限（common.forbidden 或更具体的码）。 */
     Forbidden: {
       headers: {
@@ -2119,15 +2159,6 @@ export interface components {
     RateLimited: {
       headers: {
         'Retry-After': components['headers']['RetryAfter'];
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
-      headers: {
         [name: string]: unknown;
       };
       content: {
@@ -2178,6 +2209,36 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  readMyUacCredentials: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description 当前本人企业凭据，仅交受控skill执行进程即时使用 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacEnterpriseCredentials'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      429: components['responses']['RateLimited'];
+    };
+  };
   loginUacSso: {
     parameters: {
       query?: never;

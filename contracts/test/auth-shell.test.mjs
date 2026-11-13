@@ -220,3 +220,48 @@ test('SSO result supports safe QR fallback without returning upstream tokens', (
     'common.yaml#/components/responses/Forbidden',
   );
 });
+
+test('enterprise credential reads use only the authenticated caller and return a bounded current value', () => {
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  const operation = spec.paths['/me/uac/credentials'].post;
+  const request = ajv.compile(
+    operation.requestBody.content['application/json'].schema,
+  );
+  assert.equal(request({}), true);
+  for (const field of [
+    'empNo',
+    'memberId',
+    'sessionId',
+    'providerId',
+    'token',
+  ]) {
+    assert.equal(request({ [field]: id }), false);
+  }
+  assert.equal(request(null), false);
+  assert.deepEqual(operation.security, [{ bearerAuth: [] }]);
+  const value = ajv.compile(spec.components.schemas.UacEnterpriseCredentials);
+  const valid = {
+    empNo: '00123',
+    token: 'synthetic',
+    updatedAt: base.expiresAt,
+  };
+  assert.equal(value(valid), true);
+  assert.equal(value({ ...valid, cookies: { example: 'synthetic' } }), true);
+  assert.equal(value({ ...valid, token: '' }), false);
+  assert.equal(value({ ...valid, updatedAt: 'invalid' }), false);
+  assert.equal(value({ ...valid, otherAccount: id }), false);
+  assert.equal(value({ ...valid, cookies: { example: 123 } }), false);
+  assert.equal(
+    value({
+      ...valid,
+      cookies: Object.fromEntries(
+        Array.from({ length: 17 }, (_, i) => [String(i), 'synthetic']),
+      ),
+    }),
+    false,
+  );
+  assert.deepEqual(
+    operation.responses['200'].headers['Cache-Control'].schema.enum,
+    ['no-store'],
+  );
+});
