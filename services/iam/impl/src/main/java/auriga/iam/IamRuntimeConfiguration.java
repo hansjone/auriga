@@ -162,6 +162,23 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  UacTelemetry iamUacTelemetry(
+      IamStore store,
+      UacDiagnosticSettings settings,
+      AuditLogger audit,
+      Clock clock,
+      UacSessions uac,
+      org.springframework.beans.factory.ObjectProvider<auriga.ops.api.OpsSignals> ops) {
+    var telemetry = new UacTelemetry(store, settings, audit, clock);
+    uac.installTelemetry(telemetry);
+    telemetry.signals = new UacSignals(store, ops.getIfAvailable(), clock);
+    org.springframework.boot.logging.LoggingSystem.get(
+            Thread.currentThread().getContextClassLoader())
+        .setLogLevel("auriga.iam.uac.detail", org.springframework.boot.logging.LogLevel.DEBUG);
+    return telemetry;
+  }
+
+  @Bean
   UacSessions iamUacSessions(
       IamStore store,
       UacCredentialCipher cipher,
@@ -220,7 +237,7 @@ public class IamRuntimeConfiguration {
       name = "enabled",
       havingValue = "true",
       matchIfMissing = true)
-  UacWorker iamUacWorker(UacSessions uac, AuditLogger audit) {
+  UacWorker iamUacWorker(UacSessions uac, AuditLogger audit, UacTelemetry telemetry) {
     return new UacWorker(uac, audit);
   }
 

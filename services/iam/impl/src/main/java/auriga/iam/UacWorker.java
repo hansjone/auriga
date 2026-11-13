@@ -38,6 +38,7 @@ final class UacWorker
     executor.scheduleWithFixedDelay(
         () -> {
           try {
+            if (uac.telemetry != null) uac.telemetry.flushQueue();
             UUID cursor = null;
             for (int batch = 0; batch < 20; batch++) {
               List<UUID> tenants = store.uacTenants(cursor);
@@ -56,6 +57,10 @@ final class UacWorker
   }
 
   int runOnce() {
+    if (uac.telemetry != null) {
+      uac.telemetry.flushQueue();
+      uac.telemetry.flushAudit();
+    }
     new UacKeyRotation(store, uac.cipher).rotateBatch(50);
     store.tx(
         () -> {
@@ -95,6 +100,11 @@ final class UacWorker
             .warn("UAC work deferred ({})", e.getClass().getSimpleName());
       }
       count++;
+    }
+    if (uac.telemetry != null) {
+      uac.telemetry.flushAudit();
+      if (uac.telemetry.signals != null) uac.telemetry.signals.flush();
+      uac.telemetry.clean();
     }
     return count;
   }
@@ -140,6 +150,7 @@ final class UacWorker
       String token = UUID.randomUUID().toString();
       if (kind.equals("revalidate") && !prepareRevalidation(job, token, now)) continue;
       job.put("started", true);
+      if (kind.equals("scan")) job.put("pollAttempt", job.path("pollAttempt").asInt() + 1);
       job.put("leaseToken", token);
       job.put("leaseUntil", now.plusSeconds(35).toString());
       store.save("uac_job", job);
@@ -268,6 +279,10 @@ final class UacWorker
   }
 
   private void execute(ObjectNode snapshot) {
+    auriga.common.context.RequestContext.start(null, null).run(() -> executeTraced(snapshot));
+  }
+
+  private void executeTraced(ObjectNode snapshot) {
     String kind = snapshot.path("kind").asString();
     ObjectNode input =
         store.tx(
@@ -310,37 +325,87 @@ final class UacWorker
                   uac.open(credential.path("envelope"), job.path("providerId").asString()));
             });
     if (input == null) return;
-    JsonNode result =
-        switch (kind) {
-          case "scan" -> uac.adapter.scan(input.path("config"), input.path("coordinates"));
-          case "info" ->
-              uac.adapter.department(input.path("config"), input.path("credential"), "login_info");
-          case "revalidate" ->
-              "department".equals(snapshot.path("roundPolicy").path("strategy").asString())
-                  ? uac.adapter.department(
-                      input.path("config"), input.path("credential"), "revalidate")
-                  : uac.adapter.verify(input.path("config"), input.path("credential"));
-          default -> throw new IllegalStateException("Unsupported UAC work kind");
-        };
-    store.tx(
-        () -> {
-          if (kind.equals("revalidate")) {
-            store.lock("uac-slots:" + snapshot.path("providerId").asString());
-            store.lock("uac-credential:" + snapshot.path("credentialId").asString());
-          }
-          ObjectNode job = current(snapshot);
-          if (job == null) return null;
-          switch (kind) {
-            case "scan" -> scan(job, result);
-            case "info" -> {
-              info(job, result);
-              done(job);
+    ObjectNode metadata = snapshot.deepCopy();
+    if (kind.equals("scan")) {
+      metadata.put("pollId", UUID.randomUUID().toString());
+      metadata.put("attempt", snapshot.path("pollAttempt").asInt());
+    }
+    String purpose = kind.equals("scan") ? null : kind.equals("info") ? "login_info" : "revalidate";
+    String stage =
+        kind.equals("scan")
+            ? "scan_status"
+            : kind.equals("info")
+                    || "department".equals(snapshot.path("roundPolicy").path("strategy").asString())
+                ? "department_lookup"
+                : "token_verify";
+    UacTelemetry.Span round =
+        uac.telemetry != null && kind.equals("revalidate")
+            ? uac.telemetry.begin(
+                metadata, "session_revalidate", "revalidate", input.path("credential"))
+            : null;
+    try {
+      JsonNode result =
+          uac.observe(
+              metadata,
+              stage,
+              purpose,
+              input.path("credential"),
+              () ->
+                  switch (kind) {
+                    case "scan" ->
+                        uac.adapter.scan(input.path("config"), input.path("coordinates"));
+                    case "info" ->
+                        uac.adapter.department(
+                            input.path("config"), input.path("credential"), "login_info");
+                    case "revalidate" ->
+                        "department"
+                                .equals(snapshot.path("roundPolicy").path("strategy").asString())
+                            ? uac.adapter.department(
+                                input.path("config"), input.path("credential"), "revalidate")
+                            : uac.adapter.verify(input.path("config"), input.path("credential"));
+                    default -> throw new IllegalStateException("Unsupported UAC work kind");
+                  });
+      if (kind.equals("scan")
+          && !Set.of("waiting", "scanned", "unavailable").contains(result.path("state").asString())
+          && uac.telemetry != null) {
+        var acquired = uac.telemetry.begin(metadata, "token_acquire", null, result);
+        acquired.end(
+            "verified".equals(result.path("state").asString()) ? "success" : "failure", result);
+      }
+      store.tx(
+          () -> {
+            if (kind.equals("revalidate")) {
+              store.lock("uac-slots:" + snapshot.path("providerId").asString());
+              store.lock("uac-credential:" + snapshot.path("credentialId").asString());
             }
-            case "revalidate" -> revalidate(job, result, input.path("credential"));
-            default -> throw new IllegalStateException();
-          }
-          return null;
-        });
+            ObjectNode job = current(snapshot);
+            if (job == null) return null;
+            switch (kind) {
+              case "scan" -> scan(job, result);
+              case "info" -> {
+                info(job, result);
+                done(job);
+              }
+              case "revalidate" -> revalidate(job, result, input.path("credential"));
+              default -> throw new IllegalStateException();
+            }
+            return null;
+          });
+      if (round != null) {
+        ObjectNode current =
+            store.tx(
+                () ->
+                    store.byId("uac_credential", snapshot.path("credentialId").asString(), false));
+        round.end(
+            result.path("success").asBoolean() || result.path("available").asBoolean()
+                ? "success"
+                : "failure",
+            current == null ? Json.object() : current);
+      }
+    } finally {
+      if (round != null && !round.ended)
+        round.end("failure", Json.object("faultReason", "transport_error"));
+    }
   }
 
   private void scan(ObjectNode job, JsonNode result) {
@@ -367,7 +432,6 @@ final class UacWorker
     if (state.equals("unavailable")) {
       int failures = job.path("failures").asInt() + 1;
       job.put("failures", failures);
-      stage(job, "scan_status", "login", "failure", false, false);
       release(job, uac.clock.instant().plusSeconds(Math.min(30, 2L << Math.min(failures - 1, 4))));
       return;
     }
@@ -404,7 +468,6 @@ final class UacWorker
               ? result.path("failureCode").asString()
               : "invalid_response");
     store.save("uac_challenge", challenge);
-    stage(job, "scan_status", "login", state, state.equals("verified"), false);
     if (Set.of("waiting", "scanned").contains(state))
       release(job, uac.clock.instant().plusSeconds(2));
     else done(job);
@@ -428,13 +491,6 @@ final class UacWorker
     new ContractSchemas().validate("auth/uac-login-info.schema.json#/$defs/UacLoginInfo", info);
     session.set("uacLoginInfo", info);
     store.save("session", session);
-    stage(
-        job,
-        "department_lookup",
-        "login_info",
-        available ? "success" : "failure",
-        available,
-        available);
   }
 
   private void revalidate(ObjectNode job, JsonNode result, JsonNode oldSecret) {
@@ -470,13 +526,6 @@ final class UacWorker
       done(job);
       return;
     }
-    stage(
-        job,
-        department ? "department_lookup" : "token_verify",
-        "revalidate",
-        success ? "success" : "failure",
-        success,
-        department && success);
     if (success) {
       if (!department) {
         IamError.validate(
@@ -592,35 +641,6 @@ final class UacWorker
     job.remove("leaseToken");
     job.remove("leaseUntil");
     store.save("uac_job", job);
-  }
-
-  private void stage(
-      ObjectNode job,
-      String stage,
-      String purpose,
-      String outcome,
-      boolean success,
-      boolean department) {
-    boolean ok = success || Set.of("waiting", "scanned").contains(outcome);
-    var entry =
-        AuditEntry.builder("iam.uac." + stage)
-            .actor(AuditEntry.Actor.SYSTEM)
-            .target("provider", job.path("providerId").asString())
-            .result(ok ? AuditEntry.Result.SUCCESS : AuditEntry.Result.FAILURE)
-            .detail("correlationId", job.path("correlationId").asString())
-            .detail("parentCorrelationId", job.path("parentCorrelationId").asString(null))
-            .detail("purpose", purpose)
-            .detail("outcome", outcome)
-            .detail("departmentPresent", department);
-    IamAudit.record(audit, entry.build());
-    var logger = LoggerFactory.getLogger(UacWorker.class);
-    var log = ok ? logger.atInfo() : logger.atWarn();
-    log.addKeyValue("correlationId", job.path("correlationId").asString())
-        .addKeyValue("providerId", job.path("providerId").asString())
-        .addKeyValue("purpose", purpose)
-        .addKeyValue("result", outcome)
-        .addKeyValue("departmentPresent", department)
-        .log("UAC {}", stage);
   }
 
   @Override

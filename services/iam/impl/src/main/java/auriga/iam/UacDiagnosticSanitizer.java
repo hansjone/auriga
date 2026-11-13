@@ -42,6 +42,7 @@ final class UacDiagnosticSanitizer {
       JsonNode root = MAPPER.readTree(body);
       if (root == null || !root.isObject() && !root.isArray()) return omitted(size, "invalid_json");
       Budget budget = new Budget(sensitiveValues);
+      collectUnknown(root, "", budget);
       JsonNode sanitized = walk(root, "", budget);
       ObjectNode result =
           Json.object(
@@ -80,7 +81,8 @@ final class UacDiagnosticSanitizer {
           result.set(key, walk(entry.getValue(), key, budget));
         } else if ((key.equals("message") || key.equals("msg")) && !budget.containsSensitive(key)) {
           String value = entry.getValue().isString() ? entry.getValue().asString() : "";
-          boolean safe = MESSAGES.contains(value) && !budget.containsSensitive(value);
+          boolean safe =
+              !budget.truncated && MESSAGES.contains(value) && !budget.containsSensitive(value);
           result.put(key, safe ? value : REDACTED);
           result.put("messageRedacted", !safe);
         } else {
@@ -103,9 +105,41 @@ final class UacDiagnosticSanitizer {
     }
     String value = node.isString() ? node.asString() : "";
     if (field.equals("code")
+        && !budget.truncated
         && value.matches("[A-Za-z0-9_-]{1,64}")
         && !budget.containsSensitive(value)) return MAPPER.valueToTree(value);
     return MAPPER.valueToTree(REDACTED);
+  }
+
+  // A response can repeat a credential under a code/message key. First collect
+  // every value under unknown fields, including private enterprise field names.
+  private static void collectUnknown(JsonNode node, String field, Budget budget) {
+    if (++budget.scanned > MAX_NODES) {
+      budget.truncated = true;
+      return;
+    }
+    if (node.isObject())
+      for (var entry : node.properties()) {
+        String key = entry.getKey();
+        if (CONTAINERS.contains(key) || key.equals("message") || key.equals("msg"))
+          collectUnknown(entry.getValue(), key, budget);
+        else collectSecrets(entry.getValue(), budget);
+      }
+    else if (node.isArray()) for (JsonNode item : node) collectUnknown(item, field, budget);
+    else if (!field.equals("code")
+        && !field.equals("message")
+        && !field.equals("msg")
+        && node.isString()) budget.sensitive.add(node.asString());
+  }
+
+  private static void collectSecrets(JsonNode node, Budget budget) {
+    if (++budget.scanned > MAX_NODES) {
+      budget.truncated = true;
+      return;
+    }
+    if (node.isString()) budget.sensitive.add(node.asString());
+    else if (node.isObject() || node.isArray())
+      for (JsonNode child : node) collectSecrets(child, budget);
   }
 
   private static ObjectNode omitted(int size, String reason) {
@@ -114,13 +148,14 @@ final class UacDiagnosticSanitizer {
   }
 
   private static final class Budget {
-    final Collection<String> sensitive;
+    final java.util.List<String> sensitive;
+    int scanned;
     int nodes;
     int unknown;
     boolean truncated;
 
     Budget(Collection<String> values) {
-      sensitive = values == null ? java.util.List.of() : values;
+      sensitive = values == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(values);
     }
 
     boolean containsSensitive(String value) {

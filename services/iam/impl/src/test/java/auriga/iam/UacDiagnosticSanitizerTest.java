@@ -8,6 +8,22 @@ import org.junit.jupiter.api.Test;
 
 class UacDiagnosticSanitizerTest {
   @Test
+  void aPrivateCredentialRepeatedAsCodeIsRedactedWithoutPriorKnowledgeOfItsValue() {
+    String token = Secrets.random();
+    var response =
+        Json.object(
+            "privateCredentialField",
+            token,
+            "bo",
+            Json.object("code", token),
+            "code",
+            Json.object("code", "0000"));
+    String output = sanitize(response.toString(), List.of()).toString();
+    assertFalse(output.contains(token));
+    assertTrue(output.contains("0000"));
+  }
+
+  @Test
   void removesSecretsAndPiiFromKeysValuesArraysMessagesAndHeaders() {
     String token = Secrets.random();
     var secrets = List.of(token, "001Ab", "测试姓名", "测试部门", "test@example.com", "+1-202-555-0100");

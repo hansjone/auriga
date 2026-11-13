@@ -129,6 +129,7 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
               expand(mapping.path("body"), values(config, coordinates)),
               headers(mapping, values(config, coordinates)),
               25);
+      UacTelemetry.capture(response.status(), response.body());
       if (response.status() < 200 || response.status() >= 300)
         return failure("unavailable", "transport_error");
       JsonNode root = JSON.readTree(response.body());
@@ -174,6 +175,7 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
               expand(mapping.path("body"), values),
               headers(mapping, values),
               3);
+      UacTelemetry.capture(response.status(), response.body());
       if (response.status() < 200 || response.status() >= 300)
         return Json.object("available", false, "faultReason", "http_error");
       JsonNode root = JSON.readTree(response.body());
@@ -186,19 +188,28 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
       for (JsonNode entry : list) {
         JsonNode id = entry.at(mapping.path("empNoPointer").asString());
         if (id.isString()
-            && id.asString().strip().equals(credential.path("empNo").asString().strip()))
+            && auriga.iam.api.UacEmployee.canonical(id.asString())
+                .equals(auriga.iam.api.UacEmployee.canonical(credential.path("empNo").asString())))
           matches.add(entry);
       }
       if (matches.size() != 1)
-        return Json.object("available", false, "failureClass", "identity_mismatch");
+        return Json.object(
+            "available",
+            false,
+            "failureClass",
+            "identity_mismatch",
+            "matchingCount",
+            matches.size());
       for (JsonNode pointer : mapping.path("departmentPointers")) {
         JsonNode department = matches.getFirst().at(pointer.asString());
         if (department.isString()
             && !department.asString().strip().isEmpty()
             && department.asString().length() <= 1024)
-          return Json.object("available", true, "department", department.asString().strip());
+          return Json.object(
+              "available", true, "department", department.asString().strip(), "matchingCount", 1);
       }
-      return Json.object("available", false, "faultReason", "invalid_success_payload");
+      return Json.object(
+          "available", false, "faultReason", "missing_department", "matchingCount", 1);
     } catch (java.io.IOException e) {
       return Json.object("available", false, "faultReason", "transport_error");
     } catch (RuntimeException e) {
@@ -220,6 +231,7 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
                   config.path("systemCode").asString()),
               Map.of("X-Emp-No", account),
               3);
+      UacTelemetry.capture(response.status(), response.body());
       var decision = UacTokenVerification.evaluate(response.status(), response.body(), account);
       return Json.object(
           "success",
@@ -258,6 +270,15 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
     }
   }
 
+  @Override
+  public Boolean ssoCookiePresent(JsonNode cookies) {
+    for (String family : List.of("portal", "uds"))
+      for (String role : List.of("token", "account"))
+        if (cookies.has(settings.path("cookies").path(family).path(role).path("cookie").asString()))
+          return true;
+    return false;
+  }
+
   private JsonNode selectCookies(JsonNode cookies) {
     for (String source : List.of("portal", "uds"))
       for (var role : settings.path("cookies").path(source).properties()) {
@@ -287,7 +308,8 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
           return Json.object();
         }
       }
-      return Json.object("empNo", account.strip(), "token", token, "clientIP", ip);
+      return Json.object(
+          "empNo", account.strip(), "token", token, "clientIP", ip, "cookieFamily", system);
     }
     return Json.object();
   }

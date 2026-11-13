@@ -5,9 +5,12 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import auriga.common.audit.AuditLogger;
+import auriga.common.audit.OutboxAuditLogger;
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.common.events.EventPublisher;
+import auriga.common.events.EventSchemas;
+import auriga.common.events.OutboxEventPublisher;
 import auriga.common.persistence.*;
 import auriga.common.security.*;
 import auriga.iam.api.IdentityPolicyHooks;
@@ -97,6 +100,7 @@ class UacFlowPostgresTest {
                 "rows",
                 List.of(Json.object("employee", "001Ab", "department", "Test department"))));
     final AtomicReference<JsonNode> verifyBody = new AtomicReference<>();
+    final AtomicReference<String> scanState = new AtomicReference<>("success");
     final AtomicReference<CountDownLatch> verifyEntered = new AtomicReference<>(),
         verifyRelease = new AtomicReference<>();
     final String token = Secrets.random(), replacement = Secrets.random();
@@ -121,7 +125,8 @@ class UacFlowPostgresTest {
               case "/qr" -> {
                 scans.incrementAndGet();
                 assertEquals(32, request.path("first").asString().length());
-                response = Json.object("state", "success", "employee", "001Ab", "token", token);
+                response =
+                    Json.object("state", scanState.get(), "employee", "001Ab", "token", token);
               }
               case "/department" -> {
                 departments.incrementAndGet();
@@ -193,6 +198,9 @@ class UacFlowPostgresTest {
                   "activeKeyId", "initial", "decryptKeyIds", List.of("initial"), "revision", 0),
               Map.of("initial", envelopeKey));
       uac = new UacSessions(store, cipher, adapter, providers, sessions, time, policy);
+      uac.installTelemetry(
+          new UacTelemetry(
+              store, new UacDiagnosticSettings(store, config, audit, time), audit, time));
       when(hooks.uacMember(any()))
           .thenReturn(Optional.of(new IdentityPolicyHooks.UacMember("Test member", "member")));
       login =
@@ -330,6 +338,458 @@ class UacFlowPostgresTest {
       if (verifyRelease.get() != null) verifyRelease.get().countDown();
       worker.destroy();
       server.stop(0);
+    }
+  }
+
+  @Test
+  void everyPollHasBothPhasesAndLoginInformationFailureDoesNotLogRevocation() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.scanState.set("waiting");
+      var challenge = f.begin();
+      f.run();
+      f.time.advance(2);
+      f.scanState.set("scanned");
+      f.run();
+      f.time.advance(2);
+      f.scanState.set("success");
+      f.run();
+      f.departmentStatus.set(503);
+      var result = f.complete(challenge);
+      String sid = result.session().session().path("sessionId").asString();
+      String next = f.session(sid).path("nextRevalidateAt").asString();
+      f.run();
+      var events = stageEvents(f);
+      var polls =
+          events.stream().filter(e -> e.path("stage").asString().equals("scan_status")).toList();
+      assertEquals(6, polls.size());
+      assertEquals(
+          3,
+          polls.stream()
+              .filter(e -> e.path("phase").asString().equals("end"))
+              .map(e -> e.path("pollId").asString())
+              .distinct()
+              .count());
+      assertEquals(
+          Set.of("waiting", "scanned", "verified"),
+          new HashSet<>(
+              polls.stream()
+                  .filter(e -> e.path("phase").asString().equals("end"))
+                  .map(e -> e.path("result").asString())
+                  .toList()));
+      assertEquals(
+          2,
+          events.stream().filter(e -> e.path("stage").asString().equals("token_acquire")).count());
+      var info =
+          events.stream()
+              .filter(
+                  e ->
+                      e.path("stage").asString().equals("department_lookup")
+                          && e.path("phase").asString().equals("end"))
+              .findFirst()
+              .orElseThrow();
+      assertEquals("login_info", info.path("purpose").asString());
+      assertEquals(503, info.path("httpStatus").asInt());
+      assertEquals("WARN", info.path("level").asString());
+      assertTrue(
+          events.stream().noneMatch(e -> e.path("stage").asString().equals("session_revoke")));
+      assertEquals(next, f.session(sid).path("nextRevalidateAt").asString());
+      for (var event : events)
+        for (String field :
+            List.of(
+                "timestamp",
+                "service",
+                "level",
+                "stage",
+                "phase",
+                "result",
+                "durationMs",
+                "correlationId",
+                "eventId",
+                "transactionId",
+                "pollId",
+                "attempt",
+                "parentCorrelationId",
+                "trace_id",
+                "spanId",
+                "requestId",
+                "tenantId",
+                "providerId",
+                "configRevision",
+                "empNo",
+                "chain",
+                "tokenHashPrefix",
+                "endpoint",
+                "httpStatus",
+                "udsCode",
+                "udsSubCode",
+                "udsMessage",
+                "truncated")) assertTrue(event.has(field), field);
+      String raw = events.toString();
+      assertFalse(raw.contains(f.token));
+      assertFalse(raw.contains(f.replacement));
+      assertFalse(raw.contains("Test department"));
+      assertTrue(events.stream().noneMatch(e -> e.has("udsRawSanitized")));
+    }
+  }
+
+  static List<ObjectNode> stageEvents(Fixture f) {
+    return f.call(
+        () ->
+            store.tx(
+                () ->
+                    store
+                        .networkJdbc()
+                        .query(
+                            "SELECT data->'event' FROM iam.uac_diagnostics WHERE tenant_id=? AND data->>'kind'='event' ORDER BY id",
+                            (rs, i) -> Json.read(rs.getString(1)),
+                            f.tenant)));
+  }
+
+  static ObjectNode telemetryMetadata(Fixture f) {
+    return Json.object(
+        "providerId",
+        f.provider,
+        "correlationId",
+        UUID.randomUUID().toString(),
+        "transactionId",
+        UUID.randomUUID().toString(),
+        "configRevision",
+        1);
+  }
+
+  static UacDiagnosticSettings diagnosticSettings(Fixture f) {
+    return new UacDiagnosticSettings(
+        store,
+        new UacProviderService(store, f.uac.providers, f.uac.adapter, f.sessions, f.audit, f.time),
+        f.audit,
+        f.time);
+  }
+
+  @Test
+  void detailedResponsesUseCapturedRevisionAndExpireAndNeverRetainResponseSecrets()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var settings = diagnosticSettings(f);
+      var off = f.call(() -> settings.get(f.provider));
+      var on =
+          f.call(
+              () ->
+                  settings.put(
+                      f.provider, Json.object("enabled", true), UacDiagnosticSettings.etag(off)));
+      var telemetry = new UacTelemetry(store, settings, f.audit, f.time);
+      var credential = Json.object("empNo", "001Ab", "token", f.token, "clientIP", "");
+      var first =
+          f.call(
+              () -> telemetry.begin(telemetryMetadata(f), "token_verify", "login_sso", credential));
+      var result =
+          f.call(
+              () ->
+                  first.call(
+                      () ->
+                          f.uac.adapter.verify(
+                              Json.object("systemCode", "test-system"), credential)));
+      var disabled =
+          f.call(
+              () ->
+                  settings.put(
+                      f.provider, Json.object("enabled", false), UacDiagnosticSettings.etag(on)));
+      f.call(
+          () -> {
+            first.end("success", result);
+            return null;
+          });
+      assertTrue(stageEvents(f).stream().noneMatch(e -> e.has("udsRawSanitized")));
+      var startedOff =
+          f.call(
+              () -> telemetry.begin(telemetryMetadata(f), "token_verify", "login_sso", credential));
+      var again =
+          f.call(
+              () ->
+                  settings.put(
+                      f.provider,
+                      Json.object("enabled", true, "ttlSeconds", 2),
+                      UacDiagnosticSettings.etag(disabled)));
+      var second =
+          f.call(
+              () ->
+                  startedOff.call(
+                      () ->
+                          f.uac.adapter.verify(
+                              Json.object("systemCode", "test-system"), credential)));
+      f.call(
+          () -> {
+            startedOff.end("success", second);
+            return null;
+          });
+      assertTrue(stageEvents(f).stream().noneMatch(e -> e.has("udsRawSanitized")));
+      var active =
+          f.call(
+              () -> telemetry.begin(telemetryMetadata(f), "token_verify", "login_sso", credential));
+      var third =
+          f.call(
+              () ->
+                  active.call(
+                      () ->
+                          f.uac.adapter.verify(
+                              Json.object("systemCode", "test-system"), credential)));
+      f.call(
+          () -> {
+            active.end("success", third);
+            return null;
+          });
+      var detail = stageEvents(f).stream().filter(e -> e.has("udsRawSanitized")).toList();
+      assertEquals(1, detail.size());
+      assertEquals("DEBUG", detail.getFirst().path("level").asString());
+      assertFalse(detail.toString().contains(f.token));
+      assertFalse(detail.toString().contains(f.replacement));
+      assertFalse(detail.toString().contains("001AB"));
+      var expires =
+          f.call(
+              () -> telemetry.begin(telemetryMetadata(f), "token_verify", "login_sso", credential));
+      var fourth =
+          f.call(
+              () ->
+                  expires.call(
+                      () ->
+                          f.uac.adapter.verify(
+                              Json.object("systemCode", "test-system"), credential)));
+      f.time.advance(2);
+      f.call(
+          () -> {
+            expires.end("success", fourth);
+            return null;
+          });
+      assertEquals(1, stageEvents(f).stream().filter(e -> e.has("udsRawSanitized")).count());
+      assertFalse(f.call(() -> settings.get(f.provider)).path("enabled").asBoolean());
+      assertEquals(
+          again.path("revision").asLong(),
+          f.call(() -> settings.get(f.provider)).path("revision").asLong());
+    }
+  }
+
+  @Test
+  void diagnosticSqlFailureDoesNotAbortAuthenticationTransactionAndSafeEventsRetryAfterCommit()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      IamStore failing = spy(store);
+      doAnswer(
+              i -> {
+                store.networkJdbc().execute("SELECT 1/0");
+                return i.callRealMethod();
+              })
+          .when(failing)
+          .insert(eq("uac_diagnostics"), anyString(), any(ObjectNode.class), any());
+      var telemetry = new UacTelemetry(failing, diagnosticSettings(f), f.audit, f.time);
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var stage =
+                        telemetry.begin(
+                            telemetryMetadata(f), "challenge_start", null, Json.object());
+                    stage.end("success", Json.object());
+                    store.insert(
+                        "rate_limit", "diagnostic-failure-proof", Json.object("value", 1), null);
+                    return null;
+                  }));
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertNotNull(store.get("rate_limit", "diagnostic-failure-proof", false));
+                    return null;
+                  }));
+      doCallRealMethod()
+          .when(failing)
+          .insert(eq("uac_diagnostics"), anyString(), any(ObjectNode.class), any());
+      telemetry.flushQueue();
+      assertEquals(2, stageEvents(f).size());
+    }
+  }
+
+  @Test
+  void uacStageAuditRetriesWithStableEventIdThroughTheRealOutboxSerializer() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var publisher =
+          new OutboxEventPublisher(
+              store.networkJdbc(), "iam", "iam", new EventSchemas(), Json.MAPPER, f.time, null);
+      var real = new OutboxAuditLogger(publisher);
+      var transientAudit = mock(AuditLogger.class);
+      AtomicBoolean fail = new AtomicBoolean(true);
+      doAnswer(
+              i -> {
+                if (fail.getAndSet(false))
+                  throw new IllegalStateException("temporary audit outage");
+                real.record(i.getArgument(0));
+                return null;
+              })
+          .when(transientAudit)
+          .record(any());
+      var telemetry = new UacTelemetry(store, diagnosticSettings(f), transientAudit, f.time);
+      f.call(
+          () -> {
+            var span =
+                telemetry.begin(
+                    telemetryMetadata(f),
+                    "token_verify",
+                    "revalidate",
+                    Json.object("empNo", "001Ab", "token", f.token));
+            span.end("success", Json.object("success", true, "token", f.replacement));
+            telemetry.flushAudit();
+            return null;
+          });
+      String event =
+          stageEvents(f).stream()
+              .filter(e -> e.path("phase").asString().equals("end"))
+              .findFirst()
+              .orElseThrow()
+              .path("eventId")
+              .asString();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        "true",
+                        store
+                            .networkJdbc()
+                            .queryForObject(
+                                "SELECT data->>'auditPending' FROM iam.uac_diagnostics WHERE tenant_id=? AND lookup_key=?",
+                                String.class,
+                                f.tenant,
+                                "event:" + event));
+                    return null;
+                  }));
+      var restarted = new UacTelemetry(store, diagnosticSettings(f), real, f.time);
+      f.call(
+          () -> {
+            restarted.flushAudit();
+            restarted.flushAudit();
+            return null;
+          });
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var rows =
+                        store
+                            .networkJdbc()
+                            .queryForList(
+                                "SELECT envelope FROM iam.outbox_event WHERE tenant_id=? AND event_type='audit.recorded'",
+                                String.class,
+                                f.tenant);
+                    assertEquals(1, rows.size());
+                    var data = Json.MAPPER.readTree(rows.getFirst()).path("data");
+                    assertEquals(event, data.path("details").path("eventId").asString());
+                    assertEquals(
+                        UacDiagnosticSanitizer.tokenHashPrefix(f.token),
+                        data.path("details").path("tokenHashPrefix").asString());
+                    assertEquals("revalidate", data.path("details").path("purpose").asString());
+                    assertFalse(rows.toString().contains(f.token));
+                    assertFalse(rows.toString().contains(f.replacement));
+                    return null;
+                  }));
+    }
+  }
+
+  @Test
+  void providerSignalsRespectSixtySecondFaultAndThirtySecondRevocationThresholdsAndRecover()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var ops = mock(auriga.ops.api.OpsSignals.class);
+      doAnswer(
+              i -> {
+                store.requireTransactionReleased();
+                return null;
+              })
+          .when(ops)
+          .observe(any(), any(), any(), any(), anyBoolean());
+      var signals = new UacSignals(store, ops, f.time);
+      f.uac.telemetry.signals = signals;
+      f.call(
+          () -> {
+            var stage =
+                f.uac.telemetry.begin(
+                    telemetryMetadata(f), "token_verify", "login_sso", Json.object());
+            stage.end(
+                "failure",
+                Json.object("failureClass", "upstream_fault", "faultReason", "transport_error"));
+            signals.flush();
+            return null;
+          });
+      f.time.advance(59);
+      f.call(
+          () -> {
+            signals.flush();
+            return null;
+          });
+      verify(ops, never())
+          .observe(eq(f.tenant), eq("iam_uac"), eq(f.provider), eq("warning"), eq(true));
+      f.time.advance(2);
+      f.call(
+          () -> {
+            signals.flush();
+            return null;
+          });
+      verify(ops).observe(f.tenant, "iam_uac", f.provider, "warning", true);
+      f.call(
+          () -> {
+            var stage =
+                f.uac.telemetry.begin(
+                    telemetryMetadata(f), "token_verify", "login_sso", Json.object());
+            stage.end("success", Json.object());
+            signals.flush();
+            return null;
+          });
+      verify(ops, atLeastOnce()).observe(f.tenant, "iam_uac", f.provider, "warning", false);
+      reset(ops);
+      var session = f.login().session().session();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    f.sessions.revokeOne(session, "logout");
+                    store.enqueueSessionProjection(
+                        session.path("cookieHash").asString(), f.time.instant());
+                    store
+                        .networkJdbc()
+                        .update(
+                            "UPDATE iam.session_projection SET created_at=? WHERE tenant_id=?",
+                            java.sql.Timestamp.from(f.time.instant()),
+                            f.tenant);
+                    return null;
+                  }));
+      f.time.advance(29);
+      f.call(
+          () -> {
+            signals.flush();
+            return null;
+          });
+      verify(ops, never())
+          .observe(eq(f.tenant), eq("iam_uac"), eq(f.provider), eq("warning"), eq(true));
+      f.time.advance(2);
+      f.call(
+          () -> {
+            signals.flush();
+            return null;
+          });
+      verify(ops).observe(f.tenant, "iam_uac", f.provider, "warning", true);
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    store
+                        .networkJdbc()
+                        .update("DELETE FROM iam.session_projection WHERE tenant_id=?", f.tenant);
+                    return null;
+                  }));
+      f.time.advance(2);
+      f.call(
+          () -> {
+            signals.flush();
+            return null;
+          });
+      verify(ops, atLeastOnce()).observe(f.tenant, "iam_uac", f.provider, "warning", false);
     }
   }
 

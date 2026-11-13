@@ -34,6 +34,40 @@ final class UacSessions {
   final SessionManager sessions;
   final Clock clock;
   final UacRevalidationConfiguration policy;
+  UacTelemetry telemetry;
+
+  void installTelemetry(UacTelemetry value) {
+    telemetry = value;
+    sessions.uacRevocation(
+        (row, reason) -> {
+          var meta =
+              Json.object(
+                  "providerId",
+                  row.path("providerId"),
+                  "correlationId",
+                  auriga.common.persistence.UuidV7.next().toString(),
+                  "parentCorrelationId",
+                  row.path("uacCorrelationId"),
+                  "transactionId",
+                  row.path("uacTransactionId"),
+                  "configRevision",
+                  row.path("configRevision"));
+          var span = value.begin(meta, "session_revoke", null, Json.object());
+          return success ->
+              span.end(success ? "completed" : "failure", Json.object("faultReason", reason));
+        });
+  }
+
+  JsonNode observe(
+      ObjectNode metadata,
+      String stage,
+      String purpose,
+      JsonNode credential,
+      java.util.function.Supplier<JsonNode> work) {
+    return telemetry == null
+        ? work.get()
+        : telemetry.operation(metadata, stage, purpose, credential, work);
+  }
 
   UacSessions(
       IamStore store,
@@ -123,6 +157,8 @@ final class UacSessions {
     session.put("uacCredentialId", credential.path("id").asString());
     session.put("authGeneration", generation);
     session.put("authenticatedAt", session.path("authTime").asString());
+    session.set("uacCorrelationId", tx.path("correlationId"));
+    session.set("uacTransactionId", tx.path("id"));
     ObjectNode snapshot = policy.policy();
     session.put("intervalSeconds", snapshot.path("intervalSeconds").asInt());
     session.put("configRevision", snapshot.path("configRevision").asLong());
@@ -157,6 +193,10 @@ final class UacSessions {
             credential.path("id").asString(),
             "correlationId",
             correlation,
+            "transactionId",
+            tx.path("id"),
+            "configRevision",
+            snapshot.path("configRevision"),
             "nextAt",
             clock.instant().toString()));
     enqueue(
@@ -174,6 +214,10 @@ final class UacSessions {
             credential.path("id").asString(),
             "parentCorrelationId",
             correlation,
+            "transactionId",
+            tx.path("id"),
+            "configRevision",
+            snapshot.path("configRevision"),
             "correlationId",
             UUID.randomUUID().toString(),
             "nextAt",

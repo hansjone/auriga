@@ -13,4 +13,9 @@ public interface UacEnterpriseAdapter extends IdentityConnector {
   JsonNode verify(JsonNode config, JsonNode credential);
 
   JsonNode ssoCookies(JsonNode cookies);
+
+  /** Presence only; never return private Cookie names to diagnostics. Null means unknown. */
+  default Boolean ssoCookiePresent(JsonNode cookies) {
+    return null;
+  }
 }

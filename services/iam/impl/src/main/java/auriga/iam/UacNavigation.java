@@ -388,27 +388,65 @@ final class UacNavigation {
                           && "portal".equals(nav.path("continuation").asString())
                           && !suppressed(suppression, origin));
           nav.put("invitationCode", input.path("invitationCode").asString(""));
+          nav.put("eligible", attempt);
+          nav.put("suppressed", suppressed(suppression, origin));
+          nav.put(
+              "fallbackReason",
+              !enabled
+                  ? "disabled"
+                  : nav.path("suppressed").asBoolean()
+                          && "auto".equals(input.path("mode").asString())
+                      ? "suppressed"
+                      : !attempt ? "ineligible" : "none");
           return new Prepared(nav, existing, attempt);
         });
   }
 
   JsonNode verify(Prepared prepared, JsonNode cookies) {
     store.requireTransactionReleased();
-    if (!prepared.attempt()) return Json.object("success", false);
+    ObjectNode metadata = prepared.navigation().deepCopy();
+    Boolean present = uac.adapter.ssoCookiePresent(cookies);
+    if (present != null) metadata.put("cookiePresent", present);
+    var check =
+        uac.telemetry == null
+            ? null
+            : uac.telemetry.begin(metadata, "sso_cookie_check", null, Json.object());
+    if (!prepared.attempt()) {
+      if (check != null) check.end("skipped", metadata);
+      return Json.object("success", false);
+    }
     JsonNode pair = uac.adapter.ssoCookies(cookies);
-    if (!pair.has("token") || !pair.has("empNo")) return Json.object("success", false);
+    ObjectNode checked =
+        Json.object(
+            "cookieFamily",
+            pair.path("cookieFamily").asString("none"),
+            "empNo",
+            pair.path("empNo"),
+            "tokenHashPrefix",
+            UacDiagnosticSanitizer.tokenHashPrefix(pair.path("token").asString(null)));
+    if (!pair.has("token") || !pair.has("empNo")) {
+      checked.put("fallbackReason", "missing");
+      if (check != null) check.end("scan_required", checked);
+      return Json.object("success", false);
+    }
     ObjectNode config =
         store.tx(
             () ->
                 uac.providers.decryptedConfig(
                     providers.row(prepared.navigation().path("providerId").asString(), false)));
-    JsonNode result = uac.adapter.verify(config, pair);
+    JsonNode result =
+        uac.observe(
+            metadata, "token_verify", "login_sso", pair, () -> uac.adapter.verify(config, pair));
     if (!result.path("success").asBoolean()
         || !result.path("token").isString()
         || result.path("token").asString().isBlank()
-        || result.path("token").asString().length() > 16384) return Json.object("success", false);
+        || result.path("token").asString().length() > 16384) {
+      if (check != null) check.end("scan_required", checked);
+      return Json.object("success", false);
+    }
     ObjectNode credential = ((ObjectNode) pair).deepCopy();
     credential.set("token", result.path("token"));
+    if (check != null) check.end("success", checked);
     return Json.object("success", true, "credential", credential);
   }
 

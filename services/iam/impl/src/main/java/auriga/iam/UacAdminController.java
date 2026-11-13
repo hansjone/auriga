@@ -63,6 +63,7 @@ public class UacAdminController {
         () -> {
           return store.tx(
               () -> {
+                providers.row(providerId, true);
                 requests.browserSession(request, sessions, true);
                 var result = providers.put(providerId, body, match);
                 response.setHeader(

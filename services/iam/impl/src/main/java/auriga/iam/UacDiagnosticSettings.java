@@ -46,12 +46,17 @@ final class UacDiagnosticSettings {
   }
 
   ObjectNode put(String provider, JsonNode input, String match) {
+    return put(provider, input, match, () -> {});
+  }
+
+  ObjectNode put(String provider, JsonNode input, String match, Runnable authorize) {
     new ContractSchemas()
         .validate("auth/uac-control.schema.json#/$defs/UacDiagnosticSettingsWrite", input);
     return store.tx(
         () -> {
           // Same order as provider disable; no diagnostics -> provider lock inversion.
           providers.row(provider, true);
+          authorize.run();
           store.lock("uac-diagnostics:" + provider);
           var row = row(provider, true);
           if (!etag(row).equals(match)) throw new AurigaException(CommonErrors.PRECONDITION_FAILED);

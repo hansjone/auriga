@@ -80,11 +80,10 @@ public class UacDiagnosticController {
         request,
         () -> {
           authorize(request, true, Set.of("iam.providers.write"));
-          return store.tx(
-              () -> {
-                requests.browserSession(request, sessions, true);
-                return output(settings.put(providerId, input, match), response);
-              });
+          return output(
+              settings.put(
+                  providerId, input, match, () -> requests.browserSession(request, sessions, true)),
+              response);
         });
   }
 }

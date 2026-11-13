@@ -184,60 +184,86 @@ final class UacFlow {
                   purpose.equals("link") ? source : null,
                   binding);
           String id = UuidV7.next().toString();
-          ObjectNode coordinates = Json.object("x", coordinate(), "y", coordinate());
-          String content = adapter.qrContent(generic.decryptedConfig(row), coordinates);
-          ObjectNode challenge =
-              store.insert(
-                  "uac_challenge",
-                  id,
-                  Json.object(
-                      "providerId",
-                      provider,
-                      "transactionId",
-                      tx.path("id"),
-                      "state",
-                      "waiting",
-                      "coordinates",
-                      coordinates,
-                      "bindingHash",
-                      Secrets.hash(binding),
-                      "audience",
-                      audience,
-                      "origin",
-                      origin,
-                      "providerRevision",
-                      UacProviderService.etag(row),
-                      "expiresAt",
-                      clock.instant().plusSeconds(120).toString(),
-                      "correlationId",
-                      tx.path("correlationId")),
-                  clock.instant().plusSeconds(120));
-          uac.enqueue(
-              "scan:" + id,
-              Json.object(
-                  "kind",
-                  "scan",
-                  "providerId",
-                  provider,
-                  "challengeId",
-                  id,
-                  "correlationId",
-                  tx.path("correlationId"),
-                  "nextAt",
-                  clock.instant().toString()));
-          return new Created(
-              Json.object(
-                  "id",
-                  id,
-                  "transactionId",
-                  tx.path("id"),
-                  "qrContent",
-                  content,
-                  "expiresAt",
-                  challenge.path("expiresAt"),
-                  "pollIntervalSeconds",
-                  2),
-              binding);
+          var telemetry =
+              uac.telemetry == null
+                  ? null
+                  : uac.telemetry.begin(
+                      Json.object(
+                          "providerId",
+                          provider,
+                          "transactionId",
+                          tx.path("id"),
+                          "correlationId",
+                          tx.path("correlationId"),
+                          "configRevision",
+                          row.path("revision")),
+                      "challenge_start",
+                      null,
+                      Json.object());
+          boolean created = false;
+          try {
+            ObjectNode coordinates = Json.object("x", coordinate(), "y", coordinate());
+            String content = adapter.qrContent(generic.decryptedConfig(row), coordinates);
+            ObjectNode challenge =
+                store.insert(
+                    "uac_challenge",
+                    id,
+                    Json.object(
+                        "providerId",
+                        provider,
+                        "transactionId",
+                        tx.path("id"),
+                        "state",
+                        "waiting",
+                        "coordinates",
+                        coordinates,
+                        "bindingHash",
+                        Secrets.hash(binding),
+                        "audience",
+                        audience,
+                        "origin",
+                        origin,
+                        "providerRevision",
+                        UacProviderService.etag(row),
+                        "expiresAt",
+                        clock.instant().plusSeconds(120).toString(),
+                        "correlationId",
+                        tx.path("correlationId")),
+                    clock.instant().plusSeconds(120));
+            uac.enqueue(
+                "scan:" + id,
+                Json.object(
+                    "kind",
+                    "scan",
+                    "providerId",
+                    provider,
+                    "challengeId",
+                    id,
+                    "correlationId",
+                    tx.path("correlationId"),
+                    "transactionId",
+                    tx.path("id"),
+                    "configRevision",
+                    row.path("revision"),
+                    "nextAt",
+                    clock.instant().toString()));
+            created = true;
+            return new Created(
+                Json.object(
+                    "id",
+                    id,
+                    "transactionId",
+                    tx.path("id"),
+                    "qrContent",
+                    content,
+                    "expiresAt",
+                    challenge.path("expiresAt"),
+                    "pollIntervalSeconds",
+                    2),
+                binding);
+          } finally {
+            if (telemetry != null) telemetry.end(created ? "success" : "failure", Json.object());
+          }
         });
   }
 
