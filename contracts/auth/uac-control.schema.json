@@ -48,7 +48,8 @@
         "identity_mismatch",
         "upstream_fault",
         "retry_exhausted"
-      ]
+      ],
+      "description": "兼容原名；语义为failureClass，新消费者使用UacRevalidationFailureClass"
     },
     "UacFaultReason": {
       "type": "string",
@@ -393,7 +394,8 @@
         },
         "credentialVersion": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "description": "可选凭据读取/CAS元数据，不参与设备或外壳准入；token轮换不使绑定失效"
         },
         "expiresAt": {
           "type": "string",
@@ -407,7 +409,6 @@
         "sourceSessionId",
         "providerId",
         "authGeneration",
-        "credentialVersion",
         "expiresAt"
       ]
     },
@@ -563,6 +564,140 @@
         "installationVersion",
         "componentVersions",
         "sources"
+      ]
+    },
+    "UacRevalidationFailureClass": {
+      "type": "string",
+      "enum": [
+        "business_rejected",
+        "identity_mismatch",
+        "upstream_fault",
+        "retry_exhausted"
+      ]
+    },
+    "UacNavigationIssueRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "continuation": {
+          "type": "string",
+          "enum": [
+            "portal",
+            "device"
+          ]
+        },
+        "deviceGrantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "transactionCookie": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "suppressionCookie": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "fetchMetadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "dest": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "mode": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "site": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "user": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": []
+        }
+      },
+      "required": [
+        "requestId",
+        "providerId",
+        "origin",
+        "continuation",
+        "fetchMetadata"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "continuation": {
+                "const": "device"
+              }
+            },
+            "required": [
+              "continuation"
+            ]
+          },
+          "then": {
+            "required": [
+              "deviceGrantId"
+            ],
+            "properties": {
+              "deviceGrantId": {}
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "deviceGrantId"
+              ],
+              "properties": {
+                "deviceGrantId": {}
+              }
+            }
+          }
+        }
+      ],
+      "description": "仅可信edge调用；tenant来自内部授权，Origin必须与该tenant的受信入口完全匹配。Fetch Metadata为浏览器实际请求头证据，缺项不具备auto资格。deviceGrantId须由IAM核验未过期且与当前事务绑定；portal不可携带。"
+    },
+    "UacNavigationIssued": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/UacNavigationContext"
+        },
+        "transactionCookie": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 16384
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "enum": [
+            120
+          ]
+        }
+      },
+      "required": [
+        "context",
+        "transactionCookie",
+        "ttlSeconds"
       ]
     }
   }

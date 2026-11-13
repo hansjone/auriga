@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,10 @@ var _ MappedNullable = &ShellAuthOutputTeamPing{}
 
 // ShellAuthOutputTeamPing struct for ShellAuthOutputTeamPing
 type ShellAuthOutputTeamPing struct {
-	Available bool `json:"available"`
+	StatusCode           int32                                 `json:"statusCode"`
+	Headers              *ShellAuthOutputTeamInitializeHeaders `json:"headers,omitempty"`
+	Body                 ShellAuthOutputTeamPingBody           `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthOutputTeamPing ShellAuthOutputTeamPing
@@ -30,9 +32,10 @@ type _ShellAuthOutputTeamPing ShellAuthOutputTeamPing
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputTeamPing(available bool) *ShellAuthOutputTeamPing {
+func NewShellAuthOutputTeamPing(statusCode int32, body ShellAuthOutputTeamPingBody) *ShellAuthOutputTeamPing {
 	this := ShellAuthOutputTeamPing{}
-	this.Available = available
+	this.StatusCode = statusCode
+	this.Body = body
 	return &this
 }
 
@@ -44,28 +47,84 @@ func NewShellAuthOutputTeamPingWithDefaults() *ShellAuthOutputTeamPing {
 	return &this
 }
 
-// GetAvailable returns the Available field value
-func (o *ShellAuthOutputTeamPing) GetAvailable() bool {
+// GetStatusCode returns the StatusCode field value
+func (o *ShellAuthOutputTeamPing) GetStatusCode() int32 {
 	if o == nil {
-		var ret bool
+		var ret int32
 		return ret
 	}
 
-	return o.Available
+	return o.StatusCode
 }
 
-// GetAvailableOk returns a tuple with the Available field value
+// GetStatusCodeOk returns a tuple with the StatusCode field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputTeamPing) GetAvailableOk() (*bool, bool) {
+func (o *ShellAuthOutputTeamPing) GetStatusCodeOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.Available, true
+	return &o.StatusCode, true
 }
 
-// SetAvailable sets field value
-func (o *ShellAuthOutputTeamPing) SetAvailable(v bool) {
-	o.Available = v
+// SetStatusCode sets field value
+func (o *ShellAuthOutputTeamPing) SetStatusCode(v int32) {
+	o.StatusCode = v
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthOutputTeamPing) GetHeaders() ShellAuthOutputTeamInitializeHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthOutputTeamInitializeHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputTeamPing) GetHeadersOk() (*ShellAuthOutputTeamInitializeHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthOutputTeamPing) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthOutputTeamInitializeHeaders and assigns it to the Headers field.
+func (o *ShellAuthOutputTeamPing) SetHeaders(v ShellAuthOutputTeamInitializeHeaders) {
+	o.Headers = &v
+}
+
+// GetBody returns the Body field value
+func (o *ShellAuthOutputTeamPing) GetBody() ShellAuthOutputTeamPingBody {
+	if o == nil {
+		var ret ShellAuthOutputTeamPingBody
+		return ret
+	}
+
+	return o.Body
+}
+
+// GetBodyOk returns a tuple with the Body field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputTeamPing) GetBodyOk() (*ShellAuthOutputTeamPingBody, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Body, true
+}
+
+// SetBody sets field value
+func (o *ShellAuthOutputTeamPing) SetBody(v ShellAuthOutputTeamPingBody) {
+	o.Body = v
 }
 
 func (o ShellAuthOutputTeamPing) MarshalJSON() ([]byte, error) {
@@ -78,7 +137,16 @@ func (o ShellAuthOutputTeamPing) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthOutputTeamPing) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["available"] = o.Available
+	toSerialize["statusCode"] = o.StatusCode
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
+	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -87,7 +155,8 @@ func (o *ShellAuthOutputTeamPing) UnmarshalJSON(data []byte) (err error) {
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"available",
+		"statusCode",
+		"body",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -106,15 +175,22 @@ func (o *ShellAuthOutputTeamPing) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthOutputTeamPing := _ShellAuthOutputTeamPing{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthOutputTeamPing)
+	err = json.Unmarshal(data, &varShellAuthOutputTeamPing)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutputTeamPing(varShellAuthOutputTeamPing)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "statusCode")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

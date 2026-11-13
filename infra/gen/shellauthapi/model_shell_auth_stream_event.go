@@ -21,13 +21,16 @@ var _ MappedNullable = &ShellAuthStreamEvent{}
 
 // ShellAuthStreamEvent struct for ShellAuthStreamEvent
 type ShellAuthStreamEvent struct {
-	StreamId   string  `json:"streamId"`
-	ShellEpoch string  `json:"shellEpoch"`
-	Revision   int64   `json:"revision"`
-	Sequence   int64   `json:"sequence"`
-	Type       string  `json:"type"`
-	Data       *string `json:"data,omitempty"`
-	Code       *string `json:"code,omitempty"`
+	StreamId    string                  `json:"streamId"`
+	ShellEpoch  string                  `json:"shellEpoch"`
+	Revision    int64                   `json:"revision"`
+	Sequence    int64                   `json:"sequence"`
+	Type        string                  `json:"type"`
+	Data        interface{}             `json:"data,omitempty"`
+	AckSequence *int64                  `json:"ackSequence,omitempty"`
+	CreditBytes *int32                  `json:"creditBytes,omitempty"`
+	Code        *string                 `json:"code,omitempty"`
+	Error       *ShellAuthBusinessError `json:"error,omitempty"`
 }
 
 type _ShellAuthStreamEvent ShellAuthStreamEvent
@@ -174,22 +177,23 @@ func (o *ShellAuthStreamEvent) SetType(v string) {
 	o.Type = v
 }
 
-// GetData returns the Data field value if set, zero value otherwise.
-func (o *ShellAuthStreamEvent) GetData() string {
-	if o == nil || IsNil(o.Data) {
-		var ret string
+// GetData returns the Data field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ShellAuthStreamEvent) GetData() interface{} {
+	if o == nil {
+		var ret interface{}
 		return ret
 	}
-	return *o.Data
+	return o.Data
 }
 
 // GetDataOk returns a tuple with the Data field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthStreamEvent) GetDataOk() (*string, bool) {
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ShellAuthStreamEvent) GetDataOk() (*interface{}, bool) {
 	if o == nil || IsNil(o.Data) {
 		return nil, false
 	}
-	return o.Data, true
+	return &o.Data, true
 }
 
 // HasData returns a boolean if a field has been set.
@@ -201,9 +205,73 @@ func (o *ShellAuthStreamEvent) HasData() bool {
 	return false
 }
 
-// SetData gets a reference to the given string and assigns it to the Data field.
-func (o *ShellAuthStreamEvent) SetData(v string) {
-	o.Data = &v
+// SetData gets a reference to the given interface{} and assigns it to the Data field.
+func (o *ShellAuthStreamEvent) SetData(v interface{}) {
+	o.Data = v
+}
+
+// GetAckSequence returns the AckSequence field value if set, zero value otherwise.
+func (o *ShellAuthStreamEvent) GetAckSequence() int64 {
+	if o == nil || IsNil(o.AckSequence) {
+		var ret int64
+		return ret
+	}
+	return *o.AckSequence
+}
+
+// GetAckSequenceOk returns a tuple with the AckSequence field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthStreamEvent) GetAckSequenceOk() (*int64, bool) {
+	if o == nil || IsNil(o.AckSequence) {
+		return nil, false
+	}
+	return o.AckSequence, true
+}
+
+// HasAckSequence returns a boolean if a field has been set.
+func (o *ShellAuthStreamEvent) HasAckSequence() bool {
+	if o != nil && !IsNil(o.AckSequence) {
+		return true
+	}
+
+	return false
+}
+
+// SetAckSequence gets a reference to the given int64 and assigns it to the AckSequence field.
+func (o *ShellAuthStreamEvent) SetAckSequence(v int64) {
+	o.AckSequence = &v
+}
+
+// GetCreditBytes returns the CreditBytes field value if set, zero value otherwise.
+func (o *ShellAuthStreamEvent) GetCreditBytes() int32 {
+	if o == nil || IsNil(o.CreditBytes) {
+		var ret int32
+		return ret
+	}
+	return *o.CreditBytes
+}
+
+// GetCreditBytesOk returns a tuple with the CreditBytes field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthStreamEvent) GetCreditBytesOk() (*int32, bool) {
+	if o == nil || IsNil(o.CreditBytes) {
+		return nil, false
+	}
+	return o.CreditBytes, true
+}
+
+// HasCreditBytes returns a boolean if a field has been set.
+func (o *ShellAuthStreamEvent) HasCreditBytes() bool {
+	if o != nil && !IsNil(o.CreditBytes) {
+		return true
+	}
+
+	return false
+}
+
+// SetCreditBytes gets a reference to the given int32 and assigns it to the CreditBytes field.
+func (o *ShellAuthStreamEvent) SetCreditBytes(v int32) {
+	o.CreditBytes = &v
 }
 
 // GetCode returns the Code field value if set, zero value otherwise.
@@ -238,6 +306,38 @@ func (o *ShellAuthStreamEvent) SetCode(v string) {
 	o.Code = &v
 }
 
+// GetError returns the Error field value if set, zero value otherwise.
+func (o *ShellAuthStreamEvent) GetError() ShellAuthBusinessError {
+	if o == nil || IsNil(o.Error) {
+		var ret ShellAuthBusinessError
+		return ret
+	}
+	return *o.Error
+}
+
+// GetErrorOk returns a tuple with the Error field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthStreamEvent) GetErrorOk() (*ShellAuthBusinessError, bool) {
+	if o == nil || IsNil(o.Error) {
+		return nil, false
+	}
+	return o.Error, true
+}
+
+// HasError returns a boolean if a field has been set.
+func (o *ShellAuthStreamEvent) HasError() bool {
+	if o != nil && !IsNil(o.Error) {
+		return true
+	}
+
+	return false
+}
+
+// SetError gets a reference to the given ShellAuthBusinessError and assigns it to the Error field.
+func (o *ShellAuthStreamEvent) SetError(v ShellAuthBusinessError) {
+	o.Error = &v
+}
+
 func (o ShellAuthStreamEvent) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -253,11 +353,20 @@ func (o ShellAuthStreamEvent) ToMap() (map[string]interface{}, error) {
 	toSerialize["revision"] = o.Revision
 	toSerialize["sequence"] = o.Sequence
 	toSerialize["type"] = o.Type
-	if !IsNil(o.Data) {
+	if o.Data != nil {
 		toSerialize["data"] = o.Data
+	}
+	if !IsNil(o.AckSequence) {
+		toSerialize["ackSequence"] = o.AckSequence
+	}
+	if !IsNil(o.CreditBytes) {
+		toSerialize["creditBytes"] = o.CreditBytes
 	}
 	if !IsNil(o.Code) {
 		toSerialize["code"] = o.Code
+	}
+	if !IsNil(o.Error) {
+		toSerialize["error"] = o.Error
 	}
 	return toSerialize, nil
 }

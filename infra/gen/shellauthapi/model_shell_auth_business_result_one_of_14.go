@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf14{}
 
 // ShellAuthBusinessResultOneOf14 struct for ShellAuthBusinessResultOneOf14
 type ShellAuthBusinessResultOneOf14 struct {
-	RequestId string                                                              `json:"requestId"`
-	Operation string                                                              `json:"operation"`
-	Output    ShellAuthopenapiResourceYamlComponentsSchemasMemberInstallationPage `json:"output"`
+	RequestId string                                         `json:"requestId"`
+	Operation string                                         `json:"operation"`
+	Output    ShellAuthOutputListMemberResourceInstallations `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf14 ShellAuthBusinessResultOneOf14
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf14 ShellAuthBusinessResultOneOf14
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf14(requestId string, operation string, output ShellAuthopenapiResourceYamlComponentsSchemasMemberInstallationPage) *ShellAuthBusinessResultOneOf14 {
+func NewShellAuthBusinessResultOneOf14(requestId string, operation string, output ShellAuthOutputListMemberResourceInstallations) *ShellAuthBusinessResultOneOf14 {
 	this := ShellAuthBusinessResultOneOf14{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf14) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf14) GetOutput() ShellAuthopenapiResourceYamlComponentsSchemasMemberInstallationPage {
+func (o *ShellAuthBusinessResultOneOf14) GetOutput() ShellAuthOutputListMemberResourceInstallations {
 	if o == nil {
-		var ret ShellAuthopenapiResourceYamlComponentsSchemasMemberInstallationPage
+		var ret ShellAuthOutputListMemberResourceInstallations
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf14) GetOutput() ShellAuthopenapiResourceYam
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf14) GetOutputOk() (*ShellAuthopenapiResourceYamlComponentsSchemasMemberInstallationPage, bool) {
+func (o *ShellAuthBusinessResultOneOf14) GetOutputOk() (*ShellAuthOutputListMemberResourceInstallations, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf14) GetOutputOk() (*ShellAuthopenapiResourc
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf14) SetOutput(v ShellAuthopenapiResourceYamlComponentsSchemasMemberInstallationPage) {
+func (o *ShellAuthBusinessResultOneOf14) SetOutput(v ShellAuthOutputListMemberResourceInstallations) {
 	o.Output = v
 }
 

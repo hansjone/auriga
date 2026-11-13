@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf34{}
 
 // ShellAuthBusinessResultOneOf34 struct for ShellAuthBusinessResultOneOf34
 type ShellAuthBusinessResultOneOf34 struct {
-	RequestId string                                                `json:"requestId"`
-	Operation string                                                `json:"operation"`
-	Output    ShellAuthopenapiAiYamlComponentsSchemasChatCompletion `json:"output"`
+	RequestId string                                `json:"requestId"`
+	Operation string                                `json:"operation"`
+	Output    ShellAuthOutputCreateAiChatCompletion `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf34 ShellAuthBusinessResultOneOf34
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf34 ShellAuthBusinessResultOneOf34
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf34(requestId string, operation string, output ShellAuthopenapiAiYamlComponentsSchemasChatCompletion) *ShellAuthBusinessResultOneOf34 {
+func NewShellAuthBusinessResultOneOf34(requestId string, operation string, output ShellAuthOutputCreateAiChatCompletion) *ShellAuthBusinessResultOneOf34 {
 	this := ShellAuthBusinessResultOneOf34{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf34) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf34) GetOutput() ShellAuthopenapiAiYamlComponentsSchemasChatCompletion {
+func (o *ShellAuthBusinessResultOneOf34) GetOutput() ShellAuthOutputCreateAiChatCompletion {
 	if o == nil {
-		var ret ShellAuthopenapiAiYamlComponentsSchemasChatCompletion
+		var ret ShellAuthOutputCreateAiChatCompletion
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf34) GetOutput() ShellAuthopenapiAiYamlCompo
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf34) GetOutputOk() (*ShellAuthopenapiAiYamlComponentsSchemasChatCompletion, bool) {
+func (o *ShellAuthBusinessResultOneOf34) GetOutputOk() (*ShellAuthOutputCreateAiChatCompletion, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf34) GetOutputOk() (*ShellAuthopenapiAiYamlC
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf34) SetOutput(v ShellAuthopenapiAiYamlComponentsSchemasChatCompletion) {
+func (o *ShellAuthBusinessResultOneOf34) SetOutput(v ShellAuthOutputCreateAiChatCompletion) {
 	o.Output = v
 }
 

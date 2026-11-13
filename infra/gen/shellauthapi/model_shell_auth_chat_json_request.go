@@ -11,16 +11,15 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
 
-// checks if the ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest{}
+// checks if the ShellAuthChatJsonRequest type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &ShellAuthChatJsonRequest{}
 
-// ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest struct for ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest
-type ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest struct {
+// ShellAuthChatJsonRequest struct for ShellAuthChatJsonRequest
+type ShellAuthChatJsonRequest struct {
 	Model       string                                               `json:"model"`
 	Messages    []ShellAuthopenapiAiYamlComponentsSchemasChatMessage `json:"messages"`
 	Stream      *bool                                                `json:"stream,omitempty"`
@@ -28,39 +27,36 @@ type ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest struct {
 	Temperature *float32                                             `json:"temperature,omitempty"`
 	TopP        *float32                                             `json:"top_p,omitempty"`
 	// 首批仅接受最多4个字符串的数组，不接受单字符串stop。
-	Stop       []string                                      `json:"stop,omitempty"`
-	Tools      []ShellAuthopenapiAiYamlComponentsSchemasTool `json:"tools,omitempty"`
-	ToolChoice *string                                       `json:"tool_choice,omitempty"`
+	Stop                 []string                                      `json:"stop,omitempty"`
+	Tools                []ShellAuthopenapiAiYamlComponentsSchemasTool `json:"tools,omitempty"`
+	ToolChoice           *string                                       `json:"tool_choice,omitempty"`
+	AdditionalProperties map[string]interface{}
 }
 
-type _ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest
+type _ShellAuthChatJsonRequest ShellAuthChatJsonRequest
 
-// NewShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest instantiates a new ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest object
+// NewShellAuthChatJsonRequest instantiates a new ShellAuthChatJsonRequest object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest(model string, messages []ShellAuthopenapiAiYamlComponentsSchemasChatMessage, maxTokens int64) *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest {
-	this := ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest{}
+func NewShellAuthChatJsonRequest(model string, messages []ShellAuthopenapiAiYamlComponentsSchemasChatMessage, maxTokens int64) *ShellAuthChatJsonRequest {
+	this := ShellAuthChatJsonRequest{}
 	this.Model = model
 	this.Messages = messages
-	var stream bool = false
-	this.Stream = &stream
 	this.MaxTokens = maxTokens
 	return &this
 }
 
-// NewShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequestWithDefaults instantiates a new ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest object
+// NewShellAuthChatJsonRequestWithDefaults instantiates a new ShellAuthChatJsonRequest object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequestWithDefaults() *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest {
-	this := ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest{}
-	var stream bool = false
-	this.Stream = &stream
+func NewShellAuthChatJsonRequestWithDefaults() *ShellAuthChatJsonRequest {
+	this := ShellAuthChatJsonRequest{}
 	return &this
 }
 
 // GetModel returns the Model field value
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetModel() string {
+func (o *ShellAuthChatJsonRequest) GetModel() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -71,7 +67,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetModel(
 
 // GetModelOk returns a tuple with the Model field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetModelOk() (*string, bool) {
+func (o *ShellAuthChatJsonRequest) GetModelOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -79,12 +75,12 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetModelO
 }
 
 // SetModel sets field value
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetModel(v string) {
+func (o *ShellAuthChatJsonRequest) SetModel(v string) {
 	o.Model = v
 }
 
 // GetMessages returns the Messages field value
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetMessages() []ShellAuthopenapiAiYamlComponentsSchemasChatMessage {
+func (o *ShellAuthChatJsonRequest) GetMessages() []ShellAuthopenapiAiYamlComponentsSchemasChatMessage {
 	if o == nil {
 		var ret []ShellAuthopenapiAiYamlComponentsSchemasChatMessage
 		return ret
@@ -95,7 +91,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetMessag
 
 // GetMessagesOk returns a tuple with the Messages field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetMessagesOk() ([]ShellAuthopenapiAiYamlComponentsSchemasChatMessage, bool) {
+func (o *ShellAuthChatJsonRequest) GetMessagesOk() ([]ShellAuthopenapiAiYamlComponentsSchemasChatMessage, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -103,12 +99,12 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetMessag
 }
 
 // SetMessages sets field value
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetMessages(v []ShellAuthopenapiAiYamlComponentsSchemasChatMessage) {
+func (o *ShellAuthChatJsonRequest) SetMessages(v []ShellAuthopenapiAiYamlComponentsSchemasChatMessage) {
 	o.Messages = v
 }
 
 // GetStream returns the Stream field value if set, zero value otherwise.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetStream() bool {
+func (o *ShellAuthChatJsonRequest) GetStream() bool {
 	if o == nil || IsNil(o.Stream) {
 		var ret bool
 		return ret
@@ -118,7 +114,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetStream
 
 // GetStreamOk returns a tuple with the Stream field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetStreamOk() (*bool, bool) {
+func (o *ShellAuthChatJsonRequest) GetStreamOk() (*bool, bool) {
 	if o == nil || IsNil(o.Stream) {
 		return nil, false
 	}
@@ -126,7 +122,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetStream
 }
 
 // HasStream returns a boolean if a field has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasStream() bool {
+func (o *ShellAuthChatJsonRequest) HasStream() bool {
 	if o != nil && !IsNil(o.Stream) {
 		return true
 	}
@@ -135,12 +131,12 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasStream
 }
 
 // SetStream gets a reference to the given bool and assigns it to the Stream field.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetStream(v bool) {
+func (o *ShellAuthChatJsonRequest) SetStream(v bool) {
 	o.Stream = &v
 }
 
 // GetMaxTokens returns the MaxTokens field value
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetMaxTokens() int64 {
+func (o *ShellAuthChatJsonRequest) GetMaxTokens() int64 {
 	if o == nil {
 		var ret int64
 		return ret
@@ -151,7 +147,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetMaxTok
 
 // GetMaxTokensOk returns a tuple with the MaxTokens field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetMaxTokensOk() (*int64, bool) {
+func (o *ShellAuthChatJsonRequest) GetMaxTokensOk() (*int64, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -159,12 +155,12 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetMaxTok
 }
 
 // SetMaxTokens sets field value
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetMaxTokens(v int64) {
+func (o *ShellAuthChatJsonRequest) SetMaxTokens(v int64) {
 	o.MaxTokens = v
 }
 
 // GetTemperature returns the Temperature field value if set, zero value otherwise.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTemperature() float32 {
+func (o *ShellAuthChatJsonRequest) GetTemperature() float32 {
 	if o == nil || IsNil(o.Temperature) {
 		var ret float32
 		return ret
@@ -174,7 +170,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTemper
 
 // GetTemperatureOk returns a tuple with the Temperature field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTemperatureOk() (*float32, bool) {
+func (o *ShellAuthChatJsonRequest) GetTemperatureOk() (*float32, bool) {
 	if o == nil || IsNil(o.Temperature) {
 		return nil, false
 	}
@@ -182,7 +178,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTemper
 }
 
 // HasTemperature returns a boolean if a field has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasTemperature() bool {
+func (o *ShellAuthChatJsonRequest) HasTemperature() bool {
 	if o != nil && !IsNil(o.Temperature) {
 		return true
 	}
@@ -191,12 +187,12 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasTemper
 }
 
 // SetTemperature gets a reference to the given float32 and assigns it to the Temperature field.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetTemperature(v float32) {
+func (o *ShellAuthChatJsonRequest) SetTemperature(v float32) {
 	o.Temperature = &v
 }
 
 // GetTopP returns the TopP field value if set, zero value otherwise.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTopP() float32 {
+func (o *ShellAuthChatJsonRequest) GetTopP() float32 {
 	if o == nil || IsNil(o.TopP) {
 		var ret float32
 		return ret
@@ -206,7 +202,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTopP()
 
 // GetTopPOk returns a tuple with the TopP field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTopPOk() (*float32, bool) {
+func (o *ShellAuthChatJsonRequest) GetTopPOk() (*float32, bool) {
 	if o == nil || IsNil(o.TopP) {
 		return nil, false
 	}
@@ -214,7 +210,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTopPOk
 }
 
 // HasTopP returns a boolean if a field has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasTopP() bool {
+func (o *ShellAuthChatJsonRequest) HasTopP() bool {
 	if o != nil && !IsNil(o.TopP) {
 		return true
 	}
@@ -223,12 +219,12 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasTopP()
 }
 
 // SetTopP gets a reference to the given float32 and assigns it to the TopP field.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetTopP(v float32) {
+func (o *ShellAuthChatJsonRequest) SetTopP(v float32) {
 	o.TopP = &v
 }
 
 // GetStop returns the Stop field value if set, zero value otherwise.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetStop() []string {
+func (o *ShellAuthChatJsonRequest) GetStop() []string {
 	if o == nil || IsNil(o.Stop) {
 		var ret []string
 		return ret
@@ -238,7 +234,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetStop()
 
 // GetStopOk returns a tuple with the Stop field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetStopOk() ([]string, bool) {
+func (o *ShellAuthChatJsonRequest) GetStopOk() ([]string, bool) {
 	if o == nil || IsNil(o.Stop) {
 		return nil, false
 	}
@@ -246,7 +242,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetStopOk
 }
 
 // HasStop returns a boolean if a field has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasStop() bool {
+func (o *ShellAuthChatJsonRequest) HasStop() bool {
 	if o != nil && !IsNil(o.Stop) {
 		return true
 	}
@@ -255,12 +251,12 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasStop()
 }
 
 // SetStop gets a reference to the given []string and assigns it to the Stop field.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetStop(v []string) {
+func (o *ShellAuthChatJsonRequest) SetStop(v []string) {
 	o.Stop = v
 }
 
 // GetTools returns the Tools field value if set, zero value otherwise.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTools() []ShellAuthopenapiAiYamlComponentsSchemasTool {
+func (o *ShellAuthChatJsonRequest) GetTools() []ShellAuthopenapiAiYamlComponentsSchemasTool {
 	if o == nil || IsNil(o.Tools) {
 		var ret []ShellAuthopenapiAiYamlComponentsSchemasTool
 		return ret
@@ -270,7 +266,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetTools(
 
 // GetToolsOk returns a tuple with the Tools field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetToolsOk() ([]ShellAuthopenapiAiYamlComponentsSchemasTool, bool) {
+func (o *ShellAuthChatJsonRequest) GetToolsOk() ([]ShellAuthopenapiAiYamlComponentsSchemasTool, bool) {
 	if o == nil || IsNil(o.Tools) {
 		return nil, false
 	}
@@ -278,7 +274,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetToolsO
 }
 
 // HasTools returns a boolean if a field has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasTools() bool {
+func (o *ShellAuthChatJsonRequest) HasTools() bool {
 	if o != nil && !IsNil(o.Tools) {
 		return true
 	}
@@ -287,12 +283,12 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasTools(
 }
 
 // SetTools gets a reference to the given []ShellAuthopenapiAiYamlComponentsSchemasTool and assigns it to the Tools field.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetTools(v []ShellAuthopenapiAiYamlComponentsSchemasTool) {
+func (o *ShellAuthChatJsonRequest) SetTools(v []ShellAuthopenapiAiYamlComponentsSchemasTool) {
 	o.Tools = v
 }
 
 // GetToolChoice returns the ToolChoice field value if set, zero value otherwise.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetToolChoice() string {
+func (o *ShellAuthChatJsonRequest) GetToolChoice() string {
 	if o == nil || IsNil(o.ToolChoice) {
 		var ret string
 		return ret
@@ -302,7 +298,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetToolCh
 
 // GetToolChoiceOk returns a tuple with the ToolChoice field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetToolChoiceOk() (*string, bool) {
+func (o *ShellAuthChatJsonRequest) GetToolChoiceOk() (*string, bool) {
 	if o == nil || IsNil(o.ToolChoice) {
 		return nil, false
 	}
@@ -310,7 +306,7 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) GetToolCh
 }
 
 // HasToolChoice returns a boolean if a field has been set.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasToolChoice() bool {
+func (o *ShellAuthChatJsonRequest) HasToolChoice() bool {
 	if o != nil && !IsNil(o.ToolChoice) {
 		return true
 	}
@@ -319,11 +315,11 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) HasToolCh
 }
 
 // SetToolChoice gets a reference to the given string and assigns it to the ToolChoice field.
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) SetToolChoice(v string) {
+func (o *ShellAuthChatJsonRequest) SetToolChoice(v string) {
 	o.ToolChoice = &v
 }
 
-func (o ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) MarshalJSON() ([]byte, error) {
+func (o ShellAuthChatJsonRequest) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -331,7 +327,7 @@ func (o ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) MarshalJSO
 	return json.Marshal(toSerialize)
 }
 
-func (o ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) ToMap() (map[string]interface{}, error) {
+func (o ShellAuthChatJsonRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["model"] = o.Model
 	toSerialize["messages"] = o.Messages
@@ -354,10 +350,15 @@ func (o ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) ToMap() (m
 	if !IsNil(o.ToolChoice) {
 		toSerialize["tool_choice"] = o.ToolChoice
 	}
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
-func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) UnmarshalJSON(data []byte) (err error) {
+func (o *ShellAuthChatJsonRequest) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -381,53 +382,66 @@ func (o *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) Unmarshal
 		}
 	}
 
-	varShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest := _ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest{}
+	varShellAuthChatJsonRequest := _ShellAuthChatJsonRequest{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest)
+	err = json.Unmarshal(data, &varShellAuthChatJsonRequest)
 
 	if err != nil {
 		return err
 	}
 
-	*o = ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest(varShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest)
+	*o = ShellAuthChatJsonRequest(varShellAuthChatJsonRequest)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "model")
+		delete(additionalProperties, "messages")
+		delete(additionalProperties, "stream")
+		delete(additionalProperties, "max_tokens")
+		delete(additionalProperties, "temperature")
+		delete(additionalProperties, "top_p")
+		delete(additionalProperties, "stop")
+		delete(additionalProperties, "tools")
+		delete(additionalProperties, "tool_choice")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }
 
-type NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest struct {
-	value *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest
+type NullableShellAuthChatJsonRequest struct {
+	value *ShellAuthChatJsonRequest
 	isSet bool
 }
 
-func (v NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) Get() *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest {
+func (v NullableShellAuthChatJsonRequest) Get() *ShellAuthChatJsonRequest {
 	return v.value
 }
 
-func (v *NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) Set(val *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) {
+func (v *NullableShellAuthChatJsonRequest) Set(val *ShellAuthChatJsonRequest) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) IsSet() bool {
+func (v NullableShellAuthChatJsonRequest) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) Unset() {
+func (v *NullableShellAuthChatJsonRequest) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest(val *ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) *NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest {
-	return &NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest{value: val, isSet: true}
+func NewNullableShellAuthChatJsonRequest(val *ShellAuthChatJsonRequest) *NullableShellAuthChatJsonRequest {
+	return &NullableShellAuthChatJsonRequest{value: val, isSet: true}
 }
 
-func (v NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) MarshalJSON() ([]byte, error) {
+func (v NullableShellAuthChatJsonRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) UnmarshalJSON(src []byte) error {
+func (v *NullableShellAuthChatJsonRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

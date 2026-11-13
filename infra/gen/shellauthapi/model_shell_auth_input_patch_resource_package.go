@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,8 +20,10 @@ var _ MappedNullable = &ShellAuthInputPatchResourcePackage{}
 
 // ShellAuthInputPatchResourcePackage struct for ShellAuthInputPatchResourcePackage
 type ShellAuthInputPatchResourcePackage struct {
-	PackageId string                                                    `json:"packageId"`
-	Body      ShellAuthopenapiResourceYamlComponentsSchemasPackagePatch `json:"body"`
+	PackageId            string                                                    `json:"packageId"`
+	Headers              ShellAuthInputPatchResourcePackageHeaders                 `json:"headers"`
+	Body                 ShellAuthopenapiResourceYamlComponentsSchemasPackagePatch `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthInputPatchResourcePackage ShellAuthInputPatchResourcePackage
@@ -31,9 +32,10 @@ type _ShellAuthInputPatchResourcePackage ShellAuthInputPatchResourcePackage
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputPatchResourcePackage(packageId string, body ShellAuthopenapiResourceYamlComponentsSchemasPackagePatch) *ShellAuthInputPatchResourcePackage {
+func NewShellAuthInputPatchResourcePackage(packageId string, headers ShellAuthInputPatchResourcePackageHeaders, body ShellAuthopenapiResourceYamlComponentsSchemasPackagePatch) *ShellAuthInputPatchResourcePackage {
 	this := ShellAuthInputPatchResourcePackage{}
 	this.PackageId = packageId
+	this.Headers = headers
 	this.Body = body
 	return &this
 }
@@ -68,6 +70,30 @@ func (o *ShellAuthInputPatchResourcePackage) GetPackageIdOk() (*string, bool) {
 // SetPackageId sets field value
 func (o *ShellAuthInputPatchResourcePackage) SetPackageId(v string) {
 	o.PackageId = v
+}
+
+// GetHeaders returns the Headers field value
+func (o *ShellAuthInputPatchResourcePackage) GetHeaders() ShellAuthInputPatchResourcePackageHeaders {
+	if o == nil {
+		var ret ShellAuthInputPatchResourcePackageHeaders
+		return ret
+	}
+
+	return o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputPatchResourcePackage) GetHeadersOk() (*ShellAuthInputPatchResourcePackageHeaders, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Headers, true
+}
+
+// SetHeaders sets field value
+func (o *ShellAuthInputPatchResourcePackage) SetHeaders(v ShellAuthInputPatchResourcePackageHeaders) {
+	o.Headers = v
 }
 
 // GetBody returns the Body field value
@@ -105,7 +131,13 @@ func (o ShellAuthInputPatchResourcePackage) MarshalJSON() ([]byte, error) {
 func (o ShellAuthInputPatchResourcePackage) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["packageId"] = o.PackageId
+	toSerialize["headers"] = o.Headers
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -115,6 +147,7 @@ func (o *ShellAuthInputPatchResourcePackage) UnmarshalJSON(data []byte) (err err
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
 		"packageId",
+		"headers",
 		"body",
 	}
 
@@ -134,15 +167,22 @@ func (o *ShellAuthInputPatchResourcePackage) UnmarshalJSON(data []byte) (err err
 
 	varShellAuthInputPatchResourcePackage := _ShellAuthInputPatchResourcePackage{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthInputPatchResourcePackage)
+	err = json.Unmarshal(data, &varShellAuthInputPatchResourcePackage)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthInputPatchResourcePackage(varShellAuthInputPatchResourcePackage)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "packageId")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

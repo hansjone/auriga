@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 )
 
 // checks if the ShellAuthInputUnifiedUploadResourceVersionBody type satisfies the MappedNullable interface at compile time
@@ -23,8 +22,8 @@ var _ MappedNullable = &ShellAuthInputUnifiedUploadResourceVersionBody{}
 // ShellAuthInputUnifiedUploadResourceVersionBody struct for ShellAuthInputUnifiedUploadResourceVersionBody
 type ShellAuthInputUnifiedUploadResourceVersionBody struct {
 	Metadata  ShellAuthopenapiResourceYamlComponentsSchemasUnifiedUploadMetadata `json:"metadata"`
-	Manifest  *os.File                                                           `json:"manifest"`
-	Artifacts []*os.File                                                         `json:"artifacts"`
+	Manifest  ShellAuthUploadReference                                           `json:"manifest"`
+	Artifacts []ShellAuthUploadReference                                         `json:"artifacts"`
 }
 
 type _ShellAuthInputUnifiedUploadResourceVersionBody ShellAuthInputUnifiedUploadResourceVersionBody
@@ -33,7 +32,7 @@ type _ShellAuthInputUnifiedUploadResourceVersionBody ShellAuthInputUnifiedUpload
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUnifiedUploadResourceVersionBody(metadata ShellAuthopenapiResourceYamlComponentsSchemasUnifiedUploadMetadata, manifest *os.File, artifacts []*os.File) *ShellAuthInputUnifiedUploadResourceVersionBody {
+func NewShellAuthInputUnifiedUploadResourceVersionBody(metadata ShellAuthopenapiResourceYamlComponentsSchemasUnifiedUploadMetadata, manifest ShellAuthUploadReference, artifacts []ShellAuthUploadReference) *ShellAuthInputUnifiedUploadResourceVersionBody {
 	this := ShellAuthInputUnifiedUploadResourceVersionBody{}
 	this.Metadata = metadata
 	this.Manifest = manifest
@@ -74,9 +73,9 @@ func (o *ShellAuthInputUnifiedUploadResourceVersionBody) SetMetadata(v ShellAuth
 }
 
 // GetManifest returns the Manifest field value
-func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetManifest() *os.File {
+func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetManifest() ShellAuthUploadReference {
 	if o == nil {
-		var ret *os.File
+		var ret ShellAuthUploadReference
 		return ret
 	}
 
@@ -85,7 +84,7 @@ func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetManifest() *os.File 
 
 // GetManifestOk returns a tuple with the Manifest field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetManifestOk() (**os.File, bool) {
+func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetManifestOk() (*ShellAuthUploadReference, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -93,14 +92,14 @@ func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetManifestOk() (**os.F
 }
 
 // SetManifest sets field value
-func (o *ShellAuthInputUnifiedUploadResourceVersionBody) SetManifest(v *os.File) {
+func (o *ShellAuthInputUnifiedUploadResourceVersionBody) SetManifest(v ShellAuthUploadReference) {
 	o.Manifest = v
 }
 
 // GetArtifacts returns the Artifacts field value
-func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetArtifacts() []*os.File {
+func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetArtifacts() []ShellAuthUploadReference {
 	if o == nil {
-		var ret []*os.File
+		var ret []ShellAuthUploadReference
 		return ret
 	}
 
@@ -109,7 +108,7 @@ func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetArtifacts() []*os.Fi
 
 // GetArtifactsOk returns a tuple with the Artifacts field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetArtifactsOk() ([]*os.File, bool) {
+func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetArtifactsOk() ([]ShellAuthUploadReference, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -117,7 +116,7 @@ func (o *ShellAuthInputUnifiedUploadResourceVersionBody) GetArtifactsOk() ([]*os
 }
 
 // SetArtifacts sets field value
-func (o *ShellAuthInputUnifiedUploadResourceVersionBody) SetArtifacts(v []*os.File) {
+func (o *ShellAuthInputUnifiedUploadResourceVersionBody) SetArtifacts(v []ShellAuthUploadReference) {
 	o.Artifacts = v
 }
 

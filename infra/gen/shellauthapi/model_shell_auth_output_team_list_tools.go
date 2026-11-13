@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,10 @@ var _ MappedNullable = &ShellAuthOutputTeamListTools{}
 
 // ShellAuthOutputTeamListTools struct for ShellAuthOutputTeamListTools
 type ShellAuthOutputTeamListTools struct {
-	Tools []map[string]interface{} `json:"tools"`
+	StatusCode           int32                                 `json:"statusCode"`
+	Headers              *ShellAuthOutputTeamInitializeHeaders `json:"headers,omitempty"`
+	Body                 ShellAuthOutputTeamListToolsBody      `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthOutputTeamListTools ShellAuthOutputTeamListTools
@@ -30,9 +32,10 @@ type _ShellAuthOutputTeamListTools ShellAuthOutputTeamListTools
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputTeamListTools(tools []map[string]interface{}) *ShellAuthOutputTeamListTools {
+func NewShellAuthOutputTeamListTools(statusCode int32, body ShellAuthOutputTeamListToolsBody) *ShellAuthOutputTeamListTools {
 	this := ShellAuthOutputTeamListTools{}
-	this.Tools = tools
+	this.StatusCode = statusCode
+	this.Body = body
 	return &this
 }
 
@@ -44,28 +47,84 @@ func NewShellAuthOutputTeamListToolsWithDefaults() *ShellAuthOutputTeamListTools
 	return &this
 }
 
-// GetTools returns the Tools field value
-func (o *ShellAuthOutputTeamListTools) GetTools() []map[string]interface{} {
+// GetStatusCode returns the StatusCode field value
+func (o *ShellAuthOutputTeamListTools) GetStatusCode() int32 {
 	if o == nil {
-		var ret []map[string]interface{}
+		var ret int32
 		return ret
 	}
 
-	return o.Tools
+	return o.StatusCode
 }
 
-// GetToolsOk returns a tuple with the Tools field value
+// GetStatusCodeOk returns a tuple with the StatusCode field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputTeamListTools) GetToolsOk() ([]map[string]interface{}, bool) {
+func (o *ShellAuthOutputTeamListTools) GetStatusCodeOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Tools, true
+	return &o.StatusCode, true
 }
 
-// SetTools sets field value
-func (o *ShellAuthOutputTeamListTools) SetTools(v []map[string]interface{}) {
-	o.Tools = v
+// SetStatusCode sets field value
+func (o *ShellAuthOutputTeamListTools) SetStatusCode(v int32) {
+	o.StatusCode = v
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthOutputTeamListTools) GetHeaders() ShellAuthOutputTeamInitializeHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthOutputTeamInitializeHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputTeamListTools) GetHeadersOk() (*ShellAuthOutputTeamInitializeHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthOutputTeamListTools) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthOutputTeamInitializeHeaders and assigns it to the Headers field.
+func (o *ShellAuthOutputTeamListTools) SetHeaders(v ShellAuthOutputTeamInitializeHeaders) {
+	o.Headers = &v
+}
+
+// GetBody returns the Body field value
+func (o *ShellAuthOutputTeamListTools) GetBody() ShellAuthOutputTeamListToolsBody {
+	if o == nil {
+		var ret ShellAuthOutputTeamListToolsBody
+		return ret
+	}
+
+	return o.Body
+}
+
+// GetBodyOk returns a tuple with the Body field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputTeamListTools) GetBodyOk() (*ShellAuthOutputTeamListToolsBody, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Body, true
+}
+
+// SetBody sets field value
+func (o *ShellAuthOutputTeamListTools) SetBody(v ShellAuthOutputTeamListToolsBody) {
+	o.Body = v
 }
 
 func (o ShellAuthOutputTeamListTools) MarshalJSON() ([]byte, error) {
@@ -78,7 +137,16 @@ func (o ShellAuthOutputTeamListTools) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthOutputTeamListTools) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["tools"] = o.Tools
+	toSerialize["statusCode"] = o.StatusCode
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
+	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -87,7 +155,8 @@ func (o *ShellAuthOutputTeamListTools) UnmarshalJSON(data []byte) (err error) {
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"tools",
+		"statusCode",
+		"body",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -106,15 +175,22 @@ func (o *ShellAuthOutputTeamListTools) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthOutputTeamListTools := _ShellAuthOutputTeamListTools{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthOutputTeamListTools)
+	err = json.Unmarshal(data, &varShellAuthOutputTeamListTools)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutputTeamListTools(varShellAuthOutputTeamListTools)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "statusCode")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

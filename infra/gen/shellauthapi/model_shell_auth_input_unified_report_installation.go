@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,9 @@ var _ MappedNullable = &ShellAuthInputUnifiedReportInstallation{}
 
 // ShellAuthInputUnifiedReportInstallation struct for ShellAuthInputUnifiedReportInstallation
 type ShellAuthInputUnifiedReportInstallation struct {
-	Body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedMemberInstallationReport `json:"body"`
+	Headers              ShellAuthInputUnifiedCreateResourcePackageHeaders                     `json:"headers"`
+	Body                 ShellAuthresourceUnifiedSchemaJsonDefsUnifiedMemberInstallationReport `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthInputUnifiedReportInstallation ShellAuthInputUnifiedReportInstallation
@@ -30,8 +31,9 @@ type _ShellAuthInputUnifiedReportInstallation ShellAuthInputUnifiedReportInstall
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUnifiedReportInstallation(body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedMemberInstallationReport) *ShellAuthInputUnifiedReportInstallation {
+func NewShellAuthInputUnifiedReportInstallation(headers ShellAuthInputUnifiedCreateResourcePackageHeaders, body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedMemberInstallationReport) *ShellAuthInputUnifiedReportInstallation {
 	this := ShellAuthInputUnifiedReportInstallation{}
+	this.Headers = headers
 	this.Body = body
 	return &this
 }
@@ -42,6 +44,30 @@ func NewShellAuthInputUnifiedReportInstallation(body ShellAuthresourceUnifiedSch
 func NewShellAuthInputUnifiedReportInstallationWithDefaults() *ShellAuthInputUnifiedReportInstallation {
 	this := ShellAuthInputUnifiedReportInstallation{}
 	return &this
+}
+
+// GetHeaders returns the Headers field value
+func (o *ShellAuthInputUnifiedReportInstallation) GetHeaders() ShellAuthInputUnifiedCreateResourcePackageHeaders {
+	if o == nil {
+		var ret ShellAuthInputUnifiedCreateResourcePackageHeaders
+		return ret
+	}
+
+	return o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedReportInstallation) GetHeadersOk() (*ShellAuthInputUnifiedCreateResourcePackageHeaders, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Headers, true
+}
+
+// SetHeaders sets field value
+func (o *ShellAuthInputUnifiedReportInstallation) SetHeaders(v ShellAuthInputUnifiedCreateResourcePackageHeaders) {
+	o.Headers = v
 }
 
 // GetBody returns the Body field value
@@ -78,7 +104,13 @@ func (o ShellAuthInputUnifiedReportInstallation) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthInputUnifiedReportInstallation) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	toSerialize["headers"] = o.Headers
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -87,6 +119,7 @@ func (o *ShellAuthInputUnifiedReportInstallation) UnmarshalJSON(data []byte) (er
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
+		"headers",
 		"body",
 	}
 
@@ -106,15 +139,21 @@ func (o *ShellAuthInputUnifiedReportInstallation) UnmarshalJSON(data []byte) (er
 
 	varShellAuthInputUnifiedReportInstallation := _ShellAuthInputUnifiedReportInstallation{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthInputUnifiedReportInstallation)
+	err = json.Unmarshal(data, &varShellAuthInputUnifiedReportInstallation)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthInputUnifiedReportInstallation(varShellAuthInputUnifiedReportInstallation)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

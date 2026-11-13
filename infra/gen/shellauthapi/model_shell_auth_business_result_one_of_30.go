@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf30{}
 
 // ShellAuthBusinessResultOneOf30 struct for ShellAuthBusinessResultOneOf30
 type ShellAuthBusinessResultOneOf30 struct {
-	RequestId string                                                      `json:"requestId"`
-	Operation string                                                      `json:"operation"`
-	Output    ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket `json:"output"`
+	RequestId string                                  `json:"requestId"`
+	Operation string                                  `json:"operation"`
+	Output    ShellAuthOutputUnifiedRenewInstallation `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf30 ShellAuthBusinessResultOneOf30
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf30 ShellAuthBusinessResultOneOf30
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf30(requestId string, operation string, output ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket) *ShellAuthBusinessResultOneOf30 {
+func NewShellAuthBusinessResultOneOf30(requestId string, operation string, output ShellAuthOutputUnifiedRenewInstallation) *ShellAuthBusinessResultOneOf30 {
 	this := ShellAuthBusinessResultOneOf30{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf30) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf30) GetOutput() ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket {
+func (o *ShellAuthBusinessResultOneOf30) GetOutput() ShellAuthOutputUnifiedRenewInstallation {
 	if o == nil {
-		var ret ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket
+		var ret ShellAuthOutputUnifiedRenewInstallation
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf30) GetOutput() ShellAuthresourceUnifiedSch
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf30) GetOutputOk() (*ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket, bool) {
+func (o *ShellAuthBusinessResultOneOf30) GetOutputOk() (*ShellAuthOutputUnifiedRenewInstallation, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf30) GetOutputOk() (*ShellAuthresourceUnifie
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf30) SetOutput(v ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket) {
+func (o *ShellAuthBusinessResultOneOf30) SetOutput(v ShellAuthOutputUnifiedRenewInstallation) {
 	o.Output = v
 }
 

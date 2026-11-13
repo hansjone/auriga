@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf35{}
 
 // ShellAuthBusinessResultOneOf35 struct for ShellAuthBusinessResultOneOf35
 type ShellAuthBusinessResultOneOf35 struct {
-	RequestId string                                    `json:"requestId"`
-	Operation string                                    `json:"operation"`
-	Output    ShellAuthnetworkSystemDirectorySchemaJson `json:"output"`
+	RequestId string                            `json:"requestId"`
+	Operation string                            `json:"operation"`
+	Output    ShellAuthOutputListNetworkSystems `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf35 ShellAuthBusinessResultOneOf35
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf35 ShellAuthBusinessResultOneOf35
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf35(requestId string, operation string, output ShellAuthnetworkSystemDirectorySchemaJson) *ShellAuthBusinessResultOneOf35 {
+func NewShellAuthBusinessResultOneOf35(requestId string, operation string, output ShellAuthOutputListNetworkSystems) *ShellAuthBusinessResultOneOf35 {
 	this := ShellAuthBusinessResultOneOf35{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf35) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf35) GetOutput() ShellAuthnetworkSystemDirectorySchemaJson {
+func (o *ShellAuthBusinessResultOneOf35) GetOutput() ShellAuthOutputListNetworkSystems {
 	if o == nil {
-		var ret ShellAuthnetworkSystemDirectorySchemaJson
+		var ret ShellAuthOutputListNetworkSystems
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf35) GetOutput() ShellAuthnetworkSystemDirec
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf35) GetOutputOk() (*ShellAuthnetworkSystemDirectorySchemaJson, bool) {
+func (o *ShellAuthBusinessResultOneOf35) GetOutputOk() (*ShellAuthOutputListNetworkSystems, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf35) GetOutputOk() (*ShellAuthnetworkSystemD
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf35) SetOutput(v ShellAuthnetworkSystemDirectorySchemaJson) {
+func (o *ShellAuthBusinessResultOneOf35) SetOutput(v ShellAuthOutputListNetworkSystems) {
 	o.Output = v
 }
 

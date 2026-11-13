@@ -2,8 +2,7 @@ openapi: 3.1.0
 info:
   title: Auriga ShellAuth 本地通道草案
   version: 1.0.0
-  description: 仅描述经 OS 身份验证后的 IPC 消息。/messages 是生成器投影路径，禁止注册为公网或 DSH HTTP
-    路由。订阅事件使用同一 ShellAuthEvent。
+  description: 仅描述经 OS 身份验证后的 IPC 消息。/messages 是生成器投影路径，禁止注册为公网或 DSH HTTP 路由。订阅事件使用同一 ShellAuthEvent。
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -38,8 +37,7 @@ paths:
     post:
       operationId: exchangeShellAuthBusinessCall
       summary: 受控本机端口投影
-      description: 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见
-        contracts/plugin/shell-auth-control.md。
+      description: 经OS认证的IPC投影，业务失败在error分支；不注册公网HTTP。流注册返回streamId，订阅持续发送ShellAuthStreamEvent，结束/取消/错误关闭。
       requestBody:
         required: true
         content:
@@ -48,7 +46,7 @@ paths:
               $ref: "#/components/schemas/ShellAuthBusinessCall"
       responses:
         "200":
-          description: 当前权威记录
+          description: 受控操作结果
           content:
             application/json:
               schema:
@@ -59,12 +57,36 @@ paths:
             application/problem+json:
               schema:
                 $ref: common.yaml#/components/schemas/Problem
+  /business/events:
+    post:
+      operationId: subscribeShellAuthBusinessStream
+      summary: 订阅已注册流的IPC事件
+      x-streaming: true
+      description: 经OS认证的IPC投影，不注册HTTP路由。只订阅当前owner/epoch/revision的streamId，订阅不增加credit；持续推送有序事件，唯一end/closed/error后结束。upload_ack不消耗下行credit。一个streamId只允许一个订阅，断线终止该流，不能重新消费旧流。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShellAuthStreamSubscription"
+      responses:
+        "200":
+          description: 重复的IPC事件消息投影；非单次HTTP JSON响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthStreamEvent"
+        "403":
+          description: 安全拒绝
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
   /business/streams:
     post:
       operationId: exchangeShellAuthStreamCommand
       summary: 受控本机端口投影
-      description: 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见
-        contracts/plugin/shell-auth-control.md。
+      description: 经OS认证的IPC投影，不注册HTTP路由。发送credit/cancel/close/upload_chunk控制已注册流；接受后事件经/business/events推送，控制响应只投影相应确认或终止事件。
       requestBody:
         required: true
         content:
@@ -73,7 +95,7 @@ paths:
               $ref: "#/components/schemas/ShellAuthStreamCommand"
       responses:
         "200":
-          description: 当前权威记录
+          description: 流事件投影，实际IPC持续推送
           content:
             application/json:
               schema:
@@ -88,8 +110,7 @@ paths:
     post:
       operationId: exchangeShellAuthLoopbackExchange
       summary: 受控本机端口投影
-      description: 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见
-        contracts/plugin/shell-auth-control.md。
+      description: 127.0.0.1端口绑定控制页HTTP；精确Host/Origin及页面双令牌/票据校验，禁止跨源。
       requestBody:
         required: true
         content:
@@ -98,7 +119,7 @@ paths:
               $ref: "#/components/schemas/ShellAuthLoopbackExchange"
       responses:
         "200":
-          description: 当前权威记录
+          description: 受控操作结果
           content:
             application/json:
               schema:
@@ -113,17 +134,16 @@ paths:
     post:
       operationId: exchangeShellAuthAgentCredentialsRequest
       summary: 受控本机端口投影
-      description: 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见
-        contracts/plugin/shell-auth-control.md。
+      description: 仅真实回环HTTP对端及本人DSH任务能力；不是OS IPC。身份/owner/scope在线核验，规范见shell-auth-control.md。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/ShellAuthAgentCredentialsRequest"
-      responses: &a2
+      responses:
         "200":
-          description: 当前权威记录
+          description: 本人最新企业凭据；no-store
           content:
             application/json:
               schema:
@@ -133,22 +153,46 @@ paths:
               schema:
                 type: string
                 const: no-store
-        "400": &a1
+        "400":
           description: 原型兼容错误；非 Problem
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ShellAuthAgentError"
-        "401": *a1
-        "403": *a1
-        "405": *a1
-        "502": *a1
-        "503": *a1
+        "401":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "403":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "405":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "502":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "503":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
     get:
       operationId: getShellAuthAgentCredentials
       summary: 兼容企业 skill 原始读取
-      description: 真实回环对端，X-DSH-Session-Id 与 X-Dsh-Team-Task-Capability 验证本人任务
-        credentials scope；返回 no-store。
+      description: 仅真实回环HTTP对端及本人DSH任务能力；不是OS IPC。身份/owner/scope在线核验，规范见shell-auth-control.md。
       parameters:
         - name: X-DSH-Session-Id
           in: header
@@ -164,13 +208,59 @@ paths:
             type: string
             minLength: 1
             maxLength: 16384
-      responses: *a2
+      responses:
+        "200":
+          description: 本人最新企业凭据；no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentCredentials"
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+        "400":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "401":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "403":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "405":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "502":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
+        "503":
+          description: 原型兼容错误；非 Problem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthAgentError"
   /dsh-team/outbound:
     post:
       operationId: exchangeShellAuthOutboundRequest
       summary: 受控本机端口投影
-      description: 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见
-        contracts/plugin/shell-auth-control.md。
+      description: 仅真实回环HTTP对端及本人DSH任务能力；不是OS IPC。身份/owner/scope在线核验，规范见shell-auth-control.md。
       requestBody:
         required: true
         content:
@@ -178,30 +268,25 @@ paths:
             schema:
               $ref: "#/components/schemas/ShellAuthOutboundRequest"
       responses:
-        "200":
-          description: 当前权威记录
+        default:
+          description: 上游状态原样作为HTTP状态；成功/4xx/5xx均返回OutboundResult。本机认证/解析/运输失败返回AgentError，用error字段区分；不包含上游秘密。
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ShellAuthOutboundResult"
+                oneOf:
+                  - $ref: "#/components/schemas/ShellAuthOutboundResult"
+                  - $ref: "#/components/schemas/ShellAuthAgentError"
           headers:
             X-Dsh-Team-Outbound-Status:
               schema:
                 type: integer
                 minimum: 100
                 maximum: 599
-        "400": *a1
-        "401": *a1
-        "403": *a1
-        "405": *a1
-        "502": *a1
-        "503": *a1
   /loopback/messages:
     post:
       operationId: exchangeShellAuthPageMessage
       summary: 端口绑定页面控制命令
-      description: 精确 Host/Origin、双内存令牌和 nonce/epoch/端口/期限绑定；仅允许
-        snapshot/open_login/cancel_login，静态 GET 不返回身份。
+      description: 127.0.0.1端口绑定控制页HTTP；精确Host/Origin及页面双令牌/票据校验，禁止跨源。
       parameters:
         - name: X-Auriga-Shell-Token
           in: header
@@ -220,10 +305,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ShellAuthCommand"
+              $ref: "#/components/schemas/ShellAuthPageCommand"
       responses:
         "200":
-          description: 草案响应
+          description: 受控操作结果
           content:
             application/json:
               schema:
@@ -236,6 +321,8 @@ paths:
                 $ref: common.yaml#/components/schemas/Problem
 components:
   schemas:
+    ShellAuthStreamSubscription:
+      $ref: ../plugin/shell-business.schema.json#/$defs/ShellAuthStreamSubscription
     ShellAuthSnapshot:
       $ref: ../plugin/shell-auth.schema.json#/$defs/ShellAuthSnapshot
     ShellAuthIdentity:
@@ -268,3 +355,11 @@ components:
       $ref: ../plugin/shell-business.schema.json#/$defs/ShellAuthStreamCommand
     ShellAuthStreamEvent:
       $ref: ../plugin/shell-business.schema.json#/$defs/ShellAuthStreamEvent
+    ShellAuthPageCommand:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthPageCommand
+    ShellAuthOutboundForwardedHeaders:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthOutboundForwardedHeaders
+    ShellAuthBusinessError:
+      $ref: ../plugin/shell-business.schema.json#/$defs/ShellAuthBusinessError
+    ShellAuthUploadReference:
+      $ref: ../plugin/shell-business.schema.json#/$defs/ShellAuthUploadReference

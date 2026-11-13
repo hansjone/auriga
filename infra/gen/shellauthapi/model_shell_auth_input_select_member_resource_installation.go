@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,9 @@ var _ MappedNullable = &ShellAuthInputSelectMemberResourceInstallation{}
 
 // ShellAuthInputSelectMemberResourceInstallation struct for ShellAuthInputSelectMemberResourceInstallation
 type ShellAuthInputSelectMemberResourceInstallation struct {
-	Body ShellAuthopenapiResourceYamlComponentsSchemasMemberInstallationInput `json:"body"`
+	Headers              *ShellAuthInputSelectMemberResourceInstallationHeaders               `json:"headers,omitempty"`
+	Body                 ShellAuthopenapiResourceYamlComponentsSchemasMemberInstallationInput `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthInputSelectMemberResourceInstallation ShellAuthInputSelectMemberResourceInstallation
@@ -42,6 +43,38 @@ func NewShellAuthInputSelectMemberResourceInstallation(body ShellAuthopenapiReso
 func NewShellAuthInputSelectMemberResourceInstallationWithDefaults() *ShellAuthInputSelectMemberResourceInstallation {
 	this := ShellAuthInputSelectMemberResourceInstallation{}
 	return &this
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthInputSelectMemberResourceInstallation) GetHeaders() ShellAuthInputSelectMemberResourceInstallationHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthInputSelectMemberResourceInstallationHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputSelectMemberResourceInstallation) GetHeadersOk() (*ShellAuthInputSelectMemberResourceInstallationHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthInputSelectMemberResourceInstallation) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthInputSelectMemberResourceInstallationHeaders and assigns it to the Headers field.
+func (o *ShellAuthInputSelectMemberResourceInstallation) SetHeaders(v ShellAuthInputSelectMemberResourceInstallationHeaders) {
+	o.Headers = &v
 }
 
 // GetBody returns the Body field value
@@ -78,7 +111,15 @@ func (o ShellAuthInputSelectMemberResourceInstallation) MarshalJSON() ([]byte, e
 
 func (o ShellAuthInputSelectMemberResourceInstallation) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -106,15 +147,21 @@ func (o *ShellAuthInputSelectMemberResourceInstallation) UnmarshalJSON(data []by
 
 	varShellAuthInputSelectMemberResourceInstallation := _ShellAuthInputSelectMemberResourceInstallation{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthInputSelectMemberResourceInstallation)
+	err = json.Unmarshal(data, &varShellAuthInputSelectMemberResourceInstallation)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthInputSelectMemberResourceInstallation(varShellAuthInputSelectMemberResourceInstallation)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

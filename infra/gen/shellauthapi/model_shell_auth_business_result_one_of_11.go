@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf11{}
 
 // ShellAuthBusinessResultOneOf11 struct for ShellAuthBusinessResultOneOf11
 type ShellAuthBusinessResultOneOf11 struct {
-	RequestId string                                                  `json:"requestId"`
-	Operation string                                                  `json:"operation"`
-	Output    ShellAuthresourceSignaturesSchemaJsonDefsRevocationList `json:"output"`
+	RequestId string                                `json:"requestId"`
+	Operation string                                `json:"operation"`
+	Output    ShellAuthOutputGetResourceRevocations `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf11 ShellAuthBusinessResultOneOf11
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf11 ShellAuthBusinessResultOneOf11
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf11(requestId string, operation string, output ShellAuthresourceSignaturesSchemaJsonDefsRevocationList) *ShellAuthBusinessResultOneOf11 {
+func NewShellAuthBusinessResultOneOf11(requestId string, operation string, output ShellAuthOutputGetResourceRevocations) *ShellAuthBusinessResultOneOf11 {
 	this := ShellAuthBusinessResultOneOf11{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf11) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf11) GetOutput() ShellAuthresourceSignaturesSchemaJsonDefsRevocationList {
+func (o *ShellAuthBusinessResultOneOf11) GetOutput() ShellAuthOutputGetResourceRevocations {
 	if o == nil {
-		var ret ShellAuthresourceSignaturesSchemaJsonDefsRevocationList
+		var ret ShellAuthOutputGetResourceRevocations
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf11) GetOutput() ShellAuthresourceSignatures
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf11) GetOutputOk() (*ShellAuthresourceSignaturesSchemaJsonDefsRevocationList, bool) {
+func (o *ShellAuthBusinessResultOneOf11) GetOutputOk() (*ShellAuthOutputGetResourceRevocations, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf11) GetOutputOk() (*ShellAuthresourceSignat
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf11) SetOutput(v ShellAuthresourceSignaturesSchemaJsonDefsRevocationList) {
+func (o *ShellAuthBusinessResultOneOf11) SetOutput(v ShellAuthOutputGetResourceRevocations) {
 	o.Output = v
 }
 

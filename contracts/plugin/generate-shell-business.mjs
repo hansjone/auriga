@@ -14,6 +14,8 @@ const read = (file) => {
 function expand(value, file) {
   if (Array.isArray(value)) return value.map((v) => expand(v, file));
   if (!value || typeof value !== 'object') return value;
+  if (value.type === 'string' && value.format === 'binary')
+    return { $ref: '#/$defs/ShellAuthUploadReference' };
   if (value.$ref) {
     const [relative, fragment = ''] = value.$ref.split('#');
     const target = relative
@@ -66,17 +68,60 @@ const integer = {
 };
 const operations = [];
 const arms = [];
-const wire = (source) => ({
+const chunk64 = () => ({
+  type: 'string',
+  contentEncoding: 'base64',
+  pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
+  maxLength: 87384,
+  allOf: [{ if: { minLength: 87384 }, then: { pattern: '==$' } }],
+});
+const wire = (source, maxBytes = 65536) => ({
   type: 'string',
   contentEncoding: 'base64',
   contentMediaType: 'application/json',
   pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
-  maxLength: 87384,
+  maxLength: 4 * Math.ceil(maxBytes / 3),
   description:
-    '解码后最多65536字节，必须严格验证 ' +
+    '解码后最多' +
+    maxBytes +
+    '字节，必须严格验证 ' +
     source +
     '；保留原始受签字节，不经生成模型重序列化。',
 });
+const codes = [
+  'common.validation_failed',
+  'common.unauthenticated',
+  'common.forbidden',
+  'common.not_found',
+  'common.conflict',
+  'common.precondition_failed',
+  'common.rate_limited',
+  'common.unavailable',
+  'common.internal',
+  'resource.digest_mismatch',
+  'resource.signature_invalid',
+  'resource.storage_unavailable',
+];
+const digest = { type: 'string', pattern: '^[a-f0-9]{64}$' };
+defs.ShellAuthUploadReference = obj({
+  uploadId: uuid,
+  sizeBytes: {
+    type: 'integer',
+    format: 'int64',
+    minimum: 0,
+    maximum: 67108864,
+  },
+  sha256: digest,
+});
+defs.ShellAuthBusinessError = obj(
+  {
+    code: { type: 'string', enum: codes },
+    upstreamStatus: { type: 'integer', minimum: 400, maximum: 599 },
+    retryable: { type: 'boolean' },
+    retryAfterSeconds: { type: 'integer', minimum: 0, maximum: 300 },
+  },
+  ['code', 'retryable'],
+);
 for (const file of [
   'openapi/resource.yaml',
   'openapi/ai.yaml',
@@ -98,11 +143,25 @@ for (const file of [
       const operation = op.operationId;
       const properties = {},
         required = [];
+      const headerProperties = {},
+        headerRequired = [];
       for (let p of [...(item.parameters ?? []), ...(op.parameters ?? [])]) {
         if (p.$ref) {
           const [f, frag] = p.$ref.split('#');
           p = read(path.posix.join(path.posix.dirname(file), f));
           for (const part of frag.split('/').slice(1)) p = p[part];
+        }
+        if (p.in === 'header') {
+          const name = p.name.toLowerCase();
+          if (
+            ['if-match', 'idempotency-key', 'if-none-match', 'range'].includes(
+              name,
+            )
+          ) {
+            headerProperties[name] = expand(p.schema, file);
+            if (p.required) headerRequired.push(name);
+          }
+          continue;
         }
         if (!['path', 'query'].includes(p.in)) continue;
         // 本机设备/实例身份由 broker 派生，不能由插件指定。
@@ -110,6 +169,22 @@ for (const file of [
           continue;
         properties[p.name] = expand(p.schema, file);
         if (p.required) required.push(p.name);
+      }
+      if (file === 'openapi/resource.yaml' && method !== 'get') {
+        headerProperties['if-match'] ??= {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        };
+        headerProperties['idempotency-key'] ??= {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        };
+      }
+      if (Object.keys(headerProperties).length) {
+        properties.headers = obj(headerProperties, headerRequired);
+        if (headerRequired.length) required.push('headers');
       }
       const content = op.requestBody?.content;
       const body =
@@ -129,6 +204,22 @@ for (const file of [
       defs[outputName] = output
         ? expand(output, file)
         : obj({ streamId: uuid });
+      if (operation === 'createAiChatCompletion') {
+        const bodyName = properties.body.$ref.split('/').at(-1);
+        const baseBody = structuredClone(defs[bodyName]);
+        baseBody.properties.stream = { type: 'boolean' };
+        baseBody.allOf = [
+          ...(baseBody.allOf ?? []),
+          {
+            not: {
+              properties: { stream: { const: true } },
+              required: ['stream'],
+            },
+          },
+        ];
+        defs.ShellAuthChatJsonRequest = baseBody;
+        properties.body = { $ref: '#/$defs/ShellAuthChatJsonRequest' };
+      }
       operations.push({
         operation,
         method,
@@ -136,7 +227,15 @@ for (const file of [
         source: file,
         permission: op['x-permission'] ?? 'auriga.connect',
         audience: file.includes('/ai.') ? 'auriga.ai-gateway' : 'auriga',
-        stream: !output || operation === 'createAiChatCompletion',
+        stream: !output,
+        requestHeaders: Object.keys(headerProperties),
+        responseHeaders: [
+          'etag',
+          'content-type',
+          'content-length',
+          'content-range',
+          'retry-after',
+        ],
         retry: method === 'get' ? 'read_only' : 'explicit_idempotency_only',
         input: inputName,
         output: outputName,
@@ -150,6 +249,34 @@ for (const file of [
     }
   }
 }
+const chat = operations.find((op) => op.operation === 'createAiChatCompletion');
+const streamChat = {
+  ...chat,
+  operation: 'createAiChatCompletionStream',
+  input: 'ShellAuthInput_createAiChatCompletionStream',
+  output: 'ShellAuthOutput_createAiChatCompletionStream',
+  stream: true,
+};
+const streamInput = structuredClone(defs[chat.input]);
+const streamBody = structuredClone(defs.ShellAuthChatJsonRequest);
+streamBody.allOf = [
+  { not: { properties: { stream: { const: false } }, required: ['stream'] } },
+];
+streamBody.required = [...new Set([...(streamBody.required ?? []), 'stream'])];
+defs.ShellAuthChatStreamRequest = streamBody;
+streamInput.properties.body = { $ref: '#/$defs/ShellAuthChatStreamRequest' };
+defs[streamChat.input] = streamInput;
+defs[streamChat.output] = obj({
+  streamId: uuid,
+  encoding: { type: 'string', enum: ['sse_utf8'] },
+});
+operations.push(streamChat);
+arms.push(
+  obj({
+    operation: { type: 'string', const: streamChat.operation },
+    input: { $ref: '#/$defs/' + streamChat.input },
+  }),
+);
 // 远程 MCP 与 NATS 通道持有平台凭据，插件仅拿业务流 ID。
 for (const [operation, input, output] of [
   [
@@ -168,6 +295,37 @@ for (const [operation, input, output] of [
     obj({ available: { type: 'boolean' } }),
   ],
   ['network_open', obj({ executionContextId: uuid }), obj({ streamId: uuid })],
+  [
+    'upload_open',
+    obj({
+      sizeBytes: {
+        type: 'integer',
+        format: 'int64',
+        minimum: 0,
+        maximum: 67108864,
+      },
+      sha256: digest,
+      mediaType: {
+        type: 'string',
+        enum: [
+          'application/json',
+          'application/gzip',
+          'application/octet-stream',
+        ],
+      },
+    }),
+    obj({
+      uploadId: uuid,
+      streamId: uuid,
+      maxChunkBytes: { type: 'integer', enum: [65536] },
+      creditBytes: { type: 'integer', enum: [1048576] },
+    }),
+  ],
+  [
+    'upload_finish',
+    obj({ uploadId: uuid }),
+    { $ref: '#/$defs/ShellAuthUploadReference' },
+  ],
   [
     'network_send',
     obj({ streamId: uuid, frameWire: wire('network/protocol.schema.json') }),
@@ -215,8 +373,9 @@ for (const [operation, input, output] of [
     permission: 'auriga.connect',
     stream: operation.includes('open'),
     retry: 'never',
-    route:
-      operation === 'getNetworkKeys'
+    route: operation.startsWith('upload_')
+      ? 'broker:upload'
+      : operation === 'getNetworkKeys'
         ? '/api/collab/v1/network/keys'
         : operation === 'getNetworkKeyAnnouncement'
           ? '/api/collab/v1/network/keys/announcement'
@@ -305,13 +464,30 @@ defs.ShellAuthBusinessResult = {
     }),
   ),
 };
+defs.ShellAuthBusinessResult.oneOf.push(
+  obj({
+    requestId: uuid,
+    operation: { type: 'string', enum: operations.map((op) => op.operation) },
+    error: { $ref: '#/$defs/ShellAuthBusinessError' },
+  }),
+);
+defs.ShellAuthStreamSubscription = obj({
+  streamId: uuid,
+  shellEpoch: uuid,
+  expectedRevision: integer,
+});
 defs.ShellAuthStreamCommand = obj(
   {
     streamId: uuid,
     shellEpoch: uuid,
     expectedRevision: integer,
-    action: { type: 'string', enum: ['credit', 'cancel', 'close'] },
+    action: {
+      type: 'string',
+      enum: ['credit', 'cancel', 'close', 'upload_chunk'],
+    },
     creditBytes: { type: 'integer', minimum: 0, maximum: 1048576 },
+    sequence: integer,
+    data: chunk64(),
   },
   ['streamId', 'shellEpoch', 'expectedRevision', 'action'],
 );
@@ -321,18 +497,18 @@ defs.ShellAuthStreamEvent = obj(
     shellEpoch: uuid,
     revision: integer,
     sequence: integer,
-    type: { type: 'string', enum: ['data', 'end', 'closed', 'error'] },
-    data: { type: 'string', contentEncoding: 'base64', maxLength: 87384 },
+    type: {
+      type: 'string',
+      enum: ['data', 'end', 'closed', 'error', 'upload_ack'],
+    },
+    data: chunk64(),
+    ackSequence: integer,
+    creditBytes: { type: 'integer', minimum: 0, maximum: 1048576 },
     code: {
       type: 'string',
-      enum: [
-        'common.conflict',
-        'common.forbidden',
-        'common.unauthenticated',
-        'common.unavailable',
-        'common.rate_limited',
-      ],
+      enum: codes,
     },
+    error: { $ref: '#/$defs/ShellAuthBusinessError' },
   },
   ['streamId', 'shellEpoch', 'revision', 'sequence', 'type'],
 );
@@ -344,8 +520,41 @@ defs.ShellAuthStreamCommand.allOf = [
       not: { required: ['creditBytes'], properties: { creditBytes: {} } },
     },
   },
+  {
+    if: {
+      properties: { action: { const: 'upload_chunk' } },
+      required: ['action'],
+    },
+    then: {
+      required: ['sequence', 'data'],
+      properties: { sequence: {}, data: {} },
+    },
+    else: {
+      not: {
+        anyOf: [
+          { required: ['data'], properties: { data: {} } },
+          { required: ['sequence'], properties: { sequence: {} } },
+        ],
+      },
+    },
+  },
 ];
 defs.ShellAuthStreamEvent.allOf = [
+  {
+    if: { properties: { type: { const: 'upload_ack' } }, required: ['type'] },
+    then: {
+      required: ['ackSequence', 'creditBytes'],
+      properties: { ackSequence: {}, creditBytes: {} },
+    },
+    else: {
+      not: {
+        anyOf: [
+          { required: ['ackSequence'], properties: { ackSequence: {} } },
+          { required: ['creditBytes'], properties: { creditBytes: {} } },
+        ],
+      },
+    },
+  },
   {
     if: { properties: { type: { const: 'data' } }, required: ['type'] },
     then: { required: ['data'], properties: { data: {} } },
@@ -353,10 +562,37 @@ defs.ShellAuthStreamEvent.allOf = [
   },
   {
     if: { properties: { type: { const: 'error' } }, required: ['type'] },
-    then: { required: ['code'], properties: { code: {} } },
+    then: { required: ['code', 'error'], properties: { code: {}, error: {} } },
+    else: {
+      not: {
+        anyOf: [
+          { required: ['code'], properties: { code: {} } },
+          { required: ['error'], properties: { error: {} } },
+        ],
+      },
+    },
   },
 ];
 for (const operation of operations) {
+  operation.requestHeaders ??= [];
+  operation.responseHeaders ??= ['content-type', 'retry-after'];
+  const bodySchema = defs[operation.output];
+  defs[operation.output] = obj(
+    {
+      statusCode: { type: 'integer', minimum: 200, maximum: 299 },
+      headers: obj(
+        Object.fromEntries(
+          operation.responseHeaders.map((name) => [
+            name,
+            { type: 'string', maxLength: 1024 },
+          ]),
+        ),
+        [],
+      ),
+      body: bodySchema,
+    },
+    ['statusCode', 'body'],
+  );
   operation.scope = 'auriga.connect';
   if (
     operation.operation.startsWith('team_') ||
@@ -364,7 +600,13 @@ for (const operation of operations) {
     operation.operation === 'listNetworkSystems'
   )
     operation.permission = 'auriga.connect.collab.use';
-  if (['listAiModels', 'createAiChatCompletion'].includes(operation.operation))
+  if (
+    [
+      'listAiModels',
+      'createAiChatCompletion',
+      'createAiChatCompletionStream',
+    ].includes(operation.operation)
+  )
     operation.devicePermission = 'auriga.connect.models.invoke';
 }
 for (const [name, data] of [

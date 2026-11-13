@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,15 +20,18 @@ var _ MappedNullable = &ShellAuthOutboundRequest{}
 
 // ShellAuthOutboundRequest struct for ShellAuthOutboundRequest
 type ShellAuthOutboundRequest struct {
-	Url            string            `json:"url" validate:"regexp=^https://"`
-	Method         *string           `json:"method,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	Body           interface{}       `json:"body,omitempty"`
-	TimeoutMs      *int32            `json:"timeoutMs,omitempty"`
-	SessionId      *string           `json:"sessionId,omitempty"`
-	DshSessionId   *string           `json:"dshSessionId,omitempty"`
-	TaskCapability *string           `json:"taskCapability,omitempty"`
-	Capability     *string           `json:"capability,omitempty"`
+	Url    string  `json:"url" validate:"regexp=^https://"`
+	Method *string `json:"method,omitempty"`
+	// 兼容原型输入；仅content-type/accept/accept-language/x-lang-id/x-requested-with不分大小写保留，非空值String转换并截为1024字符，其余静默丢弃。
+	Headers map[string]interface{} `json:"headers,omitempty"`
+	Body    interface{}            `json:"body,omitempty"`
+	// 原型兼容：有效超时=min(Number(value)||30000,60000)，超过60000截断而不是拒绝。
+	TimeoutMs            interface{} `json:"timeoutMs,omitempty"`
+	SessionId            *string     `json:"sessionId,omitempty"`
+	DshSessionId         *string     `json:"dshSessionId,omitempty"`
+	TaskCapability       *string     `json:"taskCapability,omitempty"`
+	Capability           *string     `json:"capability,omitempty"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthOutboundRequest ShellAuthOutboundRequest
@@ -43,8 +45,6 @@ func NewShellAuthOutboundRequest(url string) *ShellAuthOutboundRequest {
 	this.Url = url
 	var method string = "POST"
 	this.Method = &method
-	var timeoutMs int32 = 30000
-	this.TimeoutMs = &timeoutMs
 	return &this
 }
 
@@ -55,8 +55,6 @@ func NewShellAuthOutboundRequestWithDefaults() *ShellAuthOutboundRequest {
 	this := ShellAuthOutboundRequest{}
 	var method string = "POST"
 	this.Method = &method
-	var timeoutMs int32 = 30000
-	this.TimeoutMs = &timeoutMs
 	return &this
 }
 
@@ -117,9 +115,9 @@ func (o *ShellAuthOutboundRequest) SetMethod(v string) {
 }
 
 // GetHeaders returns the Headers field value if set, zero value otherwise.
-func (o *ShellAuthOutboundRequest) GetHeaders() map[string]string {
+func (o *ShellAuthOutboundRequest) GetHeaders() map[string]interface{} {
 	if o == nil || IsNil(o.Headers) {
-		var ret map[string]string
+		var ret map[string]interface{}
 		return ret
 	}
 	return o.Headers
@@ -127,9 +125,9 @@ func (o *ShellAuthOutboundRequest) GetHeaders() map[string]string {
 
 // GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutboundRequest) GetHeadersOk() (map[string]string, bool) {
+func (o *ShellAuthOutboundRequest) GetHeadersOk() (map[string]interface{}, bool) {
 	if o == nil || IsNil(o.Headers) {
-		return map[string]string{}, false
+		return map[string]interface{}{}, false
 	}
 	return o.Headers, true
 }
@@ -143,8 +141,8 @@ func (o *ShellAuthOutboundRequest) HasHeaders() bool {
 	return false
 }
 
-// SetHeaders gets a reference to the given map[string]string and assigns it to the Headers field.
-func (o *ShellAuthOutboundRequest) SetHeaders(v map[string]string) {
+// SetHeaders gets a reference to the given map[string]interface{} and assigns it to the Headers field.
+func (o *ShellAuthOutboundRequest) SetHeaders(v map[string]interface{}) {
 	o.Headers = v
 }
 
@@ -181,22 +179,23 @@ func (o *ShellAuthOutboundRequest) SetBody(v interface{}) {
 	o.Body = v
 }
 
-// GetTimeoutMs returns the TimeoutMs field value if set, zero value otherwise.
-func (o *ShellAuthOutboundRequest) GetTimeoutMs() int32 {
-	if o == nil || IsNil(o.TimeoutMs) {
-		var ret int32
+// GetTimeoutMs returns the TimeoutMs field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ShellAuthOutboundRequest) GetTimeoutMs() interface{} {
+	if o == nil {
+		var ret interface{}
 		return ret
 	}
-	return *o.TimeoutMs
+	return o.TimeoutMs
 }
 
 // GetTimeoutMsOk returns a tuple with the TimeoutMs field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutboundRequest) GetTimeoutMsOk() (*int32, bool) {
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ShellAuthOutboundRequest) GetTimeoutMsOk() (*interface{}, bool) {
 	if o == nil || IsNil(o.TimeoutMs) {
 		return nil, false
 	}
-	return o.TimeoutMs, true
+	return &o.TimeoutMs, true
 }
 
 // HasTimeoutMs returns a boolean if a field has been set.
@@ -208,9 +207,9 @@ func (o *ShellAuthOutboundRequest) HasTimeoutMs() bool {
 	return false
 }
 
-// SetTimeoutMs gets a reference to the given int32 and assigns it to the TimeoutMs field.
-func (o *ShellAuthOutboundRequest) SetTimeoutMs(v int32) {
-	o.TimeoutMs = &v
+// SetTimeoutMs gets a reference to the given interface{} and assigns it to the TimeoutMs field.
+func (o *ShellAuthOutboundRequest) SetTimeoutMs(v interface{}) {
+	o.TimeoutMs = v
 }
 
 // GetSessionId returns the SessionId field value if set, zero value otherwise.
@@ -361,7 +360,7 @@ func (o ShellAuthOutboundRequest) ToMap() (map[string]interface{}, error) {
 	if o.Body != nil {
 		toSerialize["body"] = o.Body
 	}
-	if !IsNil(o.TimeoutMs) {
+	if o.TimeoutMs != nil {
 		toSerialize["timeoutMs"] = o.TimeoutMs
 	}
 	if !IsNil(o.SessionId) {
@@ -376,6 +375,11 @@ func (o ShellAuthOutboundRequest) ToMap() (map[string]interface{}, error) {
 	if !IsNil(o.Capability) {
 		toSerialize["capability"] = o.Capability
 	}
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -403,15 +407,28 @@ func (o *ShellAuthOutboundRequest) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthOutboundRequest := _ShellAuthOutboundRequest{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthOutboundRequest)
+	err = json.Unmarshal(data, &varShellAuthOutboundRequest)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutboundRequest(varShellAuthOutboundRequest)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "url")
+		delete(additionalProperties, "method")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		delete(additionalProperties, "timeoutMs")
+		delete(additionalProperties, "sessionId")
+		delete(additionalProperties, "dshSessionId")
+		delete(additionalProperties, "taskCapability")
+		delete(additionalProperties, "capability")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

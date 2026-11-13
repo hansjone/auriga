@@ -21,7 +21,9 @@ var _ MappedNullable = &ShellAuthOutputUnifiedDownloadVersionArtifact{}
 
 // ShellAuthOutputUnifiedDownloadVersionArtifact struct for ShellAuthOutputUnifiedDownloadVersionArtifact
 type ShellAuthOutputUnifiedDownloadVersionArtifact struct {
-	StreamId string `json:"streamId"`
+	StatusCode int32                                       `json:"statusCode"`
+	Headers    *ShellAuthOutputListResourcePackagesHeaders `json:"headers,omitempty"`
+	Body       ShellAuthOutputDownloadResourceContentBody  `json:"body"`
 }
 
 type _ShellAuthOutputUnifiedDownloadVersionArtifact ShellAuthOutputUnifiedDownloadVersionArtifact
@@ -30,9 +32,10 @@ type _ShellAuthOutputUnifiedDownloadVersionArtifact ShellAuthOutputUnifiedDownlo
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputUnifiedDownloadVersionArtifact(streamId string) *ShellAuthOutputUnifiedDownloadVersionArtifact {
+func NewShellAuthOutputUnifiedDownloadVersionArtifact(statusCode int32, body ShellAuthOutputDownloadResourceContentBody) *ShellAuthOutputUnifiedDownloadVersionArtifact {
 	this := ShellAuthOutputUnifiedDownloadVersionArtifact{}
-	this.StreamId = streamId
+	this.StatusCode = statusCode
+	this.Body = body
 	return &this
 }
 
@@ -44,28 +47,84 @@ func NewShellAuthOutputUnifiedDownloadVersionArtifactWithDefaults() *ShellAuthOu
 	return &this
 }
 
-// GetStreamId returns the StreamId field value
-func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) GetStreamId() string {
+// GetStatusCode returns the StatusCode field value
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) GetStatusCode() int32 {
 	if o == nil {
-		var ret string
+		var ret int32
 		return ret
 	}
 
-	return o.StreamId
+	return o.StatusCode
 }
 
-// GetStreamIdOk returns a tuple with the StreamId field value
+// GetStatusCodeOk returns a tuple with the StatusCode field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) GetStreamIdOk() (*string, bool) {
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) GetStatusCodeOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.StreamId, true
+	return &o.StatusCode, true
 }
 
-// SetStreamId sets field value
-func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) SetStreamId(v string) {
-	o.StreamId = v
+// SetStatusCode sets field value
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) SetStatusCode(v int32) {
+	o.StatusCode = v
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) GetHeaders() ShellAuthOutputListResourcePackagesHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthOutputListResourcePackagesHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) GetHeadersOk() (*ShellAuthOutputListResourcePackagesHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthOutputListResourcePackagesHeaders and assigns it to the Headers field.
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) SetHeaders(v ShellAuthOutputListResourcePackagesHeaders) {
+	o.Headers = &v
+}
+
+// GetBody returns the Body field value
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) GetBody() ShellAuthOutputDownloadResourceContentBody {
+	if o == nil {
+		var ret ShellAuthOutputDownloadResourceContentBody
+		return ret
+	}
+
+	return o.Body
+}
+
+// GetBodyOk returns a tuple with the Body field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) GetBodyOk() (*ShellAuthOutputDownloadResourceContentBody, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Body, true
+}
+
+// SetBody sets field value
+func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) SetBody(v ShellAuthOutputDownloadResourceContentBody) {
+	o.Body = v
 }
 
 func (o ShellAuthOutputUnifiedDownloadVersionArtifact) MarshalJSON() ([]byte, error) {
@@ -78,7 +137,11 @@ func (o ShellAuthOutputUnifiedDownloadVersionArtifact) MarshalJSON() ([]byte, er
 
 func (o ShellAuthOutputUnifiedDownloadVersionArtifact) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["streamId"] = o.StreamId
+	toSerialize["statusCode"] = o.StatusCode
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
+	toSerialize["body"] = o.Body
 	return toSerialize, nil
 }
 
@@ -87,7 +150,8 @@ func (o *ShellAuthOutputUnifiedDownloadVersionArtifact) UnmarshalJSON(data []byt
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"streamId",
+		"statusCode",
+		"body",
 	}
 
 	allProperties := make(map[string]interface{})

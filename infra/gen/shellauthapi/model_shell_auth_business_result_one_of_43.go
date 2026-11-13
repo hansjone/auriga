@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf43{}
 
 // ShellAuthBusinessResultOneOf43 struct for ShellAuthBusinessResultOneOf43
 type ShellAuthBusinessResultOneOf43 struct {
-	RequestId string                                   `json:"requestId"`
-	Operation string                                   `json:"operation"`
-	Output    ShellAuthOutputGetNetworkKeyAnnouncement `json:"output"`
+	RequestId string                     `json:"requestId"`
+	Operation string                     `json:"operation"`
+	Output    ShellAuthOutputNetworkSend `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf43 ShellAuthBusinessResultOneOf43
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf43 ShellAuthBusinessResultOneOf43
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf43(requestId string, operation string, output ShellAuthOutputGetNetworkKeyAnnouncement) *ShellAuthBusinessResultOneOf43 {
+func NewShellAuthBusinessResultOneOf43(requestId string, operation string, output ShellAuthOutputNetworkSend) *ShellAuthBusinessResultOneOf43 {
 	this := ShellAuthBusinessResultOneOf43{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf43) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf43) GetOutput() ShellAuthOutputGetNetworkKeyAnnouncement {
+func (o *ShellAuthBusinessResultOneOf43) GetOutput() ShellAuthOutputNetworkSend {
 	if o == nil {
-		var ret ShellAuthOutputGetNetworkKeyAnnouncement
+		var ret ShellAuthOutputNetworkSend
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf43) GetOutput() ShellAuthOutputGetNetworkKe
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf43) GetOutputOk() (*ShellAuthOutputGetNetworkKeyAnnouncement, bool) {
+func (o *ShellAuthBusinessResultOneOf43) GetOutputOk() (*ShellAuthOutputNetworkSend, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf43) GetOutputOk() (*ShellAuthOutputGetNetwo
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf43) SetOutput(v ShellAuthOutputGetNetworkKeyAnnouncement) {
+func (o *ShellAuthBusinessResultOneOf43) SetOutput(v ShellAuthOutputNetworkSend) {
 	o.Output = v
 }
 

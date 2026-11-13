@@ -5,11 +5,15 @@ import Ajv2020 from '../../services/contracts/node_modules/ajv/dist/2020.js';
 import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/index.js';
 import YAML from '../../services/contracts/node_modules/yaml/dist/index.js';
 import { spawnSync } from 'node:child_process';
+import {
+  platformCallSites,
+  platformSourceDigests,
+} from './auth-k-source-scan.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
 const ajv = new Ajv2020({ strict: true, allErrors: true });
-addFormats(ajv);
+addFormats(ajv, { keywords: true });
 for (const file of [
   ...readdirSync(new URL('network/', root))
     .filter((name) => name.endsWith('.schema.json'))
@@ -60,6 +64,27 @@ test('AUTH-K fixed operation projection stays current and covers all platform fa
     { encoding: 'utf8' },
   );
   assert.equal(result.status, 0, result.stderr);
+  const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
+  const calls = inventory.calls;
+  assert.deepEqual(
+    platformSourceDigests(calls.map((c) => c.file)),
+    inventory.sources,
+    'platform helper changed: review dynamic routes and update the independent inventory',
+  );
+  assert.deepEqual(
+    platformCallSites(),
+    calls.map(({ file, evidence }) => ({ file, evidence })),
+  );
+  for (const call of calls) {
+    assert.ok(call.methods.length);
+    assert.ok(call.routePattern.startsWith('/'));
+    assert.ok(call.control || call.operations.length, call.file);
+    for (const operation of call.operations)
+      assert.ok(
+        operations.some((op) => op.operation === operation),
+        operation,
+      );
+  }
   for (const name of [
     'UnifiedListResourcePackages',
     'UnifiedUploadResourceVersion',
@@ -128,7 +153,10 @@ test('business producers reject URL, header and identity injection; response con
   const good = {
     requestId: id,
     operation: 'profile_read',
-    output: { memberId: id, displayName: 'Synthetic member' },
+    output: {
+      statusCode: 200,
+      body: { memberId: id, displayName: 'Synthetic member' },
+    },
   };
   assert.equal(businessResult(good), true);
   assert.equal(
@@ -147,29 +175,22 @@ test('business producers reject URL, header and identity injection; response con
   const consumer = new Ajv2020({ strict: true });
   addFormats(consumer);
   // This result arm has no external references: extension handling is independent of request admission.
-  const responseSchema = schema.$defs.ShellAuthOutput_profile_read;
+  const responseSchema =
+    schema.$defs.ShellAuthOutput_profile_read.properties.body;
   assert.equal(
-    consumer.compile(responseSchema)({ ...good.output, futureField: true }),
+    consumer.compile(responseSchema)({
+      ...good.output.body,
+      futureField: true,
+    }),
     true,
   );
 });
 
 test('binding fixtures specify rejection for cross-user/tenant, expiry, revocation and stale generations', () => {
   const fixture = JSON.parse(read('test/auth-k-fixtures.json'));
-  // Contract oracle only: A/C/D must run these same vectors against their real authority.
-  const accepts = (candidate) =>
-    Object.entries(fixture.binding).every(([key, value]) =>
-      key === 'expiresAt'
-        ? Date.parse(candidate[key]) > Date.parse(fixture.now)
-        : candidate[key] === value,
-    );
-  assert.equal(accepts(fixture.binding), true);
-  for (const patch of fixture.reject)
-    assert.equal(
-      accepts({ ...fixture.binding, ...patch }),
-      false,
-      JSON.stringify(patch),
-    );
+  const accepts = ajv.compile(fixture.acceptanceSchema);
+  for (const vector of fixture.vectors)
+    assert.equal(accepts(vector.input), vector.expected, vector.name);
 });
 
 test('revalidation config defaults and bounds remain the decided policy', () => {
@@ -242,7 +263,7 @@ test('loopback tickets are bounded opaque values and never accept target URL', (
   assert.equal(page({ ...session, port: 65536 }), false);
 });
 
-test('enterprise compatibility keeps raw enabled and refuses authentication headers', () => {
+test('enterprise compatibility accepts discarded headers and clamps oversized timeouts', () => {
   const defs = JSON.parse(read('plugin/shell-auth-control.schema.json')).$defs;
   assert.equal(
     defs.ShellAuthEnterpriseConfig.properties.allowRawAgentToken.default,
@@ -265,12 +286,12 @@ test('enterprise compatibility keeps raw enabled and refuses authentication head
         url: 'https://api.example.com/business',
         headers: { [key]: 'synthetic' },
       }),
-      false,
+      true,
     );
   assert.equal(outbound({ url: 'http://api.example.com/business' }), false);
   assert.equal(
     outbound({ url: 'https://api.example.com/business', timeoutMs: 60001 }),
-    false,
+    true,
   );
   const credentials = validate(
     'plugin/shell-auth-control.schema.json',
@@ -316,7 +337,12 @@ test('stream contracts require credit, bounded chunks and explicit terminal outc
   assert.equal(stream({ ...event, type: 'closed', data: 'eA==' }), false);
   assert.equal(stream({ ...event, type: 'error' }), false);
   assert.equal(
-    stream({ ...event, type: 'error', code: 'common.unauthenticated' }),
+    stream({
+      ...event,
+      type: 'error',
+      code: 'common.unauthenticated',
+      error: { code: 'common.unauthenticated', retryable: false },
+    }),
     true,
   );
 });
@@ -366,7 +392,7 @@ test('navigation proof and device source bindings reject incomplete or forged pr
   for (const key of Object.keys(bound)) {
     const copy = { ...bound };
     delete copy[key];
-    assert.equal(device(copy), false, key);
+    assert.equal(device(copy), key === 'credentialVersion', key);
   }
 });
 
@@ -731,4 +757,424 @@ test('enterprise credential reads use only the authenticated caller and return a
     operation.responses['200'].headers['Cache-Control'].schema.enum,
     ['no-store'],
   );
+});
+
+test('business headers preserve resource concurrency and reject credential headers', () => {
+  const schema = JSON.parse(read('plugin/shell-business.schema.json'));
+  for (const op of operations) {
+    const input = schema.$defs[op.input];
+    assert.deepEqual(
+      Object.keys(input.properties.headers?.properties ?? {}),
+      op.requestHeaders,
+    );
+    if (!op.requestHeaders.length) continue;
+    const headers = ajv.compile(input.properties.headers);
+    const good = Object.fromEntries(
+      op.requestHeaders.map((name) => [name, 'synthetic-revision']),
+    );
+    assert.equal(headers(good), true, op.operation);
+    for (const name of input.properties.headers.required) {
+      const missing = { ...good };
+      delete missing[name];
+      assert.equal(headers(missing), false, op.operation + ':' + name);
+      assert.ok(input.required.includes('headers'), op.operation);
+    }
+    for (const name of ['authorization', 'cookie', 'x-tenant-id'])
+      assert.equal(
+        headers({ ...good, [name]: 'synthetic' }),
+        false,
+        op.operation,
+      );
+  }
+  const outputHeaders =
+    schema.$defs.ShellAuthOutput_UnifiedSelectInstallation.properties.headers;
+  const headers = ajv.compile(outputHeaders);
+  assert.equal(headers({ etag: '"revision-2"' }), true);
+  assert.equal(headers({ 'set-cookie': 'synthetic' }), false);
+  assert.equal(headers({ authorization: 'synthetic' }), false);
+});
+
+test('AI SSE registers a stream and has data, end, cancel and safe error frames', () => {
+  const json = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthInput_createAiChatCompletion',
+  );
+  const streaming = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthInput_createAiChatCompletionStream',
+  );
+  const body = {
+    model: 'example-model',
+    messages: [{ role: 'user', content: 'hello' }],
+    max_tokens: 16,
+  };
+  assert.equal(json({ body }), true);
+  assert.equal(json({ body: { ...body, stream: false } }), true);
+  assert.equal(json({ body: { ...body, stream: true } }), false);
+  assert.equal(streaming({ body: { ...body, stream: true } }), true);
+  assert.equal(streaming({ body: { ...body, stream: false } }), false);
+  assert.equal(streaming({ body }), false);
+  assert.equal(
+    businessResult({
+      requestId: id,
+      operation: 'createAiChatCompletionStream',
+      output: { statusCode: 200, body: { streamId: id, encoding: 'sse_utf8' } },
+    }),
+    true,
+  );
+  const stream = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthStreamEvent',
+  );
+  const envelope = { streamId: id, shellEpoch: id, revision: 1, sequence: 1 };
+  for (const data of ['data: {"choices":[]}\n\n', 'data: [DONE]\n\n'])
+    assert.equal(
+      stream({
+        ...envelope,
+        type: 'data',
+        data: Buffer.from(data).toString('base64'),
+      }),
+      true,
+    );
+  for (const type of ['end', 'closed'])
+    assert.equal(stream({ ...envelope, type }), true);
+  const error = {
+    code: 'common.unavailable',
+    retryable: true,
+    upstreamStatus: 503,
+  };
+  assert.equal(
+    stream({ ...envelope, type: 'error', code: error.code, error }),
+    true,
+  );
+  assert.equal(stream({ ...envelope, type: 'error', code: error.code }), false);
+  assert.equal(stream({ ...envelope, type: 'end', error }), false);
+  assert.equal(
+    stream({ ...envelope, type: 'data', data: 'not-base64' }),
+    false,
+  );
+  const command = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthStreamCommand',
+  );
+  assert.equal(
+    command({
+      streamId: id,
+      shellEpoch: id,
+      expectedRevision: 1,
+      action: 'cancel',
+    }),
+    true,
+  );
+});
+
+test('upload uses bounded base64 chunks and validated references instead of binary IPC fields', () => {
+  const open = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthInput_upload_open',
+  );
+  const input = {
+    sizeBytes: 67108864,
+    sha256: 'a'.repeat(64),
+    mediaType: 'application/octet-stream',
+  };
+  assert.equal(open(input), true);
+  assert.equal(open({ ...input, sizeBytes: 67108865 }), false);
+  assert.equal(open({ ...input, sha256: 'invalid' }), false);
+  const command = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthStreamCommand',
+  );
+  const chunk = {
+    streamId: id,
+    shellEpoch: id,
+    expectedRevision: 1,
+    action: 'upload_chunk',
+    sequence: 0,
+    data: Buffer.alloc(65536).toString('base64'),
+  };
+  assert.equal(command(chunk), true);
+  assert.equal(
+    command({ ...chunk, data: Buffer.alloc(65537).toString('base64') }),
+    false,
+  );
+  assert.equal(command({ ...chunk, data: 'invalid' }), false);
+  const missing = { ...chunk };
+  delete missing.sequence;
+  assert.equal(command(missing), false);
+  const stream = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthStreamEvent',
+  );
+  const ack = {
+    streamId: id,
+    shellEpoch: id,
+    revision: 1,
+    sequence: 1,
+    type: 'upload_ack',
+    ackSequence: 0,
+    creditBytes: 65536,
+  };
+  assert.equal(stream(ack), true);
+  assert.equal(stream({ ...ack, creditBytes: 1048577 }), false);
+  const missingAck = { ...ack };
+  delete missingAck.ackSequence;
+  assert.equal(stream(missingAck), false);
+  const reference = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthUploadReference',
+  );
+  assert.equal(
+    reference({
+      uploadId: id,
+      sizeBytes: input.sizeBytes,
+      sha256: input.sha256,
+    }),
+    true,
+  );
+  assert.equal(
+    reference({ uploadId: id, sizeBytes: input.sizeBytes, sha256: 'invalid' }),
+    false,
+  );
+  assert.doesNotMatch(
+    read('plugin/shell-business.schema.json'),
+    /"format": "binary"/,
+  );
+});
+
+test('upstream business failures keep status, safe code and retryability without raw text', () => {
+  const fixtures = JSON.parse(read('test/auth-k-transport-fixtures.json'));
+  for (const vector of fixtures.businessErrors) {
+    assert.equal(
+      businessResult(vector),
+      true,
+      JSON.stringify(businessResult.errors),
+    );
+    for (const field of [
+      'message',
+      'body',
+      'headers',
+      'token',
+      'cookie',
+      'rawResponse',
+    ])
+      assert.equal(
+        businessResult({
+          ...vector,
+          error: { ...vector.error, [field]: 'synthetic' },
+        }),
+        false,
+      );
+    assert.equal(
+      businessResult({
+        ...vector,
+        error: { ...vector.error, code: 'upstream.untrusted' },
+      }),
+      false,
+    );
+    assert.equal(
+      businessResult({ ...vector, error: { code: vector.error.code } }),
+      false,
+    );
+  }
+});
+
+test('skill compatibility vectors accept original requests and distinguish upstream from local failure', () => {
+  const fixtures = JSON.parse(read('test/auth-k-transport-fixtures.json'));
+  const request = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthOutboundRequest',
+  );
+  const forwarded = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthOutboundForwardedHeaders',
+  );
+  const result = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthOutboundResult',
+  );
+  const local = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthAgentError',
+  );
+  for (const vector of fixtures.outbound) {
+    assert.equal(request(vector.input), true, vector.name);
+    assert.equal(
+      forwarded(vector.expected.forwardedHeaders),
+      true,
+      vector.name,
+    );
+    assert.ok(vector.expected.timeoutMs <= 60000);
+    assert.equal(
+      forwarded({
+        ...vector.expected.forwardedHeaders,
+        Authorization: 'synthetic',
+      }),
+      false,
+    );
+  }
+  for (const vector of fixtures.outboundResults) {
+    assert.equal(result(vector.result), true);
+    assert.equal(vector.httpStatus, vector.result.statusCode);
+    assert.equal(local(vector.result), false);
+  }
+  for (const vector of fixtures.localErrors) {
+    assert.equal(local(vector.result), true);
+    assert.equal(result(vector.result), false);
+  }
+  const spec = YAML.parse(read('openapi/shell-auth.yaml'));
+  const response = spec.paths['/dsh-team/outbound'].post.responses.default;
+  assert.equal(response.content['application/json'].schema.oneOf.length, 2);
+  assert.ok(response.headers['X-Dsh-Team-Outbound-Status']);
+  const config = JSON.parse(read('plugin/shell-auth-control.schema.json')).$defs
+    .ShellAuthEnterpriseConfig;
+  assert.deepEqual(config.properties.outboundAllowedHosts.default, []);
+});
+
+test('SSO proof issuance is an internal edge to IAM port with evidence and a 120 second result', () => {
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  const op = spec.paths['/internal/uac/navigation-proofs'].post;
+  assert.equal(op['x-internal-only'], true);
+  assert.equal(op['x-service-caller'], 'svc:edge');
+  assert.deepEqual(op.security, [{ internalServiceAuth: [] }]);
+  const request = validate(
+    'auth/uac-control.schema.json',
+    'UacNavigationIssueRequest',
+  );
+  const good = {
+    requestId: id,
+    providerId: id,
+    origin: 'https://portal.example.com',
+    continuation: 'portal',
+    fetchMetadata: {
+      dest: 'document',
+      mode: 'navigate',
+      site: 'same-origin',
+      user: '?1',
+    },
+  };
+  assert.equal(request(good), true);
+  assert.equal(request({ ...good, fetchMetadata: {} }), true); // Missing evidence disables auto at IAM.
+  assert.equal(request({ ...good, continuation: 'device' }), false);
+  assert.equal(
+    request({ ...good, continuation: 'device', deviceGrantId: id }),
+    true,
+  );
+  assert.equal(request({ ...good, deviceGrantId: id }), false);
+  for (const key of [
+    'autoEligible',
+    'tenantId',
+    'proofHash',
+    'navigationProof',
+  ])
+    assert.equal(request({ ...good, [key]: 'synthetic' }), false);
+  const issued = validate(
+    'auth/uac-control.schema.json',
+    'UacNavigationIssued',
+  );
+  const value = {
+    context: {
+      navigationProof: 'A'.repeat(43),
+      expiresAt: base.expiresAt,
+      transactionId: id,
+      purpose: 'portal',
+      autoEligible: true,
+      autoSuppressed: false,
+    },
+    transactionCookie: 'B'.repeat(43),
+    ttlSeconds: 120,
+  };
+  assert.equal(issued(value), true);
+  assert.equal(issued({ ...value, ttlSeconds: 121 }), false);
+  assert.equal(
+    spec.paths['/admin/providers/{providerId}/uac'].put.parameters.find(
+      (p) => p.name === 'If-Match',
+    ).required,
+    true,
+  );
+});
+
+test('loopback page schema exposes only its four bounded commands including skip login', () => {
+  const command = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthPageCommand',
+  );
+  const envelope = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    expectedRevision: 0,
+  };
+  for (const action of ['snapshot', 'open_login', 'cancel_login', 'skip_login'])
+    assert.equal(command({ ...envelope, action }), true);
+  for (const action of ['logout', 'subscribe', 'arbitrary_http'])
+    assert.equal(command({ ...envelope, action }), false);
+  assert.equal(
+    command({
+      ...envelope,
+      action: 'open_login',
+      url: 'https://evil.example.com',
+    }),
+    false,
+  );
+  const spec = YAML.parse(read('openapi/shell-auth.yaml'));
+  assert.match(
+    spec.paths['/loopback/messages'].post.requestBody.content[
+      'application/json'
+    ].schema.$ref,
+    /ShellAuthPageCommand$/,
+  );
+});
+
+test('maximal compact network key publication fits the existing 64 KiB transport budget', (t) => {
+  const kid = 'k'.repeat(128),
+    time = '2026-11-13T00:00:00Z',
+    signature = 'A'.repeat(86),
+    version = '18446744073709551615';
+  const keyset = {
+    keyset: {
+      schema_version: 1,
+      realm: version,
+      keyset_version: version,
+      issued_at: time,
+      valid_until: '2026-11-14T00:00:00Z',
+      keys: Array.from({ length: 128 }, (_, i) => ({
+        kid: String(i).padStart(3, '0') + kid.slice(3),
+        alg: 'Ed25519',
+        purpose: 'business_delivery',
+        state: 'retired',
+        not_before: time,
+        not_after: '2026-11-14T00:00:00Z',
+        public_key_spki: 'A'.repeat(59),
+      })),
+    },
+    root_auth: { alg: 'Ed25519', kid, signature },
+  };
+  const announcement = {
+    keyset_version: version,
+    manifest_digest: 'sha256:' + 'a'.repeat(64),
+    valid_until: time,
+    root_kid: kid,
+    root_signature: signature,
+  };
+  for (const [name, data, file, definition] of [
+    ['keyset', keyset, 'network/keyset.schema.json', 'SignedKeyset'],
+    [
+      'announcement',
+      announcement,
+      'network/protocol.schema.json',
+      'KeysetAnnouncement',
+    ],
+  ]) {
+    const valid = validate(file, definition);
+    assert.equal(valid(data), true, JSON.stringify(valid.errors));
+    const bytes = Buffer.byteLength(JSON.stringify(data));
+    assert.ok(bytes <= 65536, name + ':' + bytes);
+    t.diagnostic(
+      name +
+        ' compact UTF-8 bytes: ' +
+        bytes +
+        ' / 65536; synthetic signature, size validation only',
+    );
+  }
 });

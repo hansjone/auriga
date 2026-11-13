@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,10 @@ var _ MappedNullable = &ShellAuthOutputTeamInitialize{}
 
 // ShellAuthOutputTeamInitialize struct for ShellAuthOutputTeamInitialize
 type ShellAuthOutputTeamInitialize struct {
-	StreamId string `json:"streamId"`
+	StatusCode           int32                                      `json:"statusCode"`
+	Headers              *ShellAuthOutputTeamInitializeHeaders      `json:"headers,omitempty"`
+	Body                 ShellAuthOutputDownloadResourceContentBody `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthOutputTeamInitialize ShellAuthOutputTeamInitialize
@@ -30,9 +32,10 @@ type _ShellAuthOutputTeamInitialize ShellAuthOutputTeamInitialize
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputTeamInitialize(streamId string) *ShellAuthOutputTeamInitialize {
+func NewShellAuthOutputTeamInitialize(statusCode int32, body ShellAuthOutputDownloadResourceContentBody) *ShellAuthOutputTeamInitialize {
 	this := ShellAuthOutputTeamInitialize{}
-	this.StreamId = streamId
+	this.StatusCode = statusCode
+	this.Body = body
 	return &this
 }
 
@@ -44,28 +47,84 @@ func NewShellAuthOutputTeamInitializeWithDefaults() *ShellAuthOutputTeamInitiali
 	return &this
 }
 
-// GetStreamId returns the StreamId field value
-func (o *ShellAuthOutputTeamInitialize) GetStreamId() string {
+// GetStatusCode returns the StatusCode field value
+func (o *ShellAuthOutputTeamInitialize) GetStatusCode() int32 {
 	if o == nil {
-		var ret string
+		var ret int32
 		return ret
 	}
 
-	return o.StreamId
+	return o.StatusCode
 }
 
-// GetStreamIdOk returns a tuple with the StreamId field value
+// GetStatusCodeOk returns a tuple with the StatusCode field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputTeamInitialize) GetStreamIdOk() (*string, bool) {
+func (o *ShellAuthOutputTeamInitialize) GetStatusCodeOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.StreamId, true
+	return &o.StatusCode, true
 }
 
-// SetStreamId sets field value
-func (o *ShellAuthOutputTeamInitialize) SetStreamId(v string) {
-	o.StreamId = v
+// SetStatusCode sets field value
+func (o *ShellAuthOutputTeamInitialize) SetStatusCode(v int32) {
+	o.StatusCode = v
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthOutputTeamInitialize) GetHeaders() ShellAuthOutputTeamInitializeHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthOutputTeamInitializeHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputTeamInitialize) GetHeadersOk() (*ShellAuthOutputTeamInitializeHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthOutputTeamInitialize) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthOutputTeamInitializeHeaders and assigns it to the Headers field.
+func (o *ShellAuthOutputTeamInitialize) SetHeaders(v ShellAuthOutputTeamInitializeHeaders) {
+	o.Headers = &v
+}
+
+// GetBody returns the Body field value
+func (o *ShellAuthOutputTeamInitialize) GetBody() ShellAuthOutputDownloadResourceContentBody {
+	if o == nil {
+		var ret ShellAuthOutputDownloadResourceContentBody
+		return ret
+	}
+
+	return o.Body
+}
+
+// GetBodyOk returns a tuple with the Body field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputTeamInitialize) GetBodyOk() (*ShellAuthOutputDownloadResourceContentBody, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Body, true
+}
+
+// SetBody sets field value
+func (o *ShellAuthOutputTeamInitialize) SetBody(v ShellAuthOutputDownloadResourceContentBody) {
+	o.Body = v
 }
 
 func (o ShellAuthOutputTeamInitialize) MarshalJSON() ([]byte, error) {
@@ -78,7 +137,16 @@ func (o ShellAuthOutputTeamInitialize) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthOutputTeamInitialize) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["streamId"] = o.StreamId
+	toSerialize["statusCode"] = o.StatusCode
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
+	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -87,7 +155,8 @@ func (o *ShellAuthOutputTeamInitialize) UnmarshalJSON(data []byte) (err error) {
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"streamId",
+		"statusCode",
+		"body",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -106,15 +175,22 @@ func (o *ShellAuthOutputTeamInitialize) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthOutputTeamInitialize := _ShellAuthOutputTeamInitialize{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthOutputTeamInitialize)
+	err = json.Unmarshal(data, &varShellAuthOutputTeamInitialize)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutputTeamInitialize(varShellAuthOutputTeamInitialize)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "statusCode")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

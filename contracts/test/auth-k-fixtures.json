@@ -1,25 +1,252 @@
 {
   "now": "2026-11-13T00:00:00Z",
-  "binding": {
-    "osUser": "synthetic-owner",
-    "tenantId": "00000000-0000-4000-8000-000000000001",
-    "memberId": "00000000-0000-4000-8000-000000000002",
-    "shellEpoch": "00000000-0000-4000-8000-000000000003",
-    "revision": 2,
-    "authGeneration": 3,
-    "credentialVersion": 4,
-    "state": "authenticated",
-    "expiresAt": "2026-11-13T00:00:30Z"
+  "acceptanceSchema": {
+    "type": "object",
+    "properties": {
+      "osUser": {
+        "const": "synthetic-owner"
+      },
+      "tenantId": {
+        "const": "00000000-0000-4000-8000-000000000001"
+      },
+      "memberId": {
+        "const": "00000000-0000-4000-8000-000000000002"
+      },
+      "sourceSessionId": {
+        "const": "00000000-0000-4000-8000-000000000008"
+      },
+      "providerId": {
+        "const": "00000000-0000-4000-8000-000000000009"
+      },
+      "shellEpoch": {
+        "const": "00000000-0000-4000-8000-000000000003"
+      },
+      "revision": {
+        "const": 2
+      },
+      "authGeneration": {
+        "const": 3
+      },
+      "state": {
+        "const": "authenticated"
+      },
+      "expiresAt": {
+        "type": "string",
+        "format": "date-time",
+        "formatExclusiveMinimum": "2026-11-13T00:00:00Z"
+      },
+      "credentialVersion": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "required": [
+      "osUser",
+      "tenantId",
+      "memberId",
+      "sourceSessionId",
+      "providerId",
+      "shellEpoch",
+      "revision",
+      "authGeneration",
+      "state",
+      "expiresAt"
+    ],
+    "additionalProperties": false
   },
-  "reject": [
-    {"osUser": "another-owner"},
-    {"tenantId": "00000000-0000-4000-8000-000000000005"},
-    {"memberId": "00000000-0000-4000-8000-000000000006"},
-    {"shellEpoch": "00000000-0000-4000-8000-000000000007"},
-    {"revision": 1},
-    {"authGeneration": 2},
-    {"credentialVersion": 3},
-    {"state": "revoked"},
-    {"expiresAt": "2026-11-12T23:59:59Z"}
+  "vectors": [
+    {
+      "name": "current",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": true
+    },
+    {
+      "name": "rotated_token_keeps_binding",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z",
+        "credentialVersion": 5
+      },
+      "expected": true
+    },
+    {
+      "name": "osUser_mismatch",
+      "input": {
+        "osUser": "another-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "tenantId_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000005",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "memberId_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "sourceSessionId_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000010",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "providerId_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000011",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "shellEpoch_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000007",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "revision_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 1,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "authGeneration_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 2,
+        "state": "authenticated",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "state_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "revoked",
+        "expiresAt": "2026-11-13T00:00:30Z"
+      },
+      "expected": false
+    },
+    {
+      "name": "expiresAt_mismatch",
+      "input": {
+        "osUser": "synthetic-owner",
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "memberId": "00000000-0000-4000-8000-000000000002",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000008",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000003",
+        "revision": 2,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "expiresAt": "2026-11-12T23:59:59Z"
+      },
+      "expected": false
+    }
   ]
 }

@@ -21,11 +21,13 @@ var _ MappedNullable = &ShellAuthStreamCommand{}
 
 // ShellAuthStreamCommand struct for ShellAuthStreamCommand
 type ShellAuthStreamCommand struct {
-	StreamId         string `json:"streamId"`
-	ShellEpoch       string `json:"shellEpoch"`
-	ExpectedRevision int64  `json:"expectedRevision"`
-	Action           string `json:"action"`
-	CreditBytes      *int32 `json:"creditBytes,omitempty"`
+	StreamId         string      `json:"streamId"`
+	ShellEpoch       string      `json:"shellEpoch"`
+	ExpectedRevision int64       `json:"expectedRevision"`
+	Action           string      `json:"action"`
+	CreditBytes      *int32      `json:"creditBytes,omitempty"`
+	Sequence         *int64      `json:"sequence,omitempty"`
+	Data             interface{} `json:"data,omitempty"`
 }
 
 type _ShellAuthStreamCommand ShellAuthStreamCommand
@@ -179,6 +181,71 @@ func (o *ShellAuthStreamCommand) SetCreditBytes(v int32) {
 	o.CreditBytes = &v
 }
 
+// GetSequence returns the Sequence field value if set, zero value otherwise.
+func (o *ShellAuthStreamCommand) GetSequence() int64 {
+	if o == nil || IsNil(o.Sequence) {
+		var ret int64
+		return ret
+	}
+	return *o.Sequence
+}
+
+// GetSequenceOk returns a tuple with the Sequence field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthStreamCommand) GetSequenceOk() (*int64, bool) {
+	if o == nil || IsNil(o.Sequence) {
+		return nil, false
+	}
+	return o.Sequence, true
+}
+
+// HasSequence returns a boolean if a field has been set.
+func (o *ShellAuthStreamCommand) HasSequence() bool {
+	if o != nil && !IsNil(o.Sequence) {
+		return true
+	}
+
+	return false
+}
+
+// SetSequence gets a reference to the given int64 and assigns it to the Sequence field.
+func (o *ShellAuthStreamCommand) SetSequence(v int64) {
+	o.Sequence = &v
+}
+
+// GetData returns the Data field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ShellAuthStreamCommand) GetData() interface{} {
+	if o == nil {
+		var ret interface{}
+		return ret
+	}
+	return o.Data
+}
+
+// GetDataOk returns a tuple with the Data field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ShellAuthStreamCommand) GetDataOk() (*interface{}, bool) {
+	if o == nil || IsNil(o.Data) {
+		return nil, false
+	}
+	return &o.Data, true
+}
+
+// HasData returns a boolean if a field has been set.
+func (o *ShellAuthStreamCommand) HasData() bool {
+	if o != nil && !IsNil(o.Data) {
+		return true
+	}
+
+	return false
+}
+
+// SetData gets a reference to the given interface{} and assigns it to the Data field.
+func (o *ShellAuthStreamCommand) SetData(v interface{}) {
+	o.Data = v
+}
+
 func (o ShellAuthStreamCommand) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -195,6 +262,12 @@ func (o ShellAuthStreamCommand) ToMap() (map[string]interface{}, error) {
 	toSerialize["action"] = o.Action
 	if !IsNil(o.CreditBytes) {
 		toSerialize["creditBytes"] = o.CreditBytes
+	}
+	if !IsNil(o.Sequence) {
+		toSerialize["sequence"] = o.Sequence
+	}
+	if o.Data != nil {
+		toSerialize["data"] = o.Data
 	}
 	return toSerialize, nil
 }

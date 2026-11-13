@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,9 +20,11 @@ var _ MappedNullable = &ShellAuthInputUnifiedSubmitResourceVersion{}
 
 // ShellAuthInputUnifiedSubmitResourceVersion struct for ShellAuthInputUnifiedSubmitResourceVersion
 type ShellAuthInputUnifiedSubmitResourceVersion struct {
-	PackageId string                                              `json:"packageId"`
-	VersionId string                                              `json:"versionId"`
-	Body      ShellAuthopenapiResourceYamlComponentsSchemasReason `json:"body"`
+	PackageId            string                                              `json:"packageId"`
+	VersionId            string                                              `json:"versionId"`
+	Headers              ShellAuthInputUnifiedCreateResourcePackageHeaders   `json:"headers"`
+	Body                 ShellAuthopenapiResourceYamlComponentsSchemasReason `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthInputUnifiedSubmitResourceVersion ShellAuthInputUnifiedSubmitResourceVersion
@@ -32,10 +33,11 @@ type _ShellAuthInputUnifiedSubmitResourceVersion ShellAuthInputUnifiedSubmitReso
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUnifiedSubmitResourceVersion(packageId string, versionId string, body ShellAuthopenapiResourceYamlComponentsSchemasReason) *ShellAuthInputUnifiedSubmitResourceVersion {
+func NewShellAuthInputUnifiedSubmitResourceVersion(packageId string, versionId string, headers ShellAuthInputUnifiedCreateResourcePackageHeaders, body ShellAuthopenapiResourceYamlComponentsSchemasReason) *ShellAuthInputUnifiedSubmitResourceVersion {
 	this := ShellAuthInputUnifiedSubmitResourceVersion{}
 	this.PackageId = packageId
 	this.VersionId = versionId
+	this.Headers = headers
 	this.Body = body
 	return &this
 }
@@ -96,6 +98,30 @@ func (o *ShellAuthInputUnifiedSubmitResourceVersion) SetVersionId(v string) {
 	o.VersionId = v
 }
 
+// GetHeaders returns the Headers field value
+func (o *ShellAuthInputUnifiedSubmitResourceVersion) GetHeaders() ShellAuthInputUnifiedCreateResourcePackageHeaders {
+	if o == nil {
+		var ret ShellAuthInputUnifiedCreateResourcePackageHeaders
+		return ret
+	}
+
+	return o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedSubmitResourceVersion) GetHeadersOk() (*ShellAuthInputUnifiedCreateResourcePackageHeaders, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Headers, true
+}
+
+// SetHeaders sets field value
+func (o *ShellAuthInputUnifiedSubmitResourceVersion) SetHeaders(v ShellAuthInputUnifiedCreateResourcePackageHeaders) {
+	o.Headers = v
+}
+
 // GetBody returns the Body field value
 func (o *ShellAuthInputUnifiedSubmitResourceVersion) GetBody() ShellAuthopenapiResourceYamlComponentsSchemasReason {
 	if o == nil {
@@ -132,7 +158,13 @@ func (o ShellAuthInputUnifiedSubmitResourceVersion) ToMap() (map[string]interfac
 	toSerialize := map[string]interface{}{}
 	toSerialize["packageId"] = o.PackageId
 	toSerialize["versionId"] = o.VersionId
+	toSerialize["headers"] = o.Headers
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -143,6 +175,7 @@ func (o *ShellAuthInputUnifiedSubmitResourceVersion) UnmarshalJSON(data []byte) 
 	requiredProperties := []string{
 		"packageId",
 		"versionId",
+		"headers",
 		"body",
 	}
 
@@ -162,15 +195,23 @@ func (o *ShellAuthInputUnifiedSubmitResourceVersion) UnmarshalJSON(data []byte) 
 
 	varShellAuthInputUnifiedSubmitResourceVersion := _ShellAuthInputUnifiedSubmitResourceVersion{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthInputUnifiedSubmitResourceVersion)
+	err = json.Unmarshal(data, &varShellAuthInputUnifiedSubmitResourceVersion)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthInputUnifiedSubmitResourceVersion(varShellAuthInputUnifiedSubmitResourceVersion)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "packageId")
+		delete(additionalProperties, "versionId")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

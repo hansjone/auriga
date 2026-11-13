@@ -21,9 +21,10 @@ var _ MappedNullable = &ShellAuthAgentError{}
 
 // ShellAuthAgentError struct for ShellAuthAgentError
 type ShellAuthAgentError struct {
-	Error   string  `json:"error"`
-	Message string  `json:"message"`
-	Hint    *string `json:"hint,omitempty"`
+	Error     string         `json:"error"`
+	Message   string         `json:"message"`
+	Hint      *string        `json:"hint,omitempty"`
+	SessionId NullableString `json:"sessionId,omitempty"`
 }
 
 type _ShellAuthAgentError ShellAuthAgentError
@@ -127,6 +128,49 @@ func (o *ShellAuthAgentError) SetHint(v string) {
 	o.Hint = &v
 }
 
+// GetSessionId returns the SessionId field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ShellAuthAgentError) GetSessionId() string {
+	if o == nil || IsNil(o.SessionId.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.SessionId.Get()
+}
+
+// GetSessionIdOk returns a tuple with the SessionId field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ShellAuthAgentError) GetSessionIdOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.SessionId.Get(), o.SessionId.IsSet()
+}
+
+// HasSessionId returns a boolean if a field has been set.
+func (o *ShellAuthAgentError) HasSessionId() bool {
+	if o != nil && o.SessionId.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetSessionId gets a reference to the given NullableString and assigns it to the SessionId field.
+func (o *ShellAuthAgentError) SetSessionId(v string) {
+	o.SessionId.Set(&v)
+}
+
+// SetSessionIdNil sets the value for SessionId to be an explicit nil
+func (o *ShellAuthAgentError) SetSessionIdNil() {
+	o.SessionId.Set(nil)
+}
+
+// UnsetSessionId ensures that no value is present for SessionId, not even an explicit nil
+func (o *ShellAuthAgentError) UnsetSessionId() {
+	o.SessionId.Unset()
+}
+
 func (o ShellAuthAgentError) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -141,6 +185,9 @@ func (o ShellAuthAgentError) ToMap() (map[string]interface{}, error) {
 	toSerialize["message"] = o.Message
 	if !IsNil(o.Hint) {
 		toSerialize["hint"] = o.Hint
+	}
+	if o.SessionId.IsSet() {
+		toSerialize["sessionId"] = o.SessionId.Get()
 	}
 	return toSerialize, nil
 }

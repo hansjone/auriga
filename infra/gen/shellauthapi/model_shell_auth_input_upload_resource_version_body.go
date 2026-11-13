@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 )
 
 // checks if the ShellAuthInputUploadResourceVersionBody type satisfies the MappedNullable interface at compile time
@@ -23,7 +22,7 @@ var _ MappedNullable = &ShellAuthInputUploadResourceVersionBody{}
 // ShellAuthInputUploadResourceVersionBody struct for ShellAuthInputUploadResourceVersionBody
 type ShellAuthInputUploadResourceVersionBody struct {
 	Metadata ShellAuthopenapiResourceYamlComponentsSchemasUploadMetadata `json:"metadata"`
-	Archive  *os.File                                                    `json:"archive"`
+	Archive  ShellAuthUploadReference                                    `json:"archive"`
 }
 
 type _ShellAuthInputUploadResourceVersionBody ShellAuthInputUploadResourceVersionBody
@@ -32,7 +31,7 @@ type _ShellAuthInputUploadResourceVersionBody ShellAuthInputUploadResourceVersio
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUploadResourceVersionBody(metadata ShellAuthopenapiResourceYamlComponentsSchemasUploadMetadata, archive *os.File) *ShellAuthInputUploadResourceVersionBody {
+func NewShellAuthInputUploadResourceVersionBody(metadata ShellAuthopenapiResourceYamlComponentsSchemasUploadMetadata, archive ShellAuthUploadReference) *ShellAuthInputUploadResourceVersionBody {
 	this := ShellAuthInputUploadResourceVersionBody{}
 	this.Metadata = metadata
 	this.Archive = archive
@@ -72,9 +71,9 @@ func (o *ShellAuthInputUploadResourceVersionBody) SetMetadata(v ShellAuthopenapi
 }
 
 // GetArchive returns the Archive field value
-func (o *ShellAuthInputUploadResourceVersionBody) GetArchive() *os.File {
+func (o *ShellAuthInputUploadResourceVersionBody) GetArchive() ShellAuthUploadReference {
 	if o == nil {
-		var ret *os.File
+		var ret ShellAuthUploadReference
 		return ret
 	}
 
@@ -83,7 +82,7 @@ func (o *ShellAuthInputUploadResourceVersionBody) GetArchive() *os.File {
 
 // GetArchiveOk returns a tuple with the Archive field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthInputUploadResourceVersionBody) GetArchiveOk() (**os.File, bool) {
+func (o *ShellAuthInputUploadResourceVersionBody) GetArchiveOk() (*ShellAuthUploadReference, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -91,7 +90,7 @@ func (o *ShellAuthInputUploadResourceVersionBody) GetArchiveOk() (**os.File, boo
 }
 
 // SetArchive sets field value
-func (o *ShellAuthInputUploadResourceVersionBody) SetArchive(v *os.File) {
+func (o *ShellAuthInputUploadResourceVersionBody) SetArchive(v ShellAuthUploadReference) {
 	o.Archive = v
 }
 

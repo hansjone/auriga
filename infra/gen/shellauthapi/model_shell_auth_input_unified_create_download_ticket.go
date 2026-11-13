@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,9 @@ var _ MappedNullable = &ShellAuthInputUnifiedCreateDownloadTicket{}
 
 // ShellAuthInputUnifiedCreateDownloadTicket struct for ShellAuthInputUnifiedCreateDownloadTicket
 type ShellAuthInputUnifiedCreateDownloadTicket struct {
-	Body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicketInput `json:"body"`
+	Headers              ShellAuthInputUnifiedCreateResourcePackageHeaders                `json:"headers"`
+	Body                 ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicketInput `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthInputUnifiedCreateDownloadTicket ShellAuthInputUnifiedCreateDownloadTicket
@@ -30,8 +31,9 @@ type _ShellAuthInputUnifiedCreateDownloadTicket ShellAuthInputUnifiedCreateDownl
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUnifiedCreateDownloadTicket(body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicketInput) *ShellAuthInputUnifiedCreateDownloadTicket {
+func NewShellAuthInputUnifiedCreateDownloadTicket(headers ShellAuthInputUnifiedCreateResourcePackageHeaders, body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicketInput) *ShellAuthInputUnifiedCreateDownloadTicket {
 	this := ShellAuthInputUnifiedCreateDownloadTicket{}
+	this.Headers = headers
 	this.Body = body
 	return &this
 }
@@ -42,6 +44,30 @@ func NewShellAuthInputUnifiedCreateDownloadTicket(body ShellAuthresourceUnifiedS
 func NewShellAuthInputUnifiedCreateDownloadTicketWithDefaults() *ShellAuthInputUnifiedCreateDownloadTicket {
 	this := ShellAuthInputUnifiedCreateDownloadTicket{}
 	return &this
+}
+
+// GetHeaders returns the Headers field value
+func (o *ShellAuthInputUnifiedCreateDownloadTicket) GetHeaders() ShellAuthInputUnifiedCreateResourcePackageHeaders {
+	if o == nil {
+		var ret ShellAuthInputUnifiedCreateResourcePackageHeaders
+		return ret
+	}
+
+	return o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedCreateDownloadTicket) GetHeadersOk() (*ShellAuthInputUnifiedCreateResourcePackageHeaders, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Headers, true
+}
+
+// SetHeaders sets field value
+func (o *ShellAuthInputUnifiedCreateDownloadTicket) SetHeaders(v ShellAuthInputUnifiedCreateResourcePackageHeaders) {
+	o.Headers = v
 }
 
 // GetBody returns the Body field value
@@ -78,7 +104,13 @@ func (o ShellAuthInputUnifiedCreateDownloadTicket) MarshalJSON() ([]byte, error)
 
 func (o ShellAuthInputUnifiedCreateDownloadTicket) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	toSerialize["headers"] = o.Headers
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -87,6 +119,7 @@ func (o *ShellAuthInputUnifiedCreateDownloadTicket) UnmarshalJSON(data []byte) (
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
+		"headers",
 		"body",
 	}
 
@@ -106,15 +139,21 @@ func (o *ShellAuthInputUnifiedCreateDownloadTicket) UnmarshalJSON(data []byte) (
 
 	varShellAuthInputUnifiedCreateDownloadTicket := _ShellAuthInputUnifiedCreateDownloadTicket{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthInputUnifiedCreateDownloadTicket)
+	err = json.Unmarshal(data, &varShellAuthInputUnifiedCreateDownloadTicket)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthInputUnifiedCreateDownloadTicket(varShellAuthInputUnifiedCreateDownloadTicket)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

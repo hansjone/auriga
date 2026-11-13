@@ -69,6 +69,10 @@ type ShellAuthBusinessResult struct {
 	ShellAuthBusinessResultOneOf52 *ShellAuthBusinessResultOneOf52
 	ShellAuthBusinessResultOneOf53 *ShellAuthBusinessResultOneOf53
 	ShellAuthBusinessResultOneOf54 *ShellAuthBusinessResultOneOf54
+	ShellAuthBusinessResultOneOf55 *ShellAuthBusinessResultOneOf55
+	ShellAuthBusinessResultOneOf56 *ShellAuthBusinessResultOneOf56
+	ShellAuthBusinessResultOneOf57 *ShellAuthBusinessResultOneOf57
+	ShellAuthBusinessResultOneOf58 *ShellAuthBusinessResultOneOf58
 	ShellAuthBusinessResultOneOf6  *ShellAuthBusinessResultOneOf6
 	ShellAuthBusinessResultOneOf7  *ShellAuthBusinessResultOneOf7
 	ShellAuthBusinessResultOneOf8  *ShellAuthBusinessResultOneOf8
@@ -429,6 +433,34 @@ func ShellAuthBusinessResultOneOf53AsShellAuthBusinessResult(v *ShellAuthBusines
 func ShellAuthBusinessResultOneOf54AsShellAuthBusinessResult(v *ShellAuthBusinessResultOneOf54) ShellAuthBusinessResult {
 	return ShellAuthBusinessResult{
 		ShellAuthBusinessResultOneOf54: v,
+	}
+}
+
+// ShellAuthBusinessResultOneOf55AsShellAuthBusinessResult is a convenience function that returns ShellAuthBusinessResultOneOf55 wrapped in ShellAuthBusinessResult
+func ShellAuthBusinessResultOneOf55AsShellAuthBusinessResult(v *ShellAuthBusinessResultOneOf55) ShellAuthBusinessResult {
+	return ShellAuthBusinessResult{
+		ShellAuthBusinessResultOneOf55: v,
+	}
+}
+
+// ShellAuthBusinessResultOneOf56AsShellAuthBusinessResult is a convenience function that returns ShellAuthBusinessResultOneOf56 wrapped in ShellAuthBusinessResult
+func ShellAuthBusinessResultOneOf56AsShellAuthBusinessResult(v *ShellAuthBusinessResultOneOf56) ShellAuthBusinessResult {
+	return ShellAuthBusinessResult{
+		ShellAuthBusinessResultOneOf56: v,
+	}
+}
+
+// ShellAuthBusinessResultOneOf57AsShellAuthBusinessResult is a convenience function that returns ShellAuthBusinessResultOneOf57 wrapped in ShellAuthBusinessResult
+func ShellAuthBusinessResultOneOf57AsShellAuthBusinessResult(v *ShellAuthBusinessResultOneOf57) ShellAuthBusinessResult {
+	return ShellAuthBusinessResult{
+		ShellAuthBusinessResultOneOf57: v,
+	}
+}
+
+// ShellAuthBusinessResultOneOf58AsShellAuthBusinessResult is a convenience function that returns ShellAuthBusinessResultOneOf58 wrapped in ShellAuthBusinessResult
+func ShellAuthBusinessResultOneOf58AsShellAuthBusinessResult(v *ShellAuthBusinessResultOneOf58) ShellAuthBusinessResult {
+	return ShellAuthBusinessResult{
+		ShellAuthBusinessResultOneOf58: v,
 	}
 }
 
@@ -1331,6 +1363,74 @@ func (dst *ShellAuthBusinessResult) UnmarshalJSON(data []byte) error {
 		dst.ShellAuthBusinessResultOneOf54 = nil
 	}
 
+	// try to unmarshal data into ShellAuthBusinessResultOneOf55
+	err = newStrictDecoder(data).Decode(&dst.ShellAuthBusinessResultOneOf55)
+	if err == nil {
+		jsonShellAuthBusinessResultOneOf55, _ := json.Marshal(dst.ShellAuthBusinessResultOneOf55)
+		if string(jsonShellAuthBusinessResultOneOf55) == "{}" { // empty struct
+			dst.ShellAuthBusinessResultOneOf55 = nil
+		} else {
+			if err = validator.Validate(dst.ShellAuthBusinessResultOneOf55); err != nil {
+				dst.ShellAuthBusinessResultOneOf55 = nil
+			} else {
+				match++
+			}
+		}
+	} else {
+		dst.ShellAuthBusinessResultOneOf55 = nil
+	}
+
+	// try to unmarshal data into ShellAuthBusinessResultOneOf56
+	err = newStrictDecoder(data).Decode(&dst.ShellAuthBusinessResultOneOf56)
+	if err == nil {
+		jsonShellAuthBusinessResultOneOf56, _ := json.Marshal(dst.ShellAuthBusinessResultOneOf56)
+		if string(jsonShellAuthBusinessResultOneOf56) == "{}" { // empty struct
+			dst.ShellAuthBusinessResultOneOf56 = nil
+		} else {
+			if err = validator.Validate(dst.ShellAuthBusinessResultOneOf56); err != nil {
+				dst.ShellAuthBusinessResultOneOf56 = nil
+			} else {
+				match++
+			}
+		}
+	} else {
+		dst.ShellAuthBusinessResultOneOf56 = nil
+	}
+
+	// try to unmarshal data into ShellAuthBusinessResultOneOf57
+	err = newStrictDecoder(data).Decode(&dst.ShellAuthBusinessResultOneOf57)
+	if err == nil {
+		jsonShellAuthBusinessResultOneOf57, _ := json.Marshal(dst.ShellAuthBusinessResultOneOf57)
+		if string(jsonShellAuthBusinessResultOneOf57) == "{}" { // empty struct
+			dst.ShellAuthBusinessResultOneOf57 = nil
+		} else {
+			if err = validator.Validate(dst.ShellAuthBusinessResultOneOf57); err != nil {
+				dst.ShellAuthBusinessResultOneOf57 = nil
+			} else {
+				match++
+			}
+		}
+	} else {
+		dst.ShellAuthBusinessResultOneOf57 = nil
+	}
+
+	// try to unmarshal data into ShellAuthBusinessResultOneOf58
+	err = newStrictDecoder(data).Decode(&dst.ShellAuthBusinessResultOneOf58)
+	if err == nil {
+		jsonShellAuthBusinessResultOneOf58, _ := json.Marshal(dst.ShellAuthBusinessResultOneOf58)
+		if string(jsonShellAuthBusinessResultOneOf58) == "{}" { // empty struct
+			dst.ShellAuthBusinessResultOneOf58 = nil
+		} else {
+			if err = validator.Validate(dst.ShellAuthBusinessResultOneOf58); err != nil {
+				dst.ShellAuthBusinessResultOneOf58 = nil
+			} else {
+				match++
+			}
+		}
+	} else {
+		dst.ShellAuthBusinessResultOneOf58 = nil
+	}
+
 	// try to unmarshal data into ShellAuthBusinessResultOneOf6
 	err = newStrictDecoder(data).Decode(&dst.ShellAuthBusinessResultOneOf6)
 	if err == nil {
@@ -1452,6 +1552,10 @@ func (dst *ShellAuthBusinessResult) UnmarshalJSON(data []byte) error {
 		dst.ShellAuthBusinessResultOneOf52 = nil
 		dst.ShellAuthBusinessResultOneOf53 = nil
 		dst.ShellAuthBusinessResultOneOf54 = nil
+		dst.ShellAuthBusinessResultOneOf55 = nil
+		dst.ShellAuthBusinessResultOneOf56 = nil
+		dst.ShellAuthBusinessResultOneOf57 = nil
+		dst.ShellAuthBusinessResultOneOf58 = nil
 		dst.ShellAuthBusinessResultOneOf6 = nil
 		dst.ShellAuthBusinessResultOneOf7 = nil
 		dst.ShellAuthBusinessResultOneOf8 = nil
@@ -1673,6 +1777,22 @@ func (src ShellAuthBusinessResult) MarshalJSON() ([]byte, error) {
 
 	if src.ShellAuthBusinessResultOneOf54 != nil {
 		return json.Marshal(&src.ShellAuthBusinessResultOneOf54)
+	}
+
+	if src.ShellAuthBusinessResultOneOf55 != nil {
+		return json.Marshal(&src.ShellAuthBusinessResultOneOf55)
+	}
+
+	if src.ShellAuthBusinessResultOneOf56 != nil {
+		return json.Marshal(&src.ShellAuthBusinessResultOneOf56)
+	}
+
+	if src.ShellAuthBusinessResultOneOf57 != nil {
+		return json.Marshal(&src.ShellAuthBusinessResultOneOf57)
+	}
+
+	if src.ShellAuthBusinessResultOneOf58 != nil {
+		return json.Marshal(&src.ShellAuthBusinessResultOneOf58)
 	}
 
 	if src.ShellAuthBusinessResultOneOf6 != nil {
@@ -1903,6 +2023,22 @@ func (obj *ShellAuthBusinessResult) GetActualInstance() interface{} {
 		return obj.ShellAuthBusinessResultOneOf54
 	}
 
+	if obj.ShellAuthBusinessResultOneOf55 != nil {
+		return obj.ShellAuthBusinessResultOneOf55
+	}
+
+	if obj.ShellAuthBusinessResultOneOf56 != nil {
+		return obj.ShellAuthBusinessResultOneOf56
+	}
+
+	if obj.ShellAuthBusinessResultOneOf57 != nil {
+		return obj.ShellAuthBusinessResultOneOf57
+	}
+
+	if obj.ShellAuthBusinessResultOneOf58 != nil {
+		return obj.ShellAuthBusinessResultOneOf58
+	}
+
 	if obj.ShellAuthBusinessResultOneOf6 != nil {
 		return obj.ShellAuthBusinessResultOneOf6
 	}
@@ -2127,6 +2263,22 @@ func (obj ShellAuthBusinessResult) GetActualInstanceValue() interface{} {
 
 	if obj.ShellAuthBusinessResultOneOf54 != nil {
 		return *obj.ShellAuthBusinessResultOneOf54
+	}
+
+	if obj.ShellAuthBusinessResultOneOf55 != nil {
+		return *obj.ShellAuthBusinessResultOneOf55
+	}
+
+	if obj.ShellAuthBusinessResultOneOf56 != nil {
+		return *obj.ShellAuthBusinessResultOneOf56
+	}
+
+	if obj.ShellAuthBusinessResultOneOf57 != nil {
+		return *obj.ShellAuthBusinessResultOneOf57
+	}
+
+	if obj.ShellAuthBusinessResultOneOf58 != nil {
+		return *obj.ShellAuthBusinessResultOneOf58
 	}
 
 	if obj.ShellAuthBusinessResultOneOf6 != nil {

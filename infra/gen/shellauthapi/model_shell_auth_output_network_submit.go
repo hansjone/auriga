@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,8 +20,10 @@ var _ MappedNullable = &ShellAuthOutputNetworkSubmit{}
 
 // ShellAuthOutputNetworkSubmit struct for ShellAuthOutputNetworkSubmit
 type ShellAuthOutputNetworkSubmit struct {
-	// 解码后最多65536字节，必须严格验证 network/send.schema.json#/$defs/SendResult；保留原始受签字节，不经生成模型重序列化。
-	ResultWire string `json:"resultWire" validate:"regexp=^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"`
+	StatusCode           int32                                 `json:"statusCode"`
+	Headers              *ShellAuthOutputTeamInitializeHeaders `json:"headers,omitempty"`
+	Body                 ShellAuthOutputNetworkSubmitBody      `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthOutputNetworkSubmit ShellAuthOutputNetworkSubmit
@@ -31,9 +32,10 @@ type _ShellAuthOutputNetworkSubmit ShellAuthOutputNetworkSubmit
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputNetworkSubmit(resultWire string) *ShellAuthOutputNetworkSubmit {
+func NewShellAuthOutputNetworkSubmit(statusCode int32, body ShellAuthOutputNetworkSubmitBody) *ShellAuthOutputNetworkSubmit {
 	this := ShellAuthOutputNetworkSubmit{}
-	this.ResultWire = resultWire
+	this.StatusCode = statusCode
+	this.Body = body
 	return &this
 }
 
@@ -45,28 +47,84 @@ func NewShellAuthOutputNetworkSubmitWithDefaults() *ShellAuthOutputNetworkSubmit
 	return &this
 }
 
-// GetResultWire returns the ResultWire field value
-func (o *ShellAuthOutputNetworkSubmit) GetResultWire() string {
+// GetStatusCode returns the StatusCode field value
+func (o *ShellAuthOutputNetworkSubmit) GetStatusCode() int32 {
 	if o == nil {
-		var ret string
+		var ret int32
 		return ret
 	}
 
-	return o.ResultWire
+	return o.StatusCode
 }
 
-// GetResultWireOk returns a tuple with the ResultWire field value
+// GetStatusCodeOk returns a tuple with the StatusCode field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputNetworkSubmit) GetResultWireOk() (*string, bool) {
+func (o *ShellAuthOutputNetworkSubmit) GetStatusCodeOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.ResultWire, true
+	return &o.StatusCode, true
 }
 
-// SetResultWire sets field value
-func (o *ShellAuthOutputNetworkSubmit) SetResultWire(v string) {
-	o.ResultWire = v
+// SetStatusCode sets field value
+func (o *ShellAuthOutputNetworkSubmit) SetStatusCode(v int32) {
+	o.StatusCode = v
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthOutputNetworkSubmit) GetHeaders() ShellAuthOutputTeamInitializeHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthOutputTeamInitializeHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputNetworkSubmit) GetHeadersOk() (*ShellAuthOutputTeamInitializeHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthOutputNetworkSubmit) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthOutputTeamInitializeHeaders and assigns it to the Headers field.
+func (o *ShellAuthOutputNetworkSubmit) SetHeaders(v ShellAuthOutputTeamInitializeHeaders) {
+	o.Headers = &v
+}
+
+// GetBody returns the Body field value
+func (o *ShellAuthOutputNetworkSubmit) GetBody() ShellAuthOutputNetworkSubmitBody {
+	if o == nil {
+		var ret ShellAuthOutputNetworkSubmitBody
+		return ret
+	}
+
+	return o.Body
+}
+
+// GetBodyOk returns a tuple with the Body field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputNetworkSubmit) GetBodyOk() (*ShellAuthOutputNetworkSubmitBody, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Body, true
+}
+
+// SetBody sets field value
+func (o *ShellAuthOutputNetworkSubmit) SetBody(v ShellAuthOutputNetworkSubmitBody) {
+	o.Body = v
 }
 
 func (o ShellAuthOutputNetworkSubmit) MarshalJSON() ([]byte, error) {
@@ -79,7 +137,16 @@ func (o ShellAuthOutputNetworkSubmit) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthOutputNetworkSubmit) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["resultWire"] = o.ResultWire
+	toSerialize["statusCode"] = o.StatusCode
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
+	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -88,7 +155,8 @@ func (o *ShellAuthOutputNetworkSubmit) UnmarshalJSON(data []byte) (err error) {
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"resultWire",
+		"statusCode",
+		"body",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -107,15 +175,22 @@ func (o *ShellAuthOutputNetworkSubmit) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthOutputNetworkSubmit := _ShellAuthOutputNetworkSubmit{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthOutputNetworkSubmit)
+	err = json.Unmarshal(data, &varShellAuthOutputNetworkSubmit)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutputNetworkSubmit(varShellAuthOutputNetworkSubmit)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "statusCode")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

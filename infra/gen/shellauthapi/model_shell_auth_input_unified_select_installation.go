@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,9 @@ var _ MappedNullable = &ShellAuthInputUnifiedSelectInstallation{}
 
 // ShellAuthInputUnifiedSelectInstallation struct for ShellAuthInputUnifiedSelectInstallation
 type ShellAuthInputUnifiedSelectInstallation struct {
-	Body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationInput `json:"body"`
+	Headers              ShellAuthInputUnifiedCreateResourcePackageHeaders              `json:"headers"`
+	Body                 ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationInput `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthInputUnifiedSelectInstallation ShellAuthInputUnifiedSelectInstallation
@@ -30,8 +31,9 @@ type _ShellAuthInputUnifiedSelectInstallation ShellAuthInputUnifiedSelectInstall
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUnifiedSelectInstallation(body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationInput) *ShellAuthInputUnifiedSelectInstallation {
+func NewShellAuthInputUnifiedSelectInstallation(headers ShellAuthInputUnifiedCreateResourcePackageHeaders, body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationInput) *ShellAuthInputUnifiedSelectInstallation {
 	this := ShellAuthInputUnifiedSelectInstallation{}
+	this.Headers = headers
 	this.Body = body
 	return &this
 }
@@ -42,6 +44,30 @@ func NewShellAuthInputUnifiedSelectInstallation(body ShellAuthresourceUnifiedSch
 func NewShellAuthInputUnifiedSelectInstallationWithDefaults() *ShellAuthInputUnifiedSelectInstallation {
 	this := ShellAuthInputUnifiedSelectInstallation{}
 	return &this
+}
+
+// GetHeaders returns the Headers field value
+func (o *ShellAuthInputUnifiedSelectInstallation) GetHeaders() ShellAuthInputUnifiedCreateResourcePackageHeaders {
+	if o == nil {
+		var ret ShellAuthInputUnifiedCreateResourcePackageHeaders
+		return ret
+	}
+
+	return o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedSelectInstallation) GetHeadersOk() (*ShellAuthInputUnifiedCreateResourcePackageHeaders, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Headers, true
+}
+
+// SetHeaders sets field value
+func (o *ShellAuthInputUnifiedSelectInstallation) SetHeaders(v ShellAuthInputUnifiedCreateResourcePackageHeaders) {
+	o.Headers = v
 }
 
 // GetBody returns the Body field value
@@ -78,7 +104,13 @@ func (o ShellAuthInputUnifiedSelectInstallation) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthInputUnifiedSelectInstallation) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	toSerialize["headers"] = o.Headers
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -87,6 +119,7 @@ func (o *ShellAuthInputUnifiedSelectInstallation) UnmarshalJSON(data []byte) (er
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
+		"headers",
 		"body",
 	}
 
@@ -106,15 +139,21 @@ func (o *ShellAuthInputUnifiedSelectInstallation) UnmarshalJSON(data []byte) (er
 
 	varShellAuthInputUnifiedSelectInstallation := _ShellAuthInputUnifiedSelectInstallation{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthInputUnifiedSelectInstallation)
+	err = json.Unmarshal(data, &varShellAuthInputUnifiedSelectInstallation)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthInputUnifiedSelectInstallation(varShellAuthInputUnifiedSelectInstallation)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf46{}
 
 // ShellAuthBusinessResultOneOf46 struct for ShellAuthBusinessResultOneOf46
 type ShellAuthBusinessResultOneOf46 struct {
-	RequestId string                           `json:"requestId"`
-	Operation string                           `json:"operation"`
-	Output    ShellAuthOutputTeamListEndpoints `json:"output"`
+	RequestId string                                   `json:"requestId"`
+	Operation string                                   `json:"operation"`
+	Output    ShellAuthOutputGetNetworkKeyAnnouncement `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf46 ShellAuthBusinessResultOneOf46
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf46 ShellAuthBusinessResultOneOf46
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf46(requestId string, operation string, output ShellAuthOutputTeamListEndpoints) *ShellAuthBusinessResultOneOf46 {
+func NewShellAuthBusinessResultOneOf46(requestId string, operation string, output ShellAuthOutputGetNetworkKeyAnnouncement) *ShellAuthBusinessResultOneOf46 {
 	this := ShellAuthBusinessResultOneOf46{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf46) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf46) GetOutput() ShellAuthOutputTeamListEndpoints {
+func (o *ShellAuthBusinessResultOneOf46) GetOutput() ShellAuthOutputGetNetworkKeyAnnouncement {
 	if o == nil {
-		var ret ShellAuthOutputTeamListEndpoints
+		var ret ShellAuthOutputGetNetworkKeyAnnouncement
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf46) GetOutput() ShellAuthOutputTeamListEndp
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf46) GetOutputOk() (*ShellAuthOutputTeamListEndpoints, bool) {
+func (o *ShellAuthBusinessResultOneOf46) GetOutputOk() (*ShellAuthOutputGetNetworkKeyAnnouncement, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf46) GetOutputOk() (*ShellAuthOutputTeamList
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf46) SetOutput(v ShellAuthOutputTeamListEndpoints) {
+func (o *ShellAuthBusinessResultOneOf46) SetOutput(v ShellAuthOutputGetNetworkKeyAnnouncement) {
 	o.Output = v
 }
 

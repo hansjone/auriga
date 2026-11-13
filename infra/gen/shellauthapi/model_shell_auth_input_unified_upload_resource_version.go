@@ -20,8 +20,9 @@ var _ MappedNullable = &ShellAuthInputUnifiedUploadResourceVersion{}
 
 // ShellAuthInputUnifiedUploadResourceVersion struct for ShellAuthInputUnifiedUploadResourceVersion
 type ShellAuthInputUnifiedUploadResourceVersion struct {
-	PackageId            string                                         `json:"packageId"`
-	Body                 ShellAuthInputUnifiedUploadResourceVersionBody `json:"body"`
+	PackageId            string                                            `json:"packageId"`
+	Headers              ShellAuthInputUnifiedCreateResourcePackageHeaders `json:"headers"`
+	Body                 ShellAuthInputUnifiedUploadResourceVersionBody    `json:"body"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -31,9 +32,10 @@ type _ShellAuthInputUnifiedUploadResourceVersion ShellAuthInputUnifiedUploadReso
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUnifiedUploadResourceVersion(packageId string, body ShellAuthInputUnifiedUploadResourceVersionBody) *ShellAuthInputUnifiedUploadResourceVersion {
+func NewShellAuthInputUnifiedUploadResourceVersion(packageId string, headers ShellAuthInputUnifiedCreateResourcePackageHeaders, body ShellAuthInputUnifiedUploadResourceVersionBody) *ShellAuthInputUnifiedUploadResourceVersion {
 	this := ShellAuthInputUnifiedUploadResourceVersion{}
 	this.PackageId = packageId
+	this.Headers = headers
 	this.Body = body
 	return &this
 }
@@ -68,6 +70,30 @@ func (o *ShellAuthInputUnifiedUploadResourceVersion) GetPackageIdOk() (*string, 
 // SetPackageId sets field value
 func (o *ShellAuthInputUnifiedUploadResourceVersion) SetPackageId(v string) {
 	o.PackageId = v
+}
+
+// GetHeaders returns the Headers field value
+func (o *ShellAuthInputUnifiedUploadResourceVersion) GetHeaders() ShellAuthInputUnifiedCreateResourcePackageHeaders {
+	if o == nil {
+		var ret ShellAuthInputUnifiedCreateResourcePackageHeaders
+		return ret
+	}
+
+	return o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedUploadResourceVersion) GetHeadersOk() (*ShellAuthInputUnifiedCreateResourcePackageHeaders, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Headers, true
+}
+
+// SetHeaders sets field value
+func (o *ShellAuthInputUnifiedUploadResourceVersion) SetHeaders(v ShellAuthInputUnifiedCreateResourcePackageHeaders) {
+	o.Headers = v
 }
 
 // GetBody returns the Body field value
@@ -105,6 +131,7 @@ func (o ShellAuthInputUnifiedUploadResourceVersion) MarshalJSON() ([]byte, error
 func (o ShellAuthInputUnifiedUploadResourceVersion) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["packageId"] = o.PackageId
+	toSerialize["headers"] = o.Headers
 	toSerialize["body"] = o.Body
 
 	for key, value := range o.AdditionalProperties {
@@ -120,6 +147,7 @@ func (o *ShellAuthInputUnifiedUploadResourceVersion) UnmarshalJSON(data []byte) 
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
 		"packageId",
+		"headers",
 		"body",
 	}
 
@@ -151,6 +179,7 @@ func (o *ShellAuthInputUnifiedUploadResourceVersion) UnmarshalJSON(data []byte) 
 
 	if err = json.Unmarshal(data, &additionalProperties); err == nil {
 		delete(additionalProperties, "packageId")
+		delete(additionalProperties, "headers")
 		delete(additionalProperties, "body")
 		o.AdditionalProperties = additionalProperties
 	}

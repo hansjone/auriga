@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,9 @@ var _ MappedNullable = &ShellAuthInputCreateAiChatCompletion{}
 
 // ShellAuthInputCreateAiChatCompletion struct for ShellAuthInputCreateAiChatCompletion
 type ShellAuthInputCreateAiChatCompletion struct {
-	Body ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest `json:"body"`
+	Headers              *ShellAuthInputCreateAiChatCompletionHeaders `json:"headers,omitempty"`
+	Body                 ShellAuthChatJsonRequest                     `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthInputCreateAiChatCompletion ShellAuthInputCreateAiChatCompletion
@@ -30,7 +31,7 @@ type _ShellAuthInputCreateAiChatCompletion ShellAuthInputCreateAiChatCompletion
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputCreateAiChatCompletion(body ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) *ShellAuthInputCreateAiChatCompletion {
+func NewShellAuthInputCreateAiChatCompletion(body ShellAuthChatJsonRequest) *ShellAuthInputCreateAiChatCompletion {
 	this := ShellAuthInputCreateAiChatCompletion{}
 	this.Body = body
 	return &this
@@ -44,10 +45,42 @@ func NewShellAuthInputCreateAiChatCompletionWithDefaults() *ShellAuthInputCreate
 	return &this
 }
 
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthInputCreateAiChatCompletion) GetHeaders() ShellAuthInputCreateAiChatCompletionHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthInputCreateAiChatCompletionHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputCreateAiChatCompletion) GetHeadersOk() (*ShellAuthInputCreateAiChatCompletionHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthInputCreateAiChatCompletion) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthInputCreateAiChatCompletionHeaders and assigns it to the Headers field.
+func (o *ShellAuthInputCreateAiChatCompletion) SetHeaders(v ShellAuthInputCreateAiChatCompletionHeaders) {
+	o.Headers = &v
+}
+
 // GetBody returns the Body field value
-func (o *ShellAuthInputCreateAiChatCompletion) GetBody() ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest {
+func (o *ShellAuthInputCreateAiChatCompletion) GetBody() ShellAuthChatJsonRequest {
 	if o == nil {
-		var ret ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest
+		var ret ShellAuthChatJsonRequest
 		return ret
 	}
 
@@ -56,7 +89,7 @@ func (o *ShellAuthInputCreateAiChatCompletion) GetBody() ShellAuthopenapiAiYamlC
 
 // GetBodyOk returns a tuple with the Body field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthInputCreateAiChatCompletion) GetBodyOk() (*ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest, bool) {
+func (o *ShellAuthInputCreateAiChatCompletion) GetBodyOk() (*ShellAuthChatJsonRequest, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -64,7 +97,7 @@ func (o *ShellAuthInputCreateAiChatCompletion) GetBodyOk() (*ShellAuthopenapiAiY
 }
 
 // SetBody sets field value
-func (o *ShellAuthInputCreateAiChatCompletion) SetBody(v ShellAuthopenapiAiYamlComponentsSchemasChatCompletionRequest) {
+func (o *ShellAuthInputCreateAiChatCompletion) SetBody(v ShellAuthChatJsonRequest) {
 	o.Body = v
 }
 
@@ -78,7 +111,15 @@ func (o ShellAuthInputCreateAiChatCompletion) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthInputCreateAiChatCompletion) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -106,15 +147,21 @@ func (o *ShellAuthInputCreateAiChatCompletion) UnmarshalJSON(data []byte) (err e
 
 	varShellAuthInputCreateAiChatCompletion := _ShellAuthInputCreateAiChatCompletion{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthInputCreateAiChatCompletion)
+	err = json.Unmarshal(data, &varShellAuthInputCreateAiChatCompletion)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthInputCreateAiChatCompletion(varShellAuthInputCreateAiChatCompletion)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

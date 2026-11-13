@@ -9,6 +9,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_listResourcePackages",
       "output": "ShellAuthOutput_listResourcePackages",
@@ -22,6 +30,17 @@
       "permission": "resource.packages.upload",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_createResourcePackage",
       "output": "ShellAuthOutput_createResourcePackage",
@@ -35,6 +54,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_getResourcePackage",
       "output": "ShellAuthOutput_getResourcePackage",
@@ -48,6 +75,17 @@
       "permission": "resource.packages.upload",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "if-match",
+        "idempotency-key"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_patchResourcePackage",
       "output": "ShellAuthOutput_patchResourcePackage",
@@ -61,6 +99,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_listResourceVersions",
       "output": "ShellAuthOutput_listResourceVersions",
@@ -74,6 +120,17 @@
       "permission": "resource.packages.upload",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_uploadResourceVersion",
       "output": "ShellAuthOutput_uploadResourceVersion",
@@ -87,6 +144,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_getResourceVersion",
       "output": "ShellAuthOutput_getResourceVersion",
@@ -100,6 +165,17 @@
       "permission": "resource.versions.submit",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_submitResourceVersion",
       "output": "ShellAuthOutput_submitResourceVersion",
@@ -113,6 +189,17 @@
       "permission": "resource.distributions.manage",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_requestResourceDistribution",
       "output": "ShellAuthOutput_requestResourceDistribution",
@@ -126,6 +213,14 @@
       "permission": "resource.distributions.manage",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_getResourceDistribution",
       "output": "ShellAuthOutput_getResourceDistribution",
@@ -139,6 +234,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": true,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_downloadResourceContent",
       "output": "ShellAuthOutput_downloadResourceContent",
@@ -152,6 +255,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_getResourceRevocations",
       "output": "ShellAuthOutput_getResourceRevocations",
@@ -165,6 +276,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_createMemberResourceDownloadTicket",
       "output": "ShellAuthOutput_createMemberResourceDownloadTicket",
@@ -178,6 +300,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": true,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_consumeMemberResourceDownloadTicket",
       "output": "ShellAuthOutput_consumeMemberResourceDownloadTicket",
@@ -191,6 +324,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_listMemberResourceInstallations",
       "output": "ShellAuthOutput_listMemberResourceInstallations",
@@ -204,6 +345,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_selectMemberResourceInstallation",
       "output": "ShellAuthOutput_selectMemberResourceInstallation",
@@ -217,6 +369,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_reportMemberResourceInstallation",
       "output": "ShellAuthOutput_reportMemberResourceInstallation",
@@ -230,6 +393,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_UnifiedListResourcePackages",
       "output": "ShellAuthOutput_UnifiedListResourcePackages",
@@ -243,6 +414,17 @@
       "permission": "resource.packages.upload",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_UnifiedCreateResourcePackage",
       "output": "ShellAuthOutput_UnifiedCreateResourcePackage",
@@ -256,6 +438,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_UnifiedGetResourcePackage",
       "output": "ShellAuthOutput_UnifiedGetResourcePackage",
@@ -269,6 +459,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_UnifiedListResourceVersions",
       "output": "ShellAuthOutput_UnifiedListResourceVersions",
@@ -282,6 +480,17 @@
       "permission": "resource.packages.upload",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_UnifiedUploadResourceVersion",
       "output": "ShellAuthOutput_UnifiedUploadResourceVersion",
@@ -295,6 +504,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_UnifiedGetResourceVersion",
       "output": "ShellAuthOutput_UnifiedGetResourceVersion",
@@ -308,6 +525,17 @@
       "permission": "resource.versions.submit",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_UnifiedSubmitResourceVersion",
       "output": "ShellAuthOutput_UnifiedSubmitResourceVersion",
@@ -321,6 +549,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": true,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_UnifiedDownloadResourceManifest",
       "output": "ShellAuthOutput_UnifiedDownloadResourceManifest",
@@ -334,6 +570,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_UnifiedCreateDownloadTicket",
       "output": "ShellAuthOutput_UnifiedCreateDownloadTicket",
@@ -347,6 +594,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": true,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_UnifiedDownloadArtifact",
       "output": "ShellAuthOutput_UnifiedDownloadArtifact",
@@ -360,6 +618,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_UnifiedListInstallations",
       "output": "ShellAuthOutput_UnifiedListInstallations",
@@ -373,6 +639,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_UnifiedSelectInstallation",
       "output": "ShellAuthOutput_UnifiedSelectInstallation",
@@ -386,6 +663,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_UnifiedReportInstallation",
       "output": "ShellAuthOutput_UnifiedReportInstallation",
@@ -399,6 +687,17 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_UnifiedRenewInstallation",
       "output": "ShellAuthOutput_UnifiedRenewInstallation",
@@ -412,6 +711,14 @@
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": true,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_UnifiedDownloadVersionArtifact",
       "output": "ShellAuthOutput_UnifiedDownloadVersionArtifact",
@@ -425,6 +732,14 @@
       "permission": "ai.usage.read",
       "audience": "auriga.ai-gateway",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_listOwnAiUsage",
       "output": "ShellAuthOutput_listOwnAiUsage",
@@ -438,6 +753,14 @@
       "permission": "ai.models.invoke",
       "audience": "auriga.ai-gateway",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_listAiModels",
       "output": "ShellAuthOutput_listAiModels",
@@ -451,7 +774,17 @@
       "source": "openapi/ai.yaml",
       "permission": "ai.models.invoke",
       "audience": "auriga.ai-gateway",
-      "stream": true,
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "explicit_idempotency_only",
       "input": "ShellAuthInput_createAiChatCompletion",
       "output": "ShellAuthOutput_createAiChatCompletion",
@@ -466,10 +799,42 @@
       "permission": "auriga.connect.collab.use",
       "audience": "auriga",
       "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
       "retry": "read_only",
       "input": "ShellAuthInput_listNetworkSystems",
       "output": "ShellAuthOutput_listNetworkSystems",
       "scope": "auriga.connect"
+    },
+    {
+      "operation": "createAiChatCompletionStream",
+      "method": "post",
+      "route": "/ai/v1/chat/completions",
+      "source": "openapi/ai.yaml",
+      "permission": "ai.models.invoke",
+      "audience": "auriga.ai-gateway",
+      "stream": true,
+      "requestHeaders": [
+        "idempotency-key"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_createAiChatCompletionStream",
+      "output": "ShellAuthOutput_createAiChatCompletionStream",
+      "scope": "auriga.connect",
+      "devicePermission": "auriga.connect.models.invoke"
     },
     {
       "operation": "team_initialize",
@@ -480,6 +845,11 @@
       "stream": false,
       "retry": "never",
       "route": "/ai/mcp",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -491,6 +861,11 @@
       "stream": false,
       "retry": "never",
       "route": "/ai/mcp",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -502,6 +877,11 @@
       "stream": false,
       "retry": "never",
       "route": "/ai/mcp",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -513,6 +893,43 @@
       "stream": true,
       "retry": "never",
       "route": "broker:nats",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "upload_open",
+      "input": "ShellAuthInput_upload_open",
+      "output": "ShellAuthOutput_upload_open",
+      "audience": "auriga",
+      "permission": "auriga.connect",
+      "stream": true,
+      "retry": "never",
+      "route": "broker:upload",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "upload_finish",
+      "input": "ShellAuthInput_upload_finish",
+      "output": "ShellAuthOutput_upload_finish",
+      "audience": "auriga",
+      "permission": "auriga.connect",
+      "stream": false,
+      "retry": "never",
+      "route": "broker:upload",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -524,6 +941,11 @@
       "stream": false,
       "retry": "never",
       "route": "broker:nats",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -535,6 +957,11 @@
       "stream": false,
       "retry": "never",
       "route": "/api/ai/v1/network/submit",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -546,6 +973,11 @@
       "stream": false,
       "retry": "never",
       "route": "/api/collab/v1/network/keys",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -557,6 +989,11 @@
       "stream": false,
       "retry": "never",
       "route": "/api/collab/v1/network/keys/announcement",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -568,6 +1005,11 @@
       "stream": false,
       "retry": "never",
       "route": "/api/iam/v1/me",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -579,6 +1021,11 @@
       "stream": false,
       "retry": "never",
       "route": "/api/iam/v1/login/providers",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -591,6 +1038,11 @@
       "retry": "explicit_idempotency_only",
       "route": "/ai/mcp",
       "tool": "auriga_list_endpoints",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -603,6 +1055,11 @@
       "retry": "explicit_idempotency_only",
       "route": "/ai/mcp",
       "tool": "auriga_open_thread",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -615,6 +1072,11 @@
       "retry": "explicit_idempotency_only",
       "route": "/ai/mcp",
       "tool": "auriga_reply_thread",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -627,6 +1089,11 @@
       "retry": "explicit_idempotency_only",
       "route": "/ai/mcp",
       "tool": "auriga_read_thread",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -638,6 +1105,11 @@
       "stream": true,
       "retry": "explicit_idempotency_only",
       "route": "/ai/team/node/register",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -649,6 +1121,11 @@
       "stream": true,
       "retry": "explicit_idempotency_only",
       "route": "/ai/team/node/bind",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -660,6 +1137,11 @@
       "stream": true,
       "retry": "explicit_idempotency_only",
       "route": "/ai/team/node/pull",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -671,6 +1153,11 @@
       "stream": true,
       "retry": "explicit_idempotency_only",
       "route": "/ai/team/node/ack",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     },
     {
@@ -682,6 +1169,11 @@
       "stream": true,
       "retry": "explicit_idempotency_only",
       "route": "/ai/team/node/revoke",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
       "scope": "auriga.connect"
     }
   ]

@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf33{}
 
 // ShellAuthBusinessResultOneOf33 struct for ShellAuthBusinessResultOneOf33
 type ShellAuthBusinessResultOneOf33 struct {
-	RequestId string                                           `json:"requestId"`
-	Operation string                                           `json:"operation"`
-	Output    ShellAuthopenapiAiYamlComponentsSchemasModelList `json:"output"`
+	RequestId string                      `json:"requestId"`
+	Operation string                      `json:"operation"`
+	Output    ShellAuthOutputListAiModels `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf33 ShellAuthBusinessResultOneOf33
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf33 ShellAuthBusinessResultOneOf33
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf33(requestId string, operation string, output ShellAuthopenapiAiYamlComponentsSchemasModelList) *ShellAuthBusinessResultOneOf33 {
+func NewShellAuthBusinessResultOneOf33(requestId string, operation string, output ShellAuthOutputListAiModels) *ShellAuthBusinessResultOneOf33 {
 	this := ShellAuthBusinessResultOneOf33{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf33) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf33) GetOutput() ShellAuthopenapiAiYamlComponentsSchemasModelList {
+func (o *ShellAuthBusinessResultOneOf33) GetOutput() ShellAuthOutputListAiModels {
 	if o == nil {
-		var ret ShellAuthopenapiAiYamlComponentsSchemasModelList
+		var ret ShellAuthOutputListAiModels
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf33) GetOutput() ShellAuthopenapiAiYamlCompo
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf33) GetOutputOk() (*ShellAuthopenapiAiYamlComponentsSchemasModelList, bool) {
+func (o *ShellAuthBusinessResultOneOf33) GetOutputOk() (*ShellAuthOutputListAiModels, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf33) GetOutputOk() (*ShellAuthopenapiAiYamlC
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf33) SetOutput(v ShellAuthopenapiAiYamlComponentsSchemasModelList) {
+func (o *ShellAuthBusinessResultOneOf33) SetOutput(v ShellAuthOutputListAiModels) {
 	o.Output = v
 }
 

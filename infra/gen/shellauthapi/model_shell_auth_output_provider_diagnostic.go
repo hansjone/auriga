@@ -21,7 +21,9 @@ var _ MappedNullable = &ShellAuthOutputProviderDiagnostic{}
 
 // ShellAuthOutputProviderDiagnostic struct for ShellAuthOutputProviderDiagnostic
 type ShellAuthOutputProviderDiagnostic struct {
-	Available bool `json:"available"`
+	StatusCode int32                                 `json:"statusCode"`
+	Headers    *ShellAuthOutputTeamInitializeHeaders `json:"headers,omitempty"`
+	Body       ShellAuthOutputTeamPingBody           `json:"body"`
 }
 
 type _ShellAuthOutputProviderDiagnostic ShellAuthOutputProviderDiagnostic
@@ -30,9 +32,10 @@ type _ShellAuthOutputProviderDiagnostic ShellAuthOutputProviderDiagnostic
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputProviderDiagnostic(available bool) *ShellAuthOutputProviderDiagnostic {
+func NewShellAuthOutputProviderDiagnostic(statusCode int32, body ShellAuthOutputTeamPingBody) *ShellAuthOutputProviderDiagnostic {
 	this := ShellAuthOutputProviderDiagnostic{}
-	this.Available = available
+	this.StatusCode = statusCode
+	this.Body = body
 	return &this
 }
 
@@ -44,28 +47,84 @@ func NewShellAuthOutputProviderDiagnosticWithDefaults() *ShellAuthOutputProvider
 	return &this
 }
 
-// GetAvailable returns the Available field value
-func (o *ShellAuthOutputProviderDiagnostic) GetAvailable() bool {
+// GetStatusCode returns the StatusCode field value
+func (o *ShellAuthOutputProviderDiagnostic) GetStatusCode() int32 {
 	if o == nil {
-		var ret bool
+		var ret int32
 		return ret
 	}
 
-	return o.Available
+	return o.StatusCode
 }
 
-// GetAvailableOk returns a tuple with the Available field value
+// GetStatusCodeOk returns a tuple with the StatusCode field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputProviderDiagnostic) GetAvailableOk() (*bool, bool) {
+func (o *ShellAuthOutputProviderDiagnostic) GetStatusCodeOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.Available, true
+	return &o.StatusCode, true
 }
 
-// SetAvailable sets field value
-func (o *ShellAuthOutputProviderDiagnostic) SetAvailable(v bool) {
-	o.Available = v
+// SetStatusCode sets field value
+func (o *ShellAuthOutputProviderDiagnostic) SetStatusCode(v int32) {
+	o.StatusCode = v
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthOutputProviderDiagnostic) GetHeaders() ShellAuthOutputTeamInitializeHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthOutputTeamInitializeHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputProviderDiagnostic) GetHeadersOk() (*ShellAuthOutputTeamInitializeHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthOutputProviderDiagnostic) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthOutputTeamInitializeHeaders and assigns it to the Headers field.
+func (o *ShellAuthOutputProviderDiagnostic) SetHeaders(v ShellAuthOutputTeamInitializeHeaders) {
+	o.Headers = &v
+}
+
+// GetBody returns the Body field value
+func (o *ShellAuthOutputProviderDiagnostic) GetBody() ShellAuthOutputTeamPingBody {
+	if o == nil {
+		var ret ShellAuthOutputTeamPingBody
+		return ret
+	}
+
+	return o.Body
+}
+
+// GetBodyOk returns a tuple with the Body field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputProviderDiagnostic) GetBodyOk() (*ShellAuthOutputTeamPingBody, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Body, true
+}
+
+// SetBody sets field value
+func (o *ShellAuthOutputProviderDiagnostic) SetBody(v ShellAuthOutputTeamPingBody) {
+	o.Body = v
 }
 
 func (o ShellAuthOutputProviderDiagnostic) MarshalJSON() ([]byte, error) {
@@ -78,7 +137,11 @@ func (o ShellAuthOutputProviderDiagnostic) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthOutputProviderDiagnostic) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["available"] = o.Available
+	toSerialize["statusCode"] = o.StatusCode
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
+	toSerialize["body"] = o.Body
 	return toSerialize, nil
 }
 
@@ -87,7 +150,8 @@ func (o *ShellAuthOutputProviderDiagnostic) UnmarshalJSON(data []byte) (err erro
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"available",
+		"statusCode",
+		"body",
 	}
 
 	allProperties := make(map[string]interface{})

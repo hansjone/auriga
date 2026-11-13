@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,8 +20,10 @@ var _ MappedNullable = &ShellAuthOutputProfileRead{}
 
 // ShellAuthOutputProfileRead struct for ShellAuthOutputProfileRead
 type ShellAuthOutputProfileRead struct {
-	MemberId    string `json:"memberId"`
-	DisplayName string `json:"displayName"`
+	StatusCode           int32                                 `json:"statusCode"`
+	Headers              *ShellAuthOutputTeamInitializeHeaders `json:"headers,omitempty"`
+	Body                 ShellAuthOutputProfileReadBody        `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthOutputProfileRead ShellAuthOutputProfileRead
@@ -31,10 +32,10 @@ type _ShellAuthOutputProfileRead ShellAuthOutputProfileRead
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputProfileRead(memberId string, displayName string) *ShellAuthOutputProfileRead {
+func NewShellAuthOutputProfileRead(statusCode int32, body ShellAuthOutputProfileReadBody) *ShellAuthOutputProfileRead {
 	this := ShellAuthOutputProfileRead{}
-	this.MemberId = memberId
-	this.DisplayName = displayName
+	this.StatusCode = statusCode
+	this.Body = body
 	return &this
 }
 
@@ -46,52 +47,84 @@ func NewShellAuthOutputProfileReadWithDefaults() *ShellAuthOutputProfileRead {
 	return &this
 }
 
-// GetMemberId returns the MemberId field value
-func (o *ShellAuthOutputProfileRead) GetMemberId() string {
+// GetStatusCode returns the StatusCode field value
+func (o *ShellAuthOutputProfileRead) GetStatusCode() int32 {
 	if o == nil {
-		var ret string
+		var ret int32
 		return ret
 	}
 
-	return o.MemberId
+	return o.StatusCode
 }
 
-// GetMemberIdOk returns a tuple with the MemberId field value
+// GetStatusCodeOk returns a tuple with the StatusCode field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputProfileRead) GetMemberIdOk() (*string, bool) {
+func (o *ShellAuthOutputProfileRead) GetStatusCodeOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.MemberId, true
+	return &o.StatusCode, true
 }
 
-// SetMemberId sets field value
-func (o *ShellAuthOutputProfileRead) SetMemberId(v string) {
-	o.MemberId = v
+// SetStatusCode sets field value
+func (o *ShellAuthOutputProfileRead) SetStatusCode(v int32) {
+	o.StatusCode = v
 }
 
-// GetDisplayName returns the DisplayName field value
-func (o *ShellAuthOutputProfileRead) GetDisplayName() string {
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthOutputProfileRead) GetHeaders() ShellAuthOutputTeamInitializeHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthOutputTeamInitializeHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputProfileRead) GetHeadersOk() (*ShellAuthOutputTeamInitializeHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthOutputProfileRead) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthOutputTeamInitializeHeaders and assigns it to the Headers field.
+func (o *ShellAuthOutputProfileRead) SetHeaders(v ShellAuthOutputTeamInitializeHeaders) {
+	o.Headers = &v
+}
+
+// GetBody returns the Body field value
+func (o *ShellAuthOutputProfileRead) GetBody() ShellAuthOutputProfileReadBody {
 	if o == nil {
-		var ret string
+		var ret ShellAuthOutputProfileReadBody
 		return ret
 	}
 
-	return o.DisplayName
+	return o.Body
 }
 
-// GetDisplayNameOk returns a tuple with the DisplayName field value
+// GetBodyOk returns a tuple with the Body field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputProfileRead) GetDisplayNameOk() (*string, bool) {
+func (o *ShellAuthOutputProfileRead) GetBodyOk() (*ShellAuthOutputProfileReadBody, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.DisplayName, true
+	return &o.Body, true
 }
 
-// SetDisplayName sets field value
-func (o *ShellAuthOutputProfileRead) SetDisplayName(v string) {
-	o.DisplayName = v
+// SetBody sets field value
+func (o *ShellAuthOutputProfileRead) SetBody(v ShellAuthOutputProfileReadBody) {
+	o.Body = v
 }
 
 func (o ShellAuthOutputProfileRead) MarshalJSON() ([]byte, error) {
@@ -104,8 +137,16 @@ func (o ShellAuthOutputProfileRead) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthOutputProfileRead) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["memberId"] = o.MemberId
-	toSerialize["displayName"] = o.DisplayName
+	toSerialize["statusCode"] = o.StatusCode
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
+	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -114,8 +155,8 @@ func (o *ShellAuthOutputProfileRead) UnmarshalJSON(data []byte) (err error) {
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"memberId",
-		"displayName",
+		"statusCode",
+		"body",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -134,15 +175,22 @@ func (o *ShellAuthOutputProfileRead) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthOutputProfileRead := _ShellAuthOutputProfileRead{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthOutputProfileRead)
+	err = json.Unmarshal(data, &varShellAuthOutputProfileRead)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutputProfileRead(varShellAuthOutputProfileRead)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "statusCode")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

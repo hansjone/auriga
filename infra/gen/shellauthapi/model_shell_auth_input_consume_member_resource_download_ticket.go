@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,7 +20,9 @@ var _ MappedNullable = &ShellAuthInputConsumeMemberResourceDownloadTicket{}
 
 // ShellAuthInputConsumeMemberResourceDownloadTicket struct for ShellAuthInputConsumeMemberResourceDownloadTicket
 type ShellAuthInputConsumeMemberResourceDownloadTicket struct {
-	Body ShellAuthopenapiResourceYamlComponentsSchemasMemberDownloadInput `json:"body"`
+	Headers              *ShellAuthInputCreateResourcePackageHeaders                      `json:"headers,omitempty"`
+	Body                 ShellAuthopenapiResourceYamlComponentsSchemasMemberDownloadInput `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthInputConsumeMemberResourceDownloadTicket ShellAuthInputConsumeMemberResourceDownloadTicket
@@ -42,6 +43,38 @@ func NewShellAuthInputConsumeMemberResourceDownloadTicket(body ShellAuthopenapiR
 func NewShellAuthInputConsumeMemberResourceDownloadTicketWithDefaults() *ShellAuthInputConsumeMemberResourceDownloadTicket {
 	this := ShellAuthInputConsumeMemberResourceDownloadTicket{}
 	return &this
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthInputConsumeMemberResourceDownloadTicket) GetHeaders() ShellAuthInputCreateResourcePackageHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthInputCreateResourcePackageHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputConsumeMemberResourceDownloadTicket) GetHeadersOk() (*ShellAuthInputCreateResourcePackageHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthInputConsumeMemberResourceDownloadTicket) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthInputCreateResourcePackageHeaders and assigns it to the Headers field.
+func (o *ShellAuthInputConsumeMemberResourceDownloadTicket) SetHeaders(v ShellAuthInputCreateResourcePackageHeaders) {
+	o.Headers = &v
 }
 
 // GetBody returns the Body field value
@@ -78,7 +111,15 @@ func (o ShellAuthInputConsumeMemberResourceDownloadTicket) MarshalJSON() ([]byte
 
 func (o ShellAuthInputConsumeMemberResourceDownloadTicket) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -106,15 +147,21 @@ func (o *ShellAuthInputConsumeMemberResourceDownloadTicket) UnmarshalJSON(data [
 
 	varShellAuthInputConsumeMemberResourceDownloadTicket := _ShellAuthInputConsumeMemberResourceDownloadTicket{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthInputConsumeMemberResourceDownloadTicket)
+	err = json.Unmarshal(data, &varShellAuthInputConsumeMemberResourceDownloadTicket)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthInputConsumeMemberResourceDownloadTicket(varShellAuthInputConsumeMemberResourceDownloadTicket)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

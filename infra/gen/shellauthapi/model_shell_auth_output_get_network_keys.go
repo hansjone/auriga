@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,8 +20,10 @@ var _ MappedNullable = &ShellAuthOutputGetNetworkKeys{}
 
 // ShellAuthOutputGetNetworkKeys struct for ShellAuthOutputGetNetworkKeys
 type ShellAuthOutputGetNetworkKeys struct {
-	// 解码后最多65536字节，必须严格验证 network/keyset.schema.json#/$defs/SignedKeyset；保留原始受签字节，不经生成模型重序列化。
-	Wire string `json:"wire" validate:"regexp=^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"`
+	StatusCode           int32                                 `json:"statusCode"`
+	Headers              *ShellAuthOutputTeamInitializeHeaders `json:"headers,omitempty"`
+	Body                 ShellAuthOutputGetNetworkKeysBody     `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthOutputGetNetworkKeys ShellAuthOutputGetNetworkKeys
@@ -31,9 +32,10 @@ type _ShellAuthOutputGetNetworkKeys ShellAuthOutputGetNetworkKeys
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputGetNetworkKeys(wire string) *ShellAuthOutputGetNetworkKeys {
+func NewShellAuthOutputGetNetworkKeys(statusCode int32, body ShellAuthOutputGetNetworkKeysBody) *ShellAuthOutputGetNetworkKeys {
 	this := ShellAuthOutputGetNetworkKeys{}
-	this.Wire = wire
+	this.StatusCode = statusCode
+	this.Body = body
 	return &this
 }
 
@@ -45,28 +47,84 @@ func NewShellAuthOutputGetNetworkKeysWithDefaults() *ShellAuthOutputGetNetworkKe
 	return &this
 }
 
-// GetWire returns the Wire field value
-func (o *ShellAuthOutputGetNetworkKeys) GetWire() string {
+// GetStatusCode returns the StatusCode field value
+func (o *ShellAuthOutputGetNetworkKeys) GetStatusCode() int32 {
 	if o == nil {
-		var ret string
+		var ret int32
 		return ret
 	}
 
-	return o.Wire
+	return o.StatusCode
 }
 
-// GetWireOk returns a tuple with the Wire field value
+// GetStatusCodeOk returns a tuple with the StatusCode field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputGetNetworkKeys) GetWireOk() (*string, bool) {
+func (o *ShellAuthOutputGetNetworkKeys) GetStatusCodeOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.Wire, true
+	return &o.StatusCode, true
 }
 
-// SetWire sets field value
-func (o *ShellAuthOutputGetNetworkKeys) SetWire(v string) {
-	o.Wire = v
+// SetStatusCode sets field value
+func (o *ShellAuthOutputGetNetworkKeys) SetStatusCode(v int32) {
+	o.StatusCode = v
+}
+
+// GetHeaders returns the Headers field value if set, zero value otherwise.
+func (o *ShellAuthOutputGetNetworkKeys) GetHeaders() ShellAuthOutputTeamInitializeHeaders {
+	if o == nil || IsNil(o.Headers) {
+		var ret ShellAuthOutputTeamInitializeHeaders
+		return ret
+	}
+	return *o.Headers
+}
+
+// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputGetNetworkKeys) GetHeadersOk() (*ShellAuthOutputTeamInitializeHeaders, bool) {
+	if o == nil || IsNil(o.Headers) {
+		return nil, false
+	}
+	return o.Headers, true
+}
+
+// HasHeaders returns a boolean if a field has been set.
+func (o *ShellAuthOutputGetNetworkKeys) HasHeaders() bool {
+	if o != nil && !IsNil(o.Headers) {
+		return true
+	}
+
+	return false
+}
+
+// SetHeaders gets a reference to the given ShellAuthOutputTeamInitializeHeaders and assigns it to the Headers field.
+func (o *ShellAuthOutputGetNetworkKeys) SetHeaders(v ShellAuthOutputTeamInitializeHeaders) {
+	o.Headers = &v
+}
+
+// GetBody returns the Body field value
+func (o *ShellAuthOutputGetNetworkKeys) GetBody() ShellAuthOutputGetNetworkKeysBody {
+	if o == nil {
+		var ret ShellAuthOutputGetNetworkKeysBody
+		return ret
+	}
+
+	return o.Body
+}
+
+// GetBodyOk returns a tuple with the Body field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthOutputGetNetworkKeys) GetBodyOk() (*ShellAuthOutputGetNetworkKeysBody, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Body, true
+}
+
+// SetBody sets field value
+func (o *ShellAuthOutputGetNetworkKeys) SetBody(v ShellAuthOutputGetNetworkKeysBody) {
+	o.Body = v
 }
 
 func (o ShellAuthOutputGetNetworkKeys) MarshalJSON() ([]byte, error) {
@@ -79,7 +137,16 @@ func (o ShellAuthOutputGetNetworkKeys) MarshalJSON() ([]byte, error) {
 
 func (o ShellAuthOutputGetNetworkKeys) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["wire"] = o.Wire
+	toSerialize["statusCode"] = o.StatusCode
+	if !IsNil(o.Headers) {
+		toSerialize["headers"] = o.Headers
+	}
+	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -88,7 +155,8 @@ func (o *ShellAuthOutputGetNetworkKeys) UnmarshalJSON(data []byte) (err error) {
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"wire",
+		"statusCode",
+		"body",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -107,15 +175,22 @@ func (o *ShellAuthOutputGetNetworkKeys) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthOutputGetNetworkKeys := _ShellAuthOutputGetNetworkKeys{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthOutputGetNetworkKeys)
+	err = json.Unmarshal(data, &varShellAuthOutputGetNetworkKeys)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutputGetNetworkKeys(varShellAuthOutputGetNetworkKeys)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "statusCode")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

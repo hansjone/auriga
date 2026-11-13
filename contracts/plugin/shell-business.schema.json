@@ -2,6 +2,71 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ShellAuth 固定业务操作",
   "$defs": {
+    "ShellAuthUploadReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "maximum": 67108864
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "uploadId",
+        "sizeBytes",
+        "sha256"
+      ]
+    },
+    "ShellAuthBusinessError": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "common.validation_failed",
+            "common.unauthenticated",
+            "common.forbidden",
+            "common.not_found",
+            "common.conflict",
+            "common.precondition_failed",
+            "common.rate_limited",
+            "common.unavailable",
+            "common.internal",
+            "resource.digest_mismatch",
+            "resource.signature_invalid",
+            "resource.storage_unavailable"
+          ]
+        },
+        "upstreamStatus": {
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "retryAfterSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        }
+      },
+      "required": [
+        "code",
+        "retryable"
+      ]
+    },
     "ShellAuthInput_listResourcePackages": {
       "type": "object",
       "additionalProperties": false,
@@ -127,7 +192,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_listResourcePackages": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_PackagePage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_PackagePage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_PackageInput": {
       "type": "object",
@@ -172,6 +279,22 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": []
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_PackageInput"
         }
@@ -181,7 +304,49 @@
       ]
     },
     "ShellAuthOutput_createResourcePackage": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Package"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Package"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_getResourcePackage": {
       "type": "object",
@@ -197,7 +362,49 @@
       ]
     },
     "ShellAuthOutput_getResourcePackage": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Package"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Package"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_PackagePatch": {
       "type": "object",
@@ -238,17 +445,78 @@
           "type": "string",
           "format": "uuid"
         },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "if-match": {
+              "type": "string",
+              "minLength": 1
+            },
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_PackagePatch"
         }
       },
       "required": [
         "packageId",
+        "headers",
         "body"
       ]
     },
     "ShellAuthOutput_patchResourcePackage": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Package"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Package"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_listResourceVersions": {
       "type": "object",
@@ -509,7 +777,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_listResourceVersions": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_VersionPage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_VersionPage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_UploadMetadata": {
       "type": "object",
@@ -579,6 +889,23 @@
           "type": "string",
           "format": "uuid"
         },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "if-match"
+          ]
+        },
         "body": {
           "type": "object",
           "properties": {
@@ -586,8 +913,7 @@
               "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UploadMetadata"
             },
             "archive": {
-              "type": "string",
-              "format": "binary"
+              "$ref": "#/$defs/ShellAuthUploadReference"
             }
           },
           "required": [
@@ -599,11 +925,54 @@
       },
       "required": [
         "packageId",
+        "headers",
         "body"
       ]
     },
     "ShellAuthOutput_uploadResourceVersion": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Version"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Version"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_getResourceVersion": {
       "type": "object",
@@ -624,7 +993,49 @@
       ]
     },
     "ShellAuthOutput_getResourceVersion": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Version"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Version"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_Reason": {
       "type": "object",
@@ -652,6 +1063,23 @@
           "type": "string",
           "format": "uuid"
         },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Reason"
         }
@@ -659,6 +1087,7 @@
       "required": [
         "packageId",
         "versionId",
+        "headers",
         "body"
       ]
     },
@@ -713,7 +1142,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_submitResourceVersion": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Review"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Review"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_DistributionInput": {
       "type": "object",
@@ -766,6 +1237,22 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": []
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_DistributionInput"
         }
@@ -883,7 +1370,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_requestResourceDistribution": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Distribution"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Distribution"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_getResourceDistribution": {
       "type": "object",
@@ -899,7 +1428,49 @@
       ]
     },
     "ShellAuthOutput_getResourceDistribution": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Distribution"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Distribution"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_downloadResourceContent": {
       "type": "object",
@@ -923,13 +1494,55 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_getResourceRevocations": {
@@ -1015,7 +1628,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_getResourceRevocations": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_RevocationList"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_RevocationList"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicketInput": {
       "type": "object",
@@ -1049,6 +1704,22 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": []
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicketInput"
         }
@@ -1089,7 +1760,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_createMemberResourceDownloadTicket": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadInput": {
       "type": "object",
@@ -1113,6 +1826,22 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": []
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadInput"
         }
@@ -1125,13 +1854,55 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_listMemberResourceInstallations": {
@@ -1261,7 +2032,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_listMemberResourceInstallations": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationPage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationPage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationInput": {
       "type": "object",
@@ -1305,6 +2118,20 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string"
+            }
+          },
+          "required": []
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationInput"
         }
@@ -1314,7 +2141,49 @@
       ]
     },
     "ShellAuthOutput_selectMemberResourceInstallation": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationReport": {
       "type": "object",
@@ -1363,6 +2232,22 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": []
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationReport"
         }
@@ -1372,7 +2257,49 @@
       ]
     },
     "ShellAuthOutput_reportMemberResourceInstallation": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_UnifiedListResourcePackages": {
       "type": "object",
@@ -1509,7 +2436,49 @@
       "description": "Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection."
     },
     "ShellAuthOutput_UnifiedListResourcePackages": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackagePage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackagePage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackageInput": {
       "type": "object",
@@ -1557,16 +2526,79 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key",
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackageInput"
         }
       },
       "required": [
+        "headers",
         "body"
       ]
     },
     "ShellAuthOutput_UnifiedCreateResourcePackage": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_UnifiedGetResourcePackage": {
       "type": "object",
@@ -1582,7 +2614,49 @@
       ]
     },
     "ShellAuthOutput_UnifiedGetResourcePackage": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_UnifiedListResourceVersions": {
       "type": "object",
@@ -2706,7 +3780,49 @@
       ]
     },
     "ShellAuthOutput_UnifiedListResourceVersions": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersionPage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersionPage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedUploadMetadata": {
       "type": "object",
@@ -2738,6 +3854,26 @@
           "type": "string",
           "format": "uuid"
         },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key",
+            "if-match"
+          ]
+        },
         "body": {
           "type": "object",
           "properties": {
@@ -2745,14 +3881,12 @@
               "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedUploadMetadata"
             },
             "manifest": {
-              "type": "string",
-              "format": "binary"
+              "$ref": "#/$defs/ShellAuthUploadReference"
             },
             "artifacts": {
               "type": "array",
               "items": {
-                "type": "string",
-                "format": "binary"
+                "$ref": "#/$defs/ShellAuthUploadReference"
               },
               "minItems": 0,
               "maxItems": 32
@@ -2768,11 +3902,54 @@
       },
       "required": [
         "packageId",
+        "headers",
         "body"
       ]
     },
     "ShellAuthOutput_UnifiedUploadResourceVersion": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_UnifiedGetResourceVersion": {
       "type": "object",
@@ -2793,7 +3970,49 @@
       ]
     },
     "ShellAuthOutput_UnifiedGetResourceVersion": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_UnifiedSubmitResourceVersion": {
       "type": "object",
@@ -2807,6 +4026,26 @@
           "type": "string",
           "format": "uuid"
         },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key",
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_Reason"
         }
@@ -2814,6 +4053,7 @@
       "required": [
         "packageId",
         "versionId",
+        "headers",
         "body"
       ]
     },
@@ -2916,7 +4156,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_UnifiedSubmitResourceVersion": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedReview"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedReview"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_UnifiedDownloadResourceManifest": {
       "type": "object",
@@ -2940,13 +4222,55 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadTicketInput": {
@@ -3019,11 +4343,32 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key",
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadTicketInput"
         }
       },
       "required": [
+        "headers",
         "body"
       ]
     },
@@ -3183,7 +4528,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_UnifiedCreateDownloadTicket": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadTicket"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadTicket"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadInput": {
       "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedDownloadInput"
@@ -3217,11 +4604,32 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key",
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadInput"
         }
       },
       "required": [
+        "headers",
         "body"
       ]
     },
@@ -3229,13 +4637,55 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_UnifiedListInstallations": {
@@ -3461,7 +4911,49 @@
       ]
     },
     "ShellAuthOutput_UnifiedListInstallations": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedInstallationPage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedInstallationPage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedInstallationInput": {
       "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedInstallationInput"
@@ -3509,11 +5001,32 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key",
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedInstallationInput"
         }
       },
       "required": [
+        "headers",
         "body"
       ]
     },
@@ -3521,7 +5034,49 @@
       "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedInstallation"
     },
     "ShellAuthOutput_UnifiedSelectInstallation": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedInstallation"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedInstallation"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedMemberInstallationReport": {
       "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedMemberInstallationReport"
@@ -3635,16 +5190,79 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key",
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedMemberInstallationReport"
         }
       },
       "required": [
+        "headers",
         "body"
       ]
     },
     "ShellAuthOutput_UnifiedReportInstallation": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedInstallation"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedInstallation"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedRenewalInput": {
       "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedRenewalInput"
@@ -3691,16 +5309,79 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key",
+            "if-match"
+          ]
+        },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedRenewalInput"
         }
       },
       "required": [
+        "headers",
         "body"
       ]
     },
     "ShellAuthOutput_UnifiedRenewInstallation": {
-      "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadTicket"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadTicket"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_UnifiedDownloadVersionArtifact": {
       "type": "object",
@@ -3730,13 +5411,55 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_listOwnAiUsage": {
@@ -3885,7 +5608,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_listOwnAiUsage": {
-      "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_UsagePage"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_UsagePage"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_listAiModels": {
       "type": "object",
@@ -3956,7 +5721,49 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_listAiModels": {
-      "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_ModelList"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_ModelList"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthopenapi_ai_yaml_components_schemas_ChatCompletionRequest": {
       "type": "object",
@@ -4145,8 +5952,19 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "required": []
+        },
         "body": {
-          "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_ChatCompletionRequest"
+          "$ref": "#/$defs/ShellAuthChatJsonRequest"
         }
       },
       "required": [
@@ -4277,7 +6095,131 @@
       "additionalProperties": false
     },
     "ShellAuthOutput_createAiChatCompletion": {
-      "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_ChatCompletion"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_ChatCompletion"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
+    },
+    "ShellAuthChatJsonRequest": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_ChatMessage"
+          },
+          "maxItems": 256,
+          "minItems": 1
+        },
+        "stream": {
+          "type": "boolean"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "stop": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "首批仅接受最多4个字符串的数组，不接受单字符串stop。"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_Tool"
+          },
+          "maxItems": 128
+        },
+        "tool_choice": {
+          "type": "string",
+          "enum": [
+            "none",
+            "auto",
+            "required"
+          ]
+        }
+      },
+      "required": [
+        "model",
+        "messages",
+        "max_tokens"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "properties": {
+              "stream": {
+                "const": true
+              }
+            },
+            "required": [
+              "stream"
+            ]
+          }
+        }
+      ]
     },
     "ShellAuthInput_listNetworkSystems": {
       "type": "object",
@@ -4380,7 +6322,217 @@
       }
     },
     "ShellAuthOutput_listNetworkSystems": {
-      "$ref": "#/$defs/ShellAuthnetwork_system_directory_schema_json"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthnetwork_system_directory_schema_json"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
+    },
+    "ShellAuthChatStreamRequest": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_ChatMessage"
+          },
+          "maxItems": 256,
+          "minItems": 1
+        },
+        "stream": {
+          "type": "boolean"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "stop": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "description": "首批仅接受最多4个字符串的数组，不接受单字符串stop。"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAuthopenapi_ai_yaml_components_schemas_Tool"
+          },
+          "maxItems": 128
+        },
+        "tool_choice": {
+          "type": "string",
+          "enum": [
+            "none",
+            "auto",
+            "required"
+          ]
+        }
+      },
+      "required": [
+        "model",
+        "messages",
+        "max_tokens",
+        "stream"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "properties": {
+              "stream": {
+                "const": false
+              }
+            },
+            "required": [
+              "stream"
+            ]
+          }
+        }
+      ]
+    },
+    "ShellAuthInput_createAiChatCompletionStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthChatStreamRequest"
+        }
+      },
+      "required": [
+        "body"
+      ]
+    },
+    "ShellAuthOutput_createAiChatCompletionStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "encoding": {
+              "type": "string",
+              "enum": [
+                "sse_utf8"
+              ]
+            }
+          },
+          "required": [
+            "streamId",
+            "encoding"
+          ]
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
     },
     "ShellAuthInput_team_initialize": {
       "type": "object",
@@ -4401,13 +6553,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_team_list_tools": {
@@ -4427,16 +6609,46 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "tools": {
-          "type": "array",
-          "maxItems": 256,
-          "items": {
-            "type": "object"
-          }
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "required": [
+            "tools"
+          ]
         }
       },
       "required": [
-        "tools"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_team_ping": {
@@ -4456,12 +6668,42 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "available": {
-          "type": "boolean"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "available"
+          ]
         }
       },
       "required": [
-        "available"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_network_open": {
@@ -4481,13 +6723,180 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
+    },
+    "ShellAuthInput_upload_open": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sizeBytes": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "maximum": 67108864
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": [
+            "application/json",
+            "application/gzip",
+            "application/octet-stream"
+          ]
+        }
+      },
+      "required": [
+        "sizeBytes",
+        "sha256",
+        "mediaType"
+      ]
+    },
+    "ShellAuthOutput_upload_open": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "uploadId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxChunkBytes": {
+              "type": "integer",
+              "enum": [
+                65536
+              ]
+            },
+            "creditBytes": {
+              "type": "integer",
+              "enum": [
+                1048576
+              ]
+            }
+          },
+          "required": [
+            "uploadId",
+            "streamId",
+            "maxChunkBytes",
+            "creditBytes"
+          ]
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
+    },
+    "ShellAuthInput_upload_finish": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uploadId": {
           "type": "string",
           "format": "uuid"
         }
       },
       "required": [
-        "streamId"
+        "uploadId"
+      ]
+    },
+    "ShellAuthOutput_upload_finish": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "$ref": "#/$defs/ShellAuthUploadReference"
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_network_send": {
@@ -4516,15 +6925,45 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "sequence": {
+        "statusCode": {
           "type": "integer",
-          "format": "int64",
-          "minimum": 0,
-          "maximum": 9007199254740991
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "sequence"
+          ]
         }
       },
       "required": [
-        "sequence"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_network_submit": {
@@ -4553,17 +6992,47 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "resultWire": {
-          "type": "string",
-          "contentEncoding": "base64",
-          "contentMediaType": "application/json",
-          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
-          "maxLength": 87384,
-          "description": "解码后最多65536字节，必须严格验证 network/send.schema.json#/$defs/SendResult；保留原始受签字节，不经生成模型重序列化。"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resultWire": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "contentMediaType": "application/json",
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "maxLength": 87384,
+              "description": "解码后最多65536字节，必须严格验证 network/send.schema.json#/$defs/SendResult；保留原始受签字节，不经生成模型重序列化。"
+            }
+          },
+          "required": [
+            "resultWire"
+          ]
         }
       },
       "required": [
-        "resultWire"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_getNetworkKeys": {
@@ -4576,17 +7045,47 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "wire": {
-          "type": "string",
-          "contentEncoding": "base64",
-          "contentMediaType": "application/json",
-          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
-          "maxLength": 87384,
-          "description": "解码后最多65536字节，必须严格验证 network/keyset.schema.json#/$defs/SignedKeyset；保留原始受签字节，不经生成模型重序列化。"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wire": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "contentMediaType": "application/json",
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "maxLength": 87384,
+              "description": "解码后最多65536字节，必须严格验证 network/keyset.schema.json#/$defs/SignedKeyset；保留原始受签字节，不经生成模型重序列化。"
+            }
+          },
+          "required": [
+            "wire"
+          ]
         }
       },
       "required": [
-        "wire"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_getNetworkKeyAnnouncement": {
@@ -4599,17 +7098,47 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "wire": {
-          "type": "string",
-          "contentEncoding": "base64",
-          "contentMediaType": "application/json",
-          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
-          "maxLength": 87384,
-          "description": "解码后最多65536字节，必须严格验证 network/protocol.schema.json#/$defs/KeysetAnnouncement；保留原始受签字节，不经生成模型重序列化。"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wire": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "contentMediaType": "application/json",
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "maxLength": 87384,
+              "description": "解码后最多65536字节，必须严格验证 network/protocol.schema.json#/$defs/KeysetAnnouncement；保留原始受签字节，不经生成模型重序列化。"
+            }
+          },
+          "required": [
+            "wire"
+          ]
         }
       },
       "required": [
-        "wire"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_profile_read": {
@@ -4622,18 +7151,48 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "memberId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
         },
-        "displayName": {
-          "type": "string",
-          "maxLength": 256
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "memberId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "displayName": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "memberId",
+            "displayName"
+          ]
         }
       },
       "required": [
-        "memberId",
-        "displayName"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthInput_provider_diagnostic": {
@@ -4646,12 +7205,42 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "available": {
-          "type": "boolean"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "available"
+          ]
         }
       },
       "required": [
-        "available"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_mcp_schema_json__defs_ListEndpoints": {
@@ -4699,13 +7288,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_mcp_schema_json__defs_OpenThread": {
@@ -4762,13 +7381,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_mcp_schema_json__defs_ReplyThread": {
@@ -4812,13 +7461,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_mcp_schema_json__defs_ReadThread": {
@@ -4864,13 +7543,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_transport_schema_json__defs_Register": {
@@ -4912,13 +7621,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_transport_schema_json__defs_Bind": {
@@ -4970,13 +7709,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_transport_schema_json__defs_Pull": {
@@ -5018,13 +7787,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_transport_schema_json__defs_Ack": {
@@ -5080,13 +7879,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthplugin_team_transport_schema_json__defs_Revoke": {
@@ -5122,13 +7951,43 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "streamId": {
-          "type": "string",
-          "format": "uuid"
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "streamId"
+          ]
         }
       },
       "required": [
-        "streamId"
+        "statusCode",
+        "body"
       ]
     },
     "ShellAuthBusinessCall": {
@@ -5781,6 +8640,23 @@
               "properties": {
                 "operation": {
                   "type": "string",
+                  "const": "createAiChatCompletionStream"
+                },
+                "input": {
+                  "$ref": "#/$defs/ShellAuthInput_createAiChatCompletionStream"
+                }
+              },
+              "required": [
+                "operation",
+                "input"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "operation": {
+                  "type": "string",
                   "const": "team_initialize"
                 },
                 "input": {
@@ -5836,6 +8712,40 @@
                 },
                 "input": {
                   "$ref": "#/$defs/ShellAuthInput_network_open"
+                }
+              },
+              "required": [
+                "operation",
+                "input"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "operation": {
+                  "type": "string",
+                  "const": "upload_open"
+                },
+                "input": {
+                  "$ref": "#/$defs/ShellAuthInput_upload_open"
+                }
+              },
+              "required": [
+                "operation",
+                "input"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "operation": {
+                  "type": "string",
+                  "const": "upload_finish"
+                },
+                "input": {
+                  "$ref": "#/$defs/ShellAuthInput_upload_finish"
                 }
               },
               "required": [
@@ -6914,6 +9824,28 @@
             },
             "operation": {
               "type": "string",
+              "const": "createAiChatCompletionStream"
+            },
+            "output": {
+              "$ref": "#/$defs/ShellAuthOutput_createAiChatCompletionStream"
+            }
+          },
+          "required": [
+            "requestId",
+            "operation",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
               "const": "team_initialize"
             },
             "output": {
@@ -6984,6 +9916,50 @@
             },
             "output": {
               "$ref": "#/$defs/ShellAuthOutput_network_open"
+            }
+          },
+          "required": [
+            "requestId",
+            "operation",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "upload_open"
+            },
+            "output": {
+              "$ref": "#/$defs/ShellAuthOutput_upload_open"
+            }
+          },
+          "required": [
+            "requestId",
+            "operation",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "upload_finish"
+            },
+            "output": {
+              "$ref": "#/$defs/ShellAuthOutput_upload_finish"
             }
           },
           "required": [
@@ -7321,7 +10297,113 @@
             "operation",
             "output"
           ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "enum": [
+                "listResourcePackages",
+                "createResourcePackage",
+                "getResourcePackage",
+                "patchResourcePackage",
+                "listResourceVersions",
+                "uploadResourceVersion",
+                "getResourceVersion",
+                "submitResourceVersion",
+                "requestResourceDistribution",
+                "getResourceDistribution",
+                "downloadResourceContent",
+                "getResourceRevocations",
+                "createMemberResourceDownloadTicket",
+                "consumeMemberResourceDownloadTicket",
+                "listMemberResourceInstallations",
+                "selectMemberResourceInstallation",
+                "reportMemberResourceInstallation",
+                "UnifiedListResourcePackages",
+                "UnifiedCreateResourcePackage",
+                "UnifiedGetResourcePackage",
+                "UnifiedListResourceVersions",
+                "UnifiedUploadResourceVersion",
+                "UnifiedGetResourceVersion",
+                "UnifiedSubmitResourceVersion",
+                "UnifiedDownloadResourceManifest",
+                "UnifiedCreateDownloadTicket",
+                "UnifiedDownloadArtifact",
+                "UnifiedListInstallations",
+                "UnifiedSelectInstallation",
+                "UnifiedReportInstallation",
+                "UnifiedRenewInstallation",
+                "UnifiedDownloadVersionArtifact",
+                "listOwnAiUsage",
+                "listAiModels",
+                "createAiChatCompletion",
+                "listNetworkSystems",
+                "createAiChatCompletionStream",
+                "team_initialize",
+                "team_list_tools",
+                "team_ping",
+                "network_open",
+                "upload_open",
+                "upload_finish",
+                "network_send",
+                "network_submit",
+                "getNetworkKeys",
+                "getNetworkKeyAnnouncement",
+                "profile_read",
+                "provider_diagnostic",
+                "team_list_endpoints",
+                "team_open_thread",
+                "team_reply_thread",
+                "team_read_thread",
+                "team_node_register",
+                "team_node_bind",
+                "team_node_pull",
+                "team_node_ack",
+                "team_node_revoke"
+              ]
+            },
+            "error": {
+              "$ref": "#/$defs/ShellAuthBusinessError"
+            }
+          },
+          "required": [
+            "requestId",
+            "operation",
+            "error"
+          ]
         }
+      ]
+    },
+    "ShellAuthStreamSubscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "streamId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "streamId",
+        "shellEpoch",
+        "expectedRevision"
       ]
     },
     "ShellAuthStreamCommand": {
@@ -7347,13 +10429,36 @@
           "enum": [
             "credit",
             "cancel",
-            "close"
+            "close",
+            "upload_chunk"
           ]
         },
         "creditBytes": {
           "type": "integer",
           "minimum": 0,
           "maximum": 1048576
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "data": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "maxLength": 87384,
+          "allOf": [
+            {
+              "if": {
+                "minLength": 87384
+              },
+              "then": {
+                "pattern": "==$"
+              }
+            }
+          ]
         }
       },
       "required": [
@@ -7392,6 +10497,50 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "upload_chunk"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "required": [
+              "sequence",
+              "data"
+            ],
+            "properties": {
+              "sequence": {},
+              "data": {}
+            }
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {}
+                  }
+                },
+                {
+                  "required": [
+                    "sequence"
+                  ],
+                  "properties": {
+                    "sequence": {}
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -7425,23 +10574,56 @@
             "data",
             "end",
             "closed",
-            "error"
+            "error",
+            "upload_ack"
           ]
         },
         "data": {
           "type": "string",
           "contentEncoding": "base64",
-          "maxLength": 87384
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "maxLength": 87384,
+          "allOf": [
+            {
+              "if": {
+                "minLength": 87384
+              },
+              "then": {
+                "pattern": "==$"
+              }
+            }
+          ]
+        },
+        "ackSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "creditBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
         },
         "code": {
           "type": "string",
           "enum": [
-            "common.conflict",
-            "common.forbidden",
+            "common.validation_failed",
             "common.unauthenticated",
+            "common.forbidden",
+            "common.not_found",
+            "common.conflict",
+            "common.precondition_failed",
+            "common.rate_limited",
             "common.unavailable",
-            "common.rate_limited"
+            "common.internal",
+            "resource.digest_mismatch",
+            "resource.signature_invalid",
+            "resource.storage_unavailable"
           ]
+        },
+        "error": {
+          "$ref": "#/$defs/ShellAuthBusinessError"
         }
       },
       "required": [
@@ -7452,6 +10634,50 @@
         "type"
       ],
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "upload_ack"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "ackSequence",
+              "creditBytes"
+            ],
+            "properties": {
+              "ackSequence": {},
+              "creditBytes": {}
+            }
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "ackSequence"
+                  ],
+                  "properties": {
+                    "ackSequence": {}
+                  }
+                },
+                {
+                  "required": [
+                    "creditBytes"
+                  ],
+                  "properties": {
+                    "creditBytes": {}
+                  }
+                }
+              ]
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -7495,10 +10721,34 @@
           },
           "then": {
             "required": [
-              "code"
+              "code",
+              "error"
             ],
             "properties": {
-              "code": {}
+              "code": {},
+              "error": {}
+            }
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "code"
+                  ],
+                  "properties": {
+                    "code": {}
+                  }
+                },
+                {
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {}
+                  }
+                }
+              ]
             }
           }
         }

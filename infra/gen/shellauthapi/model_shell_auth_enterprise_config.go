@@ -19,7 +19,8 @@ var _ MappedNullable = &ShellAuthEnterpriseConfig{}
 
 // ShellAuthEnterpriseConfig struct for ShellAuthEnterpriseConfig
 type ShellAuthEnterpriseConfig struct {
-	AllowRawAgentToken       *bool    `json:"allowRawAgentToken,omitempty"`
+	AllowRawAgentToken *bool `json:"allowRawAgentToken,omitempty"`
+	// 缺省或空数组均拒绝全部；真实主机仅私有部署配置提供。
 	OutboundAllowedHosts     []string `json:"outboundAllowedHosts,omitempty"`
 	TaskCapabilityTtlSeconds *int32   `json:"taskCapabilityTtlSeconds,omitempty"`
 	AdditionalProperties     map[string]interface{}
