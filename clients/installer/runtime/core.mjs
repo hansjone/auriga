@@ -1,4 +1,14 @@
 import { cleanupDownloads } from './update-state.mjs';
+import { createRequire } from 'node:module';
+import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
+import {
+  ProcessTree,
+  assertNTFS,
+  notifyPrivateOnly,
+  notifySharedRestart,
+} from './process-tree.mjs';
+import { Supervisor, packagedTrust } from './supervisor.mjs';
+import { superviseDsh } from './desktop-supervision.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -169,7 +179,7 @@ function assertOwned(root) {
 // --------------------------------------------------------------- profile --
 
 /** Seed profile manifest and (only when absent) the patch with the platform address. */
-function seedProfile(dataHome, { platformOrigin }) {
+function seedProfile(dataHome, { platformOrigin, target }) {
   const dir = profileDir(dataHome);
   mkdirSync(join(dir, 'node_modules'), { recursive: true });
   writeFileSync(join(dir, DATA_MARKER), 'Auriga Desktop profile\n');
@@ -210,6 +220,35 @@ function seedProfile(dataHome, { platformOrigin }) {
     }
     writeFileSync(patch, rows.join('\n') + '\n');
   }
+  // Use the locked upstream parser, preserving !!js as inert scalar text.
+  // Invalid/conflicting patches keep their original bytes and cannot enable sharing.
+  try {
+    const yaml = createRequire(join(target, 'upstream', 'app', 'package.json'))(
+      'yaml',
+    );
+    upgradeSkillPatch(patch, yamlParser(yaml), dataHome);
+  } catch (error) {
+    console.error(`Auriga 共享技能配置未启用：${error.message}`);
+  }
+}
+
+function assertGuardianCompatible(target, dataHome) {
+  const stateFile = join(dataHome, 'auriga', 'guardian', 'state.json');
+  if (
+    !existsSync(stateFile) ||
+    existsSync(join(target, 'auriga', 'runtime', 'supervisor.mjs'))
+  )
+    return;
+  const state = readJson(stateFile);
+  const current = join(dataHome, 'auriga', 'skills-active', 'current');
+  if (
+    state.guardian?.state !== 'private_only' ||
+    state.pendingIsolation ||
+    (existsSync(current) && readdirSync(current).length)
+  )
+    throw new Error(
+      '目标版本缺少可信 guardian；请先停用并隔离共享技能再回滚。',
+    );
 }
 
 const copyTree = (from, to) =>
@@ -500,6 +539,7 @@ export function install({
     );
   // Verify before anything is copied into place or executed.
   const manifest = verifyPackage(payload, { trees: false });
+  assertGuardianCompatible(payload, dataHome);
   mkdirSync(join(root, 'versions'), { recursive: true });
   writeFileSync(
     join(root, INSTALL_MARKER),
@@ -540,7 +580,7 @@ export function install({
     target,
     fault,
     apply() {
-      seedProfile(dataHome, { platformOrigin });
+      seedProfile(dataHome, { platformOrigin, target });
       syncPlugin(target, dataHome);
       smoke(target, dataHome);
     },
@@ -563,6 +603,7 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
   if (!existsSync(dir))
     throw new Error(`previous version missing: ${state.previous}`);
   verifyPackage(dir);
+  assertGuardianCompatible(dir, state.dataHome);
   transition({
     root,
     dataHome: state.dataHome,
@@ -573,7 +614,7 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
     fault,
     apply() {
       if (!restorePluginParts(state.dataHome, state.previous)) {
-        seedProfile(state.dataHome, {});
+        seedProfile(state.dataHome, { target: dir });
         syncPlugin(dir, state.dataHome);
       }
       smoke(dir, state.dataHome);
@@ -661,8 +702,32 @@ export function desktopSession(root) {
 export async function launch({ root, args = [], env = process.env }) {
   root = resolve(root);
   assertOwned(root);
-  const session = desktopSession(root);
+  const initial = readState(root);
+  if (!initial) throw new Error('installation state missing');
+  verifyPackage(versionDir(root, initial.current), { trees: false });
+  assertNTFS(initial.dataHome);
+  const tree = new ProcessTree(initial.dataHome);
+  const oldProcesses = [
+    tree.record.launcher,
+    tree.record.root,
+    ...tree.record.children,
+  ].filter(Boolean);
+  const supervisor = new Supervisor(
+    initial.dataHome,
+    tree,
+    packagedTrust(versionDir(root, initial.current)),
+  );
+  const releaseSingleton = tree.singleton();
+  let session;
+
   try {
+    await supervisor.prepare();
+    const sessionFile = join(root, 'desktop-session.json');
+    if (existsSync(sessionFile) && (await tree.isStopped())) {
+      const previous = readJson(sessionFile);
+      if (oldProcesses.some((p) => p.pid === previous.pid)) rmSync(sessionFile);
+    }
+    session = desktopSession(root);
     recover(root);
     cleanupDownloads(root, { stopped: true });
     const { applyPending } = await import('./update.mjs');
@@ -675,29 +740,40 @@ export async function launch({ root, args = [], env = process.env }) {
     };
     await apply();
     const state = readState(root);
-    if (!state) throw new Error(`no installation state in ${root}`);
     const dir = versionDir(root, state.current);
-    const child = spawn(
-      nodeBin(dir),
-      [dshBin(dir), '--profile', PROFILE, ...args],
-      {
-        stdio: 'inherit',
-        env: launchEnv(dir, state.dataHome, {
-          ...env,
-          AURIGA_DESKTOP_ROOT: root,
-          AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
+    // The update transaction may have changed packaged trust or profile bytes.
+    verifyPackage(dir, { trees: false });
+    supervisor.trust = packagedTrust(dir);
+    await supervisor.reconcile(true);
+    if (
+      supervisor.privateOnly ||
+      supervisor.guardian.read()?.guardian.state === 'private_only'
+    )
+      notifyPrivateOnly();
+    const status = await superviseDsh({
+      tree,
+      supervisor,
+      session,
+      notify: notifySharedRestart,
+      start: () =>
+        spawn(nodeBin(dir), [dshBin(dir), '--profile', PROFILE, ...args], {
+          stdio: 'inherit',
+          env: launchEnv(dir, state.dataHome, {
+            ...env,
+            AURIGA_DESKTOP_ROOT: root,
+            AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
+          }),
         }),
-      },
-    );
-    if (child.pid) session.child(child.pid);
-    const status = await new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('exit', (code) => resolve(code ?? 1));
     });
     session.child(process.pid);
     await apply();
     return status;
   } finally {
-    session.close();
+    try {
+      await tree.stopTree();
+    } finally {
+      session?.close();
+      releaseSingleton();
+    }
   }
 }

@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+import { checkProductionCordis } from './cordis-production.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -130,6 +132,8 @@ test(
     assertPackageId(manifest);
     // The install-time verification accepts the built package as is.
     verifyPackage(payload);
+    const upstream = createRequire(join(payload, 'upstream/app/package.json'));
+    assert.equal(checkProductionCordis(upstream('yaml')), 8);
     assert.equal(manifest.target, 'win-x64');
     for (const required of [
       'upstream/node/node.exe',
