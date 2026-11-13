@@ -27,6 +27,51 @@ import tools.jackson.databind.json.JsonMapper;
 @ConditionalOnExpression(
     "${auriga.platform.combined:false} && ${auriga.services.workspace.enabled:false}")
 public class PlatformWorkspaceConfiguration {
+  @Bean(initMethod = "start", destroyMethod = "close")
+  auriga.workspace.app.WorkspaceUnifiedResources workspaceUnifiedResources(
+      auriga.workspace.app.WorkspaceService service,
+      WorkspaceInputs inputs,
+      ObjectProvider<auriga.resource.api.UnifiedResourceResolution> resolver) {
+    return new auriga.workspace.app.WorkspaceUnifiedResources(
+        service,
+        inputs,
+        request -> {
+          var current = resolver.getIfAvailable();
+          if (current == null)
+            throw new auriga.common.error.AurigaException(
+                auriga.common.error.CommonErrors.UNAVAILABLE);
+          return current.resolve(request);
+        });
+  }
+
+  @Bean
+  auriga.resource.api.UnifiedResourceWorkspace unifiedResourceWorkspace(
+      auriga.workspace.app.WorkspaceUnifiedResources resources) {
+    return new PlatformResourceWorkspace.Unified(resources);
+  }
+
+  @Bean
+  @ConditionalOnExpression("'${auriga.events.nats-url:}' != ''")
+  NatsEventConsumer workspaceUnifiedResourceConsumer(
+      @Qualifier("workspaceDataSource") DataSource source,
+      @Qualifier("workspaceTransactionManager") TenantTransactionManager manager,
+      auriga.workspace.app.WorkspaceUnifiedResources handler,
+      io.nats.client.Connection connection,
+      EventMetrics metrics,
+      Clock clock) {
+    var inbox =
+        new InboxProcessor(
+            manager,
+            new JdbcTemplate(source),
+            "workspace",
+            metrics,
+            clock,
+            5,
+            EventProducers.of(java.util.Map.of("resource.*", java.util.List.of("resource"))));
+    return new NatsEventConsumer(
+        connection, "workspace", handler, inbox, Duration.ofSeconds(30), Duration.ofSeconds(1));
+  }
+
   @Bean(destroyMethod = "close")
   DataSource workspaceDataSource(Environment env) {
     String url = env.getRequiredProperty("auriga.platform.workspace.jdbc-url");

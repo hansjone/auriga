@@ -55,9 +55,10 @@ type Options struct {
 	SealingPrivate   [32]byte
 	RestrictFile     func(path string) error
 	// OwnerUID/GID set after write for secret files (0 = skip).
-	OwnerUID int
-	OwnerGID int
-	Chown    func(path string, uid, gid int) error
+	OwnerUID         int
+	OwnerGID         int
+	Chown            func(path string, uid, gid int) error
+	ResourceObserver bool
 }
 
 // Render writes meta/ config from spec. Same spec → same digest.
@@ -177,6 +178,12 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	}
 
 	digestPaths := []string{pkgPath, cordisPath, keysPath, envPath, tokenPath}
+	if opt.ResourceObserver {
+		if err := installResourceObserver(opt); err != nil {
+			return Result{}, err
+		}
+		digestPaths = append(digestPaths, opt.MetaDir+"/resource-observer.mjs", opt.MetaDir+"/resource-supervisor.mjs")
+	}
 	caPath := filepath.Join(opt.MetaDir, "managed-ca.pem")
 	if len(managedCARaw) > 0 {
 		if err := writeAtomic(caPath, managedCARaw, 0o644, nil, opt); err != nil {

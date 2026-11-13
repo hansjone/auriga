@@ -285,6 +285,9 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		labelGeneration: strconv.FormatInt(s.Generation, 10),
 		labelManaged:    "true",
 	}
+	if s.SharedBind != "" {
+		labels["auriga.shared-skills"] = "read-only"
+	}
 	if d.EdgeContainer != "" {
 		labels["auriga.observability.edge"] = d.EdgeContainer
 	}
@@ -344,6 +347,22 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	}
 	if err := scope.recheck(); err != nil {
 		return err
+	}
+	if s.SharedBind != "" {
+		host := body["HostConfig"].(map[string]any)
+		mounts := host["Mounts"].([]map[string]any)
+		host["Mounts"] = append(mounts, map[string]any{"Type": "bind", "Source": s.SharedBind, "Target": renderer.ContainerDSHHome + "/auriga/skills-active/current", "ReadOnly": true, "RW": false})
+		image, err := d.Client.ImageInspect(ctx, engineImageID)
+		if err != nil {
+			return err
+		}
+		command, err := trustedImageCommand(image)
+		if err != nil {
+			return err
+		}
+		body["Entrypoint"] = []string{"node", renderer.ContainerResourceSupervisor}
+		body["Cmd"] = append([]string{renderer.ContainerResourcePolicy}, command...)
+		host["RestartPolicy"] = map[string]any{"Name": "no"}
 	}
 	containerID, err := d.Client.ContainerCreate(ctx, name, body, scope.candidate.Partition.OS+"/"+scope.candidate.Partition.Arch)
 	if err != nil {
