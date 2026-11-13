@@ -291,9 +291,11 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		}
 	}
 	spec = proto.Clone(spec).(*nodev1.InstanceSpec)
-	if !r.guardResources(ctx, spec) {
+	guarded, isolated := r.guardResources(ctx, spec)
+	if !guarded {
 		return
 	}
+	replaceStoppedExecution = replaceStoppedExecution || isolated
 	if telemetry.Current(ctx).Generation != spec.Generation || telemetry.Current(ctx).Instance != id {
 		ctx = r.startupContext(ctx, r.Store.StartupParent(id, spec.Generation), id, spec.Generation)
 	}

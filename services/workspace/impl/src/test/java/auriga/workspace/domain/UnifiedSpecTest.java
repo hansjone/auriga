@@ -41,6 +41,7 @@ class UnifiedSpecTest {
           .setTenantId("tenant")
           .setInstanceId("instance")
           .setGeneration(9)
+          .setResourceSelectionRevision(1)
           .setDesired(DesiredState.DESIRED_STATE_RUNNING)
           .build();
 
@@ -181,7 +182,7 @@ class UnifiedSpecTest {
   }
 
   @Test
-  void revocationStopsOnEitherDigestOrVersionOrReusedArtifact() {
+  void revocationPreservesPrivateInstanceAndResourceIntent() {
     var installed = empty.toBuilder().addUnifiedResources(ref).build();
     for (var entry :
         List.of(
@@ -202,7 +203,7 @@ class UnifiedSpecTest {
                 .build())) {
       var revoked = list.toBuilder().addRevokedArtifacts(entry).build();
       var stopped = UnifiedSpec.revocations(installed, revoked, true);
-      assertEquals(DesiredState.DESIRED_STATE_STOPPED, stopped.getDesired());
+      assertEquals(DesiredState.DESIRED_STATE_RUNNING, stopped.getDesired());
       assertEquals(
           ref,
           stopped.getUnifiedResources(0),
@@ -211,5 +212,49 @@ class UnifiedSpecTest {
       assertEquals(stopped, UnifiedSpec.revocations(stopped, revoked, true));
       assertThrows(AurigaException.class, () -> UnifiedSpec.revocations(stopped, list, true));
     }
+  }
+
+  @Test
+  void renewalAcceptsOnlySameBytesMonotonicSafetyDisable() {
+    var current = empty.toBuilder().addUnifiedResources(ref).build();
+    var disabled =
+        ref.toBuilder()
+            .setEnabled(false)
+            .setInstallationRevision(2)
+            .setDesiredState(UNIFIED_RESOURCE_DESIRED_STATE_DISABLED)
+            .build();
+    var next = UnifiedSpec.apply(current, 1, List.of(), resolution(1, disabled), true);
+    assertEquals(disabled, next.getUnifiedResources(0));
+    for (var invalid :
+        List.of(
+            disabled.toBuilder().setInstallationRevision(1).build(),
+            disabled.toBuilder()
+                .setIdentity(id.toBuilder().setManifestDigest("sha256:changed"))
+                .build()))
+      assertThrows(
+          AurigaException.class,
+          () -> UnifiedSpec.apply(current, 1, List.of(), resolution(1, invalid), true));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                next,
+                1,
+                List.of(),
+                resolution(1, ref.toBuilder().setInstallationRevision(3).build()),
+                true));
+  }
+
+  @Test
+  void incrementRequiresNextRevisionAndRetainsFullResolutionEntries() {
+    var first = empty.toBuilder().addUnifiedResources(ref).build();
+    var other = ref.toBuilder().setIdentity(id.toBuilder().setPackageId("other")).build();
+    var choice =
+        UnifiedSelection.newBuilder().setIdentity(other.getIdentity()).setAction("install").build();
+    assertThrows(
+        AurigaException.class,
+        () -> UnifiedSpec.apply(first, 3, List.of(choice), resolution(3, ref, other), false));
+    var next = UnifiedSpec.apply(first, 2, List.of(choice), resolution(2, ref, other), false);
+    assertEquals(List.of(ref, other), next.getUnifiedResourcesList());
   }
 }

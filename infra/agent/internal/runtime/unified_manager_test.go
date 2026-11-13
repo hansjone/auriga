@@ -58,6 +58,7 @@ type unifiedFixture struct {
 	revPrivate        ed25519.PrivateKey
 	releasePrivate    ed25519.PrivateKey
 	catalogPrivate    bool
+	catalogEmpty      bool
 	privateCollision  bool
 	override          bool
 	root              string
@@ -173,12 +174,12 @@ func newUnifiedFixture(t *testing.T) *unifiedFixture {
 			return
 		}
 		rows := []map[string]any{}
-		if f.catalogPrivate && f.privateCollision {
+		if (f.catalogPrivate || f.catalogEmpty) && f.privateCollision {
 			for _, preset := range []string{"cordis", "standard", "ptc"} {
 				rows = append(rows, map[string]any{"name": "example-skill", "provider": "user", "path": "/home/dsh/.dsh/skills/example-skill/SKILL.md", "content": "Private colliding name.", "preset": preset})
 			}
 		}
-		if !f.catalogPrivate {
+		if !f.catalogPrivate && !f.catalogEmpty {
 			for _, preset := range []string{"cordis", "standard", "ptc"} {
 				provider := "auriga-shared"
 				if f.override && preset == "ptc" {
@@ -214,7 +215,7 @@ func TestUnifiedManagerActivationObservationAndExpiry(t *testing.T) {
 	}
 	f.override = true
 	reports, _, err = f.manager.Observe(ctx, f.source.spec.InstanceId)
-	if err != nil || reports[0].State != "overridden" {
+	if err == nil || len(reports) != 0 {
 		t.Fatalf("preset collision counted as applied: %+v %v", reports, err)
 	}
 	f.override = false
@@ -303,7 +304,7 @@ func TestUnifiedManagerRemovalTombstoneAndNoRedownload(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatal("remove left shared content", err)
 	}
-	f.catalogPrivate = true
+	f.catalogEmpty = true
 	f.privateCollision = true
 	reports, _, err := f.manager.Observe(ctx, f.source.spec.InstanceId)
 	if err != nil || reports[0].InstallationRevision != 2 || reports[0].State != "removed" || reports[0].Generation != 2 {
@@ -312,13 +313,18 @@ func TestUnifiedManagerRemovalTombstoneAndNoRedownload(t *testing.T) {
 }
 
 func TestUnifiedArchiveRejectsUnsafeAndExecutableContent(t *testing.T) {
-	for _, name := range []string{"../SKILL.md", "/SKILL.md", "references/CON.txt", "references/a//b.md", "assets/payload.sh", "assets/archive.tar.gz"} {
+	for _, name := range []string{"../SKILL.md", "/SKILL.md", "references/CON.txt", "references/CONIN$.md", "references/CONOUT$.txt", "references/a//b.md", "assets/payload.sh", "assets/archive.tar.gz"} {
 		t.Run(name, func(t *testing.T) {
 			archive := skillArchive(t, map[string]string{"SKILL.md": unifiedSkillText, name: "unsafe"})
 			if err := ExtractUnifiedSkill(archive, filepath.Join(t.TempDir(), "stage")); err == nil {
 				t.Fatal("unsafe archive accepted")
 			}
 		})
+	}
+	for _, name := range []string{"references/COM¹.txt", "references/LPT².md", "references/COM³.txt"} {
+		if _, err := unifiedArchivePath(name); err == nil {
+			t.Fatalf("Windows reserved alias admitted: %s", name)
+		}
 	}
 	for _, raw := range []string{"---\na: 1\na: 2\n---\nBody", "---\na: &x test\nb: *x\n---\nBody"} {
 		if err := unifiedSkillFrontMatter([]byte(raw)); err == nil {
@@ -411,7 +417,7 @@ func TestUnifiedManagerRecoversCrashAfterQuarantineRename(t *testing.T) {
 func TestUnifiedDockerMountMustBeReadOnlyAndOwned(t *testing.T) {
 	d := &Docker{DataRoot: t.TempDir()}
 	id := "instance"
-	source := filepath.Join(d.DataRoot, "instances", id, "meta", "shared-resources", "skills-active", "current")
+	source := filepath.Join(d.DataRoot, "instances", id, "resource-state", "skills-active", "current")
 	mount := map[string]any{"Source": source, "Destination": "/home/dsh/.dsh/auriga/skills-active/current", "Type": "bind", "RW": false}
 	inspection := map[string]any{"Mounts": []any{mount}, "Config": map[string]any{"Entrypoint": []string{"node", renderer.ContainerResourceSupervisor}, "Cmd": []string{renderer.ContainerResourcePolicy, "node", "dsh.mjs"}}, "HostConfig": map[string]any{"RestartPolicy": map[string]any{"Name": "no"}}}
 	if err := d.verifyUnifiedMount(inspection, id); err != nil {

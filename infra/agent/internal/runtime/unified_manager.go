@@ -55,10 +55,12 @@ type unifiedNodeState struct {
 	Migrations            map[string]map[string]any
 	UsedAuthorizations    []string
 	InstallationRevisions map[string]uint64
+	SelectionLocks        map[string]unifiedSelectionLock
+	ObservedAt            string
 }
 
 // UnifiedManager is the cloud's only shared-skill writer. Its private ledger,
-// cache and recovery journal stay under the node-owned meta directory. Only
+// cache and recovery journal stay outside the container's home/meta mounts. Only
 // current is exposed to the instance, through an additional read-only mount.
 // The agent's exclusively locked state database and this mutex serialize writers.
 type UnifiedManager struct {
@@ -164,7 +166,7 @@ func (m *UnifiedManager) paths(id string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	root, err := storage.SafeJoin(paths.Meta, "shared-resources")
+	root, err := storage.SafeJoin(paths.Root, "resource-state")
 	if err != nil {
 		return "", "", err
 	}
@@ -421,13 +423,18 @@ func (m *UnifiedManager) isolate(ctx context.Context, s *unifiedNodeState, root,
 		return err
 	}
 	s.State = "private_only"
+	s.ObservedAt = ""
 	s.PendingIsolation = ""
 	s.PendingActivation = ""
 	if err := m.save(root, s); err != nil {
 		_ = m.Driver.Stop(ctx, s.Host, 5*time.Second)
 		return err
 	}
-	return nil
+	paths, err := m.Layout.For(s.Host)
+	if err != nil {
+		return err
+	}
+	return m.publishSessionPolicy(filepath.Join(paths.Meta, "resource-session-policy.json"), s)
 }
 
 // Guard is called on every apply and health tick, independently of the plugin.
@@ -464,6 +471,36 @@ func (m *UnifiedManager) Guard(ctx context.Context, spec *nodev1.InstanceSpec) (
 			reason = "verification_failed"
 		}
 	}
+	if reason == "" && spec.GetResourceSelectionRevision() > s.SelectionRevision {
+		incoming := map[string]*resourcev1.UnifiedResourceRef{}
+		for _, ref := range spec.GetUnifiedResources() {
+			incoming[ref.GetIdentity().GetPackageId()] = ref
+		}
+		for _, record := range s.Installations {
+			if record.DesiredState != "ENABLED" {
+				continue
+			}
+			var prior resourcev1.UnifiedResourceRef
+			if proto.Unmarshal(record.Ref, &prior) != nil {
+				reason = "verification_failed"
+				break
+			}
+			next := incoming[prior.GetIdentity().GetPackageId()]
+			if next == nil {
+				reason = "disabled"
+				break
+			}
+			_, desired, err := ReadUnifiedIntent(next)
+			if err != nil {
+				reason = "verification_failed"
+				break
+			}
+			if desired != "ENABLED" {
+				reason = "disabled"
+				break
+			}
+		}
+	}
 	effective := m.now()
 	if reason == "" {
 		advance := ut(s.Clock["maxObservedTime"]).Add(time.Duration(m.mono()-un(s.Clock["lastMonotonicMillis"])) * time.Millisecond)
@@ -492,9 +529,11 @@ func (m *UnifiedManager) Guard(ctx context.Context, spec *nodev1.InstanceSpec) (
 			if list.GetRevision() < s.RevocationRevision || list.GetRevision() == s.RevocationRevision && s.RevocationDigest != "" && s.RevocationDigest != digest {
 				reason = "verification_failed"
 			} else {
-				s.RevocationRevision, s.RevocationDigest = list.GetRevision(), digest
-				if err := m.save(root, s); err != nil {
-					return err
+				if s.RevocationRevision != list.GetRevision() || s.RevocationDigest != digest {
+					s.RevocationRevision, s.RevocationDigest = list.GetRevision(), digest
+					if err := m.save(root, s); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -567,7 +606,17 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 	}
 	defer func() {
 		if failure != nil {
-			if current, err := m.privateFallback(spec); err == nil {
+			// A rejected new intent must never leave the old shared view usable.
+			if err := m.Isolate(ctx, spec.GetInstanceId(), "verification_failed"); err != nil {
+				if m.Driver != nil {
+					stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+					defer cancel()
+					_ = m.Driver.Stop(stopCtx, spec.GetInstanceId(), 5*time.Second)
+				}
+				failure = errors.Join(failure, err)
+				return
+			}
+			if current, err := m.privateFallback(spec); err == nil && !errors.Is(failure, errUnifiedSelection) {
 				binding, failure = current, nil
 			}
 		}
@@ -701,6 +750,9 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 			return "", fmt.Errorf("resource selection superseded")
 		}
 	}
+	if err := m.lockSelection(spec, s); err != nil {
+		return "", err
+	}
 	if s.PendingIsolation != "" || s.PendingActivation != "" || s.State == "stopping" || s.State == "isolating" || s.State == "blocked" {
 		if err := m.isolate(ctx, s, root, current, "verification_failed"); err != nil {
 			return "", err
@@ -723,19 +775,19 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 		installationKey := spec.GetTenantId() + "/" + spec.GetOwnerId() + "/" + item.ref.GetIdentity().GetPackageId()
 		highRevision := s.InstallationRevisions[installationKey]
 		if item.revision < highRevision {
-			return "", fmt.Errorf("installation revision rollback after collection")
+			return "", fmt.Errorf("%w: installation revision rollback after collection", errUnifiedSelection)
 		}
 		if _, exists := old[item.ref.GetIdentity().GetPackageId()]; !exists && highRevision > 0 && item.revision == highRevision {
-			return "", fmt.Errorf("collected installation revision replay")
+			return "", fmt.Errorf("%w: collected installation revision replay", errUnifiedSelection)
 		}
 		if previous, ok := old[item.ref.GetIdentity().GetPackageId()]; ok {
 			if item.revision < previous.InstallationRevision {
-				return "", fmt.Errorf("installation revision rollback")
+				return "", fmt.Errorf("%w: installation revision rollback", errUnifiedSelection)
 			}
 			if item.revision == previous.InstallationRevision {
 				var prior resourcev1.UnifiedResourceRef
 				if proto.Unmarshal(previous.Ref, &prior) != nil || !proto.Equal(prior.GetIdentity(), item.ref.GetIdentity()) || prior.GetReleaseSequence() != item.ref.GetReleaseSequence() || previous.DesiredState != item.state {
-					return "", fmt.Errorf("installation revision conflict")
+					return "", fmt.Errorf("%w: installation revision conflict", errUnifiedSelection)
 				}
 			}
 		}
@@ -744,7 +796,7 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 				if item.ref.GetReleaseSequence() < uint64(un(watermark["releaseSequence"])) {
 					id, err := m.authorizeDowngrade(spec, s, item.ref, item.revision, old[item.ref.GetIdentity().GetPackageId()])
 					if err != nil {
-						return "", err
+						return "", errors.Join(errUnifiedSelection, err)
 					}
 					item.authorization = id
 				} else if err := m.Protocol.Evaluate("watermark", map[string]any{"release": item.input, "watermark": watermark}); err != nil {
@@ -805,6 +857,7 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 		return "", err
 	}
 	installations := []unifiedInstalled{}
+	hasEnabled := false
 	for _, item := range ready {
 		wire, err := proto.Marshal(item.ref)
 		if err != nil {
@@ -818,6 +871,7 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 			}
 			record.State = "applying"
 			s.HasShared = true
+			hasEnabled = true
 			key := spec.GetTenantId() + "/" + item.ref.GetIdentity().GetPackageId()
 			prior := s.Watermarks[key]
 			if prior == nil || un(prior["releaseSequence"]) < int64(item.ref.GetReleaseSequence()) {
@@ -839,6 +893,8 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 	s.Tenant, s.Owner, s.Host = spec.GetTenantId(), spec.GetOwnerId(), spec.GetInstanceId()
 	s.SelectionRevision, s.Generation = spec.GetResourceSelectionRevision(), spec.GetGeneration()
 	s.Installations = installations
+	s.HasShared = hasEnabled
+	s.ObservedAt = ""
 	s.PendingActivation = transaction
 	s.State = "verifying"
 	if err := m.save(root, s); err != nil {
@@ -888,19 +944,71 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 	if err := m.writeInstallationReceipts(root, s); err != nil {
 		return "", err
 	}
+	if err := m.collectResourceCache(root, s); err != nil {
+		return "", err
+	}
+	paths, err := m.Layout.For(spec.GetInstanceId())
+	if err != nil {
+		return "", err
+	}
+	if err := m.publishSessionPolicy(filepath.Join(paths.Meta, "resource-session-policy.json"), s); err != nil {
+		return "", err
+	}
 	return current, nil
 }
 
-func (m *UnifiedManager) Observe(ctx context.Context, id string) ([]*resourcev1.UnifiedInstallationReport, *resourcev1.UnifiedGuardianState, error) {
+// Isolate withdraws shared content before returning any failed observation or intent.
+func (m *UnifiedManager) Isolate(ctx context.Context, id, reason string) error {
 	defer m.lock(id)()
-	s, root, _, err := m.load(id)
+	s, root, current, err := m.load(id)
+	if err != nil {
+		return err
+	}
+	if s.Tenant == "" && len(s.Installations) == 0 {
+		return nil
+	}
+	if s.State == "private_only" && s.PendingIsolation == "" && s.PendingActivation == "" {
+		return nil
+	}
+	return m.isolate(ctx, s, root, current, reason)
+}
+
+func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*resourcev1.UnifiedInstallationReport, guardian *resourcev1.UnifiedGuardianState, failure error) {
+	defer m.lock(id)()
+	defer func() {
+		if failure != nil && m.Driver != nil {
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			if err := m.Driver.Stop(stopCtx, id, 5*time.Second); err != nil {
+				failure = errors.Join(failure, err)
+			}
+		}
+	}()
+	s, root, current, err := m.load(id)
 	if err != nil {
 		return nil, nil, err
 	}
-	guardian := &resourcev1.UnifiedGuardianState{TenantId: s.Tenant, OwnerId: s.Owner, HostId: s.Host, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), State: s.State, Reason: s.Reason, NewSessionRequired: s.HasShared && s.State == "private_only", ViewCleared: s.State == "private_only"}
-	var reports []*resourcev1.UnifiedInstallationReport
+	guardian = unifiedGuardian(s)
 	if len(s.Installations) == 0 && !s.HasShared {
 		return reports, guardian, nil
+	}
+	defer func() {
+		if failure != nil {
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			if err := m.isolate(stopCtx, s, root, current, "observation_mismatch"); err != nil {
+				failure = errors.Join(failure, err)
+			}
+			reports = nil
+			guardian = unifiedGuardian(s)
+		}
+	}()
+	if verifier, ok := m.Driver.(interface {
+		VerifyResourceView(context.Context, string) error
+	}); ok {
+		if err := verifier.VerifyResourceView(ctx, id); err != nil {
+			return nil, guardian, err
+		}
 	}
 	endpoint, err := m.Driver.Endpoint(id)
 	if err != nil {
@@ -909,6 +1017,36 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) ([]*resourcev1.
 	paths, err := m.Layout.For(id)
 	if err != nil {
 		return nil, guardian, err
+	}
+	var policy map[string]any
+	policyError := unifiedRead(filepath.Join(paths.Meta, "resource-session-policy.json"), &policy)
+	actualPolicy, _ := json.Marshal(policy)
+	expectedPolicy, _ := json.Marshal(m.sessionPolicy(s))
+	if policyError != nil || !bytes.Equal(actualPolicy, expectedPolicy) {
+		return nil, guardian, fmt.Errorf("node session policy does not match guardian")
+	}
+	if err := storage.CheckNoSymlink(root, current); err != nil {
+		return nil, guardian, err
+	}
+	entries, err := os.ReadDir(current)
+	if err != nil {
+		return nil, guardian, err
+	}
+	expectedNames := map[string]bool{}
+	if s.State == "active" {
+		for _, record := range s.Installations {
+			if record.DesiredState == "ENABLED" {
+				expectedNames[record.Name] = true
+			}
+		}
+	}
+	if len(entries) != len(expectedNames) {
+		return nil, guardian, fmt.Errorf("node shared view does not match selected content")
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !expectedNames[entry.Name()] {
+			return nil, guardian, fmt.Errorf("unexpected node shared content")
+		}
 	}
 	token, err := os.ReadFile(filepath.Join(paths.Meta, "instance.token"))
 	if err != nil {
@@ -939,9 +1077,15 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) ([]*resourcev1.
 	if err := json.Unmarshal(raw, &catalog); err != nil {
 		return nil, guardian, err
 	}
-	if s.HasShared && s.State == "private_only" && !catalog.PrivateOnly {
+	if catalog.PrivateOnly != (s.HasShared && s.State == "private_only") {
 		return nil, guardian, fmt.Errorf("private-only session gate unavailable")
 	}
+	for _, skill := range catalog.Skills {
+		if skill.Provider == "auriga-shared" && !expectedNames[skill.Name] {
+			return nil, guardian, fmt.Errorf("instance reported unselected shared content")
+		}
+	}
+	changed := s.ObservedAt == ""
 	for i, record := range s.Installations {
 		var ref resourcev1.UnifiedResourceRef
 		if err := proto.Unmarshal(record.Ref, &ref); err != nil {
@@ -978,20 +1122,33 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) ([]*resourcev1.
 		if confirmed["cordis"] && confirmed["standard"] && confirmed["ptc"] {
 			state = "applied"
 		}
+		if record.DesiredState == "ENABLED" && s.State == "active" && state != "applied" {
+			return nil, guardian, fmt.Errorf("native catalog disagrees with node shared view")
+		}
+		if s.State == "private_only" && foundShared {
+			return nil, guardian, fmt.Errorf("isolated shared content still visible")
+		}
 		if record.DesiredState != "ENABLED" && !foundShared {
 			if _, err := os.Lstat(filepath.Join(root, "skills-active", "current", record.Name)); os.IsNotExist(err) {
 				state = strings.ToLower(record.DesiredState)
 			}
 		}
+		changed = changed || s.Installations[i].State != state
 		s.Installations[i].State = state
 		reports = append(reports, &resourcev1.UnifiedInstallationReport{ClientId: id, Identity: ref.GetIdentity(), InstallationRevision: record.InstallationRevision, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), ObservedGeneration: uint64(s.Generation), State: state, ReportSource: "node", ObservedAt: m.now().Format(time.RFC3339Nano)})
 	}
-	if err := m.save(root, s); err != nil {
-		return nil, guardian, err
-	}
-	if err := m.writeInstallationReceipts(root, s); err != nil {
-		_ = m.Driver.Stop(ctx, id, 5*time.Second)
-		return nil, guardian, err
+	if changed {
+		s.ObservedAt = m.now().Format(time.RFC3339Nano)
+		if err := m.save(root, s); err != nil {
+			return nil, guardian, err
+		}
+		if err := m.writeInstallationReceipts(root, s); err != nil {
+			return nil, guardian, err
+		}
 	}
 	return reports, guardian, nil
+}
+
+func unifiedGuardian(s *unifiedNodeState) *resourcev1.UnifiedGuardianState {
+	return &resourcev1.UnifiedGuardianState{TenantId: s.Tenant, OwnerId: s.Owner, HostId: s.Host, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), State: s.State, Reason: s.Reason, NewSessionRequired: s.HasShared && s.State == "private_only", ViewCleared: s.State == "private_only"}
 }

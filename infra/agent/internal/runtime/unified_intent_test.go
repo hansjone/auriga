@@ -47,7 +47,7 @@ func TestUnifiedGeneratedDesiredSuccessReports(t *testing.T) {
 			f := newUnifiedFixture(t)
 			f.ref.DesiredState = test.desired.Enum()
 			f.ref.Enabled = test.report == "applied"
-			f.catalogPrivate = !f.ref.Enabled
+			f.catalogEmpty = !f.ref.Enabled
 			if _, err := f.manager.Prepare(context.Background(), f.source.spec); err != nil {
 				t.Fatal(err)
 			}

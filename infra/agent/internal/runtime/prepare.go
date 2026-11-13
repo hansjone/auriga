@@ -486,6 +486,19 @@ func (p *Preparing) CheckHealth(ctx context.Context, id string) (Status, error) 
 		if err := p.Unified.Guard(ctx, spec); err != nil {
 			return Status{InstanceID: id}, err
 		}
+		_, guardian, err := p.Unified.Status(id)
+		if err != nil {
+			return Status{}, err
+		}
+		if guardian != nil && guardian.State == "private_only" {
+			actual, err := p.Inner.Inspect(ctx, id)
+			if err != nil {
+				return Status{}, err
+			}
+			if !actual.Running {
+				return actual, ErrUnifiedPrivateOnly
+			}
+		}
 	}
 	if checker, ok := p.Inner.(HealthChecker); ok {
 		return checker.CheckHealth(ctx, id)

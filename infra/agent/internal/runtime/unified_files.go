@@ -19,7 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var unifiedReserved = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)`)
+var unifiedReserved = regexp.MustCompile(`(?i)^(con(?:in\$|out\$)?|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)`)
 
 func unifiedRename(source, target string) error {
 	if _, err := os.Lstat(target); !os.IsNotExist(err) {

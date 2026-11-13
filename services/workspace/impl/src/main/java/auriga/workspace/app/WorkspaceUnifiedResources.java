@@ -1,5 +1,6 @@
 package auriga.workspace.app;
 
+import auriga.common.context.TenantContext;
 import auriga.common.error.*;
 import auriga.common.events.*;
 import auriga.common.persistence.UuidV7;
@@ -130,18 +131,35 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
               throw new AurigaException(CommonErrors.CONFLICT);
             return null;
           }
-          if (WorkspaceService.spec(row).getResourceSelectionRevision() > selectionRevision)
-            return null;
-          if (WorkspaceService.spec(row).getResourceSelectionRevision() == selectionRevision)
-            throw new AurigaException(CommonErrors.CONFLICT);
+          var spec = WorkspaceService.spec(row);
+          boolean contained =
+              spec.getResourceSelectionRevision() >= selectionRevision
+                  && selections.stream()
+                      .allMatch(
+                          selection ->
+                              spec.getUnifiedResourcesList().stream()
+                                  .anyMatch(
+                                      ref ->
+                                          ref.getIdentity().equals(selection.getIdentity())
+                                              && UnifiedResourceIntent.desired(ref)
+                                                  .equals(
+                                                      switch (selection.getAction()) {
+                                                        case "install", "enable" -> "ENABLED";
+                                                        case "disable" -> "DISABLED";
+                                                        case "remove" -> "REMOVED";
+                                                        default ->
+                                                            throw new AurigaException(
+                                                                CommonErrors.VALIDATION_FAILED);
+                                                      })));
           service.store.jdbc.update(
-              "INSERT INTO unified_resource_intent(id,tenant_id,instance_id,owner_id,selection_revision,request) VALUES(?,?,?,?,?,?)",
+              "INSERT INTO unified_resource_intent(id,tenant_id,instance_id,owner_id,selection_revision,request,applied) VALUES(?,?,?,?,?,?,?)",
               UuidV7.next(service.clock),
               tenant,
               instance,
               owner,
               selectionRevision,
-              bytes);
+              bytes,
+              contained);
           return null;
         });
   }
@@ -154,18 +172,36 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       List<UnifiedSelection> selections) {
     record(tenant, instance, owner, selectionRevision, selections);
     var before = snapshot(tenant, instance);
-    if (before.spec().getResourceSelectionRevision() >= selectionRevision) return before;
+    if (before.spec().getResourceSelectionRevision() >= selectionRevision) {
+      boolean applied =
+          service.store.in(
+              tenant,
+              () ->
+                  Boolean.TRUE.equals(
+                      service.store.jdbc.queryForObject(
+                          "SELECT applied FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision=?",
+                          Boolean.class,
+                          tenant,
+                          instance,
+                          selectionRevision)));
+      if (!applied) throw new AurigaException(CommonErrors.CONFLICT);
+      return before;
+    }
+    if (before.spec().getResourceSelectionRevision() + 1 != selectionRevision) return before;
     if (before.node() == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
     var resolution =
-        resolver.apply(
-            ResolveUnifiedResourcesRequest.newBuilder()
-                .setTenantId(tenant.toString())
-                .setOwnerId(owner.toString())
-                .setInstanceId(instance.toString())
-                .setNodeId(before.node().toString())
-                .setSelectionRevision(selectionRevision)
-                .addAllSelections(selections)
-                .build());
+        TenantContext.call(
+            tenant,
+            () ->
+                resolver.apply(
+                    ResolveUnifiedResourcesRequest.newBuilder()
+                        .setTenantId(tenant.toString())
+                        .setOwnerId(owner.toString())
+                        .setInstanceId(instance.toString())
+                        .setNodeId(before.node().toString())
+                        .setSelectionRevision(selectionRevision)
+                        .addAllSelections(selections)
+                        .build()));
     return service.store.in(
         tenant,
         () -> {
@@ -174,12 +210,14 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           authorize(tenant, owner, row);
           var old = WorkspaceService.spec(row);
           if (old.getResourceSelectionRevision() >= selectionRevision) return view(row);
+          if (old.getResourceSelectionRevision() + 1 != selectionRevision)
+            throw new AurigaException(CommonErrors.CONFLICT);
           if (!Objects.equals(row.get("node_id"), before.node()))
             throw new AurigaException(CommonErrors.CONFLICT);
           var next = UnifiedSpec.apply(old, selectionRevision, selections, resolution, false);
           service.saveSpec(row, UnifiedSpec.bump(next));
           service.store.jdbc.update(
-              "UPDATE unified_resource_intent SET applied=true WHERE tenant_id=? AND instance_id=? AND selection_revision<=?",
+              "UPDATE unified_resource_intent SET applied=true WHERE tenant_id=? AND instance_id=? AND selection_revision=?",
               tenant,
               instance,
               selectionRevision);
@@ -201,6 +239,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           authorize(tenant, owner, row);
           var old = WorkspaceService.spec(row);
           var retained = new ArrayList<UnifiedResourceRef>();
+          var renewal = response.toBuilder();
           var reports = view(row).reports();
           for (var ref : old.getUnifiedResourcesList()) {
             boolean present =
@@ -211,17 +250,23 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                                 .getPackageId()
                                 .equals(ref.getIdentity().getPackageId()));
             if (present) retained.add(ref);
-            else if (!UnifiedResourceIntent.desired(ref).equals("REMOVED")
-                || reports.stream()
-                    .noneMatch(
+            else if (UnifiedResourceIntent.desired(ref).equals("REMOVED")
+                && reports.stream()
+                    .anyMatch(
                         r ->
                             r.getIdentity().equals(ref.getIdentity())
-                                && r.getState().equals("removed")))
-              throw new AurigaException(CommonErrors.CONFLICT);
+                                && r.getState().equals("removed"))) {
+              // Only an exact node acknowledgement permits next-generation collection.
+            } else {
+              // An unavailable entry cannot prevent healthy entries renewing. Preserve
+              // its original signed deadline; absence never authorizes uninstall.
+              retained.add(ref);
+              renewal.addResources(ref);
+            }
           }
           var base =
               old.toBuilder().clearUnifiedResources().addAllUnifiedResources(retained).build();
-          var next = UnifiedSpec.apply(base, selectionRevision, List.of(), response, true);
+          var next = UnifiedSpec.apply(base, selectionRevision, List.of(), renewal.build(), true);
           if (!next.equals(old)) service.saveSpec(row, UnifiedSpec.bump(next));
           service.store.jdbc.update(
               "UPDATE instance SET unified_refresh_pending=false WHERE tenant_id=? AND id=?",
@@ -374,7 +419,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                 tenant,
                 () ->
                     service.store.jdbc.queryForList(
-                        "SELECT * FROM unified_resource_intent WHERE tenant_id=? AND NOT applied ORDER BY selection_revision DESC LIMIT 200",
+                        "SELECT * FROM unified_resource_intent WHERE tenant_id=? AND NOT applied ORDER BY instance_id,selection_revision ASC LIMIT 200",
                         tenant));
         for (var intent : pending) {
           try {
@@ -418,19 +463,41 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                     .setOwnerId(spec.getOwnerId())
                     .setNodeId(row.get("node_id").toString())
                     .setSelectionRevision(spec.getResourceSelectionRevision());
-            spec.getUnifiedResourcesList()
-                .forEach(
-                    r ->
-                        request.addSelections(
-                            UnifiedSelection.newBuilder()
-                                .setIdentity(r.getIdentity())
-                                .setAction(r.getEnabled() ? "enable" : "disable")));
+            var original =
+                service.store.in(
+                    tenant,
+                    () ->
+                        service.store.jdbc.queryForList(
+                            "SELECT request FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision=? AND applied",
+                            tenant,
+                            row.get("id"),
+                            spec.getResourceSelectionRevision()));
+            if (!original.isEmpty()) {
+              // A resolves the immutable original distribution, including remove
+              // actions. Renewing is not a new enable/disable operation.
+              request.addAllSelections(
+                  UnifiedDistributionInput.parseFrom((byte[]) original.getFirst().get("request"))
+                      .getSelectionsList());
+            } else
+              spec.getUnifiedResourcesList()
+                  .forEach(
+                      r ->
+                          request.addSelections(
+                              UnifiedSelection.newBuilder()
+                                  .setIdentity(r.getIdentity())
+                                  .setAction(
+                                      switch (UnifiedResourceIntent.desired(r)) {
+                                        case "ENABLED" -> "enable";
+                                        case "DISABLED" -> "disable";
+                                        case "REMOVED" -> "remove";
+                                        default -> throw new AurigaException(CommonErrors.CONFLICT);
+                                      })));
             refresh(
                 tenant,
                 (UUID) row.get("id"),
                 (UUID) row.get("owner_id"),
                 spec.getResourceSelectionRevision(),
-                resolver.apply(request.build()));
+                TenantContext.call(tenant, () -> resolver.apply(request.build())));
           } catch (Exception e) {
             org.slf4j.LoggerFactory.getLogger(getClass())
                 .warn("Unified lease reconciliation deferred");

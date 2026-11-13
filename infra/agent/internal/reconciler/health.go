@@ -174,6 +174,10 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 	if !current() {
 		return
 	}
+	if errors.Is(checkErr, runtime.ErrUnifiedPrivateOnly) {
+		r.applySpec(ctx, id, spec, true)
+		return
+	}
 	if checkErr == nil && actual.Generation != rec.Status.ObservedGeneration {
 		checkErr = errors.New("runtime health execution generation mismatch")
 	}
@@ -191,7 +195,7 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 					st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART
 				}
 			}
-			if r.persistHealth(ctx, epoch, spec, st, 0) {
+			if r.persistHealth(ctx, epoch, spec, st, 0) && st.Ready {
 				telemetry.Stage(ctx, "ready")
 			}
 		}
@@ -229,7 +233,7 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 					st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART
 				}
 			}
-			if r.persistHealth(ctx, epoch, spec, st, 0) {
+			if r.persistHealth(ctx, epoch, spec, st, 0) && st.Ready {
 				telemetry.Stage(ctx, "ready")
 			}
 			r.mu.Lock()

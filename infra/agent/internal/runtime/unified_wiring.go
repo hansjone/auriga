@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"encoding/json"
@@ -25,8 +26,8 @@ import (
 // leave private instances usable and shared activation closed. ApplySpec never
 // supplies a signing root or an origin.
 func NewUnifiedManager(layout *storage.Layout, driver Driver, specs SpecSource, agentDirectory string) *UnifiedManager {
-	started := time.Now()
-	m := &UnifiedManager{Layout: layout, Driver: driver, Specs: specs, BootID: unifiedNonce(), Mono: func() int64 { return time.Since(started).Milliseconds() }}
+	boot, mono := unifiedHostClock()
+	m := &UnifiedManager{Layout: layout, Driver: driver, Specs: specs, BootID: boot, Mono: mono}
 	var settings struct {
 		SchemaVersion int               `json:"schemaVersion"`
 		Origin        string            `json:"origin"`
@@ -201,7 +202,17 @@ func (m *UnifiedManager) Status(id string) ([]*resourcev1.UnifiedInstallationRep
 			break
 		}
 	}
-	return nil, state, nil
+	var reports []*resourcev1.UnifiedInstallationReport
+	if s.ObservedAt != "" {
+		for _, record := range s.Installations {
+			var ref resourcev1.UnifiedResourceRef
+			if proto.Unmarshal(record.Ref, &ref) != nil {
+				return nil, state, fmt.Errorf("invalid cached resource observation")
+			}
+			reports = append(reports, &resourcev1.UnifiedInstallationReport{ClientId: id, Identity: ref.GetIdentity(), InstallationRevision: record.InstallationRevision, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), ObservedGeneration: uint64(s.Generation), State: record.State, ReportSource: "node", ObservedAt: s.ObservedAt})
+		}
+	}
+	return reports, state, nil
 }
 
 // ResourceObservations supplies authenticated node evidence to the reconciler.
@@ -252,8 +263,22 @@ func (d *Docker) ResourceProcessStopped(ctx context.Context, id string) (bool, e
 	return !running, nil
 }
 
+// Engine identity, mount provenance and actual process state are node-owned
+// evidence. A catalog response from an instance cannot substitute for them.
+func (d *Docker) VerifyResourceView(ctx context.Context, id string) error {
+	actual, err := d.Inspect(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !actual.Running {
+		return fmt.Errorf("resource runtime is not running")
+	}
+	return nil
+}
+
 func (d *Docker) verifyUnifiedMount(inspection map[string]any, id string) error {
-	expected := filepath.Join(d.DataRoot, "instances", id, "meta", "shared-resources", "skills-active", "current")
+	root := filepath.Join(d.DataRoot, "instances", id, "resource-state")
+	expected := filepath.Join(root, "skills-active", "current")
 	mounts, _ := inspection["Mounts"].([]any)
 	count := 0
 	for _, value := range mounts {
@@ -262,6 +287,9 @@ func (d *Docker) verifyUnifiedMount(inspection map[string]any, id string) error 
 			continue
 		}
 		if mount["Destination"] != "/home/dsh/.dsh/auriga/skills-active/current" {
+			if source, ok := mount["Source"].(string); ok && (unifiedContains(source, root) || unifiedContains(root, source)) {
+				return fmt.Errorf("node-private resource state exposed to instance")
+			}
 			continue
 		}
 		source, ok := mount["Source"].(string)
@@ -287,4 +315,9 @@ func (d *Docker) verifyUnifiedMount(inspection map[string]any, id string) error 
 		return fmt.Errorf("resource supervisor automatic restart denied")
 	}
 	return nil
+}
+
+func unifiedContains(parent, child string) bool {
+	rel, err := filepath.Rel(filepath.Clean(parent), filepath.Clean(child))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }

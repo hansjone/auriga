@@ -34,7 +34,7 @@ public final class UnifiedSpec {
     require(
         renewal
             ? old.getResourceSelectionRevision() == revision
-            : old.getResourceSelectionRevision() < revision);
+            : old.getResourceSelectionRevision() + 1 == revision);
     Map<String, UnifiedResourceRef> before = refs(old.getUnifiedResourcesList());
     Map<String, UnifiedResourceRef> incoming = refs(resolved.getResourcesList());
     var result = new LinkedHashMap<>(before);
@@ -45,12 +45,7 @@ public final class UnifiedSpec {
           (key, next) -> {
             var previous = before.get(key);
             require(sameBytes(previous, next));
-            require(previous.getEnabled() == next.getEnabled());
-            require(
-                UnifiedResourceIntent.desired(previous)
-                    .equals(UnifiedResourceIntent.desired(next)));
-            require(
-                UnifiedResourceIntent.revision(previous) == UnifiedResourceIntent.revision(next));
+            require(sameIntentOrSafetyDisable(previous, next));
             result.put(key, next);
           });
     } else {
@@ -93,7 +88,13 @@ public final class UnifiedSpec {
           default -> throw new AurigaException(CommonErrors.VALIDATION_FAILED);
         }
       }
-      require(incoming.isEmpty());
+      incoming.forEach(
+          (key, next) -> {
+            var previous = before.get(key);
+            require(previous != null && sameBytes(previous, next));
+            require(sameIntentOrSafetyDisable(previous, next));
+            result.put(key, next);
+          });
     }
     for (var ref : result.values()) {
       require(ref.getIdentity().getTenantId().equals(old.getTenantId()));
@@ -108,6 +109,18 @@ public final class UnifiedSpec {
             .setResourceSelectionRevision(revision)
             .build();
     return revocations(next, resolved.getRevocations(), false);
+  }
+
+  private static boolean sameIntentOrSafetyDisable(
+      UnifiedResourceRef previous, UnifiedResourceRef next) {
+    String before = UnifiedResourceIntent.desired(previous),
+        after = UnifiedResourceIntent.desired(next);
+    long prior = UnifiedResourceIntent.revision(previous),
+        revision = UnifiedResourceIntent.revision(next);
+    // A resource-side withdrawal/revocation allocates a new CAS for a safety
+    // disable. Ordinary signing/lease renewal still preserves intent and CAS.
+    return before.equals(after) && prior == revision
+        || before.equals("ENABLED") && after.equals("DISABLED") && revision > prior;
   }
 
   public static boolean sameBytes(UnifiedResourceRef a, UnifiedResourceRef b) {
@@ -163,14 +176,12 @@ public final class UnifiedSpec {
     for (var prior : old.getResourceRevocationsList())
       if (prior.getTenantId().equals(effective.getTenantId())
           && prior.getRevision() == effective.getRevision()) require(prior.equals(effective));
-    boolean affected = old.getUnifiedResourcesList().stream().anyMatch(r -> revoked(r, effective));
     var next =
         old.toBuilder()
             .clearResourceRevocations()
             .addResourceRevocations(effective)
             .clearUnifiedResources();
     next.addAllUnifiedResources(old.getUnifiedResourcesList());
-    if (affected) next.setDesired(DesiredState.DESIRED_STATE_STOPPED);
     var built = next.build();
     if (bump && !built.equals(old)) return bump(built);
     return built;

@@ -118,6 +118,10 @@ func TestUnifiedTombstoneCollectionRetainsInstallationCAS(t *testing.T) {
 	if _, err := f.manager.Prepare(ctx, f.source.spec); err != nil {
 		t.Fatal(err)
 	}
+	f.catalogEmpty = true
+	if _, _, err := f.manager.Observe(ctx, f.source.spec.InstanceId); err != nil {
+		t.Fatal(err)
+	}
 	f.source.spec.Generation = 3
 	f.source.spec.UnifiedResources = nil
 	if _, err := f.manager.Prepare(ctx, f.source.spec); err != nil {
@@ -129,10 +133,9 @@ func TestUnifiedTombstoneCollectionRetainsInstallationCAS(t *testing.T) {
 	f.source.spec.Generation = 4
 	f.source.spec.ResourceSelectionRevision = 3
 	f.source.spec.UnifiedResources = append(f.source.spec.UnifiedResources, f.ref)
-	// Private fallback may keep the instance usable, but cannot reactivate the
-	// collected grant or erase its installation revision high-water mark.
-	if _, err := f.manager.Prepare(ctx, f.source.spec); err != nil {
-		t.Fatal("private fallback", err)
+	// The rejected CAS must not count as a successful apply or reactivate bytes.
+	if _, err := f.manager.Prepare(ctx, f.source.spec); err == nil {
+		t.Fatal("collected installation CAS replay accepted")
 	}
 	s, _, current, err := f.manager.load(f.source.spec.InstanceId)
 	if err != nil {

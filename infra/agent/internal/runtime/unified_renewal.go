@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -17,9 +18,6 @@ func (m *UnifiedManager) renewCached(spec *nodev1.InstanceSpec, s *unifiedNodeSt
 	if spec.GetResourceSelectionRevision() != s.SelectionRevision || spec.GetGeneration() <= s.Generation {
 		return nil
 	}
-	if len(spec.GetUnifiedResources()) != len(s.Installations) {
-		return fmt.Errorf("renewal changed selection")
-	}
 	byPackage := map[string]*resourcev1.UnifiedResourceRef{}
 	for _, ref := range spec.GetUnifiedResources() {
 		key := ref.GetIdentity().GetPackageId()
@@ -28,30 +26,28 @@ func (m *UnifiedManager) renewCached(spec *nodev1.InstanceSpec, s *unifiedNodeSt
 		}
 		byPackage[key] = ref
 	}
-	records := append([]unifiedInstalled(nil), s.Installations...)
+	records := []unifiedInstalled{}
 	var deadline time.Time
-	for i, record := range records {
+	for _, record := range s.Installations {
 		var prior resourcev1.UnifiedResourceRef
 		if err := proto.Unmarshal(record.Ref, &prior); err != nil {
 			return err
 		}
 		next := byPackage[prior.GetIdentity().GetPackageId()]
 		if next == nil {
+			if s.ObservedAt != "" && record.DesiredState == "REMOVED" && record.State == "removed" {
+				continue
+			}
 			return fmt.Errorf("renewal lost identity")
 		}
+		delete(byPackage, prior.GetIdentity().GetPackageId())
 		revision, state, err := ReadUnifiedIntent(next)
 		if err != nil || revision != record.InstallationRevision || state != record.DesiredState {
 			return fmt.Errorf("renewal changed installation intent")
 		}
-		a, b := proto.Clone(&prior).(*resourcev1.UnifiedResourceRef), proto.Clone(next).(*resourcev1.UnifiedResourceRef)
-		a.Envelope, b.Envelope, a.Lease, b.Lease = nil, nil, nil, nil
-		a.ManifestDownloadPath, b.ManifestDownloadPath = "", ""
-		for _, ref := range []*resourcev1.UnifiedResourceRef{a, b} {
-			for _, artifact := range ref.GetArtifacts() {
-				artifact.DownloadPath = ""
-			}
-		}
-		if !proto.Equal(a, b) {
+		a, e1 := unifiedSelectionBytes(&prior)
+		b, e2 := unifiedSelectionBytes(next)
+		if e1 != nil || e2 != nil || !bytes.Equal(a, b) {
 			return fmt.Errorf("renewal changed selected bytes")
 		}
 		if state == "ENABLED" {
@@ -70,12 +66,20 @@ func (m *UnifiedManager) renewCached(spec *nodev1.InstanceSpec, s *unifiedNodeSt
 		if err != nil {
 			return err
 		}
-		records[i].Ref = wire
+		record.Ref = wire
+		records = append(records, record)
+	}
+	if len(byPackage) != 0 {
+		return fmt.Errorf("renewal added identity")
 	}
 	if deadline.IsZero() {
 		return fmt.Errorf("active renewal has no enabled resource")
 	}
+	if err := m.lockSelection(spec, s); err != nil {
+		return err
+	}
 	s.Installations, s.Generation = records, spec.GetGeneration()
+	s.ObservedAt = ""
 	s.LeaseExpiresAt = deadline.Format(time.RFC3339Nano)
 	s.Clock["leaseDeadlineMonotonicMillis"] = json.Number(fmt.Sprint(m.mono() + deadline.Sub(now).Milliseconds()))
 	return nil
