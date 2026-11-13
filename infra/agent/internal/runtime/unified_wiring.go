@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
+	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	resourcev1 "github.com/hansjone/auriga/infra/gen/auriga/resource/v1"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -125,12 +127,56 @@ func (m *UnifiedManager) publishSessionPolicy(file string, s *unifiedNodeState) 
 }
 
 func (m *UnifiedManager) sessionPolicy(s *unifiedNodeState) map[string]any {
-	policy := map[string]any{"schemaVersion": 1, "newSessionRequired": s.HasShared && s.State == "private_only", "leaseExpiresAt": "", "trustedTime": ""}
+	policy := map[string]any{"schemaVersion": 1, "newSessionRequired": s.newSessionRequired(), "leaseExpiresAt": "", "trustedTime": ""}
 	if s.State == "active" {
 		policy["leaseExpiresAt"] = s.LeaseExpiresAt
 		policy["trustedTime"] = s.Clock["maxObservedTime"]
 	}
 	return policy
+}
+
+func (m *UnifiedManager) prepareWithoutHostClock(ctx context.Context, spec *nodev1.InstanceSpec) (string, error) {
+	defer m.lock(spec.GetInstanceId())()
+	s, root, current, err := m.load(spec.GetInstanceId())
+	if err != nil {
+		return "", err
+	}
+	if m.Specs != nil {
+		latest, err := m.Specs.GetDesired(spec.GetInstanceId())
+		if err != nil || !proto.Equal(latest, spec) {
+			return "", fmt.Errorf("resource selection superseded")
+		}
+	}
+	if err := m.lockSelection(spec, s); err != nil {
+		return "", err
+	}
+	if s.Tenant == "" {
+		s.Tenant, s.Owner = spec.GetTenantId(), spec.GetOwnerId()
+	}
+	if s.State != "private_only" || s.PendingActivation != "" || s.PendingIsolation != "" {
+		if err := m.isolate(ctx, s, root, current, "verification_failed"); err != nil {
+			return "", err
+		}
+	}
+	entries, err := os.ReadDir(current)
+	if err != nil || len(entries) != 0 {
+		return "", fmt.Errorf("private recovery view not empty")
+	}
+	s.Tenant, s.Owner, s.Host = spec.GetTenantId(), spec.GetOwnerId(), spec.GetInstanceId()
+	s.Generation, s.SelectionRevision = spec.GetGeneration(), spec.GetResourceSelectionRevision()
+	s.Reason = "verification_failed"
+	if err := m.save(root, s); err != nil {
+		return "", err
+	}
+	paths, err := m.Layout.For(s.Host)
+	if err != nil {
+		return "", err
+	}
+	if err := m.publishSessionPolicy(filepath.Join(paths.Meta, "resource-session-policy.json"), s); err != nil {
+		return "", err
+	}
+	telemetry.Log(ctx, slog.LevelWarn, "shared resource activation deferred: host boot identity or monotonic clock unavailable")
+	return current, nil
 }
 
 func trustedImageCommand(image map[string]any) ([]string, error) {
@@ -165,7 +211,7 @@ func (m *UnifiedManager) privateFallback(spec *nodev1.InstanceSpec) (string, err
 	if err != nil {
 		return "", err
 	}
-	if !s.HasShared || s.State != "private_only" || s.PendingActivation != "" || s.PendingIsolation != "" || s.Tenant != spec.GetTenantId() || s.Owner != spec.GetOwnerId() {
+	if !s.newSessionRequired() || s.PendingActivation != "" || s.PendingIsolation != "" || s.Tenant != spec.GetTenantId() || s.Owner != spec.GetOwnerId() {
 		return "", fmt.Errorf("private recovery not authorized")
 	}
 	entries, err := os.ReadDir(current)
@@ -194,7 +240,8 @@ func (m *UnifiedManager) Status(id string) ([]*resourcev1.UnifiedInstallationRep
 	if s.Tenant == "" {
 		return nil, nil, nil
 	}
-	state := &resourcev1.UnifiedGuardianState{TenantId: s.Tenant, OwnerId: s.Owner, HostId: s.Host, Generation: uint64(s.Generation), SelectionRevision: s.SelectionRevision, State: s.State, Reason: s.Reason, NewSessionRequired: s.HasShared && s.State == "private_only", ProcessStopped: s.State == "private_only", ViewCleared: s.State == "private_only"}
+	state := unifiedGuardian(s)
+	state.ProcessStopped = s.State == "private_only"
 	for _, record := range s.Installations {
 		var ref resourcev1.UnifiedResourceRef
 		if proto.Unmarshal(record.Ref, &ref) == nil && ref.GetLease().GetExpiresAt() == s.LeaseExpiresAt {

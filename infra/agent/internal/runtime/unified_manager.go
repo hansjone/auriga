@@ -52,6 +52,7 @@ type unifiedNodeState struct {
 	PendingIsolation      string
 	PendingActivation     string
 	HasShared             bool
+	SafetyIsolationReason string
 	Migrations            map[string]map[string]any
 	UsedAuthorizations    []string
 	InstallationRevisions map[string]uint64
@@ -186,7 +187,7 @@ func (m *UnifiedManager) load(id string) (*unifiedNodeState, string, string, err
 	if err != nil {
 		return nil, "", "", err
 	}
-	s := &unifiedNodeState{SchemaVersion: 1, Host: id, State: "verifying", Watermarks: map[string]map[string]any{}, Installations: []unifiedInstalled{}}
+	s := &unifiedNodeState{SchemaVersion: 1, Host: id, State: "verifying", Reason: "startup", Watermarks: map[string]map[string]any{}, Installations: []unifiedInstalled{}}
 	err = unifiedRead(filepath.Join(root, "node-state.json"), s)
 	if os.IsNotExist(err) {
 		if entries, readErr := os.ReadDir(current); readErr == nil && len(entries) > 0 {
@@ -207,7 +208,28 @@ func (m *UnifiedManager) load(id string) (*unifiedNodeState, string, string, err
 	default:
 		return nil, "", "", fmt.Errorf("unknown guardian state")
 	}
+	s.Reason = unifiedGuardianReason(s.Reason)
+	// Older ledgers recorded the isolation cause only in Reason. Carry that
+	// evidence forward before a new specification can replace it with startup.
+	if s.SafetyIsolationReason == "" && s.HasShared && s.State != "active" && s.Reason != "startup" {
+		s.SafetyIsolationReason = s.Reason
+	}
 	return s, root, current, nil
+}
+
+func unifiedGuardianReason(reason string) string {
+	switch reason {
+	case "", "disabled", "startup":
+		return "startup"
+	case "lease_expired", "revoked", "identity_changed", "clock_rollback", "verification_failed", "cleanup_failed":
+		return reason
+	default:
+		return "verification_failed"
+	}
+}
+
+func (s *unifiedNodeState) newSessionRequired() bool {
+	return s.State == "private_only" && (s.HasShared || s.SafetyIsolationReason != "")
 }
 func (m *UnifiedManager) save(root string, s *unifiedNodeState) error {
 	s.Revision++
@@ -367,6 +389,12 @@ func (m *UnifiedManager) stopped(ctx context.Context, id string) error {
 	return nil
 }
 func (m *UnifiedManager) isolate(ctx context.Context, s *unifiedNodeState, root, current, reason string) error {
+	reason = unifiedGuardianReason(reason)
+	// Save the safety latch in the first recovery journal, before stopping or
+	// moving files. A later disable and an interrupted isolation must retain it.
+	if s.HasShared && s.SafetyIsolationReason == "" && reason != "startup" {
+		s.SafetyIsolationReason = reason
+	}
 	s.State, s.Reason = "stopping", reason
 	if s.PendingIsolation == "" {
 		s.PendingIsolation = unifiedNonce()
@@ -463,6 +491,7 @@ func (m *UnifiedManager) Guard(ctx context.Context, spec *nodev1.InstanceSpec) (
 		return nil
 	}
 	reason := ""
+	voluntaryDisable := false
 	if s.Tenant != spec.GetTenantId() || s.Owner != spec.GetOwnerId() {
 		reason = "identity_changed"
 	} else if err := m.Protocol.Evaluate("clock", map[string]any{"clock": s.Clock, "bootId": m.BootID, "monotonicNowMillis": json.Number(fmt.Sprint(m.mono())), "wallNow": m.now().Format(time.RFC3339Nano), "leaseExpiresAt": s.LeaseExpiresAt}); err != nil {
@@ -487,7 +516,7 @@ func (m *UnifiedManager) Guard(ctx context.Context, spec *nodev1.InstanceSpec) (
 			}
 			next := incoming[prior.GetIdentity().GetPackageId()]
 			if next == nil {
-				reason = "disabled"
+				voluntaryDisable = true
 				break
 			}
 			_, desired, err := ReadUnifiedIntent(next)
@@ -496,7 +525,7 @@ func (m *UnifiedManager) Guard(ctx context.Context, spec *nodev1.InstanceSpec) (
 				break
 			}
 			if desired != "ENABLED" {
-				reason = "disabled"
+				voluntaryDisable = true
 				break
 			}
 		}
@@ -569,6 +598,9 @@ func (m *UnifiedManager) Guard(ctx context.Context, spec *nodev1.InstanceSpec) (
 			}
 		}
 	}
+	if reason == "" && voluntaryDisable {
+		reason = "startup"
+	}
 	if reason != "" {
 		if err := m.isolate(ctx, s, root, current, reason); err != nil {
 			return err
@@ -624,6 +656,11 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 	root, current, err := m.paths(spec.GetInstanceId())
 	if err != nil {
 		return "", err
+	}
+	for _, ref := range spec.GetUnifiedResources() {
+		if ref.GetEnabled() && (!uUUID.MatchString(m.BootID) || m.mono() < 0) {
+			return m.prepareWithoutHostClock(ctx, spec)
+		}
 	}
 	var staging []string
 	defer func() {
@@ -844,12 +881,22 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 		return "", err
 	}
 	if s.State == "active" || s.Tenant != "" && s.Tenant != spec.GetTenantId() || s.Owner != "" && s.Owner != spec.GetOwnerId() {
-		if err := m.isolate(ctx, s, root, current, "identity_changed"); err != nil {
+		reason := "startup"
+		if s.Tenant != spec.GetTenantId() || s.Owner != spec.GetOwnerId() {
+			reason = "identity_changed"
+		} else if err := m.Protocol.Evaluate("clock", map[string]any{"clock": s.Clock, "bootId": m.BootID, "monotonicNowMillis": json.Number(fmt.Sprint(m.mono())), "wallNow": m.now().Format(time.RFC3339Nano), "leaseExpiresAt": s.LeaseExpiresAt}); err != nil {
+			reason = unifiedGuardianReason(err.Error())
+		}
+		if err := m.isolate(ctx, s, root, current, reason); err != nil {
 			return "", err
 		}
 	}
 	if err := m.cleanupQuarantines(root, s.Host); err != nil {
 		return "", err
+	}
+	activationMono := m.mono()
+	if !deadline.IsZero() && (!uUUID.MatchString(m.BootID) || activationMono < 0) {
+		return "", fmt.Errorf("host clock unavailable before shared activation")
 	}
 	transaction := unifiedNonce()
 	next := filepath.Join(root, "skills-active", "prepared-"+transaction)
@@ -920,6 +967,9 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 	s.PendingActivation = ""
 	s.State = "private_only"
 	s.Reason = "startup"
+	if s.SafetyIsolationReason != "" {
+		s.Reason = s.SafetyIsolationReason
+	}
 	if !deadline.IsZero() {
 		effective := m.now()
 		if trustedTime.After(effective) {
@@ -934,7 +984,7 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 			return "", fmt.Errorf("resource expired before activation")
 		}
 		s.LeaseExpiresAt = deadline.Format(time.RFC3339Nano)
-		s.Clock = map[string]any{"bootId": m.BootID, "maxObservedTime": effective.Format(time.RFC3339Nano), "lastTrustedTime": trustedTime.Format(time.RFC3339Nano), "lastTrustedTimeSource": "authenticated_server", "lastMonotonicMillis": json.Number(fmt.Sprint(m.mono())), "leaseDeadlineMonotonicMillis": json.Number(fmt.Sprint(m.mono() + deadline.Sub(effective).Milliseconds()))}
+		s.Clock = map[string]any{"bootId": m.BootID, "maxObservedTime": effective.Format(time.RFC3339Nano), "lastTrustedTime": trustedTime.Format(time.RFC3339Nano), "lastTrustedTimeSource": "authenticated_server", "lastMonotonicMillis": json.Number(fmt.Sprint(activationMono)), "leaseDeadlineMonotonicMillis": json.Number(fmt.Sprint(activationMono + deadline.Sub(effective).Milliseconds()))}
 		s.State = "active"
 		s.Reason = "startup"
 	}
@@ -989,14 +1039,14 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 		return nil, nil, err
 	}
 	guardian = unifiedGuardian(s)
-	if len(s.Installations) == 0 && !s.HasShared {
+	if len(s.Installations) == 0 && !s.HasShared && s.SafetyIsolationReason == "" {
 		return reports, guardian, nil
 	}
 	defer func() {
 		if failure != nil {
 			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
-			if err := m.isolate(stopCtx, s, root, current, "observation_mismatch"); err != nil {
+			if err := m.isolate(stopCtx, s, root, current, "verification_failed"); err != nil {
 				failure = errors.Join(failure, err)
 			}
 			reports = nil
@@ -1077,7 +1127,7 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 	if err := json.Unmarshal(raw, &catalog); err != nil {
 		return nil, guardian, err
 	}
-	if catalog.PrivateOnly != (s.HasShared && s.State == "private_only") {
+	if catalog.PrivateOnly != s.newSessionRequired() {
 		return nil, guardian, fmt.Errorf("private-only session gate unavailable")
 	}
 	for _, skill := range catalog.Skills {
@@ -1150,5 +1200,5 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 }
 
 func unifiedGuardian(s *unifiedNodeState) *resourcev1.UnifiedGuardianState {
-	return &resourcev1.UnifiedGuardianState{TenantId: s.Tenant, OwnerId: s.Owner, HostId: s.Host, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), State: s.State, Reason: s.Reason, NewSessionRequired: s.HasShared && s.State == "private_only", ViewCleared: s.State == "private_only"}
+	return &resourcev1.UnifiedGuardianState{TenantId: s.Tenant, OwnerId: s.Owner, HostId: s.Host, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), State: s.State, Reason: unifiedGuardianReason(s.Reason), NewSessionRequired: s.newSessionRequired(), ViewCleared: s.State == "private_only"}
 }

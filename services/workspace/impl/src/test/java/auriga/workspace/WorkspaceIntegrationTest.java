@@ -310,13 +310,31 @@ class WorkspaceIntegrationTest {
                   .forEach(s -> actions.put(s.getIdentity().getPackageId(), s.getAction()));
               assertEquals("remove", actions.get(removed.getIdentity().getPackageId()));
               assertEquals("enable", actions.get(healthy.getIdentity().getPackageId()));
-              assertEquals("enable", actions.get(unavailable.getIdentity().getPackageId()));
+              assertEquals("install", actions.get(unavailable.getIdentity().getPackageId()));
               return ResolveUnifiedResourcesResponse.newBuilder()
                   .setSelectionRevision(1)
                   .addResources(renewed)
                   .setRevocations(unifiedReviewRevocations())
                   .build();
             })) {
+      resources.record(
+          tenant,
+          instance,
+          owner,
+          1,
+          List.of(
+              UnifiedSelection.newBuilder()
+                  .setIdentity(removed.getIdentity())
+                  .setAction("remove")
+                  .build(),
+              UnifiedSelection.newBuilder()
+                  .setIdentity(healthy.getIdentity())
+                  .setAction("enable")
+                  .build(),
+              UnifiedSelection.newBuilder()
+                  .setIdentity(unavailable.getIdentity())
+                  .setAction("install")
+                  .build()));
       clock.now = clock.now.plusSeconds(2000);
       resources.reconcile();
       assertEquals(1, calls.get());
@@ -335,6 +353,65 @@ class WorkspaceIntegrationTest {
           actual.get(unavailable.getIdentity().getPackageId()),
           "failed entry keeps its old signed expiry");
       assertEquals(DesiredState.DESIRED_STATE_RUNNING, view.spec().getDesired());
+    }
+  }
+
+  @Test
+  void unifiedRenewalSkipsMissingOriginalIntentAndContinuesOtherInstances() throws Exception {
+    policy.maxConcurrentStarts(2);
+    new RecoveryControl(tenant);
+    UUID missing =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    var missingRef = unifiedReviewRef("missing-original", false);
+    seedUnifiedReview(missing, 1, List.of(missingRef));
+    UUID otherOwner = UuidV7.next();
+    UUID healthy =
+        TenantContext.call(tenant, () -> (UUID) service.open(otherOwner).instance().get("id"));
+    var healthyRef = unifiedReviewRef("healthy-original", false);
+    seedUnifiedReview(healthy, 1, List.of(healthyRef));
+    var renewed =
+        healthyRef.toBuilder()
+            .setLease(
+                healthyRef.getLease().toBuilder()
+                    .setExpiresAt(clock.instant().plusSeconds(10800).toString()))
+            .build();
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              assertNotEquals(
+                  missing.toString(),
+                  request.getInstanceId(),
+                  "missing original must never reach the resolver");
+              if (!request.getInstanceId().equals(healthy.toString()))
+                throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+              calls.incrementAndGet();
+              assertEquals("install", request.getSelections(0).getAction());
+              return ResolveUnifiedResourcesResponse.newBuilder()
+                  .setSelectionRevision(1)
+                  .addResources(renewed)
+                  .setRevocations(unifiedReviewRevocations())
+                  .build();
+            })) {
+      resources.record(
+          tenant,
+          healthy,
+          otherOwner,
+          1,
+          List.of(
+              UnifiedSelection.newBuilder()
+                  .setIdentity(healthyRef.getIdentity())
+                  .setAction("install")
+                  .build()));
+      var before = resources.snapshot(tenant, missing).spec();
+      clock.now = clock.now.plusSeconds(2000);
+      resources.reconcile();
+      assertEquals(1, calls.get());
+      assertEquals(before, resources.snapshot(tenant, missing).spec());
+      assertEquals(
+          List.of(renewed), resources.snapshot(tenant, healthy).spec().getUnifiedResourcesList());
     }
   }
 

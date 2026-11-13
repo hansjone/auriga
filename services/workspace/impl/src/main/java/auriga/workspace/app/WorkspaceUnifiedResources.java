@@ -472,26 +472,19 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                             tenant,
                             row.get("id"),
                             spec.getResourceSelectionRevision()));
-            if (!original.isEmpty()) {
-              // A resolves the immutable original distribution, including remove
-              // actions. Renewing is not a new enable/disable operation.
-              request.addAllSelections(
-                  UnifiedDistributionInput.parseFrom((byte[]) original.getFirst().get("request"))
-                      .getSelectionsList());
-            } else
-              spec.getUnifiedResourcesList()
-                  .forEach(
-                      r ->
-                          request.addSelections(
-                              UnifiedSelection.newBuilder()
-                                  .setIdentity(r.getIdentity())
-                                  .setAction(
-                                      switch (UnifiedResourceIntent.desired(r)) {
-                                        case "ENABLED" -> "enable";
-                                        case "DISABLED" -> "disable";
-                                        case "REMOVED" -> "remove";
-                                        default -> throw new AurigaException(CommonErrors.CONFLICT);
-                                      })));
+            if (original.isEmpty()) {
+              org.slf4j.LoggerFactory.getLogger(getClass())
+                  .warn(
+                      "Unified lease renewal skipped: applied original intent missing for instance {} revision {}",
+                      spec.getInstanceId(),
+                      spec.getResourceSelectionRevision());
+              continue;
+            }
+            // A resolves the immutable original distribution, including remove
+            // actions. Renewing is not a new enable/disable operation.
+            request.addAllSelections(
+                UnifiedDistributionInput.parseFrom((byte[]) original.getFirst().get("request"))
+                    .getSelectionsList());
             refresh(
                 tenant,
                 (UUID) row.get("id"),

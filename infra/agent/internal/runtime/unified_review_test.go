@@ -225,10 +225,13 @@ func TestUnifiedR6AuthoritySafetyDisablePreservesSelectedBytes(t *testing.T) {
 	if _, err := f.manager.Prepare(t.Context(), next); err != nil {
 		t.Fatal("authority safety disable blocked", err)
 	}
-	f.catalogEmpty = true
-	reports, _, err := f.manager.Observe(t.Context(), next.InstanceId)
+	f.catalogPrivate = true
+	reports, guardian, err := f.manager.Observe(t.Context(), next.InstanceId)
 	if err != nil || len(reports) != 1 || reports[0].State != "disabled" || reports[0].InstallationRevision != 2 {
 		t.Fatalf("wrong authority disable: %+v %v", reports, err)
+	}
+	if !guardian.GetNewSessionRequired() {
+		t.Fatal("authority safety disable cleared the old-session gate")
 	}
 }
 
