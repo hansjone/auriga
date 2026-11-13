@@ -70,7 +70,7 @@ final class NetworkEnvelopeSigner {
           if (target.requestId() == null) auth.putNull("request_id");
           else auth.put("request_id", target.requestId());
           auth.put("channel_nonce", target.channelNonce())
-              .put("keyset_version", Long.toString(version));
+              .put("keyset_version", Long.toUnsignedString(version));
           try {
             Signature signature = Signature.getInstance("Ed25519");
             signature.initSign(key.privateKey);

@@ -272,6 +272,13 @@ public final class NetworkKeyOperations {
   }
 
   private Stored stored() {
+    Boolean v2 =
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM collab.msgnet_realm WHERE tenant_id = ? AND realm = ? AND legacy_disabled = true)",
+            Boolean.class,
+            tenant,
+            realm);
+    if (Boolean.TRUE.equals(v2)) throw unavailable();
     var rows =
         jdbc.query(
             "SELECT keyset_version, signed_keyset, announcement, first_published::text, pending_push FROM collab.network_key_publication WHERE tenant_id = ? AND realm = ?",

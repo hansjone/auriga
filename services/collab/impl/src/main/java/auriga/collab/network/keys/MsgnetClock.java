@@ -24,14 +24,35 @@ public final class MsgnetClock {
   private long previousTick;
   private boolean failed;
   private int stableSamples;
+  private final long skewSeconds;
+  private final long forwardSeconds;
+  private final long backwardSeconds;
 
   public MsgnetClock(Clock wall) {
     this(wall, System::nanoTime);
   }
 
   MsgnetClock(Clock wall, LongSupplier monotonic) {
+    this(wall, monotonic, 60, 300, 60);
+  }
+
+  MsgnetClock(
+      Clock wall,
+      LongSupplier monotonic,
+      long skewSeconds,
+      long forwardSeconds,
+      long backwardSeconds) {
     this.wall = Objects.requireNonNull(wall);
     this.monotonic = Objects.requireNonNull(monotonic);
+    if (skewSeconds < 0
+        || skewSeconds > 60
+        || forwardSeconds < 0
+        || forwardSeconds > 300
+        || backwardSeconds < 0
+        || backwardSeconds > 60) throw new IllegalArgumentException("Invalid msgnet clock limits");
+    this.skewSeconds = skewSeconds;
+    this.forwardSeconds = forwardSeconds;
+    this.backwardSeconds = backwardSeconds;
     previousWall = wall.instant();
     previousTick = monotonic.getAsLong();
     baselineWall = previousWall;
@@ -50,11 +71,12 @@ public final class MsgnetClock {
     Duration checkedError = failed ? error : baselineError;
     boolean aligned =
         databaseTime != null
-            && Duration.between(databaseTime, now).abs().compareTo(Duration.ofSeconds(60)) <= 0;
+            && Duration.between(databaseTime, now).abs().compareTo(Duration.ofSeconds(skewSeconds))
+                <= 0;
     boolean jump =
         elapsed < 0
-            || checkedError.compareTo(Duration.ofSeconds(300)) > 0
-            || checkedError.compareTo(Duration.ofSeconds(-60)) < 0;
+            || checkedError.compareTo(Duration.ofSeconds(forwardSeconds)) > 0
+            || checkedError.compareTo(Duration.ofSeconds(-backwardSeconds)) < 0;
     if (!aligned || jump) {
       failed = true;
       stableSamples = 0;

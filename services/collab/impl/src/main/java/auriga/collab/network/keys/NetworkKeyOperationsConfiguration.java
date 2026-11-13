@@ -19,7 +19,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnExpression(
-    "${auriga.services.collab.enabled:true} && ${auriga.collab.network.key-operations.enabled:false} && '${auriga.service.schema:}' == 'collab'")
+    "${auriga.services.collab.enabled:true} && ${auriga.collab.network.key-operations.enabled:false} && !${auriga.collab.network.auto-renew.enabled:false} && '${auriga.service.schema:}' == 'collab'")
 @Import(NetworkKeysController.class)
 @EnableScheduling
 public class NetworkKeyOperationsConfiguration {
