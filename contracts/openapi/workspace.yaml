@@ -24,6 +24,12 @@ tags:
   - name: instance-api
   - name: connect
 paths:
+  /me/placement:
+    $ref: 'shared-dsh.yaml#/paths/~1me~1placement'
+  /admin/members/{memberId}/placement-switches:
+    $ref: 'shared-dsh.yaml#/paths/~1admin~1members~1{memberId}~1placement-switches'
+  /admin/placement-switches/{operationId}:
+    $ref: 'shared-dsh.yaml#/paths/~1admin~1placement-switches~1{operationId}'
   /admin/ops/backups/{id}:
     $ref: 'ops-runtime.yaml#/paths/~1admin~1ops~1backups~1{id}'
   /admin/ops/upgrades:
