@@ -1,0 +1,704 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UAC 公共控制契约",
+  "$defs": {
+    "UacRevalidationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "token-verify",
+            "department"
+          ],
+          "default": "token-verify"
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "default": 7200
+        },
+        "retryIntervalSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 30
+        },
+        "maxRetries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 3
+        },
+        "configRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        }
+      },
+      "required": []
+    },
+    "UacRevalidationReason": {
+      "type": "string",
+      "enum": [
+        "business_rejected",
+        "identity_mismatch",
+        "upstream_fault",
+        "retry_exhausted"
+      ],
+      "description": "兼容原名；语义为failureClass，新消费者使用UacRevalidationFailureClass"
+    },
+    "UacFaultReason": {
+      "type": "string",
+      "enum": [
+        "transport_error",
+        "http_error",
+        "invalid_json",
+        "missing_code",
+        "invalid_code",
+        "invalid_success_payload"
+      ]
+    },
+    "UacCredentialEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "algorithm": {
+          "type": "string",
+          "const": "A256GCM"
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16}$"
+        },
+        "ciphertext": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "aad": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tenantId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "providerId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "purpose": {
+              "type": "string",
+              "enum": [
+                "uac_credential"
+              ]
+            }
+          },
+          "required": [
+            "tenantId",
+            "providerId",
+            "purpose"
+          ]
+        }
+      },
+      "required": [
+        "keyId",
+        "algorithm",
+        "nonce",
+        "ciphertext",
+        "aad"
+      ]
+    },
+    "UacDecryptionKeyring": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "activeKeyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "decryptKeyIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "legacyKeyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "仅兼容迁移旧无keyId密文的显式旧键映射"
+        }
+      },
+      "required": [
+        "activeKeyId",
+        "decryptKeyIds",
+        "revision"
+      ]
+    },
+    "UacDiagnosticSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        }
+      },
+      "required": [
+        "enabled",
+        "revision"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "required": [
+              "expiresAt"
+            ],
+            "properties": {
+              "expiresAt": {}
+            }
+          }
+        }
+      ]
+    },
+    "UacDiagnosticSettingsWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 900,
+          "default": 900
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "UacNavigationContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "navigationProof": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "transactionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "portal",
+            "device"
+          ]
+        },
+        "autoEligible": {
+          "type": "boolean"
+        },
+        "autoSuppressed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "navigationProof",
+        "expiresAt",
+        "transactionId",
+        "purpose",
+        "autoEligible",
+        "autoSuppressed"
+      ]
+    },
+    "UacNavigationProofBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "transactionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "proofHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "audience": {
+          "type": "string",
+          "enum": [
+            "portal"
+          ]
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "login"
+          ]
+        },
+        "continuation": {
+          "type": "string",
+          "enum": [
+            "portal",
+            "device"
+          ]
+        },
+        "autoEligible": {
+          "type": "boolean"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "consumed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "transactionId",
+        "proofHash",
+        "origin",
+        "tenantId",
+        "providerId",
+        "audience",
+        "purpose",
+        "continuation",
+        "autoEligible",
+        "expiresAt",
+        "consumed"
+      ]
+    },
+    "UacLogoutSuppression": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "browserSessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "suppressed": {
+          "type": "boolean",
+          "default": true,
+          "description": "退出抑制标记；显式继续不能清除"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        }
+      },
+      "required": [
+        "browserSessionId",
+        "tenantId",
+        "origin",
+        "suppressed",
+        "revision"
+      ]
+    },
+    "UacCredentialBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "deviceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sourceSessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "authGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "credentialVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "可选凭据读取/CAS元数据，不参与设备或外壳准入；token轮换不使绑定失效"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "tenantId",
+        "memberId",
+        "deviceId",
+        "sourceSessionId",
+        "providerId",
+        "authGeneration",
+        "expiresAt"
+      ]
+    },
+    "UacDiagnosticManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "redactorVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "exportAuditId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "missingSources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "iam",
+              "audit",
+              "ops",
+              "loki",
+              "desktop",
+              "plugin"
+            ]
+          }
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "uac-steps.jsonl",
+                  "audit.jsonl",
+                  "ops-alerts.json",
+                  "sanitized-config.json",
+                  "uds-detail.jsonl"
+                ]
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "lines": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "format": "int64"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "format": "int64"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "sha256",
+              "lines",
+              "bytes",
+              "truncated"
+            ]
+          }
+        },
+        "installationVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "componentVersions": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "available"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "iam",
+                  "audit",
+                  "ops",
+                  "loki",
+                  "desktop",
+                  "plugin"
+                ]
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "missing",
+                  "unreachable",
+                  "invalid_log",
+                  "truncated"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "version",
+        "from",
+        "to",
+        "redactorVersion",
+        "exportAuditId",
+        "partial",
+        "missingSources",
+        "files",
+        "installationVersion",
+        "componentVersions",
+        "sources"
+      ]
+    },
+    "UacRevalidationFailureClass": {
+      "type": "string",
+      "enum": [
+        "business_rejected",
+        "identity_mismatch",
+        "upstream_fault",
+        "retry_exhausted"
+      ]
+    },
+    "UacNavigationIssueRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "continuation": {
+          "type": "string",
+          "enum": [
+            "portal",
+            "device"
+          ]
+        },
+        "deviceGrantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "transactionCookie": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "suppressionCookie": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "fetchMetadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "dest": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "mode": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "site": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "user": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": []
+        }
+      },
+      "required": [
+        "requestId",
+        "providerId",
+        "origin",
+        "continuation",
+        "fetchMetadata"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "continuation": {
+                "const": "device"
+              }
+            },
+            "required": [
+              "continuation"
+            ]
+          },
+          "then": {
+            "required": [
+              "deviceGrantId"
+            ],
+            "properties": {
+              "deviceGrantId": {}
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "deviceGrantId"
+              ],
+              "properties": {
+                "deviceGrantId": {}
+              }
+            }
+          }
+        }
+      ],
+      "description": "仅可信edge调用；tenant来自内部授权，Origin必须与该tenant的受信入口完全匹配。Fetch Metadata为浏览器实际请求头证据，缺项不具备auto资格。deviceGrantId须由IAM核验未过期且与当前事务绑定；portal不可携带。"
+    },
+    "UacNavigationIssued": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/UacNavigationContext"
+        },
+        "transactionCookie": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 16384
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "enum": [
+            120
+          ]
+        }
+      },
+      "required": [
+        "context",
+        "transactionCookie",
+        "ttlSeconds"
+      ]
+    }
+  }
+}

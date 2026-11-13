@@ -32,6 +32,127 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /internal/uac/navigation-proofs:
+    post:
+      operationId: issueUacNavigationProof
+      summary: edge向IAM签发并登记SSO导航事务
+      tags:
+        - login
+      x-internal-only: true
+      x-service-caller: svc:edge
+      servers:
+        - url: http://127.0.0.1/api/iam/v1
+      security:
+        - internalServiceAuth: []
+      parameters:
+        - name: auriga-tenant-id
+          in: header
+          required: true
+          description: 沿既有内部租户委派语义；B从受信入口配置构造，剥离浏览器同名头。A仅在svc:edge位于委派白名单时绑定该租户；不能用内部JWT的平台tid替代。
+          schema:
+            type: string
+            format: uuid
+      description: 仅内部受认证传输：svc:edge的auriga.internal服务JWT（ptyp=internal_service、ctx=service）和auriga-tenant-id受委派tenant，分离部署必须mTLS，禁止公网或浏览器调用。B从真实门户导航读取完整Origin和Fetch
+        Metadata，A核对受信入口/tenant/provider和设备续接绑定，自己计算autoEligible，原子登记120秒一次性proof哈希及事务cookie绑定；GET门户不建session。返回context由B放入no-store
+        HTML，transactionCookie仅由B设置HttpOnly同入口cookie，不交脚本。设备用途autoEligible恒false，缺证据显示扫码/显式继续。SSO
+        POST由A核精确Origin/CSRF/cookie并CAS消费证明。requestId重放冲突；丢失响应由新页面签发新事务并作废旧证明。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacNavigationIssueRequest"
+      responses:
+        "201":
+          description: 受信服务间响应；no-store，不记录凭据
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacNavigationIssued"
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "409":
+          $ref: common.yaml#/components/responses/Conflict
+  /admin/providers/{providerId}/uac/diagnostics:
+    parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getUacDiagnosticSettings
+      summary: 读取独立诊断设置
+      tags:
+        - admin-providers
+      x-admin-only: true
+      x-permission: iam.providers.read
+      responses:
+        "200":
+          description: 当前权威记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacDiagnosticSettings"
+          headers:
+            ETag:
+              schema:
+                type: string
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+    put:
+      operationId: putUacDiagnosticSettings
+      summary: 修改独立诊断设置
+      tags:
+        - admin-providers
+      x-admin-only: true
+      x-permission: iam.providers.write
+      description: 仅管理会话，精确 Origin、CSRF；If-Match 必填且针对独立
+        revision；缺失或不匹配返回412。默认关闭，启用默认900秒自动关闭。所有副本逐次核权威修订及expiresAt，存储失败禁止详细输出；重启保持已有有效期。变更写审计，不修改
+        provider 认证修订。
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacDiagnosticSettingsWrite"
+      responses:
+        "200":
+          description: 当前权威记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacDiagnosticSettings"
+          headers:
+            ETag:
+              schema:
+                type: string
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "412":
+          $ref: common.yaml#/components/responses/PreconditionFailed
   /me/uac/credentials:
     post:
       tags:
@@ -145,9 +266,12 @@ paths:
       x-admin-only: true
       x-permission: iam.providers.write
       description: UAC
-        enabled/config的唯一写入口，和通用Provider共用同一行及ETag。systemCode映射由受信企业适配器处理，真实主机、路径和其他系统标识仅来自私有配置。停用原子撤销挑战、源会话和关联设备授权。If-Match提供时检查，不匹配412，省略时以当前修订事务串行更新。
+        enabled/config的唯一写入口，和通用Provider共用同一行及ETag。systemCode映射由受信企业适配器处理，真实主机、路径和其他系统标识仅来自私有配置。停用原子撤销挑战、源会话和关联设备授权。If-Match必填，缺失或不匹配均返回412。
       parameters:
-        - $ref: common.yaml#/components/parameters/IfMatch
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
       requestBody:
         required: true
         content:
@@ -1559,6 +1683,10 @@ components:
       description: 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。
       schema: { type: string, pattern: '^[BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4}$' }
   securitySchemes:
+    internalServiceAuth:
+      type: http
+      scheme: bearer
+      description: 仅auriga.internal JWT，caller svc:edge；不是浏览器或设备Bearer
     bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
     adminSessionCookie:
       type: apiKey
@@ -1566,6 +1694,36 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    UacRevalidationFailureClass:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacRevalidationFailureClass
+    UacNavigationIssueRequest:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacNavigationIssueRequest
+    UacNavigationIssued:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacNavigationIssued
+    UacRevalidationPolicy:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacRevalidationPolicy
+    UacRevalidationReason:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacRevalidationReason
+    UacFaultReason:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacFaultReason
+    UacCredentialEnvelope:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacCredentialEnvelope
+    UacDecryptionKeyring:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacDecryptionKeyring
+    UacDiagnosticSettings:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacDiagnosticSettings
+    UacDiagnosticSettingsWrite:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacDiagnosticSettingsWrite
+    UacNavigationContext:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacNavigationContext
+    UacNavigationProofBinding:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacNavigationProofBinding
+    UacLogoutSuppression:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacLogoutSuppression
+    UacCredentialBinding:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacCredentialBinding
+    UacDiagnosticManifest:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacDiagnosticManifest
     UacEnterpriseCredentials:
       type: object
       additionalProperties: false

@@ -1,0 +1,271 @@
+{
+  "businessErrors": [
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 400,
+        "code": "common.validation_failed",
+        "retryable": false
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 401,
+        "code": "common.unauthenticated",
+        "retryable": false
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 403,
+        "code": "common.forbidden",
+        "retryable": false
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 404,
+        "code": "common.not_found",
+        "retryable": false
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 409,
+        "code": "common.conflict",
+        "retryable": false
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 412,
+        "code": "common.precondition_failed",
+        "retryable": false
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 422,
+        "code": "common.validation_failed",
+        "retryable": false
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 429,
+        "code": "common.rate_limited",
+        "retryable": true
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 500,
+        "code": "common.internal",
+        "retryable": true
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 502,
+        "code": "common.unavailable",
+        "retryable": true
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 503,
+        "code": "common.unavailable",
+        "retryable": true
+      }
+    },
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "operation": "profile_read",
+      "error": {
+        "upstreamStatus": 504,
+        "code": "common.unavailable",
+        "retryable": true
+      }
+    }
+  ],
+  "outbound": [
+    {
+      "name": "skill_headers_and_timeout",
+      "input": {
+        "url": "https://api.example.com/business",
+        "headers": {
+          "Origin": "https://portal.example.com",
+          "Referer": "https://portal.example.com/",
+          "X-Origin-ServiceName": "example",
+          "Authorization": "synthetic",
+          "Cookie": "synthetic",
+          "Accept": "application/json",
+          "X-Lang-Id": 1033,
+          "Content-Type": "application/json"
+        },
+        "timeoutMs": 60001
+      },
+      "expected": {
+        "forwardedHeaders": {
+          "Accept": "application/json",
+          "X-Lang-Id": "1033",
+          "Content-Type": "application/json"
+        },
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "default_timeout_and_null_header",
+      "input": {
+        "url": "https://api.example.com/business",
+        "headers": {
+          "Accept": null,
+          "X-Requested-With": "skill"
+        }
+      },
+      "expected": {
+        "forwardedHeaders": {
+          "X-Requested-With": "skill"
+        },
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "numeric_string_timeout",
+      "input": {
+        "url": "https://api.example.com/business",
+        "timeoutMs": "90000"
+      },
+      "expected": {
+        "forwardedHeaders": {},
+        "timeoutMs": 60000
+      }
+    }
+  ],
+  "outboundResults": [
+    {
+      "httpStatus": 404,
+      "result": {
+        "statusCode": 404,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"message\":\"synthetic\"}",
+        "json": {
+          "message": "synthetic"
+        }
+      }
+    },
+    {
+      "httpStatus": 409,
+      "result": {
+        "statusCode": 409,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"message\":\"synthetic\"}",
+        "json": {
+          "message": "synthetic"
+        }
+      }
+    },
+    {
+      "httpStatus": 412,
+      "result": {
+        "statusCode": 412,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"message\":\"synthetic\"}",
+        "json": {
+          "message": "synthetic"
+        }
+      }
+    },
+    {
+      "httpStatus": 422,
+      "result": {
+        "statusCode": 422,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"message\":\"synthetic\"}",
+        "json": {
+          "message": "synthetic"
+        }
+      }
+    },
+    {
+      "httpStatus": 500,
+      "result": {
+        "statusCode": 500,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"message\":\"synthetic\"}",
+        "json": {
+          "message": "synthetic"
+        }
+      }
+    },
+    {
+      "httpStatus": 503,
+      "result": {
+        "statusCode": 503,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"message\":\"synthetic\"}",
+        "json": {
+          "message": "synthetic"
+        }
+      }
+    }
+  ],
+  "localErrors": [
+    {
+      "httpStatus": 401,
+      "result": {
+        "error": "unauthorized",
+        "message": "Authentication required",
+        "sessionId": "synthetic-session"
+      }
+    },
+    {
+      "httpStatus": 401,
+      "result": {
+        "error": "unauthorized",
+        "message": "Authentication required",
+        "sessionId": null
+      }
+    },
+    {
+      "httpStatus": 502,
+      "result": {
+        "error": "upstream_failed",
+        "message": "Upstream unavailable"
+      }
+    }
+  ]
+}

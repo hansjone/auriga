@@ -1,4 +1,47 @@
 export interface paths {
+  '/internal/uac/navigation-proofs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * edge向IAM签发并登记SSO导航事务
+     * @description 仅内部受认证传输：svc:edge的auriga.internal服务JWT（ptyp=internal_service、ctx=service）和auriga-tenant-id受委派tenant，分离部署必须mTLS，禁止公网或浏览器调用。B从真实门户导航读取完整Origin和Fetch Metadata，A核对受信入口/tenant/provider和设备续接绑定，自己计算autoEligible，原子登记120秒一次性proof哈希及事务cookie绑定；GET门户不建session。返回context由B放入no-store HTML，transactionCookie仅由B设置HttpOnly同入口cookie，不交脚本。设备用途autoEligible恒false，缺证据显示扫码/显式继续。SSO POST由A核精确Origin/CSRF/cookie并CAS消费证明。requestId重放冲突；丢失响应由新页面签发新事务并作废旧证明。
+     */
+    post: operations['issueUacNavigationProof'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/providers/{providerId}/uac/diagnostics': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    /** 读取独立诊断设置 */
+    get: operations['getUacDiagnosticSettings'];
+    /**
+     * 修改独立诊断设置
+     * @description 仅管理会话，精确 Origin、CSRF；If-Match 必填且针对独立 revision；缺失或不匹配返回412。默认关闭，启用默认900秒自动关闭。所有副本逐次核权威修订及expiresAt，存储失败禁止详细输出；重启保持已有有效期。变更写审计，不修改 provider 认证修订。
+     */
+    put: operations['putUacDiagnosticSettings'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/me/uac/credentials': {
     parameters: {
       query?: never;
@@ -55,7 +98,7 @@ export interface paths {
     get: operations['getUacProviderConfig'];
     /**
      * 配置已有 UAC 身份源草案
-     * @description UAC enabled/config的唯一写入口，和通用Provider共用同一行及ETag。systemCode映射由受信企业适配器处理，真实主机、路径和其他系统标识仅来自私有配置。停用原子撤销挑战、源会话和关联设备授权。If-Match提供时检查，不匹配412，省略时以当前修订事务串行更新。
+     * @description UAC enabled/config的唯一写入口，和通用Provider共用同一行及ETag。systemCode映射由受信企业适配器处理，真实主机、路径和其他系统标识仅来自私有配置。停用原子撤销挑战、源会话和关联设备授权。If-Match必填，缺失或不匹配均返回412。
      */
     put: operations['putUacProviderConfig'];
     post?: never;
@@ -1254,6 +1297,213 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @enum {string} */
+    UacRevalidationFailureClass:
+      | 'business_rejected'
+      | 'identity_mismatch'
+      | 'upstream_fault'
+      | 'retry_exhausted';
+    /** @description 仅可信edge调用；tenant来自内部授权，Origin必须与该tenant的受信入口完全匹配。Fetch Metadata为浏览器实际请求头证据，缺项不具备auto资格。deviceGrantId须由IAM核验未过期且与当前事务绑定；portal不可携带。 */
+    UacNavigationIssueRequest: {
+      /** Format: uuid */
+      requestId: string;
+      /** Format: uuid */
+      providerId: string;
+      /** Format: uri */
+      origin: string;
+      /** @enum {string} */
+      continuation: 'portal' | 'device';
+      /** Format: uuid */
+      deviceGrantId?: string;
+      transactionCookie?: string;
+      suppressionCookie?: string;
+      fetchMetadata: {
+        dest?: string;
+        mode?: string;
+        site?: string;
+        user?: string;
+      };
+    } & unknown;
+    UacNavigationIssued: {
+      context: components['schemas']['UacNavigationContext'];
+      transactionCookie: string;
+      /** @enum {integer} */
+      ttlSeconds: 120;
+    };
+    UacRevalidationPolicy: {
+      /**
+       * @default token-verify
+       * @enum {string}
+       */
+      strategy: 'token-verify' | 'department';
+      /** @default 7200 */
+      intervalSeconds: number;
+      /** @default 30 */
+      retryIntervalSeconds: number;
+      /** @default 3 */
+      maxRetries: number;
+      /** Format: int64 */
+      configRevision?: number;
+    };
+    /**
+     * @description 兼容原名；语义为failureClass，新消费者使用UacRevalidationFailureClass
+     * @enum {string}
+     */
+    UacRevalidationReason:
+      | 'business_rejected'
+      | 'identity_mismatch'
+      | 'upstream_fault'
+      | 'retry_exhausted';
+    /** @enum {string} */
+    UacFaultReason:
+      | 'transport_error'
+      | 'http_error'
+      | 'invalid_json'
+      | 'missing_code'
+      | 'invalid_code'
+      | 'invalid_success_payload';
+    UacCredentialEnvelope: {
+      keyId: string;
+      /** @constant */
+      algorithm: 'A256GCM';
+      nonce: string;
+      ciphertext: string;
+      aad: {
+        /** Format: uuid */
+        tenantId: string;
+        /** Format: uuid */
+        providerId: string;
+        /** @enum {string} */
+        purpose: 'uac_credential';
+      };
+    };
+    UacDecryptionKeyring: {
+      activeKeyId: string;
+      decryptKeyIds: string[];
+      /** Format: int64 */
+      revision: number;
+      /** @description 仅兼容迁移旧无keyId密文的显式旧键映射 */
+      legacyKeyId?: string;
+    };
+    UacDiagnosticSettings: {
+      /** @default false */
+      enabled: boolean;
+      /** Format: date-time */
+      expiresAt?: string;
+      /** Format: int64 */
+      revision: number;
+    } & unknown;
+    UacDiagnosticSettingsWrite: {
+      enabled: boolean;
+      /** @default 900 */
+      ttlSeconds: number;
+    };
+    UacNavigationContext: {
+      navigationProof: string;
+      /** Format: date-time */
+      expiresAt: string;
+      /** Format: uuid */
+      transactionId: string;
+      /** @enum {string} */
+      purpose: 'portal' | 'device';
+      autoEligible: boolean;
+      autoSuppressed: boolean;
+    };
+    UacNavigationProofBinding: {
+      /** Format: uuid */
+      transactionId: string;
+      proofHash: string;
+      /** Format: uri */
+      origin: string;
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      providerId: string;
+      /** @enum {string} */
+      audience: 'portal';
+      /** @enum {string} */
+      purpose: 'login';
+      /** @enum {string} */
+      continuation: 'portal' | 'device';
+      autoEligible: boolean;
+      /** Format: date-time */
+      expiresAt: string;
+      consumed: boolean;
+    };
+    UacLogoutSuppression: {
+      /** Format: uuid */
+      browserSessionId: string;
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uri */
+      origin: string;
+      /**
+       * @description 退出抑制标记；显式继续不能清除
+       * @default true
+       */
+      suppressed: boolean;
+      /** Format: int64 */
+      revision: number;
+    };
+    UacCredentialBinding: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      memberId: string;
+      /** Format: uuid */
+      deviceId: string;
+      /** Format: uuid */
+      sourceSessionId: string;
+      /** Format: uuid */
+      providerId: string;
+      authGeneration: number;
+      /** @description 可选凭据读取/CAS元数据，不参与设备或外壳准入；token轮换不使绑定失效 */
+      credentialVersion?: number;
+      /** Format: date-time */
+      expiresAt: string;
+    };
+    UacDiagnosticManifest: {
+      /** @constant */
+      version: 1;
+      /** Format: date-time */
+      from: string;
+      /** Format: date-time */
+      to: string;
+      redactorVersion: string;
+      /** Format: uuid */
+      exportAuditId: string;
+      partial: boolean;
+      missingSources: (
+        'iam' | 'audit' | 'ops' | 'loki' | 'desktop' | 'plugin'
+      )[];
+      files: {
+        /** @enum {string} */
+        name:
+          | 'uac-steps.jsonl'
+          | 'audit.jsonl'
+          | 'ops-alerts.json'
+          | 'sanitized-config.json'
+          | 'uds-detail.jsonl';
+        sha256: string;
+        /** Format: int64 */
+        lines: number;
+        /** Format: int64 */
+        bytes: number;
+        truncated: boolean;
+      }[];
+      installationVersion: string;
+      componentVersions: {
+        [key: string]: string;
+      };
+      sources: {
+        /** @enum {string} */
+        source: 'iam' | 'audit' | 'ops' | 'loki' | 'desktop' | 'plugin';
+        available: boolean;
+        /** @enum {string} */
+        reason?:
+          'available' | 'missing' | 'unreachable' | 'invalid_log' | 'truncated';
+      }[];
+    };
     UacEnterpriseCredentials: {
       empNo: string;
       /** @description 最新有效企业token，skill进程内即时使用，禁止输出到工具结果、日志或会话记录 */
@@ -2146,6 +2396,24 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
+    /** @description 状态冲突（common.conflict 等）。 */
+    Conflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description If-Match 不匹配（common.precondition_failed）。 */
+    PreconditionFailed: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
     /** @description 资源不存在（common.not_found）。 */
     NotFound: {
       headers: {
@@ -2165,24 +2433,6 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description If-Match 不匹配（common.precondition_failed）。 */
-    PreconditionFailed: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 状态冲突（common.conflict 等）。 */
-    Conflict: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
   };
   parameters: {
     TxId: components['schemas']['Uuid'];
@@ -2191,9 +2441,9 @@ export interface components {
     ServiceAccountId: components['schemas']['Uuid'];
     /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
     UserCode: string;
+    IdempotencyKey: string;
     /** @description 资源的 ETag；不匹配返回 412。 */
     IfMatch: string;
-    IdempotencyKey: string;
     Limit: number;
     /** @description 上一页响应里的 nextCursor。 */
     Cursor: string;
@@ -2209,6 +2459,96 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  issueUacNavigationProof: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description 沿既有内部租户委派语义；B从受信入口配置构造，剥离浏览器同名头。A仅在svc:edge位于委派白名单时绑定该租户；不能用内部JWT的平台tid替代。 */
+        'auriga-tenant-id': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacNavigationIssueRequest'];
+      };
+    };
+    responses: {
+      /** @description 受信服务间响应；no-store，不记录凭据 */
+      201: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacNavigationIssued'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  getUacDiagnosticSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacDiagnosticSettings'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  putUacDiagnosticSettings: {
+    parameters: {
+      query?: never;
+      header: {
+        'If-Match': string;
+      };
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacDiagnosticSettingsWrite'];
+      };
+    };
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacDiagnosticSettings'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      412: components['responses']['PreconditionFailed'];
+    };
+  };
   readMyUacCredentials: {
     parameters: {
       query?: never;
@@ -2296,9 +2636,8 @@ export interface operations {
   putUacProviderConfig: {
     parameters: {
       query?: never;
-      header?: {
-        /** @description 资源的 ETag；不匹配返回 412。 */
-        'If-Match'?: components['parameters']['IfMatch'];
+      header: {
+        'If-Match': string;
       };
       path: {
         providerId: string;
