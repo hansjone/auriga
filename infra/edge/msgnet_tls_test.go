@@ -62,8 +62,11 @@ func TestMsgnetTLSNewHandshakesUseProjectedLeaf(t *testing.T) {
 	if err := os.WriteFile(files.KeyFile, []byte("invalid"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := request(second); err == nil {
-		t.Fatal("incomplete projection accepted")
+	if err := request(second); err != nil {
+		t.Fatal("valid committed leaf lost on incomplete replacement:", err)
+	}
+	if _, err := reloadingServerTLS(files.CertFile, files.KeyFile); err == nil {
+		t.Fatal("invalid initial projection accepted")
 	}
 	replaceTLSFiles(t, files, second)
 	if err := request(second); err != nil {
@@ -117,6 +120,10 @@ func TestMsgnetWSSUpstreamRotatesDualTrustWithoutRestart(t *testing.T) {
 	}
 	request(101)
 	if err := os.WriteFile(first.hop.CAFile, newCA, 0600); err != nil {
+		t.Fatal(err)
+	}
+	request(101)
+	if err := os.WriteFile(first.hop.CAFile, []byte("incomplete CA projection"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	request(101)
@@ -197,7 +204,11 @@ func TestMsgnetPresenceTLSCallbacksReloadClientAndRoots(t *testing.T) {
 	if err := os.WriteFile(first.hop.KeyFile, []byte("invalid"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := options.TLSCertCB(); err == nil {
-		t.Fatal("invalid replacement accepted")
+	if _, err := options.TLSCertCB(); err != nil {
+		t.Fatal("valid committed client leaf lost:", err)
+	}
+	request()
+	if _, err := reloadingPresenceTLS(DevicePresenceConfig{CAFile: first.hop.CAFile, CertFile: first.hop.CertFile, KeyFile: first.hop.KeyFile}); err == nil {
+		t.Fatal("invalid initial client projection accepted")
 	}
 }

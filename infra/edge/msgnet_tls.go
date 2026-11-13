@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 )
 
 // reloadingServerTLS reads only the configured leaf paths, never paths supplied
@@ -38,6 +39,15 @@ func reloadingServerTLS(certFile, keyFile string) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	initial.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) { return load() }
+	var committed atomic.Pointer[tls.Config]
+	committed.Store(initial.Clone())
+	initial.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		current, err := load()
+		if err != nil {
+			return committed.Load().Clone(), nil
+		}
+		committed.Store(current.Clone())
+		return current, nil
+	}
 	return initial, nil
 }

@@ -17,6 +17,7 @@ import (
 func reloadingPresenceTLS(cfg DevicePresenceConfig) (nats.Option, error) {
 	var mu sync.Mutex
 	var roots *x509.CertPool
+	var lastPair tls.Certificate
 	load := func() (tls.Certificate, error) {
 		cert, key, ca := cfg.CertFile, cfg.KeyFile, cfg.CAFile
 		if filepath.Dir(cert) == filepath.Dir(key) && filepath.Dir(cert) == filepath.Dir(ca) {
@@ -40,6 +41,7 @@ func reloadingPresenceTLS(cfg DevicePresenceConfig) (nats.Option, error) {
 		}
 		mu.Lock()
 		roots = pool
+		lastPair = pair
 		mu.Unlock()
 		return pair, nil
 	}
@@ -52,7 +54,15 @@ func reloadingPresenceTLS(cfg DevicePresenceConfig) (nats.Option, error) {
 		}
 		o.Secure = true
 		o.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: cfg.ServerName}
-		o.TLSCertCB = load
+		o.TLSCertCB = func() (tls.Certificate, error) {
+			pair, err := load()
+			if err == nil {
+				return pair, nil
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			return lastPair, nil
+		}
 		o.RootCAsCB = func() (*x509.CertPool, error) { mu.Lock(); defer mu.Unlock(); return roots, nil }
 		return nil
 	}, nil

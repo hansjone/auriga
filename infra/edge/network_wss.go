@@ -88,11 +88,15 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 		TLSClientConfig:     tlsConfig,
 	}
 	if tlsConfig != nil {
+		var committed atomic.Pointer[tls.Config]
+		committed.Store(tlsConfig)
 		// Read the committed trust projection for every new upstream connection.
 		tr.DialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 			current, err := networkWSSTLS(cfg, u.Scheme)
 			if err != nil {
-				return nil, err
+				current = committed.Load()
+			} else {
+				committed.Store(current)
 			}
 			return (&tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: current}).DialContext(ctx, network, address)
 		}
