@@ -1326,6 +1326,8 @@ export interface components {
       decryptKeyIds: string[];
       /** Format: int64 */
       revision: number;
+      /** @description 仅兼容迁移旧无keyId密文的显式旧键映射 */
+      legacyKeyId?: string;
     };
     UacDiagnosticSettings: {
       /** @default false */
@@ -1431,6 +1433,18 @@ export interface components {
         /** Format: int64 */
         bytes: number;
         truncated: boolean;
+      }[];
+      installationVersion: string;
+      componentVersions: {
+        [key: string]: string;
+      };
+      sources: {
+        /** @enum {string} */
+        source: 'iam' | 'audit' | 'ops' | 'loki' | 'desktop' | 'plugin';
+        available: boolean;
+        /** @enum {string} */
+        reason?:
+          'available' | 'missing' | 'unreachable' | 'invalid_log' | 'truncated';
       }[];
     };
     UacEnterpriseCredentials: {

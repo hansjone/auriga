@@ -427,6 +427,71 @@ test('diagnostic projection rejects secrets and personal values in nested or unk
   }
   assert.equal(diagnostic({ ...safe, empNo: '00001' }), true);
 });
+
+test('diagnostic manifests identify versions, safe sources and final file digests', () => {
+  const manifest = validate(
+    'auth/uac-control.schema.json',
+    'UacDiagnosticManifest',
+  );
+  const value = {
+    version: 1,
+    from: base.expiresAt,
+    to: base.expiresAt,
+    redactorVersion: '1',
+    exportAuditId: id,
+    partial: true,
+    missingSources: ['loki'],
+    files: [
+      {
+        name: 'audit.jsonl',
+        sha256: 'a'.repeat(64),
+        lines: 1,
+        bytes: 100,
+        truncated: false,
+      },
+    ],
+    installationVersion: 'synthetic-1',
+    componentVersions: { iam: 'synthetic-1' },
+    sources: [{ source: 'loki', available: false, reason: 'unreachable' }],
+  };
+  assert.equal(manifest(value), true);
+  assert.equal(
+    manifest({
+      ...value,
+      files: [{ ...value.files[0], name: '../../private.json' }],
+    }),
+    false,
+  );
+  assert.equal(
+    manifest({ ...value, files: [{ ...value.files[0], sha256: 'invalid' }] }),
+    false,
+  );
+  assert.equal(manifest({ ...value, token: 'synthetic' }), false);
+  assert.equal(
+    manifest({
+      ...value,
+      sources: [{ source: 'https://evil.example.com', available: true }],
+    }),
+    false,
+  );
+  const keyring = validate(
+    'auth/uac-control.schema.json',
+    'UacDecryptionKeyring',
+  );
+  assert.equal(
+    keyring({
+      activeKeyId: 'new',
+      decryptKeyIds: ['old', 'new'],
+      legacyKeyId: 'old',
+      revision: 1,
+    }),
+    true,
+  );
+  assert.equal(
+    keyring({ activeKeyId: 'new', decryptKeyIds: ['new', 'new'], revision: 1 }),
+    false,
+  );
+});
 const id = '00000000-0000-4000-8000-000000000001';
 const identity = { tenantId: id, memberId: id, deviceId: id, providerId: id };
 const base = {

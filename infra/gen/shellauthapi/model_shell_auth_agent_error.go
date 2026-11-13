@@ -11,6 +11,7 @@ API version: 1.0.0
 package shellauthapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -20,10 +21,9 @@ var _ MappedNullable = &ShellAuthAgentError{}
 
 // ShellAuthAgentError struct for ShellAuthAgentError
 type ShellAuthAgentError struct {
-	Error                string  `json:"error"`
-	Message              string  `json:"message"`
-	Hint                 *string `json:"hint,omitempty"`
-	AdditionalProperties map[string]interface{}
+	Error   string  `json:"error"`
+	Message string  `json:"message"`
+	Hint    *string `json:"hint,omitempty"`
 }
 
 type _ShellAuthAgentError ShellAuthAgentError
@@ -142,11 +142,6 @@ func (o ShellAuthAgentError) ToMap() (map[string]interface{}, error) {
 	if !IsNil(o.Hint) {
 		toSerialize["hint"] = o.Hint
 	}
-
-	for key, value := range o.AdditionalProperties {
-		toSerialize[key] = value
-	}
-
 	return toSerialize, nil
 }
 
@@ -175,22 +170,15 @@ func (o *ShellAuthAgentError) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthAgentError := _ShellAuthAgentError{}
 
-	err = json.Unmarshal(data, &varShellAuthAgentError)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varShellAuthAgentError)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthAgentError(varShellAuthAgentError)
-
-	additionalProperties := make(map[string]interface{})
-
-	if err = json.Unmarshal(data, &additionalProperties); err == nil {
-		delete(additionalProperties, "error")
-		delete(additionalProperties, "message")
-		delete(additionalProperties, "hint")
-		o.AdditionalProperties = additionalProperties
-	}
 
 	return err
 }
