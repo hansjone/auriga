@@ -18,7 +18,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Dedicated audit schema. Cross-tenant reads are exposed only through the admin controller. */
-public class AuditStore {
+public class AuditStore implements auriga.audit.api.UacAuditEvents {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate tx;
   private final JsonMapper json = JsonMapper.builder().build();
@@ -66,6 +66,8 @@ public class AuditStore {
     safe.put("action", SensitiveDataMasker.mask(data.path("action").asText()));
     safe.put("result", data.path("result").asText());
     safe.put("detailsRedacted", true);
+    var uac = UacAuditProjection.project(data);
+    if (uac != null) safe.set("details", uac);
     safe.put("id", e.id().toString());
     safe.put("tenantId", e.tenantId().toString());
     var time = e.time().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
@@ -87,6 +89,49 @@ public class AuditStore {
         node.path("action").asText(),
         node.path("result").asText(),
         node.toString());
+  }
+
+  @Override
+  public auriga.audit.api.UacAuditEvents.Page readUac(
+      Instant from, Instant to, UUID provider, UUID correlation, int limit) {
+    var tenant = auriga.common.context.TenantContext.require();
+    var principal =
+        auriga.common.security.AuthorizationRules.currentPrincipal()
+            .orElseThrow(
+                () ->
+                    new auriga.common.error.AurigaException(
+                        auriga.common.error.CommonErrors.UNAUTHENTICATED));
+    if (!principal.tenantId().equals(tenant)
+        || !principal.isAdminContext()
+        || !principal.hasPermission("audit.events.read"))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+    if (from == null
+        || to == null
+        || !from.isBefore(to)
+        || java.time.Duration.between(from, to).compareTo(java.time.Duration.ofDays(1)) > 0
+        || limit < 1
+        || limit > 10000) throw new IllegalArgumentException("Invalid UAC audit range");
+    return tx.execute(
+        s -> {
+          jdbc.queryForObject(
+              "SELECT set_config('auriga.tenant_id',?,true)", String.class, tenant.toString());
+          var values =
+              new ArrayList<Object>(
+                  List.of(tenant, Timestamp.from(from), Timestamp.from(to), provider.toString()));
+          String sql =
+              "SELECT payload::text FROM audit.event WHERE tenant_id=? AND occurred_at>=? AND occurred_at<? AND action LIKE 'iam.uac.%' AND (payload->'details'->>'providerId'=? OR payload->'target'->>'id'=?)";
+          values.add(provider.toString());
+          if (correlation != null) {
+            sql += " AND payload->'details'->>'correlationId'=?";
+            values.add(correlation.toString());
+          }
+          sql += " ORDER BY occurred_at,id LIMIT ?";
+          values.add(limit + 1);
+          var rows = jdbc.query(sql, (rs, i) -> rs.getString(1), values.toArray());
+          recordAccess("audit.events.export");
+          return new auriga.audit.api.UacAuditEvents.Page(
+              List.copyOf(rows.subList(0, Math.min(rows.size(), limit))), rows.size() > limit);
+        });
   }
 
   public Page query(
