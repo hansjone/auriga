@@ -24,7 +24,6 @@ import {
 } from '../runtime/host-lock.mjs';
 import { schemaValid } from '../runtime/schema.mjs';
 import {
-  assertUnmanagedStart,
   checkLease,
   DesktopGuardian,
   guardianTransition,
@@ -312,7 +311,7 @@ test('plugin-free isolation stops first and preserves history and quarantine', a
   assert(
     existsSync(join(f.home, receipt.quarantinePath, 'example', 'SKILL.md')),
   );
-  assert.doesNotThrow(() => assertUnmanagedStart(f.home));
+  assert.equal(f.guardian.read().guardian.state, 'private_only');
 });
 
 test('unconfirmed process stop keeps current and blocks startup', async (t) => {

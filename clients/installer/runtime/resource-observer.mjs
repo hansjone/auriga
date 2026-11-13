@@ -174,13 +174,58 @@ function revocations(snapshot, trust, now, release, checkedFiles) {
   return lists[0];
 }
 
-export function verifySnapshot(snapshot, trust, watermarks, now) {
-  const { ledger, directory, transactions } = snapshot;
-  const installations = ledger.installations.filter(
-    (i) =>
-      i.resource.enabled &&
-      ['applying', 'applied', 'pending_restart'].includes(i.state),
+export function installationEnabled(i) {
+  const r = i.resource;
+  return (
+    (r.desiredState === undefined ? r.enabled : r.desiredState === 'ENABLED') &&
+    ['applying', 'applied', 'pending_restart'].includes(i.state)
   );
+}
+export function acceptedView(snapshot, trust, now) {
+  const expected = new Map();
+  for (const i of snapshot.ledger.installations.filter(installationEnabled)) {
+    const r = i.resource,
+      rawManifest = cached(
+        snapshot.directory,
+        r.identity.manifestDigest,
+        2097152,
+      ).toString('utf8');
+    const artifactBytes = {};
+    for (const a of r.artifacts)
+      artifactBytes[a.artifactId] = cached(
+        snapshot.directory,
+        a.digest,
+      ).toString('base64');
+    const release = {
+      protocol: 2,
+      envelope: r.envelope,
+      rawManifest,
+      artifactBytes,
+      expected: r.identity,
+      now,
+    };
+    verifyTrust('release', release, trust);
+    revocations(snapshot, trust, now, release, []);
+    const manifest = parseStrictJson(Buffer.from(rawManifest));
+    const payload = manifest.artifacts.find((a) => a.role === 'payload');
+    expected.set(
+      manifest.name,
+      skillFiles(Buffer.from(artifactBytes[payload.id], 'base64')),
+    );
+  }
+  return expected;
+}
+
+export function verifySnapshot(
+  snapshot,
+  trust,
+  watermarks,
+  now,
+  previous = new Map(),
+) {
+  const { ledger, directory, transactions } = snapshot;
+  const installations = ledger.installations.filter(installationEnabled);
+  const expected = new Map();
   const releases = [];
   const checkedFiles = [];
   const leases = [];
@@ -287,6 +332,7 @@ export function verifySnapshot(snapshot, trust, watermarks, now) {
     const expectedFiles = skillFiles(
       Buffer.from(artifactBytes[payload.id], 'base64'),
     );
+    expected.set(manifest.name, expectedFiles);
     const materialized =
       installation.state === 'applying'
         ? join(
@@ -353,11 +399,18 @@ export function verifySnapshot(snapshot, trust, watermarks, now) {
   const actualNames = dirs(activeRoot)
     .map((e) => e.name)
     .sort();
-  if (canonicalize(actualNames) !== canonicalize(materializedNames.sort()))
-    throw new Error('unexpected active Skill directories');
+  for (const name of actualNames) {
+    if (materializedNames.includes(name)) continue;
+    if (!previous.has(name))
+      throw new Error('unexpected active Skill directories');
+    const directory = join(activeRoot, name);
+    verifySkillDirectory(directory, previous.get(name), checkedFiles);
+    views.push({ directory, expected: previous.get(name) });
+  }
   if (!installations.length) return null;
   leases.sort((a, b) => Date.parse(a.expiresAt) - Date.parse(b.expiresAt));
   return {
+    expected,
     lease: leases[0],
     releases,
     ledger,

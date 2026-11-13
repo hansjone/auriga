@@ -66,8 +66,11 @@ export function verifySkillDirectory(directory, expected, checkedFiles) {
       const file = join(path, name);
       assertLocalPath(file);
       const key = prefix + name;
-      if (lstatSync(file).isDirectory()) walk(file, key + '/');
-      else {
+      if (lstatSync(file).isDirectory()) {
+        if (![...expected.keys()].some((k) => k.startsWith(key + '/')))
+          throw new Error('unexpected empty Skill directory');
+        walk(file, key + '/');
+      } else {
         const digest = sha(readBounded(file));
         found.set(key, digest);
         checkedFiles.push({ file, digest });

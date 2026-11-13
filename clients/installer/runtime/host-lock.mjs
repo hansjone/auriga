@@ -89,12 +89,12 @@ export function assertLocalPath(path) {
   }
 }
 
-export function durableJson(file, value) {
+export function durableWrite(file, content) {
   assertLocalPath(file);
   const temporary = `${file}.${randomUUID()}.tmp`;
   const fd = openSync(temporary, 'wx', 0o600);
   try {
-    writeFileSync(fd, JSON.stringify(value) + '\n');
+    writeFileSync(fd, content);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -109,6 +109,9 @@ export function durableJson(file, value) {
     }
   }
 }
+
+export const durableJson = (file, value) =>
+  durableWrite(file, JSON.stringify(value) + '\n');
 
 export function acquireHostLock(dataHome, role = 'E', time = hostTime) {
   assertLocalPath(dataHome);

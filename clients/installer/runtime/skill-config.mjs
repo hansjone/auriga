@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { durableWrite } from './host-lock.mjs';
 import { isAbsolute } from 'node:path';
 
 export const SHARED_ROW = `- insert:
@@ -76,7 +77,6 @@ export function upgradeSkillPatch(file, parse, dataHome) {
   const source = existsSync(file) ? readFileSync(file, 'utf8') : '';
   const merged = mergeSkillPatch(source, parse, dataHome);
   if (merged !== source) {
-    writeFileSync(`${file}.shared.tmp`, merged);
-    renameSync(`${file}.shared.tmp`, file);
+    durableWrite(file, merged);
   }
 }

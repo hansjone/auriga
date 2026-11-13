@@ -97,7 +97,13 @@ edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口�
 
 正常入口仍为 `bin/auriga-desktop.cmd`。启动器独立核验共享 Skill 的冻结 ledger、事务、回执、原始清单、归档及实际落盘字节，再持锁复核 revision 和字节后持久化高水位与激活许可。启动器单实例监督 DSH 子进程，记录 PID/创建时间和后代；撤销、最早租约截止、身份改变或回拨触发 `taskkill /T /F`，确认退出后隔离共享根并写停用回执。插件关闭或卸载不影响该监督。
 
+C 正常持锁或在两次加锁间提交新 revision 时，E 有界退避重试，不把竞争当成信任失败。尚未激活且 current 为空时，缺公钥、陈旧信封或不认识的 ledger 只禁止共享，不阻止私有 Desktop 启动。K2 的 desiredState 存在时优先于 enabled。selectionRevision/generation 前进需要新的 prepared 证明和完整验签，不视为身份切换；回退拒绝。从 private_only 恢复共享先停机，在同一启动器 session 里自动重新拉起 DSH，并提示建议新建会话。
+
 构建时以 `--resource-trust-json <可信公钥文件>` 固定独立的 release/revocation/downgrade Ed25519 公钥；文件按 `{release:{kid,publicKeySpkiBase64},revocation:{...},downgrade:{...}}` 提供，禁止测试钥用于部署。未固定资源公钥的包只能使用私有技能。构建同时带入冻结 JSON Schema，使用锁定上游 Ajv 完整校验。运行时不从插件、环境变量或制品读取公钥。
+
+构建器会拒绝 unified 向量的公开测试公钥，即使改换 kid 也不能作为部署根。启动时校验包内 runtime、公钥和配置的 manifest 摘要。相同 OS 用户仍可一并改写程序、manifest 或 guardian 数据；本实现没有服务账户或操作系统隔离，包内校验不能防御这种同用户主动篡改。Windows LastBootUpTime 也可能随系统校时变化而触发保守重验，不应当作不会变化的硬件开机编号。
+
+每秒检查租约和轻量文件属性清单；文件、身份或代次变化时立即完整复核，稳定时最多每 30 秒完整复核一次，临近租约截止也复核。进程树每 15 秒枚举及停机前即时枚举；高水位只在变化时写入，时钟在完整核验时持久化。C 的已验证旧视图允许在新 prepared 集合等待切换期间保留，E 自有 authorized-ledger.json 只保存冻结格式的已授权账本，不能代替新集合的验签。
 
 仅支持本地固定 NTFS 卷，拒绝网络盘、映射盘、UNC 与重解析路径。持久化以同目录临时文件、fsync、rename 为前提。已知陈旧锁必须在停止全部受管写者、复核 lockId 后回收；未知锁保留并失败封闭。进程崩溃后的下次启动先根据可信账本停止旧树并恢复隔离；高水位与停用证据放在独立 DSH_HOME，不随应用回滚删除。存在未隔离共享状态时禁止退回不带 guardian 的旧版本。
 

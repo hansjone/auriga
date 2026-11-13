@@ -2,7 +2,8 @@
 import { createPublicKey, verify, createHash } from 'node:crypto';
 import { schemaValid } from './schema.mjs';
 import { canonicalize, parseStrictJson } from './json.mjs';
-const clockRules = { rollbackToleranceMillis: 120000 };
+import { guardianProtocol } from './guardian-protocol.mjs';
+const clockRules = guardianProtocol.clock;
 const canon = canonicalize;
 const sha = (value) =>
   'sha256:' + createHash('sha256').update(value).digest('hex');

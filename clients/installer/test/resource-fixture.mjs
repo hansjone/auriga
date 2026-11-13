@@ -196,5 +196,17 @@ export function resourceFixture(home, now = Date.now(), duration = 3600000) {
     ),
     body,
   );
-  return { home, trust, ledger, directory, cache, revocations, ref };
+  const renew = () => {
+    ref.envelope = signed(
+      {
+        ...ref.envelope,
+        statement: {
+          ...ref.envelope.statement,
+          issuedAt: new Date().toISOString(),
+        },
+      },
+      'release',
+    );
+  };
+  return { home, trust, ledger, directory, cache, revocations, ref, renew };
 }

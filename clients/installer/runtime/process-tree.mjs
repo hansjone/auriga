@@ -62,7 +62,13 @@ export function processList() {
 }
 const same = (a, b) => a && b && a.pid === b.pid && a.createdAt === b.createdAt;
 export function notifyPrivateOnly() {
-  console.error('共享技能已停用，建议新建会话。');
+  notifyDesktop('共享技能已停用，建议新建会话。');
+}
+export function notifySharedRestart() {
+  notifyDesktop('共享技能状态已更新，Desktop 正在重新启动，建议新建会话。');
+}
+function notifyDesktop(message) {
+  console.error(message);
   if (process.platform === 'win32')
     spawnSync(
       'powershell.exe',
@@ -70,7 +76,7 @@ export function notifyPrivateOnly() {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        "$w=New-Object -ComObject WScript.Shell; $null=$w.Popup('共享技能已停用，建议新建会话。',8,'Auriga Desktop',64)",
+        `$w=New-Object -ComObject WScript.Shell; $null=$w.Popup('${message.replaceAll("'", "''")}',8,'Auriga Desktop',64)`,
       ],
       { windowsHide: true, timeout: 10000, stdio: 'ignore' },
     );
@@ -179,18 +185,29 @@ export class ProcessTree {
     for (let changed = true; changed;) {
       changed = false;
       for (const p of processes)
-        if (ids.has(p.parent) && !ids.has(p.pid)) {
+        if (
+          ids.has(p.parent) &&
+          !ids.has(p.pid) &&
+          Date.parse(p.createdAt) >=
+            Date.parse(live.find((parent) => parent.pid === p.parent).createdAt)
+        ) {
           live.push(p);
           ids.add(p.pid);
           changed = true;
         }
     }
-    this.record.children = live.filter((p) => !same(p, this.record.root));
-    this.save();
+    const children = live.filter((p) => !same(p, this.record.root));
+    if (JSON.stringify(children) !== JSON.stringify(this.record.children)) {
+      this.record.children = children;
+      this.save();
+    }
     return live;
   }
   async stopTree() {
     const live = this.refresh();
+    this.stoppedWriters = [this.record.root, ...this.record.children].filter(
+      Boolean,
+    );
     for (const owned of live) {
       const current = this.list().find((p) => p.pid === owned.pid);
       if (!same(current, owned)) continue;

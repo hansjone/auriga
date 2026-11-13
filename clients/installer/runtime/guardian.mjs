@@ -1,3 +1,5 @@
+import { verifyTrust } from './resource-trust.mjs';
+import { guardianProtocol } from './guardian-protocol.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -18,38 +20,29 @@ import {
 } from './host-lock.mjs';
 
 export function checkLease(clock, lease, sample) {
-  const maximum = Date.parse(clock.maxObservedTime);
-  const trusted = Date.parse(clock.lastTrustedTime);
-  const expires = Date.parse(lease.expiresAt);
-  if (
-    ![
-      maximum,
-      trusted,
-      expires,
-      sample.wallMillis,
-      sample.monotonicMillis,
-      clock.lastMonotonicMillis,
-      clock.leaseDeadlineMonotonicMillis,
-    ].every(Number.isFinite)
-  )
-    return { valid: false, reason: 'verification_failed' };
-  if (sample.bootId !== clock.bootId)
-    return { valid: false, reason: 'verification_failed' };
-  if (
-    sample.monotonicMillis < clock.lastMonotonicMillis ||
-    sample.wallMillis < maximum - 120000
-  )
-    return { valid: false, reason: 'clock_rollback' };
+  try {
+    verifyTrust(
+      'clock',
+      {
+        clock,
+        bootId: sample.bootId,
+        monotonicNowMillis: sample.monotonicMillis,
+        wallNow: new Date(sample.wallMillis).toISOString(),
+        leaseExpiresAt: lease.expiresAt,
+      },
+      {},
+    );
+  } catch (error) {
+    return { valid: false, reason: error.message };
+  }
   const effective = Math.max(
     sample.wallMillis,
-    maximum + sample.monotonicMillis - clock.lastMonotonicMillis,
-    trusted,
+    Date.parse(clock.maxObservedTime) +
+      sample.monotonicMillis -
+      clock.lastMonotonicMillis,
+    Date.parse(clock.lastTrustedTime),
   );
-  if (
-    effective >= expires ||
-    sample.monotonicMillis >= clock.leaseDeadlineMonotonicMillis
-  )
-    return { valid: false, reason: 'lease_expired' };
+
   return {
     valid: true,
     clock: {
@@ -160,6 +153,16 @@ export class DesktopGuardian {
     durableJson(this.file, state);
   }
 
+  move(state, event, facts, lock) {
+    state.guardian.state = guardianTransition(
+      guardianProtocol,
+      state.guardian.state,
+      event,
+      facts,
+    ).to;
+    this.write(state, lock);
+  }
+
   cleared() {
     assertLocalPath(this.current);
     return !existsSync(this.current) || readdirSync(this.current).length === 0;
@@ -175,6 +178,7 @@ export class DesktopGuardian {
       'verification_failed',
     ];
     if (!reasons.includes(reason)) throw new Error('invalid disable reason');
+    const stopped = await this.ports.isStopped();
     this.locked((lock) => {
       const state = this.read();
       if (!state)
@@ -190,16 +194,34 @@ export class DesktopGuardian {
       }
       state.guardian = {
         ...state.guardian,
-        state: 'stopping',
         reason:
           recovering && reasons.includes(state.guardian.reason)
             ? state.guardian.reason
             : reason,
-        processStopped: false,
+        processStopped: stopped,
         viewCleared: false,
         newSessionRequired: true,
       };
-      this.write(state, lock);
+      if (
+        state.guardian.state === 'active' &&
+        [
+          'lease_expired',
+          'revoked',
+          'identity_changed',
+          'clock_rollback',
+        ].includes(reason)
+      )
+        this.move(state, reason, {}, lock);
+      else {
+        if (state.guardian.state !== 'verifying')
+          this.move(state, 'restart', {}, lock);
+        this.move(
+          state,
+          'trust_invalid',
+          { processRunning: !stopped, processStopped: stopped },
+          lock,
+        );
+      }
     });
     try {
       await this.ports.stopTree();
@@ -210,8 +232,9 @@ export class DesktopGuardian {
         const pending = state.pendingIsolation;
         const quarantine = join(this.home, pending.quarantinePath);
         assertLocalPath(quarantine);
-        state.guardian.state = 'isolating';
         state.guardian.processStopped = true;
+        if (state.guardian.state === 'stopping')
+          this.move(state, 'stop_confirmed', { processStopped: true }, lock);
         pending.phase = 'rename_pending';
         this.write(state, lock);
         if (existsSync(quarantine) && !this.cleared())
@@ -270,60 +293,32 @@ export class DesktopGuardian {
         state.lastDisableReceiptId = receiptId;
         pending.phase = 'receipt_written';
         this.write(state, lock);
-        state.guardian = {
-          ...state.guardian,
-          state: 'private_only',
-          viewCleared: true,
-        };
+        state.guardian.viewCleared = true;
         delete state.pendingIsolation;
-        this.write(state, lock);
+        this.move(
+          state,
+          'isolation_confirmed',
+          {
+            processStopped: true,
+            viewCleared: true,
+            disableReceiptDurable: true,
+          },
+          lock,
+        );
       });
     } catch (error) {
       this.locked((lock) => {
         const state = this.read();
-        state.guardian.state = 'blocked';
-        this.write(state, lock);
+        this.move(
+          state,
+          state.guardian.state === 'stopping'
+            ? 'stop_failed'
+            : 'isolation_failed',
+          {},
+          lock,
+        );
       });
       throw error;
     }
   }
-
-  async tick() {
-    const state = this.locked(() => this.read());
-    if (state?.guardian.state !== 'active') return;
-    const sample = { ...this.time(), wallMillis: Date.now() };
-    const lease = checkLease(state.clock, state.guardian.lease, sample);
-    let reason = lease.valid ? null : lease.reason;
-    if (!reason) {
-      // This trusted port must independently verify the complete C snapshot, never a plugin boolean.
-      const observation = await this.ports.verifyCurrent(state);
-      if (!observation?.valid)
-        reason = observation?.reason ?? 'verification_failed';
-    }
-    if (reason) return this.disable(reason);
-    this.locked((lock) => {
-      const latest = this.read();
-      if (latest.revision !== state.revision)
-        throw new Error('guardian snapshot changed');
-      latest.clock = lease.clock;
-      this.write(latest, lock);
-    });
-  }
-}
-
-// P1 round 2 permits private-only restart after verified quarantine, with a session warning.
-export function assertUnmanagedStart(dataHome) {
-  assertLocalPath(dataHome);
-  const guardian = new DesktopGuardian(dataHome, {});
-  guardian.locked(() => {
-    const state = guardian.read();
-    if (
-      (state &&
-        (state.guardian.state !== 'private_only' || state.pendingIsolation)) ||
-      !guardian.cleared()
-    )
-      throw new Error(
-        '共享资源需完成可信重验与新会话门禁，当前拒绝启动。历史与私有技能已保留。',
-      );
-  });
 }

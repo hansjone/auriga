@@ -1,9 +1,14 @@
 import { cleanupDownloads } from './update-state.mjs';
 import { createRequire } from 'node:module';
 import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
-import { ProcessTree, assertNTFS, notifyPrivateOnly } from './process-tree.mjs';
+import {
+  ProcessTree,
+  assertNTFS,
+  notifyPrivateOnly,
+  notifySharedRestart,
+} from './process-tree.mjs';
 import { Supervisor, packagedTrust } from './supervisor.mjs';
-import { setTimeout as delay } from 'node:timers/promises';
+import { superviseDsh } from './desktop-supervision.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -699,6 +704,7 @@ export async function launch({ root, args = [], env = process.env }) {
   assertOwned(root);
   const initial = readState(root);
   if (!initial) throw new Error('installation state missing');
+  verifyPackage(versionDir(root, initial.current), { trees: false });
   assertNTFS(initial.dataHome);
   const tree = new ProcessTree(initial.dataHome);
   const oldProcesses = [
@@ -713,8 +719,7 @@ export async function launch({ root, args = [], env = process.env }) {
   );
   const releaseSingleton = tree.singleton();
   let session;
-  let monitor;
-  let finished = false;
+
   try {
     await supervisor.prepare();
     const sessionFile = join(root, 'desktop-session.json');
@@ -737,48 +742,33 @@ export async function launch({ root, args = [], env = process.env }) {
     const state = readState(root);
     const dir = versionDir(root, state.current);
     // The update transaction may have changed packaged trust or profile bytes.
+    verifyPackage(dir, { trees: false });
     supervisor.trust = packagedTrust(dir);
     await supervisor.reconcile(true);
-    if (supervisor.guardian.read()?.guardian.state === 'private_only')
+    if (
+      supervisor.privateOnly ||
+      supervisor.guardian.read()?.guardian.state === 'private_only'
+    )
       notifyPrivateOnly();
-    const child = spawn(
-      nodeBin(dir),
-      [dshBin(dir), '--profile', PROFILE, ...args],
-      {
-        stdio: 'inherit',
-        env: launchEnv(dir, state.dataHome, {
-          ...env,
-          AURIGA_DESKTOP_ROOT: root,
-          AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
+    const status = await superviseDsh({
+      tree,
+      supervisor,
+      session,
+      notify: notifySharedRestart,
+      start: () =>
+        spawn(nodeBin(dir), [dshBin(dir), '--profile', PROFILE, ...args], {
+          stdio: 'inherit',
+          env: launchEnv(dir, state.dataHome, {
+            ...env,
+            AURIGA_DESKTOP_ROOT: root,
+            AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
+          }),
         }),
-      },
-    );
-    const exited = new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('exit', (code) => resolve(code ?? 1));
     });
-    if (child.pid) {
-      tree.attach(child.pid);
-      session.child(child.pid);
-    }
-    monitor = (async () => {
-      while (!finished) {
-        await delay(1000);
-        if (finished) break;
-        tree.refresh();
-        await supervisor.reconcile();
-      }
-    })();
-    const status = await Promise.race([exited, monitor]);
-    finished = true;
-    await monitor;
-    await tree.stopTree();
     session.child(process.pid);
     await apply();
     return status;
   } finally {
-    finished = true;
-    if (monitor) await monitor.catch(() => {});
     try {
       await tree.stopTree();
     } finally {

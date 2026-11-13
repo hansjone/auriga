@@ -129,8 +129,22 @@ for (const mode of ['clock_rollback', 'lease_expired', 'identity_changed'])
     if (mode === 'clock_rollback') now -= 120001;
     if (mode === 'lease_expired') mono += 3600001;
     if (mode === 'identity_changed') {
-      f.ledger.generation++;
-      durableJson(join(f.directory, 'ledger.json'), f.ledger);
+      renameSync(
+        join(f.home, 'auriga/resources', id(1), id(5)),
+        join(f.home, 'auriga/resources', id(1), id(8)),
+      );
+      f.ledger.ownerId = id(8);
+      durableJson(
+        join(
+          f.home,
+          'auriga/resources',
+          id(1),
+          id(8),
+          id(3),
+          'skills/ledger.json',
+        ),
+        f.ledger,
+      );
     }
     await supervisor.reconcile();
     assert(stopped);
