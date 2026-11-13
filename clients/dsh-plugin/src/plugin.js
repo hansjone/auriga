@@ -237,6 +237,7 @@ export async function apply(ctx, config) {
                   ctx: connectCtx,
                 });
                 try {
+                  await resources.beforeIdentity(runtime);
                   const saved = runtime.vault.snapshot().credential;
                   if (
                     saved &&

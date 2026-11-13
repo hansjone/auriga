@@ -1,5 +1,6 @@
 import { messages } from './messages';
 import style from './panel.css?inline';
+import { SkillPanel } from './SkillPanel';
 import {
   readMembers,
   applyMember,
@@ -23,6 +24,10 @@ import {
 } from './resources';
 
 export class AurigaTeamPanel extends HTMLElement {
+  private kind: 'plugin' | 'skill' = 'plugin';
+  private skills?: SkillPanel;
+  private skillRoot = document.createElement('section');
+  private skillTab?: 'market' | 'mine';
   private value?: PanelContext;
   private tab: 'market' | 'mine' = 'market';
   private search = '';
@@ -87,6 +92,8 @@ export class AurigaTeamPanel extends HTMLElement {
         JSON.stringify(value?.resourceIdentity) ||
       previous.apiBase !== value?.apiBase;
     if (changed) {
+      this.skills?.dispose();
+      this.skills = undefined;
       this.memberRead++;
       this.memberReadAbort?.abort();
       this.memberAbort?.abort();
@@ -103,9 +110,12 @@ export class AurigaTeamPanel extends HTMLElement {
       this.retryAction = undefined;
     }
     if (this.isConnected) {
-      if (changed && value?.memberResources) void this.loadMembers();
-      if (changed && this.tab === 'market') this.loadPackages();
-      if (changed && this.tab === 'mine') this.loadInstalled();
+      if (this.kind === 'plugin' && changed && value?.memberResources)
+        void this.loadMembers();
+      if (this.kind === 'plugin' && changed && this.tab === 'market')
+        this.loadPackages();
+      if (this.kind === 'plugin' && changed && this.tab === 'mine')
+        this.loadInstalled();
       this.render();
     }
   }
@@ -117,11 +127,15 @@ export class AurigaTeamPanel extends HTMLElement {
   }
   connectedCallback() {
     this.render();
-    if (this.tab === 'market' && !this.loaded) this.loadPackages();
-    if (this.tab === 'mine') this.loadInstalled();
-    if (this.context?.memberResources) void this.loadMembers();
+    if (this.kind === 'plugin' && this.tab === 'market' && !this.loaded)
+      this.loadPackages();
+    if (this.kind === 'plugin' && this.tab === 'mine') this.loadInstalled();
+    if (this.kind === 'plugin' && this.context?.memberResources)
+      void this.loadMembers();
   }
   disconnectedCallback() {
+    this.skills?.dispose();
+    this.skills = undefined;
     this.cancel();
     this.memberRead++;
     this.memberReadAbort?.abort();
@@ -278,8 +292,9 @@ export class AurigaTeamPanel extends HTMLElement {
     this.failure = undefined;
     this.retryAction = undefined;
     this.memberConfirm = undefined;
-    if (value === 'market' && !this.loaded) this.loadPackages();
-    if (value === 'mine') this.loadInstalled();
+    if (this.kind === 'plugin' && value === 'market' && !this.loaded)
+      this.loadPackages();
+    if (this.kind === 'plugin' && value === 'mine') this.loadInstalled();
     this.render();
   }
 
@@ -558,8 +573,44 @@ export class AurigaTeamPanel extends HTMLElement {
       tabs.append(button);
     }
     this.root.append(tabs);
+    const kinds = this.element('nav');
+    for (const kind of ['plugin', 'skill'] as const)
+      kinds.append(
+        this.button(
+          kind === 'plugin'
+            ? this.context?.locale?.startsWith('en')
+              ? 'Plugins'
+              : '插件'
+            : this.context?.locale?.startsWith('en')
+              ? 'Skills'
+              : '技能',
+          () => {
+            this.cancel();
+            this.kind = kind;
+            this.skills?.dispose();
+            this.skills = undefined;
+            if (kind === 'plugin' && !this.loaded && this.tab === 'market')
+              this.loadPackages();
+            this.render();
+          },
+        ),
+      );
+    this.root.append(kinds);
     const section = this.element('section');
     this.root.append(section);
+    if (this.kind === 'skill') {
+      section.append(this.skillRoot);
+      if (!this.skills || this.skillTab !== this.tab) {
+        this.skills?.dispose();
+        this.skillTab = this.tab;
+        this.skills = new SkillPanel(
+          this.skillRoot,
+          this.context ?? {},
+          this.tab === 'mine',
+        );
+      }
+      return;
+    }
     if (this.context?.memberResources) this.memberNotice(section);
     if (this.tab === 'mine') {
       if (this.context?.memberResources) {

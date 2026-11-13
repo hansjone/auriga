@@ -37,6 +37,40 @@ import { sha256File, assertNoSecrets, listFiles } from './lib/files.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const installerDir = resolve(here, '..');
 const pluginDir = resolve(installerDir, '..', 'dsh-plugin');
+export function validateResourceRoots(trust) {
+  if (Object.keys(trust).sort().join() !== 'downgrade,release,revocation')
+    throw new Error('invalid resource trust roles');
+  const fixtureKeys = Object.values(
+    JSON.parse(
+      readFileSync(
+        join(installerDir, '../../contracts/resource/unified-vectors.json'),
+        'utf8',
+      ),
+    ).trust,
+  ).map((k) => k.publicKeySpkiBase64);
+  const canonicalKeys = [];
+  for (const role of ['release', 'revocation', 'downgrade']) {
+    const root = trust[role];
+    if (!root || !/^[A-Za-z0-9._-]{1,128}$/.test(root.kid))
+      throw new Error('invalid resource trust root');
+    const key = createPublicKey({
+      key: Buffer.from(root.publicKeySpkiBase64, 'base64'),
+      type: 'spki',
+      format: 'der',
+    });
+    if (key.asymmetricKeyType !== 'ed25519')
+      throw new Error('resource trust must be Ed25519');
+    const canonical = key
+      .export({ type: 'spki', format: 'der' })
+      .toString('base64');
+    if (fixtureKeys.includes(canonical))
+      throw new Error('public test resource key cannot be deployed');
+    canonicalKeys.push(canonical);
+  }
+  if (new Set(canonicalKeys).size !== 3)
+    throw new Error('resource trust roles require independent keys');
+  return trust;
+}
 const isWin = process.platform === 'win32';
 const NPM_FLAGS = [
   '--omit=dev',
@@ -363,6 +397,24 @@ export async function build(args) {
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });
+  mkdirSync(join(payload, 'auriga', 'runtime', 'schemas'), { recursive: true });
+  for (const name of ['package', 'signatures', 'unified'])
+    cpSync(
+      join(installerDir, '../../contracts/resource', name + '.schema.json'),
+      join(payload, 'auriga', 'runtime', 'schemas', name + '.schema.json'),
+    );
+  cpSync(
+    join(installerDir, '../../contracts/resource/guardian-transitions.json'),
+    join(payload, 'auriga/runtime/schemas/guardian-transitions.json'),
+  );
+  if (args['resource-trust-json']) {
+    const trust = JSON.parse(readFileSync(args['resource-trust-json'], 'utf8'));
+    validateResourceRoots(trust);
+    writeFileSync(
+      join(payload, 'auriga', 'runtime', 'resource-roots.json'),
+      JSON.stringify(trust),
+    );
+  }
   if (args['release-public-key']) {
     const key = createPublicKey(readFileSync(args['release-public-key']));
     if (key.asymmetricKeyType !== 'ed25519')

@@ -94,7 +94,10 @@ assert.equal(
   'styles remain inside Shadow DOM',
 );
 const tabs = panel.shadowRoot.querySelectorAll('nav button');
-assert.equal(tabs.length, 2);
+assert.deepEqual(
+  Array.from(tabs, (tab) => tab.textContent),
+  ['Resource market', 'My resources', 'Plugins', 'Skills'],
+);
 tabs[1].click();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.ok(
@@ -137,8 +140,9 @@ assert.doesNotMatch(
   'native bundle must not contain a Vue runtime',
 );
 assert.ok(
-  Buffer.byteLength(source) < 40_000,
-  'native panel must stay below its 40 kB uncompressed budget',
+  Buffer.byteLength(source) < 55_000,
+  // Shared Skill selection and observation add a second native surface, with no UI runtime dependency.
+  'native plugin and Skill panel must stay below its 55 kB uncompressed budget',
 );
 console.log(
   JSON.stringify({

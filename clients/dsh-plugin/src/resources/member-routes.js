@@ -6,6 +6,7 @@ import { memberIdentity } from './member-api.js';
 import { resourceHost } from './host.js';
 import { parseStrictJson } from './json.js';
 import { exact, refuse, uuid } from './trust.js';
+import { createCatalogIdentityFence } from './identity-fence.js';
 const base = '/auriga/resources/local/';
 /** Local owner request gate is applied by the existing catalogue channel first.
  * The browser never chooses clientId, tenant, roots, archive path or member token.
@@ -15,6 +16,21 @@ export function createMemberRoutes(options) {
   const engines = new Map();
   /** @type {Map<any,()=>void>} */ const subscriptions = new Map();
   const directory = join(options.directory, 'auriga-resources');
+  const identityFence = createCatalogIdentityFence();
+  /** @type {Map<any,()=>void>} */ const identityGates = new Map();
+  /** @param {any} runtime */
+  async function beforeIdentity(runtime) {
+    if (
+      runtime &&
+      !identityGates.has(runtime) &&
+      typeof runtime.vault?.subscribeResourceIdentityGate === 'function'
+    )
+      identityGates.set(
+        runtime,
+        runtime.vault.subscribeResourceIdentityGate(identityFence.setIdentity),
+      );
+    await identityFence.fromRuntime(runtime);
+  }
   const host = resourceHost(options.ctx);
   let closed = false;
   let identityReady = options.current() !== undefined;
@@ -127,7 +143,13 @@ export function createMemberRoutes(options) {
   }
   /** @param {any} runtime */
   async function attach(runtime) {
+    await beforeIdentity(runtime);
     identityReady = true;
+    for (const [previous, unsubscribe] of identityGates)
+      if (previous !== runtime) {
+        unsubscribe();
+        identityGates.delete(previous);
+      }
     for (const [previous, unsubscribe] of subscriptions)
       if (previous !== runtime) {
         unsubscribe();
@@ -167,6 +189,7 @@ export function createMemberRoutes(options) {
   discovery.unref();
   return {
     ready,
+    beforeIdentity,
     attach,
     reconcile,
     /** @param {any} runtime @param {any} req @param {any} res */
@@ -257,6 +280,9 @@ export function createMemberRoutes(options) {
       closed = true;
       clearInterval(discovery);
       for (const unsubscribe of subscriptions.values()) unsubscribe();
+      for (const unsubscribe of identityGates.values()) unsubscribe();
+      identityGates.clear();
+      identityFence.close();
       await guardTail;
       await Promise.allSettled(
         [...engines.values()].map(async (promise) => (await promise).close()),

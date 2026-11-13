@@ -267,7 +267,12 @@ export function createSettingsView(
       headers:
         body === undefined
           ? {}
-          : { 'content-type': 'application/json', 'X-Auriga-Settings': '1' },
+          : {
+              'content-type': 'application/json',
+              ...(path.startsWith('auriga/resources/catalog/')
+                ? { 'x-auriga-catalog': '1' }
+                : { 'X-Auriga-Settings': '1' }),
+            },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!response.ok)
@@ -284,6 +289,395 @@ export function createSettingsView(
       throw new Error('invalidState');
     }
   }
+  function PrivateSkillsView(/** @type {{locale:string}} */ { locale }) {
+    const zh = locale?.startsWith('zh');
+    const t = zh
+      ? {
+          title: '私有技能',
+          hint: '内容仅保存在当前 DSH。修改、关闭和卸载后请新建会话。导入可粘贴原生 SKILL.md；不允许 YAML 别名或标签。',
+          refresh: '刷新',
+          create: '新建／导入',
+          edit: '打开',
+          save: '保存修改',
+          disable: '关闭',
+          enable: '启用',
+          remove: '卸载并保留本地副本',
+          freeze: '冻结本地快照',
+          frozen: '本地快照已冻结；尚未上传或送审',
+          conflict: '操作失败，请刷新检查内容是否已被修改或同名技能已存在。',
+          writeLock:
+            '私有写锁仍存在。若重启后仍不能写入，请先关闭此 DSH 的全部进程，确认没有写操作，再用文件管理器把下列私有锁目录移到备份位置后重启。不要处理 guardian 的共享锁：',
+          disabled: '已关闭',
+          unavailable: '内容格式不支持，请使用原生文件工具编辑',
+          source: 'SKILL.md 内容',
+        }
+      : {
+          title: 'Private skills',
+          hint: 'Stored only in this DSH. Start a new session after editing, disabling or removing. Paste native SKILL.md to import. YAML aliases and tags are not allowed.',
+          refresh: 'Refresh',
+          create: 'Create / import',
+          edit: 'Open',
+          save: 'Save changes',
+          disable: 'Disable',
+          enable: 'Enable',
+          remove: 'Remove and keep a local copy',
+          freeze: 'Freeze local snapshot',
+          frozen: 'Local snapshot frozen; not uploaded or submitted',
+          conflict:
+            'Operation failed. Refresh to check for edits or a name conflict.',
+          writeLock:
+            'A private write lock remains. If writes still fail after restart, close all processes for this DSH, confirm no writer remains, move this private lock directory to a backup location and restart. Do not touch the guardian shared lock:',
+          disabled: 'Disabled',
+          unavailable: 'Unsupported content; edit with native file tools',
+          source: 'SKILL.md content',
+        };
+    const [items, setItems] = React.useState([]);
+    const [frozen, setFrozen] = React.useState(null);
+    const [targets, setTargets] = React.useState([]);
+    const [submission, setSubmission] = React.useState({
+      version: '1.0.0',
+      license: '',
+      author: '',
+      reason: '',
+      tools: '',
+      outboundHosts: '',
+      dataAccess: '',
+      confirmed: false,
+      packageId: '',
+    });
+    const [selected, setSelected] = React.useState(null);
+    const [source, setSource] = React.useState(
+      '---\nname: my-skill\ndescription: "Describe this skill"\n---\n\n',
+    );
+    const [notice, setNotice] = React.useState('');
+    const [busy, setBusy] = React.useState(false);
+    const refresh = async () => {
+      const result = await call('auriga/settings/skills');
+      if (!Array.isArray(result.items)) throw new Error('invalidState');
+      setItems(result.items);
+      if (result.writeLock)
+        setNotice(t.writeLock + ' ' + result.writeLock.path);
+    };
+    React.useEffect(() => {
+      let live = true;
+      call('auriga/settings/skills')
+        .then((value) => {
+          if (!Array.isArray(value.items)) throw new Error('invalidState');
+          if (live) {
+            setItems(value.items);
+            if (value.writeLock)
+              setNotice(t.writeLock + ' ' + value.writeLock.path);
+          }
+        })
+        .catch(() => {
+          if (live) setNotice(t.conflict);
+        });
+      return () => {
+        live = false;
+      };
+    }, []);
+    const run = async (/** @type {()=>Promise<any>} */ work) => {
+      setBusy(true);
+      setNotice('');
+      try {
+        await work();
+        await refresh();
+      } catch {
+        setNotice(t.conflict);
+        try {
+          await refresh();
+        } catch {
+          /* Preserve the original failure. */
+        }
+      } finally {
+        setBusy(false);
+      }
+    };
+    const change = (/** @type {any} */ item, /** @type {string} */ action) =>
+      run(async () => {
+        const result = await call('auriga/settings/skills', {
+          action,
+          name: item.name,
+          enabled: item.enabled,
+          revision: item.revision,
+        });
+        if (action === 'freeze') {
+          const preview = await call('auriga/settings/skills', {
+            action: 'preview',
+            snapshotId: result.snapshotId,
+          });
+          setFrozen({
+            ...preview,
+            snapshotId: result.snapshotId,
+            key: globalThis.crypto.randomUUID(),
+          });
+          setSubmission({ ...submission, confirmed: false, packageId: '' });
+          setTargets([]);
+          try {
+            const value = await call(
+              'auriga/resources/catalog/submission-targets',
+              { snapshotId: result.snapshotId },
+            );
+            if (Array.isArray(value.items)) setTargets(value.items);
+          } catch {
+            /* The local snapshot remains available while signed out or offline. */
+          }
+          setNotice(t.frozen + ' · ' + result.snapshotId);
+        } else setSelected(null);
+      });
+    const button = (
+      /** @type {string} */ label,
+      /** @type {()=>any} */ onClick,
+      disabled = false,
+    ) =>
+      h(
+        'button',
+        { type: 'button', disabled: busy || disabled, onClick },
+        label,
+      );
+    return h(
+      'section',
+      { 'aria-label': t.title },
+      h('h3', null, t.title),
+      h('p', null, t.hint),
+      button(t.refresh, () => run(refresh)),
+      frozen &&
+        h(
+          'section',
+          { 'aria-label': zh ? '冻结送审预览' : 'Frozen submission preview' },
+          h('h4', null, zh ? '冻结送审预览' : 'Frozen submission preview'),
+          h(
+            'p',
+            null,
+            zh
+              ? '以下文件为冻结副本，后续私有编辑不会改变送审内容。命令、工具、外连和数据访问权限均须声明并由平台审核。'
+              : 'These frozen files remain independent of subsequent private edits. Declare commands, tools, outbound hosts and data access for platform review.',
+          ),
+          ...Object.entries(frozen.files).map(([path, content]) =>
+            h(
+              'details',
+              { key: path },
+              h('summary', null, path),
+              h('pre', null, String(content)),
+            ),
+          ),
+          h(
+            'label',
+            null,
+            zh ? '共享目标' : 'Shared target',
+            h(
+              'select',
+              {
+                value: submission.packageId,
+                disabled: busy,
+                onChange: (/** @type {any} */ event) => {
+                  setSubmission({
+                    ...submission,
+                    packageId: event.target.value,
+                    confirmed: false,
+                  });
+                  setFrozen({ ...frozen, key: globalThis.crypto.randomUUID() });
+                },
+              },
+              h(
+                'option',
+                { value: '' },
+                zh ? '新建共享技能' : 'Create a shared skill',
+              ),
+              ...targets.map((/** @type {any} */ target) =>
+                h(
+                  'option',
+                  { key: target.id, value: target.id },
+                  (zh
+                    ? '更新已有共享技能：'
+                    : 'Update existing shared skill: ') + target.name,
+                ),
+              ),
+            ),
+          ),
+          button(zh ? '刷新共享目标' : 'Refresh shared targets', () =>
+            run(async () => {
+              const value = await call(
+                'auriga/resources/catalog/submission-targets',
+                { snapshotId: frozen.snapshotId },
+              );
+              setTargets(value.items);
+            }),
+          ),
+          ...[
+            ['version', '版本', 'Version'],
+            ['license', '许可证', 'License'],
+            ['author', '作者显示名', 'Author display name'],
+            ['reason', '送审说明', 'Submission reason'],
+            ['tools', '工具声明（逗号分隔）', 'Tools (comma separated)'],
+            [
+              'outboundHosts',
+              '外连域名（逗号分隔）',
+              'Outbound hosts (comma separated)',
+            ],
+            [
+              'dataAccess',
+              '数据访问（workspace_read / workspace_write / user_selected_files）',
+              'Data access (workspace_read / workspace_write / user_selected_files)',
+            ],
+          ].map(([key, cn, en]) =>
+            h(
+              'label',
+              { key, style: { display: 'block' } },
+              zh ? cn : en,
+              h('input', {
+                value: submission[key],
+                disabled: busy,
+                onChange: (/** @type {any} */ event) => {
+                  setSubmission({
+                    ...submission,
+                    [key]: event.target.value,
+                    confirmed: false,
+                  });
+                  setFrozen({ ...frozen, key: globalThis.crypto.randomUUID() });
+                },
+              }),
+            ),
+          ),
+          h(
+            'label',
+            null,
+            h('input', {
+              type: 'checkbox',
+              checked: submission.confirmed,
+              disabled: busy,
+              onChange: (/** @type {any} */ event) =>
+                setSubmission({
+                  ...submission,
+                  confirmed: event.target.checked,
+                }),
+            }),
+            zh
+              ? '我确认上传以上冻结文件到平台供审核'
+              : 'I confirm uploading these frozen files to the platform for review',
+          ),
+          button(
+            zh ? '上传并送审' : 'Upload and submit',
+            () =>
+              run(async () => {
+                const list = (/** @type {string} */ value) =>
+                  value
+                    .split(',')
+                    .map((entry) => entry.trim())
+                    .filter(Boolean);
+                const response = await fetcher(
+                  localURL('auriga/resources/catalog/submissions'),
+                  {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    redirect: 'error',
+                    signal: AbortSignal.timeout(90000),
+                    headers: {
+                      'content-type': 'application/json',
+                      'x-auriga-catalog': '1',
+                    },
+                    body: JSON.stringify({
+                      snapshotId: frozen.snapshotId,
+                      key: frozen.key,
+                      version: submission.version,
+                      license: submission.license,
+                      author: submission.author,
+                      reason: submission.reason,
+                      permissions: {
+                        tools: list(submission.tools),
+                        outboundHosts: list(submission.outboundHosts),
+                        dataAccess: list(submission.dataAccess),
+                      },
+                      ...(submission.packageId
+                        ? { packageId: submission.packageId }
+                        : {}),
+                    }),
+                  },
+                );
+                if (!response.ok) throw new Error('submission failed');
+                const result = await response.json();
+                setFrozen(null);
+                setNotice(
+                  (zh ? '平台已接受送审：' : 'Submission accepted: ') +
+                    result.versionId +
+                    ' · ' +
+                    result.state,
+                );
+              }),
+            !submission.confirmed ||
+              !submission.license ||
+              !submission.author ||
+              !submission.reason,
+          ),
+        ),
+      ...items.map((/** @type {any} */ item) =>
+        h(
+          'div',
+          { key: item.name + item.enabled },
+          h(
+            'p',
+            null,
+            item.name,
+            item.enabled ? '' : ' · ' + t.disabled,
+            item.unavailable ? ' · ' + t.unavailable : '',
+          ),
+          !item.unavailable &&
+            h(
+              'div',
+              null,
+              button(t.edit, () =>
+                run(async () => {
+                  const result = await call('auriga/settings/skills', {
+                    action: 'read',
+                    name: item.name,
+                    enabled: item.enabled,
+                  });
+                  setSelected(result);
+                  setSource(result.files['SKILL.md']);
+                }),
+              ),
+              button(item.enabled ? t.disable : t.enable, () =>
+                change(item, item.enabled ? 'disable' : 'enable'),
+              ),
+              button(t.remove, () => change(item, 'remove')),
+              button(t.freeze, () => change(item, 'freeze')),
+            ),
+        ),
+      ),
+      h(
+        'label',
+        null,
+        t.source,
+        h('textarea', {
+          value: source,
+          rows: 12,
+          style: { display: 'block', width: '100%' },
+          onChange: (/** @type {any} */ event) => setSource(event.target.value),
+        }),
+      ),
+      button(t.create, () =>
+        run(async () => {
+          await call('auriga/settings/skills', { action: 'create', source });
+          setSelected(null);
+        }),
+      ),
+      selected &&
+        button(t.save, () =>
+          run(async () => {
+            const result = await call('auriga/settings/skills', {
+              action: 'edit',
+              name: selected.name,
+              enabled: selected.enabled,
+              revision: selected.revision,
+              source,
+            });
+            setSelected(result);
+          }),
+        ),
+      notice && h('p', { role: 'status' }, notice),
+    );
+  }
+
   return function SettingsView(
     /** @type {{locale:string,boot?:any,consent?:any}} */ {
       locale,
@@ -661,6 +1055,7 @@ export function createSettingsView(
           network?.reason ?? account?.communication ?? t.notProvided,
         ),
       ),
+      h(PrivateSkillsView, { locale }),
       notice && h('p', { role: 'status', 'aria-live': 'polite' }, notice),
     );
   };
