@@ -50,6 +50,22 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class NetworkKeyConfigurationTest {
+  @Test
+  void automaticRenewalExcludesTheLegacyControllerAndPublisher() {
+    new ApplicationContextRunner()
+        .withUserConfiguration(NetworkKeysController.class, NetworkKeyOperationsConfiguration.class)
+        .withPropertyValues(
+            "auriga.service.schema=collab",
+            "auriga.collab.network.key-operations.enabled=true",
+            "auriga.collab.network.auto-renew.enabled=true")
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              assertEquals(0, context.getBeanNamesForType(NetworkKeysController.class).length);
+              assertEquals(0, context.getBeanNamesForType(NetworkKeyOperations.class).length);
+            });
+  }
+
   @TempDir(factory = WorkspaceTempDirectory.class)
   Path directory;
 

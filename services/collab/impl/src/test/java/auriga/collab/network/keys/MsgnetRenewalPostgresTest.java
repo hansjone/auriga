@@ -92,6 +92,10 @@ class MsgnetRenewalPostgresTest {
   }
 
   void install() throws Exception {
+    install(false);
+  }
+
+  void install(boolean allTransportComponents) throws Exception {
     var a =
         (ObjectNode)
             template
@@ -110,6 +114,19 @@ class MsgnetRenewalPostgresTest {
             Base64.getUrlEncoder()
                 .withoutPadding()
                 .encodeToString(runtime.getPublic().getEncoded()));
+    if (allTransportComponents) {
+      var scopes = (tools.jackson.databind.node.ArrayNode) a.path("transport_scope");
+      ((tools.jackson.databind.node.ArrayNode) scopes.get(0).path("ekus")).add("clientAuth");
+      var edge = (ObjectNode) scopes.get(0).deepCopy();
+      edge.put("component", "edge").put("identity_id", "edge-projector");
+      edge.putArray("sans").add("edge.example.com");
+      scopes.add(edge);
+      var broker = (ObjectNode) scopes.get(0).deepCopy();
+      broker.put("component", "broker").put("identity_id", "broker-projector");
+      broker.putArray("sans").add("broker.example.com");
+      broker.putArray("ekus").add("serverAuth");
+      scopes.add(broker);
+    }
     var authority = rootSigned(a, "NetworkRuntimeAuthority");
     var c =
         (ObjectNode)
@@ -234,7 +251,7 @@ class MsgnetRenewalPostgresTest {
   @Test
   void pkiPhasesRequireExactReceiptsAndLeafRenewalKeepsCaPrivate() throws Exception {
     try (ring) {
-      install();
+      install(true);
       service().reconcile();
       var service = service();
       var config =
@@ -271,17 +288,34 @@ class MsgnetRenewalPostgresTest {
                   "publication_digest",
                   MsgnetMaterials.digest(NetworkJson.parse(service.publication(), 1048576)))
               .put("phase", "persisted");
-      pki.confirm(receipt, identity);
+      confirmAllTransport(pki, receipt, identity);
       pki.reconcile();
       assertEquals("new_leaves", text(pki.bundle().path("payload"), "phase"));
       var leaves = pki.leaves(identity);
-      assertEquals(1, leaves.size());
+      assertEquals(2, leaves.size());
+      for (var leaf : leaves) assertNotEquals("edge-presence", text(leaf, "role"));
+      var edgeLeaves =
+          pki.leaves(
+              new MsgnetControlLedger.Identity(
+                  "edge", "edge-projector", "", "edge", "gateway", "", "subject"));
+      assertEquals(
+          java.util.Set.of("edge", "edge-presence"),
+          edgeLeaves
+              .valueStream()
+              .map(l -> text(l, "role"))
+              .collect(java.util.stream.Collectors.toSet()));
+      assertEquals(
+          1,
+          pki.leaves(
+                  new MsgnetControlLedger.Identity(
+                      "broker", "broker-projector", "", "broker", "gateway", "", "subject"))
+              .size());
       assertFalse(MsgnetRenewal.canonical(pki.bundle()).contains("private_pkcs8"));
       receipt
           .put("bundle_version", "2")
           .put("bundle_digest", NetworkJson.digest(pki.bundle()))
           .put("phase", "handshake_verified");
-      pki.confirm(receipt, identity);
+      confirmAllTransport(pki, receipt, identity);
       pki.reconcile();
       assertEquals("retire_old", text(pki.bundle().path("payload"), "phase"));
       String oldCertificate = text(leaves.get(0), "certificate_der");
@@ -295,6 +329,19 @@ class MsgnetRenewalPostgresTest {
       assertEquals("dual_trust", text(pki.bundle().path("payload"), "phase"));
       assertEquals(4, pki.bundle().path("payload").path("cas").size());
     }
+  }
+
+  private static void confirmAllTransport(
+      MsgnetPki pki, ObjectNode receipt, MsgnetControlLedger.Identity network) {
+    pki.confirm(receipt, network);
+    pki.confirm(
+        receipt,
+        new MsgnetControlLedger.Identity(
+            "edge", "edge-projector", "", "edge", "gateway", "", "subject"));
+    pki.confirm(
+        receipt,
+        new MsgnetControlLedger.Identity(
+            "broker", "broker-projector", "", "broker", "gateway", "", "subject"));
   }
 
   @Test

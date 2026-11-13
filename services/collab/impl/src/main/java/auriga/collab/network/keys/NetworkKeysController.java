@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** Fixed configured realm only; no caller-selected realm, URL, root or private-key mutation. */
 @RestController
 @ConditionalOnExpression(
-    "${auriga.services.collab.enabled:true} && ${auriga.collab.network.key-operations.enabled:false} && '${auriga.service.schema:}' == 'collab'")
+    "${auriga.services.collab.enabled:true} && ${auriga.collab.network.key-operations.enabled:false} && !${auriga.collab.network.auto-renew.enabled:false} && '${auriga.service.schema:}' == 'collab'")
 @AuthenticatedOnly
 public class NetworkKeysController {
   private final NetworkKeyOperations operations;

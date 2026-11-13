@@ -201,8 +201,8 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
       String component = text(scope, "component");
       List<String> roles =
           switch (component) {
-            case "network" -> List.of("submit", "broker-client", "edge-presence");
-            case "edge" -> List.of("edge");
+            case "network" -> List.of("submit", "broker-client");
+            case "edge" -> List.of("edge", "edge-presence");
             case "broker" -> List.of("broker");
             default -> throw failure("scope_denied");
           };
