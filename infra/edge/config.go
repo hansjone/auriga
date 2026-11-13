@@ -14,6 +14,8 @@ import (
 
 // Config drives auriga-edge. Values may come from a JSON file and/or environment.
 type Config struct {
+	UacProviderID          string                        `json:"uacProviderId,omitempty"`
+	UacSSOCookieNames      []string                      `json:"uacSsoCookieNames,omitempty"`
 	AccessConfigFile       string                        `json:"accessConfigFile"`
 	Access                 deploymentconfig.Config       `json:"-"`
 	ProxyTLS               ProxyTLSConfig                `json:"proxyTLS"`

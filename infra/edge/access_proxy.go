@@ -18,6 +18,9 @@ var invitationPreviewPath = regexp.MustCompile(`^/api/org/v1/invitations/preview
 
 func loginOperation(r *http.Request) bool {
 	p := r.URL.Path
+	if uacLoginOperation(r) {
+		return true
+	}
 	if p == "/api/iam/v1/login/providers" {
 		return r.Method == "GET"
 	}
@@ -78,6 +81,10 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		return
 	}
 	iam := target == g.iamURL
+	if r.URL.Path == "/api/iam/v1/login/uac/sso" && audience != "portal" {
+		fail(403, "common.forbidden")
+		return
+	}
 	if r.URL.Path == "/oauth2/revoke" && (r.Method != http.MethodPost || audience != "portal") {
 		fail(403, "common.forbidden")
 		return
@@ -330,6 +337,9 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap bool) (st
 			names = append(names, csrfCookieBase())
 		}
 	}
+	if e.role == "portal" && (r.URL.Path == "/api/iam/v1/login/uac/sso" || r.URL.Path == "/api/iam/v1/logout") {
+		names = append(names, "auriga_portal_sso_suppression")
+	}
 	var selected []string
 	for _, base := range names {
 		name := cookieName(e.scheme == "https", base)
@@ -342,6 +352,17 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap bool) (st
 		}
 		if count > 1 {
 			return "", errString("ambiguous cookie")
+		}
+	}
+	if e.role == "portal" && r.URL.Path == "/api/iam/v1/login/uac/sso" {
+		for _, name := range g.Cfg.UacSSOCookieNames {
+			if strings.Contains(strings.ToLower(name), "auriga_") {
+				return "", errString("invalid SSO cookie name")
+			}
+			value, ok := singleCookie(r, name)
+			if ok {
+				selected = append(selected, (&http.Cookie{Name: name, Value: value}).String())
+			}
 		}
 	}
 	return strings.Join(selected, "; "), nil

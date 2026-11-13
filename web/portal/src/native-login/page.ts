@@ -1,11 +1,13 @@
+import { createUacLoginView } from '../../../shared/src/native-login/uac';
+import type { components } from '../../../shared/src/generated/iam';
 import {
   createLoginView,
   type LoginView,
-} from '../../../../clients/dsh-plugin/src/login/index.js';
+} from '../../../shared/src/native-login/index.js';
 import type {
   ClientStep,
   StepInput,
-} from '../../../../clients/dsh-plugin/src/generated/steps.js';
+} from '../../../shared/src/generated/steps';
 import { createApiClient } from '../../../shared/src/api/client';
 import {
   createIamApi,
@@ -21,7 +23,7 @@ const transactionIdPattern =
 const messages = {
   'zh-CN': {
     title: '登录并进入我的 DSH',
-    scope: '此入口支持表单登录。其他登录方式、邀请和扫码确认请使用原有门户。',
+    scope: '选择团队账号或企业登录，成功后准备并进入本人的 DSH。',
     portal: '打开原有登录门户',
     language: '语言 / Language',
     checking: '正在确认登录会话…',
@@ -49,7 +51,7 @@ const messages = {
   en: {
     title: 'Sign in and enter my DSH',
     scope:
-      'This entry supports form sign-in. Use the existing portal for other methods, invitations and QR confirmation.',
+      'Sign in with a team account or company identity, then prepare and enter your DSH.',
     portal: 'Open the existing sign-in portal',
     language: '语言 / Language',
     checking: 'Checking your sign-in session…',
@@ -112,6 +114,7 @@ export function mountInstanceLogin(
   let tx: LoginTransaction | undefined;
   let providerId: string | undefined;
   let view: LoginView | undefined;
+  let uacView: { dispose(): void } | undefined;
   let workAbort: AbortController | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -204,12 +207,12 @@ export function mountInstanceLogin(
     logout.hidden = !authenticated;
     retry.hidden = !retryable;
     retry.disabled = authBusy || workBusy || Date.now() < retryAt;
-    cancel.hidden = !(authBusy || workBusy || tx);
+    cancel.hidden = !(authBusy || workBusy || tx || uacView);
     cancel.disabled = status === 'cancelled';
     change.hidden = !tx || authenticated;
     change.disabled = authBusy || workBusy;
     choices.replaceChildren();
-    if (!tx && !authenticated && !workBusy) {
+    if (!tx && !uacView && !authenticated && !workBusy) {
       for (const provider of providers) {
         const button = doc.createElement('button');
         button.type = 'button';
@@ -244,6 +247,8 @@ export function mountInstanceLogin(
     retryTimer = undefined;
     retryAt = 0;
     // Set epoch first: the renderer abort callback cannot revive this lifecycle.
+    uacView?.dispose();
+    uacView = undefined;
     view?.dispose();
     view = undefined;
   }
@@ -427,6 +432,48 @@ export function mountInstanceLogin(
     invalidate();
     tx = undefined;
     providerId = id;
+    if (providers.find((p) => p.id === id)?.connectorType === 'uac') {
+      const version = epoch;
+      let navigation: components['schemas']['UacNavigationContext'] | undefined;
+      const context = doc.getElementById('auriga-uac-navigation');
+      if (context) {
+        try {
+          navigation = JSON.parse(context.textContent ?? '');
+        } catch {
+          /* Missing proof falls back to QR. */
+        }
+        context.remove();
+      }
+      uacView = createUacLoginView(loginRoot, {
+        api: iam,
+        providerId: id,
+        locale,
+        navigation,
+        onComplete: (result) => {
+          if (!current(version)) return;
+          if (result.state === 'authenticated') void verifyAndOpen();
+          else if (result.state === 'additional_step_required') {
+            void mutation(
+              () => iam.getLoginTransaction(result.transactionId),
+              version,
+            )
+              .then((step) => {
+                if (current(version)) {
+                  uacView?.dispose();
+                  uacView = undefined;
+                  installView(step);
+                }
+              })
+              .catch((error: unknown) => {
+                if (current(version)) fail(error);
+              });
+          }
+        },
+      });
+      render();
+      return;
+    }
+
     const version = epoch;
     show('signing');
     try {
@@ -461,6 +508,9 @@ export function mountInstanceLogin(
       throw new Error('Invalid login providers');
     providers = result.items;
     show(providers.length ? 'providers' : 'empty');
+    const preferred = providers.find((p) => p.connectorType === 'uac');
+    if (preferred && doc.getElementById('auriga-uac-navigation'))
+      void selectProvider(preferred.id);
   }
 
   async function verifyAndOpen() {

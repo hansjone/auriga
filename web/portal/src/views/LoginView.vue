@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
+import { createUacLoginView } from '../../../shared/src/native-login/uac';
+import type { IAMComponents } from '@auriga/shared';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -24,11 +26,18 @@ const providers = ref<LoginProvider[]>([]);
 const tx = ref<LoginTransaction | null>(null);
 const error = ref('');
 const loading = ref(true);
+const uacRoot = ref<globalThis.HTMLElement>();
+const uacActive = ref(false);
+let uacView: { dispose(): void } | undefined;
+onUnmounted(() => uacView?.dispose());
 
 onMounted(async () => {
   try {
     const res = await iamApi.listLoginProviders();
     providers.value = res.items;
+    const preferred = res.items.find((p) => p.connectorType === 'uac');
+    if (preferred && document.getElementById('auriga-uac-navigation'))
+      await selectProvider(preferred);
   } catch (e) {
     error.value = isApiError(e)
       ? mapProblemMessage(e.problem, t)
@@ -39,6 +48,50 @@ onMounted(async () => {
 });
 
 async function selectProvider(provider: LoginProvider) {
+  if (provider.connectorType === 'uac' && uacRoot.value) {
+    uacView?.dispose();
+    uacActive.value = true;
+    loading.value = false;
+    let navigation:
+      IAMComponents['schemas']['UacNavigationContext'] | undefined;
+    const context = document.getElementById('auriga-uac-navigation');
+    if (context) {
+      try {
+        navigation = JSON.parse(context.textContent ?? '');
+      } catch {
+        /* QR fallback */
+      }
+      context.remove();
+    }
+    uacView = createUacLoginView(uacRoot.value, {
+      api: iamApi,
+      providerId: provider.id,
+      navigation,
+      locale: document.documentElement.lang,
+      invitationCode:
+        typeof route.query.invitation === 'string'
+          ? route.query.invitation
+          : undefined,
+      onComplete: (result) => {
+        if (result.state === 'authenticated')
+          globalThis.location.assign('/instance-login.html');
+        else if (result.state === 'additional_step_required')
+          void iamApi
+            .getLoginTransaction(result.transactionId)
+            .then((value) => {
+              tx.value = value;
+              uacActive.value = false;
+              uacView?.dispose();
+            })
+            .catch(() => {
+              error.value = t('errors.unknown');
+            });
+      },
+    });
+    return;
+  }
+  uacView?.dispose();
+  uacActive.value = false;
   error.value = '';
   loading.value = true;
   try {
@@ -111,8 +164,9 @@ const step = (): ClientStep | null =>
     <p v-if="loading" class="auriga-login-status" role="status">
       {{ t('login.loading') }}
     </p>
+    <div v-show="uacActive" ref="uacRoot" />
     <ProviderSelect
-      v-else-if="!tx"
+      v-if="!loading && !tx && !uacActive"
       :providers="providers"
       @select="selectProvider"
     />

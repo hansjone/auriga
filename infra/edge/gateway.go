@@ -260,6 +260,11 @@ func (g *Gateway) Handler() http.Handler {
 
 func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	rid, r := ensureRequestID(r)
+	// Internal IAM control endpoints never enter the public proxy.
+	if r.URL.Path == "/api/iam/v1/internal" || strings.HasPrefix(r.URL.Path, "/api/iam/v1/internal/") {
+		writeProblem(w, problem(http.StatusNotFound, "common.not_found", "Not Found", "", rid))
+		return
+	}
 	clientIP := ResolveClientIP(r, g.Trusted)
 	r = r.WithContext(context.WithValue(r.Context(), ctxKeyClientIP, clientIP))
 	host := requestHost(r)
@@ -428,6 +433,9 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	// SPA static by audience
 	if audience == "admin" {
 		g.adminStatic.ServeHTTP(w, r)
+		return
+	}
+	if g.serveUacNavigation(w, r) {
 		return
 	}
 	g.portalStatic.ServeHTTP(w, r)
