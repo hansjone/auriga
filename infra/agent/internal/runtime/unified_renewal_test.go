@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	resourcev1 "github.com/hansjone/auriga/infra/gen/auriga/resource/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -109,8 +110,8 @@ func TestUnifiedTombstoneCollectionRetainsInstallationCAS(t *testing.T) {
 	if _, err := f.manager.Prepare(ctx, f.source.spec); err != nil {
 		t.Fatal(err)
 	}
-	f.state = "REMOVED"
-	f.revision = 2
+	f.ref.DesiredState = resourcev1.UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_REMOVED.Enum()
+	f.ref.InstallationRevision = 2
 	f.ref.Enabled = false
 	f.source.spec.Generation = 2
 	f.source.spec.ResourceSelectionRevision = 2
@@ -122,8 +123,8 @@ func TestUnifiedTombstoneCollectionRetainsInstallationCAS(t *testing.T) {
 	if _, err := f.manager.Prepare(ctx, f.source.spec); err != nil {
 		t.Fatal(err)
 	}
-	f.state = "ENABLED"
-	f.revision = 1
+	f.ref.DesiredState = resourcev1.UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_ENABLED.Enum()
+	f.ref.InstallationRevision = 1
 	f.ref.Enabled = true
 	f.source.spec.Generation = 4
 	f.source.spec.ResourceSelectionRevision = 3

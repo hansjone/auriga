@@ -20,10 +20,6 @@ func (m *UnifiedManager) renewCached(spec *nodev1.InstanceSpec, s *unifiedNodeSt
 	if len(spec.GetUnifiedResources()) != len(s.Installations) {
 		return fmt.Errorf("renewal changed selection")
 	}
-	intent := m.Intent
-	if intent == nil {
-		intent = ReadUnifiedIntent
-	}
 	byPackage := map[string]*resourcev1.UnifiedResourceRef{}
 	for _, ref := range spec.GetUnifiedResources() {
 		key := ref.GetIdentity().GetPackageId()
@@ -43,7 +39,7 @@ func (m *UnifiedManager) renewCached(spec *nodev1.InstanceSpec, s *unifiedNodeSt
 		if next == nil {
 			return fmt.Errorf("renewal lost identity")
 		}
-		revision, state, err := intent(next)
+		revision, state, err := ReadUnifiedIntent(next)
 		if err != nil || revision != record.InstallationRevision || state != record.DesiredState {
 			return fmt.Errorf("renewal changed installation intent")
 		}

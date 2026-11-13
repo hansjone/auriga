@@ -61,9 +61,7 @@ public class WorkspaceRuntimeConfiguration {
           service,
           inputs,
           request ->
-              auriga.common.grpc.GrpcErrors.call(() -> stub.resolveUnifiedResources(request)),
-          UnifiedInstallationRevision::read,
-          UnifiedInstallationRevision::desired);
+              auriga.common.grpc.GrpcErrors.call(() -> stub.resolveUnifiedResources(request)));
     }
 
     @Bean

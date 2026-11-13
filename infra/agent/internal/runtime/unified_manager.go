@@ -23,7 +23,6 @@ import (
 	resourcev1 "github.com/hansjone/auriga/infra/gen/auriga/resource/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 	"gopkg.in/yaml.v3"
 )
 
@@ -69,7 +68,6 @@ type UnifiedManager struct {
 	Protocol UnifiedProtocol
 	Origin   string
 	Client   *http.Client
-	Intent   func(*resourcev1.UnifiedResourceRef) (uint64, string, error)
 	Now      func() time.Time
 	Mono     func() int64
 	BootID   string
@@ -94,32 +92,23 @@ func unifiedNonce() string {
 	return s[:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:]
 }
 
-// ReadUnifiedIntent isolates K2 generated fields; missing fields deny activation.
+// ReadUnifiedIntent validates generated K2 fields. This consumer requires an
+// explicit desired state; legacy enabled alone never authorizes a tombstone.
 func ReadUnifiedIntent(ref *resourcev1.UnifiedResourceRef) (uint64, string, error) {
-	m := ref.ProtoReflect()
-	revision := m.Descriptor().Fields().ByName("installation_revision")
-	desired := m.Descriptor().Fields().ByName("desired_state")
-	if revision == nil || desired == nil {
-		return 0, "", fmt.Errorf("K2 unified intent fields unavailable")
-	}
-	r := m.Get(revision).Uint()
-	state := ""
-	if desired.Kind() == protoreflect.EnumKind {
-		value := desired.Enum().Values().ByNumber(m.Get(desired).Enum())
-		if value != nil {
-			state = string(value.Name())
-		}
-	} else if desired.Kind() == protoreflect.StringKind {
-		state = m.Get(desired).String()
-	}
-	for _, candidate := range []string{"ENABLED", "DISABLED", "REMOVED"} {
-		if state == candidate || strings.HasSuffix(state, "_"+candidate) {
-			state = candidate
-			break
-		}
-	}
-	if r < 1 || r > 9007199254740991 || state != "ENABLED" && state != "DISABLED" && state != "REMOVED" {
+	r := ref.GetInstallationRevision()
+	if ref == nil || r < 1 || r > 9007199254740991 || ref.DesiredState == nil {
 		return 0, "", fmt.Errorf("invalid unified intent")
+	}
+	state := ""
+	switch ref.GetDesiredState() {
+	case resourcev1.UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_ENABLED:
+		state = "ENABLED"
+	case resourcev1.UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_DISABLED:
+		state = "DISABLED"
+	case resourcev1.UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_REMOVED:
+		state = "REMOVED"
+	default:
+		return 0, "", fmt.Errorf("invalid unified desired state")
 	}
 	if ref.GetEnabled() != (state == "ENABLED") {
 		return 0, "", fmt.Errorf("inconsistent unified intent")
@@ -583,10 +572,6 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 			}
 		}
 	}()
-	intent := m.Intent
-	if intent == nil {
-		intent = ReadUnifiedIntent
-	}
 	root, current, err := m.paths(spec.GetInstanceId())
 	if err != nil {
 		return "", err
@@ -615,7 +600,7 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 	names := map[string]bool{}
 	list := unifiedTenantRevocations(spec)
 	for _, ref := range spec.GetUnifiedResources() {
-		revision, state, err := intent(ref)
+		revision, state, err := ReadUnifiedIntent(ref)
 		if err != nil {
 			return "", err
 		}
@@ -961,6 +946,10 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) ([]*resourcev1.
 		var ref resourcev1.UnifiedResourceRef
 		if err := proto.Unmarshal(record.Ref, &ref); err != nil {
 			return nil, guardian, err
+		}
+		revision, desired, err := ReadUnifiedIntent(&ref)
+		if err != nil || revision != record.InstallationRevision || desired != record.DesiredState {
+			return nil, guardian, fmt.Errorf("installation ledger does not match generated intent")
 		}
 		state := "overridden"
 		if record.DesiredState == "ENABLED" && s.State == "private_only" {

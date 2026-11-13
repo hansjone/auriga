@@ -4,8 +4,6 @@ import auriga.common.error.*;
 import auriga.contracts.node.v1.*;
 import auriga.contracts.resource.v1.*;
 import java.util.*;
-import java.util.function.Function;
-import java.util.function.ToLongFunction;
 
 /** Pure spec rules. Cryptographic verification belongs to the trusted node executor. */
 public final class UnifiedSpec {
@@ -20,7 +18,8 @@ public final class UnifiedSpec {
               var old = prior.get(ref.getIdentity().getPackageId());
               return old == null
                   || !old.getIdentity().equals(ref.getIdentity())
-                  || old.getEnabled() != ref.getEnabled();
+                  || UnifiedResourceIntent.revision(old) != UnifiedResourceIntent.revision(ref)
+                  || !UnifiedResourceIntent.desired(old).equals(UnifiedResourceIntent.desired(ref));
             });
   }
 
@@ -29,26 +28,7 @@ public final class UnifiedSpec {
       long revision,
       List<UnifiedSelection> selections,
       ResolveUnifiedResourcesResponse resolved,
-      boolean renewal,
-      ToLongFunction<UnifiedResourceRef> installationRevision) {
-    return apply(
-        old,
-        revision,
-        selections,
-        resolved,
-        renewal,
-        installationRevision,
-        ref -> ref.getEnabled() ? "ENABLED" : "DISABLED");
-  }
-
-  public static InstanceSpec apply(
-      InstanceSpec old,
-      long revision,
-      List<UnifiedSelection> selections,
-      ResolveUnifiedResourcesResponse resolved,
-      boolean renewal,
-      ToLongFunction<UnifiedResourceRef> installationRevision,
-      Function<UnifiedResourceRef, String> desiredState) {
+      boolean renewal) {
     require(revision > 0 && revision <= 9007199254740991L);
     require(resolved.getSelectionRevision() == revision);
     require(
@@ -66,10 +46,11 @@ public final class UnifiedSpec {
             var previous = before.get(key);
             require(sameBytes(previous, next));
             require(previous.getEnabled() == next.getEnabled());
-            require(desiredState.apply(previous).equals(desiredState.apply(next)));
             require(
-                installationRevision.applyAsLong(previous)
-                    == installationRevision.applyAsLong(next));
+                UnifiedResourceIntent.desired(previous)
+                    .equals(UnifiedResourceIntent.desired(next)));
+            require(
+                UnifiedResourceIntent.revision(previous) == UnifiedResourceIntent.revision(next));
             result.put(key, next);
           });
     } else {
@@ -85,14 +66,12 @@ public final class UnifiedSpec {
             require(next != null && next.getIdentity().equals(id));
             require(next.getEnabled() == !selection.getAction().equals("disable"));
             require(
-                desiredState
-                    .apply(next)
+                UnifiedResourceIntent.desired(next)
                     .equals(selection.getAction().equals("disable") ? "DISABLED" : "ENABLED"));
-            require(installationRevision.applyAsLong(next) > 0);
+            require(UnifiedResourceIntent.revision(next) > 0);
             if (previous != null) {
               require(
-                  installationRevision.applyAsLong(next)
-                      > installationRevision.applyAsLong(previous));
+                  UnifiedResourceIntent.revision(next) > UnifiedResourceIntent.revision(previous));
               require(next.getReleaseSequence() >= previous.getReleaseSequence());
               if (next.getReleaseSequence() == previous.getReleaseSequence())
                 require(sameBytes(previous, next));
@@ -105,10 +84,9 @@ public final class UnifiedSpec {
                     && next != null
                     && previous.getIdentity().equals(id)
                     && next.getIdentity().equals(id));
-            require(!next.getEnabled() && desiredState.apply(next).equals("REMOVED"));
+            require(!next.getEnabled() && UnifiedResourceIntent.desired(next).equals("REMOVED"));
             require(
-                installationRevision.applyAsLong(next)
-                    > installationRevision.applyAsLong(previous));
+                UnifiedResourceIntent.revision(next) > UnifiedResourceIntent.revision(previous));
             require(sameBytes(previous, next));
             result.put(key, next);
           }
@@ -120,7 +98,8 @@ public final class UnifiedSpec {
     for (var ref : result.values()) {
       require(ref.getIdentity().getTenantId().equals(old.getTenantId()));
       require(ref.getIdentity().getKind().equals("skill"));
-      require(installationRevision.applyAsLong(ref) > 0);
+      require(UnifiedResourceIntent.revision(ref) > 0);
+      UnifiedResourceIntent.desired(ref);
     }
     var next =
         old.toBuilder()
@@ -190,11 +169,7 @@ public final class UnifiedSpec {
             .clearResourceRevocations()
             .addResourceRevocations(effective)
             .clearUnifiedResources();
-    old.getUnifiedResourcesList()
-        .forEach(
-            r ->
-                next.addUnifiedResources(
-                    revoked(r, effective) ? r.toBuilder().setEnabled(false).build() : r));
+    next.addAllUnifiedResources(old.getUnifiedResourcesList());
     if (affected) next.setDesired(DesiredState.DESIRED_STATE_STOPPED);
     var built = next.build();
     if (bump && !built.equals(old)) return bump(built);

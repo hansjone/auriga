@@ -57,8 +57,6 @@ type unifiedFixture struct {
 	ref               *resourcev1.UnifiedResourceRef
 	revPrivate        ed25519.PrivateKey
 	releasePrivate    ed25519.PrivateKey
-	state             string
-	revision          uint64
 	catalogPrivate    bool
 	privateCollision  bool
 	override          bool
@@ -99,7 +97,7 @@ const unifiedSkillText = "---\nname: example-skill\ndescription: Public isolated
 
 func newUnifiedFixture(t *testing.T) *unifiedFixture {
 	t.Helper()
-	f := &unifiedFixture{now: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC), state: "ENABLED", revision: 1}
+	f := &unifiedFixture{now: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)}
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +135,7 @@ func newUnifiedFixture(t *testing.T) *unifiedFixture {
 	if err := protojson.Unmarshal(wire, f.list); err != nil {
 		t.Fatal(err)
 	}
-	f.ref = &resourcev1.UnifiedResourceRef{Identity: &resourcev1.UnifiedResourceIdentity{TenantId: tenant, PackageId: pkg, VersionId: version, Kind: "skill", Version: "1.0.0", ManifestDigest: udigest(f.manifest)}, Envelope: e, ReleaseSequence: 7, Enabled: true, ManifestDownloadPath: "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000010/manifest", Artifacts: []*resourcev1.UnifiedArtifactDownload{{ArtifactId: "payload", Digest: udigest(f.payload), SizeBytes: uint64(len(f.payload)), DownloadPath: "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000010/artifacts/payload"}}, Lease: &resourcev1.UnifiedLease{EnvelopeNotAfter: e.NotAfter, RevocationsExpiresAt: f.list.ExpiresAt, ExpiresAt: e.NotAfter, RevocationRevision: 1}}
+	f.ref = &resourcev1.UnifiedResourceRef{InstallationRevision: 1, DesiredState: resourcev1.UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_ENABLED.Enum(), Identity: &resourcev1.UnifiedResourceIdentity{TenantId: tenant, PackageId: pkg, VersionId: version, Kind: "skill", Version: "1.0.0", ManifestDigest: udigest(f.manifest)}, Envelope: e, ReleaseSequence: 7, Enabled: true, ManifestDownloadPath: "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000010/manifest", Artifacts: []*resourcev1.UnifiedArtifactDownload{{ArtifactId: "payload", Digest: udigest(f.payload), SizeBytes: uint64(len(f.payload)), DownloadPath: "/internal/resource/v1/catalog/downloads/019a0000-0000-7000-8000-000000000010/artifacts/payload"}}, Lease: &resourcev1.UnifiedLease{EnvelopeNotAfter: e.NotAfter, RevocationsExpiresAt: f.list.ExpiresAt, ExpiresAt: e.NotAfter, RevocationRevision: 1}}
 	f.source = &unifiedSource{spec: &nodev1.InstanceSpec{InstanceId: instance, TenantId: tenant, OwnerId: owner, Generation: 1, ResourceSelectionRevision: 1, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING, UnifiedResources: []*resourcev1.UnifiedResourceRef{f.ref}, ResourceRevocations: []*resourcev1.ResourceRevocationList{f.list}}}
 	f.driver = &unifiedDriver{Fake: NewFake()}
 	layout := &storage.Layout{InstancesDir: filepath.Join(t.TempDir(), "instances")}
@@ -168,7 +166,7 @@ func newUnifiedFixture(t *testing.T) *unifiedFixture {
 	t.Cleanup(server.Close)
 	client := server.Client()
 	client.Transport.(*http.Transport).TLSClientConfig.Certificates = server.TLS.Certificates
-	f.manager = &UnifiedManager{Layout: layout, Driver: f.driver, Specs: f.source, Origin: server.URL, Client: client, BootID: "019a0000-0000-7000-8000-000000000008", Now: func() time.Time { return f.now }, Mono: func() int64 { return f.mono }, Intent: func(*resourcev1.UnifiedResourceRef) (uint64, string, error) { return f.revision, f.state, nil }, Protocol: UnifiedProtocol{Keys: []*resourcev1.ResourceTrustKey{{Kid: "release", Purpose: "release", PublicKey: pub, NotBefore: "2020-01-01T00:00:00Z", NotAfter: "2100-01-01T00:00:00Z"}, {Kid: "revocation", Purpose: "revocation", PublicKey: revPub, NotBefore: "2020-01-01T00:00:00Z", NotAfter: "2100-01-01T00:00:00Z"}}}}
+	f.manager = &UnifiedManager{Layout: layout, Driver: f.driver, Specs: f.source, Origin: server.URL, Client: client, BootID: "019a0000-0000-7000-8000-000000000008", Now: func() time.Time { return f.now }, Mono: func() int64 { return f.mono }, Protocol: UnifiedProtocol{Keys: []*resourcev1.ResourceTrustKey{{Kid: "release", Purpose: "release", PublicKey: pub, NotBefore: "2020-01-01T00:00:00Z", NotAfter: "2100-01-01T00:00:00Z"}, {Kid: "revocation", Purpose: "revocation", PublicKey: revPub, NotBefore: "2020-01-01T00:00:00Z", NotAfter: "2100-01-01T00:00:00Z"}}}}
 	catalog := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer public-test-node-token" {
 			w.WriteHeader(403)
@@ -289,7 +287,8 @@ func TestUnifiedManagerRemovalTombstoneAndNoRedownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.state, f.revision = "REMOVED", 2
+	f.ref.DesiredState = resourcev1.UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_REMOVED.Enum()
+	f.ref.InstallationRevision = 2
 	ref := proto.Clone(f.ref).(*resourcev1.UnifiedResourceRef)
 	ref.Enabled = false
 	f.source.spec = proto.Clone(f.source.spec).(*nodev1.InstanceSpec)
@@ -366,7 +365,7 @@ func TestUnifiedManagerDowngradeRetainsHighWaterAndRejectsReplay(t *testing.T) {
 	if err != nil || un(s.Watermarks[key]["releaseSequence"]) != 8 || len(s.UsedAuthorizations) != 1 {
 		t.Fatal("downgrade lost high water", err)
 	}
-	f.revision = 2
+	f.ref.InstallationRevision = 2
 	f.source.spec = proto.Clone(f.source.spec).(*nodev1.InstanceSpec)
 	f.source.spec.Generation = 2
 	f.source.spec.ResourceSelectionRevision = 2

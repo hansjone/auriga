@@ -26,7 +26,7 @@ import (
 // supplies a signing root or an origin.
 func NewUnifiedManager(layout *storage.Layout, driver Driver, specs SpecSource, agentDirectory string) *UnifiedManager {
 	started := time.Now()
-	m := &UnifiedManager{Layout: layout, Driver: driver, Specs: specs, BootID: unifiedNonce(), Mono: func() int64 { return time.Since(started).Milliseconds() }, Intent: ReadUnifiedIntent}
+	m := &UnifiedManager{Layout: layout, Driver: driver, Specs: specs, BootID: unifiedNonce(), Mono: func() int64 { return time.Since(started).Milliseconds() }}
 	var settings struct {
 		SchemaVersion int               `json:"schemaVersion"`
 		Origin        string            `json:"origin"`

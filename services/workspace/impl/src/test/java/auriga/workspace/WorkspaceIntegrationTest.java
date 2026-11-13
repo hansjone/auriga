@@ -180,6 +180,10 @@ class WorkspaceIntegrationTest {
             .build();
     var ref =
         auriga.contracts.resource.v1.UnifiedResourceRef.newBuilder()
+            .setInstallationRevision(1)
+            .setDesiredState(
+                auriga.contracts.resource.v1.UnifiedResourceDesiredState
+                    .UNIFIED_RESOURCE_DESIRED_STATE_ENABLED)
             .setIdentity(id)
             .setEnabled(true)
             .setReleaseSequence(1)
@@ -221,8 +225,7 @@ class WorkspaceIntegrationTest {
                       .isActualTransactionActive());
               calls.incrementAndGet();
               return answer.get();
-            },
-            r -> r.getEnvelope().getSignature().getValue().equals("first") ? 1 : 2)) {
+            })) {
       var eventData =
           WorkspaceService.JSON.valueToTree(
               Map.of(
@@ -353,13 +356,20 @@ class WorkspaceIntegrationTest {
       resources.revoke(tenant, instance, revoked);
       var stopped = resources.snapshot(tenant, instance);
       assertEquals(DesiredState.DESIRED_STATE_STOPPED, stopped.spec().getDesired());
-      assertFalse(stopped.spec().getUnifiedResources(0).getEnabled());
+      assertEquals(
+          ref,
+          stopped.spec().getUnifiedResources(0),
+          "revocation cannot change resource-assigned intent/CAS");
       resources.revoke(tenant, instance, revoked);
       assertEquals(
           stopped.spec().getGeneration(),
           resources.snapshot(tenant, instance).spec().getGeneration());
       var tombstone =
           stopped.spec().getUnifiedResources(0).toBuilder()
+              .setInstallationRevision(2)
+              .setDesiredState(
+                  auriga.contracts.resource.v1.UnifiedResourceDesiredState
+                      .UNIFIED_RESOURCE_DESIRED_STATE_REMOVED)
               .setEnvelope(
                   ref.getEnvelope().toBuilder()
                       .setSignature(
@@ -373,15 +383,7 @@ class WorkspaceIntegrationTest {
               .setRevocations(revoked)
               .build();
       try (var removals =
-          new WorkspaceUnifiedResources(
-              service,
-              inputs,
-              request -> removedResolution,
-              r -> r.getEnvelope().getSignature().getValue().equals("removed") ? 2 : 1,
-              r ->
-                  r.getEnvelope().getSignature().getValue().equals("removed")
-                      ? "REMOVED"
-                      : r.getEnabled() ? "ENABLED" : "DISABLED")) {
+          new WorkspaceUnifiedResources(service, inputs, request -> removedResolution)) {
         var removing =
             removals.apply(
                 tenant,

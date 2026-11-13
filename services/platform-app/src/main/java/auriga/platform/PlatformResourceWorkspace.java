@@ -28,7 +28,8 @@ public final class PlatformResourceWorkspace implements ResourceWorkspace {
           view.spec().getGeneration(),
           view.observedGeneration(),
           view.ready(),
-          view.reports());
+          view.reports(),
+          view.spec().getUnifiedResourcesList());
     }
 
     @Override

@@ -41,9 +41,7 @@ public class PlatformWorkspaceConfiguration {
             throw new auriga.common.error.AurigaException(
                 auriga.common.error.CommonErrors.UNAVAILABLE);
           return current.resolve(request);
-        },
-        auriga.workspace.app.UnifiedInstallationRevision::read,
-        auriga.workspace.app.UnifiedInstallationRevision::desired);
+        });
   }
 
   @Bean

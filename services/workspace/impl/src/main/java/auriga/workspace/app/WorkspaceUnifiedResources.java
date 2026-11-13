@@ -8,6 +8,7 @@ import auriga.contracts.org.v1.MemberStatus;
 import auriga.contracts.resource.v1.*;
 import auriga.contracts.workspace.v1.*;
 import auriga.workspace.api.WorkspaceInputs;
+import auriga.workspace.domain.UnifiedResourceIntent;
 import auriga.workspace.domain.UnifiedSpec;
 import java.util.*;
 import java.util.concurrent.*;
@@ -27,8 +28,6 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
   private final WorkspaceService service;
   private final WorkspaceInputs inputs;
   private final Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver;
-  private final ToLongFunction<UnifiedResourceRef> revision;
-  private final Function<UnifiedResourceRef, String> desired;
   private final ScheduledExecutorService worker =
       Executors.newSingleThreadScheduledExecutor(
           Thread.ofVirtual().name("workspace-unified-resources").factory());
@@ -36,22 +35,10 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
   public WorkspaceUnifiedResources(
       WorkspaceService service,
       WorkspaceInputs inputs,
-      Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver,
-      ToLongFunction<UnifiedResourceRef> revision) {
-    this(service, inputs, resolver, revision, ref -> ref.getEnabled() ? "ENABLED" : "DISABLED");
-  }
-
-  public WorkspaceUnifiedResources(
-      WorkspaceService service,
-      WorkspaceInputs inputs,
-      Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver,
-      ToLongFunction<UnifiedResourceRef> revision,
-      Function<UnifiedResourceRef, String> desired) {
+      Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver) {
     this.service = service;
     this.inputs = inputs;
     this.resolver = resolver;
-    this.revision = revision;
-    this.desired = desired;
   }
 
   public void start() {
@@ -189,9 +176,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           if (old.getResourceSelectionRevision() >= selectionRevision) return view(row);
           if (!Objects.equals(row.get("node_id"), before.node()))
             throw new AurigaException(CommonErrors.CONFLICT);
-          var next =
-              UnifiedSpec.apply(
-                  old, selectionRevision, selections, resolution, false, revision, desired);
+          var next = UnifiedSpec.apply(old, selectionRevision, selections, resolution, false);
           service.saveSpec(row, UnifiedSpec.bump(next));
           service.store.jdbc.update(
               "UPDATE unified_resource_intent SET applied=true WHERE tenant_id=? AND instance_id=? AND selection_revision<=?",
@@ -226,7 +211,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                                 .getPackageId()
                                 .equals(ref.getIdentity().getPackageId()));
             if (present) retained.add(ref);
-            else if (!desired.apply(ref).equals("REMOVED")
+            else if (!UnifiedResourceIntent.desired(ref).equals("REMOVED")
                 || reports.stream()
                     .noneMatch(
                         r ->
@@ -236,9 +221,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           }
           var base =
               old.toBuilder().clearUnifiedResources().addAllUnifiedResources(retained).build();
-          var next =
-              UnifiedSpec.apply(
-                  base, selectionRevision, List.of(), response, true, revision, desired);
+          var next = UnifiedSpec.apply(base, selectionRevision, List.of(), response, true);
           if (!next.equals(old)) service.saveSpec(row, UnifiedSpec.bump(next));
           service.store.jdbc.update(
               "UPDATE instance SET unified_refresh_pending=false WHERE tenant_id=? AND id=?",
@@ -307,8 +290,9 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                   .anyMatch(
                       ref ->
                           ref.getIdentity().equals(report.getIdentity())
-                              && (!report.getState().equals("applied") || ref.getEnabled())
-                              && revision.applyAsLong(ref) == report.getInstallationRevision());
+                              && UnifiedResourceIntent.reportMatches(ref, report.getState())
+                              && UnifiedResourceIntent.revision(ref)
+                                  == report.getInstallationRevision());
           if (matches) reports.add(report.toBuilder().setReportSource("node").build());
         }
       } catch (com.google.protobuf.InvalidProtocolBufferException e) {
