@@ -18,16 +18,20 @@ import tools.jackson.databind.node.ObjectNode;
 public final class NetworkJson {
   private static final int MAX_BYTES = 65536;
   static final JsonMapper JSON = JsonMapper.builder().build();
-  private static final JsonFactory FACTORY =
-      JsonFactory.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .streamReadConstraints(
-              StreamReadConstraints.builder()
-                  .maxNestingDepth(16)
-                  .maxStringLength(16384)
-                  .maxNumberLength(17)
-                  .build())
-          .build();
+  private static final JsonFactory FACTORY = factory(16384);
+  private static final JsonFactory LARGE_FACTORY = factory(1048576);
+
+  private static JsonFactory factory(int maximumString) {
+    return JsonFactory.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .streamReadConstraints(
+            StreamReadConstraints.builder()
+                .maxNestingDepth(16)
+                .maxStringLength(maximumString)
+                .maxNumberLength(17)
+                .build())
+        .build();
+  }
 
   private NetworkJson() {}
 
@@ -47,17 +51,26 @@ public final class NetworkJson {
   }
 
   public static JsonNode parse(String input) {
+    return parse(input, MAX_BYTES);
+  }
+
+  /** Bounded larger v2 publication containing a complete predecessor proof. */
+  public static JsonNode parse(String input, int maximumBytes) {
     try {
-      if (input == null || input.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) fail();
+      if (maximumBytes < 1
+          || maximumBytes > 1048576
+          || input == null
+          || input.getBytes(StandardCharsets.UTF_8).length > maximumBytes) fail();
       unicode(input);
+      var factory = maximumBytes > MAX_BYTES ? LARGE_FACTORY : FACTORY;
       int values = 0;
-      try (var parser = FACTORY.createParser(input)) {
+      try (var parser = factory.createParser(input)) {
         JsonToken token;
         while ((token = parser.nextToken()) != null) {
           if (token != JsonToken.PROPERTY_NAME
               && token != JsonToken.END_ARRAY
               && token != JsonToken.END_OBJECT
-              && ++values > 8192) fail();
+              && ++values > (maximumBytes > MAX_BYTES ? 131072 : 8192)) fail();
           if (token == JsonToken.VALUE_NUMBER_FLOAT) fail();
           if (token == JsonToken.VALUE_NUMBER_INT) {
             long n = parser.getLongValue();
@@ -67,10 +80,10 @@ public final class NetworkJson {
             unicode(parser.getString());
         }
       }
-      try (var parser = FACTORY.createParser(input)) {
+      try (var parser = factory.createParser(input)) {
         JsonNode result = JSON.readTree(parser);
         if (result == null || parser.nextToken() != null) fail();
-        validate(result, 1, new int[] {0});
+        validate(result, 1, new int[] {0}, maximumBytes);
         return result;
       }
     } catch (AurigaException e) {
@@ -81,20 +94,29 @@ public final class NetworkJson {
   }
 
   public static String canonical(JsonNode value) {
-    validate(value, 1, new int[] {0});
+    return canonical(value, MAX_BYTES);
+  }
+
+  public static String canonical(JsonNode value, int maximumBytes) {
+    if (maximumBytes < 1 || maximumBytes > 1048576) fail();
+    validate(value, 1, new int[] {0}, maximumBytes);
     StringBuilder out = new StringBuilder();
     append(value, out);
-    if (out.toString().getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) fail();
+    if (out.toString().getBytes(StandardCharsets.UTF_8).length > maximumBytes) fail();
     return out.toString();
   }
 
   public static String digest(JsonNode value) {
+    return digest(value, MAX_BYTES);
+  }
+
+  public static String digest(JsonNode value, int maximumBytes) {
     try {
       return "sha256:"
           + HexFormat.of()
               .formatHex(
                   MessageDigest.getInstance("SHA-256")
-                      .digest(canonical(value).getBytes(StandardCharsets.UTF_8)));
+                      .digest(canonical(value, maximumBytes).getBytes(StandardCharsets.UTF_8)));
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException("SHA-256 unavailable", e);
     }
@@ -104,20 +126,22 @@ public final class NetworkJson {
     return JSON.createObjectNode();
   }
 
-  private static void validate(JsonNode n, int depth, int[] values) {
-    if (n == null || depth > 16 || ++values[0] > 8192) fail();
+  private static void validate(JsonNode n, int depth, int[] values, int maximumBytes) {
+    boolean large = maximumBytes > MAX_BYTES;
+    if (n == null || depth > 16 || ++values[0] > (large ? 131072 : 8192)) fail();
     if (n.isObject()) {
       if (n.size() > 128) fail();
       for (var entry : n.properties()) {
         if (entry.getKey().getBytes(StandardCharsets.UTF_8).length > 16384) fail();
         unicode(entry.getKey());
-        validate(entry.getValue(), depth + 1, values);
+        validate(entry.getValue(), depth + 1, values, maximumBytes);
       }
     } else if (n.isArray()) {
-      if (n.size() > 256) fail();
-      for (var item : n) validate(item, depth + 1, values);
+      if (n.size() > (large ? 65536 : 256)) fail();
+      for (var item : n) validate(item, depth + 1, values, maximumBytes);
     } else if (n.isString()) {
-      if (n.asString().getBytes(StandardCharsets.UTF_8).length > 16384) fail();
+      if (n.asString().getBytes(StandardCharsets.UTF_8).length > (large ? maximumBytes : 16384))
+        fail();
       unicode(n.asString());
     } else if (n.isNumber()) {
       if (!n.isIntegralNumber()
