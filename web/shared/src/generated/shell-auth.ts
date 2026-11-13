@@ -204,7 +204,8 @@ export interface components {
         | 'member_disabled';
       /** @description 仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除 */
       uacLoginInfo?: components['schemas']['UacLoginInfo'];
-    } & (unknown & unknown & unknown);
+      deviceAttempt?: components['schemas']['ShellAuthDeviceAttempt'];
+    } & (unknown & unknown & unknown & unknown);
     ShellAuthIdentity: {
       /** Format: uuid */
       tenantId: string;
@@ -259,6 +260,11 @@ export interface components {
       clientNonce: string;
       /** Format: date-time */
       expiresAt: string;
+      /**
+       * Format: uuid
+       * @description broker为票据交换生成的页面归属ID，设备尝试只回送同一owner；不作为令牌且不接受命令自报。
+       */
+      pageOwner?: string;
     };
     ShellAuthEnterpriseConfig: {
       /** @default true */
@@ -1204,6 +1210,18 @@ export interface components {
        */
       updatedAt?: string;
     } & unknown;
+    /** @description broker只向发起控制页投影本次公开用户码；pageOwner来自票据交换的服务端页面会话，不接受命令自报。必须提示用户在可信门户人工核对本次用户码。无device_code、令牌或URL。 */
+    ShellAuthDeviceAttempt: {
+      /** Format: uuid */
+      attemptId: string;
+      /** Format: uuid */
+      pageOwner: string;
+      userCode: string;
+      /** Format: date-time */
+      expiresAt: string;
+      /** @constant */
+      verificationRequired: true;
+    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;

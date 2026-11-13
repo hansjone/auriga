@@ -52,6 +52,11 @@
         "expiresAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "pageOwner": {
+          "type": "string",
+          "format": "uuid",
+          "description": "broker为票据交换生成的页面归属ID，设备尝试只回送同一owner；不作为令牌且不接受命令自报。"
         }
       },
       "required": [

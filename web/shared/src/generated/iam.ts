@@ -1,4 +1,24 @@
 export interface paths {
+  '/internal/uac/device-navigation-proofs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * edge以公开用户码解析权威设备事务并签发导航证明
+     * @description 门户GET /device/{userCode}由edge取路径用户码；tenant/provider/Origin来自受信配置，剥离浏览器内部头。使用与navigation-proofs相同服务JWT/委派租户及分离部署mTLS。IAM原子解析租户内唯一有效设备事务并绑定证明；不得接受浏览器grant ID，不返回grant ID。无效、过期、已消费、跨租户或provider不匹配均404。设备用途禁止auto SSO。返回值仅context进入no-store HTML；transactionCookie由edge设HttpOnly。CSRF初始化见contracts/auth/navigation-cookie-policy.md。
+     */
+    post: operations['issueUacDeviceNavigationProof'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/internal/uac/navigation-proofs': {
     parameters: {
       query?: never;
@@ -1303,6 +1323,28 @@ export interface components {
       | 'identity_mismatch'
       | 'upstream_fault'
       | 'retry_exhausted';
+    /** @description 仅svc:edge使用。IAM在受委派tenant内规范化userCode（去连字符、大写），解析唯一、未过期且未消费的权威设备事务，核对provider和来源绑定；失败统一404。解析和导航证明绑定原子完成，不向浏览器返回grant ID。autoEligible恒false。 */
+    UacDeviceNavigationIssueRequest: {
+      /** Format: uuid */
+      requestId: string;
+      /** Format: uuid */
+      providerId: string;
+      /** Format: uri */
+      origin: string;
+      /** @constant */
+      continuation: 'device';
+      transactionCookie?: string;
+      suppressionCookie?: string;
+      fetchMetadata: {
+        dest?: string;
+        mode?: string;
+        site?: string;
+        user?: string;
+      };
+      userCode: string;
+      /** @description edge转发本入口现有CSRF cookie供IAM验证及复用；不得信任浏览器自报绑定。 */
+      csrfCookie?: string;
+    };
     /** @description 仅可信edge调用；tenant来自内部授权，Origin必须与该tenant的受信入口完全匹配。Fetch Metadata为浏览器实际请求头证据，缺项不具备auto资格。deviceGrantId须由IAM核验未过期且与当前事务绑定；portal不可携带。 */
     UacNavigationIssueRequest: {
       /** Format: uuid */
@@ -1323,12 +1365,16 @@ export interface components {
         site?: string;
         user?: string;
       };
+      /** @description edge转发本入口现有CSRF cookie供IAM验证及复用；不得信任浏览器自报绑定。 */
+      csrfCookie?: string;
     } & unknown;
     UacNavigationIssued: {
       context: components['schemas']['UacNavigationContext'];
       transactionCookie: string;
       /** @enum {integer} */
       ttlSeconds: 120;
+      /** @description 仅受认证内部响应交edge设置可读CSRF Cookie；不得进入HTML或日志。已有有效CSRF时复用并返回同值。 */
+      csrfCookie?: string;
     };
     UacRevalidationPolicy: {
       /**
@@ -2378,35 +2424,8 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
     /** @description 没有权限（common.forbidden 或更具体的码）。 */
     Forbidden: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 状态冲突（common.conflict 等）。 */
-    Conflict: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description If-Match 不匹配（common.precondition_failed）。 */
-    PreconditionFailed: {
       headers: {
         [name: string]: unknown;
       };
@@ -2423,10 +2442,37 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
+    /** @description 状态冲突（common.conflict 等）。 */
+    Conflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
     /** @description 太频繁（common.rate_limited）。 */
     RateLimited: {
       headers: {
         'Retry-After': components['headers']['RetryAfter'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description If-Match 不匹配（common.precondition_failed）。 */
+    PreconditionFailed: {
+      headers: {
         [name: string]: unknown;
       };
       content: {
@@ -2450,6 +2496,8 @@ export interface components {
   };
   requestBodies: never;
   headers: {
+    /** @description IAM生成的UUID；同一登录事务及其导航、SSO、挑战、状态轮询、取消和完成始终使用同值，重试不变，写入阶段日志并供页面展示；不采信客户端同名头。尚未绑定事务的失败生成独立ID。与transactionId语义独立，不含身份或凭据。 */
+    UacCorrelationId: string;
     /** @description 多少秒后重试。 */
     RetryAfter: number;
     /** @description 资源版本。 */
@@ -2459,6 +2507,85 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  issueUacDeviceNavigationProof: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description 沿既有内部租户委派语义；B从受信入口配置构造，剥离浏览器同名头。A仅在svc:edge位于委派白名单时绑定该租户；不能用内部JWT的平台tid替代。 */
+        'auriga-tenant-id': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacDeviceNavigationIssueRequest'];
+      };
+    };
+    responses: {
+      /** @description 受信服务间响应；no-store，不记录凭据 */
+      201: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacNavigationIssued'];
+        };
+      };
+      /** @description 请求无效（common.validation_failed 等）。 */
+      400: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 状态冲突（common.conflict 等）。 */
+      409: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   issueUacNavigationProof: {
     parameters: {
       query?: never;
@@ -2478,6 +2605,7 @@ export interface operations {
       /** @description 受信服务间响应；no-store，不记录凭据 */
       201: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           'Cache-Control'?: 'no-store';
           [name: string]: unknown;
         };
@@ -2485,10 +2613,46 @@ export interface operations {
           'application/json': components['schemas']['UacNavigationIssued'];
         };
       };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      409: components['responses']['Conflict'];
+      /** @description 请求无效（common.validation_failed 等）。 */
+      400: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 状态冲突（common.conflict 等）。 */
+      409: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   getUacDiagnosticSettings: {
@@ -2505,6 +2669,7 @@ export interface operations {
       /** @description 当前权威记录 */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           ETag?: string;
           [name: string]: unknown;
         };
@@ -2512,8 +2677,26 @@ export interface operations {
           'application/json': components['schemas']['UacDiagnosticSettings'];
         };
       };
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   putUacDiagnosticSettings: {
@@ -2536,6 +2719,7 @@ export interface operations {
       /** @description 当前权威记录 */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           ETag?: string;
           [name: string]: unknown;
         };
@@ -2543,10 +2727,46 @@ export interface operations {
           'application/json': components['schemas']['UacDiagnosticSettings'];
         };
       };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      412: components['responses']['PreconditionFailed'];
+      /** @description 请求无效（common.validation_failed 等）。 */
+      400: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description If-Match 不匹配（common.precondition_failed）。 */
+      412: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   readMyUacCredentials: {
@@ -2565,6 +2785,7 @@ export interface operations {
       /** @description 当前本人企业凭据，仅交受控skill执行进程即时使用 */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           'Cache-Control'?: 'no-store';
           [name: string]: unknown;
         };
@@ -2572,11 +2793,57 @@ export interface operations {
           'application/json': components['schemas']['UacEnterpriseCredentials'];
         };
       };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      429: components['responses']['RateLimited'];
+      /** @description 请求无效（common.validation_failed 等）。 */
+      400: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 太频繁（common.rate_limited）。 */
+      429: {
+        headers: {
+          'Retry-After': components['headers']['RetryAfter'];
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   loginUacSso: {
@@ -2595,16 +2862,54 @@ export interface operations {
       /** @description 登录结果或扫码降级，浏览器会话cookie仅按原入口规则设置 */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['UacSsoLoginResult'];
         };
       };
-      400: components['responses']['BadRequest'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      429: components['responses']['RateLimited'];
+      /** @description 请求无效（common.validation_failed 等）。 */
+      400: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 太频繁（common.rate_limited）。 */
+      429: {
+        headers: {
+          'Retry-After': components['headers']['RetryAfter'];
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   getUacProviderConfig: {
@@ -2621,6 +2926,7 @@ export interface operations {
       /** @description 草案响应 */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
@@ -2628,9 +2934,36 @@ export interface operations {
           'application/json': components['schemas']['UacProviderConfig'];
         };
       };
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   putUacProviderConfig: {
@@ -2653,6 +2986,7 @@ export interface operations {
       /** @description 草案响应 */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
@@ -2660,11 +2994,56 @@ export interface operations {
           'application/json': components['schemas']['UacProviderConfig'];
         };
       };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      412: components['responses']['PreconditionFailed'];
+      /** @description 请求无效（common.validation_failed 等）。 */
+      400: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description If-Match 不匹配（common.precondition_failed）。 */
+      412: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   createUacChallenge: {
@@ -2683,20 +3062,68 @@ export interface operations {
       /** @description 草案响应 */
       201: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['UacChallenge'];
         };
       };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      429: components['responses']['RateLimited'];
+      /** @description 请求无效（common.validation_failed 等）。 */
+      400: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 太频繁（common.rate_limited）。 */
+      429: {
+        headers: {
+          'Retry-After': components['headers']['RetryAfter'];
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
       /** @description 请求失败，使用既有 common.* 错误码 */
       503: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           [name: string]: unknown;
         };
         content: {
@@ -2719,16 +3146,54 @@ export interface operations {
       /** @description 草案响应 */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['UacChallengeStatus'];
         };
       };
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      429: components['responses']['RateLimited'];
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 太频繁（common.rate_limited）。 */
+      429: {
+        headers: {
+          'Retry-After': components['headers']['RetryAfter'];
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   cancelUacChallenge: {
@@ -2745,13 +3210,41 @@ export interface operations {
       /** @description 已取消 */
       204: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           [name: string]: unknown;
         };
         content?: never;
       };
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   completeUacChallenge: {
@@ -2768,19 +3261,57 @@ export interface operations {
       /** @description 草案响应 */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['UacCompleteResult'];
         };
       };
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 资源不存在（common.not_found）。 */
+      404: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 状态冲突（common.conflict 等）。 */
+      409: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
       /** @description 请求失败，使用既有 common.* 错误码 */
       503: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           [name: string]: unknown;
         };
         content: {
@@ -2805,6 +3336,7 @@ export interface operations {
       /** @description 已完成脱敏校验的诊断zip */
       200: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           'X-Auriga-Diagnostic-Partial'?: boolean;
           'Content-Disposition'?: string;
           [name: string]: unknown;
@@ -2813,13 +3345,51 @@ export interface operations {
           'application/zip': string;
         };
       };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthenticated'];
-      403: components['responses']['Forbidden'];
-      429: components['responses']['RateLimited'];
+      /** @description 请求无效（common.validation_failed 等）。 */
+      400: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+      401: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 没有权限（common.forbidden 或更具体的码）。 */
+      403: {
+        headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 太频繁（common.rate_limited）。 */
+      429: {
+        headers: {
+          'Retry-After': components['headers']['RetryAfter'];
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
       /** @description UAC或诊断数据源不可达，common.unavailable */
       503: {
         headers: {
+          'X-Auriga-Correlation-Id': components['headers']['UacCorrelationId'];
           [name: string]: unknown;
         };
         content: {

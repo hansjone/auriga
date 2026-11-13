@@ -850,5 +850,7 @@
       "file": "settings/store.js",
       "sha256": "cb57fdc5a4a8689aa9664891058a5953b29acfddb95f0d0056f8ec3836d7de7e"
     }
-  ]
+  ],
+  "migrationState": "legacy",
+  "checkPolicy": "legacy允许删除已盘点调用但禁止新增；broker要求无平台路由或直接网络传输，固定operation调用必须在shell-business-operations中。D迁移提交更新为broker并清空calls。sources仅历史证据，不再参与门禁。"
 }

@@ -5,10 +5,7 @@ import Ajv2020 from '../../services/contracts/node_modules/ajv/dist/2020.js';
 import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/index.js';
 import YAML from '../../services/contracts/node_modules/yaml/dist/index.js';
 import { spawnSync } from 'node:child_process';
-import {
-  platformCallSites,
-  platformSourceDigests,
-} from './auth-k-source-scan.mjs';
+import { checkPlatformMigration } from './auth-k-source-scan.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
@@ -66,15 +63,7 @@ test('AUTH-K fixed operation projection stays current and covers all platform fa
   assert.equal(result.status, 0, result.stderr);
   const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
   const calls = inventory.calls;
-  assert.deepEqual(
-    platformSourceDigests(calls.map((c) => c.file)),
-    inventory.sources,
-    'platform helper changed: review dynamic routes and update the independent inventory',
-  );
-  assert.deepEqual(
-    platformCallSites(),
-    calls.map(({ file, evidence }) => ({ file, evidence })),
-  );
+  checkPlatformMigration(inventory, operations);
   for (const call of calls) {
     assert.ok(call.methods.length);
     assert.ok(call.routePattern.startsWith('/'));
@@ -709,8 +698,8 @@ test('SSO result supports safe QR fallback without returning upstream tokens', (
   const operation = spec.paths['/login/uac/sso'].post;
   assert.deepEqual(operation.security, [{}]);
   assert.equal(
-    operation.responses['403'].$ref,
-    'common.yaml#/components/responses/Forbidden',
+    operation.responses['403'].content['application/problem+json'].schema.$ref,
+    'common.yaml#/components/schemas/Problem',
   );
 });
 
@@ -1184,4 +1173,173 @@ test('maximal compact network key publication fits the existing 64 KiB transport
         ' / 65536; synthetic signature, size validation only',
     );
   }
+});
+
+test('K2 device navigation resolves only public user code at the internal IAM port', () => {
+  const valid = validate(
+    'auth/uac-control.schema.json',
+    'UacDeviceNavigationIssueRequest',
+  );
+  const good = {
+    requestId: id,
+    providerId: id,
+    origin: 'https://portal.example.com',
+    continuation: 'device',
+    userCode: 'BCDF-GHJK',
+    fetchMetadata: {},
+  };
+  assert.equal(valid(good), true);
+  for (const patch of [
+    { userCode: 'INVALID' },
+    { userCode: '' },
+    { deviceGrantId: id },
+    { continuation: 'portal' },
+    { token: 'secret' },
+    { tenantId: id },
+  ])
+    assert.equal(valid({ ...good, ...patch }), false);
+  const missing = { ...good };
+  delete missing.userCode;
+  assert.equal(valid(missing), false);
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  const op = spec.paths['/internal/uac/device-navigation-proofs'].post;
+  assert.equal(op['x-internal-only'], true);
+  assert.equal(op['x-service-caller'], 'svc:edge');
+  assert.deepEqual(op.security, [{ internalServiceAuth: [] }]);
+  assert.ok(op.responses['404']);
+  for (const item of Object.values(spec.paths))
+    for (const op of Object.values(item))
+      for (const response of Object.values(op.responses ?? {})) {
+        if (response.headers?.['X-Auriga-Correlation-Id'])
+          assert.equal(
+            response.headers['X-Auriga-Correlation-Id'].$ref,
+            '#/components/headers/UacCorrelationId',
+          );
+      }
+  for (const route of [
+    '/login/uac/sso',
+    '/internal/uac/device-navigation-proofs',
+  ])
+    for (const response of Object.values(spec.paths[route].post.responses))
+      assert.ok(response.headers['X-Auriga-Correlation-Id']);
+  const header = ajv.compile(spec.components.headers.UacCorrelationId.schema);
+  assert.equal(header(id), true);
+  assert.equal(header('token'), false);
+});
+
+test('K2 device attempt has bounded public projection and is forbidden in terminal snapshots', () => {
+  const value = {
+    attemptId: id,
+    pageOwner: id,
+    userCode: 'BCDF-GHJK',
+    expiresAt: base.expiresAt,
+    verificationRequired: true,
+  };
+  const attempt = validate(
+    'plugin/shell-auth.schema.json',
+    'ShellAuthDeviceAttempt',
+  );
+  assert.equal(attempt(value), true);
+  for (const patch of [
+    { verificationRequired: false },
+    { expiresAt: 'tomorrow' },
+    { userCode: 'bad' },
+    { pageOwner: 'bad' },
+    { device_code: 'secret' },
+    { token: 'secret' },
+    { url: 'https://evil.example.com' },
+  ])
+    assert.equal(attempt({ ...value, ...patch }), false);
+  for (const key of Object.keys(value)) {
+    const missing = { ...value };
+    delete missing[key];
+    assert.equal(attempt(missing), false);
+  }
+  assert.equal(
+    snapshot({ ...base, state: 'authenticating', deviceAttempt: value }),
+    true,
+  );
+  for (const state of [
+    'signed_out',
+    'authenticated',
+    'revoked',
+    'unreachable',
+    'reauth_required',
+  ])
+    assert.equal(snapshot({ ...base, state, deviceAttempt: value }), false);
+});
+
+test('K2 migration gate allows unrelated edits and removal but rejects new or remaining direct transport', () => {
+  const legacy = {
+    migrationState: 'legacy',
+    calls: [{ file: 'x.js', evidence: "fetch('/api/iam/v1/me')" }],
+  };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(legacy, operations, {
+      'x.js': "// changed comment\nfetch('/api/iam/v1/me')",
+    }),
+  );
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(legacy, operations, { 'x.js': '// removed' }),
+  );
+  assert.throws(() =>
+    checkPlatformMigration(legacy, operations, {
+      'x.js': "fetch('/api/ai/v1/new')",
+    }),
+  );
+  const broker = { migrationState: 'broker', calls: [] };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, {
+      'x.js': "broker.call('profile_read', {})",
+    }),
+  );
+  for (const source of [
+    'fetch(dynamicUrl)',
+    'new WebSocket(url)',
+    "import http from 'node:http'",
+    'broker.call(operation, {})',
+    "broker.call('invented', {})",
+    "broker.call('profile_read' + suffix, {})",
+  ])
+    assert.throws(
+      () => checkPlatformMigration(broker, operations, { 'x.js': source }),
+      source,
+    );
+  assert.throws(() =>
+    checkPlatformMigration({ ...broker, calls: legacy.calls }, operations, {}),
+  );
+});
+
+test('K2 anonymous CSRF bootstrap remains bounded and internal only', () => {
+  const issued = validate(
+    'auth/uac-control.schema.json',
+    'UacNavigationIssued',
+  );
+  const response = {
+    context: {
+      navigationProof: 'A'.repeat(43),
+      expiresAt: base.expiresAt,
+      transactionId: id,
+      purpose: 'portal',
+      autoEligible: false,
+      autoSuppressed: true,
+    },
+    transactionCookie: 'B'.repeat(43),
+    ttlSeconds: 120,
+    csrfCookie: 'C'.repeat(43),
+  };
+  assert.equal(issued(response), true);
+  for (const csrfCookie of ['', 'short', '+'.repeat(43), 'D'.repeat(44)])
+    assert.equal(issued({ ...response, csrfCookie }), false);
+  assert.equal(issued({ ...response, accessToken: 'secret' }), false);
+  const policy = read('auth/navigation-cookie-policy.md');
+  for (const value of [
+    '__Host-auriga_portal_sso_suppression',
+    'HttpOnly',
+    'SameSite=Lax',
+    'X-Auriga-CSRF',
+    '120 秒',
+    '终态',
+  ])
+    assert.ok(policy.includes(value));
 });

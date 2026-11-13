@@ -63,6 +63,9 @@
         "uacLoginInfo": {
           "$ref": "../auth/uac-login-info.schema.json#/$defs/UacLoginInfo",
           "description": "仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除"
+        },
+        "deviceAttempt": {
+          "$ref": "#/$defs/ShellAuthDeviceAttempt"
         }
       },
       "additionalProperties": false,
@@ -137,6 +140,23 @@
               ],
               "properties": {
                 "uacLoginInfo": {}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "deviceAttempt"
+            ],
+            "properties": {
+              "deviceAttempt": {}
+            }
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "authenticating"
               }
             }
           }
@@ -306,6 +326,40 @@
           }
         }
       ]
+    },
+    "ShellAuthDeviceAttempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attemptId",
+        "pageOwner",
+        "userCode",
+        "expiresAt",
+        "verificationRequired"
+      ],
+      "properties": {
+        "attemptId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "pageOwner": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "userCode": {
+          "type": "string",
+          "pattern": "^[BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4}$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "verificationRequired": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "description": "broker只向发起控制页投影本次公开用户码；pageOwner来自票据交换的服务端页面会话，不接受命令自报。必须提示用户在可信门户人工核对本次用户码。无device_code、令牌或URL。"
     }
   }
 }
