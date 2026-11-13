@@ -1290,12 +1290,69 @@ class UacFlowPostgresTest {
       f.run();
       assertEquals(1, f.verifications.get());
       assertEquals(f.replacement, f.read(sid).path("token").asString());
+      var round =
+          stageEvents(f).stream()
+              .filter(
+                  e ->
+                      "session_revalidate".equals(e.path("stage").asString())
+                          && "end".equals(e.path("phase").asString()))
+              .findFirst()
+              .orElseThrow();
+      assertEquals("token-verify", round.path("strategy").asString());
+      assertEquals(1, round.path("attempt").asInt());
+      assertEquals(3, round.path("maxRetries").asInt());
+      assertEquals(1, round.path("credentialVersion").asInt());
+      assertEquals(7200, round.path("intervalSeconds").asInt());
+      assertEquals(31000, round.path("dueLagMs").asLong());
+      assertEquals(
+          UacDiagnosticSanitizer.tokenHashPrefix(f.token),
+          round.path("oldTokenHashPrefix").asString());
+      assertEquals(
+          UacDiagnosticSanitizer.tokenHashPrefix(f.replacement),
+          round.path("newTokenHashPrefix").asString());
+      assertTrue(round.path("tokenReplaced").asBoolean());
+      assertTrue(round.path("identityMatched").asBoolean());
+      assertEquals("strip-ascii-fold-v1", round.path("identityComparisonVersion").asString());
+      assertFalse(round.path("retry_pending").asBoolean(true));
       assertEquals(
           f.time.instant().plusSeconds(7200).toString(),
           f.session(sid).path("nextRevalidateAt").asString());
       assertEquals(1, f.departments.get());
       f.run();
       assertEquals(1, f.verifications.get());
+    }
+  }
+
+  @Test
+  void rolledBackRevocationNeverReportsCommitted() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String sid = f.login().session().session().path("sessionId").asString();
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              f.call(
+                  () ->
+                      store.tx(
+                          () -> {
+                            f.sessions.revokeOne(store.byId("session", sid, true), "security");
+                            throw new IllegalStateException("synthetic rollback");
+                          })));
+      f.call(
+          () -> {
+            f.uac.telemetry.flushQueue();
+            return null;
+          });
+      var events =
+          stageEvents(f).stream()
+              .filter(e -> "session_revoke".equals(e.path("stage").asString()))
+              .toList();
+      assertTrue(
+          events.stream().anyMatch(e -> "requested".equals(e.path("revocationPhase").asString())));
+      assertTrue(
+          events.stream()
+              .anyMatch(e -> "rolled_back".equals(e.path("revocationPhase").asString())));
+      assertFalse(
+          events.stream().anyMatch(e -> "committed".equals(e.path("revocationPhase").asString())));
     }
   }
 
@@ -1313,10 +1370,33 @@ class UacFlowPostgresTest {
       assertEquals(next, f.session(sid).path("nextRevalidateAt").asString());
       f.run();
       assertEquals(1, f.verifications.get());
+      assertTrue(
+          stageEvents(f).stream()
+              .anyMatch(
+                  e ->
+                      "session_revalidate".equals(e.path("stage").asString())
+                          && "end".equals(e.path("phase").asString())
+                          && e.path("retry_pending").asBoolean()
+                          && e.path("retryAt").isString()
+                          && e.path("retryDeadline").isString()));
       f.time.advance(5);
       f.run();
       assertEquals(2, f.verifications.get());
       assertTrue(f.session(sid).path("revoked").asBoolean());
+      assertTrue(
+          stageEvents(f).stream()
+              .anyMatch(
+                  e ->
+                      "session_revalidate".equals(e.path("stage").asString())
+                          && "end".equals(e.path("phase").asString())
+                          && e.path("retry_exhausted").asBoolean()));
+      assertTrue(
+          stageEvents(f).stream()
+              .anyMatch(
+                  e ->
+                      "session_revoke".equals(e.path("stage").asString())
+                          && "committed".equals(e.path("revocationPhase").asString())
+                          && e.path("authGeneration").asLong() > 0));
       assertEquals(
           "common.unauthenticated",
           assertThrows(AurigaException.class, () -> f.read(sid)).errorCode().code());

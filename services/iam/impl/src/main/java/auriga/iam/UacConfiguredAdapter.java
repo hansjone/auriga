@@ -298,13 +298,22 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
             "identity_mismatch",
             "matchingCount",
             matches.size());
+      int branch = 0;
       for (JsonNode pointer : mapping.path("departmentPointers")) {
+        branch++;
         JsonNode department = matches.getFirst().at(pointer.asString());
         if (department.isString()
             && !department.asString().strip().isEmpty()
             && department.asString().length() <= 1024)
           return Json.object(
-              "available", true, "department", department.asString().strip(), "matchingCount", 1);
+              "available",
+              true,
+              "department",
+              department.asString().strip(),
+              "matchingCount",
+              1,
+              "fieldBranch",
+              branch == 1 ? "primary" : "fallback");
       }
       return Json.object(
           "available", false, "faultReason", "missing_department", "matchingCount", 1);
@@ -338,6 +347,12 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
           decision.failureClass(),
           "faultReason",
           decision.faultReason(),
+          "identityComparisonVersion",
+          "strip-ascii-fold-v1",
+          "identityMatched",
+          decision.success()
+              ? Boolean.TRUE
+              : "identity_mismatch".equals(decision.failureClass()) ? Boolean.FALSE : null,
           "token",
           decision.replacementToken());
     } catch (java.io.IOException e) {

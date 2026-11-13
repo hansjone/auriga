@@ -60,6 +60,8 @@ SSO 退出抑制使用 host-only 会话 Cookie；HTTPS 带 `__Host-`、Secure、
 
 每次实际阶段都有 JSON start/end，逐轮扫描保留 waiting/scanned 与 pollId；信息查询一次且不阻断登录。中断的信息查询不重发上游，记录 WARN/interrupted；停止轮询记录取消/过期结果。最小事件持久化并经稳定 eventId 重试到真实 audit outbox；OpsSignals 聚合上游故障、重试耗尽、撤销投影故障与恢复。详细响应只经闭合脱敏投影进入专用 DEBUG sink，启用不要求全局 DEBUG。
 
+复验日志及审计保留当轮 strategy、attempt/maxRetries、凭据版本、dueLagMs、重试时间与状态、新旧 token 哈希前缀、身份比较版本与结果；部门字段分支仅用 primary/fallback 别名。已被代次或租约围栏丢弃的晚响应在 session_revalidate 中记 skipped/late_result。撤销开始记 requested，只有真实事务提交后才记 committed；回滚记 rolled_back，目标 authGeneration 可关联。IAM 不假定下游连接已经关闭，connectionsClosed 保持 null；实际传播与关闭结果由消费 identity.session_revoked 的 edge/连接所属模块记录，并在主控跨线验收中关联。
+
 `GET/PUT /api/iam/v1/admin/providers/{providerId}/uac/diagnostics` 使用独立 ETag/revision，默认关闭，默认有效期 900 秒。写入需当前管理会话、`iam.providers.write`、Origin/CSRF；输出前再次核对权威 revision/expiry，存储不可用时禁止输出详细字段。启用仅影响之后开始的请求，关闭/到期后不会泄出先前捕获的详细响应。正常事件、audit、Ops、ZIP 始终省略姓名、部门原值和完整秘密，token 仅保留 SHA-256 前 12 位。
 
 `POST /api/iam/v1/admin/uac/diagnostic-bundles` 接受可选 `providerId`、`correlationId`、`sinceSeconds`（默认 7200、最大 86400）。需要当前管理 Cookie 会话及 `iam.providers.read`、`audit.events.read`、`ops.alerts.read`，含 Origin/CSRF，收集前/生成前/发送前重新授权。每账号每分钟最多 3 次、每进程同时最多 2 次，单包最大 50 MiB。返回 ZIP 附件、no-store、`X-Auriga-Diagnostic-Partial`。空源拒绝成功，缺源/损坏/截断在 manifest 和配置统计中明确记录；权限拒绝直接失败。详细开关在导出过程中撤销则终止下载。

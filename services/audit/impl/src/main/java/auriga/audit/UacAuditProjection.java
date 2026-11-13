@@ -111,8 +111,22 @@ final class UacAuditProjection {
             "tokenReplaced",
             "cookiePresent",
             "eligible",
-            "suppressed")) if (input.path(field).isBoolean()) out.set(field, input.path(field));
-    for (String field : List.of("durationMs", "attempt", "configRevision", "matchingCount"))
+            "suppressed",
+            "identityMatched",
+            "retry_pending",
+            "retry_exhausted"))
+      if (input.path(field).isBoolean()) out.set(field, input.path(field));
+    for (String field :
+        List.of(
+            "durationMs",
+            "attempt",
+            "configRevision",
+            "matchingCount",
+            "credentialVersion",
+            "authGeneration",
+            "intervalSeconds",
+            "maxRetries",
+            "dueLagMs"))
       if (input.path(field).isIntegralNumber()
           && input.path(field).asLong(-1) >= 0
           && input.path(field).asLong() > -1
@@ -122,8 +136,23 @@ final class UacAuditProjection {
     for (String field : List.of("udsCode", "udsSubCode"))
       if (input.path(field).isString() && input.path(field).asString().matches("[0-9]{1,8}"))
         out.set(field, input.path(field));
-    if (input.path("tokenHashPrefix").asString().matches("[a-f0-9]{12}"))
-      out.set("tokenHashPrefix", input.path("tokenHashPrefix"));
+    for (String field : List.of("tokenHashPrefix", "oldTokenHashPrefix", "newTokenHashPrefix"))
+      if (input.path(field).asString().matches("[a-f0-9]{12}")) out.set(field, input.path(field));
+    for (String field : List.of("retryAt", "retryDeadline", "nextRevalidateAt"))
+      if (input.path(field).isString())
+        try {
+          out.put(field, java.time.Instant.parse(input.path(field).asString()).toString());
+        } catch (RuntimeException ignored) {
+        }
+    if (Set.of("token-verify", "department").contains(input.path("strategy").asString()))
+      out.set("strategy", input.path("strategy"));
+    if ("strip-ascii-fold-v1".equals(input.path("identityComparisonVersion").asString()))
+      out.set("identityComparisonVersion", input.path("identityComparisonVersion"));
+    if (Set.of("primary", "fallback").contains(input.path("fieldBranch").asString()))
+      out.set("fieldBranch", input.path("fieldBranch"));
+    if (Set.of("requested", "committed", "rolled_back")
+        .contains(input.path("revocationPhase").asString()))
+      out.set("revocationPhase", input.path("revocationPhase"));
     // Only identifier syntax; names, URLs, messages and arbitrary free text never pass.
     if (input.path("empNo").asString().matches("[A-Za-z0-9_-]{1,128}"))
       out.set("empNo", input.path("empNo"));

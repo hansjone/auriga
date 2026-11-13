@@ -566,6 +566,11 @@ final class UacDiagnosticBundles {
               String state = session.path("uacLoginInfo").path("status").asString();
               if (Set.of("pending", "available", "unavailable").contains(state))
                 safe.put("loginInfoStatus", state);
+              if (session.path("uacLoginInfo").path("updatedAt").isString())
+                safe.put(
+                    "loginInfoUpdatedAt",
+                    Instant.parse(session.path("uacLoginInfo").path("updatedAt").asString())
+                        .toString());
               sessions.add(safe);
             }
             var retry =

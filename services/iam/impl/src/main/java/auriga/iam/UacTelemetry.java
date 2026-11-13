@@ -201,6 +201,24 @@ final class UacTelemetry {
               "nextRevalidateAt",
               "responseBytes",
               "contentType")) event.putNull(key);
+      for (String key :
+          List.of(
+              "transportError",
+              "strategy",
+              "credentialVersion",
+              "authGeneration",
+              "intervalSeconds",
+              "maxRetries",
+              "dueLagMs",
+              "identityMatched",
+              "identityComparisonVersion",
+              "fieldBranch",
+              "oldTokenHashPrefix",
+              "newTokenHashPrefix",
+              "retry_pending",
+              "retry_exhausted",
+              "revocationPhase",
+              "connectionsClosed")) event.putNull(key);
       event.put("timestamp", clock.instant().toString());
       event.put("service", "iam");
       event.put("stage", stage);
@@ -253,7 +271,17 @@ final class UacTelemetry {
           event.put(
               "tokenReplaced",
               !Objects.equals(hash, metadata.path("tokenHashPrefix").asString(null)));
+        if (Set.of("token_verify", "session_revalidate").contains(stage)
+            && !extra.path("token").asString().isEmpty()) {
+          event.set("oldTokenHashPrefix", metadata.path("tokenHashPrefix"));
+          event.put("newTokenHashPrefix", hash);
+          event.put(
+              "tokenReplaced",
+              !Objects.equals(hash, metadata.path("tokenHashPrefix").asString(null)));
+        }
       }
+      if ("transport_error".equals(event.path("faultReason").asString()))
+        event.put("transportError", "transport_error");
       RequestContext.current()
           .map(RequestContext::requestId)
           .filter(UacTelemetry::uuid)
@@ -326,7 +354,17 @@ final class UacTelemetry {
       for (String key :
           List.of("correlationId", "parentCorrelationId", "transactionId", "pollId", "providerId"))
         if (uuid(input.path(key).asString(null))) event.set(key, input.path(key));
-    for (String key : List.of("attempt", "configRevision", "matchingCount", "responseBytes"))
+    for (String key :
+        List.of(
+            "attempt",
+            "configRevision",
+            "matchingCount",
+            "responseBytes",
+            "credentialVersion",
+            "authGeneration",
+            "intervalSeconds",
+            "maxRetries",
+            "dueLagMs"))
       if (input.path(key).isIntegralNumber()
           && input.path(key).asLong(-1) >= 0
           && input.path(key).asLong() <= 9007199254740991L) event.set(key, input.path(key));
@@ -338,7 +376,10 @@ final class UacTelemetry {
             "cookiePresent",
             "eligible",
             "suppressed",
-            "truncated")) if (input.path(key).isBoolean()) event.set(key, input.path(key));
+            "truncated",
+            "identityMatched",
+            "retry_pending",
+            "retry_exhausted")) if (input.path(key).isBoolean()) event.set(key, input.path(key));
     if (input.path("available").isBoolean())
       event.set("departmentPresent", input.path("available"));
     for (String key : List.of("fallbackReason", "failureClass", "faultReason"))
@@ -347,8 +388,17 @@ final class UacTelemetry {
       event.set("faultReason", input.path("failureCode"));
     if (input.path("empNo").asString().matches("[A-Za-z0-9_-]{1,128}"))
       event.set("empNo", input.path("empNo"));
-    if (input.path("tokenHashPrefix").asString().matches("[a-f0-9]{12}"))
-      event.set("tokenHashPrefix", input.path("tokenHashPrefix"));
+    for (String key : List.of("tokenHashPrefix", "oldTokenHashPrefix", "newTokenHashPrefix"))
+      if (input.path(key).asString().matches("[a-f0-9]{12}")) event.set(key, input.path(key));
+    if (Set.of("token-verify", "department").contains(input.path("strategy").asString()))
+      event.set("strategy", input.path("strategy"));
+    if ("strip-ascii-fold-v1".equals(input.path("identityComparisonVersion").asString()))
+      event.set("identityComparisonVersion", input.path("identityComparisonVersion"));
+    if (Set.of("primary", "fallback").contains(input.path("fieldBranch").asString()))
+      event.set("fieldBranch", input.path("fieldBranch"));
+    if (Set.of("requested", "committed", "rolled_back")
+        .contains(input.path("revocationPhase").asString()))
+      event.set("revocationPhase", input.path("revocationPhase"));
     if (Set.of("portal", "uds", "none").contains(input.path("cookieFamily").asString()))
       event.set("cookieFamily", input.path("cookieFamily"));
     if (input.path("httpStatus").asInt() >= 100 && input.path("httpStatus").asInt() <= 599)
@@ -358,7 +408,9 @@ final class UacTelemetry {
     if (Set.of("success", "waiting", "rejected", "unavailable", "[REDACTED]")
         .contains(input.path("udsMessage").asString()))
       event.set("udsMessage", input.path("udsMessage"));
-    for (String key : List.of("retryAt", "retryDeadline", "nextRevalidateAt"))
+    if ("transport_error".equals(input.path("transportError").asString()))
+      event.put("transportError", "transport_error");
+    for (String key : List.of("retryAt", "retryDeadline", "nextRevalidateAt", "loginInfoUpdatedAt"))
       if (input.path(key).isString())
         try {
           event.put(key, Instant.parse(input.path(key).asString()).toString());

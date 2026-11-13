@@ -59,6 +59,7 @@ class UacAuditEventsTest {
   @Test
   void actualConsumerRetainsOnlyMinimalSafeFieldsAndReadCannotCrossTenantOrProvider() {
     String secret = UUID.randomUUID().toString();
+    String hash = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     var details =
         JSON.createObjectNode()
             .put("correlationId", correlation.toString())
@@ -67,6 +68,15 @@ class UacAuditEventsTest {
             .put("chain", "login")
             .put("outcome", "failure")
             .put("departmentPresent", false)
+            .put("strategy", "token-verify")
+            .put("credentialVersion", 3)
+            .put("maxRetries", 2)
+            .put("oldTokenHashPrefix", hash)
+            .put("newTokenHashPrefix", hash)
+            .put("identityComparisonVersion", "strip-ascii-fold-v1")
+            .put("identityMatched", false)
+            .put("retry_pending", true)
+            .put("retryAt", now.plusSeconds(5).toString())
             .put("token", secret)
             .put("department", secret)
             .put("udsMessage", secret);
@@ -98,6 +108,13 @@ class UacAuditEventsTest {
                       assertEquals("login_info", retained.path("purpose").asString());
                       assertEquals("failure", retained.path("outcome").asString());
                       assertFalse(retained.path("departmentPresent").asBoolean());
+                      assertEquals("token-verify", retained.path("strategy").asString());
+                      assertEquals(3, retained.path("credentialVersion").asInt());
+                      assertEquals(hash, retained.path("oldTokenHashPrefix").asString());
+                      assertEquals(hash, retained.path("newTokenHashPrefix").asString());
+                      assertTrue(retained.path("retry_pending").asBoolean());
+                      assertEquals(
+                          now.plusSeconds(5).toString(), retained.path("retryAt").asString());
                       assertTrue(
                           store
                               .readUac(

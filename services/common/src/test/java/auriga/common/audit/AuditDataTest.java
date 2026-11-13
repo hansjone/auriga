@@ -24,13 +24,16 @@ class AuditDataTest {
     var entry =
         AuditEntry.builder("iam.uac.token_verify")
             .detail("tokenHashPrefix", hash)
+            .detail("oldTokenHashPrefix", hash)
+            .detail("newTokenHashPrefix", hash)
             .detail("tokenMissing", false)
             .detail("cookiePresent", true)
             .detail("cookieFamily", "portal")
             .detail("token", "must-stay-hidden")
             .build();
     var data = JSON.valueToTree(OutboxAuditLogger.toData(entry, null));
-    assertEquals(hash, data.path("details").path("tokenHashPrefix").asString());
+    for (String field : List.of("tokenHashPrefix", "oldTokenHashPrefix", "newTokenHashPrefix"))
+      assertEquals(hash, data.path("details").path(field).asString());
     assertFalse(data.path("details").path("tokenMissing").asBoolean(true));
     assertTrue(data.path("details").path("cookiePresent").asBoolean());
     assertFalse(data.toString().contains("must-stay-hidden"));

@@ -45,9 +45,12 @@ public final class OutboxAuditLogger implements AuditLogger {
       // Restore only typed UAC metadata whose names overlap generic secret markers.
       // No raw credential value or arbitrary string can bypass the normal redactor.
       if (entry.action().startsWith("iam.uac.")) {
-        Object hash = entry.details().get("tokenHashPrefix");
-        if (hash instanceof String value && value.matches("[a-f0-9]{12}"))
-          details.put("tokenHashPrefix", value);
+        for (String field :
+            List.of("tokenHashPrefix", "oldTokenHashPrefix", "newTokenHashPrefix")) {
+          Object hash = entry.details().get(field);
+          if (hash instanceof String value && value.matches("[a-f0-9]{12}"))
+            details.put(field, value);
+        }
         for (String field : List.of("tokenMissing", "tokenReplaced", "cookiePresent")) {
           Object value = entry.details().get(field);
           if (value instanceof Boolean) details.put(field, value);

@@ -52,9 +52,43 @@ final class UacSessions {
                   row.path("uacTransactionId"),
                   "configRevision",
                   row.path("configRevision"));
+          meta.set("authGeneration", row.path("authGeneration"));
+          meta.put("revocationPhase", "requested");
           var span = value.begin(meta, "session_revoke", null, Json.object());
-          return success ->
-              span.end(success ? "completed" : "failure", Json.object("faultReason", reason));
+          UUID tenant = TenantContext.require();
+          java.util.function.Consumer<Boolean> finish =
+              committed -> {
+                try {
+                  store.isolated(
+                      tenant,
+                      () -> {
+                        span.end(
+                            committed ? "completed" : "failure",
+                            Json.object(
+                                "faultReason",
+                                reason,
+                                "revocationPhase",
+                                committed ? "committed" : "rolled_back"));
+                        return null;
+                      });
+                } catch (RuntimeException failure) {
+                  org.slf4j.LoggerFactory.getLogger("auriga.iam.uac")
+                      .warn("UAC revocation diagnostic deferred");
+                }
+              };
+          return success -> {
+            if (org.springframework.transaction.support.TransactionSynchronizationManager
+                .isSynchronizationActive())
+              org.springframework.transaction.support.TransactionSynchronizationManager
+                  .registerSynchronization(
+                      new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCompletion(int status) {
+                          finish.accept(success && status == STATUS_COMMITTED);
+                        }
+                      });
+            else finish.accept(success);
+          };
         });
   }
 
@@ -198,7 +232,11 @@ final class UacSessions {
             "configRevision",
             snapshot.path("configRevision"),
             "nextAt",
-            clock.instant().toString()));
+            clock.instant().toString(),
+            "nextRevalidateAt",
+            session.path("nextRevalidateAt"),
+            "intervalSeconds",
+            session.path("intervalSeconds")));
     enqueue(
         "revalidate:" + session.path("sessionId").asString(),
         Json.object(

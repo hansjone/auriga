@@ -248,6 +248,15 @@ final class UacWorker
     store.save("uac_credential", credential);
     job.put("credentialVersion", credential.path("version").asLong());
     job.set("roundPolicy", policy);
+    job.put("attempt", attempt + 1);
+    job.set("strategy", policy.path("strategy"));
+    job.set("maxRetries", policy.path("maxRetries"));
+    job.set("intervalSeconds", policy.path("intervalSeconds"));
+    job.set("configRevision", policy.path("configRevision"));
+    job.set("nextRevalidateAt", session.path("nextRevalidateAt"));
+    job.put("dueLagMs", Math.max(0, Duration.between(due, now).toMillis()));
+    if (credential.has("retryAt")) job.set("retryAt", credential.path("retryAt"));
+    if (credential.has("retryDeadline")) job.set("retryDeadline", credential.path("retryDeadline"));
     var dueSessions = Json.MAPPER.createArrayNode();
     for (ObjectNode candidate : store.uacDueSessions(credential.path("id").asString(), now))
       if (candidate.path("uacCredentialId").equals(credential.path("id"))
@@ -298,6 +307,13 @@ final class UacWorker
               ObjectNode provider =
                   store.get("idp_provider", job.path("providerId").asString(), false);
               if (provider == null || !provider.path("enabled").asBoolean()) {
+                if (kind.equals("scan"))
+                  uac.observe(
+                      job,
+                      "scan_status",
+                      null,
+                      Json.object(),
+                      () -> Json.object("state", "cancelled", "faultReason", "provider_disabled"));
                 done(job);
                 return null;
               }
@@ -401,35 +417,51 @@ final class UacWorker
         acquired.end(
             "verified".equals(result.path("state").asString()) ? "success" : "failure", result);
       }
-      store.tx(
-          () -> {
-            if (kind.equals("revalidate")) {
-              store.lock("uac-slots:" + snapshot.path("providerId").asString());
-              store.lock("uac-credential:" + snapshot.path("credentialId").asString());
-            }
-            ObjectNode job = current(snapshot);
-            if (job == null) return null;
-            switch (kind) {
-              case "scan" -> scan(job, result);
-              case "info" -> {
-                info(job, result);
-                done(job);
-              }
-              case "revalidate" -> revalidate(job, result, input.path("credential"));
-              default -> throw new IllegalStateException();
-            }
-            return null;
-          });
+      String applied =
+          store.tx(
+              () -> {
+                if (kind.equals("revalidate")) {
+                  store.lock("uac-slots:" + snapshot.path("providerId").asString());
+                  store.lock("uac-credential:" + snapshot.path("credentialId").asString());
+                }
+                ObjectNode job = current(snapshot);
+                if (job == null) return "skipped";
+                switch (kind) {
+                  case "scan" -> scan(job, result);
+                  case "info" -> {
+                    info(job, result);
+                    done(job);
+                  }
+                  case "revalidate" -> {
+                    return revalidate(job, result, input.path("credential"));
+                  }
+                  default -> throw new IllegalStateException();
+                }
+                return null;
+              });
       if (round != null) {
         ObjectNode current =
             store.tx(
                 () ->
                     store.byId("uac_credential", snapshot.path("credentialId").asString(), false));
-        round.end(
-            result.path("success").asBoolean() || result.path("available").asBoolean()
-                ? "success"
-                : "failure",
-            current == null ? Json.object() : current);
+        ObjectNode end = Json.object();
+        if (current != null) UacTelemetry.copySafe(current, end, false);
+        UacTelemetry.copySafe(result, end, false);
+        boolean success =
+            result.path("success").asBoolean() || result.path("available").asBoolean();
+        end.put("retry_pending", current != null && current.has("retryAt"));
+        end.put(
+            "retry_exhausted",
+            !success
+                && !"skipped".equals(applied)
+                && snapshot.path("attempt").asInt() >= 1 + snapshot.path("maxRetries").asInt()
+                && "upstream_fault".equals(result.path("failureClass").asString()));
+        if ("skipped".equals(applied)) end.put("faultReason", "late_result");
+        else if (result.has("token")) end.set("token", result.path("token"));
+        ObjectNode source =
+            store.tx(() -> store.byId("session", snapshot.path("sessionId").asString(), false));
+        if (source != null) UacTelemetry.copySafe(source, end, false);
+        round.end(applied == null ? "failure" : applied, end);
       }
     } finally {
       if (round != null && !round.ended)
@@ -522,14 +554,14 @@ final class UacWorker
     store.save("session", session);
   }
 
-  private void revalidate(ObjectNode job, JsonNode result, JsonNode oldSecret) {
+  private String revalidate(ObjectNode job, JsonNode result, JsonNode oldSecret) {
     ObjectNode credential = store.byId("uac_credential", job.path("credentialId").asString(), true);
     if (credential == null
         || credential.path("invalid").asBoolean()
         || !credential.path("version").equals(job.path("credentialVersion"))
         || !credential.path("leaseToken").equals(job.path("leaseToken"))) {
       done(job);
-      return;
+      return "skipped";
     }
     boolean live = false;
     for (JsonNode due : job.path("dueSessions")) {
@@ -543,7 +575,7 @@ final class UacWorker
       clearRound(credential);
       store.save("uac_credential", credential);
       done(job);
-      return;
+      return "skipped";
     }
     Instant now = uac.clock.instant();
     boolean department = "department".equals(job.path("roundPolicy").path("strategy").asString());
@@ -553,7 +585,7 @@ final class UacWorker
         && !now.isBefore(Instant.parse(credential.path("retryDeadline").asString()))) {
       invalidate(credential, "revalidation_unreachable");
       done(job);
-      return;
+      return "failure";
     }
     if (success) {
       if (!department) {
@@ -599,14 +631,14 @@ final class UacWorker
               next.plusSeconds(UacSessions.jitter(session.path("sessionId").asString(), next)));
         }
       }
-      return;
+      return "success";
     }
     if (department
         || Set.of("business_rejected", "identity_mismatch")
             .contains(result.path("failureClass").asString())) {
       invalidate(credential, "revalidation_rejected");
       done(job);
-      return;
+      return "failure";
     }
     JsonNode policy = credential.path("roundPolicy");
     if (!credential.has("retryDeadline"))
@@ -619,7 +651,7 @@ final class UacWorker
     if (credential.path("attempt").asInt() >= 1 + policy.path("maxRetries").asInt()) {
       invalidate(credential, "revalidation_unreachable");
       done(job);
-      return;
+      return "failure";
     }
     Instant retry = now.plusSeconds(policy.path("retryIntervalSeconds").asLong());
     credential.put("retryAt", retry.toString());
@@ -627,6 +659,7 @@ final class UacWorker
     credential.remove("leaseUntil");
     store.save("uac_credential", credential);
     release(job, retry);
+    return "failure";
   }
 
   private void invalidate(ObjectNode credential, String reason) {
