@@ -1,4 +1,158 @@
 export interface paths {
+  '/me/uac/credentials': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 本人skill按调用读取当前企业登录信息草案
+     * @description 复用现有本人会话认证与来源设备绑定。只接受当前user会话或绑定该用户UAC来源会话的device凭据，拒绝服务主体。IAM从认证上下文取tenant、member及sourceSessionId/authGeneration，校验来源会话、设备、成员与provider均有效后读取该凭据记录的最新版本。请求为空对象，不能指定工号、用户、其他session或provider。仅由插件既有凭据handler为本人DSH会话skill调用，插件沿用宿主执行上下文与owner核对。token换发提交后读取新值，退出/失效后不可读。响应含工号、最新有效token及更新时间，cookies仅为内部应用所需私有映射项。响应Cache-Control no-store，响应体/原始Cookie不进入访问日志、追踪、诊断、静态配置或工具会话记录，skill只在进程内使用并输出业务结果。
+     */
+    post: operations['readMyUacCredentials'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/login/uac/sso': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 门户服务端尝试SSO免扫码登录草案
+     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存bo.token，执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。 设备确认及其登录续接禁止auto，即使导航证明与Cookie齐全也须由用户点击继续并核码，发起设备与用户码取服务端权威事务。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效，同域Cookie可读风险已由用户接受。
+     */
+    post: operations['loginUacSso'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/providers/{providerId}/uac': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * 读取 UAC 身份源配置草案
+     * @description 返回UAC权威配置投影，与通用Provider读取使用相同修订。 尚未通过UAC接口配置的停用占位实例返回404，配置表单使用通用Provider读取的ETag并以默认关闭初始化。
+     */
+    get: operations['getUacProviderConfig'];
+    /**
+     * 配置已有 UAC 身份源草案
+     * @description UAC enabled/config的唯一写入口，和通用Provider共用同一行及ETag。systemCode映射由受信企业适配器处理，真实主机、路径和其他系统标识仅来自私有配置。停用原子撤销挑战、源会话和关联设备授权。If-Match提供时检查，不匹配412，省略时以当前修订事务串行更新。
+     */
+    put: operations['putUacProviderConfig'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/login/uac/challenges': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 创建绑定入口事务的 UAC 挑战草案
+     * @description 精确 Origin 校验后设置现有 portal/admin 分名 HttpOnly 登录事务 cookie，tenant/audience 由可信入口解析。一次一事务，新事务取消旧挑战。只返回公开扫码坐标，不返回绑定证明。 purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+     */
+    post: operations['createUacChallenge'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/login/uac/challenges/{challengeId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * 读取挑战状态草案
+     * @description 需要正确登录事务 cookie、受信 Host 与同源 Fetch Metadata，存在 Origin 时校验精确值。GET 仅读状态，上游轮询由 IAM 调度。未知或绑定失败统一404。响应 Cache-Control no-store。 purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+     */
+    get: operations['getUacChallenge'];
+    put?: never;
+    post?: never;
+    /**
+     * 取消本次挑战草案
+     * @description 绑定 cookie + 精确 Origin。仅取消该事务，禁止撤销其他已登录会话。 purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+     */
+    delete: operations['cancelUacChallenge'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/login/uac/challenges/{challengeId}/complete': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 原子消费已验证挑战草案
+     * @description 需要绑定 cookie + 精确 Origin。验证身份和成员策略后才设置现有入口会话 cookie。若需 MFA 则继续既有 transaction advance。完成结果只在原事务发起端可重复读取，绝不重复创建会话。尚未 verified 返回409，过期返回404。 purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+     */
+    post: operations['completeUacChallenge'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/uac/diagnostic-bundles': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 导出当前租户的脱敏UAC诊断包草案
+     * @description 额外要求audit.events.read和ops.alerts.read，精确管理Origin及CSRF。IAM受信读取audit和Loki，先脱敏、校验、生成受保护临时zip，再重新核权并直接下载。禁止任意URL/查询输入。包含当前租户/可选provider，最大24小时/50MiB，部分来源缺失须在manifest及X-Auriga-Diagnostic-Partial中标明。导出动作写审计。随NAS默认部署包发布，管理台提供按钮。
+     */
+    post: operations['downloadUacDiagnosticBundle'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/admin/credentials': {
     parameters: {
       query?: never;
@@ -799,6 +953,7 @@ export interface paths {
     };
     get: operations['listProviders'];
     put?: never;
+    /** @description UAC类型创建须config={}满足ProviderInput必填，仅创建未配置占位实例，初始enabled=false，省略enabled按false。显式enabled=true或非空config返回400。占位创建跳过完整连接器configSchema校验，唯一UAC配置入口执行完整验证并启用。实现保留原JSON字段存在性以区分省略和显式值，非UAC沿用通用默认true。 */
     post: operations['createProvider'];
     delete?: never;
     options?: never;
@@ -822,7 +977,7 @@ export interface paths {
     delete: operations['deleteProvider'];
     options?: never;
     head?: never;
-    /** @description JSON Merge Patch。config 里没给的机密字段保持原值。 */
+    /** @description JSON Merge Patch。config 里没给的机密字段保持原值。UAC类型禁止通过本入口修改enabled或config，含这些键即400 common.validation_failed，必须使用UAC配置入口，允许其余展示元数据更新。 */
     patch: operations['updateProvider'];
     trace?: never;
   };
@@ -1099,6 +1254,124 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    UacEnterpriseCredentials: {
+      empNo: string;
+      /** @description 最新有效企业token，skill进程内即时使用，禁止输出到工具结果、日志或会话记录 */
+      token: string;
+      /** Format: date-time */
+      updatedAt: string;
+      /** @description 仅内部应用需要的私有配置Cookie键值，token项随权威凭据版本更新 */
+      cookies?: {
+        [key: string]: string;
+      };
+    };
+    UacSsoLogin: {
+      /** Format: uuid */
+      providerId: string;
+      /** @description 门户服务端签发的32字节随机一次性导航证明，非UAC token */
+      navigationProof: string;
+      /**
+       * @description 请求意图不构成用户操作证明，服务器核导航资格与抑制标记
+       * @enum {string}
+       */
+      mode: 'auto' | 'continue';
+      invitationCode?: string;
+    };
+    UacSsoLoginResult: {
+      /** Format: uuid */
+      transactionId: string;
+      /** @enum {string} */
+      state: 'authenticated' | 'additional_step_required' | 'scan_required';
+    };
+    /** @description 当前认证会话的展示资料。purpose固定login_info。available时必须具有department和updatedAt，pending/unavailable时省略department，由生产方执行状态关联校验。该资料不参与授权或复验截止计算。 */
+    UacLoginInfo: {
+      /** @constant */
+      purpose: 'login_info';
+      /** @enum {string} */
+      status: 'pending' | 'available' | 'unavailable';
+      /** @description 仅available时展示，禁止写入普通日志和诊断包 */
+      department?: string;
+      /**
+       * Format: date-time
+       * @description 该次信息查询状态持久化的时间，不作为复验时钟
+       */
+      updatedAt?: string;
+    } & unknown;
+    UacProviderConfig: {
+      /** @default false */
+      enabled: boolean;
+      /** Format: uri */
+      baseUrl: string;
+      systemCode: string;
+    };
+    UacChallengeCreate: {
+      /** Format: uuid */
+      providerId: string;
+      invitationCode?: string;
+      /**
+       * @description login可匿名，link要求同入口现有会话及10分钟内新鲜认证，不能同时提交invitationCode
+       * @default login
+       * @enum {string}
+       */
+      purpose: 'login' | 'link';
+    };
+    UacChallenge: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      transactionId: string;
+      qrContent: string;
+      /** Format: date-time */
+      expiresAt: string;
+      pollIntervalSeconds: number;
+    };
+    UacChallengeStatus: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      state:
+        | 'waiting'
+        | 'scanned'
+        | 'verified'
+        | 'expired'
+        | 'denied'
+        | 'unavailable'
+        | 'cancelled'
+        | 'failed';
+      /** Format: date-time */
+      expiresAt: string;
+      /**
+       * @description 仅failed/denied/unavailable时提供的安全分类，禁止携带原始上游响应
+       * @enum {string}
+       */
+      failureCode?:
+        | 'missing_token'
+        | 'missing_emp_no'
+        | 'upstream_rejected'
+        | 'invalid_response'
+        | 'transport_error';
+    };
+    UacCompleteResult: {
+      /** Format: uuid */
+      transactionId: string;
+      /** @enum {string} */
+      state: 'authenticated' | 'additional_step_required' | 'linked';
+    };
+    UacSessionBinding: {
+      /** Format: uuid */
+      sourceSessionId: string;
+      authGeneration: number;
+      /** Format: uuid */
+      providerId: string;
+    };
+    UacDiagnosticExport: {
+      /** Format: uuid */
+      providerId?: string;
+      /** Format: uuid */
+      correlationId?: string;
+      /** @default 7200 */
+      sinceSeconds: number;
+    };
     CredentialRevoke: {
       /** Format: int64 */
       version: number;
@@ -1264,6 +1537,8 @@ export interface components {
       expiresAt: string;
     };
     Me: {
+      /** @description 当前会话的可选部门展示资料，身份或会话变更时清除 */
+      readonly uacLoginInfo?: components['schemas']['UacLoginInfo'];
       account: components['schemas']['Account'];
       session: components['schemas']['SessionView'];
       identities: components['schemas']['IdentityView'][];
@@ -1289,6 +1564,8 @@ export interface components {
       devices: components['schemas']['Device'][];
     };
     SessionView: {
+      /** @description 仅UAC来源时由IAM生成，刷新须核来源会话和认证代次仍有效 */
+      readonly uacSessionBinding?: components['schemas']['UacSessionBinding'];
       id: components['schemas']['Uuid'];
       /** @enum {string} */
       audience: 'portal' | 'admin';
@@ -1346,6 +1623,8 @@ export interface components {
       backedUp?: boolean;
     };
     Device: {
+      /** @description 仅UAC来源时由IAM生成，刷新须核来源会话和认证代次仍有效 */
+      readonly uacSessionBinding?: components['schemas']['UacSessionBinding'];
       id: components['schemas']['Uuid'];
       name: string;
       /** @enum {string} */
@@ -1849,6 +2128,15 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
     /** @description 没有权限（common.forbidden 或更具体的码）。 */
     Forbidden: {
       headers: {
@@ -1860,24 +2148,6 @@ export interface components {
     };
     /** @description 资源不存在（common.not_found）。 */
     NotFound: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 状态冲突（common.conflict 等）。 */
-    Conflict: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
       headers: {
         [name: string]: unknown;
       };
@@ -1904,6 +2174,15 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
+    /** @description 状态冲突（common.conflict 等）。 */
+    Conflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
   };
   parameters: {
     TxId: components['schemas']['Uuid'];
@@ -1912,9 +2191,9 @@ export interface components {
     ServiceAccountId: components['schemas']['Uuid'];
     /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
     UserCode: string;
-    IdempotencyKey: string;
     /** @description 资源的 ETag；不匹配返回 412。 */
     IfMatch: string;
+    IdempotencyKey: string;
     Limit: number;
     /** @description 上一页响应里的 nextCursor。 */
     Cursor: string;
@@ -1930,6 +2209,286 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  readMyUacCredentials: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': Record<string, never>;
+      };
+    };
+    responses: {
+      /** @description 当前本人企业凭据，仅交受控skill执行进程即时使用 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacEnterpriseCredentials'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      429: components['responses']['RateLimited'];
+    };
+  };
+  loginUacSso: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacSsoLogin'];
+      };
+    };
+    responses: {
+      /** @description 登录结果或扫码降级，浏览器会话cookie仅按原入口规则设置 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacSsoLoginResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      429: components['responses']['RateLimited'];
+    };
+  };
+  getUacProviderConfig: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacProviderConfig'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  putUacProviderConfig: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description 资源的 ETag；不匹配返回 412。 */
+        'If-Match'?: components['parameters']['IfMatch'];
+      };
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacProviderConfig'];
+      };
+    };
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacProviderConfig'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      412: components['responses']['PreconditionFailed'];
+    };
+  };
+  createUacChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacChallengeCreate'];
+      };
+    };
+    responses: {
+      /** @description 草案响应 */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacChallenge'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      429: components['responses']['RateLimited'];
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  getUacChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacChallengeStatus'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      429: components['responses']['RateLimited'];
+    };
+  };
+  cancelUacChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 已取消 */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  completeUacChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        challengeId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacCompleteResult'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  downloadUacDiagnosticBundle: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacDiagnosticExport'];
+      };
+    };
+    responses: {
+      /** @description 已完成脱敏校验的诊断zip */
+      200: {
+        headers: {
+          'X-Auriga-Diagnostic-Partial'?: boolean;
+          'Content-Disposition'?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/zip': string;
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      429: components['responses']['RateLimited'];
+      /** @description UAC或诊断数据源不可达，common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   listCredentials: {
     parameters: {
       query?: {

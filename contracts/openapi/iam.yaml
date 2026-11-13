@@ -32,6 +32,326 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /me/uac/credentials:
+    post:
+      tags:
+        - me
+      operationId: readMyUacCredentials
+      summary: 本人skill按调用读取当前企业登录信息草案
+      description: 复用现有本人会话认证与来源设备绑定。只接受当前user会话或绑定该用户UAC来源会话的device凭据，拒绝服务主体。IAM从认证上下文取tenant、member及sourceSessionId/authGeneration，校验来源会话、设备、成员与provider均有效后读取该凭据记录的最新版本。请求为空对象，不能指定工号、用户、其他session或provider。仅由插件既有凭据handler为本人DSH会话skill调用，插件沿用宿主执行上下文与owner核对。token换发提交后读取新值，退出/失效后不可读。响应含工号、最新有效token及更新时间，cookies仅为内部应用所需私有映射项。响应Cache-Control
+        no-store，响应体/原始Cookie不进入访问日志、追踪、诊断、静态配置或工具会话记录，skill只在进程内使用并输出业务结果。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              maxProperties: 0
+      responses:
+        "200":
+          description: 当前本人企业凭据，仅交受控skill执行进程即时使用
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacEnterpriseCredentials"
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+        "429":
+          $ref: common.yaml#/components/responses/RateLimited
+  /login/uac/sso:
+    post:
+      tags:
+        - login
+      operationId: loginUacSso
+      summary: 门户服务端尝试SSO免扫码登录草案
+      security:
+        - {}
+      description: 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存bo.token，执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control
+        no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。
+        设备确认及其登录续接禁止auto，即使导航证明与Cookie齐全也须由用户点击继续并核码，发起设备与用户码取服务端权威事务。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效，同域Cookie可读风险已由用户接受。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacSsoLogin"
+      responses:
+        "200":
+          description: 登录结果或扫码降级，浏览器会话cookie仅按原入口规则设置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacSsoLoginResult"
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+        "429":
+          $ref: common.yaml#/components/responses/RateLimited
+  /admin/providers/{providerId}/uac:
+    parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - admin-providers
+      operationId: getUacProviderConfig
+      summary: 读取 UAC 身份源配置草案
+      x-admin-only: true
+      x-permission: iam.providers.read
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacProviderConfig"
+          headers:
+            ETag:
+              $ref: common.yaml#/components/headers/ETag
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+      description: 返回UAC权威配置投影，与通用Provider读取使用相同修订。 尚未通过UAC接口配置的停用占位实例返回404，配置表单使用通用Provider读取的ETag并以默认关闭初始化。
+    put:
+      tags:
+        - admin-providers
+      operationId: putUacProviderConfig
+      summary: 配置已有 UAC 身份源草案
+      x-admin-only: true
+      x-permission: iam.providers.write
+      description: UAC
+        enabled/config的唯一写入口，和通用Provider共用同一行及ETag。systemCode映射由受信企业适配器处理，真实主机、路径和其他系统标识仅来自私有配置。停用原子撤销挑战、源会话和关联设备授权。If-Match提供时检查，不匹配412，省略时以当前修订事务串行更新。
+      parameters:
+        - $ref: common.yaml#/components/parameters/IfMatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacProviderConfig"
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacProviderConfig"
+          headers:
+            ETag:
+              $ref: common.yaml#/components/headers/ETag
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+        "412":
+          $ref: common.yaml#/components/responses/PreconditionFailed
+  /login/uac/challenges:
+    post:
+      tags:
+        - login
+      operationId: createUacChallenge
+      summary: 创建绑定入口事务的 UAC 挑战草案
+      security:
+        - {}
+        - bearerAuth: []
+      description: 精确 Origin 校验后设置现有 portal/admin 分名 HttpOnly 登录事务 cookie，tenant/audience
+        由可信入口解析。一次一事务，新事务取消旧挑战。只返回公开扫码坐标，不返回绑定证明。
+        purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacChallengeCreate"
+      responses:
+        "201":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacChallenge"
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+        "429":
+          $ref: common.yaml#/components/responses/RateLimited
+        "503":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+  /login/uac/challenges/{challengeId}:
+    parameters:
+      - name: challengeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - login
+      operationId: getUacChallenge
+      summary: 读取挑战状态草案
+      security:
+        - {}
+        - bearerAuth: []
+      description: 需要正确登录事务 cookie、受信 Host 与同源 Fetch Metadata，存在 Origin 时校验精确值。GET 仅读状态，上游轮询由 IAM 调度。未知或绑定失败统一404。响应
+        Cache-Control no-store。
+        purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacChallengeStatus"
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+        "429":
+          $ref: common.yaml#/components/responses/RateLimited
+    delete:
+      tags:
+        - login
+      operationId: cancelUacChallenge
+      summary: 取消本次挑战草案
+      security:
+        - {}
+        - bearerAuth: []
+      description: 绑定 cookie + 精确 Origin。仅取消该事务，禁止撤销其他已登录会话。
+        purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+      responses:
+        "204":
+          description: 已取消
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+  /login/uac/challenges/{challengeId}/complete:
+    parameters:
+      - name: challengeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags:
+        - login
+      operationId: completeUacChallenge
+      summary: 原子消费已验证挑战草案
+      security:
+        - {}
+        - bearerAuth: []
+      description: 需要绑定 cookie + 精确 Origin。验证身份和成员策略后才设置现有入口会话 cookie。若需 MFA 则继续既有 transaction
+        advance。完成结果只在原事务发起端可重复读取，绝不重复创建会话。尚未 verified 返回409，过期返回404。
+        purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+      responses:
+        "200":
+          description: 草案响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacCompleteResult"
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+        "409":
+          $ref: common.yaml#/components/responses/Conflict
+        "503":
+          description: 请求失败，使用既有 common.* 错误码
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+  /admin/uac/diagnostic-bundles:
+    post:
+      tags:
+        - admin-providers
+      operationId: downloadUacDiagnosticBundle
+      summary: 导出当前租户的脱敏UAC诊断包草案
+      x-admin-only: true
+      x-permission: iam.providers.read
+      description: 额外要求audit.events.read和ops.alerts.read，精确管理Origin及CSRF。IAM受信读取audit和Loki，先脱敏、校验、生成受保护临时zip，再重新核权并直接下载。禁止任意URL/查询输入。包含当前租户/可选provider，最大24小时/50MiB，部分来源缺失须在manifest及X-Auriga-Diagnostic-Partial中标明。导出动作写审计。随NAS默认部署包发布，管理台提供按钮。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacDiagnosticExport"
+      responses:
+        "200":
+          description: 已完成脱敏校验的诊断zip
+          headers:
+            X-Auriga-Diagnostic-Partial:
+              schema:
+                type: boolean
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "429":
+          $ref: common.yaml#/components/responses/RateLimited
+        "503":
+          description: UAC或诊断数据源不可达，common.unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
   /admin/credentials:
     get:
       tags: [admin-keys]
@@ -828,6 +1148,7 @@ paths:
     post:
       tags: [admin-providers]
       operationId: createProvider
+      description: UAC类型创建须config={}满足ProviderInput必填，仅创建未配置占位实例，初始enabled=false，省略enabled按false。显式enabled=true或非空config返回400。占位创建跳过完整连接器configSchema校验，唯一UAC配置入口执行完整验证并启用。实现保留原JSON字段存在性以区分省略和显式值，非UAC沿用通用默认true。
       x-admin-only: true
       x-permission: iam.providers.write
       parameters:
@@ -868,7 +1189,7 @@ paths:
       operationId: updateProvider
       x-admin-only: true
       x-permission: iam.providers.write
-      description: JSON Merge Patch。config 里没给的机密字段保持原值。
+      description: JSON Merge Patch。config 里没给的机密字段保持原值。UAC类型禁止通过本入口修改enabled或config，含这些键即400 common.validation_failed，必须使用UAC配置入口，允许其余展示元数据更新。
       parameters:
         - $ref: 'common.yaml#/components/parameters/IfMatch'
       requestBody:
@@ -1245,6 +1566,208 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    UacEnterpriseCredentials:
+      type: object
+      additionalProperties: false
+      required:
+        - empNo
+        - token
+        - updatedAt
+      properties:
+        empNo:
+          type: string
+          minLength: 1
+          maxLength: 128
+        token:
+          type: string
+          minLength: 1
+          maxLength: 16384
+          description: 最新有效企业token，skill进程内即时使用，禁止输出到工具结果、日志或会话记录
+        updatedAt:
+          type: string
+          format: date-time
+        cookies:
+          type: object
+          maxProperties: 16
+          additionalProperties:
+            type: string
+            maxLength: 16384
+          description: 仅内部应用需要的私有配置Cookie键值，token项随权威凭据版本更新
+    UacSsoLogin:
+      type: object
+      additionalProperties: false
+      required:
+        - providerId
+        - navigationProof
+        - mode
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        navigationProof:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: ^[A-Za-z0-9_-]{43}$
+          description: 门户服务端签发的32字节随机一次性导航证明，非UAC token
+        mode:
+          type: string
+          enum:
+            - auto
+            - continue
+          description: 请求意图不构成用户操作证明，服务器核导航资格与抑制标记
+        invitationCode:
+          type: string
+          maxLength: 512
+    UacSsoLoginResult:
+      type: object
+      additionalProperties: false
+      required:
+        - transactionId
+        - state
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - authenticated
+            - additional_step_required
+            - scan_required
+    UacLoginInfo:
+      $ref: ../auth/uac-login-info.schema.json#/$defs/UacLoginInfo
+    UacProviderConfig:
+      type: object
+      required:
+        - enabled
+        - baseUrl
+        - systemCode
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        baseUrl:
+          type: string
+          format: uri
+          pattern: ^https://
+        systemCode:
+          type: string
+          minLength: 1
+          maxLength: 128
+      additionalProperties: false
+    UacChallengeCreate:
+      type: object
+      required:
+        - providerId
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        invitationCode:
+          type: string
+          maxLength: 256
+        purpose:
+          type: string
+          enum:
+            - login
+            - link
+          default: login
+          description: login可匿名，link要求同入口现有会话及10分钟内新鲜认证，不能同时提交invitationCode
+      additionalProperties: false
+    UacChallenge:
+      type: object
+      required:
+        - id
+        - transactionId
+        - qrContent
+        - expiresAt
+        - pollIntervalSeconds
+      properties:
+        id:
+          type: string
+          format: uuid
+        transactionId:
+          type: string
+          format: uuid
+        qrContent:
+          type: string
+          maxLength: 2048
+        expiresAt:
+          type: string
+          format: date-time
+        pollIntervalSeconds:
+          type: integer
+          minimum: 2
+          maximum: 30
+      additionalProperties: false
+    UacChallengeStatus:
+      type: object
+      required:
+        - id
+        - state
+        - expiresAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - waiting
+            - scanned
+            - verified
+            - expired
+            - denied
+            - unavailable
+            - cancelled
+            - failed
+        expiresAt:
+          type: string
+          format: date-time
+        failureCode:
+          type: string
+          enum:
+            - missing_token
+            - missing_emp_no
+            - upstream_rejected
+            - invalid_response
+            - transport_error
+          description: 仅failed/denied/unavailable时提供的安全分类，禁止携带原始上游响应
+      additionalProperties: false
+    UacCompleteResult:
+      type: object
+      required:
+        - transactionId
+        - state
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - authenticated
+            - additional_step_required
+            - linked
+      additionalProperties: false
+    UacSessionBinding:
+      $ref: ../auth/uac-session-binding.schema.json#/$defs/UacSessionBinding
+    UacDiagnosticExport:
+      type: object
+      additionalProperties: false
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        correlationId:
+          type: string
+          format: uuid
+        sinceSeconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          default: 7200
     CredentialRevoke:
       type: object
       additionalProperties: false
@@ -1394,6 +1917,10 @@ components:
     Me:
       type: object
       properties:
+        uacLoginInfo:
+          $ref: '#/components/schemas/UacLoginInfo'
+          readOnly: true
+          description: 当前会话的可选部门展示资料，身份或会话变更时清除
         account: { $ref: '#/components/schemas/Account' }
         session: { $ref: '#/components/schemas/SessionView' }
         identities: { type: array, items: { $ref: '#/components/schemas/IdentityView' } }
@@ -1422,6 +1949,10 @@ components:
     SessionView:
       type: object
       properties:
+        uacSessionBinding:
+          $ref: '#/components/schemas/UacSessionBinding'
+          readOnly: true
+          description: 仅UAC来源时由IAM生成，刷新须核来源会话和认证代次仍有效
         id: { $ref: 'common.yaml#/components/schemas/Uuid' }
         audience: { type: string, enum: [portal, admin] }
         current: { type: boolean, description: 是否是发起本请求的会话。 }
@@ -1477,6 +2008,10 @@ components:
     Device:
       type: object
       properties:
+        uacSessionBinding:
+          $ref: '#/components/schemas/UacSessionBinding'
+          readOnly: true
+          description: 仅UAC来源时由IAM生成，刷新须核来源会话和认证代次仍有效
         id: { $ref: 'common.yaml#/components/schemas/Uuid' }
         name: { type: string }
         kind: { type: string, enum: [dsh_connect, cli] }
