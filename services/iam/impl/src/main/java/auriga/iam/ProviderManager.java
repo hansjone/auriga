@@ -36,7 +36,12 @@ public final class ProviderManager {
         () -> {
           String type = input.path("connectorType").asString();
           IamError.require(!type.equals("emergency"), "builtin_provider", 409);
-          registry.validate(type, input.path("config"));
+          if (type.equals("uac")) {
+            IamError.validate(input.path("config").isObject() && input.path("config").isEmpty());
+            IamError.validate(
+                !input.has("enabled")
+                    || input.path("enabled").isBoolean() && !input.path("enabled").asBoolean());
+          } else registry.validate(type, input.path("config"));
           if (!registry.get(type).descriptor().path("multipleInstances").asBoolean(true))
             IamError.require(
                 store.all("idp_provider").stream()
@@ -60,7 +65,7 @@ public final class ProviderManager {
                       "builtin",
                       false,
                       "enabled",
-                      input.path("enabled").asBoolean(true),
+                      input.path("enabled").asBoolean(!type.equals("uac")),
                       "display",
                       input.path("display"),
                       "config",
@@ -97,6 +102,7 @@ public final class ProviderManager {
           IamError.require(row != null, "not_found", 404);
           IamError.require(!row.path("builtin").asBoolean(), "builtin_provider", 409);
           String type = row.path("connectorType").asString();
+          IamError.validate(!type.equals("uac") || !patch.has("enabled") && !patch.has("config"));
           if (patch.has("display")) row.set("display", patch.path("display"));
           if (patch.has("enabled")) row.put("enabled", patch.path("enabled").asBoolean());
           if (patch.has("admission")) {

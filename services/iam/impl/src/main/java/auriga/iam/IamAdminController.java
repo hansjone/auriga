@@ -58,8 +58,20 @@ public class IamAdminController {
   @PostMapping("/providers")
   @RequiresPermission("iam.providers.write")
   @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
-  public ObjectNode create(@RequestBody ProviderInput input) {
-    return providers.create(Json.MAPPER.valueToTree(input));
+  public ObjectNode create(@RequestBody tools.jackson.databind.JsonNode input) {
+    IamError.validate(input.isObject());
+    IamError.validate(!input.has("enabled") || input.path("enabled").isBoolean());
+    ProviderInput parsed;
+    try {
+      parsed = Json.MAPPER.treeToValue(input, ProviderInput.class);
+    } catch (tools.jackson.core.JacksonException e) {
+      throw new auriga.common.error.AurigaException(
+          auriga.common.error.CommonErrors.VALIDATION_FAILED);
+    }
+    ObjectNode normalized = Json.MAPPER.valueToTree(parsed);
+    // The generated generic model defaults enabled=true. UAC must retain field absence.
+    if (!input.has("enabled")) normalized.remove("enabled");
+    return providers.create(normalized);
   }
 
   @GetMapping("/providers/{id}")

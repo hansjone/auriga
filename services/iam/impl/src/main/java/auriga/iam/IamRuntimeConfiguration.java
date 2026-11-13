@@ -102,6 +102,11 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  UacRevalidationConfiguration iamUacRevalidationConfiguration(Environment env) {
+    return new UacRevalidationConfiguration(env);
+  }
+
+  @Bean
   Secrets iamSecrets(Environment env) {
     return new Secrets(env.getRequiredProperty("auriga.iam.encryption-key"));
   }
