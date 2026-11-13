@@ -45,6 +45,7 @@ import tools.jackson.databind.json.JsonMapper;
     properties = {
       "auriga.platform.combined=true",
       "auriga.services.resource.enabled=true",
+      "auriga.resource.catalog-writes-enabled=false",
       "auriga.services.workspace.enabled=false",
       "auriga.resource.reconcile-ms=3600000",
       "server.address=127.0.0.1",
@@ -360,6 +361,58 @@ class ResourceReadAssemblyTest {
 
   String cursor(JsonNode page) {
     return URLEncoder.encode(page.path("nextCursor").asString(), StandardCharsets.UTF_8);
+  }
+
+  @Test
+  void disabledCatalogWritesKeepLegacyHttpAndPluginIsolation() throws Exception {
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['resource.packages.read','resource.packages.upload','resource.versions.submit','resource.versions.review','resource.versions.publish','resource.distributions.manage'] WHERE id=?",
+        ROLE);
+    var legacy = resource(189, "l4", "private", ALICE, T1, false);
+    assertEquals(200, request("/" + legacy, token(T1, ALICE, true)).statusCode());
+    String root = "http://127.0.0.1:" + port;
+    var list =
+        http.send(
+            HttpRequest.newBuilder(URI.create(root + "/api/resource/v1/catalog/packages"))
+                .header("Authorization", "Bearer " + token(T1, ALICE, true))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, list.statusCode(), list.body());
+    assertTrue(JSON.readTree(list.body()).path("items").isEmpty());
+    var isolated =
+        http.send(
+            HttpRequest.newBuilder(URI.create(root + "/api/resource/v1/catalog/packages/" + legacy))
+                .header("Authorization", "Bearer " + token(T1, ALICE, true))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(404, isolated.statusCode(), isolated.body());
+    var create =
+        http.send(
+            HttpRequest.newBuilder(URI.create(root + "/api/resource/v1/catalog/packages"))
+                .header("Authorization", "Bearer " + workflowToken(ALICE))
+                .header("Content-Type", "application/json")
+                .header("If-Match", "\"0\"")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        "{\"name\":\"example-skill\",\"kind\":\"skill\",\"visibility\":\"tenant\"}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(503, create.statusCode(), create.body());
+    var node =
+        http.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        root
+                            + "/internal/resource/v1/catalog/downloads/"
+                            + UUID.randomUUID()
+                            + "/manifest"))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(401, node.statusCode(), node.body());
   }
 
   @Test

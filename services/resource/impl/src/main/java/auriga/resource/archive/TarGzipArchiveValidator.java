@@ -201,7 +201,7 @@ public final class TarGzipArchiveValidator {
   }
 
   /** Bounds both libraries' header processing without interpreting header fields. */
-  private static final class HeaderInput extends InputStream {
+  static final class HeaderInput extends InputStream {
     final InputStream source;
     long headerBytes;
     boolean complete;

@@ -44,7 +44,7 @@ public final class ResourceGarbageCollector {
                           cutoff,
                           () ->
                               db.rows(
-                                      "SELECT id FROM resource.resource_version WHERE tenant_id=:tenant AND digest=:digest LIMIT 1",
+                                      "SELECT id FROM resource.resource_version WHERE tenant_id=:tenant AND digest=:digest UNION ALL SELECT id FROM resource.catalog_artifact WHERE tenant_id=:tenant AND digest=:digest LIMIT 1",
                                       db.args("digest", candidate.digest()))
                                   .isEmpty());
                     }));

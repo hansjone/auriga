@@ -37,6 +37,9 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 @Import({
   auriga.resource.web.DesktopController.class,
   ResourceController.class,
+  auriga.resource.web.CatalogController.class,
+  auriga.resource.web.CatalogDeliveryController.class,
+  auriga.resource.web.CatalogNodeController.class,
   ResourceMetadataController.class,
   ResourceAdministrationController.class,
   ResourceWorkflowController.class,
@@ -198,6 +201,78 @@ public class ResourceRuntimeConfiguration {
             () -> {});
     return new ResourceWorkflow(
         store, db, access, () -> required(objects), () -> required(signing), events, clock);
+  }
+
+  @Bean
+  CatalogWorkflow catalogWorkflow(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      ResourceWorkflow workflow,
+      ObjectProvider<ObjectStore> objects,
+      ObjectProvider<ResourceSigning> signing,
+      Environment env,
+      ResourceCursor cursors,
+      ListableBeanFactory beans,
+      Clock clock) {
+    // The three catalog events have explicit names in the frozen contract rather than the
+    // legacy convention. CatalogEvents validates each data schema before the common outbox.
+    var events =
+        new CatalogEvents(
+            new auriga.common.events.OutboxEventPublisher(
+                new JdbcTemplate(resourceSource(beans)),
+                "resource",
+                "resource",
+                null,
+                tools.jackson.databind.json.JsonMapper.builder().build(),
+                clock,
+                () -> {}));
+    return new CatalogWorkflow(
+        store,
+        db,
+        access,
+        workflow,
+        () -> required(objects),
+        () -> required(signing),
+        () -> env.getProperty("auriga.resource.catalog-writes-enabled", Boolean.class, true),
+        cursors,
+        events,
+        clock);
+  }
+
+  @Bean
+  CatalogDelivery catalogDelivery(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      CatalogWorkflow catalog,
+      ResourceDistributions distributions,
+      ObjectProvider<auriga.resource.api.UnifiedResourceWorkspace> workspace,
+      ObjectProvider<auriga.resource.api.ResourceWorkspace> tenants,
+      ListableBeanFactory beans,
+      Clock clock,
+      ResourceCursor cursors) {
+    var events =
+        new CatalogEvents(
+            new auriga.common.events.OutboxEventPublisher(
+                new JdbcTemplate(resourceSource(beans)),
+                "resource",
+                "resource",
+                null,
+                tools.jackson.databind.json.JsonMapper.builder().build(),
+                clock,
+                () -> {}));
+    return new CatalogDelivery(
+        store,
+        db,
+        access,
+        catalog,
+        distributions,
+        workspace::getIfAvailable,
+        events,
+        clock,
+        cursors,
+        tenants::getIfAvailable);
   }
 
   @Bean
