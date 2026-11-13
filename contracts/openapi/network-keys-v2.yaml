@@ -1,0 +1,439 @@
+openapi: 3.1.0
+info:
+  title: Auriga 消息网络自动续期
+  version: 2.0.0
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: https://auriga.example.com
+security:
+  - bearerAuth: []
+tags:
+  - name: NetworkRenewal
+    description: 根控制、运行清单与受限材料端口
+paths:
+  /api/collab/v2/network/keys:
+    get:
+      operationId: getNetworkKeysV2
+      tags:
+        - NetworkRenewal
+      summary: getNetworkKeysV2
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.read
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/Publication
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/keys/announcement:
+    get:
+      operationId: getNetworkKeyAnnouncementV2
+      tags:
+        - NetworkRenewal
+      summary: getNetworkKeyAnnouncementV2
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.read
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/keys/status:
+    get:
+      operationId: getNetworkRenewalStatus
+      tags:
+        - NetworkRenewal
+      summary: getNetworkRenewalStatus
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.read
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/RenewalStatus
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/controls/packages:
+    post:
+      operationId: createNetworkControlPackage
+      tags:
+        - NetworkRenewal
+      summary: createNetworkControlPackage
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.control.install
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/ControlPackage
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/ControlPackage
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/controls/receipts:
+    post:
+      operationId: confirmNetworkControl
+      tags:
+        - NetworkRenewal
+      summary: confirmNetworkControl
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.control.install
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/InstallationReceipt
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/IsolationRecord
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/isolation:
+    post:
+      operationId: enforceNetworkIsolation
+      tags:
+        - NetworkRenewal
+      summary: enforceNetworkIsolation
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.isolation.enforce
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/IsolationRecord
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/IsolationRecord
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/projections/protocol:
+    post:
+      operationId: getProtocolProjection
+      tags:
+        - NetworkRenewal
+      summary: getProtocolProjection
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.projection.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionRequest
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProtocolMaterial
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/projections/transport:
+    post:
+      operationId: getTransportProjection
+      tags:
+        - NetworkRenewal
+      summary: getTransportProjection
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.projection.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionRequest
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionMaterial
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/projections/receipts:
+    post:
+      operationId: confirmNetworkProjection
+      tags:
+        - NetworkRenewal
+      summary: confirmNetworkProjection
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.projection.ack
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionReceipt
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionReceipt
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/bootstrap/materials:
+    post:
+      operationId: getSealedNetworkMaterial
+      tags:
+        - NetworkRenewal
+      summary: getSealedNetworkMaterial
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      x-permission: collab.msgnet.projection.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionRequest
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/SealedMaterial
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/bootstrap/controls:
+    get:
+      operationId: getPublicNetworkControl
+      tags:
+        - NetworkRenewal
+      summary: getPublicNetworkControl
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      security: []
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedRootControl
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/bootstrap/transport:
+    get:
+      operationId: getPublicTransportBundle
+      tags:
+        - NetworkRenewal
+      summary: getPublicTransportBundle
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      security: []
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+  /api/collab/v2/network/bootstrap/keys:
+    get:
+      operationId: getPublicNetworkPublication
+      tags:
+        - NetworkRenewal
+      summary: getNetworkKeysV2
+      description: 固定安装端点；绑定安装身份、tenant/realm及组件。公有引导不依赖消息连接。明文材料只允许内部mTLS；密封引导验证独立安装签名及nonce。禁止重定向及消息内URL。
+      responses:
+        "200":
+          description: 精确已提交对象；Cache-Control no-store。
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/Publication
+        "400":
+          description: 无效契约或转换
+        "403":
+          description: 身份、用途、撤销或隔离拒绝
+        "409":
+          description: 版本、摘要或代际冲突
+        "503":
+          description: 材料不可用或clock_error
+      security: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Signature:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/Signature
+    Limits:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/Limits
+    TransportScope:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportScope
+    RuntimeAuthority:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/RuntimeAuthority
+    AuthorityReference:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/AuthorityReference
+    RootControl:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/RootControl
+    SignedRuntimeAuthority:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedRuntimeAuthority
+    SignedRootControl:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedRootControl
+    PublicKey:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/PublicKey
+    FirstPublication:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/FirstPublication
+    Archive:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/Archive
+    KeysetPayload:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/KeysetPayload
+    SignedKeysetV2:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedKeysetV2
+    PredecessorProof:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/PredecessorProof
+    Publication:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/Publication
+    KeysetAnnouncementV2:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/KeysetAnnouncementV2
+    SignedKeysetAnnouncementV2:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2
+    TransportCa:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportCa
+    TransportTrustBundle:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportTrustBundle
+    SignedTransportTrustBundle:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle
+    ControlPackage:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/ControlPackage
+    InstallationReceipt:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/InstallationReceipt
+    IsolationRecord:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/IsolationRecord
+    ProjectionRequest:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionRequest
+    ProtocolMaterial:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProtocolMaterial
+    TlsLeaf:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TlsLeaf
+    ProjectionMaterial:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionMaterial
+    SealedMaterial:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/SealedMaterial
+    ProjectionReceipt:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/ProjectionReceipt
+    MigrationPermit:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/MigrationPermit
+    SignedMigrationPermit:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedMigrationPermit
+    MigrationReceipt:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/MigrationReceipt
+    Tombstone:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/Tombstone
+    Redelivery:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/Redelivery
+    RenewalStatus:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/RenewalStatus
+    RenewalConfig:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/RenewalConfig
+    PrivateKeyAad:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/PrivateKeyAad
+    EncryptedPrivateKey:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/EncryptedPrivateKey

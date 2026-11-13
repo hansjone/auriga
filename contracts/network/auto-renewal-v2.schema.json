@@ -1,0 +1,1986 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/auto-renewal-v2.schema.json",
+  "title": "Auriga 消息网络自动续期 v2",
+  "description": "严格受签对象，拒绝未知字段和重复键。跨字段规则见 auto-renewal-v2.md。整数序列为十进制字符串，须检查 uint64 上界。",
+  "$defs": {
+    "Signature": {
+      "type": "object",
+      "properties": {
+        "alg": {
+          "const": "Ed25519"
+        },
+        "kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+        }
+      },
+      "required": [
+        "alg",
+        "kid",
+        "signature"
+      ],
+      "additionalProperties": false
+    },
+    "Limits": {
+      "type": "object",
+      "properties": {
+        "keyset_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "business_key_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 691200
+        },
+        "restart_key_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "next_maturity_seconds": {
+          "type": "integer",
+          "minimum": 86400,
+          "maximum": 2147483647
+        },
+        "overlap_seconds": {
+          "type": "integer",
+          "minimum": 360,
+          "maximum": 2147483647
+        },
+        "archive_grace_seconds": {
+          "type": "integer",
+          "minimum": 360,
+          "maximum": 2147483647
+        }
+      },
+      "required": [
+        "keyset_seconds",
+        "business_key_seconds",
+        "restart_key_seconds",
+        "next_maturity_seconds",
+        "overlap_seconds",
+        "archive_grace_seconds"
+      ],
+      "additionalProperties": false
+    },
+    "TransportScope": {
+      "type": "object",
+      "properties": {
+        "component": {
+          "type": "string",
+          "enum": [
+            "network",
+            "edge",
+            "broker"
+          ]
+        },
+        "identity_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sans": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 32
+        },
+        "ekus": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "serverAuth",
+              "clientAuth"
+            ]
+          },
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "component",
+        "identity_id",
+        "sans",
+        "ekus"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeAuthority": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "runtime_kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "public_key_spki": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{59}$"
+        },
+        "not_before": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "expiry_policy": {
+          "const": "no_hard_expiry"
+        },
+        "review_period_days": {
+          "const": 365
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "keyset",
+              "announcement",
+              "business_rotation",
+              "restart_recovery",
+              "history_archive",
+              "network_transport"
+            ]
+          },
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "transport_scope": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TransportScope"
+          },
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "schema_version",
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "authority_revision",
+        "runtime_kid",
+        "public_key_spki",
+        "not_before",
+        "expiry_policy",
+        "review_period_days",
+        "capabilities",
+        "limits",
+        "transport_scope"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorityReference": {
+      "type": "object",
+      "properties": {
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "authority_id",
+        "authority_digest"
+      ],
+      "additionalProperties": false
+    },
+    "RootControl": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "allowed_authorities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AuthorityReference"
+          },
+          "maxItems": 32
+        },
+        "revoked_authority_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 65536
+        },
+        "revoked_installation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 65536
+        },
+        "minimum_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "minimum_keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "tenant_id",
+        "realm",
+        "control_revision",
+        "issued_at",
+        "allowed_authorities",
+        "revoked_authority_ids",
+        "revoked_installation_ids",
+        "minimum_generation",
+        "minimum_keyset_version"
+      ],
+      "additionalProperties": false
+    },
+    "SignedRuntimeAuthority": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/RuntimeAuthority"
+        },
+        "root_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "payload",
+        "root_auth"
+      ],
+      "additionalProperties": false
+    },
+    "SignedRootControl": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/RootControl"
+        },
+        "root_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "payload",
+        "root_auth"
+      ],
+      "additionalProperties": false
+    },
+    "PublicKey": {
+      "type": "object",
+      "properties": {
+        "kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "alg": {
+          "const": "Ed25519"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "business_delivery",
+            "protocol_response",
+            "management_state"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "next",
+            "retired",
+            "revoked"
+          ]
+        },
+        "not_before": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "not_after": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "public_key_spki": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{59}$"
+        }
+      },
+      "required": [
+        "kid",
+        "alg",
+        "purpose",
+        "state",
+        "not_before",
+        "not_after",
+        "public_key_spki"
+      ],
+      "additionalProperties": false
+    },
+    "FirstPublication": {
+      "type": "object",
+      "properties": {
+        "kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "committed_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "committed_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        }
+      },
+      "required": [
+        "kid",
+        "committed_version",
+        "committed_at"
+      ],
+      "additionalProperties": false
+    },
+    "Archive": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "history_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "before",
+        "history_digest"
+      ],
+      "additionalProperties": false
+    },
+    "KeysetPayload": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "valid_until": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "bootstrap",
+            "refresh",
+            "activate",
+            "restart_recovery",
+            "migration"
+          ]
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PublicKey"
+          },
+          "maxItems": 128
+        },
+        "first_publications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FirstPublication"
+          },
+          "maxItems": 128
+        },
+        "archive": {
+          "$ref": "#/$defs/Archive"
+        }
+      },
+      "required": [
+        "schema_version",
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "authority_digest",
+        "control_revision",
+        "generation",
+        "keyset_version",
+        "issued_at",
+        "valid_until",
+        "mode",
+        "keys",
+        "first_publications",
+        "archive"
+      ],
+      "additionalProperties": false
+    },
+    "SignedKeysetV2": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/KeysetPayload"
+        },
+        "runtime_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "payload",
+        "runtime_auth"
+      ],
+      "additionalProperties": false
+    },
+    "PredecessorProof": {
+      "type": "object",
+      "properties": {
+        "keyset": {
+          "$ref": "#/$defs/SignedKeysetV2"
+        },
+        "keyset_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "authority": {
+          "$ref": "#/$defs/SignedRuntimeAuthority"
+        },
+        "control": {
+          "$ref": "#/$defs/SignedRootControl"
+        }
+      },
+      "required": [
+        "keyset",
+        "keyset_digest",
+        "authority",
+        "control"
+      ],
+      "additionalProperties": false
+    },
+    "Publication": {
+      "type": "object",
+      "properties": {
+        "keyset": {
+          "$ref": "#/$defs/SignedKeysetV2"
+        },
+        "authority": {
+          "$ref": "#/$defs/SignedRuntimeAuthority"
+        },
+        "control": {
+          "$ref": "#/$defs/SignedRootControl"
+        },
+        "predecessor": {
+          "$ref": "#/$defs/PredecessorProof"
+        }
+      },
+      "required": [
+        "keyset",
+        "authority",
+        "control"
+      ],
+      "additionalProperties": false
+    },
+    "KeysetAnnouncementV2": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "valid_until": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        }
+      },
+      "required": [
+        "schema_version",
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "authority_digest",
+        "control_revision",
+        "generation",
+        "keyset_version",
+        "keyset_digest",
+        "valid_until"
+      ],
+      "additionalProperties": false
+    },
+    "SignedKeysetAnnouncementV2": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/KeysetAnnouncementV2"
+        },
+        "runtime_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "payload",
+        "runtime_auth"
+      ],
+      "additionalProperties": false
+    },
+    "TransportCa": {
+      "type": "object",
+      "properties": {
+        "ca_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "server",
+            "client"
+          ]
+        },
+        "certificate_der": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "not_before": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "not_after": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        }
+      },
+      "required": [
+        "ca_id",
+        "role",
+        "certificate_der",
+        "not_before",
+        "not_after"
+      ],
+      "additionalProperties": false
+    },
+    "TransportTrustBundle": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "dual_trust",
+            "new_leaves",
+            "retire_old"
+          ]
+        },
+        "cas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TransportCa"
+          },
+          "maxItems": 4
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TransportScope"
+          },
+          "maxItems": 32
+        },
+        "required_reader_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 65536
+        },
+        "previous_bundle_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "authority_digest",
+        "control_revision",
+        "generation",
+        "bundle_version",
+        "issued_at",
+        "phase",
+        "cas",
+        "scope",
+        "required_reader_ids",
+        "previous_bundle_digest"
+      ],
+      "additionalProperties": false
+    },
+    "SignedTransportTrustBundle": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/TransportTrustBundle"
+        },
+        "runtime_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "payload",
+        "runtime_auth"
+      ],
+      "additionalProperties": false
+    },
+    "ControlPackage": {
+      "type": "object",
+      "properties": {
+        "package_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "control": {
+          "$ref": "#/$defs/SignedRootControl"
+        },
+        "control_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "target_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "challenge": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "package_id",
+        "tenant_id",
+        "realm",
+        "control",
+        "control_digest",
+        "target_id",
+        "challenge"
+      ],
+      "additionalProperties": false
+    },
+    "InstallationReceipt": {
+      "type": "object",
+      "properties": {
+        "package_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "target_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "identity_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "challenge": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "control_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "installed",
+            "rejected"
+          ]
+        },
+        "persisted_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "identity_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "package_id",
+        "tenant_id",
+        "realm",
+        "target_id",
+        "identity_id",
+        "challenge",
+        "control_revision",
+        "control_digest",
+        "result",
+        "persisted_at",
+        "identity_auth"
+      ],
+      "additionalProperties": false
+    },
+    "IsolationRecord": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "target_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "minimum_control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "control_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "quarantined",
+            "confirmed",
+            "ready"
+          ]
+        },
+        "identity_compromised": {
+          "type": "boolean"
+        },
+        "challenge": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "new_chain_ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "target_id",
+        "minimum_control_revision",
+        "control_digest",
+        "state",
+        "identity_compromised",
+        "challenge",
+        "new_chain_ready"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectionRequest": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "component": {
+          "type": "string",
+          "enum": [
+            "network",
+            "edge",
+            "broker"
+          ]
+        },
+        "gateway_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "expected_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "expected_keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "identity_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "installation_id",
+        "component",
+        "gateway_id",
+        "nonce",
+        "expected_generation",
+        "expected_keyset_version",
+        "identity_auth"
+      ],
+      "additionalProperties": false
+    },
+    "ProtocolMaterial": {
+      "type": "object",
+      "properties": {
+        "publication": {
+          "$ref": "#/$defs/Publication"
+        },
+        "active_kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "active_pkcs8": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "next_kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "next_pkcs8": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "publication",
+        "active_kid",
+        "active_pkcs8"
+      ],
+      "additionalProperties": false
+    },
+    "TlsLeaf": {
+      "type": "object",
+      "properties": {
+        "component": {
+          "type": "string",
+          "enum": [
+            "network",
+            "edge",
+            "broker"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "submit",
+            "edge",
+            "broker",
+            "broker-client",
+            "edge-presence"
+          ]
+        },
+        "certificate_der": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "private_pkcs8": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "ca_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "not_before": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "not_after": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        }
+      },
+      "required": [
+        "component",
+        "role",
+        "certificate_der",
+        "private_pkcs8",
+        "ca_id",
+        "not_before",
+        "not_after"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectionMaterial": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "component": {
+          "type": "string",
+          "enum": [
+            "network",
+            "edge",
+            "broker"
+          ]
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "publication_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "bundle": {
+          "$ref": "#/$defs/SignedTransportTrustBundle"
+        },
+        "leaves": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TlsLeaf"
+          },
+          "maxItems": 5
+        },
+        "protocol": {
+          "$ref": "#/$defs/ProtocolMaterial"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "installation_id",
+        "component",
+        "nonce",
+        "generation",
+        "keyset_version",
+        "publication_digest",
+        "bundle",
+        "leaves"
+      ],
+      "additionalProperties": false
+    },
+    "SealedMaterial": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "component": {
+          "type": "string",
+          "enum": [
+            "network",
+            "edge",
+            "broker"
+          ]
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "kem": {
+          "const": "DHKEM(X25519,HKDF-SHA256)"
+        },
+        "kdf": {
+          "const": "HKDF-SHA256"
+        },
+        "aead": {
+          "const": "AES-256-GCM"
+        },
+        "enc": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "ciphertext": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "installation_id",
+        "component",
+        "nonce",
+        "generation",
+        "keyset_version",
+        "bundle_digest",
+        "kem",
+        "kdf",
+        "aead",
+        "enc",
+        "ciphertext"
+      ],
+      "additionalProperties": false
+    },
+    "ProjectionReceipt": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "component": {
+          "type": "string",
+          "enum": [
+            "network",
+            "edge",
+            "broker"
+          ]
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "publication_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "bundle_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "persisted",
+            "loaded",
+            "handshake_verified",
+            "failed"
+          ]
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "identity_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "installation_id",
+        "component",
+        "nonce",
+        "generation",
+        "keyset_version",
+        "publication_digest",
+        "bundle_version",
+        "bundle_digest",
+        "phase",
+        "observed_at",
+        "identity_auth"
+      ],
+      "additionalProperties": false
+    },
+    "MigrationPermit": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "permit_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "ancestor_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "queue_commitment_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "maximum_committed_v1_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "minimum_v2_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "minimum_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "tenant_id",
+        "realm",
+        "permit_id",
+        "ancestor_digest",
+        "queue_commitment_digest",
+        "maximum_committed_v1_version",
+        "minimum_v2_version",
+        "minimum_generation"
+      ],
+      "additionalProperties": false
+    },
+    "SignedMigrationPermit": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/MigrationPermit"
+        },
+        "root_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "payload",
+        "root_auth"
+      ],
+      "additionalProperties": false
+    },
+    "MigrationReceipt": {
+      "type": "object",
+      "properties": {
+        "permit_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observed_v1_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "observed_v1_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "v2_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "v2_keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "publication_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "barrier_committed": {
+          "type": "boolean"
+        },
+        "legacy_disabled": {
+          "type": "boolean"
+        },
+        "frozen_elapsed_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600
+        }
+      },
+      "required": [
+        "permit_id",
+        "observed_v1_version",
+        "observed_v1_digest",
+        "v2_generation",
+        "v2_keyset_version",
+        "publication_digest",
+        "barrier_committed",
+        "legacy_disabled",
+        "frozen_elapsed_seconds"
+      ],
+      "additionalProperties": false
+    },
+    "Tombstone": {
+      "type": "object",
+      "properties": {
+        "kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "identity_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "not_before": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "not_after": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "terminal_state": {
+          "type": "string",
+          "enum": [
+            "retired",
+            "revoked"
+          ]
+        }
+      },
+      "required": [
+        "kid",
+        "identity_digest",
+        "not_before",
+        "not_after",
+        "terminal_state"
+      ],
+      "additionalProperties": false
+    },
+    "Redelivery": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "message_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "delivery_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "body_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "sequence": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "original_expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "previous_envelope_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "new_envelope_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "delivered",
+            "acknowledged",
+            "expired",
+            "rejected"
+          ]
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "message_id",
+        "delivery_id",
+        "body_digest",
+        "sequence",
+        "original_expires_at",
+        "previous_envelope_digest",
+        "new_envelope_digest",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "RenewalStatus": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "renewing",
+            "paused",
+            "clock_error",
+            "authority_revoked",
+            "projection_pending",
+            "degraded"
+          ]
+        },
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "expiry_policy": {
+          "const": "no_hard_expiry"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "keyset_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "review_due_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "review_required": {
+          "type": "boolean"
+        },
+        "next_renewal_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "last_success_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "business_valid_until": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        },
+        "announcement_confirmed": {
+          "type": "boolean"
+        },
+        "failure_code": {
+          "type": "string",
+          "enum": [
+            "none",
+            "collab.msgnet_authority_revoked",
+            "collab.msgnet_authority_unknown",
+            "collab.msgnet_control_rollback",
+            "collab.msgnet_control_required",
+            "collab.msgnet_version_rollback",
+            "collab.msgnet_same_version_conflict",
+            "collab.msgnet_scope_denied",
+            "collab.msgnet_invalid_chain",
+            "collab.msgnet_invalid_transition",
+            "collab.msgnet_predecessor_required",
+            "collab.msgnet_clock_error",
+            "collab.msgnet_projection_pending",
+            "collab.msgnet_identity_quarantined",
+            "collab.msgnet_migration_expired",
+            "collab.msgnet_migration_outside_commitment"
+          ]
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "state",
+        "authority_id",
+        "expiry_policy",
+        "generation",
+        "keyset_version",
+        "control_revision",
+        "review_due_at",
+        "review_required",
+        "next_renewal_at",
+        "last_success_at",
+        "business_valid_until",
+        "announcement_confirmed",
+        "failure_code"
+      ],
+      "additionalProperties": false
+    },
+    "RenewalConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "kek_secret_file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kek_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "control_source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "keyset_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "refresh_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 43200
+        },
+        "check_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        },
+        "business_key_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 691200
+        },
+        "rotation_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 432000
+        },
+        "preannounce_seconds": {
+          "type": "integer",
+          "minimum": 172800,
+          "maximum": 2147483647
+        },
+        "maturity_seconds": {
+          "type": "integer",
+          "minimum": 86400,
+          "maximum": 2147483647
+        },
+        "overlap_seconds": {
+          "type": "integer",
+          "minimum": 360,
+          "maximum": 2147483647
+        },
+        "allowed_skew_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "review_period_days": {
+          "const": 365
+        },
+        "review_reminder_days": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 364
+          },
+          "minItems": 3,
+          "uniqueItems": true
+        },
+        "projector_identity_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "projection_directory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "reload_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "leaf_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 90
+        },
+        "leaf_renew_before_days": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 89
+        },
+        "ca_years": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "ca_renew_before_years": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 9
+        },
+        "forward_jump_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "backward_jump_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "clock_retry_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "migration_margin_seconds": {
+          "type": "integer",
+          "minimum": 21600,
+          "maximum": 2147483647
+        },
+        "freeze_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600
+        }
+      },
+      "required": [
+        "enabled",
+        "kek_secret_file",
+        "kek_id",
+        "authority_source",
+        "control_source",
+        "keyset_seconds",
+        "refresh_seconds",
+        "check_seconds",
+        "business_key_seconds",
+        "rotation_seconds",
+        "preannounce_seconds",
+        "maturity_seconds",
+        "overlap_seconds",
+        "allowed_skew_seconds",
+        "review_period_days",
+        "review_reminder_days",
+        "projector_identity_id",
+        "projection_directory",
+        "reload_seconds",
+        "leaf_days",
+        "leaf_renew_before_days",
+        "ca_years",
+        "ca_renew_before_years",
+        "forward_jump_seconds",
+        "backward_jump_seconds",
+        "clock_retry_seconds",
+        "migration_margin_seconds",
+        "freeze_seconds"
+      ],
+      "additionalProperties": false
+    },
+    "PrivateKeyAad": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "alg": {
+          "enum": [
+            "Ed25519",
+            "X25519"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "runtime_authority",
+            "business_delivery",
+            "protocol_response",
+            "management_state",
+            "network_transport_ca",
+            "network_transport_leaf"
+          ]
+        },
+        "component": {
+          "enum": [
+            "collab",
+            "network",
+            "edge",
+            "broker"
+          ]
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "kid",
+        "alg",
+        "purpose",
+        "component"
+      ],
+      "additionalProperties": false
+    },
+    "EncryptedPrivateKey": {
+      "type": "object",
+      "properties": {
+        "kek_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "alg": {
+          "const": "AES-256-GCM"
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16}$"
+        },
+        "aad": {
+          "$ref": "#/$defs/PrivateKeyAad"
+        },
+        "ciphertext": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "kek_id",
+        "alg",
+        "nonce",
+        "aad",
+        "ciphertext"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/Publication"
+}

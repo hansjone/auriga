@@ -219,6 +219,7 @@ type SessionRequest struct {
 	//	*SessionRequest_Wake
 	//	*SessionRequest_Result
 	//	*SessionRequest_Log
+	//	*SessionRequest_MsgnetControlReceipt
 	Body          isSessionRequest_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -324,6 +325,15 @@ func (x *SessionRequest) GetLog() *LogChunk {
 	return nil
 }
 
+func (x *SessionRequest) GetMsgnetControlReceipt() *MsgnetControlReceipt {
+	if x != nil {
+		if x, ok := x.Body.(*SessionRequest_MsgnetControlReceipt); ok {
+			return x.MsgnetControlReceipt
+		}
+	}
+	return nil
+}
+
 type isSessionRequest_Body interface {
 	isSessionRequest_Body()
 }
@@ -356,6 +366,10 @@ type SessionRequest_Log struct {
 	Log *LogChunk `protobuf:"bytes,7,opt,name=log,proto3,oneof"`
 }
 
+type SessionRequest_MsgnetControlReceipt struct {
+	MsgnetControlReceipt *MsgnetControlReceipt `protobuf:"bytes,8,opt,name=msgnet_control_receipt,json=msgnetControlReceipt,proto3,oneof"`
+}
+
 func (*SessionRequest_Hello) isSessionRequest_Body() {}
 
 func (*SessionRequest_Inventory) isSessionRequest_Body() {}
@@ -370,6 +384,8 @@ func (*SessionRequest_Result) isSessionRequest_Body() {}
 
 func (*SessionRequest_Log) isSessionRequest_Body() {}
 
+func (*SessionRequest_MsgnetControlReceipt) isSessionRequest_Body() {}
+
 // workspace → 节点代理（设计文档里的 ControlMessage）。
 type SessionResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -381,6 +397,8 @@ type SessionResponse struct {
 	//	*SessionResponse_Command
 	//	*SessionResponse_Policy
 	//	*SessionResponse_Update
+	//	*SessionResponse_MsgnetControlPackage
+	//	*SessionResponse_MsgnetTransportBundle
 	Body          isSessionResponse_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -477,6 +495,24 @@ func (x *SessionResponse) GetUpdate() *UpdateAgent {
 	return nil
 }
 
+func (x *SessionResponse) GetMsgnetControlPackage() *MsgnetControlPackage {
+	if x != nil {
+		if x, ok := x.Body.(*SessionResponse_MsgnetControlPackage); ok {
+			return x.MsgnetControlPackage
+		}
+	}
+	return nil
+}
+
+func (x *SessionResponse) GetMsgnetTransportBundle() *MsgnetTransportBundle {
+	if x != nil {
+		if x, ok := x.Body.(*SessionResponse_MsgnetTransportBundle); ok {
+			return x.MsgnetTransportBundle
+		}
+	}
+	return nil
+}
+
 type isSessionResponse_Body interface {
 	isSessionResponse_Body()
 }
@@ -505,6 +541,14 @@ type SessionResponse_Update struct {
 	Update *UpdateAgent `protobuf:"bytes,6,opt,name=update,proto3,oneof"`
 }
 
+type SessionResponse_MsgnetControlPackage struct {
+	MsgnetControlPackage *MsgnetControlPackage `protobuf:"bytes,7,opt,name=msgnet_control_package,json=msgnetControlPackage,proto3,oneof"`
+}
+
+type SessionResponse_MsgnetTransportBundle struct {
+	MsgnetTransportBundle *MsgnetTransportBundle `protobuf:"bytes,8,opt,name=msgnet_transport_bundle,json=msgnetTransportBundle,proto3,oneof"`
+}
+
 func (*SessionResponse_Welcome) isSessionResponse_Body() {}
 
 func (*SessionResponse_Apply) isSessionResponse_Body() {}
@@ -516,6 +560,10 @@ func (*SessionResponse_Command) isSessionResponse_Body() {}
 func (*SessionResponse_Policy) isSessionResponse_Body() {}
 
 func (*SessionResponse_Update) isSessionResponse_Body() {}
+
+func (*SessionResponse_MsgnetControlPackage) isSessionResponse_Body() {}
+
+func (*SessionResponse_MsgnetTransportBundle) isSessionResponse_Body() {}
 
 type Hello struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
@@ -2362,7 +2410,7 @@ var File_auriga_node_v1_node_control_proto protoreflect.FileDescriptor
 
 const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"\n" +
-	"!auriga/node/v1/node_control.proto\x12\x0eauriga.node.v1\x1a\x19auriga/node/v1/spec.proto\x1a auriga/resource/v1/unified.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8a\x03\n" +
+	"!auriga/node/v1/node_control.proto\x12\x0eauriga.node.v1\x1a\x19auriga/node/v1/spec.proto\x1a#auriga/node/v1/msgnet_control.proto\x1a auriga/resource/v1/unified.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe8\x03\n" +
 	"\x0eSessionRequest\x12-\n" +
 	"\x05hello\x18\x01 \x01(\v2\x15.auriga.node.v1.HelloH\x00R\x05hello\x129\n" +
 	"\tinventory\x18\x02 \x01(\v2\x19.auriga.node.v1.InventoryH\x00R\tinventory\x128\n" +
@@ -2370,15 +2418,18 @@ const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"\x05usage\x18\x04 \x01(\v2\x19.auriga.node.v1.NodeUsageH\x00R\x05usage\x122\n" +
 	"\x04wake\x18\x05 \x01(\v2\x1c.auriga.node.v1.WakeScheduleH\x00R\x04wake\x127\n" +
 	"\x06result\x18\x06 \x01(\v2\x1d.auriga.node.v1.CommandResultH\x00R\x06result\x12,\n" +
-	"\x03log\x18\a \x01(\v2\x18.auriga.node.v1.LogChunkH\x00R\x03logB\x06\n" +
-	"\x04body\"\xdd\x02\n" +
+	"\x03log\x18\a \x01(\v2\x18.auriga.node.v1.LogChunkH\x00R\x03log\x12\\\n" +
+	"\x16msgnet_control_receipt\x18\b \x01(\v2$.auriga.node.v1.MsgnetControlReceiptH\x00R\x14msgnetControlReceiptB\x06\n" +
+	"\x04body\"\x9c\x04\n" +
 	"\x0fSessionResponse\x123\n" +
 	"\awelcome\x18\x01 \x01(\v2\x17.auriga.node.v1.WelcomeH\x00R\awelcome\x121\n" +
 	"\x05apply\x18\x02 \x01(\v2\x19.auriga.node.v1.ApplySpecH\x00R\x05apply\x128\n" +
 	"\x06delete\x18\x03 \x01(\v2\x1e.auriga.node.v1.DeleteInstanceH\x00R\x06delete\x123\n" +
 	"\acommand\x18\x04 \x01(\v2\x17.auriga.node.v1.CommandH\x00R\acommand\x124\n" +
 	"\x06policy\x18\x05 \x01(\v2\x1a.auriga.node.v1.PolicyHintH\x00R\x06policy\x125\n" +
-	"\x06update\x18\x06 \x01(\v2\x1b.auriga.node.v1.UpdateAgentH\x00R\x06updateB\x06\n" +
+	"\x06update\x18\x06 \x01(\v2\x1b.auriga.node.v1.UpdateAgentH\x00R\x06update\x12\\\n" +
+	"\x16msgnet_control_package\x18\a \x01(\v2$.auriga.node.v1.MsgnetControlPackageH\x00R\x14msgnetControlPackage\x12_\n" +
+	"\x17msgnet_transport_bundle\x18\b \x01(\v2%.auriga.node.v1.MsgnetTransportBundleH\x00R\x15msgnetTransportBundleB\x06\n" +
 	"\x04body\"\xb6\x04\n" +
 	"\x05Hello\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12#\n" +
@@ -2623,13 +2674,16 @@ var file_auriga_node_v1_node_control_proto_goTypes = []any{
 	(*UpdateAgent)(nil),                  // 29: auriga.node.v1.UpdateAgent
 	nil,                                  // 30: auriga.node.v1.Hello.LabelsEntry
 	nil,                                  // 31: auriga.node.v1.CommandResult.OutputEntry
-	(RuntimeKind)(0),                     // 32: auriga.node.v1.RuntimeKind
-	(*timestamppb.Timestamp)(nil),        // 33: google.protobuf.Timestamp
-	(*v1.UnifiedInstallationReport)(nil), // 34: auriga.resource.v1.UnifiedInstallationReport
-	(*v1.UnifiedGuardianState)(nil),      // 35: auriga.resource.v1.UnifiedGuardianState
-	(*durationpb.Duration)(nil),          // 36: google.protobuf.Duration
-	(*InstanceSpec)(nil),                 // 37: auriga.node.v1.InstanceSpec
-	(*SignedArtifact)(nil),               // 38: auriga.node.v1.SignedArtifact
+	(*MsgnetControlReceipt)(nil),         // 32: auriga.node.v1.MsgnetControlReceipt
+	(*MsgnetControlPackage)(nil),         // 33: auriga.node.v1.MsgnetControlPackage
+	(*MsgnetTransportBundle)(nil),        // 34: auriga.node.v1.MsgnetTransportBundle
+	(RuntimeKind)(0),                     // 35: auriga.node.v1.RuntimeKind
+	(*timestamppb.Timestamp)(nil),        // 36: google.protobuf.Timestamp
+	(*v1.UnifiedInstallationReport)(nil), // 37: auriga.resource.v1.UnifiedInstallationReport
+	(*v1.UnifiedGuardianState)(nil),      // 38: auriga.resource.v1.UnifiedGuardianState
+	(*durationpb.Duration)(nil),          // 39: google.protobuf.Duration
+	(*InstanceSpec)(nil),                 // 40: auriga.node.v1.InstanceSpec
+	(*SignedArtifact)(nil),               // 41: auriga.node.v1.SignedArtifact
 }
 var file_auriga_node_v1_node_control_proto_depIdxs = []int32{
 	5,  // 0: auriga.node.v1.SessionRequest.hello:type_name -> auriga.node.v1.Hello
@@ -2639,53 +2693,56 @@ var file_auriga_node_v1_node_control_proto_depIdxs = []int32{
 	14, // 4: auriga.node.v1.SessionRequest.wake:type_name -> auriga.node.v1.WakeSchedule
 	15, // 5: auriga.node.v1.SessionRequest.result:type_name -> auriga.node.v1.CommandResult
 	16, // 6: auriga.node.v1.SessionRequest.log:type_name -> auriga.node.v1.LogChunk
-	17, // 7: auriga.node.v1.SessionResponse.welcome:type_name -> auriga.node.v1.Welcome
-	18, // 8: auriga.node.v1.SessionResponse.apply:type_name -> auriga.node.v1.ApplySpec
-	19, // 9: auriga.node.v1.SessionResponse.delete:type_name -> auriga.node.v1.DeleteInstance
-	20, // 10: auriga.node.v1.SessionResponse.command:type_name -> auriga.node.v1.Command
-	28, // 11: auriga.node.v1.SessionResponse.policy:type_name -> auriga.node.v1.PolicyHint
-	29, // 12: auriga.node.v1.SessionResponse.update:type_name -> auriga.node.v1.UpdateAgent
-	32, // 13: auriga.node.v1.Hello.drivers:type_name -> auriga.node.v1.RuntimeKind
-	6,  // 14: auriga.node.v1.Hello.capacity:type_name -> auriga.node.v1.Capacity
-	30, // 15: auriga.node.v1.Hello.labels:type_name -> auriga.node.v1.Hello.LabelsEntry
-	33, // 16: auriga.node.v1.Hello.node_time:type_name -> google.protobuf.Timestamp
-	9,  // 17: auriga.node.v1.Inventory.instances:type_name -> auriga.node.v1.InstanceStatus
-	8,  // 18: auriga.node.v1.Inventory.artifacts:type_name -> auriga.node.v1.CachedArtifact
-	0,  // 19: auriga.node.v1.InstanceStatus.phase:type_name -> auriga.node.v1.InstancePhase
-	1,  // 20: auriga.node.v1.InstanceStatus.restart_reasons:type_name -> auriga.node.v1.RestartReason
-	10, // 21: auriga.node.v1.InstanceStatus.error:type_name -> auriga.node.v1.InstanceError
-	33, // 22: auriga.node.v1.InstanceStatus.started_at:type_name -> google.protobuf.Timestamp
-	33, // 23: auriga.node.v1.InstanceStatus.updated_at:type_name -> google.protobuf.Timestamp
-	34, // 24: auriga.node.v1.InstanceStatus.unified_resource_reports:type_name -> auriga.resource.v1.UnifiedInstallationReport
-	35, // 25: auriga.node.v1.InstanceStatus.unified_guardian:type_name -> auriga.resource.v1.UnifiedGuardianState
-	33, // 26: auriga.node.v1.InstanceError.next_retry_at:type_name -> google.protobuf.Timestamp
-	33, // 27: auriga.node.v1.NodeUsage.sampled_at:type_name -> google.protobuf.Timestamp
-	12, // 28: auriga.node.v1.NodeUsage.node:type_name -> auriga.node.v1.NodeResources
-	13, // 29: auriga.node.v1.NodeUsage.instances:type_name -> auriga.node.v1.InstanceUsage
-	33, // 30: auriga.node.v1.WakeSchedule.next_wake_at:type_name -> google.protobuf.Timestamp
-	10, // 31: auriga.node.v1.CommandResult.error:type_name -> auriga.node.v1.InstanceError
-	31, // 32: auriga.node.v1.CommandResult.output:type_name -> auriga.node.v1.CommandResult.OutputEntry
-	2,  // 33: auriga.node.v1.LogChunk.stream:type_name -> auriga.node.v1.LogStream
-	33, // 34: auriga.node.v1.Welcome.server_time:type_name -> google.protobuf.Timestamp
-	36, // 35: auriga.node.v1.Welcome.heartbeat_interval:type_name -> google.protobuf.Duration
-	37, // 36: auriga.node.v1.ApplySpec.spec:type_name -> auriga.node.v1.InstanceSpec
-	21, // 37: auriga.node.v1.Command.restart:type_name -> auriga.node.v1.RestartCommand
-	22, // 38: auriga.node.v1.Command.snapshot:type_name -> auriga.node.v1.SnapshotCommand
-	23, // 39: auriga.node.v1.Command.restore:type_name -> auriga.node.v1.RestoreCommand
-	24, // 40: auriga.node.v1.Command.archive:type_name -> auriga.node.v1.ArchiveCommand
-	25, // 41: auriga.node.v1.Command.export:type_name -> auriga.node.v1.ExportCommand
-	26, // 42: auriga.node.v1.Command.tail_log:type_name -> auriga.node.v1.TailLogCommand
-	27, // 43: auriga.node.v1.Command.drain:type_name -> auriga.node.v1.DrainCommand
-	36, // 44: auriga.node.v1.RestartCommand.grace:type_name -> google.protobuf.Duration
-	36, // 45: auriga.node.v1.TailLogCommand.max_duration:type_name -> google.protobuf.Duration
-	38, // 46: auriga.node.v1.UpdateAgent.signed:type_name -> auriga.node.v1.SignedArtifact
-	3,  // 47: auriga.node.v1.NodeControlService.Session:input_type -> auriga.node.v1.SessionRequest
-	4,  // 48: auriga.node.v1.NodeControlService.Session:output_type -> auriga.node.v1.SessionResponse
-	48, // [48:49] is the sub-list for method output_type
-	47, // [47:48] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	32, // 7: auriga.node.v1.SessionRequest.msgnet_control_receipt:type_name -> auriga.node.v1.MsgnetControlReceipt
+	17, // 8: auriga.node.v1.SessionResponse.welcome:type_name -> auriga.node.v1.Welcome
+	18, // 9: auriga.node.v1.SessionResponse.apply:type_name -> auriga.node.v1.ApplySpec
+	19, // 10: auriga.node.v1.SessionResponse.delete:type_name -> auriga.node.v1.DeleteInstance
+	20, // 11: auriga.node.v1.SessionResponse.command:type_name -> auriga.node.v1.Command
+	28, // 12: auriga.node.v1.SessionResponse.policy:type_name -> auriga.node.v1.PolicyHint
+	29, // 13: auriga.node.v1.SessionResponse.update:type_name -> auriga.node.v1.UpdateAgent
+	33, // 14: auriga.node.v1.SessionResponse.msgnet_control_package:type_name -> auriga.node.v1.MsgnetControlPackage
+	34, // 15: auriga.node.v1.SessionResponse.msgnet_transport_bundle:type_name -> auriga.node.v1.MsgnetTransportBundle
+	35, // 16: auriga.node.v1.Hello.drivers:type_name -> auriga.node.v1.RuntimeKind
+	6,  // 17: auriga.node.v1.Hello.capacity:type_name -> auriga.node.v1.Capacity
+	30, // 18: auriga.node.v1.Hello.labels:type_name -> auriga.node.v1.Hello.LabelsEntry
+	36, // 19: auriga.node.v1.Hello.node_time:type_name -> google.protobuf.Timestamp
+	9,  // 20: auriga.node.v1.Inventory.instances:type_name -> auriga.node.v1.InstanceStatus
+	8,  // 21: auriga.node.v1.Inventory.artifacts:type_name -> auriga.node.v1.CachedArtifact
+	0,  // 22: auriga.node.v1.InstanceStatus.phase:type_name -> auriga.node.v1.InstancePhase
+	1,  // 23: auriga.node.v1.InstanceStatus.restart_reasons:type_name -> auriga.node.v1.RestartReason
+	10, // 24: auriga.node.v1.InstanceStatus.error:type_name -> auriga.node.v1.InstanceError
+	36, // 25: auriga.node.v1.InstanceStatus.started_at:type_name -> google.protobuf.Timestamp
+	36, // 26: auriga.node.v1.InstanceStatus.updated_at:type_name -> google.protobuf.Timestamp
+	37, // 27: auriga.node.v1.InstanceStatus.unified_resource_reports:type_name -> auriga.resource.v1.UnifiedInstallationReport
+	38, // 28: auriga.node.v1.InstanceStatus.unified_guardian:type_name -> auriga.resource.v1.UnifiedGuardianState
+	36, // 29: auriga.node.v1.InstanceError.next_retry_at:type_name -> google.protobuf.Timestamp
+	36, // 30: auriga.node.v1.NodeUsage.sampled_at:type_name -> google.protobuf.Timestamp
+	12, // 31: auriga.node.v1.NodeUsage.node:type_name -> auriga.node.v1.NodeResources
+	13, // 32: auriga.node.v1.NodeUsage.instances:type_name -> auriga.node.v1.InstanceUsage
+	36, // 33: auriga.node.v1.WakeSchedule.next_wake_at:type_name -> google.protobuf.Timestamp
+	10, // 34: auriga.node.v1.CommandResult.error:type_name -> auriga.node.v1.InstanceError
+	31, // 35: auriga.node.v1.CommandResult.output:type_name -> auriga.node.v1.CommandResult.OutputEntry
+	2,  // 36: auriga.node.v1.LogChunk.stream:type_name -> auriga.node.v1.LogStream
+	36, // 37: auriga.node.v1.Welcome.server_time:type_name -> google.protobuf.Timestamp
+	39, // 38: auriga.node.v1.Welcome.heartbeat_interval:type_name -> google.protobuf.Duration
+	40, // 39: auriga.node.v1.ApplySpec.spec:type_name -> auriga.node.v1.InstanceSpec
+	21, // 40: auriga.node.v1.Command.restart:type_name -> auriga.node.v1.RestartCommand
+	22, // 41: auriga.node.v1.Command.snapshot:type_name -> auriga.node.v1.SnapshotCommand
+	23, // 42: auriga.node.v1.Command.restore:type_name -> auriga.node.v1.RestoreCommand
+	24, // 43: auriga.node.v1.Command.archive:type_name -> auriga.node.v1.ArchiveCommand
+	25, // 44: auriga.node.v1.Command.export:type_name -> auriga.node.v1.ExportCommand
+	26, // 45: auriga.node.v1.Command.tail_log:type_name -> auriga.node.v1.TailLogCommand
+	27, // 46: auriga.node.v1.Command.drain:type_name -> auriga.node.v1.DrainCommand
+	39, // 47: auriga.node.v1.RestartCommand.grace:type_name -> google.protobuf.Duration
+	39, // 48: auriga.node.v1.TailLogCommand.max_duration:type_name -> google.protobuf.Duration
+	41, // 49: auriga.node.v1.UpdateAgent.signed:type_name -> auriga.node.v1.SignedArtifact
+	3,  // 50: auriga.node.v1.NodeControlService.Session:input_type -> auriga.node.v1.SessionRequest
+	4,  // 51: auriga.node.v1.NodeControlService.Session:output_type -> auriga.node.v1.SessionResponse
+	51, // [51:52] is the sub-list for method output_type
+	50, // [50:51] is the sub-list for method input_type
+	50, // [50:50] is the sub-list for extension type_name
+	50, // [50:50] is the sub-list for extension extendee
+	0,  // [0:50] is the sub-list for field type_name
 }
 
 func init() { file_auriga_node_v1_node_control_proto_init() }
@@ -2694,6 +2751,7 @@ func file_auriga_node_v1_node_control_proto_init() {
 		return
 	}
 	file_auriga_node_v1_spec_proto_init()
+	file_auriga_node_v1_msgnet_control_proto_init()
 	file_auriga_node_v1_node_control_proto_msgTypes[0].OneofWrappers = []any{
 		(*SessionRequest_Hello)(nil),
 		(*SessionRequest_Inventory)(nil),
@@ -2702,6 +2760,7 @@ func file_auriga_node_v1_node_control_proto_init() {
 		(*SessionRequest_Wake)(nil),
 		(*SessionRequest_Result)(nil),
 		(*SessionRequest_Log)(nil),
+		(*SessionRequest_MsgnetControlReceipt)(nil),
 	}
 	file_auriga_node_v1_node_control_proto_msgTypes[1].OneofWrappers = []any{
 		(*SessionResponse_Welcome)(nil),
@@ -2710,6 +2769,8 @@ func file_auriga_node_v1_node_control_proto_init() {
 		(*SessionResponse_Command)(nil),
 		(*SessionResponse_Policy)(nil),
 		(*SessionResponse_Update)(nil),
+		(*SessionResponse_MsgnetControlPackage)(nil),
+		(*SessionResponse_MsgnetTransportBundle)(nil),
 	}
 	file_auriga_node_v1_node_control_proto_msgTypes[3].OneofWrappers = []any{}
 	file_auriga_node_v1_node_control_proto_msgTypes[17].OneofWrappers = []any{
