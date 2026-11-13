@@ -2,7 +2,7 @@
 
 ## 1. 范围与依据
 
-本稿基于 `51beea24b3e42619f8d8b5879ba158176235fa87`，第7轮结合内部接入资料补充可切换复验策略及后续SSO边界，保留第6轮独审返工的Desktop、身份源写入、设备绑定及交付接线，沿用扫码现场实现和七项产品决定，供后续拆分实现。契约新增项均为草案，尚无运行时接线。审查等级 A，涉及 contracts，交主控标记【待审查】。
+本稿基于 `51beea24b3e42619f8d8b5879ba158176235fa87`，第8轮根据用户确认将token-verify设为默认复验策略，并落实续审N1–N4的故障分类与语义澄清，保留第6轮独审返工的Desktop、身份源写入、设备绑定及交付接线，沿用扫码现场实现和七项产品决定，供后续拆分实现。契约新增项均为草案，尚无运行时接线。审查等级 A，涉及 contracts，交主控标记【待审查】。
 
 本轮的用户要求是 UAC 扫码与团队账号并列，登录页归云端门户或 Desktop 外壳，插件继承身份。Desktop 可跳过并稍后登录，平台认证失败不得封锁本地 DSH。云端托管入口要求登录。桌面登录仅认证并返回当前 DSH，进入本人云端实例由门户现有工作空间流程负责。
 
@@ -10,13 +10,13 @@
 
 ### 1.1 现场协议与公开文档边界
 
-扫码取得token和工号即完成UAC登录。随后一次purpose=login_info的部门查询用于展示，失败只记WARN。到期的purpose=revalidate按部署策略执行：默认department查询判定失效，现场确认兼容后可切换token-verify。本设计保留用户最终规则，验收使用替身与日志断言。
+扫码取得token和工号即完成UAC登录。随后一次purpose=login_info的部门查询用于展示，失败只记WARN。到期的purpose=revalidate按部署策略执行：默认token-verify验证token，department部门查询保留为可切换备用策略。本设计保留用户最终规则，验收使用替身与日志断言。
 
-原型的接口主机、完整路径、系统标识、二维码编码及字段编解码保留在企业适配器私有配置。公开仓库只使用 `<qrVerifyPath>`、`<userSearchUrl>`、`<tokenVerifyUrl>` 和字段角色说明。适配器将本稿Uac挑战与上游报文互转，返回waiting/scanned、token、empNo和部门信息。来源文件、逐字段核对及原型与新规则差异记入未提交执行报告，企业专用细节不复制到公共契约。
+真实接口主机、完整路径和系统标识只存部署或企业适配器私有配置，扫码与部门查询的报文编解码细节也保留在私有适配器。公开仓库的地址只使用 `<qrVerifyPath>`、`<userSearchUrl>`、`<tokenVerifyUrl>` 占位符；token-verify按第2.4.3节公开通用字段名、请求头及摘要算法，不包含真实地址、注册编码或凭据。适配器将本稿Uac挑战与上游报文互转，返回waiting/scanned、token、empNo和部门信息。来源文件、逐字段核对及原型与新规则差异记入未提交执行报告，企业专用细节不复制到公共契约。
 
-第7轮还只读核对了内部UAC接入资料：其入口依赖公司域SSO Cookie，与现场扫码属于不同接入方式。资料中的真实主机、路径、Cookie名称和系统编码均不进入公开仓库。扫码兼容性尚不能由该资料证明，按第2.5节观察后切换。
+第7轮还只读核对了内部UAC接入资料：其入口依赖公司域SSO Cookie，与现场扫码属于不同接入方式。资料中的真实主机、路径、Cookie名称和系统编码均不进入公开仓库。用户已确认扫码取得的token被token验证接口接受，因此默认采用token-verify；clientIP取值、失败码及返回用户标识格式等继续按第2.5节现场观察。
 
-通用边界保持HTTPS、受信地址允许列表、禁止重定向、15秒扫码请求超时、3秒资料请求超时、2MiB响应上限、严格工号匹配及120秒挑战有效期。企业部署通过私有映射延续现场可用协议。
+通用边界保持HTTPS、受信地址允许列表、禁止重定向、15秒扫码请求超时、3秒资料请求超时、2MiB响应上限、按各协议限定的工号比对及120秒挑战有效期。企业部署通过私有映射延续现场可用协议。
 
 ### 1.2 当前 Auriga 接缝
 
@@ -36,7 +36,7 @@ baseUrl 必须 HTTPS、无 userinfo/query/fragment，按部署受信允许列表
 
 UAC配置只有 `/admin/providers/{providerId}/uac` 一个enabled/config写入口，底层复用同一Provider行、修订和ETag。通用PATCH含enabled或config时对UAC类型返回400 common.validation_failed，元数据变更仍可走通用入口。通用创建UAC类型时省略enabled取false，显式true或非空config拒绝，通用创建必须带config={}以满足ProviderInput必填，建立未配置占位实例时暂不执行完整连接器配置校验，随后唯一UAC写入口执行完整验证。未配置时UAC GET返回404，E通过通用Provider读取ETag后初始化关闭的配置表单，再经UAC接口配置并启用。其他连接器沿通用默认true，UAC界面明确默认关闭，不能将通用生成模型默认值当作UAC的服务器授权。实现保留原JSON字段存在性区分省略与显式值。
 
-baseUrl与systemCode由UAC管理接口保存，真实值只在受信部署数据库/企业配置中。完整扫码路径、资料URL、其他系统标识及报文字段映射由企业适配器私有配置注入。公开示例仅用占位符。通用配置读取与UAC读取使用同一事实源，停用与撤销在同一权威事务协调。
+baseUrl与systemCode由UAC管理接口保存，真实值只在受信部署数据库/企业配置中。完整扫码路径、资料URL、其他系统标识及扫码/部门查询报文字段映射由企业适配器私有配置注入。公开示例仅用占位符。通用配置读取与UAC读取使用同一事实源，停用与撤销在同一权威事务协调。
 
 新增 `/login/uac/challenges` API 明确区分 UAC 二维码。现有 QrStep 要求手机输入 matchCode，上游原型缺此交互，因此本稿新增 Uac schema，保留既有步骤完整定义。
 
@@ -85,9 +85,9 @@ IAM加密保存登录时取得的token和工号。在建立会话的同一数据
 
 复验配置由安装管理员在IAM的application.yaml中设置，作用于该部署全部UAC身份源。`auriga.iam.uac.revalidation.interval-seconds` 默认7200秒，默认值沿原型会话复验常量的两小时周期，核对记录见执行报告。合法值为整数60至86400秒，含边界。配置省略时使用默认值，非整数、负数和超界均拒绝启动并记录配置键。
 
-新增同前缀配置：`auriga.iam.uac.revalidation.strategy`为department（默认）或token-verify；`auriga.iam.uac.revalidation.retry-interval-seconds`默认30，合法整数5至300；`auriga.iam.uac.revalidation.max-retries`默认3，合法整数0至10，表示首次请求以外的重试次数。缺省使用默认，未知策略及非法数值拒绝启动。后两项仅用于token-verify运输故障，department始终单次失败撤销。参数形成同一配置修订，重试最大等待为retry-interval-seconds乘max-retries；默认首次之后最多重试3次，约在第30、60、90秒执行，单次HTTP超时另为3秒。
+新增同前缀配置：`auriga.iam.uac.revalidation.strategy`为token-verify（默认）或department（备用）；`auriga.iam.uac.revalidation.retry-interval-seconds`默认30，合法整数5至300；`auriga.iam.uac.revalidation.max-retries`默认3，合法整数0至10，表示首次请求以外的重试次数。缺省使用默认，未知策略及非法数值拒绝启动。后两项用于token-verify上游故障（含运输、HTTP及响应格式故障），department始终单次失败撤销。参数形成同一配置修订，重试最大等待为retry-interval-seconds乘max-retries；默认首次之后最多重试3次，约在第30、60、90秒执行，单次HTTP超时另为3秒。
 
-选择部署配置是因为周期与策略控制IAM后台调度，由运维统一调整便于多副本协调。修改通过部署配置更新及正常IAM滚动重启生效，多副本使用同一配置修订。既有会话已持久化的nextRevalidateAt保持原值，新会话及一次复验成功后的后续周期使用当时生效的周期配置，并持久化所用intervalSeconds及配置修订。每轮到期领取时持久化本轮strategy、重试参数和配置修订，进行中的重试不随滚动更新换策略或重置次数，下一轮才采用新策略。切换token-verify须先以现场日志确认扫码token能被验证接口接受，未确认继续department。回切也只影响下一轮，不能借切换清除失败预算。重启时直接读取存储的到期时间，禁止用进程启动时间重算期限。
+选择部署配置是因为周期与策略控制IAM后台调度，由运维统一调整便于多副本协调。修改通过部署配置更新及正常IAM滚动重启生效，多副本使用同一配置修订。既有会话已持久化的nextRevalidateAt保持原值，新会话及一次复验成功后的后续周期使用当时生效的周期配置，并持久化所用intervalSeconds及配置修订。每轮到期领取时持久化本轮strategy、重试参数和配置修订，进行中的重试不随滚动更新换策略或重置次数，下一轮才采用新策略。扫码token的接口兼容性已由用户确认，默认token-verify。部署方可显式切换到备用department，其单次失败撤销的取舍不变。策略切换只影响下一轮，不能借切换清除失败预算。重启时直接读取存储的到期时间，禁止用进程启动时间重算期限。
 
 调度器启动后和运行中只选择 `nextRevalidateAt <= now` 的有效会话。未来到期会话保持原时间，不能提前执行purpose=revalidate。信息性作业独立消费，避免混入复验到期队列。到期会话按nextRevalidateAt升序，每批最多50条，使用数据库租约领取，全部署同一provider最多4个并发查询。department策略下，同一tenant/provider、token哈希和工号的并行到期会话可以合并本轮查询，结果仅应用于已到期且认证代次未变的会话。token-verify按第2.4.3节的凭据版本串行，防止旋转竞争。
 
@@ -95,7 +95,7 @@ IAM加密保存登录时取得的token和工号。在建立会话的同一数据
 
 department策略以purpose=revalidate使用第2.4.2节查询，取得唯一工号严格匹配且非空的部门才成功；token-verify按第2.4.3节判定并替换token，不要求部门查询成功。成功时持久化lastRevalidatedAt，并原子更新 `nextRevalidateAt = lastRevalidatedAt + intervalSeconds`。该截止时间跨服务重启保留，复验成功不会延长平台会话或访问令牌自身期限。
 
-department策略判定性复验单次查不到部门立即判定token失效并撤销会话，包括HTTP/业务拒绝、无结果、员工号不符、重复匹配、空部门、超时、网络失败和畸形响应。日志分别记录原因，界面区分上游不可达与凭据拒绝。按用户要求，默认department策略purpose=revalidate的单次查询拿不到部门，包括超时、网络失败，就判定失效。这会导致UDS短暂不可达时全员被退出登录。已激活共享资源的Desktop用户还会触发guardian停止整个DSH进程树、隔离共享内容，再以private_only重新启动，原有任务可能中断且需新会话。这是当前采用的已知取舍，现场日志重点观察，以后有更好的方案再改。
+department策略判定性复验单次查不到部门立即判定token失效并撤销会话，包括HTTP/业务拒绝、无结果、员工号不符、重复匹配、空部门、超时、网络失败和畸形响应。日志分别记录原因，界面区分上游不可达与凭据拒绝。部署方选择备用department策略后，purpose=revalidate的单次查询拿不到部门，包括超时、网络失败，就判定失效。这会导致UDS短暂不可达时全员被退出登录。已激活共享资源的Desktop用户还会触发guardian停止整个DSH进程树、隔离共享内容，再以private_only重新启动，原有任务可能中断且需新会话。这是备用department策略的已知取舍，现场日志重点观察，以后有更好的方案再改。
 
 失效立即停止关联平台能力并撤销对应session/device grant，原子提交权威状态及outbox，传播到edge、外壳和旧HTTP/WS连接。撤销失败须重试和告警，本地先停平台能力，旧结果不能复活新身份。用户重新扫码取得token和工号后建立新会话及其新的nextRevalidateAt。
 
@@ -105,7 +105,7 @@ department策略判定性复验单次查不到部门立即判定token失效并�
 
 IAM在UAC会话创建时分配单调递增authGeneration。设备人工核码批准时，服务器从批准者权威会话读取sourceSessionId、authGeneration和providerId，持久化到grant及旋转refresh-token家族，响应与设备JWT可带只读uacSessionBinding。浏览器、插件和OAuth请求不能指定这些字段。这些关联字段在通用DTO中为可选以兼容非UAC设备，UAC来源grant若缺完整绑定必须拒绝兑换或刷新，不能降级当作非UAC授权。设备授权仍要求人工核码，扫码完成平台身份认证后还需这一步确认。
 
-token-verify尚在有界网络重试预算内时，来源会话仍为有效，绑定设备可按原期限刷新，不因一次运输错误拒绝；预算耗尽或明确失效后立即拒绝。权威会话检查同时核对retryDeadline，超过截止即拒绝平台请求与刷新并排队撤销，不能等待后台调度恢复才停权。重试不得延长平台会话、设备凭据的原有最大期限。
+token-verify尚在有界上游故障重试预算内时，来源会话仍为有效，绑定设备可按原期限刷新，不因一次上游故障拒绝；预算耗尽或明确失效后立即拒绝。权威会话检查同时核对retryDeadline，超过截止即拒绝平台请求与刷新并排队撤销，不能等待后台调度恢复才停权。重试不得延长平台会话、设备凭据的原有最大期限。
 
 每次初始兑换、刷新、换取AI/网络等audience凭据时，IAM重新校验来源会话未过期/撤销、认证代次相同、provider和成员可用，再验证device/client/scope。UAC复验失败、会话退出/过期、成员停用、身份源关闭均撤销绑定grant/refresh家族，旧认证代次的刷新立即拒绝。复验任务即使只从来源会话开始，也必须沿绑定索引覆盖所有设备。
 
@@ -127,21 +127,27 @@ IAM通过受信私有配置的 `POST <tokenVerifyUrl>` 调用验证接口，沿�
 
 clientIP由部署私有配置决定为空字符串或固定的服务端出口地址，必须现场确认哪种被接受。不得采信任意X-Forwarded-For；将来采用真实客户端地址时只能经过受信代理解析。token、verifyCode、摘要拼接原文、clientIP实际值及orgId不进入普通日志。真实地址、编码和Cookie名只来自私有配置。
 
-HTTP 200且JSON `code.code == "0000"`、`bo.code == "0000"`同时成立才成功。任一已解析业务码非成功即失败，不硬编码某个特定失败码。成功还须bo.user与已验证account严格一致，bo.token为非空且在长度限制内；bo.orgId为可选资料，不授予成员权限。响应缺码、畸形、主体不符、缺新token及非预期HTTP 3xx/4xx为协议失败并撤销。HTTP 5xx即使带业务body仍按运输故障处理，不将其body冒充确定业务拒绝。HTTP 429按运输故障进入同一有限预算，不无限遵从Retry-After。
+token-verify按以下顺序分类，先检查HTTP与响应结构，不能只凭某一个可解析code就撤销：
+
+- 明确业务失败：只有HTTP 200、合法JSON且code.code和bo.code两层返回码齐全（均为非空字符串），其中任一不是成功码"0000"，才立即判失效并撤销，reason=revalidation_rejected、failureClass=business_rejected。不硬编码某个特定失败码。
+- 上游故障：HTTP 3xx、4xx（包括401/403/429）、5xx、超时、网络错误、非JSON/畸形JSON、超大响应、缺少任一层返回码或码类型非法，一律不立即判失效，failureClass=upstream_fault，进入下述同一有界重试预算。非200即使body带失败码也属于上游故障；禁止跟随重定向，不无限遵从Retry-After。
+- 成功候选：HTTP 200、合法JSON且 `code.code == "0000"`、`bo.code == "0000"`同时成立后，再校验bo.user和bo.token。bo.user必须为字符串、去首尾空白后非空且不超过128字符，bo.token必须为非空字符串且不超过16384字符；缺失、空值、非法类型或超长均为上游响应故障，进入同一预算，不能以不完整成功报文续期或覆盖旧token。bo.orgId为可选资料，不授予成员权限。
+
+成功候选中的bo.user与已验证account均去首尾空白，并按与语言环境无关的ASCII大小写折叠进行比对（仅A–Z转a–z），允许工号大小写及首尾空白差异。保留前导零，不转数字，不猜测长短工号或其他格式映射，也不改写第2.3节持久化身份主键。两个非空有效标识归一化后仍不一致，视为明确身份失败并立即撤销，reason=revalidation_rejected、failureClass=identity_mismatch；此项是完整成功码响应的额外主体校验，不将缺失用户字段当作明确失败。日志记录比对规则版本、匹配结果和工号，字段原文仍遵守第9节脱敏。
 
 成功原子加密保存bo.token替换旧token（允许新旧相同），递增credentialVersion，写lastRevalidatedAt并推进nextRevalidateAt，清除重试记录；bo.orgId不写日志，也不替代登录时部门展示。IAM持久化凭据记录及session引用，同一tenant/provider/account及同一来源token的会话共享该凭据版本。每个凭据记录用数据库租约串行验证，HTTP前读取版本、提交时CAS校验版本和认证代次，旧响应不能覆盖新token。只推进本轮已到期会话的复验时间；未来到期会话仅引用新的凭据版本，不提前作判定性复验。不同tenant/provider不合并。登录信息查询若读取旧版本晚返回，仅可补同代会话展示，其失败仍不撤销、不覆盖token。
 
-超时、网络错误、HTTP 5xx/429不立即判失效：记录WARN及retry_pending，保持原会话/设备绑定有效，不发送revoked，也不预写nextRevalidateAt。首次故障同事务持久化attempt、retryAt、retryDeadline、strategy/configRevision与凭据版本，retryDeadline=首次故障时间+间隔乘最大重试数+一次请求超时。此后按配置间隔重试，最多max-retries次；达到次数或截止时间仍未成功则撤销，reason=revalidation_unreachable。max-retries=0表示首次运输故障立即耗尽。重启、租约接管、排队及配置切换不得重置次数/截止；截止后恢复的工作者直接处理耗尽，不重新获得宽限。始终优先服从会话自身过期、用户退出和管理员停用。
+上述所有上游故障均不立即判失效：记录WARN及retry_pending，保持原会话/设备绑定有效，不发送revoked，也不预写nextRevalidateAt。首次故障同事务持久化attempt、retryAt、retryDeadline、strategy/configRevision与凭据版本，retryDeadline=首次故障时间+间隔乘最大重试数+一次请求超时。此后按配置间隔重试，最多max-retries次；达到次数或截止时间仍未成功则撤销，reason=revalidation_unreachable。max-retries=0表示首次上游故障立即耗尽。重启、租约接管、排队及配置切换不得重置次数/截止；截止后恢复的工作者直接处理耗尽，不重新获得宽限。始终优先服从会话自身过期、用户退出和管理员停用。
 
 重试领取同时检查retryAt已到达且未超过retryDeadline，仍使用数据库租约及provider并发上限。原nextRevalidateAt已到期不能绕过retryAt反复领取；初次到期抖动只应用一次，不在每次重试重新抽取。次数在出站前持久化递增，领取后崩溃不能获得额外尝试。截止时仍在途的成功响应也必须通过截止、会话代次和凭据版本CAS校验，超期不能复活会话。
 
-重试若收到明确非成功业务码立即撤销，reason=revalidation_rejected。失败原因记录transport_error、protocol_error、business_rejected或retry_exhausted。超时可能发生在上游已旋转token但我方尚未持久化之后，重试旧token可能被拒而要求重登；本设计不宣称上游幂等或网络故障永远无感。现场观察token是否每次更换及旧token宽限，确认前只使用department默认策略。多副本并发、崩溃后旋转不确定性及保存失败必须以替身验证，不允许用失效旧响应恢复已撤销会话。
+重试若收到符合上述条件的明确业务失败，或成功候选中的有效用户标识归一化后不匹配，立即撤销，reason=revalidation_rejected。日志以failureClass区分business_rejected、identity_mismatch、upstream_fault、retry_exhausted；upstream_fault再以faultReason区分transport_error、http_error、invalid_json、missing_code、invalid_code和invalid_success_payload，保留httpStatus及安全业务码。超时可能发生在上游已旋转token但我方尚未持久化之后，重试旧token可能被拒而要求重登；本设计不宣称上游幂等或网络故障永远无感。现场继续观察token是否每次更换及旧token宽限，默认策略仍为已确认兼容的token-verify。多副本并发、崩溃后旋转不确定性及保存失败必须以替身验证，不允许用失效旧响应恢复已撤销会话。
 
 ### 2.5 替身验收与现场日志重点观察项
 
 测试使用随机回环端口的协议替身，由测试显式注入transport，使用合成token和工号，结束关闭服务。登录替身覆盖waiting/scanned/success/denied/expired、成功码缺token或工号、错误业务码、HTTP错误、畸形及超大响应、并发complete、响应丢失、停用与到期晚响应。成功扫码后立即建立会话。验收“登录时部门查询成功并记录”和“登录时部门查询失败仍登录成功且nextRevalidateAt不变”，包括空部门、HTTP/业务错误、超时、网络失败、畸形响应及资料写入失败。正常完整登录流程purpose=login_info调用恰好1次，重复complete不增加次数，失败仅写WARN且不发session_revoke。
 
-采用可控时钟验证登录信息查询恰好1次、初次周期内purpose=revalidate调用为0、nextRevalidateAt持久化，重启仅领取到期复验会话，到期边界、批次抖动、多副本租约、成功复验后推进期限和失败后撤销。复验替身覆盖唯一匹配部门、工号不符/多条、空部门、HTTP/业务错误、超时、网络失败及畸形响应。默认department策略purpose=revalidate的上述失败立即撤销，部门查询不重试。token-verify替身覆盖双层成功码及任一非成功码、未知失败码、clientIP大小写、UTF-8无分隔MD5小写摘要、前端编码不能覆盖后端、bo.user不匹配、bo.token缺失及原子替换。验证网络失败/超时/5xx不失效且设备仍可刷新、后续成功清预算、新token相同/不同、明确失败立即撤销、次数/时间上限耗尽撤销、重启不重置预算及并发/晚响应不能覆盖新token。MD5夹具只用合成值，验收是后续A实现要求，本PR不冒充已实现。日志断言核对两条链的purpose、级别、动作和关联，真实UDS联调不作为设计及后续迁移实现的验收门禁。
+采用可控时钟验证登录信息查询恰好1次、初次周期内purpose=revalidate调用为0、nextRevalidateAt持久化，重启仅领取到期复验会话，到期边界、批次抖动、多副本租约、成功复验后推进期限和失败后撤销。复验替身覆盖唯一匹配部门、工号不符/多条、空部门、HTTP/业务错误、超时、网络失败及畸形响应。备用department策略purpose=revalidate的上述失败立即撤销，部门查询不重试。token-verify替身覆盖双层成功码及任一非成功码、未知失败码、clientIP大小写、UTF-8无分隔MD5小写摘要、前端编码不能覆盖后端、bo.user大小写/首尾空白差异仍匹配、有效标识归一化后仍不匹配立即撤销、bo.user/bo.token缺失进入故障预算及原子替换。验证默认token-verify；网络失败/超时、3xx/4xx/5xx（包括代理401/403及429，即使body有失败码）、HTTP200非JSON、缺任一层码、非法码类型和不完整成功字段均不立即失效且设备仍可刷新、后续成功清预算、新token相同/不同、明确失败立即撤销、次数/时间上限耗尽撤销、重启不重置预算及并发/晚响应不能覆盖新token。MD5夹具只用合成值，验收是后续A实现要求，本PR不冒充已实现。日志断言核对两条链的purpose、级别、动作和关联，真实UDS联调不作为设计及后续迁移实现的验收门禁。
 
 现场部署后重点观察以下项目，用户回传脱敏诊断包后据事实调整。
 
@@ -149,7 +155,7 @@ HTTP 200且JSON `code.code == "0000"`、`bo.code == "0000"`同时成立才成功
 - 扫码验证占位路径的配置修订、HTTP状态和业务码，systemCode配置修订、originSystemCode是否为空、MD5输入字段存在性。日志省略实际签名输入和二维码坐标。
 - 登录时token/工号字段的实际分支、token哈希前缀及扫码耗时。
 - 资料源标识及路径、purpose、HTTP/业务结果、列表分支、匹配数量、dept字段分支与departmentPresent。日志省略姓名、部门全称和完整响应中的个人值。
-- 扫码token是否被token验证接口接受，clientIP为空或服务端出口地址是否通过，双层失败码实际取值，新token是否每次更换、旧token是否有宽限。诊断只比较哈希前缀与存在性，不回传原token或地址。
+- clientIP为空或服务端出口地址是否通过，双层失败码实际取值，新token是否每次更换、旧token是否有宽限，以及验证接口返回的用户标识与工号的格式是否一致（包括长短工号差异）。诊断只比较哈希前缀与存在性，不回传原token或地址。
 - 云端SSO Cookie的Domain/Path/Secure是否覆盖门户后端、私有Cookie映射、注册回跳地址是否可用，是否满足第7节后续增强前提。
 - 实际复验strategy、重试预算/attempt/retryAt/retryDeadline、tokenReplaced、复验周期、nextRevalidateAt、重启领取的到期会话、批量抖动与dueLagMs、失效原因、撤销传播时间，多副本重复或晚响应情况。
 - 手机目标系统展示差异、员工号变更/回收、网络出口/代理/TLS故障、响应结构变化与速率限制。观测资料作为现场修正依据。
@@ -213,7 +219,7 @@ Windows通过第3.2.1节helper使用禁远程访问的命名管道，DACL 仅当
 - ShellAuthSnapshot 包含 shellEpoch、单调 revision、state、expiresAt，可选 identity/reason。identity 绑定 tenant/member/device/provider，empNo 可选。authenticated 必须包含当前 identity。expiresAt 为快照使用截止，最长30秒且不能超过平台凭据有效期；订阅每10秒重发当前快照或客户端到期前重取，属于本地健康检查。signed_out/authenticating/revoked 不含 identity。unreachable/reauth_required 可保留上次脱敏 identity 供显示，不授予平台操作。
 - ShellAuthEvent 含 requestId、type，snapshot/changed 必须包含 snapshot，error 必须有白名单 code，ack 确认动作已接受。退出完成以 signed_out/revoked 快照为准。订阅主动事件 requestId 使用订阅命令 id。消费方按 epoch/revision 丢弃旧事件，重连先 snapshot，再订阅，服务端原子注册并补发当前快照消除间隙。
 - requestId 在同 epoch 内幂等，缓存有界保存至命令到期，同一 id 不同内容拒绝。logout 必须先本地停权、递增 revision，再排队远程撤销。网络失败不恢复本地身份，重新登录生成新代次，旧排队撤销只针对旧设备/会话。
-- reason新增revalidation_rejected、revalidation_unreachable、user_logout、admin_disabled和member_disabled，保留source_disabled表示身份源关闭。明确拒绝的复验、department单次不可达或token-verify重试耗尽、管理员/成员停用及来源关闭映射revoked，用户退出完成映射signed_out；token-verify运输故障仍在预算内时保持authenticated，不发revoked，用安全状态说明正在重试；普通平台网络断开映射unreachable/offline，信息性查询失败只更新uacLoginInfo，不把认证改为revoked。界面按白名单原因显示。
+- reason新增revalidation_rejected、revalidation_unreachable、user_logout、admin_disabled和member_disabled，保留source_disabled表示身份源关闭。明确拒绝的复验、department单次不可达或token-verify重试耗尽、管理员/成员停用及来源关闭映射revoked，用户退出完成映射signed_out，reason=user_logout；user_action保留为旧草案的通用用户操作值，仅供消费方识别历史消息，不能据此推断已退出，当前生产方不再发出该值；token-verify上游故障仍在预算内时保持authenticated，不发revoked，用安全状态说明正在重试；普通平台网络断开映射unreachable/offline，信息性查询失败只更新uacLoginInfo，不把认证改为revoked。界面按白名单原因显示。
 - broker 重启生成新 epoch，所有订阅失效。插件在管道断开或快照 expiresAt 到期立即停平台能力，重连读取权威状态。本地 owner 保持可用。时间使用 UTC 与本地单调截止双重限制，禁止时钟回拨延长快照有效期。
 - open_login 只拉起配置指定的外壳入口，不接受 URL。cancel_login 只取消本命令对应发起窗口的尝试。多窗口共享同一 DSH owner 的平台身份，关闭一个窗口不撤销其他窗口。
 
@@ -253,7 +259,7 @@ Windows通过第3.2.1节helper使用禁远程访问的命名管道，DACL 仅当
 
 ### 5.1 管理台配置与会话恢复
 
-复验策略、周期和token-verify重试采用第2.4节部署配置，默认department、7200秒（整数60至86400）、30秒间隔（整数5至300）及最多3次重试（整数0至10），管理台配置页提供配置位置、范围及重启生效说明。工作线E维护该说明，工作线A负责IAM配置绑定、会话nextRevalidateAt持久化及到期调度。UDS临时故障使已到期会话的单次部门查询失败时立即撤销平台会话，用户在外壳重新扫码登录，按新登录时间重新安排nextRevalidateAt，本地DSH权限沿本节处理。确认扫码token兼容后可切token-verify，短暂运输故障保持会话，在预算内自动恢复，明确失败或预算耗尽才要求重登。
+复验策略、周期和token-verify重试采用第2.4节部署配置，默认token-verify、7200秒（整数60至86400）、30秒间隔（整数5至300）及最多3次重试（整数0至10），管理台配置页提供配置位置、范围及重启生效说明。工作线E维护该说明，工作线A负责IAM配置绑定、会话nextRevalidateAt持久化及到期调度。默认token-verify的上游故障保持会话并在预算内自动重试；明确业务/身份失败或预算耗尽后才要求重登。部署方切到备用department后，已到期会话的单次部门查询失败仍立即撤销。重新扫码按新登录时间安排nextRevalidateAt，本地DSH权限沿本节处理。
 
 ## 6. 安全与验收要求
 
@@ -286,7 +292,7 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 
 ### 工作线 A，IAM UAC 身份源
 
-文件范围为 services/iam/api、impl 的连接器/登录/会话，企业适配器模块，以及 services/org 的成员关联策略接口。contracts 的进一步变动由主控统一协调。依赖AUTH-K。验收包括三语言生成、严格员工映射/邀请关联、复验/撤销、共享存储并发消费、RLS和跨租户负例。复验调度测试覆盖第2.4节周期、strategy及重试配置的默认值、上下界、非法值拒绝，以及配置修订和滚动重启生效。可控时钟验证nextRevalidateAt持久化、初次周期内零判定性复验、仅领取到期会话、重启保留期限、抖动分批、租约崩溃接管及成功后更新期限。配置与邀请提交失败可安全重试，单个挑战最多创建一个session。按最新流程迁移挑战与扫码取token/工号，登录后执行一次login_info信息查询，到期按department/token-verify策略执行revalidate，并以替身逐项断言调用次数、purpose、日志与脱敏。A同时负责第9节IAM日志、安全诊断序列化器、audit和OpsSignals接线，以及IAM诊断下载控制器、web/admin按钮所需接口和deploy/compose、deploy/nas观测发布接线。导出单独对接现有audit读取与Loki受信查询，避免新增公网日志采集入口。
+文件范围为 services/iam/api、impl 的连接器/登录/会话，企业适配器模块，以及 services/org 的成员关联策略接口。contracts 的进一步变动由主控统一协调。依赖AUTH-K。验收包括三语言生成、严格员工映射/邀请关联、复验/撤销、共享存储并发消费、RLS和跨租户负例。复验调度测试覆盖第2.4节周期、strategy及重试配置的默认值、上下界、非法值拒绝，以及配置修订和滚动重启生效。可控时钟验证nextRevalidateAt持久化、初次周期内零判定性复验、仅领取到期会话、重启保留期限、抖动分批、租约崩溃接管及成功后更新期限。配置与邀请提交失败可安全重试，单个挑战最多创建一个session。按最新流程迁移挑战与扫码取token/工号，登录后执行一次login_info信息查询，到期默认按token-verify执行revalidate，显式配置department时走备用查询，并以第2.5节替身逐项断言调用次数、purpose、明确失败/上游故障分类、有界重试、用户标识归一化、新token替换、日志与脱敏。A同时负责第9节IAM日志、安全诊断序列化器、audit和OpsSignals接线，以及IAM诊断下载控制器、web/admin按钮所需接口和deploy/compose、deploy/nas观测发布接线。导出单独对接现有audit读取与Loki受信查询，避免新增公网日志采集入口。
 
 ### 工作线 B，门户登录和 edge
 
@@ -302,7 +308,7 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 
 ### 工作线 E，管理台配置
 
-范围为 web/admin/src/views/IdentityProvidersView.vue、admin/providersApi、providersForm、providersMessages 与对应测试。依赖 A 配置 API、B 共享 UI。管理台说明扫码入口、默认department策略、切换token-verify的现场条件及第2.4节周期/重试部署配置的默认值和合法范围，工作线A负责实际配置绑定。验收开关/baseUrl/systemCode、ETag冲突、权限和CSRF、启用前错误提示、关闭后会话失效，普通成员不能读取或修改配置。E负责配置页的详细诊断开关、自动到期状态、correlationId及诊断下载按钮，调用AUTH-K定义、A实现的接口。测试断言开关默认关闭、脱敏响应和权限拒绝。
+范围为 web/admin/src/views/IdentityProvidersView.vue、admin/providersApi、providersForm、providersMessages 与对应测试。依赖 A 配置 API、B 共享 UI。管理台说明扫码入口、默认token-verify及备用department策略、上游故障与明确失败的行为区别及第2.4节周期/重试部署配置的默认值和合法范围，工作线A负责实际配置绑定。验收开关/baseUrl/systemCode、ETag冲突、权限和CSRF、启用前错误提示、关闭后会话失效，普通成员不能读取或修改配置。E负责配置页的详细诊断开关、自动到期状态、correlationId及诊断下载按钮，调用AUTH-K定义、A实现的接口。测试断言开关默认关闭、脱敏响应和权限拒绝。
 
 每线经针对性测试形成可部署产物通知主控，由主控串行安排开发环境部署与正常入口验收。本稿交付物是可审阅文件，实施部署属于后续派工。
 
@@ -312,7 +318,7 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 
 后续B/A协作：门户后端读取请求Cookie，通过私有映射取account/token，后端计算verifyCode并按第2.4.3节调验证接口，校验双层成功码、工号及新token，再执行现有成员策略建立我方会话。Cookie只在服务端读取，前端不读取/存储/提交UAC token，不直接信任Cookie，不透传UAC原始响应给前端；返回我方受保护会话与脱敏状态。成功会话沿用信息性部门查询和复验调度，进入正常门户实例流程。CSRF/Origin、登录事务绑定、Cookie固定及身份切换防护继续适用，回跳只允许注册的准确地址，登录失败可回扫码入口。Cookie名称、域、系统编码及跳转地址只从私有配置获取。
 
-待现场确认Cookie确实到达后端、扫码/SSO两种token的可验证性、clientIP取值、系统注册编码及回跳行为，再由AUTH-K补契约并经独审派实现。不得复制内部示例中的前端原文透传、会话存储token或仅靠浏览器标志放行的做法。
+待现场确认Cookie确实到达后端、SSO Cookie中token的可验证性、clientIP取值、系统注册编码及回跳行为，再由AUTH-K补契约并经独审派实现。不得复制内部示例中的前端原文透传、会话存储token或仅靠浏览器标志放行的做法。
 
 ## 8. 已决定
 
@@ -320,10 +326,10 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 
 1. 首次成员关联仅允许管理员核实员工号、双认证绑定或有效邀请，默认关闭自动入团队注册，避免自填员工号接管既有账号。
 2. UAC Desktop首期沿现有RFC8628人工核码，沿当前受限设备授权边界取得device-only凭据。
-3. 扫码取得token和工号即完成UAC登录，随后一次purpose=login_info部门查询只补充展示，失败仅WARN，不影响登录或nextRevalidateAt。复验周期默认7200秒，可通过第2.4节部署配置调整。每个会话持久化nextRevalidateAt，到期后按部署策略执行purpose=revalidate，默认department单次查不到部门立即撤销；现场确认兼容后可选token-verify，运输故障按有界预算重试，明确拒绝或耗尽撤销。服务重启仅处理已到期复验会话，日志分别记录网络与业务原因，本地DSH能力保持可用。
+3. 扫码取得token和工号即完成UAC登录，随后一次purpose=login_info部门查询只补充展示，失败仅WARN，不影响登录或nextRevalidateAt。复验周期默认7200秒，可通过第2.4节部署配置调整。每个会话持久化nextRevalidateAt，到期后按部署策略执行purpose=revalidate，默认token-verify（扫码token兼容性已由用户确认），上游故障按有界预算重试，完整响应中的明确业务/身份失败或预算耗尽撤销；department保留为备用，单次查不到部门立即撤销。服务重启仅处理已到期复验会话，日志分别记录网络与业务原因，本地DSH能力保持可用。
 4. 已激活共享内容的退出/跨身份切换采用受控停止、隔离和新会话，避免旧身份内容残留在上下文。普通补登录通过快照推送生效。
 5. broker源码归C的clients/shell-auth/，Desktop与独立插件携带同一版本制品，目录及D线唯一打包职责按第3.2.1节执行。
-6. 企业适配器留私有模块，真实路径、主机、系统标识及编解码来自受信私有配置，公共仓库使用占位符和通用Uac/ShellAuth契约。
+6. 企业适配器留私有模块，真实路径、主机、系统标识及扫码/部门查询编解码来自受信私有配置；token-verify通用字段名、请求头及摘要算法按第2.4.3节公开，公共仓库地址使用占位符并采用通用Uac/ShellAuth契约。
 7. UAC先限定受信团队试用。第6节明确公开扫码坐标的上游token泄露风险和门户缺少额外核对的边界，Desktop设备授权保留人工核码，日志观察不能替代防劫持能力。
 
 ## 9. 日志与一键导出诊断包
@@ -339,7 +345,7 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 - timestamp为UTC RFC3339，service、level、stage、phase、result，durationMs为本阶段耗时，start事件为0。
 - correlationId为我方生成的本次认证/复验操作ID，eventId唯一，transactionId在存在时记录，pollId/attempt区分轮询与重试，parentCorrelationId连接复验、撤销或跨壳操作。
 - trace_id、spanId沿docs/dev/observability.md接线，requestId沿现有edge/common链。后台复验创建新trace，显式关联已存操作ID，不复用过期HTTP span。对UDS的出站不添加内部身份或秘密追踪头。
-- tenantId、providerId、configRevision、empNo及chain，tokenHashPrefix在token存在时记录，tokenMissing仅用于登录凭据解析诊断。每个department_lookup/token_verify的start/end及对应审计均必填purpose，值为login_info或revalidate，并记录departmentPresent、匹配条数和字段分支。会话创建与复验事件记录nextRevalidateAt、实际intervalSeconds，调度事件记录dueLagMs；session_revalidate/token_verify及审计记录strategy、credentialVersion、tokenReplaced、attempt/maxRetries、retryAt/retryDeadline、retry_pending/retry_exhausted，替换前后仅记oldTokenHashPrefix/newTokenHashPrefix。所有这些是JSON字段，禁止作为Loki高基数标签。
+- tenantId、providerId、configRevision、empNo及chain，tokenHashPrefix在token存在时记录，tokenMissing仅用于登录凭据解析诊断。每个department_lookup/token_verify的start/end及对应审计均必填purpose，值为login_info或revalidate，并记录departmentPresent、匹配条数和字段分支。会话创建与复验事件记录nextRevalidateAt、实际intervalSeconds，调度事件记录dueLagMs；session_revalidate/token_verify及审计记录strategy、credentialVersion、tokenReplaced、attempt/maxRetries、retryAt/retryDeadline、retry_pending/retry_exhausted，替换前后仅记oldTokenHashPrefix/newTokenHashPrefix；以failureClass/faultReason区分明确业务/身份失败与上游故障，前者立即撤销，后者在预算内只重试，另记identityComparisonVersion和identityMatched。所有这些是JSON字段，禁止作为Loki高基数标签。
 - endpoint为固定路由模板和受信源别名，httpStatus、udsCode、udsSubCode、udsMessage、transportError、responseBytes。UDS错误消息先按第9.2节脱敏。challenge_start等无HTTP阶段保持httpStatus/udsCode为null，token_acquire可继承本轮上游HTTP状态。
 
 阶段结果为success、waiting、scanned、failure、expired、cancelled。撤销日志区分requested/committed/propagated，记录目标epoch或修订与关闭连接结果，确保能判断“已判失效但停权尚未完成”。首个失败原因保留，后续重试另写attempt。正常阶段INFO，失败WARN，意外内部异常ERROR，详细原始响应结构DEBUG。login_info的HTTP、业务、解析及资料写入失败统一为WARN并记reason，chain=login的认证结果保持success，不产生会话撤销。
@@ -362,7 +368,7 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 
 IAM/edge在现有JSON stdout输出阶段日志，NAS与compose的observability/config.alloy已按compose project发现容器并送Loki。沿用service/container/job低基数标签，以JSON字段查询correlationId或trace_id。Desktop broker复用本机Auriga脱敏日志sink，托管插件沿现有容器日志或auriga-dsh-*.jsonl只读导入点采集，命名及轮转沿docs/dev/observability.md。Desktop日志仅在用户主动导出时打包到诊断包。链路验证分别断言本地落盘、Alloy接收、Loki查询与缺源提示。
 
-IAM在复验失败、上游持续不可达、撤销传播失败时通过既有OpsSignals.observe按tenant/provider聚合告警，恢复时写active=false，source拟定为iam_uac，subject为providerId。连续不可达60秒或撤销传播30秒未完成触发warning，department失败及token-verify明确拒绝/预算耗尽立即停权，与告警阈值分别处理；token-verify预算内的运输故障仅告警及重试，不撤销会话。audit记录所有失败及恢复，ops不按工号/token建告警。沿既有去重、静默与通知渠道，消息只含分类和关联ID。
+IAM在复验失败、上游持续不可达、撤销传播失败时通过既有OpsSignals.observe按tenant/provider聚合告警，恢复时写active=false，source拟定为iam_uac，subject为providerId。连续不可达60秒或撤销传播30秒未完成触发warning，department失败及token-verify明确拒绝/预算耗尽立即停权，与告警阈值分别处理；token-verify预算内的上游故障仅告警及重试，不撤销会话。audit记录所有失败及恢复，ops不按工号/token建告警。沿既有去重、静默与通知渠道，消息只含分类和关联ID。
 
 ### 9.4 现场诊断下载与Desktop导出
 
@@ -382,7 +388,7 @@ Desktop诊断包保存到用户指定目录，服务器诊断包通过已认证�
 
 A与E交付前用同一替身分别测试登录链、到期复验链和撤销链。登录信息查询成功时，断言记录部门及更新时间，当前会话的界面投影status=available且正常登录链purpose=login_info调用恰好1次。登录信息查询失败时，断言登录仍成功、展示status=unavailable、分类WARN、无撤销，nextRevalidateAt与登录事务提交值严格相等，调用也恰好1次。重复complete和资料读取不增加调用，过期会话或旧身份的晚响应不写入新身份。
 
-使用可控时钟断言周期内purpose=revalidate调用为0。重启仅领取已到期复验会话，未来到期会话保留原时间，独立信息查询作业按其持久状态恢复。到期后才出现purpose=revalidate的session_revalidate及按strategy选择的department_lookup/token_verify；department成功推进期限，单次失败撤销。token-verify成功原子替换token并推进期限，运输故障不推进期限也不撤销，明确失败或预算耗尽撤销。复验使用独立correlationId，通过parentCorrelationId与原登录关联，部门查询不复用登录pollId。两种purpose各自断言HTTP/UDS码、分类、级别、审计action及脱敏诊断包计数。
+使用可控时钟断言周期内purpose=revalidate调用为0。重启仅领取已到期复验会话，未来到期会话保留原时间，独立信息查询作业按其持久状态恢复。到期后才出现purpose=revalidate的session_revalidate及按strategy选择的department_lookup/token_verify；department成功推进期限，单次失败撤销。token-verify成功原子替换token并推进期限，上游故障不推进期限也不撤销，完整响应中的明确业务/身份失败或预算耗尽撤销。复验使用独立correlationId，通过parentCorrelationId与原登录关联，部门查询不复用登录pollId。两种purpose各自断言HTTP/UDS码、分类、级别、审计action及脱敏诊断包计数。
 
 详细开关默认关闭、启用/自动到期/重启关闭均需测试，关闭时无udsRawSanitized。开启时字段结构可诊断，任意嵌套秘密和个人值不可见。audit和ops必须断言实际接收的脱敏字段，Alloy/Loki局部测试使用本机替身或隔离采集器验证配置和查询，不访问真实部署。
 
