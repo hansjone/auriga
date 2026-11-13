@@ -1,0 +1,25 @@
+{
+  "now": "2026-11-13T00:00:00Z",
+  "binding": {
+    "osUser": "synthetic-owner",
+    "tenantId": "00000000-0000-4000-8000-000000000001",
+    "memberId": "00000000-0000-4000-8000-000000000002",
+    "shellEpoch": "00000000-0000-4000-8000-000000000003",
+    "revision": 2,
+    "authGeneration": 3,
+    "credentialVersion": 4,
+    "state": "authenticated",
+    "expiresAt": "2026-11-13T00:00:30Z"
+  },
+  "reject": [
+    {"osUser": "another-owner"},
+    {"tenantId": "00000000-0000-4000-8000-000000000005"},
+    {"memberId": "00000000-0000-4000-8000-000000000006"},
+    {"shellEpoch": "00000000-0000-4000-8000-000000000007"},
+    {"revision": 1},
+    {"authGeneration": 2},
+    {"credentialVersion": 3},
+    {"state": "revoked"},
+    {"expiresAt": "2026-11-12T23:59:59Z"}
+  ]
+}

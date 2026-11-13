@@ -32,6 +32,77 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /admin/providers/{providerId}/uac/diagnostics:
+    parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getUacDiagnosticSettings
+      summary: 读取独立诊断设置
+      tags:
+        - admin-providers
+      x-admin-only: true
+      x-permission: iam.providers.read
+      responses:
+        "200":
+          description: 当前权威记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacDiagnosticSettings"
+          headers:
+            ETag:
+              schema:
+                type: string
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+    put:
+      operationId: putUacDiagnosticSettings
+      summary: 修改独立诊断设置
+      tags:
+        - admin-providers
+      x-admin-only: true
+      x-permission: iam.providers.write
+      description: 仅管理会话，精确 Origin、CSRF；If-Match 必填且针对独立
+        revision；缺失或不匹配返回412。默认关闭，启用默认900秒自动关闭。所有副本逐次核权威修订及expiresAt，存储失败禁止详细输出；重启保持已有有效期。变更写审计，不修改
+        provider 认证修订。
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacDiagnosticSettingsWrite"
+      responses:
+        "200":
+          description: 当前权威记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacDiagnosticSettings"
+          headers:
+            ETag:
+              schema:
+                type: string
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "412":
+          $ref: common.yaml#/components/responses/PreconditionFailed
   /me/uac/credentials:
     post:
       tags:
@@ -1566,6 +1637,30 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    UacRevalidationPolicy:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacRevalidationPolicy
+    UacRevalidationReason:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacRevalidationReason
+    UacFaultReason:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacFaultReason
+    UacCredentialEnvelope:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacCredentialEnvelope
+    UacDecryptionKeyring:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacDecryptionKeyring
+    UacDiagnosticSettings:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacDiagnosticSettings
+    UacDiagnosticSettingsWrite:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacDiagnosticSettingsWrite
+    UacNavigationContext:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacNavigationContext
+    UacNavigationProofBinding:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacNavigationProofBinding
+    UacLogoutSuppression:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacLogoutSuppression
+    UacCredentialBinding:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacCredentialBinding
+    UacDiagnosticManifest:
+      $ref: ../auth/uac-control.schema.json#/$defs/UacDiagnosticManifest
     UacEnterpriseCredentials:
       type: object
       additionalProperties: false

@@ -1,4 +1,27 @@
 export interface paths {
+  '/admin/providers/{providerId}/uac/diagnostics': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    /** 读取独立诊断设置 */
+    get: operations['getUacDiagnosticSettings'];
+    /**
+     * 修改独立诊断设置
+     * @description 仅管理会话，精确 Origin、CSRF；If-Match 必填且针对独立 revision；缺失或不匹配返回412。默认关闭，启用默认900秒自动关闭。所有副本逐次核权威修订及expiresAt，存储失败禁止详细输出；重启保持已有有效期。变更写审计，不修改 provider 认证修订。
+     */
+    put: operations['putUacDiagnosticSettings'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/me/uac/credentials': {
     parameters: {
       query?: never;
@@ -1254,6 +1277,162 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    UacRevalidationPolicy: {
+      /**
+       * @default token-verify
+       * @enum {string}
+       */
+      strategy: 'token-verify' | 'department';
+      /** @default 7200 */
+      intervalSeconds: number;
+      /** @default 30 */
+      retryIntervalSeconds: number;
+      /** @default 3 */
+      maxRetries: number;
+      /** Format: int64 */
+      configRevision?: number;
+    };
+    /** @enum {string} */
+    UacRevalidationReason:
+      | 'business_rejected'
+      | 'identity_mismatch'
+      | 'upstream_fault'
+      | 'retry_exhausted';
+    /** @enum {string} */
+    UacFaultReason:
+      | 'transport_error'
+      | 'http_error'
+      | 'invalid_json'
+      | 'missing_code'
+      | 'invalid_code'
+      | 'invalid_success_payload';
+    UacCredentialEnvelope: {
+      keyId: string;
+      /** @constant */
+      algorithm: 'A256GCM';
+      nonce: string;
+      ciphertext: string;
+      aad: {
+        /** Format: uuid */
+        tenantId: string;
+        /** Format: uuid */
+        providerId: string;
+        /** @enum {string} */
+        purpose: 'uac_credential';
+      };
+    };
+    UacDecryptionKeyring: {
+      activeKeyId: string;
+      decryptKeyIds: string[];
+      /** Format: int64 */
+      revision: number;
+    };
+    UacDiagnosticSettings: {
+      /** @default false */
+      enabled: boolean;
+      /** Format: date-time */
+      expiresAt?: string;
+      /** Format: int64 */
+      revision: number;
+    } & unknown;
+    UacDiagnosticSettingsWrite: {
+      enabled: boolean;
+      /** @default 900 */
+      ttlSeconds: number;
+    };
+    UacNavigationContext: {
+      navigationProof: string;
+      /** Format: date-time */
+      expiresAt: string;
+      /** Format: uuid */
+      transactionId: string;
+      /** @enum {string} */
+      purpose: 'portal' | 'device';
+      autoEligible: boolean;
+      autoSuppressed: boolean;
+    };
+    UacNavigationProofBinding: {
+      /** Format: uuid */
+      transactionId: string;
+      proofHash: string;
+      /** Format: uri */
+      origin: string;
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      providerId: string;
+      /** @enum {string} */
+      audience: 'portal';
+      /** @enum {string} */
+      purpose: 'login';
+      /** @enum {string} */
+      continuation: 'portal' | 'device';
+      autoEligible: boolean;
+      /** Format: date-time */
+      expiresAt: string;
+      consumed: boolean;
+    };
+    UacLogoutSuppression: {
+      /** Format: uuid */
+      browserSessionId: string;
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uri */
+      origin: string;
+      /**
+       * @description 退出抑制标记；显式继续不能清除
+       * @default true
+       */
+      suppressed: boolean;
+      /** Format: int64 */
+      revision: number;
+    };
+    UacCredentialBinding: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      memberId: string;
+      /** Format: uuid */
+      deviceId: string;
+      /** Format: uuid */
+      sourceSessionId: string;
+      /** Format: uuid */
+      providerId: string;
+      authGeneration: number;
+      credentialVersion: number;
+      /** Format: date-time */
+      expiresAt: string;
+    };
+    UacDiagnosticManifest: {
+      /** @constant */
+      version: 1;
+      /** Format: date-time */
+      from: string;
+      /** Format: date-time */
+      to: string;
+      redactorVersion: string;
+      /** Format: uuid */
+      exportAuditId: string;
+      partial: boolean;
+      missingSources: (
+        'iam' | 'audit' | 'ops' | 'loki' | 'desktop' | 'plugin'
+      )[];
+      files: {
+        /** @enum {string} */
+        name:
+          | 'uac-steps.jsonl'
+          | 'audit.jsonl'
+          | 'ops-alerts.json'
+          | 'sanitized-config.json'
+          | 'uds-detail.jsonl';
+        sha256: string;
+        /** Format: int64 */
+        lines: number;
+        /** Format: int64 */
+        bytes: number;
+        truncated: boolean;
+      }[];
+    };
     UacEnterpriseCredentials: {
       empNo: string;
       /** @description 最新有效企业token，skill进程内即时使用，禁止输出到工具结果、日志或会话记录 */
@@ -2119,15 +2298,6 @@ export interface components {
     };
   };
   responses: {
-    /** @description 请求无效（common.validation_failed 等）。 */
-    BadRequest: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
     /** @description 没有登录或凭据无效（common.unauthenticated）。 */
     Unauthenticated: {
       headers: {
@@ -2139,6 +2309,24 @@ export interface components {
     };
     /** @description 没有权限（common.forbidden 或更具体的码）。 */
     Forbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 请求无效（common.validation_failed 等）。 */
+    BadRequest: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description If-Match 不匹配（common.precondition_failed）。 */
+    PreconditionFailed: {
       headers: {
         [name: string]: unknown;
       };
@@ -2159,15 +2347,6 @@ export interface components {
     RateLimited: {
       headers: {
         'Retry-After': components['headers']['RetryAfter'];
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description If-Match 不匹配（common.precondition_failed）。 */
-    PreconditionFailed: {
-      headers: {
         [name: string]: unknown;
       };
       content: {
@@ -2209,6 +2388,64 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getUacDiagnosticSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacDiagnosticSettings'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  putUacDiagnosticSettings: {
+    parameters: {
+      query?: never;
+      header: {
+        'If-Match': string;
+      };
+      path: {
+        providerId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacDiagnosticSettingsWrite'];
+      };
+    };
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacDiagnosticSettings'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      412: components['responses']['PreconditionFailed'];
+    };
+  };
   readMyUacCredentials: {
     parameters: {
       query?: never;

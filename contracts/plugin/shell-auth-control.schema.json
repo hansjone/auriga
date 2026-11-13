@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ShellAuth 本机控制及企业 skill 兼容端口",
+  "$defs": {
+    "ShellAuthLoopbackExchange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ticket": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "clientNonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        }
+      },
+      "required": [
+        "ticket",
+        "clientNonce"
+      ]
+    },
+    "ShellAuthPageSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pageToken": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "csrf": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "origin": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "clientNonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "pageToken",
+        "csrf",
+        "shellEpoch",
+        "origin",
+        "port",
+        "clientNonce",
+        "expiresAt"
+      ]
+    },
+    "ShellAuthEnterpriseConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowRawAgentToken": {
+          "type": "boolean",
+          "default": true
+        },
+        "outboundAllowedHosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+          }
+        },
+        "taskCapabilityTtlSeconds": {
+          "type": "integer",
+          "const": 600,
+          "default": 600
+        }
+      },
+      "required": []
+    },
+    "ShellAuthAgentCredentialsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "dshSessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "taskCapability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        }
+      },
+      "required": []
+    },
+    "ShellAuthAgentCredentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "empNo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "empNo",
+        "token",
+        "updatedAt"
+      ]
+    },
+    "ShellAuthOutboundRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD"
+          ],
+          "default": "POST"
+        },
+        "headers": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^(?:[cC][oO][nN][tT][eE][nN][tT]-[tT][yY][pP][eE]|[aA][cC][cC][eE][pP][tT]|[aA][cC][cC][eE][pP][tT]-[lL][aA][nN][gG][uU][aA][gG][eE]|[xX]-[lL][aA][nN][gG]-[iI][dD]|[xX]-[rR][eE][qQ][uU][eE][sS][tT][eE][dD]-[wW][iI][tT][hH])$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "body": {},
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000,
+          "default": 30000
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "dshSessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "taskCapability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "ShellAuthOutboundResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 2097152
+        },
+        "json": {}
+      },
+      "required": [
+        "statusCode",
+        "headers",
+        "body",
+        "json"
+      ]
+    },
+    "ShellAuthAgentError": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "hint": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "error",
+        "message"
+      ]
+    }
+  }
+}

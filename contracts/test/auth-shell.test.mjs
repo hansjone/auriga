@@ -1,15 +1,25 @@
 ﻿import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import Ajv2020 from '../../services/contracts/node_modules/ajv/dist/2020.js';
 import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/index.js';
 import YAML from '../../services/contracts/node_modules/yaml/dist/index.js';
+import { spawnSync } from 'node:child_process';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 for (const file of [
+  ...readdirSync(new URL('network/', root))
+    .filter((name) => name.endsWith('.schema.json'))
+    .map((name) => 'network/' + name),
+  'plugin/team-mcp.schema.json',
+  'plugin/team-transport.schema.json',
+  'plugin/shell-business.schema.json',
+  'plugin/shell-auth-control.schema.json',
+  'auth/uac-control.schema.json',
+  'auth/uac-diagnostic-log.schema.json',
   'auth/uac-session-binding.schema.json',
   'auth/uac-login-info.schema.json',
   'plugin/shell-auth.schema.json',
@@ -25,6 +35,398 @@ const binding = validate(
   'auth/uac-session-binding.schema.json',
   'UacSessionBinding',
 );
+const business = validate(
+  'plugin/shell-business.schema.json',
+  'ShellAuthBusinessCall',
+);
+const businessResult = validate(
+  'plugin/shell-business.schema.json',
+  'ShellAuthBusinessResult',
+);
+const operations = JSON.parse(
+  read('plugin/shell-business-operations.json'),
+).operations;
+
+test('AUTH-K fixed operation projection stays current and covers all platform families', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      new URL(
+        '../plugin/generate-shell-business.mjs',
+        import.meta.url,
+      ).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
+      '--check',
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  for (const name of [
+    'UnifiedListResourcePackages',
+    'UnifiedUploadResourceVersion',
+    'UnifiedDownloadArtifact',
+    'listMemberResourceInstallations',
+    'requestResourceDistribution',
+    'listAiModels',
+    'createAiChatCompletion',
+    'network_open',
+    'network_send',
+    'network_submit',
+    'team_node_bind',
+    'team_node_ack',
+    'team_open_thread',
+    'team_read_thread',
+    'profile_read',
+    'provider_diagnostic',
+  ]) {
+    assert.ok(
+      operations.some((op) => op.operation === name),
+      name,
+    );
+  }
+  assert.equal(
+    new Set(operations.map((op) => op.operation)).size,
+    operations.length,
+  );
+  for (const op of operations) {
+    assert.ok(op.input.startsWith('ShellAuth'));
+    assert.ok(op.output.startsWith('ShellAuth'));
+    assert.ok(op.permission && op.audience && op.retry);
+    assert.doesNotMatch(
+      op.route,
+      /\/internal\/|\/admin\/|\/oauth2\/|\/network\/tickets/,
+    );
+  }
+});
+
+test('business producers reject URL, header and identity injection; response consumers allow extensions', () => {
+  const request = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    expectedRevision: 0,
+    expiresAt: base.expiresAt,
+    call: { operation: 'profile_read', input: {} },
+  };
+  assert.equal(business(request), true, JSON.stringify(business.errors));
+  for (const field of ['url', 'headers', 'token', 'tenantId', 'memberId']) {
+    assert.equal(
+      business({ ...request, [field]: 'https://evil.example.com' }),
+      false,
+    );
+    assert.equal(
+      business({
+        ...request,
+        call: { ...request.call, input: { [field]: 'synthetic' } },
+      }),
+      false,
+    );
+  }
+  assert.equal(
+    business({ ...request, call: { operation: 'arbitrary_http', input: {} } }),
+    false,
+  );
+  const good = {
+    requestId: id,
+    operation: 'profile_read',
+    output: { memberId: id, displayName: 'Synthetic member' },
+  };
+  assert.equal(businessResult(good), true);
+  assert.equal(
+    businessResult({ ...good, output: { token: 'synthetic' } }),
+    false,
+  );
+  const schema = structuredClone(
+    JSON.parse(read('plugin/shell-business.schema.json')),
+  );
+  function loosen(value) {
+    if (!value || typeof value !== 'object') return;
+    if (value.additionalProperties === false) value.additionalProperties = true;
+    Object.values(value).forEach(loosen);
+  }
+  loosen(schema);
+  const consumer = new Ajv2020({ strict: true });
+  addFormats(consumer);
+  // This result arm has no external references: extension handling is independent of request admission.
+  const responseSchema = schema.$defs.ShellAuthOutput_profile_read;
+  assert.equal(
+    consumer.compile(responseSchema)({ ...good.output, futureField: true }),
+    true,
+  );
+});
+
+test('binding fixtures specify rejection for cross-user/tenant, expiry, revocation and stale generations', () => {
+  const fixture = JSON.parse(read('test/auth-k-fixtures.json'));
+  // Contract oracle only: A/C/D must run these same vectors against their real authority.
+  const accepts = (candidate) =>
+    Object.entries(fixture.binding).every(([key, value]) =>
+      key === 'expiresAt'
+        ? Date.parse(candidate[key]) > Date.parse(fixture.now)
+        : candidate[key] === value,
+    );
+  assert.equal(accepts(fixture.binding), true);
+  for (const patch of fixture.reject)
+    assert.equal(
+      accepts({ ...fixture.binding, ...patch }),
+      false,
+      JSON.stringify(patch),
+    );
+});
+
+test('revalidation config defaults and bounds remain the decided policy', () => {
+  const policy = validate(
+    'auth/uac-control.schema.json',
+    'UacRevalidationPolicy',
+  );
+  assert.equal(policy({}), true);
+  const properties = JSON.parse(read('auth/uac-control.schema.json')).$defs
+    .UacRevalidationPolicy.properties;
+  assert.equal(properties.strategy.default, 'token-verify');
+  assert.equal(properties.intervalSeconds.default, 7200);
+  assert.equal(properties.retryIntervalSeconds.default, 30);
+  assert.equal(properties.maxRetries.default, 3);
+  for (const [key, min, max] of [
+    ['intervalSeconds', 60, 86400],
+    ['retryIntervalSeconds', 5, 300],
+    ['maxRetries', 0, 10],
+  ]) {
+    for (const value of [min, max])
+      assert.equal(policy({ [key]: value }), true);
+    for (const value of [min - 1, max + 1, 1.5, '30'])
+      assert.equal(policy({ [key]: value }), false);
+  }
+  assert.equal(policy({ strategy: 'invented' }), false);
+});
+
+test('independent diagnostics revision requires expiry when enabled', () => {
+  const settings = validate(
+    'auth/uac-control.schema.json',
+    'UacDiagnosticSettings',
+  );
+  assert.equal(settings({ enabled: false, revision: 0 }), true);
+  assert.equal(settings({ enabled: true, revision: 1 }), false);
+  assert.equal(
+    settings({ enabled: true, revision: 1, expiresAt: base.expiresAt }),
+    true,
+  );
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  const put = spec.paths['/admin/providers/{providerId}/uac/diagnostics'].put;
+  assert.equal(put['x-admin-only'], true);
+  assert.equal(put['x-permission'], 'iam.providers.write');
+  assert.ok(put.parameters.some((p) => p.name === 'If-Match' && p.required));
+});
+
+test('loopback tickets are bounded opaque values and never accept target URL', () => {
+  const exchange = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthLoopbackExchange',
+  );
+  const value = { ticket: 'A'.repeat(43), clientNonce: 'B'.repeat(43) };
+  assert.equal(exchange(value), true);
+  assert.equal(exchange({ ...value, ticket: 'short' }), false);
+  assert.equal(exchange({ ...value, url: 'https://evil.example.com' }), false);
+  const page = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthPageSession',
+  );
+  const session = {
+    pageToken: 'A'.repeat(43),
+    csrf: 'B'.repeat(43),
+    shellEpoch: id,
+    origin: 'http://127.0.0.1:12345',
+    port: 12345,
+    clientNonce: 'C'.repeat(43),
+    expiresAt: base.expiresAt,
+  };
+  assert.equal(page(session), true);
+  assert.equal(page({ ...session, origin: 'http://localhost:12345' }), false);
+  assert.equal(page({ ...session, port: 65536 }), false);
+});
+
+test('enterprise compatibility keeps raw enabled and refuses authentication headers', () => {
+  const defs = JSON.parse(read('plugin/shell-auth-control.schema.json')).$defs;
+  assert.equal(
+    defs.ShellAuthEnterpriseConfig.properties.allowRawAgentToken.default,
+    true,
+  );
+  const outbound = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthOutboundRequest',
+  );
+  assert.equal(
+    outbound({
+      url: 'https://api.example.com/business',
+      headers: { accept: 'application/json' },
+    }),
+    true,
+  );
+  for (const key of ['Authorization', 'cookie', 'x-enterprise-token'])
+    assert.equal(
+      outbound({
+        url: 'https://api.example.com/business',
+        headers: { [key]: 'synthetic' },
+      }),
+      false,
+    );
+  assert.equal(outbound({ url: 'http://api.example.com/business' }), false);
+  assert.equal(
+    outbound({ url: 'https://api.example.com/business', timeoutMs: 60001 }),
+    false,
+  );
+  const credentials = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthAgentCredentials',
+  );
+  assert.equal(
+    credentials({ empNo: '00001', token: 'synthetic', updatedAt: null }),
+    true,
+  );
+});
+
+test('stream contracts require credit, bounded chunks and explicit terminal outcomes', () => {
+  const command = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthStreamCommand',
+  );
+  const envelope = { streamId: id, shellEpoch: id, expectedRevision: 0 };
+  assert.equal(
+    command({ ...envelope, action: 'credit', creditBytes: 65536 }),
+    true,
+  );
+  assert.equal(command({ ...envelope, action: 'credit' }), false);
+  assert.equal(
+    command({ ...envelope, action: 'credit', creditBytes: 1048577 }),
+    false,
+  );
+  for (const action of ['cancel', 'close']) {
+    assert.equal(command({ ...envelope, action }), true);
+    assert.equal(command({ ...envelope, action, creditBytes: 1 }), false);
+  }
+  const stream = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthStreamEvent',
+  );
+  const event = { streamId: id, shellEpoch: id, revision: 0, sequence: 1 };
+  assert.equal(stream({ ...event, type: 'data', data: 'eA==' }), true);
+  assert.equal(stream({ ...event, type: 'data' }), false);
+  assert.equal(
+    stream({ ...event, type: 'data', data: 'A'.repeat(87385) }),
+    false,
+  );
+  assert.equal(stream({ ...event, type: 'end' }), true);
+  assert.equal(stream({ ...event, type: 'closed', data: 'eA==' }), false);
+  assert.equal(stream({ ...event, type: 'error' }), false);
+  assert.equal(
+    stream({ ...event, type: 'error', code: 'common.unauthenticated' }),
+    true,
+  );
+});
+
+test('navigation proof and device source bindings reject incomplete or forged producers', () => {
+  const proof = validate(
+    'auth/uac-control.schema.json',
+    'UacNavigationProofBinding',
+  );
+  const value = {
+    transactionId: id,
+    proofHash: 'a'.repeat(64),
+    origin: 'https://portal.example.com',
+    tenantId: id,
+    providerId: id,
+    audience: 'portal',
+    purpose: 'login',
+    continuation: 'device',
+    autoEligible: false,
+    expiresAt: base.expiresAt,
+    consumed: false,
+  };
+  assert.equal(proof(value), true);
+  for (const key of Object.keys(value)) {
+    const copy = { ...value };
+    delete copy[key];
+    assert.equal(proof(copy), false, key);
+  }
+  assert.equal(proof({ ...value, audience: 'admin' }), false);
+  assert.equal(proof({ ...value, purpose: 'link' }), false);
+  assert.equal(proof({ ...value, returnTo: '//evil.example.com' }), false);
+  const device = validate(
+    'auth/uac-control.schema.json',
+    'UacCredentialBinding',
+  );
+  const bound = {
+    tenantId: id,
+    memberId: id,
+    deviceId: id,
+    sourceSessionId: id,
+    providerId: id,
+    authGeneration: 1,
+    credentialVersion: 1,
+    expiresAt: base.expiresAt,
+  };
+  assert.equal(device(bound), true);
+  for (const key of Object.keys(bound)) {
+    const copy = { ...bound };
+    delete copy[key];
+    assert.equal(device(copy), false, key);
+  }
+});
+
+test('encrypted credentials never carry plaintext keys and identify the decryption key', () => {
+  const envelope = validate(
+    'auth/uac-control.schema.json',
+    'UacCredentialEnvelope',
+  );
+  const value = {
+    keyId: 'synthetic-v2',
+    algorithm: 'A256GCM',
+    nonce: 'A'.repeat(16),
+    ciphertext: 'A'.repeat(43),
+    aad: { tenantId: id, providerId: id, purpose: 'uac_credential' },
+  };
+  assert.equal(envelope(value), true);
+  assert.equal(envelope({ ...value, keyId: undefined }), false);
+  assert.equal(envelope({ ...value, nonce: 'short' }), false);
+  for (const key of ['key', 'token', 'cookie'])
+    assert.equal(envelope({ ...value, [key]: 'synthetic-secret' }), false);
+});
+
+test('diagnostic projection rejects secrets and personal values in nested or unknown fields', () => {
+  const diagnostic = validate(
+    'auth/uac-diagnostic-log.schema.json',
+    'UacDiagnosticLogProjection',
+  );
+  const safe = {
+    correlationId: id,
+    purpose: 'login_info',
+    result: 'failure',
+    tokenHashPrefix: 'a'.repeat(12),
+    departmentPresent: false,
+    message: '[REDACTED]',
+  };
+  assert.equal(diagnostic(safe), true);
+  for (const secret of [
+    'synthetic-token',
+    'Synthetic Name',
+    'Synthetic Department',
+    'alice@example.com',
+    '555-0100',
+  ]) {
+    for (const field of [
+      'headers',
+      'unknown',
+      'exception',
+      'array',
+      'udsRawSanitized',
+    ]) {
+      assert.equal(
+        diagnostic({ ...safe, [field]: { nested: [secret] } }),
+        false,
+      );
+    }
+    assert.equal(diagnostic({ ...safe, message: secret }), false);
+    assert.equal(diagnostic({ ...safe, tokenHashPrefix: secret }), false);
+  }
+  assert.equal(diagnostic({ ...safe, empNo: '00001' }), true);
+});
 const id = '00000000-0000-4000-8000-000000000001';
 const identity = { tenantId: id, memberId: id, deviceId: id, providerId: id };
 const base = {

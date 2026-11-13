@@ -16,6 +16,130 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/business/messages': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 受控本机端口投影
+     * @description 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见 contracts/plugin/shell-auth-control.md。
+     */
+    post: operations['exchangeShellAuthBusinessCall'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/business/streams': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 受控本机端口投影
+     * @description 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见 contracts/plugin/shell-auth-control.md。
+     */
+    post: operations['exchangeShellAuthStreamCommand'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/loopback/exchange': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 受控本机端口投影
+     * @description 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见 contracts/plugin/shell-auth-control.md。
+     */
+    post: operations['exchangeShellAuthLoopbackExchange'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/dsh-team/agent-credentials': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 兼容企业 skill 原始读取
+     * @description 真实回环对端，X-DSH-Session-Id 与 X-Dsh-Team-Task-Capability 验证本人任务 credentials scope；返回 no-store。
+     */
+    get: operations['getShellAuthAgentCredentials'];
+    put?: never;
+    /**
+     * 受控本机端口投影
+     * @description 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见 contracts/plugin/shell-auth-control.md。
+     */
+    post: operations['exchangeShellAuthAgentCredentialsRequest'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/dsh-team/outbound': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 受控本机端口投影
+     * @description 仅已认证 OS IPC 或指定的回环任务通道，不注册为公网路由。授权与生命周期见 contracts/plugin/shell-auth-control.md。
+     */
+    post: operations['exchangeShellAuthOutboundRequest'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/loopback/messages': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 端口绑定页面控制命令
+     * @description 精确 Host/Origin、双内存令牌和 nonce/epoch/端口/期限绑定；仅允许 snapshot/open_login/cancel_login，静态 GET 不返回身份。
+     */
+    post: operations['exchangeShellAuthPageMessage'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -93,6 +217,782 @@ export interface components {
         | 'common.unavailable'
         | 'common.validation_failed';
     } & (unknown & unknown);
+    ShellAuthLoopbackExchange: {
+      ticket: string;
+      clientNonce: string;
+    };
+    ShellAuthPageSession: {
+      pageToken: string;
+      csrf: string;
+      /** Format: uuid */
+      shellEpoch: string;
+      origin: string;
+      port: number;
+      clientNonce: string;
+      /** Format: date-time */
+      expiresAt: string;
+    };
+    ShellAuthEnterpriseConfig: {
+      /** @default true */
+      allowRawAgentToken: boolean;
+      outboundAllowedHosts?: string[];
+      /**
+       * @default 600
+       * @constant
+       */
+      taskCapabilityTtlSeconds: 600;
+    };
+    ShellAuthAgentCredentialsRequest: {
+      sessionId?: string;
+      dshSessionId?: string;
+      taskCapability?: string;
+      capability?: string;
+    };
+    ShellAuthAgentCredentials: {
+      empNo: string;
+      token: string;
+      /** Format: date-time */
+      updatedAt: string | null;
+    };
+    ShellAuthOutboundRequest: {
+      /** Format: uri */
+      url: string;
+      /**
+       * @default POST
+       * @enum {string}
+       */
+      method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
+      headers?: {
+        [key: string]: string;
+      };
+      body?: unknown;
+      /** @default 30000 */
+      timeoutMs: number;
+      sessionId?: string;
+      dshSessionId?: string;
+      taskCapability?: string;
+      capability?: string;
+    };
+    ShellAuthOutboundResult: {
+      statusCode: number;
+      headers: {
+        [key: string]: string;
+      };
+      body: string;
+      json: unknown;
+    };
+    ShellAuthAgentError: {
+      error: string;
+      message: string;
+      hint?: string;
+    };
+    ShellAuthBusinessCall: {
+      /** @constant */
+      protocolVersion: 1;
+      /** Format: uuid */
+      requestId: string;
+      /** Format: uuid */
+      shellEpoch: string;
+      /** Format: int64 */
+      expectedRevision: number;
+      /** Format: date-time */
+      expiresAt: string;
+      /** Format: uuid */
+      idempotencyKey?: string;
+      call:
+        | {
+            /** @constant */
+            operation: 'listResourcePackages';
+            input: components['schemas']['ShellAuthInput_listResourcePackages'];
+          }
+        | {
+            /** @constant */
+            operation: 'createResourcePackage';
+            input: components['schemas']['ShellAuthInput_createResourcePackage'];
+          }
+        | {
+            /** @constant */
+            operation: 'getResourcePackage';
+            input: components['schemas']['ShellAuthInput_getResourcePackage'];
+          }
+        | {
+            /** @constant */
+            operation: 'patchResourcePackage';
+            input: components['schemas']['ShellAuthInput_patchResourcePackage'];
+          }
+        | {
+            /** @constant */
+            operation: 'listResourceVersions';
+            input: components['schemas']['ShellAuthInput_listResourceVersions'];
+          }
+        | {
+            /** @constant */
+            operation: 'uploadResourceVersion';
+            input: components['schemas']['ShellAuthInput_uploadResourceVersion'];
+          }
+        | {
+            /** @constant */
+            operation: 'getResourceVersion';
+            input: components['schemas']['ShellAuthInput_getResourceVersion'];
+          }
+        | {
+            /** @constant */
+            operation: 'submitResourceVersion';
+            input: components['schemas']['ShellAuthInput_submitResourceVersion'];
+          }
+        | {
+            /** @constant */
+            operation: 'requestResourceDistribution';
+            input: components['schemas']['ShellAuthInput_requestResourceDistribution'];
+          }
+        | {
+            /** @constant */
+            operation: 'getResourceDistribution';
+            input: components['schemas']['ShellAuthInput_getResourceDistribution'];
+          }
+        | {
+            /** @constant */
+            operation: 'downloadResourceContent';
+            input: components['schemas']['ShellAuthInput_downloadResourceContent'];
+          }
+        | {
+            /** @constant */
+            operation: 'getResourceRevocations';
+            input: components['schemas']['ShellAuthInput_getResourceRevocations'];
+          }
+        | {
+            /** @constant */
+            operation: 'createMemberResourceDownloadTicket';
+            input: components['schemas']['ShellAuthInput_createMemberResourceDownloadTicket'];
+          }
+        | {
+            /** @constant */
+            operation: 'consumeMemberResourceDownloadTicket';
+            input: components['schemas']['ShellAuthInput_consumeMemberResourceDownloadTicket'];
+          }
+        | {
+            /** @constant */
+            operation: 'listMemberResourceInstallations';
+            input: components['schemas']['ShellAuthInput_listMemberResourceInstallations'];
+          }
+        | {
+            /** @constant */
+            operation: 'selectMemberResourceInstallation';
+            input: components['schemas']['ShellAuthInput_selectMemberResourceInstallation'];
+          }
+        | {
+            /** @constant */
+            operation: 'reportMemberResourceInstallation';
+            input: components['schemas']['ShellAuthInput_reportMemberResourceInstallation'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedListResourcePackages';
+            input: components['schemas']['ShellAuthInput_UnifiedListResourcePackages'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedCreateResourcePackage';
+            input: components['schemas']['ShellAuthInput_UnifiedCreateResourcePackage'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedGetResourcePackage';
+            input: components['schemas']['ShellAuthInput_UnifiedGetResourcePackage'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedListResourceVersions';
+            input: components['schemas']['ShellAuthInput_UnifiedListResourceVersions'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedUploadResourceVersion';
+            input: components['schemas']['ShellAuthInput_UnifiedUploadResourceVersion'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedGetResourceVersion';
+            input: components['schemas']['ShellAuthInput_UnifiedGetResourceVersion'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedSubmitResourceVersion';
+            input: components['schemas']['ShellAuthInput_UnifiedSubmitResourceVersion'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedDownloadResourceManifest';
+            input: components['schemas']['ShellAuthInput_UnifiedDownloadResourceManifest'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedCreateDownloadTicket';
+            input: components['schemas']['ShellAuthInput_UnifiedCreateDownloadTicket'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedDownloadArtifact';
+            input: components['schemas']['ShellAuthInput_UnifiedDownloadArtifact'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedListInstallations';
+            input: components['schemas']['ShellAuthInput_UnifiedListInstallations'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedSelectInstallation';
+            input: components['schemas']['ShellAuthInput_UnifiedSelectInstallation'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedReportInstallation';
+            input: components['schemas']['ShellAuthInput_UnifiedReportInstallation'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedRenewInstallation';
+            input: components['schemas']['ShellAuthInput_UnifiedRenewInstallation'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedDownloadVersionArtifact';
+            input: components['schemas']['ShellAuthInput_UnifiedDownloadVersionArtifact'];
+          }
+        | {
+            /** @constant */
+            operation: 'listOwnAiUsage';
+            input: components['schemas']['ShellAuthInput_listOwnAiUsage'];
+          }
+        | {
+            /** @constant */
+            operation: 'listAiModels';
+            input: components['schemas']['ShellAuthInput_listAiModels'];
+          }
+        | {
+            /** @constant */
+            operation: 'createAiChatCompletion';
+            input: components['schemas']['ShellAuthInput_createAiChatCompletion'];
+          }
+        | {
+            /** @constant */
+            operation: 'listNetworkSystems';
+            input: components['schemas']['ShellAuthInput_listNetworkSystems'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_initialize';
+            input: components['schemas']['ShellAuthInput_team_initialize'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_list_tools';
+            input: components['schemas']['ShellAuthInput_team_list_tools'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_ping';
+            input: components['schemas']['ShellAuthInput_team_ping'];
+          }
+        | {
+            /** @constant */
+            operation: 'network_open';
+            input: components['schemas']['ShellAuthInput_network_open'];
+          }
+        | {
+            /** @constant */
+            operation: 'network_send';
+            input: components['schemas']['ShellAuthInput_network_send'];
+          }
+        | {
+            /** @constant */
+            operation: 'network_submit';
+            input: components['schemas']['ShellAuthInput_network_submit'];
+          }
+        | {
+            /** @constant */
+            operation: 'getNetworkKeys';
+            input: components['schemas']['ShellAuthInput_getNetworkKeys'];
+          }
+        | {
+            /** @constant */
+            operation: 'getNetworkKeyAnnouncement';
+            input: components['schemas']['ShellAuthInput_getNetworkKeyAnnouncement'];
+          }
+        | {
+            /** @constant */
+            operation: 'profile_read';
+            input: components['schemas']['ShellAuthInput_profile_read'];
+          }
+        | {
+            /** @constant */
+            operation: 'provider_diagnostic';
+            input: components['schemas']['ShellAuthInput_provider_diagnostic'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_list_endpoints';
+            input: components['schemas']['ShellAuthInput_team_list_endpoints'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_open_thread';
+            input: components['schemas']['ShellAuthInput_team_open_thread'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_reply_thread';
+            input: components['schemas']['ShellAuthInput_team_reply_thread'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_read_thread';
+            input: components['schemas']['ShellAuthInput_team_read_thread'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_node_register';
+            input: components['schemas']['ShellAuthInput_team_node_register'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_node_bind';
+            input: components['schemas']['ShellAuthInput_team_node_bind'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_node_pull';
+            input: components['schemas']['ShellAuthInput_team_node_pull'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_node_ack';
+            input: components['schemas']['ShellAuthInput_team_node_ack'];
+          }
+        | {
+            /** @constant */
+            operation: 'team_node_revoke';
+            input: components['schemas']['ShellAuthInput_team_node_revoke'];
+          };
+    };
+    ShellAuthBusinessResult:
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'listResourcePackages';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_PackagePage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'createResourcePackage';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Package'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'getResourcePackage';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Package'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'patchResourcePackage';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Package'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'listResourceVersions';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_VersionPage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'uploadResourceVersion';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Version'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'getResourceVersion';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Version'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'submitResourceVersion';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Review'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'requestResourceDistribution';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Distribution'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'getResourceDistribution';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Distribution'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'downloadResourceContent';
+          output: components['schemas']['ShellAuthOutput_downloadResourceContent'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'getResourceRevocations';
+          output: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'createMemberResourceDownloadTicket';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'consumeMemberResourceDownloadTicket';
+          output: components['schemas']['ShellAuthOutput_consumeMemberResourceDownloadTicket'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'listMemberResourceInstallations';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationPage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'selectMemberResourceInstallation';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'reportMemberResourceInstallation';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedListResourcePackages';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackagePage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedCreateResourcePackage';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedGetResourcePackage';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedListResourceVersions';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersionPage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedUploadResourceVersion';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedGetResourceVersion';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedSubmitResourceVersion';
+          output: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedReview'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedDownloadResourceManifest';
+          output: components['schemas']['ShellAuthOutput_UnifiedDownloadResourceManifest'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedCreateDownloadTicket';
+          output: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedDownloadArtifact';
+          output: components['schemas']['ShellAuthOutput_UnifiedDownloadArtifact'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedListInstallations';
+          output: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallationPage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedSelectInstallation';
+          output: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallation'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedReportInstallation';
+          output: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallation'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedRenewInstallation';
+          output: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedDownloadVersionArtifact';
+          output: components['schemas']['ShellAuthOutput_UnifiedDownloadVersionArtifact'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'listOwnAiUsage';
+          output: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_UsagePage'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'listAiModels';
+          output: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_ModelList'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'createAiChatCompletion';
+          output: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_ChatCompletion'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'listNetworkSystems';
+          output: components['schemas']['ShellAuthnetwork_system_directory_schema_json'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_initialize';
+          output: components['schemas']['ShellAuthOutput_team_initialize'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_list_tools';
+          output: components['schemas']['ShellAuthOutput_team_list_tools'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_ping';
+          output: components['schemas']['ShellAuthOutput_team_ping'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'network_open';
+          output: components['schemas']['ShellAuthOutput_network_open'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'network_send';
+          output: components['schemas']['ShellAuthOutput_network_send'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'network_submit';
+          output: components['schemas']['ShellAuthOutput_network_submit'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'getNetworkKeys';
+          output: components['schemas']['ShellAuthOutput_getNetworkKeys'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'getNetworkKeyAnnouncement';
+          output: components['schemas']['ShellAuthOutput_getNetworkKeyAnnouncement'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'profile_read';
+          output: components['schemas']['ShellAuthOutput_profile_read'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'provider_diagnostic';
+          output: components['schemas']['ShellAuthOutput_provider_diagnostic'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_list_endpoints';
+          output: components['schemas']['ShellAuthOutput_team_list_endpoints'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_open_thread';
+          output: components['schemas']['ShellAuthOutput_team_open_thread'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_reply_thread';
+          output: components['schemas']['ShellAuthOutput_team_reply_thread'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_read_thread';
+          output: components['schemas']['ShellAuthOutput_team_read_thread'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_node_register';
+          output: components['schemas']['ShellAuthOutput_team_node_register'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_node_bind';
+          output: components['schemas']['ShellAuthOutput_team_node_bind'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_node_pull';
+          output: components['schemas']['ShellAuthOutput_team_node_pull'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_node_ack';
+          output: components['schemas']['ShellAuthOutput_team_node_ack'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'team_node_revoke';
+          output: components['schemas']['ShellAuthOutput_team_node_revoke'];
+        };
+    ShellAuthStreamCommand: {
+      /** Format: uuid */
+      streamId: string;
+      /** Format: uuid */
+      shellEpoch: string;
+      /** Format: int64 */
+      expectedRevision: number;
+      /** @enum {string} */
+      action: 'credit' | 'cancel' | 'close';
+      creditBytes?: number;
+    } & unknown;
+    ShellAuthStreamEvent: {
+      /** Format: uuid */
+      streamId: string;
+      /** Format: uuid */
+      shellEpoch: string;
+      /** Format: int64 */
+      revision: number;
+      /** Format: int64 */
+      sequence: number;
+      /** @enum {string} */
+      type: 'data' | 'end' | 'closed' | 'error';
+      data?: string;
+      /** @enum {string} */
+      code?:
+        | 'common.conflict'
+        | 'common.forbidden'
+        | 'common.unauthenticated'
+        | 'common.unavailable'
+        | 'common.rate_limited';
+    } & (unknown & unknown);
     UacSessionBinding: {
       /** Format: uuid */
       sourceSessionId: string;
@@ -145,6 +1045,1352 @@ export interface components {
       errors?: components['schemas']['FieldError'][];
       traceId?: string;
     };
+    ShellAuthInput_listResourcePackages: {
+      /** @default 50 */
+      limit: number;
+      cursor?: string;
+    };
+    /** @description 新建只允许本人L3待审草稿或L4/private个人包；level/owner/tenant由服务端决定，不能直接创建L0-L2。 */
+    ShellAuthopenapi_resource_yaml_components_schemas_PackageInput: {
+      name: string;
+      /** @constant */
+      kind: 'plugin';
+      /** @enum {string} */
+      visibility: 'tenant' | 'members' | 'groups' | 'private';
+      groupIds?: string[];
+    };
+    ShellAuthInput_createResourcePackage: {
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_PackageInput'];
+    };
+    ShellAuthInput_getResourcePackage: {
+      /** Format: uuid */
+      packageId: string;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_PackagePatch: {
+      name?: string;
+      /** @enum {string} */
+      visibility?: 'tenant' | 'members' | 'groups' | 'private';
+      groupIds?: string[];
+    };
+    ShellAuthInput_patchResourcePackage: {
+      /** Format: uuid */
+      packageId: string;
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_PackagePatch'];
+    };
+    ShellAuthInput_listResourceVersions: {
+      /** Format: uuid */
+      packageId: string;
+      /** @default 50 */
+      limit: number;
+      cursor?: string;
+    };
+    ShellAuthresource_signatures_schema_json__defs_Digest: string;
+    ShellAuthopenapi_resource_yaml_components_schemas_UploadMetadata: {
+      version: string;
+      expectedDigest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      manifest: {
+        name: string;
+        dshVersionRange: string;
+        /** @enum {string} */
+        os: 'linux' | 'windows' | 'any';
+        /** @enum {string} */
+        arch: 'amd64' | 'arm64' | 'any';
+      };
+      changeNotes?: string;
+    };
+    ShellAuthInput_uploadResourceVersion: {
+      /** Format: uuid */
+      packageId: string;
+      body: {
+        metadata: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UploadMetadata'];
+        /** Format: binary */
+        archive: string;
+      };
+    };
+    ShellAuthInput_getResourceVersion: {
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_Reason: {
+      reason: string;
+    };
+    ShellAuthInput_submitResourceVersion: {
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Reason'];
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_DistributionInput: {
+      /** Format: uuid */
+      instanceId: string;
+      selections: {
+        /** Format: uuid */
+        packageId: string;
+        /** Format: uuid */
+        versionId: string;
+        /** @enum {string} */
+        action: 'install' | 'enable' | 'disable' | 'remove';
+      }[];
+    };
+    ShellAuthInput_requestResourceDistribution: {
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_DistributionInput'];
+    };
+    ShellAuthInput_getResourceDistribution: {
+      /** Format: uuid */
+      distributionId: string;
+    };
+    ShellAuthInput_downloadResourceContent: {
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+    };
+    ShellAuthInput_getResourceRevocations: Record<string, never>;
+    ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicketInput: {
+      /** Format: uuid */
+      clientId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      digest: string;
+    };
+    ShellAuthInput_createMemberResourceDownloadTicket: {
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicketInput'];
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadInput: {
+      /** Format: uuid */
+      clientId: string;
+      ticket: string;
+    };
+    ShellAuthInput_consumeMemberResourceDownloadTicket: {
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadInput'];
+    };
+    ShellAuthInput_listMemberResourceInstallations: {
+      /** Format: uuid */
+      afterPackageId?: string;
+      /** @default 50 */
+      limit: number;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationInput: {
+      /** Format: uuid */
+      clientId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      digest: string;
+      /** @enum {string} */
+      action: 'install' | 'enable' | 'disable' | 'remove';
+    };
+    ShellAuthInput_selectMemberResourceInstallation: {
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationInput'];
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationReport: {
+      /** Format: uuid */
+      clientId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      digest: string;
+      /** Format: int64 */
+      installationRevision: number;
+      /** @enum {string} */
+      state: 'applied' | 'failed';
+    };
+    ShellAuthInput_reportMemberResourceInstallation: {
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationReport'];
+    };
+    ShellAuthInput_UnifiedListResourcePackages: {
+      /** @default 50 */
+      limit: number;
+      cursor?: string;
+      /** @enum {string} */
+      kind?: 'skill' | 'tool';
+    };
+    /** @description Shared L3 skill/tool only. Server derives tenant, owner and level. Private skill stays local. Plugin CRUD uses legacy APIs; catalog rejects plugin kind/IDs. */
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackageInput: {
+      name: string;
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      /** @enum {string} */
+      visibility: 'tenant' | 'members' | 'groups';
+      groupIds?: string[];
+    };
+    ShellAuthInput_UnifiedCreateResourcePackage: {
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackageInput'];
+    };
+    ShellAuthInput_UnifiedGetResourcePackage: {
+      /** Format: uuid */
+      packageId: string;
+    };
+    ShellAuthInput_UnifiedListResourceVersions: {
+      /** Format: uuid */
+      packageId: string;
+      /** @default 50 */
+      limit: number;
+      cursor?: string;
+    };
+    ShellAuthresource_package_schema_json__defs_Version: string;
+    /** @description Draft multipart upload. expectedDigest is exact manifest bytes SHA-256. Include manifest as a binary part, plus one binary artifacts part per manifest artifact in array order. Online tools use no artifacts. Validate all hashes before committing the immutable version. */
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedUploadMetadata: {
+      version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
+      expectedDigest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      changeNotes?: string;
+    };
+    ShellAuthInput_UnifiedUploadResourceVersion: {
+      /** Format: uuid */
+      packageId: string;
+      body: {
+        metadata: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedUploadMetadata'];
+        /** Format: binary */
+        manifest: string;
+        artifacts: string[];
+      };
+    };
+    ShellAuthInput_UnifiedGetResourceVersion: {
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+    };
+    ShellAuthInput_UnifiedSubmitResourceVersion: {
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Reason'];
+    };
+    ShellAuthInput_UnifiedDownloadResourceManifest: {
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
+      manifestDigest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicketInput: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+    };
+    ShellAuthInput_UnifiedCreateDownloadTicket: {
+      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicketInput'];
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedDownloadInput: {
+      /** Format: uuid */
+      clientId: string;
+      ticket: string;
+      artifactId: string;
+    };
+    ShellAuthInput_UnifiedDownloadArtifact: {
+      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDownloadInput'];
+    };
+    ShellAuthInput_UnifiedListInstallations: {
+      /** @enum {string} */
+      kind?: 'skill' | 'tool';
+      /** @default 50 */
+      limit: number;
+      cursor?: string;
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedSelection: {
+      identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
+      /** @enum {string} */
+      action: 'install' | 'enable' | 'disable' | 'remove';
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedInstallationInput: {
+      /** Format: uuid */
+      clientId: string;
+      selection: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedSelection'];
+    };
+    ShellAuthInput_UnifiedSelectInstallation: {
+      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallationInput'];
+    };
+    /** Format: date-time */
+    ShellAuthresource_signatures_schema_json__defs_Time: string;
+    ShellAuthresource_unified_schema_json__defs_UnifiedMemberInstallationReport: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** Format: int64 */
+      observedGeneration: number;
+      /** @enum {string} */
+      state:
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'pending_restart'
+        | 'superseded'
+        | 'overridden'
+        | 'expired'
+        | 'revoked'
+        | 'disabled'
+        | 'removed';
+      /** @constant */
+      reportSource: 'member';
+      errorCode?: string;
+      observedAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+    } & unknown;
+    ShellAuthInput_UnifiedReportInstallation: {
+      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedMemberInstallationReport'];
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedRenewalInput: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      releaseSequence: number;
+    };
+    ShellAuthInput_UnifiedRenewInstallation: {
+      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedRenewalInput'];
+    };
+    ShellAuthInput_UnifiedDownloadVersionArtifact: {
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      artifactId: string;
+    };
+    ShellAuthInput_listOwnAiUsage: {
+      /** @default 50 */
+      limit: number;
+      cursor?: string;
+    };
+    ShellAuthInput_listAiModels: Record<string, never>;
+    ShellAuthopenapi_ai_yaml_components_schemas_ToolCall: {
+      id: string;
+      /** @constant */
+      type: 'function';
+      function: {
+        name: string;
+        arguments: string;
+      };
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_ChatMessage: {
+      /** @enum {string} */
+      role: 'system' | 'user' | 'assistant' | 'tool';
+      content: string | null;
+      name?: string;
+      tool_call_id?: string;
+      tool_calls?: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_ToolCall'][];
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_Tool: {
+      /** @constant */
+      type: 'function';
+      function: {
+        name: string;
+        description?: string;
+        parameters: {
+          [key: string]: unknown;
+        };
+      };
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_ChatCompletionRequest: {
+      model: string;
+      messages: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_ChatMessage'][];
+      /** @default false */
+      stream: boolean;
+      /** Format: int64 */
+      max_tokens: number;
+      temperature?: number;
+      top_p?: number;
+      /** @description 首批仅接受最多4个字符串的数组，不接受单字符串stop。 */
+      stop?: string[];
+      tools?: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_Tool'][];
+      /** @enum {string} */
+      tool_choice?: 'none' | 'auto' | 'required';
+    };
+    ShellAuthInput_createAiChatCompletion: {
+      body: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_ChatCompletionRequest'];
+    };
+    ShellAuthInput_listNetworkSystems: {
+      /** @default 50 */
+      limit: number;
+      cursor?: string;
+    };
+    ShellAuthInput_team_initialize: {
+      /** @enum {string} */
+      protocolVersion: '2025-06-18';
+    };
+    ShellAuthInput_team_list_tools: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthInput_team_ping: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthInput_network_open: {
+      /** Format: uuid */
+      executionContextId: string;
+    };
+    ShellAuthInput_network_send: {
+      /** Format: uuid */
+      streamId: string;
+      /** @description 解码后最多65536字节，必须严格验证 network/protocol.schema.json；保留原始受签字节，不经生成模型重序列化。 */
+      frameWire: string;
+    };
+    ShellAuthInput_network_submit: {
+      /** Format: uuid */
+      executionContextId: string;
+      /** @description 解码后最多65536字节，必须严格验证 network/send.schema.json#/$defs/SubmitRequest；保留原始受签字节，不经生成模型重序列化。 */
+      requestWire: string;
+    };
+    ShellAuthInput_getNetworkKeys: Record<string, never>;
+    ShellAuthInput_getNetworkKeyAnnouncement: Record<string, never>;
+    ShellAuthInput_profile_read: Record<string, never>;
+    ShellAuthInput_provider_diagnostic: Record<string, never>;
+    ShellAuthplugin_team_mcp_schema_json__defs_Limit: number;
+    /** Format: uuid */
+    ShellAuthplugin_team_mcp_schema_json__defs_Uuid: string;
+    ShellAuthplugin_team_mcp_schema_json__defs_ListEndpoints: {
+      limit: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Limit'];
+      afterEndpointId?: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Uuid'];
+    };
+    ShellAuthInput_team_list_endpoints: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_ListEndpoints'];
+    };
+    /** @description Server additionally enforces at most 16384 UTF-8 bytes. */
+    ShellAuthplugin_team_mcp_schema_json__defs_Text: string;
+    ShellAuthplugin_team_mcp_schema_json__defs_Key: string;
+    ShellAuthplugin_team_mcp_schema_json__defs_OpenThread: {
+      targetEndpointId: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Uuid'];
+      text: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Text'];
+      idempotencyKey: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Key'];
+    };
+    ShellAuthInput_team_open_thread: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_OpenThread'];
+    };
+    ShellAuthplugin_team_mcp_schema_json__defs_ReplyThread: {
+      threadId: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Uuid'];
+      text: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Text'];
+      idempotencyKey: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Key'];
+    };
+    ShellAuthInput_team_reply_thread: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_ReplyThread'];
+    };
+    ShellAuthplugin_team_mcp_schema_json__defs_ReadThread: {
+      threadId: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Uuid'];
+      /** Format: int64 */
+      afterSequence?: number;
+      limit: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_Limit'];
+    };
+    ShellAuthInput_team_read_thread: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_mcp_schema_json__defs_ReadThread'];
+    };
+    ShellAuthplugin_team_transport_schema_json__defs_Register: {
+      label: string;
+      receiveEnabled: boolean;
+    };
+    ShellAuthInput_team_node_register: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Register'];
+    };
+    /** Format: uuid */
+    ShellAuthplugin_team_transport_schema_json__defs_Uuid: string;
+    ShellAuthplugin_team_transport_schema_json__defs_Session: string;
+    ShellAuthplugin_team_transport_schema_json__defs_Bind: {
+      endpointId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+      hostSessionId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Session'];
+      threadId?: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+    };
+    ShellAuthInput_team_node_bind: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Bind'];
+    };
+    ShellAuthplugin_team_transport_schema_json__defs_Pull: {
+      endpointId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+      limit: number;
+    };
+    ShellAuthInput_team_node_pull: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Pull'];
+    };
+    ShellAuthplugin_team_transport_schema_json__defs_Ack: {
+      endpointId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+      bindingId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+      hostSessionId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Session'];
+      deliveryId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+      leaseToken: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+      hostRequestId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+    };
+    ShellAuthInput_team_node_ack: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Ack'];
+    };
+    ShellAuthplugin_team_transport_schema_json__defs_Revoke: {
+      endpointId: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Uuid'];
+    };
+    ShellAuthInput_team_node_revoke: {
+      /** Format: uuid */
+      executionContextId: string;
+      arguments: components['schemas']['ShellAuthplugin_team_transport_schema_json__defs_Revoke'];
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_Package: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      tenantId: string;
+      name: string;
+      /** @constant */
+      kind: 'plugin';
+      /** Format: uuid */
+      ownerId: string;
+      /** @enum {string} */
+      level: 'l0' | 'l1' | 'l2' | 'l3' | 'l4';
+      /** @enum {string} */
+      visibility: 'tenant' | 'members' | 'groups' | 'private';
+      groupIds: string[];
+      /** Format: int64 */
+      revision: number;
+      /** Format: date-time */
+      createdAt: string;
+      enabled: boolean;
+      /** Format: uuid */
+      defaultVersionId: string | null;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_PackagePage: {
+      items: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Package'][];
+      nextCursor?: string;
+    };
+    /** Format: uuid */
+    ShellAuthresource_signatures_schema_json__defs_Uuid: string;
+    /** Format: int64 */
+    ShellAuthresource_signatures_schema_json__defs_Counter: number;
+    ShellAuthresource_signatures_schema_json__defs_Statement: {
+      /** @constant */
+      purpose: 'plugin';
+      name: string;
+      version: string;
+      /** @enum {string} */
+      os: 'linux' | 'windows' | 'any';
+      /** @enum {string} */
+      arch: 'amd64' | 'arm64' | 'any';
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      issuedAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+    };
+    ShellAuthresource_signatures_schema_json__defs_Signature: {
+      /** @constant */
+      alg: 'Ed25519';
+      kid: string;
+      /** @description 64 字节签名的 base64url 无填充编码；解码后须重编码比较，拒绝非规范尾位。 */
+      value: string;
+    };
+    ShellAuthresource_signatures_schema_json__defs_ResourceEnvelope: {
+      /** @constant */
+      schemaVersion: 1;
+      tenantId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      packageId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      versionId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      releaseSequence: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Counter'];
+      notAfter: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      statement: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Statement'];
+      signature: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Signature'];
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_Version: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      packageId: string;
+      version: string;
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      /** Format: int64 */
+      sizeBytes: number;
+      /** @constant */
+      mediaType: 'application/gzip';
+      /** @enum {string} */
+      state:
+        | 'draft'
+        | 'pending_review'
+        | 'approved'
+        | 'rejected'
+        | 'published'
+        | 'deprecated'
+        | 'withdrawn';
+      /** Format: int64 */
+      revision: number;
+      /** Format: int64 */
+      releaseSequence?: number;
+      resourceEnvelope?: components['schemas']['ShellAuthresource_signatures_schema_json__defs_ResourceEnvelope'];
+      /** Format: date-time */
+      createdAt: string;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_VersionPage: {
+      items: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_Version'][];
+      nextCursor?: string;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_Review: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      /** Format: int64 */
+      versionRevision: number;
+      /** @enum {string} */
+      state: 'pending' | 'approved' | 'rejected';
+      /** Format: int64 */
+      revision: number;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_Distribution: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      instanceId: string;
+      /** Format: uuid */
+      ownerId: string;
+      /** Format: int64 */
+      selectionRevision: number;
+      /**
+       * @description Once workspace accepts a newer selection revision, requested/resolved/applying becomes superseded. Already applied or failed rows keep the latest recorded outcome and error; appliedGeneration never replaces a later real failure.
+       * @enum {string}
+       */
+      state:
+        | 'requested'
+        | 'resolved'
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'superseded';
+      /** Format: int64 */
+      generation?: number;
+      /** Format: int64 */
+      observedGeneration?: number;
+      ready?: boolean;
+      errorCode?: string;
+      /** Format: int64 */
+      revision: number;
+      selections?: {
+        /** Format: uuid */
+        packageId: string;
+        /** Format: uuid */
+        versionId: string;
+        /** @enum {string} */
+        action: 'install' | 'enable' | 'disable' | 'remove';
+      }[];
+      /**
+       * Format: int64
+       * @description Last generation genuinely observed ready. Historical rows retain this successful observation after a newer selection replaces them.
+       */
+      appliedGeneration?: number;
+    };
+    ShellAuthOutput_downloadResourceContent: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthresource_signatures_schema_json__defs_RevokedArtifact: {
+      packageId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      versionId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+    };
+    ShellAuthresource_signatures_schema_json__defs_RevocationList: {
+      /** @constant */
+      schemaVersion: 1;
+      tenantId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      revision: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Counter'];
+      issuedAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      expiresAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      revokedKids: string[];
+      revokedArtifacts: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevokedArtifact'][];
+      signature: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Signature'];
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket: {
+      ticket: string;
+      /** Format: uuid */
+      clientId: string;
+      /** Format: date-time */
+      expiresAt: string;
+      resourceEnvelope: components['schemas']['ShellAuthresource_signatures_schema_json__defs_ResourceEnvelope'];
+      revocations: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
+    };
+    ShellAuthOutput_consumeMemberResourceDownloadTicket: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation: {
+      /** Format: uuid */
+      clientId: string;
+      /** Format: uuid */
+      packageId: string;
+      /** Format: uuid */
+      versionId: string;
+      digest: string;
+      /** Format: int64 */
+      releaseSequence: number;
+      /** @enum {string} */
+      level: 'l1' | 'l2' | 'l3' | 'l4';
+      /** @enum {string} */
+      desired: 'enabled' | 'disabled' | 'removed';
+      /** @enum {string} */
+      state: 'applying' | 'applied' | 'failed';
+      /** Format: int64 */
+      revision: number;
+      /** @constant */
+      reportSource: 'member';
+      /** Format: int64 */
+      reportedRevision?: number;
+      /** Format: date-time */
+      reportedAt?: string;
+      /** @constant */
+      errorCode?: 'resource.apply_failed';
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallationPage: {
+      items: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation'][];
+      /** Format: uuid */
+      nextAfterPackageId?: string;
+    };
+    /** @description Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection. */
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      tenantId: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      /** Format: uuid */
+      ownerId: string;
+      /** @enum {string} */
+      level: 'l3';
+      /** @enum {string} */
+      visibility: 'tenant' | 'members' | 'groups';
+      groupIds: string[];
+      /** Format: int64 */
+      revision: number;
+      /** Format: date-time */
+      createdAt: string;
+      enabled: boolean;
+      /** Format: uuid */
+      defaultVersionId: string | null;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackagePage: {
+      items: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage'][];
+      nextCursor?: string;
+    };
+    ShellAuthresource_package_schema_json__defs_Name: string;
+    ShellAuthresource_package_schema_json__defs_Statement: {
+      /** @constant */
+      purpose: 'resource';
+      /** @enum {string} */
+      kind: 'plugin' | 'skill' | 'tool';
+      name: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
+      manifestDigest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      artifactDigests: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'][];
+      issuedAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+    };
+    ShellAuthresource_package_schema_json__defs_Envelope: {
+      /** @constant */
+      schemaVersion: 2;
+      tenantId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      packageId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      versionId: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Uuid'];
+      releaseSequence: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Counter'];
+      notAfter: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      statement: components['schemas']['ShellAuthresource_package_schema_json__defs_Statement'];
+      signature: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Signature'];
+    };
+    ShellAuthresource_package_schema_json__defs_Permissions: {
+      tools: string[];
+      outboundHosts: string[];
+      dataAccess: (
+        'workspace_read' | 'workspace_write' | 'user_selected_files'
+      )[];
+    };
+    ShellAuthresource_package_schema_json__defs_Runtime: {
+      /** @enum {string} */
+      kind: 'node' | 'python' | 'java';
+      versionRange: string;
+    };
+    ShellAuthresource_package_schema_json__defs_SkillArtifact: {
+      id: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      /** @constant */
+      role: 'payload';
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      sizeBytes: number;
+      /** @constant */
+      mediaType: 'application/gzip';
+      /** @constant */
+      os: 'any';
+      /** @constant */
+      arch: 'any';
+    };
+    ShellAuthresource_package_schema_json__defs_Skill: {
+      /** @constant */
+      entry: 'SKILL.md';
+      /** @constant */
+      contentProfile: 'text-only';
+      dshVersionRange: string;
+    };
+    ShellAuthresource_package_schema_json__defs_SkillManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['ShellAuthresource_package_schema_json__defs_Permissions'];
+      runtimes: components['schemas']['ShellAuthresource_package_schema_json__defs_Runtime'][];
+      artifacts: components['schemas']['ShellAuthresource_package_schema_json__defs_SkillArtifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'skill';
+      skill: components['schemas']['ShellAuthresource_package_schema_json__defs_Skill'];
+    };
+    ShellAuthresource_package_schema_json__defs_Artifact: {
+      id: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      /** @enum {string} */
+      role: 'payload' | 'source_snapshot' | 'lockfile';
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      sizeBytes: number;
+      /** @enum {string} */
+      mediaType:
+        | 'application/gzip'
+        | 'application/octet-stream'
+        | 'application/json'
+        | 'text/plain';
+      /** @enum {string} */
+      os: 'linux' | 'windows' | 'any';
+      /** @enum {string} */
+      arch: 'amd64' | 'arm64' | 'any';
+    };
+    ShellAuthresource_package_schema_json__defs_OnlineTool: {
+      /** @constant */
+      delivery: 'online';
+      /** @enum {string} */
+      protocol: 'web' | 'mcp';
+      /** Format: uri */
+      url: string;
+      /** @enum {string} */
+      authentication: 'none' | 'member_oauth' | 'platform_proxy';
+    };
+    ShellAuthresource_package_schema_json__defs_OnlineManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['ShellAuthresource_package_schema_json__defs_Permissions'];
+      runtimes: components['schemas']['ShellAuthresource_package_schema_json__defs_Runtime'][];
+      artifacts: components['schemas']['ShellAuthresource_package_schema_json__defs_Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['ShellAuthresource_package_schema_json__defs_OnlineTool'];
+    };
+    ShellAuthresource_package_schema_json__defs_RelativePath: string;
+    ShellAuthresource_package_schema_json__defs_EntryPoint: {
+      artifactId: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      path: components['schemas']['ShellAuthresource_package_schema_json__defs_RelativePath'];
+      args: string[];
+    };
+    ShellAuthresource_package_schema_json__defs_OfflineTool: {
+      /** @constant */
+      delivery: 'offline';
+      entrypoints: components['schemas']['ShellAuthresource_package_schema_json__defs_EntryPoint'][];
+    };
+    ShellAuthresource_package_schema_json__defs_OfflineManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['ShellAuthresource_package_schema_json__defs_Permissions'];
+      runtimes: components['schemas']['ShellAuthresource_package_schema_json__defs_Runtime'][];
+      artifacts: components['schemas']['ShellAuthresource_package_schema_json__defs_Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['ShellAuthresource_package_schema_json__defs_OfflineTool'];
+    };
+    ShellAuthresource_package_schema_json__defs_GitTool: {
+      /** @constant */
+      delivery: 'git';
+      /** Format: uri */
+      repository: string;
+      commit: string;
+      sourceArtifactId: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      lockArtifactIds: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'][];
+      /** @enum {string} */
+      packageManager: 'npm' | 'pnpm' | 'pip' | 'maven' | 'gradle';
+      installScripts: boolean;
+      entrypoint: components['schemas']['ShellAuthresource_package_schema_json__defs_EntryPoint'];
+    };
+    ShellAuthresource_package_schema_json__defs_GitManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['ShellAuthresource_package_schema_json__defs_Permissions'];
+      runtimes: components['schemas']['ShellAuthresource_package_schema_json__defs_Runtime'][];
+      artifacts: components['schemas']['ShellAuthresource_package_schema_json__defs_Artifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'tool';
+      tool: components['schemas']['ShellAuthresource_package_schema_json__defs_GitTool'];
+    };
+    ShellAuthresource_package_schema_json__defs_ToolManifest:
+      | components['schemas']['ShellAuthresource_package_schema_json__defs_OnlineManifest']
+      | components['schemas']['ShellAuthresource_package_schema_json__defs_OfflineManifest']
+      | components['schemas']['ShellAuthresource_package_schema_json__defs_GitManifest'];
+    /** @description Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections. */
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedManifest:
+      | components['schemas']['ShellAuthresource_package_schema_json__defs_SkillManifest']
+      | components['schemas']['ShellAuthresource_package_schema_json__defs_ToolManifest'];
+    /** @description Read-only server assessment, recalculated on content/permission changes. Publication transaction checks the current assessment and review identities. */
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedRiskAssessment: {
+      /**
+       * @description Server-derived floor: command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content.
+       * @enum {string}
+       */
+      minimumLevel: 'r1' | 'r2' | 'r3';
+      /**
+       * @description Effective server risk. Authorized reviewers may raise it only; changes increment revision and invalidate earlier reviews.
+       * @enum {string}
+       */
+      level: 'r1' | 'r2' | 'r3';
+      /** @description Distinct non-author reviewers; one for r1, two for r2/r3. Repeated identities count once. */
+      requiredReviewers: number;
+      /** @description Zero for r1; at least one qualified security reviewer for r2/r3. Server verifies qualification independently of input role. */
+      requiredSecurityReviewers: number;
+    } & (unknown & unknown & unknown);
+    /** @description Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable. */
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      packageId: string;
+      version: string;
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      /** @enum {string} */
+      state:
+        | 'draft'
+        | 'pending_review'
+        | 'approved'
+        | 'rejected'
+        | 'published'
+        | 'deprecated'
+        | 'withdrawn';
+      /** Format: int64 */
+      revision: number;
+      /** Format: int64 */
+      releaseSequence?: number;
+      resourceEnvelope?: components['schemas']['ShellAuthresource_package_schema_json__defs_Envelope'];
+      /** Format: date-time */
+      createdAt: string;
+      manifest: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedManifest'];
+      /** @enum {string} */
+      kind: 'skill' | 'tool';
+      risk: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedRiskAssessment'];
+      /** @description Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL. */
+      manifestDownloadPath: string;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersionPage: {
+      items: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion'][];
+      nextCursor?: string;
+    };
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedReviewRecord: {
+      /** Format: uuid */
+      reviewerId: string;
+      /** @enum {string} */
+      role: 'general' | 'security';
+      /** @enum {string} */
+      decision: 'approve' | 'reject';
+      reason: string;
+      /** Format: int64 */
+      versionRevision: number;
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      /** Format: date-time */
+      createdAt: string;
+    };
+    /** @description Review identity and immutable decision history for the exact version revision. Version contains kind and server risk/quorum. Failed author/qualification/quorum checks cannot approve/publish. */
+    ShellAuthopenapi_resource_yaml_components_schemas_UnifiedReview: {
+      /** Format: uuid */
+      reviewId: string;
+      /** Format: uuid */
+      authorId: string;
+      version: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion'];
+      /** Format: int64 */
+      revision: number;
+      /** @enum {string} */
+      status: 'pending' | 'approved' | 'rejected';
+      decisions: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedReviewRecord'][];
+    };
+    ShellAuthOutput_UnifiedDownloadResourceManifest: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedArtifactDownload: {
+      artifactId: string;
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      /** Format: int64 */
+      sizeBytes: number;
+      /** @description Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments. */
+      downloadPath: string;
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedLease: {
+      envelopeNotAfter: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      revocationsExpiresAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      expiresAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      /** Format: int64 */
+      revocationRevision: number;
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedResourceRef: {
+      identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
+      envelope: components['schemas']['ShellAuthresource_package_schema_json__defs_Envelope'];
+      /** @description Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments. */
+      manifestDownloadPath: string;
+      artifacts: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedArtifactDownload'][];
+      lease: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedLease'];
+      /** Format: int64 */
+      releaseSequence: number;
+      enabled: boolean;
+      /**
+       * Format: int64
+       * @description Resource-assigned persisted per-installation CAS revision. Preserved by signature renewal and echoed by node/Desktop reports. Omission is transport-compatible only: never accept applied without a positive expected revision.
+       */
+      installationRevision?: number;
+      /**
+       * @description Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values.
+       * @enum {string}
+       */
+      desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket: {
+      ticket: string;
+      /** Format: uuid */
+      clientId: string;
+      expiresAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      resource: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceRef'];
+      revocations: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
+    };
+    ShellAuthOutput_UnifiedDownloadArtifact: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedInstallationReport: {
+      /** Format: uuid */
+      clientId: string;
+      identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** Format: int64 */
+      observedGeneration: number;
+      /** @enum {string} */
+      state:
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'pending_restart'
+        | 'superseded'
+        | 'overridden'
+        | 'expired'
+        | 'revoked'
+        | 'disabled'
+        | 'removed';
+      /** @enum {string} */
+      reportSource: 'member' | 'node';
+      errorCode?: string;
+      observedAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+    } & unknown;
+    ShellAuthresource_unified_schema_json__defs_UnifiedInstallation: {
+      /** Format: uuid */
+      clientId: string;
+      resource: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceRef'];
+      /** Format: int64 */
+      installationRevision: number;
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      generation: number;
+      /** @enum {string} */
+      state:
+        | 'applying'
+        | 'applied'
+        | 'failed'
+        | 'pending_restart'
+        | 'superseded'
+        | 'overridden'
+        | 'expired'
+        | 'revoked'
+        | 'disabled'
+        | 'removed';
+      /** @enum {string} */
+      reportSource: 'member' | 'node';
+      report?: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallationReport'];
+    };
+    ShellAuthresource_unified_schema_json__defs_UnifiedInstallationPage: {
+      items: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallation'][];
+      nextCursor?: string;
+    };
+    ShellAuthOutput_UnifiedDownloadVersionArtifact: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_Usage: {
+      /** Format: uuid */
+      requestId: string;
+      /** Format: uuid */
+      accountId: string;
+      modelId: string;
+      /** @enum {string} */
+      outcome:
+        | 'reserved'
+        | 'dispatching'
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+        | 'unknown';
+      /** @enum {string} */
+      usageQuality: 'confirmed' | 'estimated' | 'unknown';
+      /** Format: int64 */
+      inputTokens: number | null;
+      /** Format: int64 */
+      outputTokens: number | null;
+      /** Format: int64 */
+      costMicros: number | null;
+      /** Format: int64 */
+      frozenMicros: number;
+      /** Format: int64 */
+      frozenTokens: number;
+      currency: string;
+      /** Format: date-time */
+      dayPeriodStart: string;
+      /** Format: date-time */
+      monthPeriodStart: string;
+      priceVersion: string;
+      /** Format: date-time */
+      createdAt: string;
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_UsagePage: {
+      items: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_Usage'][];
+      nextCursor?: string;
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_ModelList: {
+      /** @constant */
+      object: 'list';
+      data: {
+        id: string;
+        /** @constant */
+        object: 'model';
+        /**
+         * Format: int64
+         * @description Unix seconds; 0 denotes an unknown creation time and is not a creation timestamp.
+         */
+        created: number;
+        /**
+         * Format: int64
+         * @description Authenticated pool context capacity, when disclosed.
+         */
+        context_window?: number;
+        /**
+         * Format: int64
+         * @description Authenticated pool output capacity; smaller than context_window when both are disclosed.
+         */
+        max_output_tokens?: number;
+        /** @constant */
+        owned_by: 'auriga';
+      }[];
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_AssistantMessage: {
+      /** @constant */
+      role: 'assistant';
+      content: string | null;
+      tool_calls?: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_ToolCall'][];
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_TokenUsage: {
+      /** Format: int64 */
+      prompt_tokens: number;
+      /** Format: int64 */
+      completion_tokens: number;
+      /** Format: int64 */
+      total_tokens: number;
+    };
+    ShellAuthopenapi_ai_yaml_components_schemas_ChatCompletion: {
+      id: string;
+      /** @constant */
+      object: 'chat.completion';
+      /** Format: int64 */
+      created: number;
+      model: string;
+      choices: {
+        /** Format: int64 */
+        index: number;
+        message: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_AssistantMessage'];
+        /** @enum {string} */
+        finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter';
+      }[];
+      usage: components['schemas']['ShellAuthopenapi_ai_yaml_components_schemas_TokenUsage'];
+    };
+    /** IAM visible DSH system directory page */
+    ShellAuthnetwork_system_directory_schema_json: {
+      items: ({
+        systemAddress: string;
+        displayName: string;
+        /** Format: uuid */
+        ownerUserId: string;
+        ownerDisplayName: string;
+        /** @enum {string} */
+        onlineState?: 'unknown' | 'online' | 'offline';
+        /** Format: date-time */
+        statusObservedAt?: string | null;
+      } & unknown)[];
+      nextCursor?: string;
+    };
+    ShellAuthOutput_team_initialize: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_list_tools: {
+      tools: Record<string, never>[];
+    };
+    ShellAuthOutput_team_ping: {
+      available: boolean;
+    };
+    ShellAuthOutput_network_open: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_network_send: {
+      /** Format: int64 */
+      sequence: number;
+    };
+    ShellAuthOutput_network_submit: {
+      /** @description 解码后最多65536字节，必须严格验证 network/send.schema.json#/$defs/SendResult；保留原始受签字节，不经生成模型重序列化。 */
+      resultWire: string;
+    };
+    ShellAuthOutput_getNetworkKeys: {
+      /** @description 解码后最多65536字节，必须严格验证 network/keyset.schema.json#/$defs/SignedKeyset；保留原始受签字节，不经生成模型重序列化。 */
+      wire: string;
+    };
+    ShellAuthOutput_getNetworkKeyAnnouncement: {
+      /** @description 解码后最多65536字节，必须严格验证 network/protocol.schema.json#/$defs/KeysetAnnouncement；保留原始受签字节，不经生成模型重序列化。 */
+      wire: string;
+    };
+    ShellAuthOutput_profile_read: {
+      /** Format: uuid */
+      memberId: string;
+      displayName: string;
+    };
+    ShellAuthOutput_provider_diagnostic: {
+      available: boolean;
+    };
+    ShellAuthOutput_team_list_endpoints: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_open_thread: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_reply_thread: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_read_thread: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_node_register: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_node_bind: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_node_pull: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_node_ack: {
+      /** Format: uuid */
+      streamId: string;
+    };
+    ShellAuthOutput_team_node_revoke: {
+      /** Format: uuid */
+      streamId: string;
+    };
   };
   responses: never;
   parameters: never;
@@ -158,6 +2404,377 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShellAuthCommand'];
+      };
+    };
+    responses: {
+      /** @description 草案响应 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthEvent'];
+        };
+      };
+      /** @description 请求失败，使用既有 common.* 错误码 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  exchangeShellAuthBusinessCall: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShellAuthBusinessCall'];
+      };
+    };
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthBusinessResult'];
+        };
+      };
+      /** @description 安全拒绝 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  exchangeShellAuthStreamCommand: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShellAuthStreamCommand'];
+      };
+    };
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthStreamEvent'];
+        };
+      };
+      /** @description 安全拒绝 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  exchangeShellAuthLoopbackExchange: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShellAuthLoopbackExchange'];
+      };
+    };
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthPageSession'];
+        };
+      };
+      /** @description 安全拒绝 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  getShellAuthAgentCredentials: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-DSH-Session-Id': string;
+        'X-Dsh-Team-Task-Capability': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentCredentials'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+    };
+  };
+  exchangeShellAuthAgentCredentialsRequest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShellAuthAgentCredentialsRequest'];
+      };
+    };
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentCredentials'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+    };
+  };
+  exchangeShellAuthOutboundRequest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShellAuthOutboundRequest'];
+      };
+    };
+    responses: {
+      /** @description 当前权威记录 */
+      200: {
+        headers: {
+          'X-Dsh-Team-Outbound-Status'?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthOutboundResult'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+      /** @description 原型兼容错误；非 Problem */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthAgentError'];
+        };
+      };
+    };
+  };
+  exchangeShellAuthPageMessage: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-Auriga-Shell-Token': string;
+        'X-Auriga-Shell-CSRF': string;
+      };
       path?: never;
       cookie?: never;
     };
