@@ -1,4 +1,24 @@
 export interface paths {
+  '/login/uac/sso': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 门户服务端尝试SSO免扫码登录草案
+     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存bo.token，执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。
+     */
+    post: operations['loginUacSso'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/admin/providers/{providerId}/uac': {
     parameters: {
       query?: never;
@@ -1214,6 +1234,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    UacSsoLogin: {
+      /** Format: uuid */
+      providerId: string;
+      /** @description 门户服务端签发的32字节随机一次性导航证明，非UAC token */
+      navigationProof: string;
+      /**
+       * @description 请求意图不构成用户操作证明，服务器核导航资格与抑制标记
+       * @enum {string}
+       */
+      mode: 'auto' | 'continue';
+      invitationCode?: string;
+    };
+    UacSsoLoginResult: {
+      /** Format: uuid */
+      transactionId: string;
+      /** @enum {string} */
+      state: 'authenticated' | 'additional_step_required' | 'scan_required';
+    };
     /** @description 当前认证会话的展示资料。purpose固定login_info。available时必须具有department和updatedAt，pending/unavailable时省略department，由生产方执行状态关联校验。该资料不参与授权或复验截止计算。 */
     UacLoginInfo: {
       /** @constant */
@@ -2050,8 +2088,8 @@ export interface components {
     };
   };
   responses: {
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
+    /** @description 请求无效（common.validation_failed 等）。 */
+    BadRequest: {
       headers: {
         [name: string]: unknown;
       };
@@ -2077,8 +2115,18 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 请求无效（common.validation_failed 等）。 */
-    BadRequest: {
+    /** @description 太频繁（common.rate_limited）。 */
+    RateLimited: {
+      headers: {
+        'Retry-After': components['headers']['RetryAfter'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
       headers: {
         [name: string]: unknown;
       };
@@ -2089,16 +2137,6 @@ export interface components {
     /** @description If-Match 不匹配（common.precondition_failed）。 */
     PreconditionFailed: {
       headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 太频繁（common.rate_limited）。 */
-    RateLimited: {
-      headers: {
-        'Retry-After': components['headers']['RetryAfter'];
         [name: string]: unknown;
       };
       content: {
@@ -2131,15 +2169,43 @@ export interface components {
   };
   requestBodies: never;
   headers: {
-    /** @description 资源版本。 */
-    ETag: string;
     /** @description 多少秒后重试。 */
     RetryAfter: number;
+    /** @description 资源版本。 */
+    ETag: string;
   };
   pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  loginUacSso: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UacSsoLogin'];
+      };
+    };
+    responses: {
+      /** @description 登录结果或扫码降级，浏览器会话cookie仅按原入口规则设置 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UacSsoLoginResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      429: components['responses']['RateLimited'];
+    };
+  };
   getUacProviderConfig: {
     parameters: {
       query?: never;

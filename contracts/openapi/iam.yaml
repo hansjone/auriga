@@ -32,6 +32,37 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /login/uac/sso:
+    post:
+      tags:
+        - login
+      operationId: loginUacSso
+      summary: 门户服务端尝试SSO免扫码登录草案
+      security:
+        - {}
+      description: 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存bo.token，执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control
+        no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UacSsoLogin"
+      responses:
+        "200":
+          description: 登录结果或扫码降级，浏览器会话cookie仅按原入口规则设置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UacSsoLoginResult"
+        "400":
+          $ref: common.yaml#/components/responses/BadRequest
+        "403":
+          $ref: common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: common.yaml#/components/responses/NotFound
+        "429":
+          $ref: common.yaml#/components/responses/RateLimited
   /admin/providers/{providerId}/uac:
     parameters:
       - name: providerId
@@ -1493,6 +1524,48 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    UacSsoLogin:
+      type: object
+      additionalProperties: false
+      required:
+        - providerId
+        - navigationProof
+        - mode
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        navigationProof:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: ^[A-Za-z0-9_-]{43}$
+          description: 门户服务端签发的32字节随机一次性导航证明，非UAC token
+        mode:
+          type: string
+          enum:
+            - auto
+            - continue
+          description: 请求意图不构成用户操作证明，服务器核导航资格与抑制标记
+        invitationCode:
+          type: string
+          maxLength: 512
+    UacSsoLoginResult:
+      type: object
+      additionalProperties: false
+      required:
+        - transactionId
+        - state
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - authenticated
+            - additional_step_required
+            - scan_required
     UacLoginInfo:
       $ref: ../auth/uac-login-info.schema.json#/$defs/UacLoginInfo
     UacProviderConfig:

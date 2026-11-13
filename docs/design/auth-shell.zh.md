@@ -2,19 +2,19 @@
 
 ## 1. 范围与依据
 
-本稿基于 `51beea24b3e42619f8d8b5879ba158176235fa87`，第8轮根据用户确认将token-verify设为默认复验策略，并落实续审N1–N4的故障分类与语义澄清，保留第6轮独审返工的Desktop、身份源写入、设备绑定及交付接线，沿用扫码现场实现和七项产品决定，供后续拆分实现。契约新增项均为草案，尚无运行时接线。审查等级 A，涉及 contracts，交主控标记【待审查】。
+本稿基于 `51beea24b3e42619f8d8b5879ba158176235fa87`，第9轮将浏览器SSO免扫码纳入第一期，并确定Desktop系统浏览器门户加设备授权的默认路径，保留第8轮token-verify默认策略及N1–N4故障分类，保留第6轮独审返工的Desktop、身份源写入、设备绑定及交付接线，沿用扫码现场实现和七项产品决定，供后续拆分实现。契约新增项均为草案，尚无运行时接线。审查等级 A，涉及 contracts，交主控标记【待审查】。
 
-本轮的用户要求是 UAC 扫码与团队账号并列，登录页归云端门户或 Desktop 外壳，插件继承身份。Desktop 可跳过并稍后登录，平台认证失败不得封锁本地 DSH。云端托管入口要求登录。桌面登录仅认证并返回当前 DSH，进入本人云端实例由门户现有工作空间流程负责。
+本轮的用户要求是 UAC 的SSO免扫码优先、扫码降级，与团队账号并列，登录页归云端门户或 Desktop 外壳，插件继承身份。Desktop 可跳过并稍后登录，平台认证失败不得封锁本地 DSH。云端托管入口要求登录。桌面登录仅认证并返回当前 DSH，进入本人云端实例由门户现有工作空间流程负责。
 
 依据为任务文件、`docs/architecture/identity.zh.md`、`contracts/README.md`、`contracts/deployment/README.md`、`contracts/plugin/local-login.md`、`contracts/resource/unified-protocol.md`，以及 memwiki 的《Auriga 工作台产品设计》《DSH 宿主兼容与连接模式认证》。公开文档中的地址均使用示例域名。企业真实地址只进入部署配置。
 
 ### 1.1 现场协议与公开文档边界
 
-扫码取得token和工号即完成UAC登录。随后一次purpose=login_info的部门查询用于展示，失败只记WARN。到期的purpose=revalidate按部署策略执行：默认token-verify验证token，department部门查询保留为可切换备用策略。本设计保留用户最终规则，验收使用替身与日志断言。
+登录页服务端优先检查浏览器SSO Cookie并验证，缺失或验证不通过则显示扫码。扫码取得token和工号即完成UAC登录。两种方式登录成功后，均执行一次purpose=login_info的部门查询用于展示，失败只记WARN。到期的purpose=revalidate按部署策略执行：默认token-verify验证token，department部门查询保留为可切换备用策略。本设计保留用户最终规则，验收使用替身与日志断言。
 
 真实接口主机、完整路径和系统标识只存部署或企业适配器私有配置，扫码与部门查询的报文编解码细节也保留在私有适配器。公开仓库的地址只使用 `<qrVerifyPath>`、`<userSearchUrl>`、`<tokenVerifyUrl>` 占位符；token-verify按第2.4.3节公开通用字段名、请求头及摘要算法，不包含真实地址、注册编码或凭据。适配器将本稿Uac挑战与上游报文互转，返回waiting/scanned、token、empNo和部门信息。来源文件、逐字段核对及原型与新规则差异记入未提交执行报告，企业专用细节不复制到公共契约。
 
-第7轮还只读核对了内部UAC接入资料：其入口依赖公司域SSO Cookie，与现场扫码属于不同接入方式。资料中的真实主机、路径、Cookie名称和系统编码均不进入公开仓库。用户已确认扫码取得的token被token验证接口接受，因此默认采用token-verify；clientIP取值、失败码及返回用户标识格式等继续按第2.5节现场观察。
+第7轮还只读核对了内部UAC接入资料：其入口依赖公司域SSO Cookie，与现场扫码属于不同接入方式。资料中的真实主机、路径、Cookie名称和系统编码均不进入公开仓库。SSO Cookie名称及Portal/UDS体系字段映射按该资料放企业适配器私有配置，公开仓库只描述角色与优先级。用户已确认扫码取得的token被token验证接口接受，因此默认采用token-verify；clientIP取值、失败码及返回用户标识格式等继续按第2.5节现场观察。
 
 通用边界保持HTTPS、受信地址允许列表、禁止重定向、15秒扫码请求超时、3秒资料请求超时、2MiB响应上限、按各协议限定的工号比对及120秒挑战有效期。企业部署通过私有映射延续现场可用协议。
 
@@ -109,7 +109,7 @@ token-verify尚在有界上游故障重试预算内时，来源会话仍为有�
 
 每次初始兑换、刷新、换取AI/网络等audience凭据时，IAM重新校验来源会话未过期/撤销、认证代次相同、provider和成员可用，再验证device/client/scope。UAC复验失败、会话退出/过期、成员停用、身份源关闭均撤销绑定grant/refresh家族，旧认证代次的刷新立即拒绝。复验任务即使只从来源会话开始，也必须沿绑定索引覆盖所有设备。
 
-关闭门户窗口或broker清理临时cookie jar仅释放本地材料。调用服务器logout会撤销来源会话及绑定设备。成功设备授权后broker只清临时jar，保留服务器来源会话至其正常期限；到期需要重新登录，device refresh不能延长来源会话上限。事件通知推动broker清材料和旧连接，通知失败时刷新端的权威检查仍拒绝，快照记录对应reason。
+关闭门户窗口或broker清理本次设备授权材料不等于服务器logout。调用服务器logout会撤销来源会话及绑定设备。成功设备授权后broker清device_code等临时材料，保留服务器来源会话至其正常期限；到期需要重新登录，device refresh不能延长来源会话上限。事件通知推动broker清材料和旧连接，通知失败时刷新端的权威检查仍拒绝，快照记录对应reason。
 
 ### 2.4.2 部门查询协议及用途
 
@@ -125,7 +125,7 @@ IAM通过受信私有配置的 `POST <tokenVerifyUrl>` 调用验证接口，沿�
 
 `verifyCode = lowercaseHex(MD5(UTF8(account + token + clientIP + systemCode)))`，四字段按此顺序无分隔拼接，输出32位小写十六进制。MD5是对方协议规定的完整性校验字段，不作为Auriga认证或防伪的安全依据；我方仍依赖TLS、受信目的地、服务端凭据保管及会话绑定。前端展示systemCode可以与后端不同，后端必须使用部署方在UAC注册的真实编码，不能接受前端覆盖或沿用公开示例。
 
-clientIP由部署私有配置决定为空字符串或固定的服务端出口地址，必须现场确认哪种被接受。不得采信任意X-Forwarded-For；将来采用真实客户端地址时只能经过受信代理解析。token、verifyCode、摘要拼接原文、clientIP实际值及orgId不进入普通日志。真实地址、编码和Cookie名只来自私有配置。
+扫码来源的clientIP由部署私有配置决定为空字符串或固定的服务端出口地址，必须现场确认哪种被接受；SSO来源按第3.1.1节优先读取私有映射中的客户端IP资料，缺失时用部署配置。登录时验证采用的clientIP及其来源加密随凭据记录保存，后续复验使用同值，变更按配置修订显式迁移，不混用浏览器地址或任意转发头。不得采信任意X-Forwarded-For；将来采用真实客户端地址时只能经过受信代理解析。token、verifyCode、摘要拼接原文、clientIP实际值及orgId不进入普通日志。真实地址、编码和Cookie名只来自私有配置。
 
 token-verify按以下顺序分类，先检查HTTP与响应结构，不能只凭某一个可解析code就撤销：
 
@@ -156,7 +156,7 @@ token-verify按以下顺序分类，先检查HTTP与响应结构，不能只凭�
 - 登录时token/工号字段的实际分支、token哈希前缀及扫码耗时。
 - 资料源标识及路径、purpose、HTTP/业务结果、列表分支、匹配数量、dept字段分支与departmentPresent。日志省略姓名、部门全称和完整响应中的个人值。
 - clientIP为空或服务端出口地址是否通过，双层失败码实际取值，新token是否每次更换、旧token是否有宽限，以及验证接口返回的用户标识与工号的格式是否一致（包括长短工号差异）。诊断只比较哈希前缀与存在性，不回传原token或地址。
-- 云端SSO Cookie的Domain/Path/Secure是否覆盖门户后端、私有Cookie映射、注册回跳地址是否可用，是否满足第7节后续增强前提。
+- 云端SSO Cookie的Domain/Path/Secure是否覆盖门户后端、私有Cookie映射、注册回跳地址是否可用，是否满足第3.1.1节第一期SSO前提、默认开关是否生效、退出抑制和显式继续行为。
 - 实际复验strategy、重试预算/attempt/retryAt/retryDeadline、tokenReplaced、复验周期、nextRevalidateAt、重启领取的到期会话、批量抖动与dueLagMs、失效原因、撤销传播时间，多副本重复或晚响应情况。
 - 手机目标系统展示差异、员工号变更/回收、网络出口/代理/TLS故障、响应结构变化与速率限制。观测资料作为现场修正依据。
 
@@ -170,11 +170,27 @@ token-verify按以下顺序分类，先检查HTTP与响应结构，不能只凭�
 
 domain 与纯 IP 部署均沿现有入口契约。IP 同源实例保留已知弱隔离，端口无法隔离 cookie。edge 转实例剥离全部平台凭据，管理写请求保持独立 Origin 与 CSRF 校验。
 
-### 3.2 Desktop外壳与loopback登录页
+### 3.1.1 第一期SSO优先与扫码降级
+
+现有web/portal是静态前端，不新增假定已存在的Node门户后端。由B在edge的门户登录页服务端接缝创建受保护导航事务，A在IAM承担门户服务端的Cookie解析、UAC验证及建会话。edge只对受信门户登录链向IAM转送私有允许列表内的SSO Cookie，不能转送到DSH、workspace、第三方连接器或任意URL，不写日志。前端脚本不读取、不拼接、不转发Cookie、account或token，仅携带浏览器自动附带的Cookie与我方导航证明。公开配置只出现角色，真实Cookie名及企业域范围由企业适配器私有配置注入。
+
+部署配置 `auriga.iam.uac.sso-cookie.enabled`默认true、只接受布尔值，非法值拒绝启动；运维关闭即直接扫码，不改变UAC provider的enabled。只有门户部署于公司域名体系且Cookie的Domain/Path/Secure实际覆盖门户登录链，浏览器才会带来SSO Cookie；host-only或Path不覆盖也可能收不到。公司域外、纯IP及仅HTTP等不满足Cookie条件的部署自然走扫码，不弹故障，不通过复制Cookie或放宽域绕过浏览器限制。B/A在部署说明写清允许域、TLS/代理、私有Cookie映射与开关位置，E展示开关生效值。
+
+用户主动打开门户登录页时先检查现有我方会话：已有有效会话继续原目的；无会话才尝试SSO。自动尝试仅限顶层、非预取导航，服务端验证Sec-Fetch-Dest=document、Sec-Fetch-Mode=navigate、Sec-Fetch-Site为none或same-origin及Sec-Fetch-User=?1，禁止iframe、跨站和缺证据请求自动登录；证据不足仍显示扫码及“用公司账号继续”。导航响应只设置我方HttpOnly事务cookie并返回120秒一次性navigationProof（32字节随机base64url，存哈希，绑定入口完整Origin、tenant/provider、portal audience、login用途和浏览器事务）；GET不建会话。可信页面自动或按钮触发同源 `POST /api/iam/v1/login/uac/sso`，同时验证精确Origin、现有CSRF规则、事务cookie及navigationProof，CAS单次消费。mode=auto仍须权威检查导航资格与退出抑制，不能由body自行宣称用户操作。mode=continue由本页明确按钮触发，同样校验事务与CSRF。自动尝试每事务最多一次，不因页面轮询无限重发；UacSsoLoginResult.transactionId指向既有LoginTransaction，必要MFA沿原GET/advance继续；scan_required后创建扫码挑战替换当前导航事务。丢失响应只读取/恢复原登录事务，不再次验证旧token。
+
+IAM按内部资料映射选择完整token/account对：Portal体系优先，缺完整配对再取UDS体系，均无则fallback扫码；不把不同体系的token与工号交叉拼接。两体系同时存在时只验证优先的完整配对，该配对验证失败直接扫码，避免静默切到另一个账号。语言按Portal、UDS、默认简体中文；客户端IP按私有UDS资料映射取值，仅视为上游校验所需的非可信资料，校验长度和IP字面量格式，不做解析访问、不将其用于我方授权或审计客户端地址。缺失时用第2.4.3节部署值。版本等非必要字段不外发，序列号不采集。缺字段、重复同名Cookie、格式非法均安全回落扫码，不向浏览器暴露具体Cookie名或原文。
+
+后端计算verifyCode，调用第2.4.3节token验证接口，双层成功码、归一化工号及新token均通过才执行成员/邀请准入和必要MFA，保存验证返回的bo.token，不能保存未验证Cookie旧token。首次SSO验证任意明确拒绝、上游故障或资料不完整都回落扫码，不为尚未成立的会话启动复验重试，也不撤销浏览器里其他账号会话。成员准入拒绝仍按既有策略提示申请邀请，不能用扫码绕过；MFA未完成仍是additional_step_required。成功后轮换我方session ID、清事务证明，并与扫码共用一次login_info作业、nextRevalidateAt、设备绑定、撤销及日志。SSO用于login，不自动执行link/stepup，也不从普通业务GET建立新会话。
+
+退出的同源受保护POST在清会话前，将“本次浏览器会话禁止自动SSO”的标记写入服务端浏览器会话记录，配套独立host-only、HttpOnly、SameSite=Lax的会话cookie（HTTPS用__Host-前缀，无Domain/Expires/Max-Age，不含UAC材料）。该标记与平台session分离、跨标签页共享，登出与浏览器返回登录页不会清掉。普通重载、重定向、会话轮换及现存企业Cookie都不能绕过标记；同一浏览器会话内仅显示“用公司账号继续”和扫码，不再自动尝试。显式继续仅为本事务授权一次，不清抑制标记，不退出公司其他应用。浏览器恢复会话可能保留session cookie，届时继续抑制属安全降级。标记存储不可用时禁止自动SSO、保留显式继续/扫码。登录/退出响应no-store，页面frame-ancestors 'none'，外部returnTo严格受信相对路径允许列表，防CSRF与登录固定。
+
+### 3.2 Desktop外壳与loopback控制页
 
 核对当前main的clients/installer/runtime/cli.mjs、core.mjs及Windows launcher，现状为Node启动器拉起DSH，并由系统浏览器显示DSH页面，我方没有自有窗口。PR #319、分支agent/codex/auriga-P1E正在增加runtime/guardian.mjs及supervisor.mjs。下述认证broker为C线新增，依赖guardian的停用/隔离部分必须等P1-E合并并完成集成验证，不能把PR分支代码视为现成发布能力。
 
-启动器先启动当前OS用户的Node认证broker，监听127.0.0.1随机端口，再用系统浏览器打开loopback登录页。页面静态资源由broker自带，CSP限制同源脚本/连接、禁止第三方内容及iframe嵌入，Referrer-Policy=no-referrer、Cache-Control=no-store。GET静态页不回个人数据，敏感状态和写操作全部走受控POST。
+确定默认方案为系统浏览器打开云端门户，再经RFC8628设备授权把平台身份交给Desktop broker；浏览器访问真实门户域名时可带已有SSO Cookie，本机127.0.0.1页无法取得公司Cookie。第6轮的loopback页保留为本机状态、跳过、取消和拉起门户的控制页，不再代理或渲染远程登录步骤。相比在loopback页登录，默认方案复用浏览器SSO与同一门户认证流程；代价是需要可达门户及一次人工设备确认，但不增加本地重定向接收token的攻击面。平台不可达仍可跳过使用本地DSH。
+
+启动器先启动当前OS用户的Node认证broker，监听127.0.0.1随机端口；主动登录可直接打开受信云端设备验证页，初始跳过/状态操作可用loopback控制页。页面静态资源由broker自带，CSP限制同源脚本/连接、禁止第三方内容及iframe嵌入，Referrer-Policy=no-referrer、Cache-Control=no-store。GET静态页不回个人数据，敏感状态和写操作全部走受控POST。
 
 每次拉起登录页创建32字节随机一次性启动票据，TTL30秒，服务端保存哈希并绑定brokerEpoch、完整Origin、端口和操作目的。系统浏览器URL fragment携带这枚票据，页面读取后立即replaceState清除。票据可能短暂出现于OS打开URL的参数和浏览器历史，这是采用系统浏览器的实际交付边界，不能承诺不进argv。它不包含平台令牌，不记录到应用日志，结束或交换后立即作废，读取OS打开参数的已失陷本用户进程属于信任边界。
 
@@ -182,9 +198,11 @@ domain 与纯 IP 部署均沿现有入口契约。IP 同源实例保留已知弱
 
 loopback认证不使用cookie、localStorage或sessionStorage。浏览器cookie跨127.0.0.1端口共享，Path和随机名字也不能给其他本机服务建立可靠隔离。内存令牌从不附加到DSH或其他Origin请求，broker禁止把它转发到IAM。浏览器刷新需重新拉起登录页，UI提供清晰恢复动作。未认证原生HTTP不能凭伪造Origin放行，原生插件后端使用下一节的OS IPC。
 
-broker代理到受信平台，远程cookie jar仅在broker内，页面只见步骤与脱敏状态。团队账号沿nativeConnect S256取得device-only凭据。UAC先完成平台扫码认证，再沿RFC8628人工核码批准绑定设备，IAM执行第2.4.1节来源会话/认证代次检查。该设备确认是Desktop的额外一步，门户直接进入实例的路径没有该设备确认。
+broker先用已登记第一方client向既有标准设备授权端点申请device_code/user_code，device_code只在broker内，随后以系统浏览器打开经过HTTPS目的地允许列表校验的verification_uri（或受信verification_uri_complete）。门户在同一正常登录入口先用SSO Cookie，否则扫码或团队账号完成登录，再回设备确认页。用户仍须手动输入或逐字核对user_code、发起端与scope，要求现有10分钟内step-up；SSO不替代设备批准和MFA。IAM按第2.4.1节绑定来源会话/认证代次，broker有界轮询标准token端点，以自己的device_code兑换device-only凭据；页面不返回平台令牌，完成页仅提示可关闭。默认浏览器设备流沿现有RFC8628公开client绑定与轮询边界，不冒称该流有PKCE；已有nativeConnect的S256契约保留但不再作为Desktop默认路径。该设备确认是Desktop的额外一步，门户直接进入实例的路径没有该设备确认。
 
-平台access/refresh token及verifier由broker持有，持久化采用当前用户DPAPI与用户ACL，UAC上游token留IAM。broker通过AUTH-K的固定操作代理供应业务能力，拒绝任意URL/header/凭据解析输入。插件后端仅通过OS IPC得到状态与受限代理结果。
+设备授权延续只允许服务端生成的待批准请求，不能用任意外来设备码绑定登录事务。门户登录续接目的只允许服务器登记的本次设备确认页面，不接受任意returnTo、loopback回调或token URL参数；默认Desktop路径不调用workspace instance/open、不创建云实例。关闭页面、取消、超时或broker epoch变化后停止轮询并作废本次设备请求，晚到凭据丢弃/撤销，不能替换新身份。浏览器来源会话在批准后保留供绑定复验，broker不持有其cookie jar。Desktop本地退出立即停权并撤销旧设备，持久化manual-login-required；下次拉起门户指定只减少自动行为的manual模式，即使浏览器已有来源会话仍先显示继续/核码，不自动批准设备。门户自身退出按第3.1.1节抑制本浏览器自动SSO。
+
+平台access/refresh token、device_code（及已有其他流程中的verifier）由broker持有，持久化采用当前用户DPAPI与用户ACL，UAC上游token留IAM。broker通过AUTH-K的固定操作代理供应业务能力，拒绝任意URL/header/凭据解析输入。插件后端仅通过OS IPC得到状态与受限代理结果。
 
 ### 3.2.1 分发与本用户IPC边界
 
@@ -245,7 +263,7 @@ Windows通过第3.2.1节helper使用禁远程访问的命名管道，DACL 仅当
 
 首次 Desktop 启动提供“跳过，使用本地 DSH”。跳过不创建平台会话、云实例或设备授权。设置和侧栏平台区域显示“未登录”和“登录”，本地 owner 准入照常执行。
 
-之后用户点击登录，插件后端向 broker 发 open_login。登录完成改变快照并推送，当前 DSH 内平台 UI、固定代理调用与新网络连接立即更新，无需为身份刷新重启 DSH。用户取消扫码仅取消尝试。平台不可达时展示故障分类，有可恢复凭据的离线状态显示自动恢复，避免反复要求用户登录。
+之后用户点击登录，插件后端向 broker 发 open_login，默认拉起系统浏览器中的门户设备验证页，已有SSO可免扫码，否则扫码或团队账号登录。登录及人工设备批准完成后改变快照并推送，当前 DSH 内平台 UI、固定代理调用与新网络连接立即更新，无需为身份刷新重启 DSH。用户取消扫码或设备授权仅取消尝试。平台不可达时展示故障分类，有可恢复凭据的离线状态显示自动恢复，避免反复要求用户登录。
 
 本地私有会话、个人 Skill、个人模型、工具配置按 DSH owner 持久保留，平台账号切换不改写或重新绑定本地 owner。服务器私有资源仍按平台 owner 隔离，切换后立即失去旧平台身份可见性。
 
@@ -286,21 +304,21 @@ Windows通过第3.2.1节helper使用禁远程访问的命名管道，DACL 仅当
 
 由主控单独派契约作者/审查人，先于A/B/C/D/E冻结接口。范围为contracts/openapi/iam.yaml及shell-auth.yaml、contracts/auth/、contracts/plugin/及生成接线，盘点clients/dsh-plugin的市场/资源、网络长连接、AI凭据和Team MCP真实调用点。定义固定业务操作白名单、输入/输出schema、权限/audience、流式与长连接背压/关闭、重试/幂等、身份代次、撤销及取消。禁止任意URL、header或请求身份透传。
 
-AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设备绑定、详细诊断开关及密钥轮换契约。诊断开关持久化于IAM的独立tenant/provider诊断设置记录，使用独立revision以免改变认证配置代次，带enabled、expiresAt、revision，所有副本按权威修订读取，默认关闭，到期即关闭，重启继续遵守已有有效期。开关API只接受管理会话、iam.providers.write与CSRF，写审计。A实现后端，E只实现UI，不由E另造接口。
+AUTH-K同时冻结第3.1.1节SSO导航证明、退出抑制与门户/设备续接约束，并定义loopback票据交换与端口绑定页面令牌、UAC来源设备绑定、详细诊断开关及密钥轮换契约。诊断开关持久化于IAM的独立tenant/provider诊断设置记录，使用独立revision以免改变认证配置代次，带enabled、expiresAt、revision，所有副本按权威修订读取，默认关闭，到期即关闭，重启继续遵守已有有效期。开关API只接受管理会话、iam.providers.write与CSRF，写审计。A实现后端，E只实现UI，不由E另造接口。
 
 验收包括操作清单覆盖全部现有平台调用点、producer/consumer正负向夹具、跨用户/tenant、过期/撤销/代次错配、URL注入、流关闭和日志脱敏，以及标准lint/TS/Java/Go生成和编译。契约提交须全新非作者A级独审。此PR不展开完整业务代理协议，AUTH-K为明确的独立交付和实施依赖。
 
 ### 工作线 A，IAM UAC 身份源
 
-文件范围为 services/iam/api、impl 的连接器/登录/会话，企业适配器模块，以及 services/org 的成员关联策略接口。contracts 的进一步变动由主控统一协调。依赖AUTH-K。验收包括三语言生成、严格员工映射/邀请关联、复验/撤销、共享存储并发消费、RLS和跨租户负例。复验调度测试覆盖第2.4节周期、strategy及重试配置的默认值、上下界、非法值拒绝，以及配置修订和滚动重启生效。可控时钟验证nextRevalidateAt持久化、初次周期内零判定性复验、仅领取到期会话、重启保留期限、抖动分批、租约崩溃接管及成功后更新期限。配置与邀请提交失败可安全重试，单个挑战最多创建一个session。按最新流程迁移挑战与扫码取token/工号，登录后执行一次login_info信息查询，到期默认按token-verify执行revalidate，显式配置department时走备用查询，并以第2.5节替身逐项断言调用次数、purpose、明确失败/上游故障分类、有界重试、用户标识归一化、新token替换、日志与脱敏。A同时负责第9节IAM日志、安全诊断序列化器、audit和OpsSignals接线，以及IAM诊断下载控制器、web/admin按钮所需接口和deploy/compose、deploy/nas观测发布接线。导出单独对接现有audit读取与Loki受信查询，避免新增公网日志采集入口。
+文件范围为 services/iam/api、impl 的连接器/登录/会话，企业适配器模块，以及 services/org 的成员关联策略接口。contracts 的进一步变动由主控统一协调。依赖AUTH-K。验收包括三语言生成、严格员工映射/邀请关联、复验/撤销、共享存储并发消费、RLS和跨租户负例。复验调度测试覆盖第2.4节周期、strategy及重试配置的默认值、上下界、非法值拒绝，以及配置修订和滚动重启生效。可控时钟验证nextRevalidateAt持久化、初次周期内零判定性复验、仅领取到期会话、重启保留期限、抖动分批、租约崩溃接管及成功后更新期限。配置与邀请提交失败可安全重试，单个挑战最多创建一个session。按最新流程迁移挑战与扫码取token/工号，登录后执行一次login_info信息查询，先实现SSO Cookie配对优先级、验证新token及回落扫码，SSO/扫码共用登录会话和信息作业；到期默认按token-verify执行revalidate，显式配置department时走备用查询，并以第2.5节替身逐项断言调用次数、purpose、明确失败/上游故障分类、有界重试、用户标识归一化、新token替换、日志与脱敏。A同时负责第9节IAM日志、安全诊断序列化器、audit和OpsSignals接线，以及IAM诊断下载控制器、web/admin按钮所需接口和deploy/compose、deploy/nas观测发布接线。导出单独对接现有audit读取与Loki受信查询，避免新增公网日志采集入口。
 
 ### 工作线 B，门户登录和 edge
 
-范围为 web/portal/src/native-login、原门户登录入口、web/shared 渲染器与 API，infra/edge 仅调整路由/新事务保护接线。负责迁出插件 UI 的唯一写入，管理台与 Desktop 消费它。依赖 A 的 API，可先用替身。验收双入口audience隔离、二维码状态/取消/过期、额外验证、正常本人实例准备与进入、退出后HTTP/WS失效，domain/IP两模式。UAC分支接同一现场迁移替身，验收部门展示成功与失败降级、登录响应不等待信息查询及当前身份元数据更新，并核对页面所见correlationId与日志一致，错误响应无上游秘密。
+范围为 web/portal/src/native-login、原门户登录入口、web/shared 渲染器与 API，infra/edge 仅调整路由/新事务保护接线。负责迁出插件 UI 的唯一写入，管理台与 Desktop 消费它。依赖 A 的 API，可先用替身。验收双入口audience隔离、二维码状态/取消/过期、额外验证、正常本人实例准备与进入、退出后HTTP/WS失效，domain/IP两模式。UAC分支第一期接SSO优先/扫码回落及同一现场迁移替身，验收顶层导航证明、CSRF/登录固定、Cookie优先级、域外无Cookie降级、退出抑制及显式继续、设备确认续接不创建实例，并验收部门展示成功与失败降级、登录响应不等待信息查询及当前身份元数据更新，并核对页面所见correlationId与日志一致，错误响应无上游秘密。
 
 ### 工作线 C，Desktop 外壳认证
 
-范围为 clients/installer/runtime、windows/launcher、打包脚本与新 shell-auth 模块，guardian 认证状态接线。依赖AUTH-K、A及P1-E合并后的guardian集成，B提供共享UI。C唯一实现clients/shell-auth/及helper、版本制品构建、clients/installer/runtime/cli.mjs中的诊断导出子命令，并维护Desktop发布清单。验收正式安装包正常启动入口、DPAPI/ACL、跨用户拒绝、端口绑定内存令牌/CSRF、S256、人工设备确认、令牌不入页面、日志只记哈希前缀、随机端口清理、多窗口及更新后凭据恢复。与资源guardian共享单一状态协调，不新增并行停用写者。C按第9节输出本机壳登录、身份推送和停权日志，复用本机脱敏sink，UAC验收使用替身并断言跨端关联。
+范围为 clients/installer/runtime、windows/launcher、打包脚本与新 shell-auth 模块，guardian 认证状态接线。依赖AUTH-K、A及P1-E合并后的guardian集成，B提供共享UI。C唯一实现clients/shell-auth/及helper、版本制品构建、clients/installer/runtime/cli.mjs中的诊断导出子命令，并维护Desktop发布清单。验收系统浏览器门户SSO/扫码加设备核码、来源会话绑定、断网跳过和仅本机控制页，以及正式安装包正常启动入口、DPAPI/ACL、跨用户拒绝、端口绑定内存令牌/CSRF、device_code仅broker持有、人工设备确认、令牌不入页面、日志只记哈希前缀、随机端口清理、多窗口及更新后凭据恢复。与资源guardian共享单一状态协调，不新增并行停用写者。C按第9节输出本机壳登录、身份推送和停权日志，复用本机脱敏sink，UAC验收使用替身并断言跨端关联。
 
 ### 工作线 D，插件继承身份并删除旧登录
 
@@ -308,25 +326,21 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 
 ### 工作线 E，管理台配置
 
-范围为 web/admin/src/views/IdentityProvidersView.vue、admin/providersApi、providersForm、providersMessages 与对应测试。依赖 A 配置 API、B 共享 UI。管理台说明扫码入口、默认token-verify及备用department策略、上游故障与明确失败的行为区别及第2.4节周期/重试部署配置的默认值和合法范围，工作线A负责实际配置绑定。验收开关/baseUrl/systemCode、ETag冲突、权限和CSRF、启用前错误提示、关闭后会话失效，普通成员不能读取或修改配置。E负责配置页的详细诊断开关、自动到期状态、correlationId及诊断下载按钮，调用AUTH-K定义、A实现的接口。测试断言开关默认关闭、脱敏响应和权限拒绝。
+范围为 web/admin/src/views/IdentityProvidersView.vue、admin/providersApi、providersForm、providersMessages 与对应测试。依赖 A 配置 API、B 共享 UI。管理台说明SSO优先/扫码降级、默认开启的部署开关及Cookie域条件、退出抑制、默认token-verify及备用department策略、上游故障与明确失败的行为区别及第2.4节周期/重试部署配置的默认值和合法范围，工作线A负责实际配置绑定。验收开关/baseUrl/systemCode、ETag冲突、权限和CSRF、启用前错误提示、关闭后会话失效，普通成员不能读取或修改配置。E负责配置页的详细诊断开关、自动到期状态、correlationId及诊断下载按钮，调用AUTH-K定义、A实现的接口。测试断言开关默认关闭、脱敏响应和权限拒绝。
 
 每线经针对性测试形成可部署产物通知主控，由主控串行安排开发环境部署与正常入口验收。本稿交付物是可审阅文件，实施部署属于后续派工。
 
-### 后续阶段，云端SSO免扫码（默认关闭）
+### 第一期交付顺序
 
-不进入第一期。扫码已在现场可用，Desktop回环页面和公司域外部署无法获得公司域SSO Cookie，因此扫码仍是云端与Desktop共同主入口。可选SSO仅在门户部署于公司域名体系、浏览器实际把配置的SSO Cookie随请求发送给门户后端、Domain/Path/Secure和受信代理边界均满足时启用；仅同属公司域名并不保证可读取，host-only Cookie可能仍不可用。
-
-后续B/A协作：门户后端读取请求Cookie，通过私有映射取account/token，后端计算verifyCode并按第2.4.3节调验证接口，校验双层成功码、工号及新token，再执行现有成员策略建立我方会话。Cookie只在服务端读取，前端不读取/存储/提交UAC token，不直接信任Cookie，不透传UAC原始响应给前端；返回我方受保护会话与脱敏状态。成功会话沿用信息性部门查询和复验调度，进入正常门户实例流程。CSRF/Origin、登录事务绑定、Cookie固定及身份切换防护继续适用，回跳只允许注册的准确地址，登录失败可回扫码入口。Cookie名称、域、系统编码及跳转地址只从私有配置获取。
-
-待现场确认Cookie确实到达后端、SSO Cookie中token的可验证性、clientIP取值、系统注册编码及回跳行为，再由AUTH-K补契约并经独审派实现。不得复制内部示例中的前端原文透传、会话存储token或仅靠浏览器标志放行的做法。
+SSO免扫码按第3.1.1节进入第一期且默认开启，与扫码共用准入、信息查询、复验和诊断。AUTH-K先冻结导航证明/退出抑制和设备续接边界，A/B随后并行实现后端与门户；C/D接系统浏览器设备流。后续增强仅包括现场日志驱动的兼容修正，不再把SSO列为后续可选功能。
 
 ## 8. 已决定
 
 按任务第2轮“7项按推荐”的指令固化，理由随决定保留。
 
 1. 首次成员关联仅允许管理员核实员工号、双认证绑定或有效邀请，默认关闭自动入团队注册，避免自填员工号接管既有账号。
-2. UAC Desktop首期沿现有RFC8628人工核码，沿当前受限设备授权边界取得device-only凭据。
-3. 扫码取得token和工号即完成UAC登录，随后一次purpose=login_info部门查询只补充展示，失败仅WARN，不影响登录或nextRevalidateAt。复验周期默认7200秒，可通过第2.4节部署配置调整。每个会话持久化nextRevalidateAt，到期后按部署策略执行purpose=revalidate，默认token-verify（扫码token兼容性已由用户确认），上游故障按有界预算重试，完整响应中的明确业务/身份失败或预算耗尽撤销；department保留为备用，单次查不到部门立即撤销。服务重启仅处理已到期复验会话，日志分别记录网络与业务原因，本地DSH能力保持可用。
+2. Desktop首期默认系统浏览器打开云端门户，通过SSO或扫码/团队账号完成身份认证，再沿现有RFC8628人工核码取得device-only凭据；本机页只控制状态/取消/跳过，平台不可达时本地DSH仍可使用。
+3. 门户第一期默认先检查SSO Cookie并验证，无Cookie或验证失败回落扫码。扫码取得token和工号即完成UAC登录，两种成功方式随后一次purpose=login_info部门查询只补充展示，失败仅WARN，不影响登录或nextRevalidateAt。复验周期默认7200秒，可通过第2.4节部署配置调整。每个会话持久化nextRevalidateAt，到期后按部署策略执行purpose=revalidate，默认token-verify（扫码token兼容性已由用户确认），上游故障按有界预算重试，完整响应中的明确业务/身份失败或预算耗尽撤销；department保留为备用，单次查不到部门立即撤销。服务重启仅处理已到期复验会话，日志分别记录网络与业务原因，本地DSH能力保持可用。
 4. 已激活共享内容的退出/跨身份切换采用受控停止、隔离和新会话，避免旧身份内容残留在上下文。普通补登录通过快照推送生效。
 5. broker源码归C的clients/shell-auth/，Desktop与独立插件携带同一版本制品，目录及D线唯一打包职责按第3.2.1节执行。
 6. 企业适配器留私有模块，真实路径、主机、系统标识及扫码/部门查询编解码来自受信私有配置；token-verify通用字段名、请求头及摘要算法按第2.4.3节公开，公共仓库地址使用占位符并采用通用Uac/ShellAuth契约。
@@ -338,21 +352,21 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 
 ### 9.1 登录、复验与撤销结构化日志
 
-每个实际执行阶段开始和结束均输出JSON事件，phase为start/end。登录链包括challenge_start、scan_status、token_acquire和一次department_lookup，后者携带purpose=login_info。复验链按strategy记录department_lookup或token_verify，隶属于session_revalidate，携带purpose=revalidate；token_verify不混入登录信息查询。session_revoke用于退出、停用和复验失败后的撤销。每条事件增加chain字段，值为login、revalidation或revocation。token_acquire是私有扫码验证成功响应的本地解析阶段，HTTP元数据引用对应pollId。上游终态未取得token时也写token_acquire失败，waiting/scanned阶段继续等待。waiting/scanned也逐轮记end，不以去重丢掉阶段终态。停止轮询、撤销排队和完成各有结果，耗时用单调计时。
+每个实际执行阶段开始和结束均输出JSON事件，phase为start/end。登录链按入口分支：先执行sso_cookie_check，SSO成功则执行token_verify，扫码分支执行challenge_start、scan_status、token_acquire；任一成功分支随后一次department_lookup，后者携带purpose=login_info。SSO登录的token_verify携带purpose=login_sso、chain=login，复验链按strategy记录department_lookup或token_verify，隶属于session_revalidate，携带purpose=revalidate；token_verify不混入登录信息查询。session_revoke用于退出、停用和复验失败后的撤销。每条事件增加chain字段，值为login、revalidation或revocation。token_acquire是私有扫码验证成功响应的本地解析阶段，HTTP元数据引用对应pollId。上游终态未取得token时也写token_acquire失败，waiting/scanned阶段继续等待。waiting/scanned也逐轮记end，不以去重丢掉阶段终态。停止轮询、撤销排队和完成各有结果，耗时用单调计时。
 
 每条必须包含以下字段，无法取得的值显式为null。
 
 - timestamp为UTC RFC3339，service、level、stage、phase、result，durationMs为本阶段耗时，start事件为0。
 - correlationId为我方生成的本次认证/复验操作ID，eventId唯一，transactionId在存在时记录，pollId/attempt区分轮询与重试，parentCorrelationId连接复验、撤销或跨壳操作。
 - trace_id、spanId沿docs/dev/observability.md接线，requestId沿现有edge/common链。后台复验创建新trace，显式关联已存操作ID，不复用过期HTTP span。对UDS的出站不添加内部身份或秘密追踪头。
-- tenantId、providerId、configRevision、empNo及chain，tokenHashPrefix在token存在时记录，tokenMissing仅用于登录凭据解析诊断。每个department_lookup/token_verify的start/end及对应审计均必填purpose，值为login_info或revalidate，并记录departmentPresent、匹配条数和字段分支。会话创建与复验事件记录nextRevalidateAt、实际intervalSeconds，调度事件记录dueLagMs；session_revalidate/token_verify及审计记录strategy、credentialVersion、tokenReplaced、attempt/maxRetries、retryAt/retryDeadline、retry_pending/retry_exhausted，替换前后仅记oldTokenHashPrefix/newTokenHashPrefix；以failureClass/faultReason区分明确业务/身份失败与上游故障，前者立即撤销，后者在预算内只重试，另记identityComparisonVersion和identityMatched。所有这些是JSON字段，禁止作为Loki高基数标签。
+- tenantId、providerId、configRevision、empNo及chain，tokenHashPrefix在token存在时记录，tokenMissing仅用于登录凭据解析诊断。每个department_lookup/token_verify的start/end及对应审计均必填purpose，值为login_info、login_sso或revalidate；sso_cookie_check记录cookiePresent（不输出Cookie名）、cookieFamily=portal/uds/none、eligible、suppressed、fallbackReason、验证结果与correlationId，token仅记哈希前缀，并记录departmentPresent、匹配条数和字段分支。会话创建与复验事件记录nextRevalidateAt、实际intervalSeconds，调度事件记录dueLagMs；session_revalidate/token_verify及审计记录strategy、credentialVersion、tokenReplaced、attempt/maxRetries、retryAt/retryDeadline、retry_pending/retry_exhausted，替换前后仅记oldTokenHashPrefix/newTokenHashPrefix；以failureClass/faultReason区分明确业务/身份失败与上游故障，在purpose=revalidate时前者立即撤销、后者在预算内重试；purpose=login_sso失败仅回落扫码、不撤销其他会话，另记identityComparisonVersion和identityMatched。所有这些是JSON字段，禁止作为Loki高基数标签。
 - endpoint为固定路由模板和受信源别名，httpStatus、udsCode、udsSubCode、udsMessage、transportError、responseBytes。UDS错误消息先按第9.2节脱敏。challenge_start等无HTTP阶段保持httpStatus/udsCode为null，token_acquire可继承本轮上游HTTP状态。
 
 阶段结果为success、waiting、scanned、failure、expired、cancelled。撤销日志区分requested/committed/propagated，记录目标epoch或修订与关闭连接结果，确保能判断“已判失效但停权尚未完成”。首个失败原因保留，后续重试另写attempt。正常阶段INFO，失败WARN，意外内部异常ERROR，详细原始响应结构DEBUG。login_info的HTTP、业务、解析及资料写入失败统一为WARN并记reason，chain=login的认证结果保持success，不产生会话撤销。
 
 ### 9.2 脱敏和详细级别
 
-工号按用户授权可记录。token只记UTF-8原值SHA-256的小写十六进制前12位，同一token跨取回、部门查询、复验可关联。无token时hash字段为null。哈希前缀仅用于诊断。verifyCode、MD5拼接原文、clientIP、orgId、cookie、Authorization、企业私有认证头、设备码、verifier、挑战key/value/binding、完整URL查询串、证书私钥与密钥全部屏蔽。
+工号按用户授权可记录。token只记UTF-8原值SHA-256的小写十六进制前12位，同一token跨取回、部门查询、复验可关联。无token时hash字段为null。哈希前缀仅用于诊断。verifyCode、MD5拼接原文、clientIP、orgId、cookie、Authorization、企业私有认证头、设备码、verifier、navigationProof、浏览器退出抑制cookie、挑战key/value/binding、完整URL查询串、证书私钥与密钥全部屏蔽。
 
 采用最小必要原则，正常和详细模式都省略姓名、部门全称、组织全称、邮箱、电话，部门查询事件的purpose、departmentPresent及字段分支足够判断该次信息查询或复验结果。未知响应字段的值默认替换为[REDACTED]，只保留已知字段键与容器结构，未知键若含个人值或凭据也替换为固定占位键并记录计数。UDS code字段经长度和格式白名单后保留，若与已知秘密或个人值重合则屏蔽。udsMessage保留已知安全字面量映射，其余记[REDACTED]及messageRedacted=true，避免上游把姓名或token嵌进错误消息。换行/控制字符转义，消息最多512字节。
 
@@ -364,7 +378,7 @@ AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设
 
 ### 9.3 audit、ops与Alloy/Loki接线
 
-按现有contracts/events/audit.schema.json写audit.recorded，经common审计写入器和outbox进入auriga.audit.iam，交audit收集。各实际执行阶段结束写一条最小审计投影，action拟定为iam.uac.challenge_start、iam.uac.scan_status、iam.uac.token_acquire、iam.uac.department_lookup、iam.uac.token_verify、iam.uac.session_revalidate、iam.uac.session_revoke，result按既有success/failure/denied映射。等待轮询投影标result=success并在details.outcome写waiting/scanned，不表示认证成功。身份未建立时actor使用type=system、id=null，details只含上述脱敏诊断字段。数据库事务外执行上游HTTP，结果审计在短事务写outbox，outbox失败留同eventId供可靠重试。详细响应结构只进受控运维日志。iam.uac.department_lookup复用同一action，以details.purpose=login_info/revalidate及chain区分。信息查询失败时只写该action的failure投影和WARN，登录审计仍为success，不生成撤销action。audit.details不包含部门全称。
+按现有contracts/events/audit.schema.json写audit.recorded，经common审计写入器和outbox进入auriga.audit.iam，交audit收集。各实际执行阶段结束写一条最小审计投影，action拟定为iam.uac.sso_cookie_check、iam.uac.challenge_start、iam.uac.scan_status、iam.uac.token_acquire、iam.uac.department_lookup、iam.uac.token_verify、iam.uac.session_revalidate、iam.uac.session_revoke，result按既有success/failure/denied映射。等待轮询投影标result=success并在details.outcome写waiting/scanned，不表示认证成功。身份未建立时actor使用type=system、id=null，details只含上述脱敏诊断字段。数据库事务外执行上游HTTP，结果审计在短事务写outbox，outbox失败留同eventId供可靠重试。详细响应结构只进受控运维日志。iam.uac.department_lookup复用同一action，以details.purpose=login_info/revalidate及chain区分。信息查询失败时只写该action的failure投影和WARN，登录审计仍为success，不生成撤销action。audit.details不包含部门全称。
 
 IAM/edge在现有JSON stdout输出阶段日志，NAS与compose的observability/config.alloy已按compose project发现容器并送Loki。沿用service/container/job低基数标签，以JSON字段查询correlationId或trace_id。Desktop broker复用本机Auriga脱敏日志sink，托管插件沿现有容器日志或auriga-dsh-*.jsonl只读导入点采集，命名及轮转沿docs/dev/observability.md。Desktop日志仅在用户主动导出时打包到诊断包。链路验证分别断言本地落盘、Alloy接收、Loki查询与缺源提示。
 
@@ -378,7 +392,7 @@ Desktop由C在现有启动器新增 `diagnostics export` 子命令，通过随�
 
 一次执行完成范围校验、audit最小投影读取、Loki受信查询、本机受控日志读取、再次脱敏、清单校验和压缩。仅从受信配置取得数据源地址，用户输入只选择时间窗、provider与关联ID，不接受任意查询语句、URL或文件路径作为采集源。默认两小时、最大24小时，跨租户范围拒绝。安装级运维读取也只查询已指定的单租户，不用Loki无租户日志默认放大范围。现有audit读取权限由身份核验，安装本机数据源访问属于已授权运维边界，导出动作记录操作者和范围。
 
-包名为uac-diagnostics-<UTC>-<随机ID>.zip，内容包括manifest.json、uac-steps.jsonl、audit.jsonl、ops-alerts.json、sanitized-config.json和可选的uds-detail.jsonl。manifest包含版本、时间窗、安装/组件版本、脱敏器版本、来源清单、各文件SHA-256、行数、缺源、截断与导出审计ID。诊断导出对Me/ShellAuth的展示资料只投影状态、更新时间与departmentPresent，省略department原值。部门查询日志及审计条目保留purpose和分类原因，诊断包按login_info/revalidate分别统计成功/失败数量，并断言login_info失败未出现关联撤销。配置只含源别名、固定接口路径、systemCode存在性、originSystemCode是否为空、strategy、复验周期及重试参数的生效值和修订、retryAt/retryDeadline/attempt、tokenReplaced、脱敏会话的nextRevalidateAt、loginInfo状态和调度积压统计，省略token、真实凭据和个人目录路径。包中不得包含DSH journal、私有会话、vault、用户资源或完整环境。
+包名为uac-diagnostics-<UTC>-<随机ID>.zip，内容包括manifest.json、uac-steps.jsonl、audit.jsonl、ops-alerts.json、sanitized-config.json和可选的uds-detail.jsonl。manifest包含版本、时间窗、安装/组件版本、脱敏器版本、来源清单、各文件SHA-256、行数、缺源、截断与导出审计ID。诊断导出对Me/ShellAuth的展示资料只投影状态、更新时间与departmentPresent，省略department原值。部门查询日志及审计条目保留purpose和分类原因，诊断包按login_info/login_sso/revalidate分别统计成功/失败数量，并记录SSO缺失/抑制/回落计数，并断言login_info失败未出现关联撤销。配置只含sso-cookie.enabled生效值和Cookie体系存在性（不含Cookie名/域原值）、源别名、固定接口路径、systemCode存在性、originSystemCode是否为空、strategy、复验周期及重试参数的生效值和修订、retryAt/retryDeadline/attempt、tokenReplaced、脱敏会话的nextRevalidateAt、loginInfo状态和调度积压统计，省略token、真实凭据和个人目录路径。包中不得包含DSH journal、私有会话、vault、用户资源或完整环境。
 
 先在当前用户独享临时目录生成已经脱敏的条目，拒绝符号链接/重解析点和输出覆盖，再扫描秘密与个人字段，生成摘要后原子发布最终zip。日志损坏或无法安全脱敏时省略该条并记录计数，不输出原文。临时目录受用户ACL/0700保护，完成或失败后清理。单包上限50MiB，超限分段或明确截断。Desktop命令以partial=true和非零退出码提示缺源，IAM下载以响应头及manifest标明partial，界面展示不完整原因，不能以空包声称成功。关闭详细开关时包里仍有已执行的登录、复验和撤销阶段基础信息。
 
@@ -386,7 +400,7 @@ Desktop诊断包保存到用户指定目录，服务器诊断包通过已认证�
 
 ### 9.5 日志与诊断包验收
 
-A与E交付前用同一替身分别测试登录链、到期复验链和撤销链。登录信息查询成功时，断言记录部门及更新时间，当前会话的界面投影status=available且正常登录链purpose=login_info调用恰好1次。登录信息查询失败时，断言登录仍成功、展示status=unavailable、分类WARN、无撤销，nextRevalidateAt与登录事务提交值严格相等，调用也恰好1次。重复complete和资料读取不增加调用，过期会话或旧身份的晚响应不写入新身份。
+A/B/C/E交付前用同一替身分别测试SSO、扫码、到期复验及撤销链。SSO必须覆盖Portal/UDS优先级及禁止混配、Cookie存在且验证通过、验证失败/上游故障回落扫码、无Cookie、域外部署、开关关闭、退出后跨标签页/刷新不自动登录、显式继续、登录session ID轮换、跨站/iframe/预取/导航证明重放拒绝。Desktop以正式启动器验收系统浏览器已有SSO免扫码、无Cookie扫码、设备人工核码/step-up、取消及晚结果丢弃、不创建云实例、平台不可达跳过；不能用单纯broker内部API冒充完成。登录信息查询成功时，断言记录部门及更新时间，当前会话的界面投影status=available且正常登录链purpose=login_info调用恰好1次。登录信息查询失败时，断言登录仍成功、展示status=unavailable、分类WARN、无撤销，nextRevalidateAt与登录事务提交值严格相等，调用也恰好1次。重复complete和资料读取不增加调用，过期会话或旧身份的晚响应不写入新身份。
 
 使用可控时钟断言周期内purpose=revalidate调用为0。重启仅领取已到期复验会话，未来到期会话保留原时间，独立信息查询作业按其持久状态恢复。到期后才出现purpose=revalidate的session_revalidate及按strategy选择的department_lookup/token_verify；department成功推进期限，单次失败撤销。token-verify成功原子替换token并推进期限，上游故障不推进期限也不撤销，完整响应中的明确业务/身份失败或预算耗尽撤销。复验使用独立correlationId，通过parentCorrelationId与原登录关联，部门查询不复用登录pollId。两种purpose各自断言HTTP/UDS码、分类、级别、审计action及脱敏诊断包计数。
 

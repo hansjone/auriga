@@ -166,3 +166,57 @@ test('ShellAuth projection is wired into the normal generation and lint workflow
   const spec = YAML.parse(read('openapi/shell-auth.yaml'));
   assert.equal(spec.info.license.identifier, 'AGPL-3.0-only');
 });
+
+test('SSO login accepts navigation intent and rejects client-supplied upstream credentials', () => {
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  const request = ajv.compile(spec.components.schemas.UacSsoLogin);
+  const valid = {
+    providerId: id,
+    navigationProof: 'A'.repeat(43),
+    mode: 'auto',
+  };
+  assert.equal(request(valid), true);
+  assert.equal(request({ ...valid, mode: 'continue' }), true);
+  for (const field of ['providerId', 'navigationProof', 'mode']) {
+    const incomplete = { ...valid };
+    delete incomplete[field];
+    assert.equal(request(incomplete), false);
+  }
+  for (const field of [
+    'token',
+    'account',
+    'cookie',
+    'clientIP',
+    'returnTo',
+    'device_code',
+  ]) {
+    assert.equal(request({ ...valid, [field]: 'synthetic' }), false);
+  }
+  assert.equal(request({ ...valid, mode: 'link' }), false);
+  assert.equal(request({ ...valid, navigationProof: 'short' }), false);
+  assert.equal(request({ ...valid, navigationProof: '+'.repeat(43) }), false);
+  assert.equal(request({ ...valid, providerId: 'invalid' }), false);
+});
+
+test('SSO result supports safe QR fallback without returning upstream tokens', () => {
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  const result = ajv.compile(spec.components.schemas.UacSsoLoginResult);
+  for (const state of [
+    'authenticated',
+    'additional_step_required',
+    'scan_required',
+  ]) {
+    const valid = { transactionId: id, state };
+    assert.equal(result(valid), true);
+    assert.equal(result({ ...valid, token: 'synthetic' }), false);
+    assert.equal(result({ ...valid, rawResponse: {} }), false);
+  }
+  assert.equal(result({ state: 'authenticated' }), false);
+  assert.equal(result({ transactionId: id, state: 'linked' }), false);
+  const operation = spec.paths['/login/uac/sso'].post;
+  assert.deepEqual(operation.security, [{}]);
+  assert.equal(
+    operation.responses['403'].$ref,
+    'common.yaml#/components/responses/Forbidden',
+  );
+});
