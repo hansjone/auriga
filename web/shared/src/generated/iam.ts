@@ -1190,6 +1190,20 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @description 当前认证会话的展示资料。purpose固定login_info。available时必须具有department和updatedAt，pending/unavailable时省略department，由生产方执行状态关联校验。该资料不参与授权或复验截止计算。 */
+    UacLoginInfo: {
+      /** @constant */
+      purpose: 'login_info';
+      /** @enum {string} */
+      status: 'pending' | 'available' | 'unavailable';
+      /** @description 仅available时展示，禁止写入普通日志和诊断包 */
+      department?: string;
+      /**
+       * Format: date-time
+       * @description 该次信息查询状态持久化的时间，不作为复验时钟
+       */
+      updatedAt?: string;
+    };
     UacProviderConfig: {
       /** @default false */
       enabled: boolean;
@@ -1397,6 +1411,8 @@ export interface components {
       expiresAt: string;
     };
     Me: {
+      /** @description 当前会话的可选部门展示资料，身份或会话变更时清除 */
+      readonly uacLoginInfo?: components['schemas']['UacLoginInfo'];
       account: components['schemas']['Account'];
       session: components['schemas']['SessionView'];
       identities: components['schemas']['IdentityView'][];

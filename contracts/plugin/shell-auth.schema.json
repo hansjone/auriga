@@ -54,6 +54,10 @@
             "account_changed",
             "shell_restarted"
           ]
+        },
+        "uacLoginInfo": {
+          "$ref": "../auth/uac-login-info.schema.json#/$defs/UacLoginInfo",
+          "description": "仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除"
         }
       },
       "additionalProperties": false

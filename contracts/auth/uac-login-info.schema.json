@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UAC 登录信息查询的只读展示资料",
+  "$defs": {
+    "UacLoginInfo": {
+      "type": "object",
+      "readOnly": true,
+      "additionalProperties": false,
+      "description": "当前认证会话的展示资料。purpose固定login_info。available时必须具有department和updatedAt，pending/unavailable时省略department，由生产方执行状态关联校验。该资料不参与授权或复验截止计算。",
+      "required": [
+        "purpose",
+        "status"
+      ],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "const": "login_info"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "available",
+            "unavailable"
+          ]
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "仅available时展示，禁止写入普通日志和诊断包"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "该次信息查询状态持久化的时间，不作为复验时钟"
+        }
+      }
+    }
+  }
+}

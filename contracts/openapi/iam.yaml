@@ -1480,6 +1480,8 @@ components:
       name: auriga_admin_session
       description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    UacLoginInfo:
+      $ref: '../auth/uac-login-info.schema.json#/$defs/UacLoginInfo'
     UacProviderConfig:
       type: object
       required:
@@ -1719,6 +1721,10 @@ components:
     Me:
       type: object
       properties:
+        uacLoginInfo:
+          $ref: '#/components/schemas/UacLoginInfo'
+          readOnly: true
+          description: 当前会话的可选部门展示资料，身份或会话变更时清除
         account: { $ref: '#/components/schemas/Account' }
         session: { $ref: '#/components/schemas/SessionView' }
         identities: { type: array, items: { $ref: '#/components/schemas/IdentityView' } }
