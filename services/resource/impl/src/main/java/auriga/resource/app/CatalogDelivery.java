@@ -301,7 +301,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
         r -> {
           var doc = bound(r, c, body, etag, true);
           return mintTicket(r, c, doc);
-        });
+        },
+        false);
   }
 
   private JsonNode mintTicket(ResourceAccess.Reader r, UUID c, JsonNode doc) {
@@ -375,6 +376,12 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               || !row.get("version_id").equals(ticket.get("version_id"))) throw missing();
           var id = json(row, "document").path("resource").path("identity");
           admit(r, id, true);
+          if (!CatalogStatePolicy.desired(json(row, "document").path("resource")).equals("ENABLED"))
+            throw missing();
+          if (db.update(
+                  "UPDATE resource.catalog_ticket SET consumed_at=:now WHERE tenant_id=:tenant AND id=:id AND consumed_at IS NULL AND expires_at>:now",
+                  db.args("id", ticket.get("id"), "now", Timestamp.from(clock.instant())))
+              != 1) throw conflict();
           return catalog.download(
               actor,
               (UUID) ticket.get("package_id"),
@@ -415,7 +422,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               doc,
               counter(body, "installationRevision"));
           return mintTicket(r, c, doc);
-        });
+        },
+        false);
   }
 
   public JsonNode report(AurigaPrincipal actor, ObjectNode body, String key, String etag) {
@@ -560,12 +568,13 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     return rows.isEmpty() ? null : rows.getFirst();
   }
 
-  private LinkedHashMap<UUID, ObjectNode> cloudResources(UUID instance, UUID owner) {
+  private LinkedHashMap<UUID, ObjectNode> cloudResources(
+      UUID instance, UUID owner, long selection) {
     var resources = new LinkedHashMap<UUID, ObjectNode>();
     for (var row :
         db.rows(
-            "SELECT * FROM resource.catalog_instance_installation WHERE tenant_id=:tenant AND instance_id=:instance ORDER BY package_id FOR UPDATE",
-            db.args("instance", instance))) {
+            "SELECT * FROM resource.catalog_instance_installation WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision=:selection AND collected_generation IS NULL ORDER BY package_id FOR UPDATE",
+            db.args("instance", instance, "selection", selection))) {
       if (!owner.equals(row.get("owner_id"))) throw missing();
       resources.put((UUID) row.get("package_id"), (ObjectNode) json(row, "resource"));
     }
@@ -595,6 +604,56 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             changed));
   }
 
+  private long reserve(UUID instance, UUID pkg) {
+    var rows =
+        db.rows(
+            "INSERT INTO resource.catalog_instance_counter(tenant_id,instance_id,package_id,revision) VALUES(:tenant,:instance,:pkg,1) ON CONFLICT(tenant_id,instance_id,package_id) DO UPDATE SET revision=catalog_instance_counter.revision+1 WHERE catalog_instance_counter.revision<:maximum RETURNING revision",
+            db.args("instance", instance, "pkg", pkg, "maximum", ResourceWorkflow.MAX));
+    if (rows.isEmpty()) throw CatalogStatePolicy.conflict();
+    return number(rows.getFirst(), "revision");
+  }
+
+  private boolean sameInstallation(JsonNode expected, UnifiedResourceRef actual) {
+    return CatalogProtocol.identity(expected.path("identity")).equals(actual.getIdentity())
+        && expected.path("installationRevision").asLong() == actual.getInstallationRevision()
+        && CatalogStatePolicy.desired(expected).equals(CatalogStatePolicy.desired(actual));
+  }
+
+  /** Only the trusted workspace spec promotes an intent into the applied installation ledger. */
+  private void synchronize(UnifiedResourceWorkspace.Snapshot snapshot) {
+    var rows =
+        db.rows(
+            "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision=:selection",
+            db.args("instance", snapshot.instance(), "selection", snapshot.selectionRevision()));
+    if (rows.isEmpty()) return;
+    var row = rows.getFirst();
+    if (!snapshot.owner().equals(row.get("owner_id"))
+        || !Objects.equals(snapshot.node(), row.get("node_id"))) throw conflict();
+    db.update(
+        "UPDATE resource.catalog_distribution SET lifecycle='superseded',next_reconcile_at=NULL WHERE tenant_id=:tenant AND instance_id=:instance AND lifecycle='active' AND id<>:id",
+        db.args("instance", snapshot.instance(), "id", row.get("id")));
+    db.update(
+        "UPDATE resource.catalog_distribution SET lifecycle='active' WHERE tenant_id=:tenant AND id=:id",
+        db.args("id", row.get("id")));
+    var resolution = hydrateExpectations(row);
+    for (var item : resolution.path("resources")) {
+      if (snapshot.resources().stream().noneMatch(actual -> sameInstallation(item, actual)))
+        continue;
+      var previous = cloudRow(snapshot.instance(), uuid(item.path("identity"), "packageId"));
+      boolean changed =
+          previous == null
+              || number(previous, "revision") != item.path("installationRevision").asLong()
+              || !CatalogStatePolicy.desired(json(previous, "resource"))
+                  .equals(CatalogStatePolicy.desired(item));
+      saveCloud(
+          snapshot.instance(),
+          snapshot.owner(),
+          snapshot.selectionRevision(),
+          (ObjectNode) item,
+          changed);
+    }
+  }
+
   public JsonNode distribute(AurigaPrincipal actor, ObjectNode body, String key, String etag) {
     validate("UnifiedDistributionInput", body);
     UUID instance = uuid(body, "instanceId");
@@ -613,11 +672,21 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           match(etag, snapshot.selectionRevision());
           if (snapshot.node() == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
           var owner = access.target(r.tenant(), snapshot.owner());
-          long revision = snapshot.selectionRevision() + 1;
+          synchronize(snapshot);
+          long revision =
+              Math.max(
+                      snapshot.selectionRevision(),
+                      number(
+                          db.row(
+                              "SELECT COALESCE(max(selection_revision),0) AS revision FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance",
+                              db.args("instance", instance)),
+                          "revision"))
+                  + 1;
+          if (revision > ResourceWorkflow.MAX) throw conflict();
           UUID id = UuidV7.next();
           var resolution = JSON.createObjectNode().put("selectionRevision", revision);
           var resources = resolution.putArray("resources");
-          var retained = cloudResources(instance, snapshot.owner());
+          var retained = cloudResources(instance, snapshot.owner(), snapshot.selectionRevision());
           var selected = new HashSet<UUID>();
           var grants = new LinkedHashMap<UUID, JsonNode>();
           for (var s : body.path("selections")) {
@@ -635,12 +704,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                 throw missing();
               resource = previous.deepCopy();
             }
-            var previous = retained.get(p);
-            long installRevision =
-                previous == null ? 0 : previous.path("installationRevision").asLong();
             CatalogStatePolicy.dispatch(
                 resource,
-                CatalogStatePolicy.advance(installRevision, installRevision),
+                reserve(instance, p),
                 CatalogStatePolicy.stateForAction(s.path("action").asString()));
             retained.put(p, resource);
           }
@@ -667,7 +733,6 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                 resource,
                 resource.path("installationRevision").asLong(),
                 CatalogStatePolicy.desired(resource));
-            saveCloud(instance, snapshot.owner(), revision, resource, changed);
             resources.add(resource);
           }
           resolution.set("revocations", legacy.revocations());
@@ -683,7 +748,10 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           doc.set("selections", body.path("selections"));
           doc.putArray("reports");
           db.update(
-              "INSERT INTO resource.catalog_distribution(id,tenant_id,actor_id,instance_id,owner_id,node_id,selection_revision,fingerprint,document,resolution) VALUES(:id,:tenant,:actor,:instance,:owner,:node,:rev,:fp,CAST(:doc AS jsonb),CAST(:resolution AS jsonb))",
+              "UPDATE resource.catalog_distribution SET lifecycle='superseded',next_reconcile_at=NULL WHERE tenant_id=:tenant AND instance_id=:instance AND lifecycle='pending'",
+              db.args("instance", instance));
+          db.update(
+              "INSERT INTO resource.catalog_distribution(id,tenant_id,actor_id,instance_id,owner_id,node_id,selection_revision,fingerprint,document,resolution,next_reconcile_at) VALUES(:id,:tenant,:actor,:instance,:owner,:node,:rev,:fp,CAST(:doc AS jsonb),CAST(:resolution AS jsonb),:due)",
               db.args(
                   "id",
                   id,
@@ -702,7 +770,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   "doc",
                   doc.toString(),
                   "resolution",
-                  resolution.toString()));
+                  resolution.toString(),
+                  "due",
+                  Timestamp.from(clock.instant())));
           for (var grant : grants.entrySet())
             db.update(
                 "INSERT INTO resource.catalog_node_grant(id,tenant_id,distribution_id,package_id,version_id) VALUES(:id,:tenant,:d,:p,:v)",
@@ -728,10 +798,18 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
   }
 
   private ObjectNode distributionView(ResourceAccess.Reader r, Map<String, Object> row) {
+    db.lock("catalog-distribution/" + row.get("instance_id"));
+    row =
+        db.row(
+            "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND id=:id",
+            db.args("id", row.get("id")));
     var doc = (ObjectNode) json(row, "document");
     var snapshot = workspace().snapshot(r.tenant(), (UUID) row.get("instance_id"));
     if (!snapshot.owner().equals(row.get("owner_id"))) throw missing();
-    if (snapshot.selectionRevision() > number(row, "selection_revision")) {
+    synchronize(snapshot);
+    if (snapshot.selectionRevision() != number(row, "selection_revision")
+            && row.get("lifecycle").equals("superseded")
+        || snapshot.selectionRevision() > number(row, "selection_revision")) {
       doc.put("state", "superseded");
       return doc;
     }
@@ -833,6 +911,11 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   @Override
   public ResolveUnifiedResourcesResponse resolve(ResolveUnifiedResourcesRequest request) {
+    return resolve(request, null);
+  }
+
+  private ResolveUnifiedResourcesResponse resolve(
+      ResolveUnifiedResourcesRequest request, UnifiedResourceWorkspace.Snapshot actual) {
     UUID tenant = TenantContext.require();
     if (!tenant.toString().equals(request.getTenantId())) throw missing();
     return tx.write(
@@ -852,10 +935,14 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           var expected = new ArrayList<UnifiedSelection>();
           selections.forEach(s -> expected.add(CatalogProtocol.selection(s)));
           if (!expected.equals(request.getSelectionsList())) throw conflict();
-          var snapshot = workspace().snapshot(tenant, (UUID) row.get("instance_id"));
+          var snapshot =
+              actual == null ? workspace().snapshot(tenant, (UUID) row.get("instance_id")) : actual;
           if (snapshot.selectionRevision() > request.getSelectionRevision()
               || !snapshot.owner().equals(row.get("owner_id"))
               || !Objects.equals(snapshot.node(), row.get("node_id"))) throw conflict();
+          synchronize(snapshot);
+          if (snapshot.selectionRevision() != request.getSelectionRevision()
+              && row.get("lifecycle").equals("superseded")) throw conflict();
           var owner = access.target(tenant, (UUID) row.get("owner_id"));
           var resolution = hydrateExpectations(row);
           var out =
@@ -865,8 +952,20 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           var refreshed = JSON.createArrayNode();
           for (var resource : resolution.path("resources")) {
             boolean enabling = CatalogStatePolicy.desired(resource).equals("ENABLED");
-            var version = admit(owner, resource.path("identity"), enabling);
+            var version = admit(owner, resource.path("identity"), false);
             var current = (ObjectNode) resource.deepCopy();
+            var pack = catalog.pkg(owner, uuid(resource.path("identity"), "packageId"), false);
+            if (enabling
+                && (!version.get("state").equals("published")
+                    || !Boolean.TRUE.equals(pack.get("enabled"))
+                    || catalog.revoked(version))) {
+              CatalogStatePolicy.dispatch(
+                  current,
+                  reserve(
+                      (UUID) row.get("instance_id"), uuid(resource.path("identity"), "packageId")),
+                  "DISABLED");
+              enabling = false;
+            }
             if (enabling
                 && Instant.parse(current.path("lease").path("expiresAt").asString())
                     .isBefore(clock.instant().plusSeconds(300))) {
@@ -882,12 +981,6 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                 CatalogStatePolicy.desired(current));
             out.addResources(CatalogProtocol.ref(current));
             refreshed.add(current);
-            saveCloud(
-                (UUID) row.get("instance_id"),
-                (UUID) row.get("owner_id"),
-                number(row, "selection_revision"),
-                current,
-                false);
           }
           var saved = (ObjectNode) resolution.deepCopy();
           saved.set("resources", refreshed);
@@ -900,15 +993,27 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
   }
 
   private ObjectNode hydrateExpectations(Map<String, Object> row) {
-    var resolution = (ObjectNode) json(row, "resolution");
+    var resolution =
+        (ObjectNode)
+            json(
+                db.row(
+                    "SELECT resolution FROM resource.catalog_distribution WHERE tenant_id=:tenant AND id=:id",
+                    db.args("id", row.get("id"))),
+                "resolution");
     for (var item : resolution.path("resources")) {
       var resource = (ObjectNode) item;
       UUID pkg = uuid(resource.path("identity"), "packageId");
-      var persisted = cloudRow((UUID) row.get("instance_id"), pkg);
       if (!resource.has("installationRevision")
           || resource.path("installationRevision").asLong() == 0) {
+        var persisted = cloudRow((UUID) row.get("instance_id"), pkg);
         long revision =
-            persisted == null ? CatalogStatePolicy.advance(0, 0) : number(persisted, "revision");
+            persisted != null
+                    && number(persisted, "selection_revision") == number(row, "selection_revision")
+                    && json(persisted, "resource")
+                        .path("identity")
+                        .equals(resource.path("identity"))
+                ? number(persisted, "revision")
+                : reserve((UUID) row.get("instance_id"), pkg);
         String desired = CatalogStatePolicy.desired(resource);
         for (var selection : json(row, "document").path("selections"))
           if (selection.path("identity").equals(resource.path("identity")))
@@ -919,17 +1024,10 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           resource,
           resource.path("installationRevision").asLong(),
           CatalogStatePolicy.desired(resource));
-      if (persisted == null)
-        saveCloud(
-            (UUID) row.get("instance_id"),
-            (UUID) row.get("owner_id"),
-            number(row, "selection_revision"),
-            resource,
-            false);
-      else if (number(persisted, "revision") != resource.path("installationRevision").asLong()
-          || number(persisted, "selection_revision") != number(row, "selection_revision"))
-        throw CatalogStatePolicy.conflict();
     }
+    db.update(
+        "UPDATE resource.catalog_distribution SET resolution=CAST(:resolution AS jsonb) WHERE tenant_id=:tenant AND id=:id",
+        db.args("id", row.get("id"), "resolution", resolution.toString()));
     return resolution;
   }
 
@@ -1054,6 +1152,12 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                         .asString()
                         .equals(grant.get("package_id").toString())) resource = item;
                   if (resource == null
+                      || !resource
+                          .path("identity")
+                          .path("versionId")
+                          .asString()
+                          .equals(grant.get("version_id").toString())
+                      || !CatalogStatePolicy.desired(resource).equals("ENABLED")
                       || !clock
                           .instant()
                           .isBefore(
@@ -1083,8 +1187,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   tx.read(
                       () ->
                           db.rows(
-                              "SELECT * FROM resource.catalog_revocation_delivery WHERE tenant_id=:tenant AND completed_revision<revision ORDER BY id",
-                              db.args()));
+                              "SELECT * FROM resource.catalog_revocation_delivery WHERE tenant_id=:tenant AND completed_revision<revision AND next_reconcile_at<=:now ORDER BY next_reconcile_at,id LIMIT 100",
+                              db.args("now", Timestamp.from(clock.instant()))));
               for (var row : pending)
                 try {
                   tx.write(
@@ -1103,43 +1207,52 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                       });
                 } catch (RuntimeException e) {
                   retry();
+                  tx.write(
+                      () ->
+                          db.update(
+                              "UPDATE resource.catalog_revocation_delivery SET next_reconcile_at=:due WHERE tenant_id=:tenant AND id=:id AND completed_revision<revision",
+                              db.args(
+                                  "id",
+                                  row.get("id"),
+                                  "due",
+                                  Timestamp.from(clock.instant().plusSeconds(5)))));
                 }
               var active =
                   tx.read(
                       () ->
                           db.rows(
-                              "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant ORDER BY id",
-                              db.args()));
-              for (var row : active)
+                              "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND lifecycle IN ('active','pending') AND next_reconcile_at<=:now ORDER BY next_reconcile_at,id LIMIT 100",
+                              db.args("now", Timestamp.from(clock.instant()))));
+              var instances = new HashSet<UUID>();
+              for (var queued : active) {
+                if (!instances.add((UUID) queued.get("instance_id"))) continue;
                 try {
                   tx.write(
                       () -> {
-                        UUID instance = (UUID) row.get("instance_id");
+                        UUID instance = (UUID) queued.get("instance_id");
                         db.lock("catalog-distribution/" + instance);
                         var snapshot = workspace().snapshot(tenant, instance);
+                        synchronize(snapshot);
+                        var current =
+                            db.rows(
+                                "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision=:selection",
+                                db.args(
+                                    "instance",
+                                    instance,
+                                    "selection",
+                                    snapshot.selectionRevision()));
+                        if (current.isEmpty()) {
+                          defer(instance);
+                          return false;
+                        }
+                        var row = current.getFirst();
                         if (snapshot.selectionRevision() != number(row, "selection_revision")
                             || !snapshot.owner().equals(row.get("owner_id"))
                             || !Objects.equals(snapshot.node(), row.get("node_id"))) return false;
-                        if (collectTombstones(row, snapshot)) return true;
-                        boolean renew = false;
-                        for (var resource : json(row, "resolution").path("resources"))
-                          if (Instant.parse(resource.path("lease").path("expiresAt").asString())
-                              .isBefore(clock.instant().plusSeconds(300))) renew = true;
-                        for (var resource : json(row, "resolution").path("resources"))
-                          if (!resource.has("installationRevision")
-                              || snapshot.resources().stream()
-                                  .noneMatch(
-                                      expected ->
-                                          expected
-                                                  .getIdentity()
-                                                  .equals(
-                                                      CatalogProtocol.identity(
-                                                          resource.path("identity")))
-                                              && expected.getInstallationRevision()
-                                                  == resource
-                                                      .path("installationRevision")
-                                                      .asLong())) renew = true;
-                        if (!renew) return false;
+                        if (collectTombstones(row, snapshot)) {
+                          defer(instance);
+                          return true;
+                        }
                         var request =
                             ResolveUnifiedResourcesRequest.newBuilder()
                                 .setTenantId(tenant.toString())
@@ -1152,23 +1265,77 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                             .forEach(
                                 selection ->
                                     request.addSelections(CatalogProtocol.selection(selection)));
-                        var resolution = resolve(request.build());
-                        workspace()
-                            .refresh(
-                                tenant,
-                                instance,
-                                snapshot.owner(),
-                                snapshot.selectionRevision(),
-                                resolution);
+                        var resolution = resolve(request.build(), snapshot);
+                        if (resolution.getResourcesCount() != snapshot.resources().size()
+                            || !new HashSet<>(resolution.getResourcesList())
+                                .equals(new HashSet<>(snapshot.resources()))) {
+                          workspace()
+                              .refresh(
+                                  tenant,
+                                  instance,
+                                  snapshot.owner(),
+                                  snapshot.selectionRevision(),
+                                  resolution);
+                          defer(instance);
+                        } else schedule(row, snapshot, resolution);
                         return true;
                       });
                 } catch (RuntimeException e) {
                   retry();
+                  tx.write(
+                      () -> {
+                        db.lock("catalog-distribution/" + queued.get("instance_id"));
+                        defer((UUID) queued.get("instance_id"));
+                        return true;
+                      });
                 }
+              }
             });
       } catch (RuntimeException e) {
         retry();
       }
+  }
+
+  private void defer(UUID instance) {
+    db.update(
+        "UPDATE resource.catalog_distribution SET next_reconcile_at=:due WHERE tenant_id=:tenant AND instance_id=:instance AND lifecycle IN ('active','pending')",
+        db.args("instance", instance, "due", Timestamp.from(clock.instant().plusSeconds(5))));
+  }
+
+  private void schedule(
+      Map<String, Object> row,
+      UnifiedResourceWorkspace.Snapshot snapshot,
+      ResolveUnifiedResourcesResponse resolution) {
+    Instant due = null;
+    for (var resource : resolution.getResourcesList()) {
+      if (CatalogStatePolicy.desired(resource).equals("ENABLED")) {
+        Instant lease = Instant.parse(resource.getLease().getExpiresAt()).minusSeconds(300);
+        if (due == null || lease.isBefore(due)) due = lease;
+      }
+      if (CatalogStatePolicy.desired(resource).equals("REMOVED")
+          || snapshot.reports().stream()
+              .noneMatch(
+                  report ->
+                      CatalogStatePolicy.acknowledged(
+                          resource,
+                          snapshot.selectionRevision(),
+                          snapshot.generation(),
+                          report,
+                          "node"))) due = clock.instant().plusSeconds(5);
+    }
+    if (!snapshot.ready() || snapshot.generation() != snapshot.observedGeneration())
+      due = clock.instant().plusSeconds(5);
+    if (due != null && !due.isAfter(clock.instant())) due = clock.instant().plusSeconds(5);
+    db.update(
+        "UPDATE resource.catalog_distribution SET next_reconcile_at=:due WHERE tenant_id=:tenant AND id=:id",
+        db.args("id", row.get("id"), "due", due == null ? null : Timestamp.from(due)));
+    db.update(
+        "UPDATE resource.catalog_distribution SET next_reconcile_at=:due WHERE tenant_id=:tenant AND instance_id=:instance AND lifecycle='pending'",
+        db.args(
+            "instance",
+            row.get("instance_id"),
+            "due",
+            Timestamp.from(clock.instant().plusSeconds(5))));
   }
 
   private static void retry() {

@@ -61,7 +61,32 @@ class CatalogWorkflowTest {
   AtomicBoolean enabled = new AtomicBoolean(true);
   Set<UUID> security = new HashSet<>();
   ResourceSigning signing;
-  Clock clock = Clock.fixed(Instant.parse("2026-11-13T00:00:00Z"), ZoneOffset.UTC);
+  KeyPair releaseKey, revocationKey;
+  java.util.concurrent.atomic.AtomicReference<Instant> now =
+      new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-11-13T00:00:00Z"));
+  Clock clock =
+      new Clock() {
+        public ZoneId getZone() {
+          return ZoneOffset.UTC;
+        }
+
+        public Clock withZone(ZoneId zone) {
+          return this;
+        }
+
+        public Instant instant() {
+          return now.get();
+        }
+      };
+
+  void advance(long seconds) {
+    now.updateAndGet(value -> value.plusSeconds(seconds));
+  }
+
+  void reconcile(CatalogDelivery delivery) {
+    advance(6);
+    delivery.reconcile();
+  }
 
   @BeforeAll
   static void migrate() {
@@ -114,12 +139,11 @@ class CatalogWorkflowTest {
               }
             });
     var keys = KeyPairGenerator.getInstance("Ed25519");
+    releaseKey = keys.generateKeyPair();
+    revocationKey = keys.generateKeyPair();
     signing =
         new ResourceSigning(
-            "release",
-            keys.generateKeyPair().getPrivate(),
-            "revoke",
-            keys.generateKeyPair().getPrivate());
+            "release", releaseKey.getPrivate(), "revoke", revocationKey.getPrivate());
     var events =
         new OutboxEventPublisher(
             jdbc, "resource", "resource", new EventSchemas(), JSON, clock, () -> {});
@@ -448,8 +472,18 @@ class CatalogWorkflowTest {
 
   @Test
   void rejectsPathAndNetworkSemantics() {
-    for (String path : List.of("a//b", "a/../b", "a./b", "a /b", "CON.txt", "/absolute", "a\\b"))
-      assertError(CommonErrors.VALIDATION_FAILED, () -> CatalogManifest.path(path));
+    for (String path :
+        List.of(
+            "a//b",
+            "a/../b",
+            "a./b",
+            "a /b",
+            "CON.txt",
+            "COM¹",
+            "LPT².txt",
+            "COM³",
+            "/absolute",
+            "a\\b")) assertError(CommonErrors.VALIDATION_FAILED, () -> CatalogManifest.path(path));
     for (String host :
         List.of(
             "https://example.com",
@@ -467,25 +501,36 @@ class CatalogWorkflowTest {
   }
 
   CatalogDelivery delivery(auriga.resource.api.UnifiedResourceWorkspace workspace) {
+    return delivery(workspace, TENANT);
+  }
+
+  CatalogDelivery delivery(UnifiedResourceWorkspace workspace, UUID tenant) {
     var distributions = mock(ResourceDistributions.class);
     when(distributions.revocations())
         .thenAnswer(
             call -> {
               var existing = db.revocations();
-              if (existing != null) return existing;
+              if (existing != null
+                  && Instant.parse(existing.path("expiresAt").asString())
+                      .isAfter(clock.instant().plusSeconds(300))) return existing;
               var n =
                   JSON.createObjectNode()
                       .put("schemaVersion", 1)
-                      .put("tenantId", TENANT.toString())
-                      .put("revision", 1)
+                      .put("tenantId", tenant.toString())
+                      .put(
+                          "revision", existing == null ? 1 : existing.path("revision").asLong() + 1)
                       .put("issuedAt", clock.instant().toString())
                       .put("expiresAt", clock.instant().plusSeconds(86400).toString());
-              n.putArray("revokedKids");
-              n.putArray("revokedArtifacts");
+              n.set(
+                  "revokedKids",
+                  existing == null ? JSON.createArrayNode() : existing.path("revokedKids"));
+              n.set(
+                  "revokedArtifacts",
+                  existing == null ? JSON.createArrayNode() : existing.path("revokedArtifacts"));
               return signing.sign(n, true);
             });
     var directory = mock(ResourceWorkspace.class);
-    when(directory.tenants()).thenReturn(List.of(TENANT));
+    when(directory.tenants()).thenReturn(List.of(tenant));
     return new CatalogDelivery(
         tx,
         db,
@@ -531,7 +576,19 @@ class CatalogWorkflowTest {
                     .put("clientId", client.toString())
                     .put("installationRevision", 1);
             ticketBody.set("identity", identity(u));
-            var ticket = d.ticket(actor(GENERAL), ticketBody, key(), "\"1\"");
+            String ticketKey = key();
+            var ticket = d.ticket(actor(GENERAL), ticketBody, ticketKey, "\"1\"");
+            assertError(
+                CommonErrors.CONFLICT,
+                () -> d.ticket(actor(GENERAL), ticketBody, ticketKey, "\"1\""));
+            assertFalse(
+                tx.read(
+                        () ->
+                            db.rows(
+                                "SELECT response FROM resource.resource_operation WHERE tenant_id=:tenant AND operation LIKE 'catalog/ticket/%'",
+                                db.args()))
+                    .toString()
+                    .contains(ticket.path("ticket").asString()));
             var download =
                 JSON.createObjectNode()
                     .put("clientId", client.toString())
@@ -540,6 +597,9 @@ class CatalogWorkflowTest {
             assertArrayEquals(
                 u.payload,
                 d.download(actor(GENERAL), download, key(), "\"1\"", false).readAllBytes());
+            assertError(
+                CommonErrors.CONFLICT,
+                () -> d.download(actor(GENERAL), download, key(), "\"1\"", false));
             assertError(
                 CommonErrors.NOT_FOUND,
                 () -> d.download(actor(PUBLISHER), download, key(), "\"1\"", false));
@@ -560,7 +620,18 @@ class CatalogWorkflowTest {
                 "applied",
                 d.report(actor(GENERAL), report, key(), "\"1\"").path("state").asString());
             var renew = ticketBody.deepCopy().put("selectionRevision", 1).put("releaseSequence", 1);
-            var renewed = d.renew(actor(GENERAL), renew, key(), "\"1\"");
+            String renewKey = key();
+            var renewed = d.renew(actor(GENERAL), renew, renewKey, "\"1\"");
+            assertError(
+                CommonErrors.CONFLICT, () -> d.renew(actor(GENERAL), renew, renewKey, "\"1\""));
+            assertFalse(
+                tx.read(
+                        () ->
+                            db.rows(
+                                "SELECT response FROM resource.resource_operation WHERE tenant_id=:tenant AND operation LIKE 'catalog/renew/%'",
+                                db.args()))
+                    .toString()
+                    .contains(renewed.path("ticket").asString()));
             assertEquals(identity(u), renewed.path("resource").path("identity"));
             assertTrue(renewed.has("ticket"));
             var current = catalog.detail(actor(AUTHOR), u.pkg, u.version, false);
@@ -995,7 +1066,9 @@ class CatalogWorkflowTest {
                         actor(PUBLISHER), UUID.fromString(intent.path("distributionId").asString()))
                     .path("state")
                     .asString());
-            d.reconcile();
+            // Leave the next intent unapplied while the current tombstone is acknowledged.
+            d.distribute(actor(PUBLISHER), distributionBody(instance), key(), "\"3\"");
+            reconcile(d);
             verify(workspace, never()).refresh(any(), any(), any(), anyLong(), any());
             report = report.toBuilder().setState("removed").build();
             current.set(
@@ -1007,7 +1080,7 @@ class CatalogWorkflowTest {
                         actor(PUBLISHER), UUID.fromString(intent.path("distributionId").asString()))
                     .path("state")
                     .asString());
-            d.reconcile();
+            reconcile(d);
             verify(workspace, never())
                 .refresh(
                     any(),
@@ -1042,7 +1115,7 @@ class CatalogWorkflowTest {
                       current.set(next);
                       return next;
                     });
-            d.reconcile();
+            reconcile(d);
             assertEquals(1, acknowledged.resources().size());
             assertEquals(4, acknowledged.generation());
             assertEquals(
@@ -1057,14 +1130,14 @@ class CatalogWorkflowTest {
                     .asString());
             var reinstall = distributionBody(instance, selection(u, "install"));
             d.distribute(actor(PUBLISHER), reinstall, key(), "\"3\"");
-            var again = d.resolve(resolveRequest(instance, node, 4, reinstall.path("selections")));
+            var again = d.resolve(resolveRequest(instance, node, 5, reinstall.path("selections")));
             assertEquals(3, again.getResources(0).getInstallationRevision());
             current.set(
                 new UnifiedResourceWorkspace.Snapshot(
                     instance,
                     GENERAL,
                     node,
-                    4,
+                    5,
                     6,
                     6,
                     true,
@@ -1074,9 +1147,9 @@ class CatalogWorkflowTest {
             publish(other, decide(submit(other), GENERAL, "general"));
             var batch =
                 distributionBody(instance, selection(u, "enable"), selection(other, "install"));
-            d.distribute(actor(PUBLISHER), batch, key(), "\"4\"");
+            d.distribute(actor(PUBLISHER), batch, key(), "\"5\"");
             var resources =
-                d.resolve(resolveRequest(instance, node, 5, batch.path("selections")))
+                d.resolve(resolveRequest(instance, node, 6, batch.path("selections")))
                     .getResourcesList();
             assertEquals(2, resources.size());
             assertEquals(
@@ -1098,5 +1171,466 @@ class CatalogWorkflowTest {
             throw new RuntimeException(e);
           }
         });
+  }
+
+  @Test
+  void withdrawnReferenceDoesNotPoisonResolution() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          try {
+            var healthy = upload(false);
+            publish(healthy, decide(submit(healthy), GENERAL, "general"));
+            var withdrawn = upload(false);
+            publish(withdrawn, decide(submit(withdrawn), GENERAL, "general"));
+            UUID instance = UUID.randomUUID(), node = UUID.randomUUID();
+            var workspace = mock(UnifiedResourceWorkspace.class);
+            var current =
+                new java.util.concurrent.atomic.AtomicReference<>(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        instance, GENERAL, node, 1, 2, 2, true, List.of(), List.of()));
+            when(workspace.snapshot(TENANT, instance)).thenAnswer(call -> current.get());
+            var d = delivery(workspace);
+            var install =
+                distributionBody(
+                    instance, selection(healthy, "install"), selection(withdrawn, "install"));
+            d.distribute(actor(PUBLISHER), install, key(), "\"1\"");
+            var request = resolveRequest(instance, node, 2, install.path("selections"));
+            var before = d.resolve(request);
+            current.set(
+                new UnifiedResourceWorkspace.Snapshot(
+                    instance, GENERAL, node, 2, 3, 3, true, List.of(), before.getResourcesList()));
+            var version = catalog.detail(actor(AUTHOR), withdrawn.pkg, withdrawn.version, false);
+            catalog.withdraw(
+                actor(PUBLISHER),
+                withdrawn.pkg,
+                withdrawn.version,
+                reason().put("mode", "withdrawn"),
+                key(),
+                etag(version));
+            advance(86200);
+            var after = d.resolve(request);
+            assertTrue(
+                Instant.parse(
+                        after.getResourcesList().stream()
+                            .filter(
+                                x -> x.getIdentity().getPackageId().equals(healthy.pkg.toString()))
+                            .findFirst()
+                            .orElseThrow()
+                            .getLease()
+                            .getExpiresAt())
+                    .isAfter(clock.instant().plusSeconds(300)));
+            assertEquals(2, after.getResourcesCount());
+            assertEquals(
+                "ENABLED",
+                CatalogStatePolicy.desired(
+                    after.getResourcesList().stream()
+                        .filter(x -> x.getIdentity().getPackageId().equals(healthy.pkg.toString()))
+                        .findFirst()
+                        .orElseThrow()));
+            assertEquals(
+                "DISABLED",
+                CatalogStatePolicy.desired(
+                    after.getResourcesList().stream()
+                        .filter(
+                            x -> x.getIdentity().getPackageId().equals(withdrawn.pkg.toString()))
+                        .findFirst()
+                        .orElseThrow()));
+            return null;
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  @Test
+  void pendingDistributionKeepsActiveResolutionAndCanBeReplaced() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          try {
+            var active = upload(false);
+            publish(active, decide(submit(active), GENERAL, "general"));
+            var pending = upload(false);
+            publish(pending, decide(submit(pending), GENERAL, "general"));
+            UUID instance = UUID.randomUUID(), node = UUID.randomUUID();
+            var workspace = mock(UnifiedResourceWorkspace.class);
+            var current =
+                new java.util.concurrent.atomic.AtomicReference<>(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        instance, GENERAL, node, 1, 2, 2, true, List.of(), List.of()));
+            when(workspace.snapshot(TENANT, instance)).thenAnswer(call -> current.get());
+            var d = delivery(workspace);
+            var install = distributionBody(instance, selection(active, "install"));
+            d.distribute(actor(PUBLISHER), install, key(), "\"1\"");
+            var request = resolveRequest(instance, node, 2, install.path("selections"));
+            var applied = d.resolve(request);
+            current.set(
+                new UnifiedResourceWorkspace.Snapshot(
+                    instance, GENERAL, node, 2, 3, 3, true, List.of(), applied.getResourcesList()));
+            var next = distributionBody(instance, selection(pending, "install"));
+            d.distribute(actor(PUBLISHER), next, key(), "\"2\"");
+            assertEquals(
+                1,
+                tx.read(
+                    () ->
+                        db.rows(
+                                "SELECT * FROM resource.catalog_instance_installation WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision=2",
+                                db.args("instance", instance))
+                            .size()));
+            assertEquals(
+                0,
+                tx.read(
+                    () ->
+                        db.rows(
+                                "SELECT * FROM resource.catalog_instance_installation WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg",
+                                db.args("instance", instance, "pkg", pending.pkg))
+                            .size()));
+            assertEquals(applied.getResourcesList(), d.resolve(request).getResourcesList());
+            advance(86200);
+            var renewedCurrent = d.resolve(request);
+            assertEquals(
+                applied.getResources(0).getInstallationRevision(),
+                renewedCurrent.getResources(0).getInstallationRevision());
+            assertTrue(
+                Instant.parse(renewedCurrent.getResources(0).getLease().getExpiresAt())
+                    .isAfter(clock.instant().plusSeconds(300)));
+            tx.write(
+                () ->
+                    db.update(
+                        "UPDATE resource.catalog_package SET visibility='groups',group_ids=CAST(:groups AS uuid[]) WHERE tenant_id=:tenant AND id=:pkg",
+                        db.args("pkg", pending.pkg, "groups", "{" + UUID.randomUUID() + "}")));
+            assertError(
+                CommonErrors.NOT_FOUND,
+                () -> d.resolve(resolveRequest(instance, node, 3, next.path("selections"))));
+            var cancel = distributionBody(instance);
+            var replacement = d.distribute(actor(PUBLISHER), cancel, key(), "\"2\"");
+            assertEquals(4, replacement.path("selectionRevision").asLong());
+            var resolution =
+                d.resolve(resolveRequest(instance, node, 4, cancel.path("selections")));
+            assertEquals(1, resolution.getResourcesCount());
+            assertEquals(
+                active.pkg.toString(), resolution.getResources(0).getIdentity().getPackageId());
+            tx.write(
+                () ->
+                    db.update(
+                        "UPDATE resource.catalog_instance_counter SET revision=:maximum WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg",
+                        db.args(
+                            "instance",
+                            instance,
+                            "pkg",
+                            active.pkg,
+                            "maximum",
+                            ResourceWorkflow.MAX)));
+            assertError(
+                CatalogStatePolicy.conflict().errorCode(),
+                () ->
+                    d.distribute(
+                        actor(PUBLISHER),
+                        distributionBody(instance, selection(active, "enable")),
+                        key(),
+                        "\"2\""));
+            return null;
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  ObjectNode trustInput(Upload upload, JsonNode envelope) {
+    var input =
+        JSON.createObjectNode()
+            .put("protocol", 2)
+            .put("now", clock.instant().toString())
+            .put("rawManifest", new String(upload.manifest, StandardCharsets.UTF_8));
+    input.set("expected", identity(upload));
+    input.set("envelope", envelope);
+    input.set(
+        "artifactBytes",
+        JSON.createObjectNode().put("payload", Base64.getEncoder().encodeToString(upload.payload)));
+    return input;
+  }
+
+  CatalogTrust verifier() {
+    var trust = JSON.createObjectNode();
+    trust.set(
+        "release",
+        JSON.createObjectNode()
+            .put("kid", "release")
+            .put(
+                "publicKeySpkiBase64",
+                Base64.getEncoder().encodeToString(releaseKey.getPublic().getEncoded())));
+    trust.set(
+        "revocation",
+        JSON.createObjectNode()
+            .put("kid", "revoke")
+            .put(
+                "publicKeySpkiBase64",
+                Base64.getEncoder().encodeToString(revocationKey.getPublic().getEncoded())));
+    return new CatalogTrust(trust);
+  }
+
+  @Test
+  void actualReleaseAndRevocationsPassIndependentVerification() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          try {
+            var u = upload(false);
+            var published = publish(u, decide(submit(u), GENERAL, "general"));
+            var input = trustInput(u, published.path("resourceEnvelope"));
+            var verifier = verifier();
+            assertDoesNotThrow(() -> verifier.verify("release", input));
+            var tampered = input.deepCopy();
+            ((ObjectNode) tampered.path("envelope")).put("releaseSequence", 2);
+            assertEquals(
+                "signature",
+                assertThrows(
+                        IllegalArgumentException.class, () -> verifier.verify("release", tampered))
+                    .getMessage());
+            var current = catalog.detail(actor(AUTHOR), u.pkg, u.version, false);
+            catalog.withdraw(
+                actor(PUBLISHER),
+                u.pkg,
+                u.version,
+                reason().put("mode", "malicious"),
+                key(),
+                etag(current));
+            var revoked = JSON.createObjectNode();
+            revoked.set("release", input);
+            revoked.set("list", tx.read(() -> db.revocations()));
+            assertEquals(
+                "revoked",
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> verifier.verify("revocation", revoked))
+                    .getMessage());
+            return null;
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  @Test
+  void maliciousPeerDoesNotPoisonRetainedDistribution() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          try {
+            var healthy = upload(false);
+            publish(healthy, decide(submit(healthy), GENERAL, "general"));
+            var malicious = upload(false);
+            publish(malicious, decide(submit(malicious), GENERAL, "general"));
+            UUID instance = UUID.randomUUID(), node = UUID.randomUUID();
+            var workspace = mock(UnifiedResourceWorkspace.class);
+            var current =
+                new java.util.concurrent.atomic.AtomicReference<>(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        instance, GENERAL, node, 1, 2, 2, true, List.of(), List.of()));
+            when(workspace.snapshot(TENANT, instance)).thenAnswer(call -> current.get());
+            var d = delivery(workspace);
+            var install =
+                distributionBody(
+                    instance, selection(healthy, "install"), selection(malicious, "install"));
+            d.distribute(actor(PUBLISHER), install, key(), "\"1\"");
+            var before = d.resolve(resolveRequest(instance, node, 2, install.path("selections")));
+            current.set(
+                new UnifiedResourceWorkspace.Snapshot(
+                    instance, GENERAL, node, 2, 3, 3, true, List.of(), before.getResourcesList()));
+            var version = catalog.detail(actor(AUTHOR), malicious.pkg, malicious.version, false);
+            catalog.withdraw(
+                actor(PUBLISHER),
+                malicious.pkg,
+                malicious.version,
+                reason().put("mode", "malicious"),
+                key(),
+                etag(version));
+            var retain = distributionBody(instance);
+            d.distribute(actor(PUBLISHER), retain, key(), "\"2\"");
+            var result = d.resolve(resolveRequest(instance, node, 3, retain.path("selections")));
+            assertEquals(2, result.getResourcesCount());
+            assertEquals(
+                "ENABLED",
+                CatalogStatePolicy.desired(
+                    result.getResourcesList().stream()
+                        .filter(x -> x.getIdentity().getPackageId().equals(healthy.pkg.toString()))
+                        .findFirst()
+                        .orElseThrow()));
+            assertEquals(
+                "DISABLED",
+                CatalogStatePolicy.desired(
+                    result.getResourcesList().stream()
+                        .filter(
+                            x -> x.getIdentity().getPackageId().equals(malicious.pkg.toString()))
+                        .findFirst()
+                        .orElseThrow()));
+            assertTrue(result.getRevocations().getRevokedArtifactsCount() > 0);
+            return null;
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  @Test
+  void reconciliationIsBoundedAndSkipsHistoricalAndCompletedIntents() {
+    UUID tenant = UUID.randomUUID(), owner = UUID.randomUUID(), node = UUID.randomUUID();
+    var workspace = mock(UnifiedResourceWorkspace.class);
+    Set<UUID> pending = new HashSet<>(), history = new HashSet<>(), visited = new HashSet<>();
+    when(workspace.snapshot(eq(tenant), any()))
+        .thenAnswer(
+            call -> {
+              UUID instance = call.getArgument(1);
+              assertFalse(history.contains(instance));
+              visited.add(instance);
+              return new UnifiedResourceWorkspace.Snapshot(
+                  instance, owner, node, 2, 3, 3, true, List.of(), List.of());
+            });
+    var d = delivery(workspace, tenant);
+    TenantContext.run(
+        tenant,
+        () ->
+            tx.write(
+                () -> {
+                  for (int i = 0; i < 500; i++) {
+                    UUID instance = UUID.randomUUID();
+                    boolean old = i < 250;
+                    (old ? history : pending).add(instance);
+                    db.update(
+                        "INSERT INTO resource.catalog_distribution(id,tenant_id,actor_id,instance_id,owner_id,node_id,selection_revision,fingerprint,document,resolution,lifecycle,next_reconcile_at) VALUES(:id,:tenant,:owner,:instance,:owner,:node,2,'fixture','{\"selections\":[]}', '{\"resources\":[]}',:state,:due)",
+                        db.args(
+                            "id",
+                            UUID.randomUUID(),
+                            "owner",
+                            owner,
+                            "instance",
+                            instance,
+                            "node",
+                            node,
+                            "state",
+                            old ? "superseded" : "pending",
+                            "due",
+                            java.sql.Timestamp.from(clock.instant())));
+                  }
+                  return true;
+                }));
+    for (int i = 0; i < 3; i++) {
+      int before = visited.size();
+      d.reconcile();
+      assertTrue(visited.size() - before <= 100);
+    }
+    assertEquals(pending, visited);
+    clearInvocations(workspace);
+    advance(10);
+    d.reconcile();
+    verifyNoInteractions(workspace);
+  }
+
+  @Test
+  void concurrentDownloadsConsumeExactlyOneTicket() throws Exception {
+    var d = delivery(null);
+    UUID client = UUID.randomUUID();
+    var download =
+        TenantContext.call(
+            TENANT,
+            () -> {
+              try {
+                var u = upload(false);
+                publish(u, decide(submit(u), GENERAL, "general"));
+                d.select(actor(GENERAL), memberSelection(u, client, "install"), key(), "\"0\"");
+                var input =
+                    JSON.createObjectNode()
+                        .put("clientId", client.toString())
+                        .put("installationRevision", 1);
+                input.set("identity", identity(u));
+                var ticket = d.ticket(actor(GENERAL), input, key(), "\"1\"");
+                return JSON.createObjectNode()
+                    .put("clientId", client.toString())
+                    .put("ticket", ticket.path("ticket").asString())
+                    .put("artifactId", "payload");
+              } catch (Exception e) {
+                throw new RuntimeException(e);
+              }
+            });
+    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+      var start = new java.util.concurrent.CountDownLatch(1);
+      var attempts = new ArrayList<java.util.concurrent.Future<Boolean>>();
+      for (int i = 0; i < 2; i++)
+        attempts.add(
+            executor.submit(
+                () -> {
+                  start.await();
+                  return TenantContext.call(
+                      TENANT,
+                      () -> {
+                        try (var stream =
+                            d.download(actor(GENERAL), download, key(), "\"1\"", false)) {
+                          stream.readAllBytes();
+                          return true;
+                        } catch (AurigaException e) {
+                          assertEquals(CommonErrors.CONFLICT, e.errorCode());
+                          return false;
+                        } catch (IOException e) {
+                          throw new UncheckedIOException(e);
+                        }
+                      });
+                }));
+      start.countDown();
+      int success = 0;
+      for (var attempt : attempts)
+        if (attempt.get(20, java.util.concurrent.TimeUnit.SECONDS)) success++;
+      assertEquals(1, success);
+    }
+  }
+
+  @Test
+  void failedRevocationBatchDoesNotStarveOtherInstances() {
+    UUID tenant = UUID.randomUUID();
+    var workspace = mock(UnifiedResourceWorkspace.class);
+    var failed = new HashSet<UUID>();
+    doAnswer(
+            call -> {
+              UUID instance = call.getArgument(1);
+              if (failed.contains(instance)) throw new IllegalStateException("offline fixture");
+              return null;
+            })
+        .when(workspace)
+        .revoke(eq(tenant), any(), any());
+    var d = delivery(workspace, tenant);
+    TenantContext.run(
+        tenant,
+        () ->
+            tx.write(
+                () -> {
+                  for (int i = 0; i < 200; i++) {
+                    UUID instance = UUID.randomUUID();
+                    if (i < 100) failed.add(instance);
+                    db.update(
+                        "INSERT INTO resource.catalog_revocation_delivery(id,tenant_id,instance_id,revision) VALUES(:id,:tenant,:instance,1)",
+                        db.args(
+                            "id", auriga.common.persistence.UuidV7.next(), "instance", instance));
+                  }
+                  return true;
+                }));
+    d.reconcile();
+    verify(workspace, times(100)).revoke(eq(tenant), any(), any());
+    clearInvocations(workspace);
+    d.reconcile();
+    verify(workspace, times(100)).revoke(eq(tenant), any(), any());
+    assertEquals(
+        100,
+        TenantContext.call(
+            tenant,
+            () ->
+                tx.read(
+                    () ->
+                        db.rows(
+                                "SELECT id FROM resource.catalog_revocation_delivery WHERE tenant_id=:tenant AND completed_revision=revision",
+                                db.args())
+                            .size())));
+    clearInvocations(workspace);
+    d.reconcile();
+    verifyNoInteractions(workspace);
   }
 }

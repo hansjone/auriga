@@ -42,7 +42,6 @@ public class CatalogController {
 
   @PostMapping("/catalog/packages")
   @RequiresPermission(ResourceAccess.UPLOAD)
-  @RequiresRecentStepUp
   public ResponseEntity<JsonNode> create(HttpServletRequest r) {
     return response(
         workflow.create(

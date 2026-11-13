@@ -65,10 +65,24 @@ public final class CatalogWorkflow {
       ObjectNode body,
       Consumer<ResourceAccess.Reader> guard,
       Function<ResourceAccess.Reader, JsonNode> action) {
+    return mutate(a, permission, admin, op, key, etag, body, guard, action, true);
+  }
+
+  JsonNode mutate(
+      AurigaPrincipal a,
+      String permission,
+      boolean admin,
+      String op,
+      String key,
+      String etag,
+      ObjectNode body,
+      Consumer<ResourceAccess.Reader> guard,
+      Function<ResourceAccess.Reader, JsonNode> action,
+      boolean replayResponse) {
     if (!writes.getAsBoolean()) throw new AurigaException(CommonErrors.UNAVAILABLE);
     if (etag == null || key == null) throw invalid();
     return operations.operation(
-        a, permission, admin, "catalog/" + op, key, body, etag, guard, action);
+        a, permission, admin, "catalog/" + op, key, body, etag, guard, action, replayResponse);
   }
 
   private static void match(String etag, long rev) {
@@ -792,6 +806,17 @@ public final class CatalogWorkflow {
                     db.args("id", id)))
               if (CatalogManifest.artifactDigests(json(candidate, "manifest")).stream()
                   .anyMatch(digests::contains)) affected.add(candidate);
+            // Match publish's package-before-version lock order, including shared artifacts.
+            for (var packageId :
+                affected.stream().map(a -> (UUID) a.get("package_id")).distinct().sorted().toList())
+              db.row(
+                  "SELECT id FROM resource.catalog_package WHERE tenant_id=:tenant AND id=:id FOR UPDATE",
+                  db.args("id", packageId));
+            affected.replaceAll(
+                a ->
+                    db.row(
+                        "SELECT * FROM resource.catalog_version WHERE tenant_id=:tenant AND id=:id FOR UPDATE",
+                        db.args("id", a.get("id"))));
             for (var a : affected) {
               var all = new HashSet<>(CatalogManifest.artifactDigests(json(a, "manifest")));
               all.add(a.get("digest").toString());

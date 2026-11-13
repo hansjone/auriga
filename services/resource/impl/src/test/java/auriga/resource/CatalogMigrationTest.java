@@ -233,5 +233,197 @@ class CatalogMigrationTest {
                           "SELECT count(*) FROM resource.catalog_installation", Integer.class));
                   return true;
                 }));
+    UUID instance = UuidV7.next(),
+        node = UuidV7.next(),
+        operation = UuidV7.next(),
+        legacyInstance = UuidV7.next();
+    String resource =
+        "{\"identity\":{\"packageId\":\""
+            + pkg
+            + "\",\"versionId\":\""
+            + version
+            + "\"},\"installationRevision\":5,\"desiredState\":\"ENABLED\"}";
+    TenantContext.run(
+        tenant,
+        () ->
+            tx.write(
+                () -> {
+                  jdbc.update(
+                      "INSERT INTO resource.catalog_instance_installation(id,tenant_id,instance_id,owner_id,package_id,revision,resource,selection_revision) VALUES(?,?,?,?,?,3,CAST(? AS jsonb),2)",
+                      UuidV7.next(),
+                      tenant,
+                      instance,
+                      owner,
+                      pkg,
+                      resource);
+                  for (int i = 2; i <= 3; i++)
+                    jdbc.update(
+                        "INSERT INTO resource.catalog_distribution(id,tenant_id,actor_id,instance_id,owner_id,node_id,selection_revision,fingerprint,document,resolution) VALUES(?,?,?,?,?,?,?,'fixture','{}',CAST(? AS jsonb))",
+                        UuidV7.next(),
+                        tenant,
+                        owner,
+                        instance,
+                        owner,
+                        node,
+                        i,
+                        "{\"resources\":[" + resource + "]}");
+                  jdbc.update(
+                      "INSERT INTO resource.catalog_distribution(id,tenant_id,actor_id,instance_id,owner_id,node_id,selection_revision,fingerprint,document,resolution) VALUES(?,?,?,?,?,?,2,'legacy','{}',CAST(? AS jsonb))",
+                      UuidV7.next(),
+                      tenant,
+                      owner,
+                      legacyInstance,
+                      owner,
+                      node,
+                      "{\"resources\":["
+                          + resource.replace(
+                              "\"installationRevision\":5", "\"installationRevision\":0")
+                          + "]}");
+                  jdbc.update(
+                      "INSERT INTO resource.resource_operation(id,tenant_id,actor_id,operation,request_key,fingerprint,response,expires_at) VALUES(?,?,?,'catalog/ticket/client','fixture','fixture','{\"ticket\":\"secret\"}',now()+interval '1 day')",
+                      operation,
+                      tenant,
+                      owner);
+                  return true;
+                }));
+    var v10 =
+        new String(
+            new ClassPathResource("db/resource/V10__catalog_delivery_lifecycle.sql")
+                .getInputStream()
+                .readAllBytes(),
+            java.nio.charset.StandardCharsets.UTF_8);
+    try (var connection = roles.owner().dataSource().getConnection()) {
+      connection.setAutoCommit(false);
+      try (var statement = connection.createStatement()) {
+        statement.execute("SET LOCAL search_path=resource");
+        statement.execute(v10);
+      }
+      connection.rollback();
+    }
+    assertNull(
+        ownerJdbc.queryForObject(
+            "SELECT to_regclass('resource.catalog_instance_counter')::text", String.class));
+    TenantContext.run(
+        tenant,
+        () ->
+            tx.read(
+                () -> {
+                  assertTrue(
+                      jdbc.queryForObject(
+                          "SELECT jsonb_exists(response,'ticket') FROM resource.resource_operation WHERE id=?",
+                          Boolean.class,
+                          operation));
+                  return true;
+                }));
+    CommonMigrations.serviceFlyway(config.target("10").load()).migrate();
+    TenantContext.run(
+        tenant,
+        () ->
+            tx.read(
+                () -> {
+                  assertEquals(
+                      5L,
+                      jdbc.queryForObject(
+                          "SELECT revision FROM resource.catalog_instance_counter WHERE instance_id=?",
+                          Long.class,
+                          instance));
+                  assertEquals(
+                      1L,
+                      jdbc.queryForObject(
+                          "SELECT revision FROM resource.catalog_instance_counter WHERE instance_id=?",
+                          Long.class,
+                          legacyInstance));
+                  assertEquals(
+                      List.of("superseded", "pending"),
+                      jdbc.queryForList(
+                          "SELECT lifecycle FROM resource.catalog_distribution WHERE instance_id=? ORDER BY selection_revision",
+                          String.class,
+                          instance));
+                  assertFalse(
+                      jdbc.queryForObject(
+                          "SELECT jsonb_exists(response,'ticket') FROM resource.resource_operation WHERE id=?",
+                          Boolean.class,
+                          operation));
+                  assertEquals(
+                      3L,
+                      jdbc.queryForObject(
+                          "SELECT revision FROM resource.catalog_instance_installation WHERE instance_id=?",
+                          Long.class,
+                          instance));
+                  return true;
+                }));
+    for (String table :
+        List.of(
+            "catalog_distribution",
+            "catalog_instance_counter",
+            "catalog_instance_installation",
+            "resource_operation"))
+      assertTrue(
+          ownerJdbc.queryForObject(
+              "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid=?::regclass",
+              Boolean.class,
+              "resource." + table));
+    TenantContext.run(
+        UUID.randomUUID(),
+        () ->
+            tx.read(
+                () -> {
+                  assertEquals(
+                      0,
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM resource.catalog_instance_counter", Integer.class));
+                  return true;
+                }));
+    UUID legacyPackage =
+        TenantContext.call(
+            tenant,
+            () ->
+                tx.read(
+                    () ->
+                        jdbc.queryForObject(
+                            "SELECT id FROM resource.resource_package ORDER BY id LIMIT 1",
+                            UUID.class)));
+    UUID legacyVersion = UuidV7.next(), proof = UuidV7.next();
+    TenantContext.run(
+        tenant,
+        () ->
+            tx.write(
+                () -> {
+                  jdbc.update(
+                      "INSERT INTO resource.resource_version(id,tenant_id,package_id,author_id,version,digest,size_bytes,state,revision,created_at) VALUES(?,?,?,?,'1.0.0',?,1,'draft',1,now())",
+                      legacyVersion,
+                      tenant,
+                      legacyPackage,
+                      owner,
+                      "sha256:" + "0".repeat(64));
+                  jdbc.update(
+                      "INSERT INTO resource.catalog_migration_proof(id,tenant_id,package_id,version_id,release_sequence,archive_digest,manifest_digest,proof,activated_at) VALUES(?,?,?,?,1,?,?,'{}',now())",
+                      proof,
+                      tenant,
+                      legacyPackage,
+                      legacyVersion,
+                      "sha256:" + "0".repeat(64),
+                      "sha256:" + "1".repeat(64));
+                  return true;
+                }));
+    TenantContext.run(
+        tenant,
+        () -> {
+          assertThrows(
+              org.springframework.dao.DataIntegrityViolationException.class,
+              () ->
+                  tx.write(
+                      () ->
+                          jdbc.update(
+                              "UPDATE resource.catalog_migration_proof SET proof='{}' WHERE id=?",
+                              proof)));
+          assertThrows(
+              org.springframework.dao.DataIntegrityViolationException.class,
+              () ->
+                  tx.write(
+                      () ->
+                          jdbc.update(
+                              "DELETE FROM resource.catalog_migration_proof WHERE id=?", proof)));
+        });
   }
 }

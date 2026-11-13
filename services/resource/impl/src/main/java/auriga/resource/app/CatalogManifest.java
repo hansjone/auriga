@@ -95,7 +95,7 @@ public final class CatalogManifest {
           || segment.chars().anyMatch(c -> c < 32 || "<>\"|?*".indexOf(c) >= 0)) throw invalid();
       String base = segment.split("\\.", 2)[0].toUpperCase(Locale.ROOT);
       if (Set.of("CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$").contains(base)
-          || base.matches("(?:COM|LPT)[1-9???]")) throw invalid();
+          || base.matches("(?:COM|LPT)[1-9¹²³]")) throw invalid();
     }
   }
 

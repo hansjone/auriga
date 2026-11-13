@@ -111,7 +111,10 @@ public class CatalogDeliveryController {
     var n =
         delivery.distribute(
             actor(), read(r, null, Set.of()), header(r, "Idempotency-Key"), header(r, "If-Match"));
-    return ResponseEntity.status(202).cacheControl(CacheControl.noStore()).eTag("\"1\"").body(n);
+    return ResponseEntity.status(202)
+        .cacheControl(CacheControl.noStore())
+        .eTag("\"" + n.path("selectionRevision").asLong() + "\"")
+        .body(n);
   }
 
   @GetMapping("/admin/catalog/distributions")
