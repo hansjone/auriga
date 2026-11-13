@@ -107,6 +107,35 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  @ConditionalOnMissingBean(auriga.iam.api.UacEnterpriseAdapter.class)
+  auriga.iam.api.UacEnterpriseAdapter iamUacAdapter(Environment env) {
+    tools.jackson.databind.JsonNode settings = Json.object();
+    String file = env.getProperty("auriga.iam.uac.adapter-config-file");
+    if (file != null) {
+      try (var input = java.nio.file.Files.newInputStream(Path.of(file))) {
+        byte[] bytes = input.readNBytes(UacTokenVerification.MAX_BODY + 1);
+        if (bytes.length > UacTokenVerification.MAX_BODY) throw new IllegalArgumentException();
+        settings = Json.MAPPER.readTree(bytes);
+        if (!settings.isObject()) throw new IllegalArgumentException();
+      } catch (java.io.IOException | RuntimeException error) {
+        throw new IllegalArgumentException("Invalid private UAC adapter configuration");
+      }
+    }
+    return new UacConfiguredAdapter(settings, false);
+  }
+
+  @Bean
+  UacProviderService iamUacProviders(
+      IamStore store,
+      ProviderManager providers,
+      auriga.iam.api.UacEnterpriseAdapter adapter,
+      SessionManager sessions,
+      AuditLogger audit,
+      Clock clock) {
+    return new UacProviderService(store, providers, adapter, sessions, audit, clock);
+  }
+
+  @Bean
   Secrets iamSecrets(Environment env) {
     return new Secrets(env.getRequiredProperty("auriga.iam.encryption-key"));
   }

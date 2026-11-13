@@ -15,6 +15,27 @@ public final class ProviderManager {
   private final AuditLogger audit;
   private final Clock clock;
   private final String issuer;
+  private java.util.function.Consumer<String> uacDisable =
+      id -> {
+        throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+      };
+
+  void uacDisable(java.util.function.Consumer<String> callback) {
+    this.uacDisable = callback;
+  }
+
+  void delete(String id) {
+    store.tx(
+        () -> {
+          ObjectNode row = store.get("idp_provider", id, true);
+          IamError.require(row != null, "not_found", 404);
+          IamError.require(!row.path("builtin").asBoolean(), "builtin_provider", 409);
+          row.put("enabled", false);
+          store.save("idp_provider", row);
+          if ("uac".equals(row.path("connectorType").asString())) uacDisable.accept(id);
+          return null;
+        });
+  }
 
   public ProviderManager(
       IamStore store,
@@ -188,6 +209,14 @@ public final class ProviderManager {
     return Json.read(
         secrets.decrypt(
             row.path("config").asString(),
+            "provider:" + TenantContext.require() + ":" + row.path("providerId").asString()));
+  }
+
+  void encryptConfig(ObjectNode row, JsonNode config) {
+    row.put(
+        "config",
+        secrets.encrypt(
+            config.toString(),
             "provider:" + TenantContext.require() + ":" + row.path("providerId").asString()));
   }
 

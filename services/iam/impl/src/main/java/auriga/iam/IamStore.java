@@ -36,7 +36,13 @@ public final class IamStore {
           "network_ingress",
           "network_policy",
           "network_grant",
-          "network_config");
+          "network_config",
+          "uac_challenge",
+          "uac_credential",
+          "uac_job",
+          "uac_navigation",
+          "uac_suppression",
+          "uac_diagnostics");
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
   private final ScopedValue<Set<String>> responseProjections = ScopedValue.newInstance();
