@@ -291,6 +291,9 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		}
 	}
 	spec = proto.Clone(spec).(*nodev1.InstanceSpec)
+	if !r.guardResources(ctx, spec) {
+		return
+	}
 	if telemetry.Current(ctx).Generation != spec.Generation || telemetry.Current(ctx).Instance != id {
 		ctx = r.startupContext(ctx, r.Store.StartupParent(id, spec.Generation), id, spec.Generation)
 	}
@@ -590,6 +593,7 @@ func (r *Reconciler) fail(id string, generation int64, attempts uint32, code, ms
 }
 
 func (r *Reconciler) persist(st *nodev1.InstanceStatus, attempts uint32) error {
+	r.enrichPersistedResources(st)
 	if err := r.Store.PutActual(state.ActualRecord{Status: st, Attempts: attempts}); err != nil {
 		r.Log.Warn("persist runtime status failed", "instance_id", st.InstanceId, "error", err)
 		return err

@@ -28,6 +28,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
   private final WorkspaceInputs inputs;
   private final Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver;
   private final ToLongFunction<UnifiedResourceRef> revision;
+  private final Function<UnifiedResourceRef, String> desired;
   private final ScheduledExecutorService worker =
       Executors.newSingleThreadScheduledExecutor(
           Thread.ofVirtual().name("workspace-unified-resources").factory());
@@ -37,10 +38,20 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       WorkspaceInputs inputs,
       Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver,
       ToLongFunction<UnifiedResourceRef> revision) {
+    this(service, inputs, resolver, revision, ref -> ref.getEnabled() ? "ENABLED" : "DISABLED");
+  }
+
+  public WorkspaceUnifiedResources(
+      WorkspaceService service,
+      WorkspaceInputs inputs,
+      Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver,
+      ToLongFunction<UnifiedResourceRef> revision,
+      Function<UnifiedResourceRef, String> desired) {
     this.service = service;
     this.inputs = inputs;
     this.resolver = resolver;
     this.revision = revision;
+    this.desired = desired;
   }
 
   public void start() {
@@ -179,7 +190,8 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           if (!Objects.equals(row.get("node_id"), before.node()))
             throw new AurigaException(CommonErrors.CONFLICT);
           var next =
-              UnifiedSpec.apply(old, selectionRevision, selections, resolution, false, revision);
+              UnifiedSpec.apply(
+                  old, selectionRevision, selections, resolution, false, revision, desired);
           service.saveSpec(row, UnifiedSpec.bump(next));
           service.store.jdbc.update(
               "UPDATE unified_resource_intent SET applied=true WHERE tenant_id=? AND instance_id=? AND selection_revision<=?",
@@ -203,7 +215,30 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           var row = service.store.instance(instance);
           authorize(tenant, owner, row);
           var old = WorkspaceService.spec(row);
-          var next = UnifiedSpec.apply(old, selectionRevision, List.of(), response, true, revision);
+          var retained = new ArrayList<UnifiedResourceRef>();
+          var reports = view(row).reports();
+          for (var ref : old.getUnifiedResourcesList()) {
+            boolean present =
+                response.getResourcesList().stream()
+                    .anyMatch(
+                        r ->
+                            r.getIdentity()
+                                .getPackageId()
+                                .equals(ref.getIdentity().getPackageId()));
+            if (present) retained.add(ref);
+            else if (!desired.apply(ref).equals("REMOVED")
+                || reports.stream()
+                    .noneMatch(
+                        r ->
+                            r.getIdentity().equals(ref.getIdentity())
+                                && r.getState().equals("removed")))
+              throw new AurigaException(CommonErrors.CONFLICT);
+          }
+          var base =
+              old.toBuilder().clearUnifiedResources().addAllUnifiedResources(retained).build();
+          var next =
+              UnifiedSpec.apply(
+                  base, selectionRevision, List.of(), response, true, revision, desired);
           if (!next.equals(old)) service.saveSpec(row, UnifiedSpec.bump(next));
           service.store.jdbc.update(
               "UPDATE instance SET unified_refresh_pending=false WHERE tenant_id=? AND id=?",

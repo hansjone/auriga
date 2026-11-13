@@ -358,6 +358,79 @@ class WorkspaceIntegrationTest {
       assertEquals(
           stopped.spec().getGeneration(),
           resources.snapshot(tenant, instance).spec().getGeneration());
+      var tombstone =
+          stopped.spec().getUnifiedResources(0).toBuilder()
+              .setEnvelope(
+                  ref.getEnvelope().toBuilder()
+                      .setSignature(
+                          ref.getEnvelope().getSignature().toBuilder().setValue("removed")))
+              .setEnabled(false)
+              .build();
+      var removedResolution =
+          auriga.contracts.resource.v1.ResolveUnifiedResourcesResponse.newBuilder()
+              .setSelectionRevision(2)
+              .addResources(tombstone)
+              .setRevocations(revoked)
+              .build();
+      try (var removals =
+          new WorkspaceUnifiedResources(
+              service,
+              inputs,
+              request -> removedResolution,
+              r -> r.getEnvelope().getSignature().getValue().equals("removed") ? 2 : 1,
+              r ->
+                  r.getEnvelope().getSignature().getValue().equals("removed")
+                      ? "REMOVED"
+                      : r.getEnabled() ? "ENABLED" : "DISABLED")) {
+        var removing =
+            removals.apply(
+                tenant,
+                instance,
+                owner,
+                2,
+                List.of(choice.toBuilder().setAction("remove").build()));
+        var collectedResolution = removedResolution.toBuilder().clearResources().build();
+        assertThrows(
+            AurigaException.class,
+            () -> removals.refresh(tenant, instance, owner, 2, collectedResolution),
+            "unacknowledged tombstone must remain");
+        var removedReport =
+            fresh.toBuilder()
+                .setInstallationRevision(1)
+                .setGeneration(removing.spec().getGeneration())
+                .setObservedGeneration(removing.spec().getGeneration())
+                .setSelectionRevision(2)
+                .setState("removed")
+                .build();
+        for (long installationRevision : List.of(1L, 2L)) {
+          var report =
+              removedReport.toBuilder().setInstallationRevision(installationRevision).build();
+          TenantContext.run(
+              tenant,
+              () ->
+                  store.tx(
+                      () ->
+                          store.jdbc.update(
+                              "UPDATE instance SET status=? WHERE tenant_id=? AND id=?",
+                              InstanceStatus.newBuilder()
+                                  .setObservedGeneration(removing.spec().getGeneration())
+                                  .addUnifiedResourceReports(report)
+                                  .build()
+                                  .toByteArray(),
+                              tenant,
+                              instance)));
+          if (installationRevision == 1) {
+            assertThrows(
+                AurigaException.class,
+                () -> removals.refresh(tenant, instance, owner, 2, collectedResolution),
+                "stale installation CAS cannot collect tombstone");
+          } else {
+            var collected = removals.refresh(tenant, instance, owner, 2, collectedResolution);
+            assertEquals(0, collected.spec().getUnifiedResourcesCount());
+            assertEquals(removing.spec().getGeneration() + 1, collected.spec().getGeneration());
+          }
+        }
+      }
       memberStatus = MemberStatus.MEMBER_STATUS_DISABLED;
       assertThrows(
           AurigaException.class,

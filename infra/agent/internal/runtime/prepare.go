@@ -30,6 +30,7 @@ type SpecSource interface {
 // Preparing wraps an inner Driver and performs artifact fetch, directory
 // setup, and config render before Ensure.
 type Preparing struct {
+	Unified        *UnifiedManager
 	Executions     *state.Store
 	Inner          Driver
 	Specs          SpecSource
@@ -152,6 +153,7 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		}
 
 		rend, err := renderer.Render(full, renderer.Options{
+			ResourceObserver: p.Unified != nil,
 			MetaDir:          paths.Meta,
 			HomeDir:          paths.Home,
 			Access:           p.Access,
@@ -196,6 +198,15 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 			s.Image = full.Dsh.Image
 		}
 		s.Env = env
+		if p.Unified != nil {
+			shared, err := p.Unified.Prepare(ctx, full)
+			if err != nil {
+				return err
+			}
+			s.SharedBind = shared
+		} else if len(full.GetUnifiedResources()) > 0 {
+			return fmt.Errorf("trusted unified guardian unavailable")
+		}
 	}
 	telemetry.Log(ctx, slog.LevelInfo, "pulling image and creating container")
 	if err := p.Inner.Ensure(ctx, s, r); err != nil {
@@ -419,7 +430,21 @@ func (p *Preparing) StartGC(ctx context.Context, interval time.Duration) (stop f
 }
 
 func (p *Preparing) Start(ctx context.Context, id string) error {
-	return p.Inner.Start(ctx, id)
+	if p.Unified != nil {
+		if err := p.Unified.AuthorizeStart(ctx, id); err != nil {
+			return err
+		}
+	}
+	if err := p.Inner.Start(ctx, id); err != nil {
+		return err
+	}
+	if p.Unified != nil {
+		if _, _, err := p.Unified.Observe(ctx, id); err != nil {
+			_ = p.Inner.Stop(ctx, id, 5*time.Second)
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Preparing) ReleaseCoordinator() *ReleaseActivation {
@@ -450,6 +475,18 @@ func (p *Preparing) Inspect(ctx context.Context, id string) (Status, error) {
 	return p.Inner.Inspect(ctx, id)
 }
 func (p *Preparing) CheckHealth(ctx context.Context, id string) (Status, error) {
+	if p.Unified != nil {
+		spec, err := p.Specs.GetDesired(id)
+		if err != nil {
+			return Status{}, err
+		}
+		if spec == nil {
+			return Status{}, fmt.Errorf("desired spec missing")
+		}
+		if err := p.Unified.Guard(ctx, spec); err != nil {
+			return Status{InstanceID: id}, err
+		}
+	}
 	if checker, ok := p.Inner.(HealthChecker); ok {
 		return checker.CheckHealth(ctx, id)
 	}

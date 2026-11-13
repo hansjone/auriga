@@ -9,6 +9,29 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class UnifiedSpecTest {
+  @Test
+  void removalCarriesExactNewInstallationRevision() {
+    var installed =
+        empty.toBuilder().addUnifiedResources(ref).setResourceSelectionRevision(1).build();
+    var tombstone = ref.toBuilder().setEnabled(false).build();
+    var remove = UnifiedSelection.newBuilder().setIdentity(id).setAction("remove").build();
+    var next =
+        UnifiedSpec.apply(
+            installed,
+            2,
+            List.of(remove),
+            resolution(2, tombstone),
+            false,
+            r -> r.getEnabled() ? 1 : 2,
+            r -> r.getEnabled() ? "ENABLED" : "REMOVED");
+    assertEquals(tombstone, next.getUnifiedResources(0));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                installed, 2, List.of(remove), resolution(2), false, r -> 2, r -> "REMOVED"));
+  }
+
   final UnifiedResourceIdentity id =
       UnifiedResourceIdentity.newBuilder()
           .setTenantId("tenant")

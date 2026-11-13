@@ -30,6 +30,7 @@ type Spec struct {
 	HostUID    int
 	HomeBind   string // host path mounted at /home/dsh
 	MetaBind   string // host meta path mounted read-only at /run/auriga
+	SharedBind string // node-owned shared skill view, mounted read-only
 	ListenPort uint32
 	Env        map[string]string
 	Labels     map[string]string

@@ -4,6 +4,7 @@ import auriga.common.error.*;
 import auriga.contracts.node.v1.*;
 import auriga.contracts.resource.v1.*;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.ToLongFunction;
 
 /** Pure spec rules. Cryptographic verification belongs to the trusted node executor. */
@@ -30,6 +31,24 @@ public final class UnifiedSpec {
       ResolveUnifiedResourcesResponse resolved,
       boolean renewal,
       ToLongFunction<UnifiedResourceRef> installationRevision) {
+    return apply(
+        old,
+        revision,
+        selections,
+        resolved,
+        renewal,
+        installationRevision,
+        ref -> ref.getEnabled() ? "ENABLED" : "DISABLED");
+  }
+
+  public static InstanceSpec apply(
+      InstanceSpec old,
+      long revision,
+      List<UnifiedSelection> selections,
+      ResolveUnifiedResourcesResponse resolved,
+      boolean renewal,
+      ToLongFunction<UnifiedResourceRef> installationRevision,
+      Function<UnifiedResourceRef, String> desiredState) {
     require(revision > 0 && revision <= 9007199254740991L);
     require(resolved.getSelectionRevision() == revision);
     require(
@@ -47,6 +66,7 @@ public final class UnifiedSpec {
             var previous = before.get(key);
             require(sameBytes(previous, next));
             require(previous.getEnabled() == next.getEnabled());
+            require(desiredState.apply(previous).equals(desiredState.apply(next)));
             require(
                 installationRevision.applyAsLong(previous)
                     == installationRevision.applyAsLong(next));
@@ -64,6 +84,10 @@ public final class UnifiedSpec {
           case "install", "enable", "disable" -> {
             require(next != null && next.getIdentity().equals(id));
             require(next.getEnabled() == !selection.getAction().equals("disable"));
+            require(
+                desiredState
+                    .apply(next)
+                    .equals(selection.getAction().equals("disable") ? "DISABLED" : "ENABLED"));
             require(installationRevision.applyAsLong(next) > 0);
             if (previous != null) {
               require(
@@ -76,10 +100,17 @@ public final class UnifiedSpec {
             result.put(key, next);
           }
           case "remove" -> {
-            require(previous != null && previous.getIdentity().equals(id) && next == null);
-            // K2 must carry the resource-assigned uninstall revision to the node.
-            // An absent ref cannot transport it; never acknowledge a guessed revision.
-            throw new AurigaException(CommonErrors.UNAVAILABLE);
+            require(
+                previous != null
+                    && next != null
+                    && previous.getIdentity().equals(id)
+                    && next.getIdentity().equals(id));
+            require(!next.getEnabled() && desiredState.apply(next).equals("REMOVED"));
+            require(
+                installationRevision.applyAsLong(next)
+                    > installationRevision.applyAsLong(previous));
+            require(sameBytes(previous, next));
+            result.put(key, next);
           }
           default -> throw new AurigaException(CommonErrors.VALIDATION_FAILED);
         }
