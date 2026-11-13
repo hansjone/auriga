@@ -2,10 +2,12 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 )
 
 // reloadingServerTLS reads only the configured leaf paths, never paths supplied
@@ -30,7 +32,7 @@ func reloadingServerTLS(certFile, keyFile string) (*tls.Config, error) {
 			}
 		}
 		pair, err := tls.LoadX509KeyPair(cert, key)
-		if err != nil {
+		if err != nil || !currentTLSLeaf(pair) {
 			return nil, fmt.Errorf("TLS projection certificate/key invalid")
 		}
 		return &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}, nil
@@ -50,4 +52,16 @@ func reloadingServerTLS(certFile, keyFile string) (*tls.Config, error) {
 		return current, nil
 	}
 	return initial, nil
+}
+
+func currentTLSLeaf(pair tls.Certificate) bool {
+	if len(pair.Certificate) == 0 {
+		return false
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return false
+	}
+	now := time.Now()
+	return !now.Before(leaf.NotBefore) && now.Before(leaf.NotAfter)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -210,5 +211,41 @@ func TestMsgnetPresenceTLSCallbacksReloadClientAndRoots(t *testing.T) {
 	request()
 	if _, err := reloadingPresenceTLS(DevicePresenceConfig{CAFile: first.hop.CAFile, CertFile: first.hop.CertFile, KeyFile: first.hop.KeyFile}); err == nil {
 		t.Fatal("invalid initial client projection accepted")
+	}
+}
+
+func TestMsgnetTLSExpiredReplacementPreservesValidLeaf(t *testing.T) {
+	pki := createAccessPKI(t)
+	files := writeAccessServerTLS(t, pki)
+	config, err := reloadingServerTLS(files.CertFile, files.KeyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired, err := x509.ParseCertificate(pki.server.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired.NotBefore = time.Now().Add(-2 * time.Hour)
+	expired.NotAfter = time.Now().Add(-time.Hour)
+	raw, err := x509.CreateCertificate(rand.Reader, expired, expired, expired.PublicKey, pki.server.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(files.CertFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	current, err := config.GetConfigForClient(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(current.Certificates[0].Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !time.Now().Before(leaf.NotAfter) {
+		t.Fatal("expired replacement evicted valid committed leaf")
+	}
+	if _, err := reloadingServerTLS(files.CertFile, files.KeyFile); err == nil {
+		t.Fatal("expired initial leaf accepted")
 	}
 }

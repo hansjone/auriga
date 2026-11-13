@@ -28,7 +28,7 @@ func reloadingPresenceTLS(cfg DevicePresenceConfig) (nats.Option, error) {
 			cert, key, ca = filepath.Join(dir, filepath.Base(cert)), filepath.Join(dir, filepath.Base(key)), filepath.Join(dir, filepath.Base(ca))
 		}
 		pair, err := tls.LoadX509KeyPair(cert, key)
-		if err != nil {
+		if err != nil || !currentTLSLeaf(pair) {
 			return tls.Certificate{}, errDevicePresence
 		}
 		raw, err := os.ReadFile(ca)
