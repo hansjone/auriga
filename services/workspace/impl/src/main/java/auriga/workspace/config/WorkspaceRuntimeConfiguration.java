@@ -33,50 +33,6 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 @ConditionalOnExpression(
     "${auriga.services.workspace.enabled:true} && ('${auriga.service.schema:}' == 'workspace' || ${auriga.platform.combined:false})")
 public class WorkspaceRuntimeConfiguration {
-  @Configuration(proxyBeanMethods = false)
-  @ConditionalOnExpression(
-      "!${auriga.platform.combined:false} && '${auriga.remote.resource.target:}' != ''")
-  static class UnifiedResourceStandalone {
-    @Bean(destroyMethod = "shutdownNow")
-    io.grpc.ManagedChannel workspaceResourceChannel(
-        Environment env, auriga.common.grpc.AurigaClientInterceptor interceptor) {
-      return auriga.common.grpc.GrpcChannels.openTls(
-          auriga.common.grpc.GrpcChannels.target(env, "resource"),
-          Path.of(env.getRequiredProperty("auriga.workspace.resource-client-certificate-file"))
-              .toFile(),
-          Path.of(env.getRequiredProperty("auriga.workspace.resource-client-key-file")).toFile(),
-          Path.of(env.getRequiredProperty("auriga.workspace.resource-ca-file")).toFile(),
-          interceptor);
-    }
-
-    @Bean(initMethod = "start", destroyMethod = "close")
-    WorkspaceUnifiedResources workspaceUnifiedResources(
-        WorkspaceService service,
-        WorkspaceInputs inputs,
-        @Qualifier("workspaceResourceChannel") io.grpc.ManagedChannel channel) {
-      var stub =
-          auriga.contracts.resource.v1.UnifiedResourceResolutionServiceGrpc.newBlockingStub(
-              channel);
-      return new WorkspaceUnifiedResources(
-          service,
-          inputs,
-          request ->
-              auriga.common.grpc.GrpcErrors.call(() -> stub.resolveUnifiedResources(request)));
-    }
-
-    @Bean
-    auriga.workspace.api.UnifiedResourceDownloadAuthority unifiedResourceDownloadAuthority(
-        WorkspaceUnifiedResources resources) {
-      return resources::check;
-    }
-
-    @Bean
-    UnifiedResourceApplyGrpc unifiedResourceApplyGrpc(
-        auriga.workspace.api.UnifiedResourceDownloadAuthority authority) {
-      return new UnifiedResourceApplyGrpc(authority);
-    }
-  }
-
   @Bean
   auriga.common.error.ErrorMessages workspaceErrorMessages(
       auriga.common.autoconfigure.AurigaProperties properties) {

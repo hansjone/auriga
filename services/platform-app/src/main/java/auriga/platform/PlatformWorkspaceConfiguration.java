@@ -51,18 +51,6 @@ public class PlatformWorkspaceConfiguration {
   }
 
   @Bean
-  auriga.workspace.api.UnifiedResourceDownloadAuthority unifiedResourceDownloadAuthority(
-      auriga.workspace.app.WorkspaceUnifiedResources resources) {
-    return resources::check;
-  }
-
-  @Bean
-  auriga.workspace.grpc.UnifiedResourceApplyGrpc unifiedResourceApplyGrpc(
-      auriga.workspace.api.UnifiedResourceDownloadAuthority authority) {
-    return new auriga.workspace.grpc.UnifiedResourceApplyGrpc(authority);
-  }
-
-  @Bean
   @ConditionalOnExpression("'${auriga.events.nats-url:}' != ''")
   NatsEventConsumer workspaceUnifiedResourceConsumer(
       @Qualifier("workspaceDataSource") DataSource source,

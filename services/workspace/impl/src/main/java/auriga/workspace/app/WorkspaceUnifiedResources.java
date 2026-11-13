@@ -360,49 +360,6 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       throw new AurigaException(CommonErrors.FORBIDDEN);
   }
 
-  public CheckUnifiedResourceDownloadResponse check(CheckUnifiedResourceDownloadRequest request) {
-    UUID tenant = UUID.fromString(request.getTenantId());
-    return service.store.in(
-        tenant,
-        () -> {
-          var row = service.store.instance(UUID.fromString(request.getInstanceId()));
-          var owner = UUID.fromString(request.getOwnerId());
-          authorize(tenant, owner, row);
-          var spec = WorkspaceService.spec(row);
-          boolean allowed =
-              Objects.equals(row.get("node_id"), UUID.fromString(request.getNodeId()))
-                  && !Boolean.TRUE.equals(
-                      service.store.node(UUID.fromString(request.getNodeId())).get("revoked"))
-                  && spec.getResourceSelectionRevision() == request.getSelectionRevision()
-                  && spec.getGeneration() == request.getGeneration()
-                  && spec.getUnifiedResourcesList().stream()
-                      .anyMatch(
-                          r ->
-                              r.getEnabled()
-                                  && r.getIdentity().equals(request.getIdentity())
-                                  && service
-                                      .clock
-                                      .instant()
-                                      .isBefore(
-                                          java.time.Instant.parse(r.getLease().getExpiresAt()))
-                                  && (request.getArtifactId().isEmpty()
-                                      ? r.getIdentity()
-                                          .getManifestDigest()
-                                          .equals(request.getArtifactDigest())
-                                      : r.getArtifactsList().stream()
-                                          .anyMatch(
-                                              a ->
-                                                  a.getArtifactId().equals(request.getArtifactId())
-                                                      && a.getDigest()
-                                                          .equals(request.getArtifactDigest()))));
-          return CheckUnifiedResourceDownloadResponse.newBuilder()
-              .setAllowed(allowed)
-              .setGeneration(spec.getGeneration())
-              .setSelectionRevision(spec.getResourceSelectionRevision())
-              .build();
-        });
-  }
-
   public void reconcile() {
     List<UUID> tenants;
     try {
@@ -444,17 +401,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
         for (var row : instances) {
           var spec = WorkspaceService.spec(row);
           if (spec.getUnifiedResourcesCount() == 0 || row.get("node_id") == null) continue;
-          boolean due =
-              Boolean.TRUE.equals(row.get("unified_refresh_pending"))
-                  || spec.getUnifiedResourcesList().stream()
-                      .anyMatch(
-                          r ->
-                              !service
-                                  .clock
-                                  .instant()
-                                  .plusSeconds(1800)
-                                  .isBefore(java.time.Instant.parse(r.getLease().getExpiresAt())));
-          if (!due) continue;
+          if (!Boolean.TRUE.equals(row.get("unified_refresh_pending"))) continue;
           try {
             var request =
                 ResolveUnifiedResourcesRequest.newBuilder()

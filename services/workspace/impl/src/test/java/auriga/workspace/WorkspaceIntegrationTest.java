@@ -335,6 +335,7 @@ class WorkspaceIntegrationTest {
                   .setIdentity(unavailable.getIdentity())
                   .setAction("install")
                   .build()));
+      requestUnifiedRefresh(instance);
       clock.now = clock.now.plusSeconds(2000);
       resources.reconcile();
       assertEquals(1, calls.get());
@@ -406,6 +407,8 @@ class WorkspaceIntegrationTest {
                   .setAction("install")
                   .build()));
       var before = resources.snapshot(tenant, missing).spec();
+      requestUnifiedRefresh(missing);
+      requestUnifiedRefresh(healthy);
       clock.now = clock.now.plusSeconds(2000);
       resources.reconcile();
       assertEquals(1, calls.get());
@@ -461,6 +464,7 @@ class WorkspaceIntegrationTest {
                   .build();
             })) {
       resources.record(tenant, instance, owner, 3, List.of(original));
+      requestUnifiedRefresh(instance);
       clock.now = clock.now.plusSeconds(2000);
       resources.reconcile();
       assertEquals(1, calls.get());
@@ -468,6 +472,16 @@ class WorkspaceIntegrationTest {
       assertEquals(List.of(removed, renewed, disabled), view.spec().getUnifiedResourcesList());
       assertEquals(DesiredState.DESIRED_STATE_RUNNING, view.spec().getDesired());
     }
+  }
+
+  void requestUnifiedRefresh(UUID instance) {
+    store.in(
+        tenant,
+        () ->
+            store.jdbc.update(
+                "UPDATE instance SET unified_refresh_pending=true WHERE tenant_id=? AND id=?",
+                tenant,
+                instance));
   }
 
   UnifiedResourceRef unifiedReviewRef(String name, boolean removed) {

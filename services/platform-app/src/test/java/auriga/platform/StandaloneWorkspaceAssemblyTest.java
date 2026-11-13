@@ -2,9 +2,7 @@ package auriga.platform;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import auriga.common.error.*;
 import auriga.common.grpc.*;
-import auriga.contracts.workspace.v1.*;
 import auriga.testsupport.PostgresExtension;
 import auriga.workspace.WorkspaceModuleConfiguration;
 import auriga.workspace.grpc.*;
@@ -15,7 +13,6 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,20 +25,23 @@ import org.springframework.test.context.*;
     classes = StandaloneWorkspaceAssemblyTest.App.class,
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = {
-      "auriga.platform.combined=false", "auriga.services.workspace.enabled=true",
-      "auriga.service.name=workspace", "auriga.service.schema=workspace",
-      "auriga.grpc.server.enabled=true", "auriga.grpc.server.port=0",
-      "auriga.workspace.node-server.port=0", "auriga.remote.org.target=localhost:1",
-      "auriga.remote.resource.target=localhost:1", "spring.flyway.schemas=workspace",
+      "auriga.platform.combined=false",
+      "auriga.services.workspace.enabled=true",
+      "auriga.service.name=workspace",
+      "auriga.service.schema=workspace",
+      "auriga.grpc.server.enabled=true",
+      "auriga.grpc.server.port=0",
+      "auriga.workspace.node-server.port=0",
+      "auriga.remote.org.target=localhost:1",
+      "spring.flyway.schemas=workspace",
       "spring.flyway.locations=classpath:db/workspace",
-          "spring.datasource.hikari.maximum-pool-size=4"
+      "spring.datasource.hikari.maximum-pool-size=4"
     })
 @ExtendWith(PostgresExtension.class)
 @DirtiesContext
 class StandaloneWorkspaceAssemblyTest {
   @TempDir static Path directory;
   @Autowired ApplicationContext context;
-  @Autowired UnifiedResourceApplyGrpc endpoint;
 
   @EnableAutoConfiguration
   @Import(WorkspaceModuleConfiguration.class)
@@ -88,35 +88,22 @@ class StandaloneWorkspaceAssemblyTest {
     registry.add("auriga.workspace.ca-private-key-file", privateKey::toString);
     registry.add("auriga.workspace.tls-certificate-file", certificate::toString);
     registry.add("auriga.workspace.tls-private-key-file", privateKey::toString);
-    for (String service : List.of("org", "resource")) {
-      registry.add(
-          "auriga.workspace." + service + "-client-certificate-file", certificate::toString);
-      registry.add("auriga.workspace." + service + "-client-key-file", privateKey::toString);
-      registry.add("auriga.workspace." + service + "-ca-file", certificate::toString);
-    }
+    registry.add("auriga.workspace.org-client-certificate-file", certificate::toString);
+    registry.add("auriga.workspace.org-client-key-file", privateKey::toString);
+    registry.add("auriga.workspace.org-ca-file", certificate::toString);
   }
 
   @Test
-  void startsStandaloneUnifiedEndpointWithAuthorizationAndRealWorkspaceBeans() {
+  void startsStandaloneWorkspaceAndBothGrpcServers() {
     assertFalse(context.containsBean("platformWorkspaceConfiguration"));
-    assertTrue(AopUtils.isCglibProxy(endpoint));
     assertTrue(context.getBean(GrpcServer.class).isRunning());
     assertTrue(context.getBean(NodeGrpcServer.class).isRunning());
+    assertNotNull(context.getBean("workspaceOrgChannel"));
     for (String name :
         List.of(
             "workspaceUnifiedResources",
             "unifiedResourceDownloadAuthority",
-            "workspaceResourceChannel",
-            "workspaceOrgChannel")) assertNotNull(context.getBean(name));
-    var observer = new PlatformWorkspaceAssemblyTest.RecordingObserver();
-    assertEquals(
-        CommonErrors.UNAUTHENTICATED,
-        assertThrows(
-                AurigaException.class,
-                () ->
-                    endpoint.checkUnifiedResourceDownload(
-                        CheckUnifiedResourceDownloadRequest.getDefaultInstance(), observer))
-            .errorCode());
-    assertFalse(observer.called);
+            "unifiedResourceApplyGrpc",
+            "workspaceResourceChannel")) assertFalse(context.containsBean(name), name);
   }
 }
