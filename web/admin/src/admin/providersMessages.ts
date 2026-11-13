@@ -1,4 +1,35 @@
 export const providersZh = {
+  uacHelp:
+    'UAC 优先验证浏览器 SSO Cookie，无 Cookie 或验证失败时降级扫码。部署开关 auriga.iam.uac.sso-cookie.enabled 默认开启；门户必须处于 Cookie 可读域，支持单 IP、单域名部署。退出后刷新或跨标签页会抑制自动登录，须显式继续。',
+  uacPolicy:
+    '复验由部署配置 auriga.iam.uac.revalidation 控制：strategy 默认 token-verify，备用 department；interval-seconds 默认 7200，范围 60–86400；retry-interval-seconds 默认 30，范围 5–300；max-retries 默认 3，范围 0–10（首次以外）。均须整数。token-verify 上游故障在预算内重试，明确业务/身份失败或预算耗尽撤销会话；department 单次失败即撤销。登录后一次部门查询仅补充展示，失败不阻断登录。',
+  uacTrusted:
+    'baseUrl 必须为 HTTPS，无用户信息、查询或片段；主机、端口和解析地址由部署允许列表最终校验，禁止重定向。systemCode 由受信企业适配器解释。',
+  uacCreateHelp:
+    'UAC 新建默认关闭，只登记名称和排序；创建后在专用配置区填写 baseUrl、systemCode 并启用。编辑名称不会改写配置或启用状态。',
+  uacSaveConfirm:
+    '确认保存并启用此 UAC 配置？服务端将按允许列表校验，使用当前 ETag 防止覆盖。',
+  uacDisableConfirm:
+    '确认保存关闭状态？停用将撤销该源挑战、平台会话及关联设备授权，用户需要重新登录。',
+  uacReload: '配置版本不可继续使用，请重新读取详情后确认；不会自动重放写请求。',
+  uacDiagnostics: 'UAC 诊断',
+  uacDiagnosticConfirm:
+    '确认更改详细诊断？默认关闭，开启仅影响后续请求，15 分钟自动到期；响应结构仍须脱敏。',
+  uacDetailedOn: '详细诊断已开启',
+  uacDetailedOff: '详细诊断已关闭或到期',
+  uacExpires: '到期时间：',
+  uacOpenDetails: '开启详细诊断（15 分钟）',
+  uacCloseDetails: '关闭详细诊断',
+  uacSince: '最近时间窗（秒，默认 7200，最多 86400）',
+  uacExportPermission: '下载还需要 audit.events.read 和 ops.alerts.read 权限。',
+  uacExport: '导出诊断包',
+  uacExportConfirm:
+    '确认下载当前租户、所选身份源和时间窗的脱敏诊断包？缺源原因见包内 manifest。',
+  uacExportInvalid:
+    '请填写有效 UUID 格式的 correlationId（可选）及 1–86400 的整数秒时间窗。',
+  uacPartial:
+    '诊断包已下载，但来源不完整；请查看 manifest 的缺源原因，不代表完整采集成功。',
+  uacDownloaded: '诊断包已下载，来源与脱敏清单见 manifest。',
   idpTitle: '身份源',
   idpInstances: '身份源实例',
   idpConnectors: '可用连接器',
@@ -16,7 +47,7 @@ export const providersZh = {
   idpEnable: '启用',
   idpDisable: '停用（保留配置）',
   idpDisableHelp:
-    'DELETE 在当前服务中只停用身份源，不删除配置、账号或已绑定身份；也不承诺撤销已有会话。',
+    '通用停用保留配置、账号和绑定，不承诺撤销已有会话；UAC 通过专用配置入口停用，并撤销该源挑战、平台会话和设备授权。',
   idpEnableConfirm:
     '确认启用身份源「{name}」？新的登录可使用该身份源，服务端仍校验实际配置。',
   idpDisableConfirm:
@@ -68,6 +99,40 @@ export const providersZh = {
   idpSteps: '登录步骤',
 };
 export const providersEn = {
+  uacHelp:
+    'UAC checks browser SSO cookies first and falls back to QR sign-in when absent or invalid. auriga.iam.uac.sso-cookie.enabled defaults to true. The portal must be in the cookie-readable domain; single-IP and single-domain deployments are supported. Logout suppresses automatic sign-in across reloads and tabs until explicit continuation.',
+  uacPolicy:
+    'Deployment settings under auriga.iam.uac.revalidation: strategy defaults to token-verify (department is the fallback); interval-seconds defaults to 7200 (60–86400); retry-interval-seconds defaults to 30 (5–300); max-retries defaults to 3 (0–10 additional attempts). Values must be integers. Token verification retries upstream faults within budget; explicit business/identity failures or exhausted retries revoke sessions. Department mode revokes on any single failure. The one-time department lookup after login is informational and never blocks login.',
+  uacTrusted:
+    'baseUrl requires HTTPS without user information, query or fragment. Deployment allowlists validate the host, port and resolved addresses; redirects are prohibited. A trusted enterprise adapter interprets systemCode.',
+  uacCreateHelp:
+    'New UAC providers are disabled. Register name and order first, then configure baseUrl and systemCode in the dedicated section before enabling. Metadata edits do not change configuration or enabled state.',
+  uacSaveConfirm:
+    'Save and enable this UAC configuration? The server validates its allowlist and current ETag.',
+  uacDisableConfirm:
+    'Save the disabled state? This revokes provider challenges, platform sessions and associated device grants. Users must sign in again.',
+  uacReload:
+    'This configuration version cannot be reused. Reload details and confirm again; writes are never replayed automatically.',
+  uacDiagnostics: 'UAC diagnostics',
+  uacDiagnosticConfirm:
+    'Change detailed diagnostics? It defaults to off, affects subsequent requests only and expires after 15 minutes. Response structures remain sanitized.',
+  uacDetailedOn: 'Detailed diagnostics enabled',
+  uacDetailedOff: 'Detailed diagnostics disabled or expired',
+  uacExpires: 'Expires at:',
+  uacOpenDetails: 'Enable details (15 minutes)',
+  uacCloseDetails: 'Disable details',
+  uacSince: 'Recent window (seconds, default 7200, maximum 86400)',
+  uacExportPermission:
+    'Download additionally requires audit.events.read and ops.alerts.read.',
+  uacExport: 'Export diagnostic bundle',
+  uacExportConfirm:
+    'Download a sanitized diagnostic bundle for this tenant, provider and time window? See manifest for missing sources.',
+  uacExportInvalid:
+    'Enter an optional UUID correlationId and an integer window of 1–86400 seconds.',
+  uacPartial:
+    'Bundle downloaded with incomplete sources. See manifest for missing-source reasons; collection is incomplete.',
+  uacDownloaded:
+    'Diagnostic bundle downloaded. See manifest for sources and sanitization details.',
   idpTitle: 'Identity providers',
   idpInstances: 'Provider instances',
   idpConnectors: 'Available connectors',
@@ -86,7 +151,7 @@ export const providersEn = {
   idpEnable: 'Enable',
   idpDisable: 'Disable (keep configuration)',
   idpDisableHelp:
-    'DELETE currently disables the provider. It does not delete configuration, accounts or linked identities, or promise revocation of existing sessions.',
+    'Generic disable preserves configuration, accounts and links without promising session revocation. UAC uses its dedicated configuration endpoint and revokes provider challenges, platform sessions and device grants.',
   idpEnableConfirm:
     'Enable provider “{name}”? New sign-ins can use it; actual configuration is still checked by the server.',
   idpDisableConfirm:

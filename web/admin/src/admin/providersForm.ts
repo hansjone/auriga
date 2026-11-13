@@ -324,6 +324,13 @@ export function providerBody(
 ): ProviderInput | ProviderPatch {
   const display = displayValue(draft, original?.display);
   const config = configChanges(form, original?.config);
+  if (connectorType === 'uac') {
+    if (!original)
+      return { connectorType, display, config: {}, enabled: false };
+    return JSON.stringify(display) !== JSON.stringify(original.display)
+      ? { display }
+      : {};
+  }
   if (!original) return { connectorType, display, config, enabled };
   return {
     ...(JSON.stringify(display) !== JSON.stringify(original.display)
@@ -332,4 +339,26 @@ export function providerBody(
     ...(Object.keys(config).length ? { config } : {}),
     ...(enabled !== original.enabled ? { enabled } : {}),
   };
+}
+
+export function uacConfigError(
+  config: import('./providersApi').UacConfig,
+): string | undefined {
+  try {
+    const url = new URL(config.baseUrl);
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      /[?#]/.test(config.baseUrl)
+    )
+      return 'baseUrl';
+  } catch {
+    return 'baseUrl';
+  }
+  if (!config.systemCode.trim() || config.systemCode.length > 128)
+    return 'systemCode';
+  return undefined;
 }

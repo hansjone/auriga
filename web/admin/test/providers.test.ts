@@ -15,6 +15,8 @@ import {
   providerBody,
 } from '../src/admin/providersForm';
 import type { Provider, ConnectorType } from '../src/admin/providersApi';
+import { uacApi } from '../src/admin/providersApi';
+import { uacConfigError } from '../src/admin/providersForm';
 const platformFetch = globalThis.fetch;
 const base = '/api/iam/v1/admin/providers';
 const id = '01900000-0000-7000-8000-000000000001';
@@ -644,6 +646,303 @@ describe('real provider management workflows', () => {
     expect(wrapper!.get('[data-testid=toggle-provider]').text()).toContain(
       'Disable',
     );
+  });
+});
+
+describe('UAC administration with frozen API fixtures', () => {
+  it('registers memory CSRF in IP mode for UAC writes and diagnostic download', async () => {
+    document.head.innerHTML = '<meta name="auriga-access-mode" content="ip">';
+    intercept = (path, init) => {
+      if (path.endsWith('/csrf-tokens'))
+        return json({
+          token: JSON.parse(String(init.body)).token,
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+        });
+      if (path.endsWith('/uac') && init.method === 'PUT') return json(config);
+      if (path.endsWith('/diagnostic-bundles'))
+        return new Response('fixture-zip', {
+          headers: {
+            'Content-Type': 'application/zip',
+            'X-Auriga-Diagnostic-Partial': 'false',
+          },
+        });
+      return undefined;
+    };
+    await uacApi.put(id, config, '"config-1"');
+    await uacApi.download({ providerId: id, sinceSeconds: 7200 });
+    const registration = calls.filter((c) => c.path.endsWith('/csrf-tokens'));
+    expect(registration).toHaveLength(2);
+    const put = calls.find((c) => c.method === 'PUT')!;
+    const download = calls.find((c) => c.path.endsWith('/diagnostic-bundles'))!;
+    expect(new Headers(put.init.headers).get('X-Auriga-CSRF')).toBe(
+      JSON.parse(String(registration[0]!.init.body)).token,
+    );
+    expect(new Headers(download.init.headers).get('X-Auriga-CSRF')).toBe(
+      JSON.parse(String(registration[1]!.init.body)).token,
+    );
+    expect(put.init.credentials).toBe('same-origin');
+    expect(download.init.redirect).toBe('error');
+    expect(new Headers(put.init.headers).get('If-Match')).toBe('"config-1"');
+    apiClient.resetSession();
+  });
+  const config = {
+    enabled: false,
+    baseUrl: 'https://example.com/uac',
+    systemCode: 'example-system',
+  };
+  function version(body: unknown, etag = '"uac-4"') {
+    return new Response(JSON.stringify(body), {
+      headers: { 'Content-Type': 'application/json', ETag: etag },
+    });
+  }
+  function fixture(
+    options: { missing?: boolean; conflict?: boolean; enabled?: boolean } = {},
+  ) {
+    provider = {
+      ...provider,
+      connectorType: 'uac',
+      enabled: false,
+      config: {},
+    };
+    rows = [provider];
+    connector = {
+      ...connector,
+      descriptor: { ...connector.descriptor, type: 'uac' },
+    };
+    intercept = (path, init) => {
+      if (path === `${base}/${id}/uac`) {
+        if (init.method === 'PUT')
+          return options.conflict
+            ? problem(412, 'common.precondition_failed')
+            : version(JSON.parse(String(init.body)));
+        return options.missing
+          ? problem(404, 'common.not_found')
+          : version(config);
+      }
+      if (path === `${base}/${id}` && init.method === 'GET')
+        return version(provider);
+      if (path === `${base}/${id}/uac/diagnostics`)
+        return version(
+          {
+            enabled: options.enabled ?? false,
+            revision: 9,
+            ...(options.enabled
+              ? { expiresAt: new Date(Date.now() + 10000).toISOString() }
+              : {}),
+            token: secret,
+          },
+          '"diag-9"',
+        );
+      return undefined;
+    };
+  }
+  it('creates only a disabled placeholder and keeps metadata patches separate', async () => {
+    fixture();
+    const form = configForm(connector, {}, true);
+    expect(
+      providerBody(form, { ...displayDraft(), nameEn: 'UAC' }, true, 'uac'),
+    ).toMatchObject({ enabled: false, config: {} });
+    expect(
+      providerBody(form, displayDraft(provider), true, 'uac', provider),
+    ).toEqual({});
+    await render();
+    await click('new-provider');
+    expect(
+      (
+        wrapper!.get('[data-testid=provider-enabled]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    expect(
+      wrapper!.get('[data-testid=provider-enabled]').attributes('disabled'),
+    ).toBeDefined();
+    await input('display-nameEn', 'Example UAC');
+    await click('save-provider');
+    await confirm();
+    expect(JSON.parse(String(writes()[0]!.init.body))).toMatchObject({
+      enabled: false,
+      config: {},
+    });
+  });
+  it.each([
+    'http://example.com',
+    'https://user@example.com',
+    'https://example.com?q=x',
+    'https://example.com#x',
+  ])('rejects unsafe baseUrl %s', (baseUrl) => {
+    expect(uacConfigError({ ...config, baseUrl })).toBe('baseUrl');
+  });
+  it('initializes missing configuration disabled and writes using provider ETag and CSRF', async () => {
+    fixture({ missing: true });
+    await render();
+    await detail();
+    expect(
+      (wrapper!.get('[data-testid=uac-enabled]').element as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    await input('uac-baseUrl', config.baseUrl);
+    await input('uac-systemCode', config.systemCode);
+    await input('uac-enabled', true);
+    await click('save-uac');
+    await confirm();
+    expect(writes()).toHaveLength(1);
+    const call = writes()[0]!;
+    expect(call.method).toBe('PUT');
+    expect(call.path).toBe(`${base}/${id}/uac`);
+    expect(new Headers(call.init.headers).get('If-Match')).toBe('"uac-4"');
+    expect(new Headers(call.init.headers).get('X-Auriga-CSRF')).toBe(
+      'example-csrf',
+    );
+  });
+  it('locks stale ETags on conflict, shows sanitized errors and never replays', async () => {
+    fixture({ conflict: true });
+    await render();
+    await detail();
+    await click('save-uac');
+    await confirm();
+    expect(writes()).toHaveLength(1);
+    expect(
+      wrapper!.get('[data-testid=save-uac]').attributes('disabled'),
+    ).toBeDefined();
+    expect(wrapper!.text()).not.toContain(secret);
+    await click('save-uac');
+    expect(writes()).toHaveLength(1);
+  });
+  it('requires configuration before enabling and explains revocation before disabling', async () => {
+    fixture({ missing: true });
+    await render();
+    await detail();
+    await click('toggle-provider');
+    expect(writes()).toHaveLength(0);
+    expect(wrapper!.text()).toContain('baseUrl');
+    await input('uac-baseUrl', config.baseUrl);
+    await input('uac-systemCode', config.systemCode);
+    await input('uac-enabled', false);
+    await click('save-uac');
+    expect(wrapper!.getComponent(ActionConfirm).props('message')).toContain(
+      '撤销',
+    );
+  });
+  it('defaults diagnostics off, drops unknown fields and uses independent ETag', async () => {
+    fixture();
+    await render();
+    await detail();
+    expect(wrapper!.get('[data-testid=uac-diagnostic-state]').text()).toContain(
+      '关闭',
+    );
+    expect(wrapper!.text()).not.toContain(secret);
+    await click('toggle-uac-diagnostics');
+    await confirm();
+    const call = writes()[0]!;
+    expect(call.path).toBe(`${base}/${id}/uac/diagnostics`);
+    expect(new Headers(call.init.headers).get('If-Match')).toBe('"diag-9"');
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      enabled: true,
+      ttlSeconds: 900,
+    });
+  });
+  it('expires diagnostic UI state without sending a new write', async () => {
+    fixture({ enabled: true });
+    await render();
+    await detail();
+    expect(wrapper!.get('[data-testid=uac-diagnostic-state]').text()).toContain(
+      '已开启',
+    );
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 11000);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(
+        wrapper!.get('[data-testid=uac-diagnostic-state]').text(),
+      ).toContain('到期');
+      expect(writes()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('blocks ordinary members from all configuration reads', async () => {
+    fixture();
+    permissions = [];
+    await render();
+    expect(calls.some((c) => c.path.startsWith(base))).toBe(false);
+    expect(wrapper!.find('[data-testid=save-uac]').exists()).toBe(false);
+  });
+  it('renders read-only settings and blocks missing download permissions', async () => {
+    fixture();
+    permissions = [read];
+    await render();
+    await detail();
+    expect(wrapper!.find('[data-testid=save-uac]').exists()).toBe(false);
+    expect(
+      wrapper!.get('[data-testid=export-uac]').attributes('disabled'),
+    ).toBeDefined();
+    expect(writes()).toHaveLength(0);
+  });
+  it('clears configuration after server permission denial', async () => {
+    fixture();
+    const original = intercept!;
+    intercept = (path, init) =>
+      path.endsWith('/uac')
+        ? problem(403, 'common.forbidden')
+        : original(path, init);
+    await render();
+    await detail();
+    expect(wrapper!.find('[data-testid=uac-baseUrl]').exists()).toBe(false);
+    expect(wrapper!.text()).not.toContain(secret);
+  });
+  it('downloads partial bundles through CSRF protection and reports missing sources', async () => {
+    fixture();
+    permissions = [read, 'audit.events.read', 'ops.alerts.read'];
+    const original = intercept!;
+    intercept = (path, init) =>
+      path.endsWith('/diagnostic-bundles')
+        ? new Response('fixture-zip', {
+            headers: {
+              'Content-Type': 'application/zip',
+              'X-Auriga-Diagnostic-Partial': 'true',
+            },
+          })
+        : original(path, init);
+    const create = vi.fn(() => 'blob:fixture');
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: create,
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    await render();
+    await detail();
+    await click('export-uac');
+    await confirm();
+    expect(create).toHaveBeenCalledOnce();
+    expect(wrapper!.text()).toContain('来源不完整');
+    const call = calls.find((c) => c.path.endsWith('/diagnostic-bundles'))!;
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      providerId: id,
+      sinceSeconds: 7200,
+    });
+    expect(new Headers(call.init.headers).get('X-Auriga-CSRF')).toBe(
+      'example-csrf',
+    );
+  });
+  it('preserves download permission errors and refuses empty bundles', async () => {
+    intercept = (path) =>
+      path.endsWith('/diagnostic-bundles')
+        ? problem(403, 'common.forbidden')
+        : undefined;
+    await expect(
+      uacApi.download({ providerId: id, sinceSeconds: 7200 }),
+    ).rejects.toMatchObject({ status: 403 });
+    intercept = (path) =>
+      path.endsWith('/diagnostic-bundles')
+        ? new Response('', { headers: { 'Content-Type': 'application/zip' } })
+        : undefined;
+    await expect(
+      uacApi.download({ providerId: id, sinceSeconds: 7200 }),
+    ).rejects.toThrow('size');
   });
 });
 

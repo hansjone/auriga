@@ -14,6 +14,9 @@ import { useOrgActions, orgError } from '../admin/useOrgActions';
 import ActionConfirm from '../admin/ActionConfirm.vue';
 import {
   providersApi,
+  uacApi,
+  type UacConfig,
+  type UacDiagnostics,
   type Provider,
   type ConnectorType,
   type ProviderInput,
@@ -21,6 +24,7 @@ import {
 } from '../admin/providersApi';
 import {
   configForm,
+  uacConfigError,
   configError,
   displayDraft,
   providerBody,
@@ -51,6 +55,29 @@ const fields = ref<ConfigForm>({
   createBlocked: false,
 });
 const readback = ref(false);
+const uac = ref<UacConfig>();
+const uacEtag = ref<string | null>(null);
+const diagnostic = ref<UacDiagnostics>();
+const diagnosticEtag = ref<string | null>(null);
+const uacLoading = ref(false);
+const correlationId = ref('');
+const sinceSeconds = ref(7200);
+const now = ref(Date.now());
+const clock = globalThis.setInterval(() => {
+  now.value = Date.now();
+}, 1000);
+const detailed = computed(
+  () =>
+    !!diagnostic.value?.enabled &&
+    Date.parse(diagnostic.value.expiresAt ?? '') > now.value,
+);
+const canExport = computed(
+  () =>
+    canRead.value &&
+    ['audit.events.read', 'ops.alerts.read'].every((p) =>
+      access.permissions.value.includes(p),
+    ),
+);
 const lifetime = new globalThis.AbortController();
 let writes = new globalThis.AbortController();
 let listEpoch = 0;
@@ -85,7 +112,9 @@ const detailConnector = computed(() =>
   ),
 );
 const readFields = computed(() =>
-  configForm(detailConnector.value, detail.value?.config, false),
+  detail.value?.connectorType === 'uac'
+    ? { fields: [], unsupported: [], createBlocked: false }
+    : configForm(detailConnector.value, detail.value?.config, false),
 );
 function clearEditor() {
   ++editEpoch;
@@ -96,6 +125,12 @@ function clearEditor() {
 function closeDetail() {
   ++detailEpoch;
   selectedId.value = '';
+  uac.value = undefined;
+  uacEtag.value = null;
+  diagnostic.value = undefined;
+  diagnosticEtag.value = null;
+  uacLoading.value = false;
+  correlationId.value = '';
   detail.value = undefined;
   detailLoading.value = false;
   detailError.value = '';
@@ -128,6 +163,7 @@ watch(
   { flush: 'sync' },
 );
 onBeforeUnmount(() => {
+  globalThis.clearInterval(clock);
   lifetime.abort();
   writes.abort();
   clearReads();
@@ -180,6 +216,7 @@ async function select(id: string) {
     if (!access.isAlive() || request !== detailEpoch || !canRead.value)
       return false;
     detail.value = result;
+    if (result.connectorType === 'uac') return await loadUac(id, request);
     return true;
   } catch (e) {
     if (access.isAlive() && request === detailEpoch)
@@ -192,7 +229,11 @@ async function select(id: string) {
 }
 onMounted(() => void load());
 function changeConnector() {
-  fields.value = configForm(currentConnector.value, {}, true);
+  enabled.value = connectorType.value !== 'uac';
+  fields.value =
+    connectorType.value === 'uac'
+      ? { fields: [], unsupported: [], createBlocked: false }
+      : configForm(currentConnector.value, {}, true);
 }
 function newProvider() {
   if (
@@ -226,7 +267,10 @@ function editProvider() {
   connectorType.value = detail.value.connectorType;
   display.value = displayDraft(detail.value);
   enabled.value = detail.value.enabled;
-  fields.value = configForm(detailConnector.value, detail.value.config, false);
+  fields.value =
+    connectorType.value === 'uac'
+      ? { fields: [], unsupported: [], createBlocked: false }
+      : configForm(detailConnector.value, detail.value.config, false);
   editor.value = true;
   error.value = '';
   notice.value = '';
@@ -341,6 +385,13 @@ function toggle() {
     readback.value
   )
     return;
+  if (original.connectorType === 'uac') {
+    if (uac.value) {
+      uac.value.enabled = !original.enabled;
+      saveUac();
+    }
+    return;
+  }
   const signal = writes.signal;
   access.ask(
     t(original.enabled ? 'idpDisableConfirm' : 'idpEnableConfirm', {
@@ -360,6 +411,160 @@ function toggle() {
         if (access.isAlive() && !signal.aborted) error.value = failure(e);
       }
     },
+  );
+}
+async function loadUac(id: string, epoch: number) {
+  uacLoading.value = true;
+  try {
+    let config;
+    try {
+      config = await uacApi.get(id, lifetime.signal);
+    } catch (e) {
+      if (!isApiError(e) || e.status !== 404) throw e;
+      const provider = await uacApi.provider(id, lifetime.signal);
+      if (provider.data.enabled) throw e;
+      config = {
+        data: { enabled: false, baseUrl: '', systemCode: '' },
+        etag: provider.etag,
+      };
+    }
+    if (!access.isAlive() || epoch !== detailEpoch || !canRead.value) return;
+    uac.value = {
+      enabled: config.data.enabled,
+      baseUrl: config.data.baseUrl,
+      systemCode: config.data.systemCode,
+    };
+    uacEtag.value = config.etag;
+    const result = await uacApi.diagnostics(id, lifetime.signal);
+    if (!access.isAlive() || epoch !== detailEpoch || !canRead.value) return;
+    diagnostic.value = {
+      enabled: result.data.enabled,
+      expiresAt: result.data.expiresAt,
+      revision: result.data.revision,
+    };
+    diagnosticEtag.value = result.etag;
+    return true;
+  } catch (e) {
+    if (access.isAlive() && epoch === detailEpoch)
+      detailError.value = failure(e);
+    return false;
+  } finally {
+    if (access.isAlive() && epoch === detailEpoch) uacLoading.value = false;
+  }
+}
+function saveUac() {
+  if (
+    !detail.value ||
+    !uac.value ||
+    !uacEtag.value ||
+    !canWrite.value ||
+    locked.value ||
+    readback.value ||
+    uacLoading.value
+  )
+    return;
+  const field = uacConfigError(uac.value);
+  if (field) {
+    error.value = t('idpInvalid', { field });
+    return;
+  }
+  const id = detail.value.id;
+  const body = { ...uac.value };
+  const etag = uacEtag.value;
+  askUac(
+    t(body.enabled ? 'uacSaveConfirm' : 'uacDisableConfirm'),
+    async (signal) => {
+      await uacApi.put(id, body, etag, signal);
+    },
+  );
+}
+function askUac(
+  message: string,
+  run: (signal: globalThis.AbortSignal) => Promise<void>,
+) {
+  const id = selectedId.value;
+  const epoch = detailEpoch;
+  const signal = writes.signal;
+  access.ask(message, async () => {
+    if (epoch !== detailEpoch || signal.aborted || !canWrite.value) return;
+    try {
+      await run(signal);
+      if (access.isAlive() && !signal.aborted && canRead.value)
+        await readAfterWrite(id, t('idpSaved'));
+    } catch (e) {
+      if (access.isAlive() && !signal.aborted) {
+        uacEtag.value = null;
+        diagnosticEtag.value = null;
+        error.value = `${failure(e)} ${t('uacReload')}`;
+      }
+    }
+  });
+}
+function toggleDiagnostics() {
+  if (
+    !detail.value ||
+    !diagnosticEtag.value ||
+    !canWrite.value ||
+    locked.value ||
+    readback.value
+  )
+    return;
+  const id = detail.value.id;
+  const etag = diagnosticEtag.value;
+  const enable = !detailed.value;
+  askUac(t('uacDiagnosticConfirm'), async (signal) => {
+    await uacApi.putDiagnostics(
+      id,
+      { enabled: enable, ttlSeconds: 900 },
+      etag,
+      signal,
+    );
+  });
+}
+function exportDiagnostics() {
+  if (!detail.value || !canExport.value || locked.value) return;
+  const correlation = correlationId.value.trim();
+  if (
+    (correlation &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        correlation,
+      )) ||
+    !Number.isInteger(sinceSeconds.value) ||
+    sinceSeconds.value < 1 ||
+    sinceSeconds.value > 86400
+  ) {
+    error.value = t('uacExportInvalid');
+    return;
+  }
+  const body = {
+    providerId: detail.value.id,
+    sinceSeconds: sinceSeconds.value,
+    ...(correlation ? { correlationId: correlation } : {}),
+  };
+  const epoch = detailEpoch;
+  access.ask(
+    t('uacExportConfirm'),
+    async () => {
+      if (epoch !== detailEpoch || !canExport.value) return;
+      try {
+        const result = await uacApi.download(body, lifetime.signal);
+        if (!access.isAlive() || epoch !== detailEpoch || !canExport.value)
+          return;
+        const url = URL.createObjectURL(result.blob);
+        try {
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `uac-diagnostics-${new Date().toISOString().replaceAll(':', '-')}-${globalThis.crypto.randomUUID()}.zip`;
+          link.click();
+        } finally {
+          globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+        notice.value = t(result.partial ? 'uacPartial' : 'uacDownloaded');
+      } catch (e) {
+        if (access.isAlive() && epoch === detailEpoch) error.value = failure(e);
+      }
+    },
+    'iam.providers.read',
   );
 }
 function cancelConfirm() {
@@ -547,6 +752,81 @@ function cancelConfirm() {
           <dt>{{ t('idpCallback') }}</dt>
           <dd>{{ detail.callbackUrl }}</dd>
         </dl>
+        <section v-if="detail.connectorType === 'uac'" class="provider-form">
+          <p>{{ t('uacHelp') }}</p>
+          <p>{{ t('uacPolicy') }}</p>
+          <p v-if="uacLoading" role="status">{{ t('loading') }}</p>
+          <template v-if="uac">
+            <label
+              ><input
+                v-model="uac.enabled"
+                type="checkbox"
+                data-testid="uac-enabled"
+                :disabled="!canWrite || locked || readback || !uacEtag"
+              />{{ t('idpEnabled') }}</label
+            >
+            <label
+              >baseUrl<input
+                v-model="uac.baseUrl"
+                data-testid="uac-baseUrl"
+                :disabled="!canWrite || locked || readback || !uacEtag"
+            /></label>
+            <label
+              >systemCode<input
+                v-model="uac.systemCode"
+                data-testid="uac-systemCode"
+                :disabled="!canWrite || locked || readback || !uacEtag"
+            /></label>
+            <p>{{ t('uacTrusted') }}</p>
+            <ElButton
+              v-if="canWrite"
+              data-testid="save-uac"
+              :disabled="locked || readback || uacLoading || !uacEtag"
+              @click="saveUac"
+              >{{ t('save') }}</ElButton
+            >
+            <p v-if="!uacEtag" role="alert">{{ t('uacReload') }}</p>
+          </template>
+          <h3>{{ t('uacDiagnostics') }}</h3>
+          <p v-if="diagnostic" data-testid="uac-diagnostic-state">
+            {{ detailed ? t('uacDetailedOn') : t('uacDetailedOff') }}
+            <span v-if="diagnostic.expiresAt"
+              >{{ t('uacExpires') }} {{ diagnostic.expiresAt }}</span
+            >
+          </p>
+          <ElButton
+            v-if="canWrite"
+            data-testid="toggle-uac-diagnostics"
+            :disabled="locked || readback || !diagnosticEtag"
+            @click="toggleDiagnostics"
+            >{{
+              detailed ? t('uacCloseDetails') : t('uacOpenDetails')
+            }}</ElButton
+          >
+          <label
+            >correlationId<input
+              v-model="correlationId"
+              data-testid="uac-correlation"
+              :disabled="locked || !canExport"
+          /></label>
+          <label
+            >{{ t('uacSince')
+            }}<input
+              v-model.number="sinceSeconds"
+              type="number"
+              min="1"
+              max="86400"
+              data-testid="uac-since"
+              :disabled="locked || !canExport"
+          /></label>
+          <p v-if="!canExport">{{ t('uacExportPermission') }}</p>
+          <ElButton
+            data-testid="export-uac"
+            :disabled="locked || !canExport"
+            @click="exportDiagnostics"
+            >{{ t('uacExport') }}</ElButton
+          >
+        </section>
         <h3>{{ t('idpConfig') }}</h3>
         <dl class="resource-facts">
           <template
@@ -652,12 +932,13 @@ function cancelConfirm() {
         ><label
           ><input
             v-model="enabled"
-            :disabled="locked"
+            :disabled="locked || connectorType === 'uac'"
             type="checkbox"
             data-testid="provider-enabled"
           />
           {{ t('idpEnabled') }}</label
         >
+        <p v-if="connectorType === 'uac'">{{ t('uacCreateHelp') }}</p>
         <h3>{{ t('idpConfig') }}</h3>
         <p class="resource-muted">{{ t('idpSecretHelp') }}</p>
         <div
