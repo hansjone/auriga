@@ -1,0 +1,1211 @@
+{
+  "schemaVersion": 1,
+  "description": "Counter/state policy fixtures. identity and expected values come from trusted current state. contentCleared is trusted execution evidence for the oracle, not an added report request field. Other signature/lease/ACL gates are independent prerequisites.",
+  "cases": [
+    {
+      "id": "explicit-enabled",
+      "operation": "desired-state",
+      "input": {
+        "enabled": true,
+        "desiredState": "ENABLED"
+      },
+      "expect": {
+        "state": "ENABLED",
+        "errorCode": null
+      }
+    },
+    {
+      "id": "disabled-retains-installation",
+      "operation": "desired-state",
+      "input": {
+        "enabled": false,
+        "desiredState": "DISABLED"
+      },
+      "expect": {
+        "state": "DISABLED",
+        "errorCode": null
+      }
+    },
+    {
+      "id": "removed-clears-installation",
+      "operation": "desired-state",
+      "input": {
+        "enabled": false,
+        "desiredState": "REMOVED"
+      },
+      "expect": {
+        "state": "REMOVED",
+        "errorCode": null
+      }
+    },
+    {
+      "id": "explicit-state-precedes-enabled",
+      "operation": "desired-state",
+      "input": {
+        "enabled": true,
+        "desiredState": "REMOVED"
+      },
+      "expect": {
+        "state": "REMOVED",
+        "errorCode": null
+      }
+    },
+    {
+      "id": "explicit-enabled-precedes-legacy-false",
+      "operation": "desired-state",
+      "input": {
+        "enabled": false,
+        "desiredState": "ENABLED"
+      },
+      "expect": {
+        "state": "ENABLED",
+        "errorCode": null
+      }
+    },
+    {
+      "id": "legacy-enabled",
+      "operation": "desired-state",
+      "input": {
+        "enabled": true
+      },
+      "expect": {
+        "state": "ENABLED",
+        "errorCode": null
+      }
+    },
+    {
+      "id": "legacy-disabled-is-not-removed",
+      "operation": "desired-state",
+      "input": {
+        "enabled": false
+      },
+      "expect": {
+        "state": "DISABLED",
+        "errorCode": null
+      }
+    },
+    {
+      "id": "unknown-state-rejected",
+      "operation": "desired-state",
+      "input": {
+        "enabled": true,
+        "desiredState": "UNKNOWN"
+      },
+      "expect": {
+        "state": null,
+        "errorCode": "common.validation_failed"
+      }
+    },
+    {
+      "id": "unspecified-state-rejected",
+      "operation": "desired-state",
+      "input": {
+        "enabled": true,
+        "desiredState": "UNSPECIFIED"
+      },
+      "expect": {
+        "state": null,
+        "errorCode": "common.validation_failed"
+      }
+    },
+    {
+      "id": "null-state-rejected",
+      "operation": "desired-state",
+      "input": {
+        "enabled": false,
+        "desiredState": null
+      },
+      "expect": {
+        "state": null,
+        "errorCode": "common.validation_failed"
+      }
+    },
+    {
+      "id": "remove-dispatches-new-revision-tombstone",
+      "operation": "dispatch",
+      "input": {
+        "before": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "enabled": true,
+          "installationRevision": 4,
+          "desiredState": "ENABLED"
+        },
+        "action": "remove"
+      },
+      "expect": {
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "enabled": false,
+        "installationRevision": 5,
+        "desiredState": "REMOVED"
+      }
+    },
+    {
+      "id": "disable-dispatch-remains-distinct",
+      "operation": "dispatch",
+      "input": {
+        "before": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "enabled": true,
+          "installationRevision": 4,
+          "desiredState": "ENABLED"
+        },
+        "action": "disable"
+      },
+      "expect": {
+        "identity": {
+          "tenantId": "019a0000-0000-7000-8000-000000000001",
+          "packageId": "019a0000-0000-7000-8000-000000000002",
+          "versionId": "019a0000-0000-7000-8000-000000000004",
+          "kind": "skill",
+          "version": "1.2.3",
+          "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+        },
+        "enabled": false,
+        "installationRevision": 5,
+        "desiredState": "DISABLED"
+      }
+    },
+    {
+      "id": "removed-confirms-current-tombstone",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": true,
+        "errorCode": null
+      }
+    },
+    {
+      "id": "applied-does-not-confirm-removal",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "applied",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "disabled-does-not-confirm-removal",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "disabled",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "failed-does-not-confirm-removal",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "failed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "uncleared-content-retains-tombstone",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": false,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "old-tombstone-revision-rejected",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 4,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "old-tombstone-selection-rejected",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 8,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "old-tombstone-generation-rejected",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 14,
+          "observedGeneration": 14,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "unobserved-generation-rejected",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 14,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "wrong-identity-rejected",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000099",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "untrusted-source-rejected",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "member"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "old-removed-cannot-delete-reinstallation",
+      "operation": "acknowledgement",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": true,
+            "installationRevision": 6,
+            "desiredState": "ENABLED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node"
+      },
+      "expect": {
+        "accepted": false,
+        "errorCode": "resource.state_conflict"
+      }
+    },
+    {
+      "id": "confirmed-tombstone-retires-next-generation",
+      "operation": "collect",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "resources": [
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000088",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 2,
+            "desiredState": "DISABLED"
+          }
+        ],
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node",
+        "nextGeneration": 16
+      },
+      "expect": {
+        "collected": true,
+        "resources": [
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000088",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 2,
+            "desiredState": "DISABLED"
+          }
+        ],
+        "installationRevision": 5
+      }
+    },
+    {
+      "id": "same-generation-retains-tombstone",
+      "operation": "collect",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "resources": [
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000088",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 2,
+            "desiredState": "DISABLED"
+          }
+        ],
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node",
+        "nextGeneration": 15
+      },
+      "expect": {
+        "collected": false,
+        "resources": [
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000088",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 2,
+            "desiredState": "DISABLED"
+          }
+        ],
+        "installationRevision": 5
+      }
+    },
+    {
+      "id": "unconfirmed-tombstone-retained",
+      "operation": "collect",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "resources": [
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000088",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 2,
+            "desiredState": "DISABLED"
+          }
+        ],
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "applied",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node",
+        "nextGeneration": 16
+      },
+      "expect": {
+        "collected": false,
+        "resources": [
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000088",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 2,
+            "desiredState": "DISABLED"
+          }
+        ],
+        "installationRevision": 5
+      }
+    },
+    {
+      "id": "reinstalled-resource-survives-old-removed",
+      "operation": "collect",
+      "input": {
+        "expected": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": true,
+            "installationRevision": 6,
+            "desiredState": "ENABLED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "resources": [
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": true,
+            "installationRevision": 6,
+            "desiredState": "ENABLED"
+          },
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000088",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 2,
+            "desiredState": "DISABLED"
+          }
+        ],
+        "report": {
+          "identity": {
+            "tenantId": "019a0000-0000-7000-8000-000000000001",
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000004",
+            "kind": "skill",
+            "version": "1.2.3",
+            "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+          },
+          "installationRevision": 5,
+          "selectionRevision": 9,
+          "generation": 15,
+          "observedGeneration": 15,
+          "state": "removed",
+          "reportSource": "node"
+        },
+        "contentCleared": true,
+        "channel": "node",
+        "nextGeneration": 16
+      },
+      "expect": {
+        "collected": false,
+        "resources": [
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": true,
+            "installationRevision": 6,
+            "desiredState": "ENABLED"
+          },
+          {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000088",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 2,
+            "desiredState": "DISABLED"
+          }
+        ],
+        "installationRevision": 6
+      }
+    },
+    {
+      "id": "stale-tombstone-cannot-execute-after-reinstall",
+      "operation": "execute",
+      "input": {
+        "incoming": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "current": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": true,
+            "installationRevision": 6,
+            "desiredState": "ENABLED"
+          },
+          "selectionRevision": 9,
+          "generation": 16
+        }
+      },
+      "expect": {
+        "execute": false
+      }
+    },
+    {
+      "id": "current-tombstone-can-clear-content",
+      "operation": "execute",
+      "input": {
+        "incoming": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        },
+        "current": {
+          "resource": {
+            "identity": {
+              "tenantId": "019a0000-0000-7000-8000-000000000001",
+              "packageId": "019a0000-0000-7000-8000-000000000002",
+              "versionId": "019a0000-0000-7000-8000-000000000004",
+              "kind": "skill",
+              "version": "1.2.3",
+              "manifestDigest": "sha256:c72e0683245710cbac3cc62294adbc7d9ee28ef69af9243fe3aaaed7b299c817"
+            },
+            "enabled": false,
+            "installationRevision": 5,
+            "desiredState": "REMOVED"
+          },
+          "selectionRevision": 9,
+          "generation": 15
+        }
+      },
+      "expect": {
+        "execute": true
+      }
+    }
+  ]
+}

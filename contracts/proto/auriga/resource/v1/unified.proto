@@ -56,6 +56,14 @@ message UnifiedArtifactDownload {
   string download_path = 4;
 }
 
+// HTTP/JSON mapping uses ENABLED / DISABLED / REMOVED, without the enum prefix.
+enum UnifiedResourceDesiredState {
+  UNIFIED_RESOURCE_DESIRED_STATE_UNSPECIFIED = 0;
+  UNIFIED_RESOURCE_DESIRED_STATE_ENABLED = 1;
+  UNIFIED_RESOURCE_DESIRED_STATE_DISABLED = 2;
+  UNIFIED_RESOURCE_DESIRED_STATE_REMOVED = 3;
+}
+
 message UnifiedResourceRef {
   UnifiedResourceIdentity identity = 1;
   UnifiedEnvelope envelope = 2;
@@ -64,6 +72,12 @@ message UnifiedResourceRef {
   UnifiedLease lease = 5;
   uint64 release_sequence = 6;
   bool enabled = 7;
+  // Resource-assigned, persisted per-installation CAS counter; renewal preserves it.
+  // Required for applied acknowledgement; absent/zero is not an expected revision.
+  uint64 installation_revision = 8;
+  // Prefer when present. Absent legacy values derive ENABLED/DISABLED from enabled.
+  // Explicit UNSPECIFIED and unknown values are invalid. REMOVED carries the new revision.
+  optional UnifiedResourceDesiredState desired_state = 9;
 }
 
 message UnifiedSelection {
@@ -209,6 +223,7 @@ message ResolveUnifiedResourcesRequest {
 }
 message ResolveUnifiedResourcesResponse {
   uint64 selection_revision = 1;
+  // Every entry carries its own installation_revision and desired_state, including REMOVED tombstones.
   repeated UnifiedResourceRef resources = 2;
   ResourceRevocationList revocations = 3;
 }

@@ -12,6 +12,24 @@ UnifiedResourceIdentity 绑定可信 tenant、kind、packageId、versionId、严
 
 202 表示接受意图。applied 要求报告 identity、installationRevision、selectionRevision 和 generation 与当前期望完全相等，observedGeneration 等于 generation，且宿主公开 catalog 已确认名称与实际来源。member 来源仅表示成员自报，node 来源只能由已认证调度节点上报，服务端从认证通道决定来源。失败状态包括 failed、pending_restart、superseded、overridden、expired、revoked。失败保留 errorCode 和原安装，禁止把未知来源/状态计为 applied。云端 C 仅观察和回报宿主来源，D 为共享内容唯一写者。
 
+### installationRevision 的分配与传递
+
+installationRevision 由 resource 服务（A）分配并持久化，是成员对某资源的安装 CAS 代次，首次为 1。每次成功安装、更新、启用、停用或卸载都在同一事务内以当前代次为 CAS 前置条件加 1；失败的 CAS 不改变代次，幂等重放不重复增加。卸载保留代次记录，重新安装继续递增，不能重置为 1。签名或租约续期只刷新可信声明，不改变 installationRevision，也不改变既有选择代次。它不等同于 releaseSequence、selectionRevision 或 generation，同一批中的不同资源可有不同 installationRevision。
+
+期望值沿 UnifiedResourceRef.installationRevision（proto 字段 installation_revision=8）逐项传递：ResolveUnifiedResourcesResponse.resources → node InstanceSpec.unified_resources；UnifiedResourceWorkspace.Snapshot.resources 保存相同的期望条目。使用现有嵌套类型，不另造整批共用的 installationRevision，也不得从节点自报的 reports 推导期望值。JSON Schema/OpenAPI 只增加可选传输字段以保持既有结构兼容，但 A 的新下发必须填正整数；缺失字段或 proto 默认 0 都不能满足 applied 条件。
+
+A 下发每个资源条目前必须通过 `unified.schema.json#/$defs/UnifiedResourceDispatchRef` 校验。该 Schema 复用 UnifiedResourceRef 的字段定义并要求 installationRevision，覆盖正常资源和 REMOVED 墓碑。旧数据读取继续使用 UnifiedResourceRef。Snapshot 保留原 8 参数构造器，resources 默认为空列表，期望资源仍须由新下发补齐。desiredState 继续使用可选字段和缺失时的旧 enabled 推导规则。
+
+云端节点（D）和 Desktop 都原样回报下发的 installationRevision，不能自行分配或使用其他计数器代替。接收方按当前持久化的期望值比较 identity、installationRevision、selectionRevision、generation，四者全部相等且 observedGeneration 等于 generation 才可计为 applied；正常报告来源和宿主来源确认门禁继续生效。旧代次乱序回报不得覆盖新状态，不匹配返回 resource.state_conflict。续期后仍以原 installationRevision 接受回报，不能把续期误当安装更新。可复用夹具见 installation-revision-fixtures.json。
+
+### 期望状态与卸载墓碑
+
+UnifiedResourceRef 新增 desiredState，HTTP/JSON 枚举值为 ENABLED、DISABLED、REMOVED。proto 字段 desired_state=9 为 optional UnifiedResourceDesiredState，分别对应 UNIFIED_RESOURCE_DESIRED_STATE_ENABLED、UNIFIED_RESOURCE_DESIRED_STATE_DISABLED、UNIFIED_RESOURCE_DESIRED_STATE_REMOVED。ResolveUnifiedResourcesResponse.resources、InstanceSpec.unified_resources 和 Snapshot.resources 逐项保留该字段。消费方在字段存在时优先使用它。旧数据缺失时才按 enabled=true 推导 ENABLED、enabled=false 推导 DISABLED。显式 UNSPECIFIED、未知枚举或 null 均拒绝，不能回退。enabled 原字段继续保留，新生产者将 ENABLED 映射为 true，将 DISABLED/REMOVED 映射为 false。
+
+卸载时 A 持久化新的 installationRevision，并在期望资源列表保留 desiredState=REMOVED 的墓碑，携带完整 identity 和该新代次。节点必须能够从当前规格取得它，不能在下发前删除条目。DISABLED 表示停用并保留安装，REMOVED 表示清除该安装内容。节点执行前核对当前规格的 identity、installationRevision、selectionRevision、generation，旧墓碑不得清除更新代次的安装。节点完成清除后原样回报四元组、observedGeneration 和 state=removed，正常认证来源检查继续适用。
+
+卸载动作的成功应用确认以匹配当前期望的 removed 回报表示。仅有 state=applied 或 disabled 不能触发墓碑回收。A 在接受 removed 确认后，将已确认墓碑从下一 generation 的期望资源条目中移除，由 workspace 发布相应规格。当前 generation 内保留墓碑，失败、清除未完成、缺失或不匹配的回报均继续保留。不匹配返回 resource.state_conflict。回收时再次比较当前持久化的四元组，期间重新安装或其他变更已产生新代次时，旧 removed 回报不得删除新条目。墓碑回收继续保留安装 CAS 代次记录，不能因回收重置 installationRevision。可复用夹具见 desired-state-fixtures.json。
+
 ## 信任、迁移与撤销
 
 所有签名按既有独立 release/revocation/downgrade 根验证，保留原 UTC 时间文本，JCS 去除顶层 signature 后验 Ed25519。v1 仅接受 schemaVersion=1/purpose=plugin，v2 仅接受 schemaVersion=2/purpose=resource。v2 artifactDigests 必须与原始清单集合精确一致、去重并按字典序排序。租约截止 expiresAt 必须等于 envelopeNotAfter 和 revocationsExpiresAt 的较早值，两个可信声明各自最多24小时。
@@ -61,6 +79,16 @@ guardian 全部转移、守卫和动作见 guardian-transitions.json。未列转
 基础 resource.packages.upload 只授予上传基础能力。skill/text-only 还须 tenant/owner、L3共享、内容扫描及风险下限校验。plugin 继续旧专属接口与原等级规则。tool/online、tool/offline、tool/git 在 P1 全部拒绝，后续分别启用细分授权、端点/凭据与网络检查、二进制来源/平台检查、固定commit和隔离构建授权后开放。未知 kind/delivery 默认拒绝。
 
 审核/发布每次核验当前版本修订和原始摘要。R1 至少一名非作者，R2/R3 至少两名不同非作者且一名安全资格审核者。role=security 由服务端资格验证。同一人多个角色只计一次，作者禁止审核/发布。风险只可上调，内容或风险变更递增修订并清空旧审核。分发使用 resource.distributions.manage，且当前目标实例/主人/节点归属有效。原始清单和制品必须逐次授权，票据和 locator 均无法绕过 ACL。
+
+## 安全审核资格与发布复核
+
+安全审核资格唯一来源为权限 `resource.versions.security_review`。服务端从现有可信输入 `ResourceAccessInputs.permissions` 读取审核者在资源所属租户的当前有效权限，禁止从客户端请求、历史审核记录或其他租户权限推断资格。内置角色仅 owner 默认拥有，admin 不默认拥有。owner 权限由内置角色目录对齐，不能单独撤销其安全审核权限，移除 owner 角色才能撤掉这项来源。通过自定义角色授予的安全审核权限可以撤销。A、B 线按此范围实现撤销。此权限不替代普通审核所需的 `resource.versions.review` 或其他既有授权门禁，owner 身份仍须通过当前有效权限检查。
+
+客户端 `role=security` 只是职责声明。提交审核决定时核验当前资格，无资格、跨租户或作者自审返回 `common.forbidden`，不能降格为普通审核后接受。发布时再次按资源租户解析每名审核者的当前可信权限；资格被撤销、无法解析或租户不匹配的安全审核不再计入审核人数和安全审核人数，不沿用提交时的资格快照。有效普通审核仍可单独计数，但不能替代安全资格。资格无法确认或人数不足均拒绝发布，返回 `resource.review_required`。
+
+只计同一租户、当前修订与原始摘要一致的 approve 决定。作者不能审核自己的提交；按 tenantId + reviewerId 去重，同人同时具有 general/security 两种职责仅算一人，但有效 security 职责仍满足安全审核要求，记录顺序不影响结果。R1 至少一名不同于作者的审核者；R2/R3 至少两名不同的非作者，其中至少一名具有当前安全审核资格。发布的其他实时授权检查继续适用。
+
+机器规则见 `unified-authorization.json`，可复用的服务端输入与期望结果见 `security-review-fixtures.json`；夹具中的 principal/currentPrincipals 均为测试注入的可信服务端输入，不是 HTTP 请求允许提交的字段。
 
 ## HTTP 条件写入与分页
 

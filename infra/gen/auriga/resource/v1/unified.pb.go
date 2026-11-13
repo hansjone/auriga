@@ -21,6 +21,59 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// HTTP/JSON mapping uses ENABLED / DISABLED / REMOVED, without the enum prefix.
+type UnifiedResourceDesiredState int32
+
+const (
+	UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_UNSPECIFIED UnifiedResourceDesiredState = 0
+	UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_ENABLED     UnifiedResourceDesiredState = 1
+	UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_DISABLED    UnifiedResourceDesiredState = 2
+	UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_REMOVED     UnifiedResourceDesiredState = 3
+)
+
+// Enum value maps for UnifiedResourceDesiredState.
+var (
+	UnifiedResourceDesiredState_name = map[int32]string{
+		0: "UNIFIED_RESOURCE_DESIRED_STATE_UNSPECIFIED",
+		1: "UNIFIED_RESOURCE_DESIRED_STATE_ENABLED",
+		2: "UNIFIED_RESOURCE_DESIRED_STATE_DISABLED",
+		3: "UNIFIED_RESOURCE_DESIRED_STATE_REMOVED",
+	}
+	UnifiedResourceDesiredState_value = map[string]int32{
+		"UNIFIED_RESOURCE_DESIRED_STATE_UNSPECIFIED": 0,
+		"UNIFIED_RESOURCE_DESIRED_STATE_ENABLED":     1,
+		"UNIFIED_RESOURCE_DESIRED_STATE_DISABLED":    2,
+		"UNIFIED_RESOURCE_DESIRED_STATE_REMOVED":     3,
+	}
+)
+
+func (x UnifiedResourceDesiredState) Enum() *UnifiedResourceDesiredState {
+	p := new(UnifiedResourceDesiredState)
+	*p = x
+	return p
+}
+
+func (x UnifiedResourceDesiredState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UnifiedResourceDesiredState) Descriptor() protoreflect.EnumDescriptor {
+	return file_auriga_resource_v1_unified_proto_enumTypes[0].Descriptor()
+}
+
+func (UnifiedResourceDesiredState) Type() protoreflect.EnumType {
+	return &file_auriga_resource_v1_unified_proto_enumTypes[0]
+}
+
+func (x UnifiedResourceDesiredState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UnifiedResourceDesiredState.Descriptor instead.
+func (UnifiedResourceDesiredState) EnumDescriptor() ([]byte, []int) {
+	return file_auriga_resource_v1_unified_proto_rawDescGZIP(), []int{0}
+}
+
 // JSON mapping and normative validation: contracts/resource/unified.schema.json and unified-protocol.md.
 // Counters map to safe JSON numbers, times retain original UTC text. Never sign protojson output.
 type UnifiedStatement struct {
@@ -446,8 +499,14 @@ type UnifiedResourceRef struct {
 	Lease                *UnifiedLease              `protobuf:"bytes,5,opt,name=lease,proto3" json:"lease,omitempty"`
 	ReleaseSequence      uint64                     `protobuf:"varint,6,opt,name=release_sequence,json=releaseSequence,proto3" json:"release_sequence,omitempty"`
 	Enabled              bool                       `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Resource-assigned, persisted per-installation CAS counter; renewal preserves it.
+	// Required for applied acknowledgement; absent/zero is not an expected revision.
+	InstallationRevision uint64 `protobuf:"varint,8,opt,name=installation_revision,json=installationRevision,proto3" json:"installation_revision,omitempty"`
+	// Prefer when present. Absent legacy values derive ENABLED/DISABLED from enabled.
+	// Explicit UNSPECIFIED and unknown values are invalid. REMOVED carries the new revision.
+	DesiredState  *UnifiedResourceDesiredState `protobuf:"varint,9,opt,name=desired_state,json=desiredState,proto3,enum=auriga.resource.v1.UnifiedResourceDesiredState,oneof" json:"desired_state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UnifiedResourceRef) Reset() {
@@ -527,6 +586,20 @@ func (x *UnifiedResourceRef) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *UnifiedResourceRef) GetInstallationRevision() uint64 {
+	if x != nil {
+		return x.InstallationRevision
+	}
+	return 0
+}
+
+func (x *UnifiedResourceRef) GetDesiredState() UnifiedResourceDesiredState {
+	if x != nil && x.DesiredState != nil {
+		return *x.DesiredState
+	}
+	return UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_UNSPECIFIED
 }
 
 type UnifiedSelection struct {
@@ -1763,12 +1836,13 @@ func (x *ResolveUnifiedResourcesRequest) GetSelections() []*UnifiedSelection {
 }
 
 type ResolveUnifiedResourcesResponse struct {
-	state             protoimpl.MessageState  `protogen:"open.v1"`
-	SelectionRevision uint64                  `protobuf:"varint,1,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
-	Resources         []*UnifiedResourceRef   `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
-	Revocations       *ResourceRevocationList `protobuf:"bytes,3,opt,name=revocations,proto3" json:"revocations,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	SelectionRevision uint64                 `protobuf:"varint,1,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	// Every entry carries its own installation_revision and desired_state, including REMOVED tombstones.
+	Resources     []*UnifiedResourceRef   `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
+	Revocations   *ResourceRevocationList `protobuf:"bytes,3,opt,name=revocations,proto3" json:"revocations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ResolveUnifiedResourcesResponse) Reset() {
@@ -2093,7 +2167,7 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x06digest\x18\x02 \x01(\tR\x06digest\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x03 \x01(\x04R\tsizeBytes\x12#\n" +
-	"\rdownload_path\x18\x04 \x01(\tR\fdownloadPath\"\x9c\x03\n" +
+	"\rdownload_path\x18\x04 \x01(\tR\fdownloadPath\"\xbe\x04\n" +
 	"\x12UnifiedResourceRef\x12G\n" +
 	"\bidentity\x18\x01 \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12?\n" +
 	"\benvelope\x18\x02 \x01(\v2#.auriga.resource.v1.UnifiedEnvelopeR\benvelope\x124\n" +
@@ -2101,7 +2175,10 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\tartifacts\x18\x04 \x03(\v2+.auriga.resource.v1.UnifiedArtifactDownloadR\tartifacts\x126\n" +
 	"\x05lease\x18\x05 \x01(\v2 .auriga.resource.v1.UnifiedLeaseR\x05lease\x12)\n" +
 	"\x10release_sequence\x18\x06 \x01(\x04R\x0freleaseSequence\x12\x18\n" +
-	"\aenabled\x18\a \x01(\bR\aenabled\"s\n" +
+	"\aenabled\x18\a \x01(\bR\aenabled\x123\n" +
+	"\x15installation_revision\x18\b \x01(\x04R\x14installationRevision\x12Y\n" +
+	"\rdesired_state\x18\t \x01(\x0e2/.auriga.resource.v1.UnifiedResourceDesiredStateH\x00R\fdesiredState\x88\x01\x01B\x10\n" +
+	"\x0e_desired_state\"s\n" +
 	"\x10UnifiedSelection\x12G\n" +
 	"\bidentity\x18\x01 \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\"\xb7\x01\n" +
@@ -2254,7 +2331,12 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x10first_version_id\x18\x05 \x01(\tR\x0efirstVersionId\x124\n" +
 	"\x16first_release_sequence\x18\x06 \x01(\x04R\x14firstReleaseSequence\x12!\n" +
 	"\factivated_at\x18\a \x01(\tR\vactivatedAt\x12C\n" +
-	"\tsignature\x18\b \x01(\v2%.auriga.resource.v1.ResourceSignatureR\tsignature2\xa7\x01\n" +
+	"\tsignature\x18\b \x01(\v2%.auriga.resource.v1.ResourceSignatureR\tsignature*\xd2\x01\n" +
+	"\x1bUnifiedResourceDesiredState\x12.\n" +
+	"*UNIFIED_RESOURCE_DESIRED_STATE_UNSPECIFIED\x10\x00\x12*\n" +
+	"&UNIFIED_RESOURCE_DESIRED_STATE_ENABLED\x10\x01\x12+\n" +
+	"'UNIFIED_RESOURCE_DESIRED_STATE_DISABLED\x10\x02\x12*\n" +
+	"&UNIFIED_RESOURCE_DESIRED_STATE_REMOVED\x10\x032\xa7\x01\n" +
 	" UnifiedResourceResolutionService\x12\x82\x01\n" +
 	"\x17ResolveUnifiedResources\x122.auriga.resource.v1.ResolveUnifiedResourcesRequest\x1a3.auriga.resource.v1.ResolveUnifiedResourcesResponseBd\n" +
 	"\x1cauriga.contracts.resource.v1P\x01ZBgithub.com/hansjone/auriga/infra/gen/auriga/resource/v1;resourcev1b\x06proto3"
@@ -2271,75 +2353,78 @@ func file_auriga_resource_v1_unified_proto_rawDescGZIP() []byte {
 	return file_auriga_resource_v1_unified_proto_rawDescData
 }
 
+var file_auriga_resource_v1_unified_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_auriga_resource_v1_unified_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_auriga_resource_v1_unified_proto_goTypes = []any{
-	(*UnifiedStatement)(nil),                // 0: auriga.resource.v1.UnifiedStatement
-	(*UnifiedEnvelope)(nil),                 // 1: auriga.resource.v1.UnifiedEnvelope
-	(*UnifiedResourceIdentity)(nil),         // 2: auriga.resource.v1.UnifiedResourceIdentity
-	(*UnifiedLease)(nil),                    // 3: auriga.resource.v1.UnifiedLease
-	(*UnifiedArtifactDownload)(nil),         // 4: auriga.resource.v1.UnifiedArtifactDownload
-	(*UnifiedResourceRef)(nil),              // 5: auriga.resource.v1.UnifiedResourceRef
-	(*UnifiedSelection)(nil),                // 6: auriga.resource.v1.UnifiedSelection
-	(*UnifiedDownloadTicketInput)(nil),      // 7: auriga.resource.v1.UnifiedDownloadTicketInput
-	(*UnifiedDownloadTicket)(nil),           // 8: auriga.resource.v1.UnifiedDownloadTicket
-	(*UnifiedDownloadInput)(nil),            // 9: auriga.resource.v1.UnifiedDownloadInput
-	(*UnifiedInstallationInput)(nil),        // 10: auriga.resource.v1.UnifiedInstallationInput
-	(*UnifiedInstallationReport)(nil),       // 11: auriga.resource.v1.UnifiedInstallationReport
-	(*UnifiedInstallation)(nil),             // 12: auriga.resource.v1.UnifiedInstallation
-	(*UnifiedInstallationPage)(nil),         // 13: auriga.resource.v1.UnifiedInstallationPage
-	(*UnifiedDistributionInput)(nil),        // 14: auriga.resource.v1.UnifiedDistributionInput
-	(*UnifiedDistribution)(nil),             // 15: auriga.resource.v1.UnifiedDistribution
-	(*UnifiedDistributionPage)(nil),         // 16: auriga.resource.v1.UnifiedDistributionPage
-	(*UnifiedRenewalInput)(nil),             // 17: auriga.resource.v1.UnifiedRenewalInput
-	(*UnifiedGuardianState)(nil),            // 18: auriga.resource.v1.UnifiedGuardianState
-	(*UnifiedMigrationProof)(nil),           // 19: auriga.resource.v1.UnifiedMigrationProof
-	(*UnifiedHighWatermark)(nil),            // 20: auriga.resource.v1.UnifiedHighWatermark
-	(*ResolveUnifiedResourcesRequest)(nil),  // 21: auriga.resource.v1.ResolveUnifiedResourcesRequest
-	(*ResolveUnifiedResourcesResponse)(nil), // 22: auriga.resource.v1.ResolveUnifiedResourcesResponse
-	(*UnifiedDowngradeAuthorization)(nil),   // 23: auriga.resource.v1.UnifiedDowngradeAuthorization
-	(*UnifiedMigrationMarker)(nil),          // 24: auriga.resource.v1.UnifiedMigrationMarker
-	(*ResourceSignature)(nil),               // 25: auriga.resource.v1.ResourceSignature
-	(*ResourceRevocationList)(nil),          // 26: auriga.resource.v1.ResourceRevocationList
-	(*ResourceEnvelope)(nil),                // 27: auriga.resource.v1.ResourceEnvelope
+	(UnifiedResourceDesiredState)(0),        // 0: auriga.resource.v1.UnifiedResourceDesiredState
+	(*UnifiedStatement)(nil),                // 1: auriga.resource.v1.UnifiedStatement
+	(*UnifiedEnvelope)(nil),                 // 2: auriga.resource.v1.UnifiedEnvelope
+	(*UnifiedResourceIdentity)(nil),         // 3: auriga.resource.v1.UnifiedResourceIdentity
+	(*UnifiedLease)(nil),                    // 4: auriga.resource.v1.UnifiedLease
+	(*UnifiedArtifactDownload)(nil),         // 5: auriga.resource.v1.UnifiedArtifactDownload
+	(*UnifiedResourceRef)(nil),              // 6: auriga.resource.v1.UnifiedResourceRef
+	(*UnifiedSelection)(nil),                // 7: auriga.resource.v1.UnifiedSelection
+	(*UnifiedDownloadTicketInput)(nil),      // 8: auriga.resource.v1.UnifiedDownloadTicketInput
+	(*UnifiedDownloadTicket)(nil),           // 9: auriga.resource.v1.UnifiedDownloadTicket
+	(*UnifiedDownloadInput)(nil),            // 10: auriga.resource.v1.UnifiedDownloadInput
+	(*UnifiedInstallationInput)(nil),        // 11: auriga.resource.v1.UnifiedInstallationInput
+	(*UnifiedInstallationReport)(nil),       // 12: auriga.resource.v1.UnifiedInstallationReport
+	(*UnifiedInstallation)(nil),             // 13: auriga.resource.v1.UnifiedInstallation
+	(*UnifiedInstallationPage)(nil),         // 14: auriga.resource.v1.UnifiedInstallationPage
+	(*UnifiedDistributionInput)(nil),        // 15: auriga.resource.v1.UnifiedDistributionInput
+	(*UnifiedDistribution)(nil),             // 16: auriga.resource.v1.UnifiedDistribution
+	(*UnifiedDistributionPage)(nil),         // 17: auriga.resource.v1.UnifiedDistributionPage
+	(*UnifiedRenewalInput)(nil),             // 18: auriga.resource.v1.UnifiedRenewalInput
+	(*UnifiedGuardianState)(nil),            // 19: auriga.resource.v1.UnifiedGuardianState
+	(*UnifiedMigrationProof)(nil),           // 20: auriga.resource.v1.UnifiedMigrationProof
+	(*UnifiedHighWatermark)(nil),            // 21: auriga.resource.v1.UnifiedHighWatermark
+	(*ResolveUnifiedResourcesRequest)(nil),  // 22: auriga.resource.v1.ResolveUnifiedResourcesRequest
+	(*ResolveUnifiedResourcesResponse)(nil), // 23: auriga.resource.v1.ResolveUnifiedResourcesResponse
+	(*UnifiedDowngradeAuthorization)(nil),   // 24: auriga.resource.v1.UnifiedDowngradeAuthorization
+	(*UnifiedMigrationMarker)(nil),          // 25: auriga.resource.v1.UnifiedMigrationMarker
+	(*ResourceSignature)(nil),               // 26: auriga.resource.v1.ResourceSignature
+	(*ResourceRevocationList)(nil),          // 27: auriga.resource.v1.ResourceRevocationList
+	(*ResourceEnvelope)(nil),                // 28: auriga.resource.v1.ResourceEnvelope
 }
 var file_auriga_resource_v1_unified_proto_depIdxs = []int32{
-	0,  // 0: auriga.resource.v1.UnifiedEnvelope.statement:type_name -> auriga.resource.v1.UnifiedStatement
-	25, // 1: auriga.resource.v1.UnifiedEnvelope.signature:type_name -> auriga.resource.v1.ResourceSignature
-	2,  // 2: auriga.resource.v1.UnifiedResourceRef.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	1,  // 3: auriga.resource.v1.UnifiedResourceRef.envelope:type_name -> auriga.resource.v1.UnifiedEnvelope
-	4,  // 4: auriga.resource.v1.UnifiedResourceRef.artifacts:type_name -> auriga.resource.v1.UnifiedArtifactDownload
-	3,  // 5: auriga.resource.v1.UnifiedResourceRef.lease:type_name -> auriga.resource.v1.UnifiedLease
-	2,  // 6: auriga.resource.v1.UnifiedSelection.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	2,  // 7: auriga.resource.v1.UnifiedDownloadTicketInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	5,  // 8: auriga.resource.v1.UnifiedDownloadTicket.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
-	26, // 9: auriga.resource.v1.UnifiedDownloadTicket.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
-	6,  // 10: auriga.resource.v1.UnifiedInstallationInput.selection:type_name -> auriga.resource.v1.UnifiedSelection
-	2,  // 11: auriga.resource.v1.UnifiedInstallationReport.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	5,  // 12: auriga.resource.v1.UnifiedInstallation.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
-	11, // 13: auriga.resource.v1.UnifiedInstallation.report:type_name -> auriga.resource.v1.UnifiedInstallationReport
-	12, // 14: auriga.resource.v1.UnifiedInstallationPage.items:type_name -> auriga.resource.v1.UnifiedInstallation
-	6,  // 15: auriga.resource.v1.UnifiedDistributionInput.selections:type_name -> auriga.resource.v1.UnifiedSelection
-	6,  // 16: auriga.resource.v1.UnifiedDistribution.selections:type_name -> auriga.resource.v1.UnifiedSelection
-	11, // 17: auriga.resource.v1.UnifiedDistribution.reports:type_name -> auriga.resource.v1.UnifiedInstallationReport
-	15, // 18: auriga.resource.v1.UnifiedDistributionPage.items:type_name -> auriga.resource.v1.UnifiedDistribution
-	2,  // 19: auriga.resource.v1.UnifiedRenewalInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	3,  // 20: auriga.resource.v1.UnifiedGuardianState.lease:type_name -> auriga.resource.v1.UnifiedLease
-	27, // 21: auriga.resource.v1.UnifiedMigrationProof.legacy_envelope:type_name -> auriga.resource.v1.ResourceEnvelope
-	1,  // 22: auriga.resource.v1.UnifiedMigrationProof.unified_envelope:type_name -> auriga.resource.v1.UnifiedEnvelope
-	24, // 23: auriga.resource.v1.UnifiedMigrationProof.marker:type_name -> auriga.resource.v1.UnifiedMigrationMarker
-	6,  // 24: auriga.resource.v1.ResolveUnifiedResourcesRequest.selections:type_name -> auriga.resource.v1.UnifiedSelection
-	5,  // 25: auriga.resource.v1.ResolveUnifiedResourcesResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
-	26, // 26: auriga.resource.v1.ResolveUnifiedResourcesResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
-	2,  // 27: auriga.resource.v1.UnifiedDowngradeAuthorization.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	25, // 28: auriga.resource.v1.UnifiedDowngradeAuthorization.signature:type_name -> auriga.resource.v1.ResourceSignature
-	25, // 29: auriga.resource.v1.UnifiedMigrationMarker.signature:type_name -> auriga.resource.v1.ResourceSignature
-	21, // 30: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:input_type -> auriga.resource.v1.ResolveUnifiedResourcesRequest
-	22, // 31: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:output_type -> auriga.resource.v1.ResolveUnifiedResourcesResponse
-	31, // [31:32] is the sub-list for method output_type
-	30, // [30:31] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	1,  // 0: auriga.resource.v1.UnifiedEnvelope.statement:type_name -> auriga.resource.v1.UnifiedStatement
+	26, // 1: auriga.resource.v1.UnifiedEnvelope.signature:type_name -> auriga.resource.v1.ResourceSignature
+	3,  // 2: auriga.resource.v1.UnifiedResourceRef.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	2,  // 3: auriga.resource.v1.UnifiedResourceRef.envelope:type_name -> auriga.resource.v1.UnifiedEnvelope
+	5,  // 4: auriga.resource.v1.UnifiedResourceRef.artifacts:type_name -> auriga.resource.v1.UnifiedArtifactDownload
+	4,  // 5: auriga.resource.v1.UnifiedResourceRef.lease:type_name -> auriga.resource.v1.UnifiedLease
+	0,  // 6: auriga.resource.v1.UnifiedResourceRef.desired_state:type_name -> auriga.resource.v1.UnifiedResourceDesiredState
+	3,  // 7: auriga.resource.v1.UnifiedSelection.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	3,  // 8: auriga.resource.v1.UnifiedDownloadTicketInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	6,  // 9: auriga.resource.v1.UnifiedDownloadTicket.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
+	27, // 10: auriga.resource.v1.UnifiedDownloadTicket.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
+	7,  // 11: auriga.resource.v1.UnifiedInstallationInput.selection:type_name -> auriga.resource.v1.UnifiedSelection
+	3,  // 12: auriga.resource.v1.UnifiedInstallationReport.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	6,  // 13: auriga.resource.v1.UnifiedInstallation.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
+	12, // 14: auriga.resource.v1.UnifiedInstallation.report:type_name -> auriga.resource.v1.UnifiedInstallationReport
+	13, // 15: auriga.resource.v1.UnifiedInstallationPage.items:type_name -> auriga.resource.v1.UnifiedInstallation
+	7,  // 16: auriga.resource.v1.UnifiedDistributionInput.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	7,  // 17: auriga.resource.v1.UnifiedDistribution.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	12, // 18: auriga.resource.v1.UnifiedDistribution.reports:type_name -> auriga.resource.v1.UnifiedInstallationReport
+	16, // 19: auriga.resource.v1.UnifiedDistributionPage.items:type_name -> auriga.resource.v1.UnifiedDistribution
+	3,  // 20: auriga.resource.v1.UnifiedRenewalInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	4,  // 21: auriga.resource.v1.UnifiedGuardianState.lease:type_name -> auriga.resource.v1.UnifiedLease
+	28, // 22: auriga.resource.v1.UnifiedMigrationProof.legacy_envelope:type_name -> auriga.resource.v1.ResourceEnvelope
+	2,  // 23: auriga.resource.v1.UnifiedMigrationProof.unified_envelope:type_name -> auriga.resource.v1.UnifiedEnvelope
+	25, // 24: auriga.resource.v1.UnifiedMigrationProof.marker:type_name -> auriga.resource.v1.UnifiedMigrationMarker
+	7,  // 25: auriga.resource.v1.ResolveUnifiedResourcesRequest.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	6,  // 26: auriga.resource.v1.ResolveUnifiedResourcesResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
+	27, // 27: auriga.resource.v1.ResolveUnifiedResourcesResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
+	3,  // 28: auriga.resource.v1.UnifiedDowngradeAuthorization.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	26, // 29: auriga.resource.v1.UnifiedDowngradeAuthorization.signature:type_name -> auriga.resource.v1.ResourceSignature
+	26, // 30: auriga.resource.v1.UnifiedMigrationMarker.signature:type_name -> auriga.resource.v1.ResourceSignature
+	22, // 31: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:input_type -> auriga.resource.v1.ResolveUnifiedResourcesRequest
+	23, // 32: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:output_type -> auriga.resource.v1.ResolveUnifiedResourcesResponse
+	32, // [32:33] is the sub-list for method output_type
+	31, // [31:32] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_auriga_resource_v1_unified_proto_init() }
@@ -2348,18 +2433,20 @@ func file_auriga_resource_v1_unified_proto_init() {
 		return
 	}
 	file_auriga_resource_v1_trust_proto_init()
+	file_auriga_resource_v1_unified_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_resource_v1_unified_proto_rawDesc), len(file_auriga_resource_v1_unified_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_auriga_resource_v1_unified_proto_goTypes,
 		DependencyIndexes: file_auriga_resource_v1_unified_proto_depIdxs,
+		EnumInfos:         file_auriga_resource_v1_unified_proto_enumTypes,
 		MessageInfos:      file_auriga_resource_v1_unified_proto_msgTypes,
 	}.Build()
 	File_auriga_resource_v1_unified_proto = out.File

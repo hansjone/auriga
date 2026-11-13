@@ -29,6 +29,10 @@ type UnifiedResourceRef struct {
 	Lease                UnifiedLease              `json:"lease"`
 	ReleaseSequence      int64                     `json:"releaseSequence"`
 	Enabled              bool                      `json:"enabled"`
+	// Resource-assigned persisted per-installation CAS revision. Preserved by signature renewal and echoed by node/Desktop reports. Omission is transport-compatible only: never accept applied without a positive expected revision.
+	InstallationRevision *int64 `json:"installationRevision,omitempty"`
+	// Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values.
+	DesiredState *string `json:"desiredState,omitempty"`
 }
 
 type _UnifiedResourceRef UnifiedResourceRef
@@ -225,6 +229,70 @@ func (o *UnifiedResourceRef) SetEnabled(v bool) {
 	o.Enabled = v
 }
 
+// GetInstallationRevision returns the InstallationRevision field value if set, zero value otherwise.
+func (o *UnifiedResourceRef) GetInstallationRevision() int64 {
+	if o == nil || IsNil(o.InstallationRevision) {
+		var ret int64
+		return ret
+	}
+	return *o.InstallationRevision
+}
+
+// GetInstallationRevisionOk returns a tuple with the InstallationRevision field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedResourceRef) GetInstallationRevisionOk() (*int64, bool) {
+	if o == nil || IsNil(o.InstallationRevision) {
+		return nil, false
+	}
+	return o.InstallationRevision, true
+}
+
+// HasInstallationRevision returns a boolean if a field has been set.
+func (o *UnifiedResourceRef) HasInstallationRevision() bool {
+	if o != nil && !IsNil(o.InstallationRevision) {
+		return true
+	}
+
+	return false
+}
+
+// SetInstallationRevision gets a reference to the given int64 and assigns it to the InstallationRevision field.
+func (o *UnifiedResourceRef) SetInstallationRevision(v int64) {
+	o.InstallationRevision = &v
+}
+
+// GetDesiredState returns the DesiredState field value if set, zero value otherwise.
+func (o *UnifiedResourceRef) GetDesiredState() string {
+	if o == nil || IsNil(o.DesiredState) {
+		var ret string
+		return ret
+	}
+	return *o.DesiredState
+}
+
+// GetDesiredStateOk returns a tuple with the DesiredState field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedResourceRef) GetDesiredStateOk() (*string, bool) {
+	if o == nil || IsNil(o.DesiredState) {
+		return nil, false
+	}
+	return o.DesiredState, true
+}
+
+// HasDesiredState returns a boolean if a field has been set.
+func (o *UnifiedResourceRef) HasDesiredState() bool {
+	if o != nil && !IsNil(o.DesiredState) {
+		return true
+	}
+
+	return false
+}
+
+// SetDesiredState gets a reference to the given string and assigns it to the DesiredState field.
+func (o *UnifiedResourceRef) SetDesiredState(v string) {
+	o.DesiredState = &v
+}
+
 func (o UnifiedResourceRef) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -242,6 +310,12 @@ func (o UnifiedResourceRef) ToMap() (map[string]interface{}, error) {
 	toSerialize["lease"] = o.Lease
 	toSerialize["releaseSequence"] = o.ReleaseSequence
 	toSerialize["enabled"] = o.Enabled
+	if !IsNil(o.InstallationRevision) {
+		toSerialize["installationRevision"] = o.InstallationRevision
+	}
+	if !IsNil(o.DesiredState) {
+		toSerialize["desiredState"] = o.DesiredState
+	}
 	return toSerialize, nil
 }
 
