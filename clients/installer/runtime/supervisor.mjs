@@ -153,6 +153,22 @@ export class Supervisor {
       marks: this.marks(),
     }));
   }
+  privateResult(error) {
+    this.privateOnly = true;
+    this.privateReason = error?.message;
+    // Failed shared activation must not hash an unchanged, large staging set
+    // every second while private Desktop is running. Any file change retries now.
+    try {
+      this.privateRejection = {
+        stamp: resourceStamp(this.home),
+        trust: this.trust,
+        until: this.now() + 30000,
+      };
+    } catch {
+      this.privateRejection = undefined;
+    }
+    return { privateOnly: true };
+  }
   async prepare() {
     await this.recoverLock();
     // A launcher crash leaves a trusted process journal; stop it before recovery or updates.
@@ -232,9 +248,7 @@ export class Supervisor {
           (!old || old.guardian.state === 'private_only') &&
           this.guardian.cleared()
         ) {
-          this.privateOnly = true;
-          this.privateReason = error.message;
-          return { privateOnly: true };
+          return this.privateResult(error);
         }
         if (!old) throw error;
         await this.guardian.disable('verification_failed');
@@ -247,6 +261,17 @@ export class Supervisor {
     const snapshot = this.snapshot(),
       old = snapshot.state;
     this.lastState = old;
+    if (
+      (!old || old.guardian.state === 'private_only') &&
+      this.guardian.cleared() &&
+      this.privateRejection &&
+      this.privateRejection.trust === this.trust &&
+      this.now() < this.privateRejection.until &&
+      this.privateRejection.stamp === resourceStamp(this.home)
+    ) {
+      this.privateOnly = true;
+      return { privateOnly: true };
+    }
     const candidates = snapshot.ledgers.filter((s) =>
       s.ledger.installations.some(installationEnabled),
     );
@@ -494,6 +519,7 @@ export class Supervisor {
         this.lastState = state;
       });
       this.privateOnly = false;
+      this.privateRejection = undefined;
       this.lastStamp = stamp;
       this.lastTrust = this.trust;
       this.lastVerifiedAt = this.now();
@@ -521,13 +547,10 @@ export class Supervisor {
         });
       if (!old) {
         if (!this.guardian.cleared()) throw error;
-        this.privateOnly = true;
-        this.privateReason = error.message;
-        return { privateOnly: true };
+        return this.privateResult(error);
       }
       if (old.guardian.state === 'private_only' && this.guardian.cleared()) {
-        this.privateOnly = true;
-        return { privateOnly: true, restart: stoppedForRestart };
+        return { ...this.privateResult(error), restart: stoppedForRestart };
       }
       await this.guardian.disable(
         [

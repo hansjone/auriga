@@ -303,3 +303,28 @@ test('L4 extra empty directories do not match signed Skill bytes', async (t) => 
   await f.s.reconcile();
   assert.equal(f.s.guardian.read().guardian.state, 'private_only');
 });
+
+test('M6 stable rejected private staging avoids repeat crypto and retries on ledger change', async (t) => {
+  const f = harness(t, 600000);
+  stage(f);
+  emptyCurrent(f);
+  await f.s.prepare();
+  const root = f.trust.release;
+  let reads = 0;
+  Object.defineProperty(f.trust, 'release', {
+    get() {
+      reads++;
+      return root;
+    },
+  });
+  await f.s.reconcile();
+  assert.equal(reads, 0);
+  f.ledger.revision++;
+  durableJson(join(f.directory, 'ledger.json'), f.ledger);
+  const path = join(f.directory, 'transactions', id(7) + '.json');
+  const transaction = JSON.parse(readFileSync(path));
+  transaction.expectedLedgerRevision = f.ledger.revision;
+  durableJson(path, transaction);
+  await f.s.reconcile();
+  assert(reads > 0);
+});
