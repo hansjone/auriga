@@ -35,7 +35,41 @@
           "format": "date-time",
           "description": "该次信息查询状态持久化的时间，不作为复验时钟"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "department",
+              "updatedAt"
+            ],
+            "properties": {
+              "department": {},
+              "updatedAt": {}
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "department"
+              ],
+              "properties": {
+                "department": {}
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

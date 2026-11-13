@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UAC 来源会话与设备授权绑定",
+  "$defs": {
+    "UacSessionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceSessionId",
+        "authGeneration",
+        "providerId"
+      ],
+      "properties": {
+        "sourceSessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "authGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    }
+  }
+}

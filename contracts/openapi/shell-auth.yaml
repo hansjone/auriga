@@ -5,8 +5,8 @@ info:
   description: 仅描述经 OS 身份验证后的 IPC 消息。/messages 是生成器投影路径，禁止注册为公网或 DSH HTTP
     路由。订阅事件使用同一 ShellAuthEvent。
   license:
-    name: MIT
-    identifier: MIT
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
 servers:
   - url: http://127.0.0.1
 security: []

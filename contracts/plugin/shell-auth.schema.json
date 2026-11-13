@@ -52,7 +52,12 @@
             "offline",
             "source_disabled",
             "account_changed",
-            "shell_restarted"
+            "shell_restarted",
+            "revalidation_rejected",
+            "revalidation_unreachable",
+            "user_logout",
+            "admin_disabled",
+            "member_disabled"
           ]
         },
         "uacLoginInfo": {
@@ -60,7 +65,83 @@
           "description": "仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "authenticated"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "identity"
+            ],
+            "properties": {
+              "identity": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "signed_out",
+                  "authenticating",
+                  "revoked"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "identity"
+              ],
+              "properties": {
+                "identity": {}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "signed_out",
+                  "authenticating",
+                  "unreachable",
+                  "reauth_required",
+                  "revoked"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "uacLoginInfo"
+              ],
+              "properties": {
+                "uacLoginInfo": {}
+              }
+            }
+          }
+        }
+      ]
     },
     "ShellAuthIdentity": {
       "type": "object",
@@ -90,6 +171,9 @@
         "empNo": {
           "type": "string",
           "maxLength": 128
+        },
+        "uacSessionBinding": {
+          "$ref": "../auth/uac-session-binding.schema.json#/$defs/UacSessionBinding"
         }
       },
       "additionalProperties": false
@@ -176,7 +260,52 @@
           ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "error"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "code"
+            ],
+            "properties": {
+              "code": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "snapshot",
+                  "changed"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "snapshot"
+            ],
+            "properties": {
+              "snapshot": {}
+            }
+          }
+        }
+      ]
     }
   }
 }

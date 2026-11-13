@@ -2,22 +2,19 @@
 
 ## 1. 范围与依据
 
-本稿基于 `51beea24b3e42619f8d8b5879ba158176235fa87`，第5轮按用户2026-11-13更正补齐登录后信息性部门查询，沿用已定现场实现和七项产品决定，供后续拆分实现。契约新增项均为草案，尚无运行时接线。审查等级 A，涉及 contracts，交主控标记【待审查】。
+本稿基于 `51beea24b3e42619f8d8b5879ba158176235fa87`，第6轮按独审清单补齐Desktop、身份源写入边界、设备绑定及交付接线，沿用已定现场实现和七项产品决定，供后续拆分实现。契约新增项均为草案，尚无运行时接线。审查等级 A，涉及 contracts，交主控标记【待审查】。
 
 本轮的用户要求是 UAC 扫码与团队账号并列，登录页归云端门户或 Desktop 外壳，插件继承身份。Desktop 可跳过并稍后登录，平台认证失败不得封锁本地 DSH。云端托管入口要求登录。桌面登录仅认证并返回当前 DSH，进入本人云端实例由门户现有工作空间流程负责。
 
 依据为任务文件、`docs/architecture/identity.zh.md`、`contracts/README.md`、`contracts/deployment/README.md`、`contracts/plugin/local-login.md`、`contracts/resource/unified-protocol.md`，以及 memwiki 的《Auriga 工作台产品设计》《DSH 宿主兼容与连接模式认证》。公开文档中的地址均使用示例域名。企业真实地址只进入部署配置。
 
-### 1.1 按现场可用实现迁移
+### 1.1 现场协议与公开文档边界
 
-用户明确原插件扫码认证在现场持续可用，并在最新更正中确定扫码取得token和工号即完成UAC登录。登录成功后进行一次信息性部门查询，到期后再进行判定性复验，两者分别处理。本轮以用户更正及以下源码调用链为迁移依据，开发验收使用本地替身和日志断言。现场出现差异时通过脱敏诊断包回传定位。
+扫码取得token和工号即完成UAC登录。随后一次purpose=login_info的部门查询用于展示，失败只记WARN。到期的purpose=revalidate查询用于判定失效。本设计保留用户最终规则，验收使用替身与日志断言。
 
-- `oclaw/dsh-team/lib/index.js` 的挑战创建及扫码代理，调用 `lib/uds/user-search.js` 和 `lib/middleware/auth-middleware.js`；对应 Hub 实现为 `lib/identity/uac/index.js`、`qr-challenge.js`、`user-search.js`。配置来源为两项目的 config 文件，复验来源为 `dsh-team/lib/uds/session-revalidation.js`。
-- `dsh-team/lib/uds/client.js` 的 `/api/auth/verify` TODO 属于另一条候选校验路径。现有源码提供verify.serv和携带token的部门查询，本稿按最新更正区分登录信息补充与到期失效复验。
-- `validator.js` 的 header/cookie 提取、单独 HR 查询和 trust 分支仅作旧代码归属参考。迁移时身份来自已绑定挑战的扫码结果，随后执行purpose=login_info的信息查询，周期到期后执行purpose=revalidate的失效查询。
-- 原型 user-search 映射可能返回空 department，旧复验对网络错误保留 unknown。本轮遵照用户明确要求，补上非空部门判定，复验时用已保存的token和工号查询部门，单次查不到部门即判平台认证失效，失败分类继续保留供诊断。
-- `lib/web/login/desk.js` 区分 src=uac/team，UAC 手机确认没有两位比对码。`lib/linked/auth.js` 的 uacEmpNo 关联作为来源参考，当前设计将 DSH owner 与平台身份分开。
-- 原型 `test/core/auth.test.mjs` 与 `test/devices/devices-qr.test.js` 提供替身样例。用户的现场说明确立迁移基线，本轮只读核对源码，本机未执行真实 UDS 联调。
+原型的接口主机、完整路径、系统标识、二维码编码及字段编解码保留在企业适配器私有配置。公开仓库只使用 `<qrVerifyPath>`、`<userSearchUrl>` 和字段角色说明。适配器将本稿Uac挑战与上游报文互转，返回waiting/scanned、token、empNo和部门信息。来源文件、逐字段核对及原型与新规则差异记入未提交执行报告，企业专用细节不复制到公共契约。
+
+通用边界保持HTTPS、受信地址允许列表、禁止重定向、15秒扫码请求超时、3秒资料请求超时、2MiB响应上限、严格工号匹配及120秒挑战有效期。企业部署通过私有映射延续现场可用协议。
 
 ### 1.2 当前 Auriga 接缝
 
@@ -35,13 +32,15 @@ IAM 已有 IdentityConnector 的 descriptor/validateConfig/begin/advance、身�
 
 baseUrl 必须 HTTPS、无 userinfo/query/fragment，按部署受信允许列表校验 hostname、端口与解析地址，拒绝重定向。上游可能位于企业私网，允许列表由部署管理员明确登记范围。管理台不可任意开启内网访问。配置更新执行既有 iam.providers.write、ctx=admin、Origin/CSRF 和 ETag。enabled=false 立即阻止新挑战并撤销该源事务及关联平台会话和设备授权。
 
-systemCode 映射到原型 loginSystemCode。originSystemCode 保留现场部署值，原型默认空字符串，两者独立。userSearchUrl 由企业适配器受信配置注入，部门查询路径固定为 `/zte-km-icenter-addresearch/user/plain/docs/search`，默认部署值从原插件配置迁入。baseUrl 与资料接口允许使用各自受信源，公开仓库只给示例域名和占位 systemCode。配置校验检查必填项、HTTPS及允许列表，保存和启用按现场既有实现推进。
+UAC配置只有 `/admin/providers/{providerId}/uac` 一个enabled/config写入口，底层复用同一Provider行、修订和ETag。通用PATCH含enabled或config时对UAC类型返回400 common.validation_failed，元数据变更仍可走通用入口。通用创建UAC类型时省略enabled取false，显式true或非空config拒绝，通用创建必须带config={}以满足ProviderInput必填，建立未配置占位实例时暂不执行完整连接器配置校验，随后唯一UAC写入口执行完整验证。未配置时UAC GET返回404，E通过通用Provider读取ETag后初始化关闭的配置表单，再经UAC接口配置并启用。其他连接器沿通用默认true，UAC界面明确默认关闭，不能将通用生成模型默认值当作UAC的服务器授权。实现保留原JSON字段存在性区分省略与显式值。
+
+baseUrl与systemCode由UAC管理接口保存，真实值只在受信部署数据库/企业配置中。完整扫码路径、资料URL、其他系统标识及报文字段映射由企业适配器私有配置注入。公开示例仅用占位符。通用配置读取与UAC读取使用同一事实源，停用与撤销在同一权威事务协调。
 
 新增 `/login/uac/challenges` API 明确区分 UAC 二维码。现有 QrStep 要求手机输入 matchCode，上游原型缺此交互，因此本稿新增 Uac schema，保留既有步骤完整定义。
 
 ### 2.2 挑战生命周期
 
-1. 外壳发现已启用身份源，用户选择 UAC。可信入口解析 tenant、规范 Origin、portal/admin audience，创建既有 IAM 登录事务和 UAC 挑战，绑定入口 cookie、provider/configRevision 与过期时间。已有邀请代码只保存在该事务中。
+1. 外壳发现已启用身份源，用户选择UAC。创建请求purpose默认login，可匿名。purpose=link要求同入口已有user类型portal/admin会话且10分钟内完成新鲜认证，设备和服务账号凭据拒绝，绑定该账号、sessionId和认证代次，缺会话返回401，新鲜度不足或主体变化拒绝；不得降级成匿名login。可信入口解析tenant、规范Origin及portal/admin audience，按原事务cookie保护挑战。邀请代码只用于login，link与invitationCode同时提交拒绝。
 2. 返回 UacChallenge 的公开扫码内容和有效期。页面不持有 UAC token、浏览器绑定秘密或 PKCE verifier。二维码过期后只能新建，刷新会取消旧事务。TTL 固定120秒，现场差异由关联日志定位后调整。
 3. IAM 后台有界轮询上游，同一挑战单飞，按两秒起步和上游限流退避。GET 状态只读取本地事务，不执行登录或上游副作用。多副本用共享持久存储及 CAS，进程内 Map 不作为生产唯一存储。
 4. 手机确认后，IAM按第2.2.1节取得非空token和工号，HTTP/业务成功且挑战绑定有效时写入已验证身份。扫码验证成功即完成UAC认证。
@@ -52,17 +51,15 @@ systemCode 映射到原型 loginSystemCode。originSystemCode 保留现场部署
 
 ### 2.2.1 扫码登录迁移协议
 
-发起挑战为我方本地调用，扫码状态与凭据取得为服务端上游HTTP调用。参数沿现场源码映射，浏览器绑定秘密始终留在我方服务端。
+发起挑战在IAM本地生成两份各16字节随机坐标，另有32字节发起端绑定秘密，仅存其哈希。二维码内容由企业适配器编码，保持上游现场兼容，IAM向页面仅返回用于显示的qrContent。TTL为120秒，绑定provider修订、事务purpose、入口与发起端。
 
-1. 发起挑战复用原型 `QrChallengeStore.create` 语义，各生成16字节随机 qrCodeKey、qrCodeValue，另生成32字节发起端绑定秘密，存其 SHA-256。扫码内容为 `TwoDIMAuth:<qrCodeKey>:<qrCodeValue>`，有效120秒。原型的本地 start/events 路由迁入本稿 UAC challenge API，持久化及 CAS 按 IAM 多副本要求实现。
-2. 扫码状态与 token 取得使用 `POST <baseUrl>/uacqr/auth/qrcode/verify.serv`，超时15秒、响应最多2MiB，拒绝重定向。JSON 请求字段为 qrCodeKey、qrCodeValue、loginClientIp、loginSystemCode、originSystemCode、verifyCode。loginClientIp 沿原型固定 `127.0.0.1`，loginSystemCode 取 systemCode，originSystemCode 取受信现场配置或空字符串。verifyCode 为 `MD5(qrCodeKey + qrCodeValue + loginClientIp + loginSystemCode + originSystemCode)`，按 UTF-8 编码后输出小写十六进制。头为 Content-Type application/json、Origin=baseUrl、Referer=baseUrl加尾部斜线、X-Requested-With=XMLHttpRequest。
-3. 先要求 HTTP 2xx，外层 `String(code.code ?? code)=0000`。bo.code=4002 为 waiting，1002 为 scanned，继续轮询且不消费挑战。bo.code=0000 时提取 `String(other.account || other.empNo || '').trim()` 为工号，`String(other.token || other.authValue || '').trim()` 为 token。工号须非空且不超过128字符，token须非空且不超过16384字符。成功码缺任一凭据即失败，记录 missing_token/missing_emp_no 分类并终结本次尝试。其他状态码为上游拒绝，HTTP错误、解析错误和超时分别记分类。waiting/scanned 时暂未返回 token 属于等待状态，到期仍无 token 则过期失败。
+IAM调用受信baseUrl加 `<qrVerifyPath>`，私有适配器注入系统标识、报文字段和上游格式需要的校验值。HTTP须为2xx，再按已核对的私有映射判断waiting、scanned或成功。等待状态不消费挑战，成功需同时取得非空token和empNo，长度分别上限16384与128字符。缺失凭据、业务拒绝、非法结构及运输错误分别返回安全失败分类。取消操作返回204，保留到期前的状态墓碑供绑定端读取cancelled，解析/凭据缺失返回failed并提供failureCode，日志不回显原文。
 
-扫码取得token和工号即完成UAC身份认证。IAM原子消费绑定挑战后按既有成员策略建立会话，成功响应直接返回，随后异步调用一次第2.4.1节部门接口，purpose=login_info。完整正常登录流程中部门接口调用恰好1次。查询成功时持久化部门展示资料，失败时写WARN并记录分类原因，登录结果、平台会话和nextRevalidateAt均保持原值。登录成功后的一个完整复验周期内不做判定性复验，平台会话自身期限、用户退出及成员/身份源停用仍独立执行。
+扫码取得token和工号即完成UAC身份认证。IAM原子消费绑定挑战，按现有成员策略建立会话或完成双认证绑定；link只把已验证身份关联当前账号，不新建匿名账号，不替换浏览器现有会话主体。显示名从已关联平台成员资料读取，缺失显示成员ID。
 
-信息查询作业与会话建立同事务登记，按sessionId和认证代次唯一，重复complete或状态读取复用同一作业。查询前以CAS持久化执行状态，单会话最多一次上游调用，禁止自动重试。进程在已领取状态崩溃时，恢复为unavailable并记interrupted分类，避免重复调用。尚未领取的作业可由恢复后的工作者执行。结果写入必须复核当前会话、tenant/provider及认证代次，用户退出、切换账号或重新登录后丢弃旧结果。
+登录成功响应直接返回，随后异步执行一次purpose=login_info部门查询。正常完整流程调用恰好1次。查询成功记录部门展示资料，失败仅记分类WARN，登录结果、会话与nextRevalidateAt保持原值。登录成功后的初次周期内不做判定性复验，平台会话期限、成员/身份源停用及用户退出仍生效。
 
-展示用途在第2.3节定义，展示元数据通过新增的只读UacLoginInfo投影提供给当前会话的Me及ShellAuth快照。元数据不携带token，信息查询状态pending/available/unavailable只影响部门展示。
+信息作业与会话建立同事务登记，以sessionId和认证代次唯一。重复complete与状态读取复用作业，CAS领取后最多调用一次，禁止自动重试。已领取后进程崩溃恢复为unavailable并记interrupted，尚未领取可由恢复工作者执行。资料写入复核tenant/provider、sessionId和认证代次，切换或退出后的晚结果丢弃。UacLoginInfo是当前会话的只读展示投影，不含token。
 
 ### 2.3 首次成员关联
 
@@ -80,9 +77,11 @@ systemCode 映射到原型 loginSystemCode。originSystemCode 保留现场部署
 
 ### 2.4 复验与撤销
 
+IAM使用既有 `services/iam/impl/.../Secrets.java` 的AES-256-GCM机制保存UAC材料，AAD绑定tenant、provider和用途。密钥来自受保护的auriga.iam.encryption-key部署配置，多副本共享同一密钥，缺失拒绝启动。当前Secrets仅有单活动密钥，不能宣称已具备在线轮换。AUTH-K定义密文keyId、兼容解密密钥环与轮换步骤，A负责实现。先分发旧/新解密集，再切活动keyId，断点分批重加密并验证，确认所有密文完成后才移除旧键，回滚保留可解密材料。
+
 IAM加密保存登录时取得的token和工号。在建立会话的同一数据库事务中持久化authenticatedAt、intervalSeconds和nextRevalidateAt，计算式为 `nextRevalidateAt = authenticatedAt + intervalSeconds`，时间为服务端可信UTC。该记录绑定sessionId、tenant、provider及当前认证代次。初次周期从实际建立会话的登录时间开始，期间不执行purpose=revalidate。登录后的purpose=login_info只补充展示资料，其成功、失败和完成时间均不改动本次会话的nextRevalidateAt。
 
-复验调度只保留一个部署配置，由安装管理员在IAM的application.yaml中设置，作用于该部署全部UAC身份源。`auriga.iam.uac.revalidation.interval-seconds` 默认7200秒，来源为 `oclaw/dsh-team/lib/uds/session-revalidation.js:15` 的 `UDS_TOKEN_CHECK_INTERVAL_MS = 2 * 60 * 60 * 1000`，换算为7200秒。合法值为整数60至86400秒，含边界。配置省略时使用默认值，非整数、负数和超界均拒绝启动并记录配置键。
+复验调度只保留一个部署配置，由安装管理员在IAM的application.yaml中设置，作用于该部署全部UAC身份源。`auriga.iam.uac.revalidation.interval-seconds` 默认7200秒，默认值沿原型会话复验常量的两小时周期，核对记录见执行报告。合法值为整数60至86400秒，含边界。配置省略时使用默认值，非整数、负数和超界均拒绝启动并记录配置键。
 
 选择部署配置是因为周期控制IAM后台调度，由运维统一调整便于多副本协调。修改通过部署配置更新及正常IAM滚动重启生效，多副本使用同一配置修订。既有会话已持久化的nextRevalidateAt保持原值，新会话及一次复验成功后的后续周期使用当时生效的配置，并持久化所用intervalSeconds及配置修订。重启时直接读取存储的到期时间，禁止用进程启动时间重算期限。
 
@@ -90,21 +89,29 @@ IAM加密保存登录时取得的token和工号。在建立会话的同一数据
 
 到期后的发起时间加入0至30秒稳定散列抖动，取sessionId与原nextRevalidateAt的哈希确定偏移。批量领取时同时检查原到期时间与该发起时间均已到达，领取成功后才占查询槽。积压按最早到期优先继续分批，观测dueLagMs和积压量。排队、领取和重启均保留原到期标记，成功查询前不得预写新的nextRevalidateAt。租约期间崩溃由其他工作者到期接管，结果提交需CAS检查session与认证代次，退出或重登后的旧结果丢弃。
 
-复验以purpose=revalidate使用第2.4.1节查询，取得唯一工号严格匹配且非空的部门才成功。成功时持久化lastRevalidatedAt，并原子更新 `nextRevalidateAt = lastRevalidatedAt + intervalSeconds`。该截止时间跨服务重启保留，复验成功不会延长平台会话或访问令牌自身期限。
+复验以purpose=revalidate使用第2.4.2节查询，取得唯一工号严格匹配且非空的部门才成功。成功时持久化lastRevalidatedAt，并原子更新 `nextRevalidateAt = lastRevalidatedAt + intervalSeconds`。该截止时间跨服务重启保留，复验成功不会延长平台会话或访问令牌自身期限。
 
-判定性复验单次查不到部门立即判定token失效并撤销会话，包括HTTP/业务拒绝、无结果、员工号不符、重复匹配、空部门、超时、网络失败和畸形响应。日志分别记录原因，界面区分上游不可达与凭据拒绝。按用户要求，purpose=revalidate的单次查询拿不到部门，包括超时、网络失败，就判定失效。这会导致UDS短暂不可达时全员被退出登录，这是已知取舍，现场日志会重点观察，以后有更好的方案再改。
+判定性复验单次查不到部门立即判定token失效并撤销会话，包括HTTP/业务拒绝、无结果、员工号不符、重复匹配、空部门、超时、网络失败和畸形响应。日志分别记录原因，界面区分上游不可达与凭据拒绝。按用户要求，purpose=revalidate的单次查询拿不到部门，包括超时、网络失败，就判定失效。这会导致UDS短暂不可达时全员被退出登录。已激活共享资源的Desktop用户还会触发guardian停止整个DSH进程树、隔离共享内容，再以private_only重新启动，原有任务可能中断且需新会话。这是当前采用的已知取舍，现场日志重点观察，以后有更好的方案再改。
 
 失效立即停止关联平台能力并撤销对应session/device grant，原子提交权威状态及outbox，传播到edge、外壳和旧HTTP/WS连接。撤销失败须重试和告警，本地先停平台能力，旧结果不能复活新身份。用户重新扫码取得token和工号后建立新会话及其新的nextRevalidateAt。
 
 本地owner会话、私人内容、个人模型及本地工具继续可用。共享资源按第5节guardian协议停用和隔离。Auriga退出撤销本入口session及对应本机设备授权，门户与管理台分别退出。来源停用、成员冻结同样触发对应平台会话撤销。
 
-### 2.4.1 部门查询协议及用途
+### 2.4.1 UAC来源与设备授权绑定
 
-登录信息作业以purpose=login_info调用一次，复验作业在nextRevalidateAt已到期并获租约后以purpose=revalidate调用。两者共用 `POST <受信资料源>/zte-km-icenter-addresearch/user/plain/docs/search`，超时3秒、响应最多2MiB。purpose属于我方业务上下文，不添加到UDS请求字段。头为Content-Type application/json;charset=UTF-8、X-Emp-No=工号、X-Auth-Value=token，Origin/Referer同UAC源。JSON body为 `{employeeShortId: empNo, enableLabel: true, keyword: empNo}`。直连使用独立Agent，沿原型绕开环境HTTP_PROXY/HTTPS_PROXY并遵循受信出口配置。
+IAM在UAC会话创建时分配单调递增authGeneration。设备人工核码批准时，服务器从批准者权威会话读取sourceSessionId、authGeneration和providerId，持久化到grant及旋转refresh-token家族，响应与设备JWT可带只读uacSessionBinding。浏览器、插件和OAuth请求不能指定这些字段。这些关联字段在通用DTO中为可选以兼容非UAC设备，UAC来源grant若缺完整绑定必须拒绝兑换或刷新，不能降级当作非UAC授权。设备授权仍要求人工核码，扫码完成平台身份认证后还需这一步确认。
 
-HTTP须为2xx，业务码 `code.code ?? code` 为字符串0000、数字0或字符串0。列表按优先级读取bo数组、bo.rows数组、bo.list数组，其他结构视为无结果。行员工号按 `employeeShortId || employeeNO || empUIID || empNo` 取首个非空值并trim，与该会话扫码工号严格相等，恰好一条匹配才继续。保留主体administrator和以双下划线开头的主体拒绝。
+每次初始兑换、刷新、换取AI/网络等audience凭据时，IAM重新校验来源会话未过期/撤销、认证代次相同、provider和成员可用，再验证device/client/scope。UAC复验失败、会话退出/过期、成员停用、身份源关闭均撤销绑定grant/refresh家族，旧认证代次的刷新立即拒绝。复验任务即使只从来源会话开始，也必须沿绑定索引覆盖所有设备。
 
-department按 `deptFullName || deptName || deptShortName || orgNamePath || orgName || department` 取值并trim，须为非空字符串。姓名、邮箱和电话不参与认证。员工号不符、重复匹配、空列表、空部门、非法结构及业务失败在purpose=login_info时只记分类WARN并更新展示状态为unavailable，在purpose=revalidate时触发会话撤销。成功的login_info记录部门用于第2.3节展示，成功的revalidate仅推进复验期限。日志仅记录purpose、departmentPresent、匹配条数及字段分支。
+关闭门户窗口或broker清理临时cookie jar仅释放本地材料。调用服务器logout会撤销来源会话及绑定设备。成功设备授权后broker只清临时jar，保留服务器来源会话至其正常期限；到期需要重新登录，device refresh不能延长来源会话上限。事件通知推动broker清材料和旧连接，通知失败时刷新端的权威检查仍拒绝，快照记录对应reason。
+
+### 2.4.2 部门查询协议及用途
+
+登录信息作业以purpose=login_info调用一次，复验作业在nextRevalidateAt已到期并获租约后以purpose=revalidate调用。两者共用受信私有配置的 `POST <userSearchUrl>`，超时3秒、响应最多2MiB。purpose属于我方业务上下文。token、工号及其他头/body字段由企业适配器私有映射注入，真实URL不写入公共文档；受信出口策略延续现场已验证实现。
+
+HTTP须为2xx且企业映射的业务码成功。适配器归一化列表和员工号，工号去首尾空白并与会话扫码工号严格相等，恰好一条匹配才继续，保留主体拒绝。
+
+department按企业适配器字段优先级归一化并trim，须为非空字符串。姓名、邮箱和电话不参与认证。员工号不符、重复匹配、空列表、空部门、非法结构及业务失败在purpose=login_info时只记分类WARN并更新展示状态为unavailable，在purpose=revalidate时触发会话撤销。成功的login_info记录部门用于第2.3节展示，成功的revalidate仅推进复验期限。日志仅记录purpose、departmentPresent、匹配条数及字段分支。
 
 ### 2.5 替身验收与现场日志重点观察项
 
@@ -115,7 +122,7 @@ department按 `deptFullName || deptName || deptShortName || orgNamePath || orgNa
 现场部署后重点观察以下项目，用户回传脱敏诊断包后据事实调整。
 
 - 挑战创建时间、TTL、轮询次数，waiting/scanned/成功码序列，超时阶段和响应长度。
-- verify.serv路径、HTTP状态和业务码，systemCode配置修订、originSystemCode是否为空、MD5输入字段存在性。日志省略实际签名输入和二维码坐标。
+- 扫码验证占位路径的配置修订、HTTP状态和业务码，systemCode配置修订、originSystemCode是否为空、MD5输入字段存在性。日志省略实际签名输入和二维码坐标。
 - 登录时token/工号字段的实际分支、token哈希前缀及扫码耗时。
 - 资料源标识及路径、purpose、HTTP/业务结果、列表分支、匹配数量、dept字段分支与departmentPresent。日志省略姓名、部门全称和完整响应中的个人值。
 - 实际复验周期、nextRevalidateAt、重启领取的到期会话、批量抖动与dueLagMs、失效原因、撤销传播时间，多副本重复或晚响应情况。
@@ -131,17 +138,27 @@ department按 `deptFullName || deptName || deptShortName || orgNamePath || orgNa
 
 domain 与纯 IP 部署均沿现有入口契约。IP 同源实例保留已知弱隔离，端口无法隔离 cookie。edge 转实例剥离全部平台凭据，管理写请求保持独立 Origin 与 CSRF 校验。
 
-### 3.2 Desktop 外壳
+### 3.2 Desktop外壳与loopback登录页
 
-采用原生外壳窗口承载登录页，使用窗口导航 API 和受限原生桥交付启动能力。Desktop guardian 生命周期拥有一个认证 broker，启动器先启动 broker，再打开外壳登录页或 DSH。外壳可提供 loopback 登录页供其受控窗口承载，凭据和认证逻辑由 broker 承担。Electron renderer 不开启 Node 能力，不加载远程脚本。现有 guardian 资源停用职责与认证状态协调。
+核对当前main的clients/installer/runtime/cli.mjs、core.mjs及Windows launcher，现状为Node启动器拉起DSH，并由系统浏览器显示DSH页面，我方没有自有窗口。PR #319、分支agent/codex/auriga-P1E正在增加runtime/guardian.mjs及supervisor.mjs。下述认证broker为C线新增，依赖guardian的停用/隔离部分必须等P1-E合并并完成集成验证，不能把PR分支代码视为现成发布能力。
 
-本地页服务器只绑定 `127.0.0.1` 随机端口，拒绝其他 Host、非精确 Origin、跨源 CORS、非预期 Fetch Metadata。初始页面通过外壳创建的单次高熵启动能力引导，能力放 URL fragment，页加载后清除 fragment，通过同源 POST 交换短期 HttpOnly SameSite=Strict cookie 和内存 CSRF token，失败与重放均拒绝。启动能力只经受控启动链交给指定窗口，不落日志、命令行或公开文件。实际实现须选择安全窗口/导航交付 API，无法满足时改用原生窗口桥接。
+启动器先启动当前OS用户的Node认证broker，监听127.0.0.1随机端口，再用系统浏览器打开loopback登录页。页面静态资源由broker自带，CSP限制同源脚本/连接、禁止第三方内容及iframe嵌入，Referrer-Policy=no-referrer、Cache-Control=no-store。GET静态页不回个人数据，敏感状态和写操作全部走受控POST。
 
-写请求均验证完整 Origin、会话 cookie、同步 CSRF token 和请求体 schema。无 Origin 的原生调用另走 OS IPC，禁止凭缺少 Origin 放行。TLS loopback 不具备通用可信证书时使用回环 HTTP，明示其信任边界限当前机器。防 DNS rebinding 依赖绑定地址与精确 Host；随机端口仅降低碰撞。
+每次拉起登录页创建32字节随机一次性启动票据，TTL30秒，服务端保存哈希并绑定brokerEpoch、完整Origin、端口和操作目的。系统浏览器URL fragment携带这枚票据，页面读取后立即replaceState清除。票据可能短暂出现于OS打开URL的参数和浏览器历史，这是采用系统浏览器的实际交付边界，不能承诺不进argv。它不包含平台令牌，不记录到应用日志，结束或交换后立即作废，读取OS打开参数的已失陷本用户进程属于信任边界。
 
-登录请求由 broker 代理到受信平台，远程 cookie jar 只存在 broker，页面只见步骤和脱敏状态。团队账号沿现有 nativeConnect S256 取得 device-only 凭据。UAC 首期完成门户认证后走既有 RFC8628 人工核码和授权，broker 保存 verifier/device code。UAC 扫码完成本身不自动批准设备授权，若需无二次确认须另行审定 UAC 的事务绑定设备契约。门户 USER token 不交给本机插件。
+页面精确同源POST交换票据，Host必须为127.0.0.1及当前端口，Origin必须完整匹配，拒绝localhost别名、跨源CORS及异常Fetch Metadata。CAS只允许消费一次。成功返回独立随机Shell页面令牌和CSRF值，均仅存页面内存，绑定brokerEpoch、Origin、端口、客户端nonce和15分钟期限。后续POST必须同时有X-Auriga-Shell-Token与X-Auriga-Shell-CSRF，服务端逐次核绑定。无票据/无令牌、过期、端口不符、重放和跨源都拒绝。
 
-平台 access/refresh token、设备 verifier 仅由 broker 持有，操作系统用户密钥保护持久化，Windows 用 DPAPI CurrentUser 及用户 ACL。UAC 上游 token 留 IAM。插件进程只读状态及受限能力，页面不获得任何 token。broker 代理调用使用固定操作白名单、固定平台 Origin/资源 audience，禁止输入任意 URL、header 或令牌解析表达式。
+loopback认证不使用cookie、localStorage或sessionStorage。浏览器cookie跨127.0.0.1端口共享，Path和随机名字也不能给其他本机服务建立可靠隔离。内存令牌从不附加到DSH或其他Origin请求，broker禁止把它转发到IAM。浏览器刷新需重新拉起登录页，UI提供清晰恢复动作。未认证原生HTTP不能凭伪造Origin放行，原生插件后端使用下一节的OS IPC。
+
+broker代理到受信平台，远程cookie jar仅在broker内，页面只见步骤与脱敏状态。团队账号沿nativeConnect S256取得device-only凭据。UAC先完成平台扫码认证，再沿RFC8628人工核码批准绑定设备，IAM执行第2.4.1节来源会话/认证代次检查。该设备确认是Desktop的额外一步，门户直接进入实例的路径没有该设备确认。
+
+平台access/refresh token及verifier由broker持有，持久化采用当前用户DPAPI与用户ACL，UAC上游token留IAM。broker通过AUTH-K的固定操作代理供应业务能力，拒绝任意URL/header/凭据解析输入。插件后端仅通过OS IPC得到状态与受限代理结果。
+
+### 3.2.1 分发与本用户IPC边界
+
+broker唯一源码目录拟定clients/shell-auth/，实现与独立制品构建归C。Windows命名管道的本用户DACL及客户端token校验由同包Windows受控管道helper承接，Node缺少该原生能力时不得伪称已校验SID。helper源码与打包归clients/shell-auth/windows/，复用安装器既有编译/签名流程。Unix使用用户私有0700目录/0600 socket并核peer uid。IPC凭据不传给页面，管道拒绝远程和其他OS用户。
+
+C构建版本化broker制品，Desktop构建放入versions/<id>/auriga/shell-auth/，以当前版本manifest摘要校验。独立插件发行也携带同一制品，位于插件包shell-auth/，D唯一负责clients/dsh-plugin/scripts/及package.json中的引用/打包接线，C不并行修改插件打包。可用时连接当前用户已有broker，否则由公开启动入口拉起同包broker。平台功能在缺broker/helper时给出诊断，本地DSH继续按owner准入。P1-E的guardian由安装器C线接线，独立插件的共享资源必须探测其受信监督能力，不能伪装拥有guardian。
 
 ### 3.3 插件代码归属清单
 
@@ -152,17 +169,17 @@ domain 与纯 IP 部署均沿现有入口契约。IP 同源实例保留已知弱
 - `src/managed/door.js`、`host-auth.js`、`guards.js`、keys/session 验签与 edge 身份读取继续保留，managed/panel 取消登录视图入口，logout 跳外壳。模型、心跳、设置权限沿当前认证通道。
 - `web/portal/src/native-login/page.ts`、管理台登录页改用共享渲染器。插件 web/设置侧栏只展示状态及“登录/退出”动作，通过受准入的后端桥接 broker。
 
-独立装到现有 DSH 的连接模式也要能从插件动作启动外壳 broker，可将最小 broker 随独立插件制品装配并用同一 OS 用户运行。缺 broker 时保留本地能力并提示安装外壳，不能退回旧插件登录页。该分发方式已按第8节决定采用。
+独立安装的分发位置、helper及打包归属按第3.2.1节执行，插件动作通过IPC请求broker拉起浏览器登录页。
 
 ## 4. ShellAuth 本地通道契约
 
 UacLoginInfo在contracts/auth/uac-login-info.schema.json中定义，Me.uacLoginInfo和ShellAuthSnapshot.uacLoginInfo通过同一引用提供可选只读资料。purpose固定login_info，status为pending/available/unavailable，department只在available时出现且同时有updatedAt。身份切换、注销及非authenticated快照清除该字段，禁止把部门展示状态解释为认证状态。
 
-生产方按 schema 严格检查字段。消费方允许扩展响应字段，但命令的未知操作、任意 URL/header/凭据输入在授权前拒绝。authenticated/identity、事件 type/snapshot/code 的关联约束还须由接收端按本节语义检查。
+生产方按 schema 严格检查字段。消费方允许扩展响应字段，但命令的未知操作、任意 URL/header/凭据输入在授权前拒绝。authenticated/identity、事件type/snapshot/code及UacLoginInfo的状态约束已在生产方schema中用条件表达式校验，接收端仍执行身份绑定与授权检查。
 
 权威消息定义在 `contracts/plugin/shell-auth.schema.json`，OpenAPI `shell-auth.yaml` 是三语言生成用的 IPC 投影。`/messages` 禁止成为公网或普通 DSH HTTP 接口。它只投影 OS 认证后的消息，发布订阅持续推送同一 ShellAuthEvent。
 
-Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必要系统主体，验证对端 token SID、受控子进程启动记录及每次启动的随机能力，避免仅凭 PID 信任。Unix 对应用户私有0700目录中的0600 socket，并核对 peer uid。能力只经继承的私有句柄或管道交给插件后端，不放 argv/env/网页。相同 OS 用户的恶意代码属于同用户信任边界，不能声称该管道隔离已被攻陷的用户账户。
+Windows通过第3.2.1节helper使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必要系统主体，验证对端 token SID、受控子进程启动记录及每次启动的随机能力，避免仅凭 PID 信任。Unix 对应用户私有0700目录中的0600 socket，并核对 peer uid。能力只经继承的私有句柄或管道交给插件后端，不放 argv/env/网页。相同 OS 用户的恶意代码属于同用户信任边界，不能声称该管道隔离已被攻陷的用户账户。
 
 ### 4.1 字段与生命周期
 
@@ -170,6 +187,7 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 - ShellAuthSnapshot 包含 shellEpoch、单调 revision、state、expiresAt，可选 identity/reason。identity 绑定 tenant/member/device/provider，empNo 可选。authenticated 必须包含当前 identity。expiresAt 为快照使用截止，最长30秒且不能超过平台凭据有效期；订阅每10秒重发当前快照或客户端到期前重取，属于本地健康检查。signed_out/authenticating/revoked 不含 identity。unreachable/reauth_required 可保留上次脱敏 identity 供显示，不授予平台操作。
 - ShellAuthEvent 含 requestId、type，snapshot/changed 必须包含 snapshot，error 必须有白名单 code，ack 确认动作已接受。退出完成以 signed_out/revoked 快照为准。订阅主动事件 requestId 使用订阅命令 id。消费方按 epoch/revision 丢弃旧事件，重连先 snapshot，再订阅，服务端原子注册并补发当前快照消除间隙。
 - requestId 在同 epoch 内幂等，缓存有界保存至命令到期，同一 id 不同内容拒绝。logout 必须先本地停权、递增 revision，再排队远程撤销。网络失败不恢复本地身份，重新登录生成新代次，旧排队撤销只针对旧设备/会话。
+- reason新增revalidation_rejected、revalidation_unreachable、user_logout、admin_disabled和member_disabled，保留source_disabled表示身份源关闭。拒绝/不可达的判定性复验、管理员/成员停用及来源关闭映射revoked，用户退出完成映射signed_out；普通平台网络断开映射unreachable/offline，信息性查询失败只更新uacLoginInfo，不把认证改为revoked。界面按白名单原因显示。
 - broker 重启生成新 epoch，所有订阅失效。插件在管道断开或快照 expiresAt 到期立即停平台能力，重连读取权威状态。本地 owner 保持可用。时间使用 UTC 与本地单调截止双重限制，禁止时钟回拨延长快照有效期。
 - open_login 只拉起配置指定的外壳入口，不接受 URL。cancel_login 只取消本命令对应发起窗口的尝试。多窗口共享同一 DSH owner 的平台身份，关闭一个窗口不撤销其他窗口。
 
@@ -187,7 +205,7 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 
 ### 4.2 平台功能的凭据路径
 
-状态消息没有凭据传递功能。现有市场、网络、AI、Team MCP 的调用需要补齐 broker 代理端口契约，按当前受限 device audience/scope 分派固定操作，身份由 broker 当前快照确定，响应只返业务数据。长连接由 broker 持有或提供受限流桥，平台字节不得经任意目标转发。实施前要盘点所有现有令牌调用点并补全操作 schema，本稿的状态通道不能被解释为已覆盖业务数据代理。
+状态消息没有凭据传递功能。现有市场、网络、AI、Team MCP 的调用需要补齐 broker 代理端口契约，按当前受限 device audience/scope 分派固定操作，身份由 broker 当前快照确定，响应只返业务数据。长连接由 broker 持有或提供受限流桥，平台字节不得经任意目标转发。AUTH-K在所有实现线之前盘点令牌调用点并补全操作schema，C/D依赖其已定契约。
 
 模型凭据仍通过公开 DSH credentials/操作作用域适配，页面不能 resolve 平台票。需要与现有模型身份绑定协议一起评审，避免将 shell token 放入全局环境或模型配置。代理未接好时对应平台功能按不可用呈现，本地个人模型照常工作。
 
@@ -201,6 +219,8 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 
 共享资源按 `unified-protocol.md` 串行处理。退出/切换先停平台请求与旧连接，阻止旧异步响应提交，通知 guardian 进入 stopping，确认 DSH 进程树退出后隔离 `skills-active/current`，持久化 disable 回执并进入 private_only，再按新身份在线重验和重新授权。清空失败为 blocked，不能把旧共享内容交给新身份。旧身份 cache/ledger 放原身份根，禁止自动恢复到 current。历史会话可查看，private_only 使用新会话。
 
+已知复验失效取舍还包含已激活共享资源的Desktop用户会被guardian停止DSH进程树并隔离共享内容，需要private_only重启及新会话，任务可能中断。该链依赖P1-E。
+
 已决定采用以下体验边界。从未登录且 private_only 的运行中补登录通过推送新身份生效，DSH进程继续运行，共享资源由用户后续明确激活。已有共享资源参与上下文时，退出或跨账号切换执行统一资源包协议的停止、隔离及新会话流程。
 
 云端无法跳过。托管退出使 edge 实例 cookie、HTTP/WS 和重连认证失效，回门户登录页，默认不停止实例任务。托管共享资源变化另走既有云端可信执行器的 guardian 等价流程。
@@ -210,6 +230,11 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 复验周期采用第2.4节部署配置，默认7200秒，合法整数范围60至86400秒，管理台配置页提供配置位置、范围及重启生效说明。工作线E维护该说明，工作线A负责IAM配置绑定、会话nextRevalidateAt持久化及到期调度。UDS临时故障使已到期会话的单次部门查询失败时立即撤销平台会话，用户在外壳重新扫码登录，按新登录时间重新安排nextRevalidateAt，本地DSH权限沿本节处理。
 
 ## 6. 安全与验收要求
+
+二维码内容可能包含上游轮询所需的公开坐标，上游兼容校验值由公开参数即可计算。看到或转发扫码内容的人可能直接向UDS轮询并在受害者确认后拿到token，我方发起端绑定只保护Auriga事务，不能保护该上游token。门户没有Desktop的设备人工核码，外壳显示目标系统名也不能保证手机扫码人看到同一提示。当前受信团队试用保留这一残余风险，不能宣称二维码不可劫持。
+
+缓解包括短TTL、完成/取消立即作废我方挑战和清屏、二维码页提醒避免屏幕共享/转发、同挑战异常轮询频率及可取得时的扫码地点异常告警。上游全局作废依赖企业协议实际支持，不能把我方作废等同UDS作废。后续若要求门户额外核对或上游签名绑定，由独立产品/契约变更处理。
+
 
 挑战绑定 cookie、完整 Origin、tenant、audience、provider 修订和 TTL，多副本原子消费，公开二维码内容不承担轮询授权。complete/取消采用写请求，严格 Origin 和事务秘密校验，已认证管理操作再校现有 CSRF。GET 状态无登录副作用，校验绑定 cookie、受信 Host、同源 Fetch Metadata，并在 Origin 存在时核精确值。
 
@@ -223,11 +248,19 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 
 ### 阶段一，迁移基线与契约
 
-以第2.2.1节现场可用实现和第8节已决定事项为基线，补全受限broker平台业务操作契约。所有新增契约经非作者A级独审，精确HEAD完整CI合格后交主控处理合并。UAC相关各线按现有实现迁移，以替身加日志断言验收。现场日志回传用于后续修正。
+以第2.2.1节现场可用实现和第8节决定为基线，首先完成AUTH-K。所有新增契约经非作者A级独审，精确HEAD完整CI合格后交主控处理合并。UAC相关各线按现有实现迁移，以替身加日志断言验收。现场日志回传用于后续修正。
+
+### AUTH-K契约线，全部实现线的前置
+
+由主控单独派契约作者/审查人，先于A/B/C/D/E冻结接口。范围为contracts/openapi/iam.yaml及shell-auth.yaml、contracts/auth/、contracts/plugin/及生成接线，盘点clients/dsh-plugin的市场/资源、网络长连接、AI凭据和Team MCP真实调用点。定义固定业务操作白名单、输入/输出schema、权限/audience、流式与长连接背压/关闭、重试/幂等、身份代次、撤销及取消。禁止任意URL、header或请求身份透传。
+
+AUTH-K同时定义loopback票据交换与端口绑定页面令牌、UAC来源设备绑定、详细诊断开关及密钥轮换契约。诊断开关持久化于IAM的独立tenant/provider诊断设置记录，使用独立revision以免改变认证配置代次，带enabled、expiresAt、revision，所有副本按权威修订读取，默认关闭，到期即关闭，重启继续遵守已有有效期。开关API只接受管理会话、iam.providers.write与CSRF，写审计。A实现后端，E只实现UI，不由E另造接口。
+
+验收包括操作清单覆盖全部现有平台调用点、producer/consumer正负向夹具、跨用户/tenant、过期/撤销/代次错配、URL注入、流关闭和日志脱敏，以及标准lint/TS/Java/Go生成和编译。契约提交须全新非作者A级独审。此PR不展开完整业务代理协议，AUTH-K为明确的独立交付和实施依赖。
 
 ### 工作线 A，IAM UAC 身份源
 
-文件范围为 services/iam/api、impl 的连接器/登录/会话，企业适配器模块，以及 services/org 的成员关联策略接口。contracts 的进一步变动由主控统一协调。依赖阶段一。验收包括三语言生成、严格员工映射/邀请关联、复验/撤销、共享存储并发消费、RLS和跨租户负例。复验调度测试覆盖第2.4节唯一周期配置的默认值、上下界、非整数拒绝，以及配置修订和滚动重启生效。可控时钟验证nextRevalidateAt持久化、初次周期内零判定性复验、仅领取到期会话、重启保留期限、抖动分批、租约崩溃接管及成功后更新期限。配置与邀请提交失败可安全重试，单个挑战最多创建一个session。按最新流程迁移挑战与扫码取token/工号，登录后执行一次login_info信息查询，到期执行revalidate判定性查询，并以替身逐项断言调用次数、purpose、日志与脱敏。A同时负责第9节IAM日志、安全诊断序列化器、audit和OpsSignals接线，以及infra/ctl诊断导出命令和deploy/compose、deploy/nas观测文件的必要接线。导出单独对接现有audit读取与Loki受信查询，避免新增公网日志采集入口。
+文件范围为 services/iam/api、impl 的连接器/登录/会话，企业适配器模块，以及 services/org 的成员关联策略接口。contracts 的进一步变动由主控统一协调。依赖AUTH-K。验收包括三语言生成、严格员工映射/邀请关联、复验/撤销、共享存储并发消费、RLS和跨租户负例。复验调度测试覆盖第2.4节唯一周期配置的默认值、上下界、非整数拒绝，以及配置修订和滚动重启生效。可控时钟验证nextRevalidateAt持久化、初次周期内零判定性复验、仅领取到期会话、重启保留期限、抖动分批、租约崩溃接管及成功后更新期限。配置与邀请提交失败可安全重试，单个挑战最多创建一个session。按最新流程迁移挑战与扫码取token/工号，登录后执行一次login_info信息查询，到期执行revalidate判定性查询，并以替身逐项断言调用次数、purpose、日志与脱敏。A同时负责第9节IAM日志、安全诊断序列化器、audit和OpsSignals接线，以及IAM诊断下载控制器、web/admin按钮所需接口和deploy/compose、deploy/nas观测发布接线。导出单独对接现有audit读取与Loki受信查询，避免新增公网日志采集入口。
 
 ### 工作线 B，门户登录和 edge
 
@@ -235,15 +268,15 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 
 ### 工作线 C，Desktop 外壳认证
 
-范围为 clients/installer/runtime、windows/launcher、打包脚本与新 shell-auth 模块，guardian 认证状态接线。依赖 A 及 ShellAuth/业务代理契约，B 提供共享 UI。验收正式安装包正常启动入口、DPAPI/ACL、跨用户拒绝、cookie/CSRF、S256、人工设备确认、令牌不入页面、日志只记哈希前缀、随机端口清理、多窗口及更新后凭据恢复。与资源guardian共享单一状态协调，不新增并行停用写者。C按第9节输出本机壳登录、身份推送和停权日志，复用本机脱敏sink，UAC验收使用替身并断言跨端关联。
+范围为 clients/installer/runtime、windows/launcher、打包脚本与新 shell-auth 模块，guardian 认证状态接线。依赖AUTH-K、A及P1-E合并后的guardian集成，B提供共享UI。C唯一实现clients/shell-auth/及helper、版本制品构建、clients/installer/runtime/cli.mjs中的诊断导出子命令，并维护Desktop发布清单。验收正式安装包正常启动入口、DPAPI/ACL、跨用户拒绝、端口绑定内存令牌/CSRF、S256、人工设备确认、令牌不入页面、日志只记哈希前缀、随机端口清理、多窗口及更新后凭据恢复。与资源guardian共享单一状态协调，不新增并行停用写者。C按第9节输出本机壳登录、身份推送和停权日志，复用本机脱敏sink，UAC验收使用替身并断言跨端关联。
 
 ### 工作线 D，插件继承身份并删除旧登录
 
-范围为 clients/dsh-plugin/src/login、identity/local/managed 的平台分支和 web 设置/侧栏，现有资源与模型适配层只作必要调用迁移。依赖 C 的状态与业务代理、B 的 UI 迁出提交。验收旧平台登录页和路由确实删除，托管无未登录页，未配置/跳过/离线的真实本地 DSH 可用，稍后登录推送生效，所有原平台功能走受限代理，旧凭据迁移与旧异步请求围栏完整。D校验broker事件与本地状态诊断，包中采用相同关联字段，禁止插件重新获取UAC token。
+范围为 clients/dsh-plugin/src/login、identity/local/managed 的平台分支和 web 设置/侧栏，现有资源与模型适配层只作必要调用迁移。依赖AUTH-K、C的状态/业务代理制品及B的UI迁出提交。D唯一维护插件内broker制品打包与启动适配。验收旧平台登录页和路由确实删除，托管无未登录页，未配置/跳过/离线的真实本地 DSH 可用，稍后登录推送生效，所有原平台功能走受限代理，旧凭据迁移与旧异步请求围栏完整。D校验broker事件与本地状态诊断，包中采用相同关联字段，禁止插件重新获取UAC token。
 
 ### 工作线 E，管理台配置
 
-范围为 web/admin/src/views/IdentityProvidersView.vue、admin/providersApi、providersForm、providersMessages 与对应测试。依赖 A 配置 API、B 共享 UI。管理台说明唯一复验周期配置默认7200秒及第2.4节部署配置的合法范围，工作线A负责实际配置绑定。验收开关/baseUrl/systemCode、ETag冲突、权限和CSRF、启用前错误提示、关闭后会话失效，普通成员不能读取或修改配置。E负责配置页的详细诊断开关、自动到期状态与correlationId展示，CLI作为一键导出入口，页面提供对应操作说明。实现派工时先为诊断开关新增独立配置契约并生成类型，保持本稿既有UAC必填字段和登录事务语义。测试断言开关默认关闭、脱敏响应和权限拒绝。
+范围为 web/admin/src/views/IdentityProvidersView.vue、admin/providersApi、providersForm、providersMessages 与对应测试。依赖 A 配置 API、B 共享 UI。管理台说明唯一复验周期配置默认7200秒及第2.4节部署配置的合法范围，工作线A负责实际配置绑定。验收开关/baseUrl/systemCode、ETag冲突、权限和CSRF、启用前错误提示、关闭后会话失效，普通成员不能读取或修改配置。E负责配置页的详细诊断开关、自动到期状态、correlationId及诊断下载按钮，调用AUTH-K定义、A实现的接口。测试断言开关默认关闭、脱敏响应和权限拒绝。
 
 每线经针对性测试形成可部署产物通知主控，由主控串行安排开发环境部署与正常入口验收。本稿交付物是可审阅文件，实施部署属于后续派工。
 
@@ -255,9 +288,9 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 2. UAC Desktop首期沿现有RFC8628人工核码，沿当前受限设备授权边界取得device-only凭据。
 3. 扫码取得token和工号即完成UAC登录，随后一次purpose=login_info部门查询只补充展示，失败仅WARN，不影响登录或nextRevalidateAt。复验周期默认7200秒，可通过第2.4节部署配置调整。每个会话持久化nextRevalidateAt，到期后执行purpose=revalidate查询，单次查不到部门立即撤销平台会话。服务重启仅处理已到期复验会话，日志分别记录网络与业务原因，本地DSH能力保持可用。
 4. 已激活共享内容的退出/跨身份切换采用受控停止、隔离和新会话，避免旧身份内容残留在上下文。普通补登录通过快照推送生效。
-5. 独立插件制品同包提供最小外壳broker，支持现有DSH独立安装且将登录页归外壳。
-6. 企业适配器留企业模块，公共仓库保留通用Uac/ShellAuth契约及示例配置，符合身份源架构与公开仓库规范。
-7. UAC先限定受信团队试用，外壳明确展示目标系统名。手机展示与抗转发行为通过现场日志和用户观察反馈改进，沿现有发起端绑定与人工设备核码控制风险。
+5. broker源码归C的clients/shell-auth/，Desktop与独立插件携带同一版本制品，目录及D线唯一打包职责按第3.2.1节执行。
+6. 企业适配器留私有模块，真实路径、主机、系统标识及编解码来自受信私有配置，公共仓库使用占位符和通用Uac/ShellAuth契约。
+7. UAC先限定受信团队试用。第6节明确公开扫码坐标的上游token泄露风险和门户缺少额外核对的边界，Desktop设备授权保留人工核码，日志观察不能替代防劫持能力。
 
 ## 9. 日志与一键导出诊断包
 
@@ -265,7 +298,7 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 
 ### 9.1 登录、复验与撤销结构化日志
 
-每个实际执行阶段开始和结束均输出JSON事件，phase为start/end。登录链包括challenge_start、scan_status、token_acquire和一次department_lookup，后者携带purpose=login_info。复验链的department_lookup隶属于session_revalidate，携带purpose=revalidate。session_revoke用于退出、停用和复验失败后的撤销。每条事件增加chain字段，值为login、revalidation或revocation。token_acquire是verify.serv成功响应的本地解析阶段，HTTP元数据引用对应pollId。上游终态未取得token时也写token_acquire失败，waiting/scanned阶段继续等待。waiting/scanned也逐轮记end，不以去重丢掉阶段终态。停止轮询、撤销排队和完成各有结果，耗时用单调计时。
+每个实际执行阶段开始和结束均输出JSON事件，phase为start/end。登录链包括challenge_start、scan_status、token_acquire和一次department_lookup，后者携带purpose=login_info。复验链的department_lookup隶属于session_revalidate，携带purpose=revalidate。session_revoke用于退出、停用和复验失败后的撤销。每条事件增加chain字段，值为login、revalidation或revocation。token_acquire是私有扫码验证成功响应的本地解析阶段，HTTP元数据引用对应pollId。上游终态未取得token时也写token_acquire失败，waiting/scanned阶段继续等待。waiting/scanned也逐轮记end，不以去重丢掉阶段终态。停止轮询、撤销排队和完成各有结果，耗时用单调计时。
 
 每条必须包含以下字段，无法取得的值显式为null。
 
@@ -279,11 +312,11 @@ Windows 使用禁远程访问的命名管道，DACL 仅当前用户 SID 和必�
 
 ### 9.2 脱敏和详细级别
 
-工号按用户授权可记录。token只记UTF-8原值SHA-256的小写十六进制前12位，同一token跨取回、部门查询、复验可关联。无token时hash字段为null。哈希前缀仅用于诊断。cookie、Authorization、X-Auth-Value、设备码、verifier、挑战key/value/binding、完整URL查询串、证书私钥与密钥全部屏蔽。
+工号按用户授权可记录。token只记UTF-8原值SHA-256的小写十六进制前12位，同一token跨取回、部门查询、复验可关联。无token时hash字段为null。哈希前缀仅用于诊断。cookie、Authorization、企业私有认证头、设备码、verifier、挑战key/value/binding、完整URL查询串、证书私钥与密钥全部屏蔽。
 
 采用最小必要原则，正常和详细模式都省略姓名、部门全称、组织全称、邮箱、电话，部门查询事件的purpose、departmentPresent及字段分支足够判断该次信息查询或复验结果。未知响应字段的值默认替换为[REDACTED]，只保留已知字段键与容器结构，未知键若含个人值或凭据也替换为固定占位键并记录计数。UDS code字段经长度和格式白名单后保留，若与已知秘密或个人值重合则屏蔽。udsMessage保留已知安全字面量映射，其余记[REDACTED]及messageRedacted=true，避免上游把姓名或token嵌进错误消息。换行/控制字符转义，消息最多512字节。
 
-详细开关名拟定为auriga.iam.uac.diagnostics.detailed，默认false，按provider和当前租户限定，启用时记录expiresAt，默认15分钟自动关闭。管理台需iam.providers.write和现有管理Origin/CSRF校验，开启/关闭均记audit。全局AURIGA_LOG_LEVEL与该开关共同控制专用详细sink，开关启用时该sink可输出DEBUG而无需提高全局等级。重启后回到关闭，明确启用只对后续请求生效。
+详细开关名拟定为auriga.iam.uac.diagnostics.detailed，默认false，按provider和当前租户限定，使用AUTH-K定义的IAM持久化记录，启用时记录expiresAt和revision，默认15分钟自动关闭。管理台需iam.providers.write和现有管理Origin/CSRF校验，开启/关闭均记audit。全局AURIGA_LOG_LEVEL与该开关共同控制专用详细sink，开关启用时该sink可输出DEBUG而无需提高全局等级。所有副本在输出前核对权威修订和expiresAt，缓存不得超过到期时间，存储不可用时禁止详细输出。重启沿用持久化有效期，到期即关，开启/关闭通过事务与失效通知传播，明确启用只对后续请求生效。
 
 开关开启时，在DEBUG事件增加udsRawSanitized，记录解析后的UDS原始响应结构。先递归处理大小写/别名敏感键及所有秘密匹配，再对未知值屏蔽，只保留经过允许列表验证的业务码、已脱敏消息、列表数量和必要字段存在性。token值一律替换为[REDACTED]，哈希前缀只在固定字段出现。HTML、非JSON、重复键、深度超限或不能安全解析的响应仅记内容类型、字节数和原因，不回显body。单次处理上限2MiB、单事件上限64KiB，超出记truncated及数量，禁止先将原文写临时文件后再清洗。
 
@@ -297,17 +330,19 @@ IAM/edge在现有JSON stdout输出阶段日志，NAS与compose的observability/c
 
 IAM在复验失败、上游持续不可达、撤销传播失败时通过既有OpsSignals.observe按tenant/provider聚合告警，恢复时写active=false，source拟定为iam_uac，subject为providerId。连续不可达60秒或撤销传播30秒未完成触发warning，认证失效立即执行，与告警阈值分别处理。audit记录所有失败及恢复，ops不按工号/token建告警。沿既有去重、静默与通知渠道，消息只含分类和关联ID。
 
-### 9.4 一键导出入口
+### 9.4 现场诊断下载与Desktop导出
 
-首期选择CLI入口，集成infra/ctl现有命令分发。拟定单命令为 `aurigactl diagnostics export --component uac --since 2h --correlation-id <id> --output <目录>`，correlation-id可省略。该命令是后续实现接口，本轮仅交设计。平台侧由安装机已授权运维用户运行并读部署受信配置，凭据从既有受保护文件或会话读取，禁止放argv或包内。Desktop同命令可用local范围仅导出当前OS用户broker/插件日志。管理台展示correlationId、详细开关和CLI操作说明。
+服务器由IAM提供 `POST /api/iam/v1/admin/uac/diagnostic-bundles`，管理台身份源页面提供“导出诊断包”按钮。IAM校验当前管理会话、tenant、iam.providers.read、audit.events.read、ops.alerts.read及CSRF，读取受信audit/Loki来源，先完成脱敏及清单校验，再重新核权后直接下载zip。API和资源随NAS/compose默认部署包发布，E负责按钮，A负责后端和制品发布验收。部分缺源在manifest及X-Auriga-Diagnostic-Partial标注，权限失败不能导出部分越权内容。
+
+Desktop由C在现有启动器新增 `diagnostics export` 子命令，通过随安装包自带Node执行 `auriga/runtime/cli.mjs diagnostics export --root <安装目录> --output <目录>`，Windows的auriga-desktop.cmd增加对应诊断参数分发。打包当前用户broker/插件脱敏日志、有效配置和调度元数据，缺源显式标注。独立插件同包broker也提供同一个导出入口。以上是待实现命令，当前cli.mjs仍只有install/rollback/uninstall/launch。开发工具实际名为auriga-ctl，位于infra/ctl，不承担现场导出，也不要求用户安装它。
 
 一次执行完成范围校验、audit最小投影读取、Loki受信查询、本机受控日志读取、再次脱敏、清单校验和压缩。仅从受信配置取得数据源地址，用户输入只选择时间窗、provider与关联ID，不接受任意查询语句、URL或文件路径作为采集源。默认两小时、最大24小时，跨租户范围拒绝。安装级运维读取也只查询已指定的单租户，不用Loki无租户日志默认放大范围。现有audit读取权限由身份核验，安装本机数据源访问属于已授权运维边界，导出动作记录操作者和范围。
 
 包名为uac-diagnostics-<UTC>-<随机ID>.zip，内容包括manifest.json、uac-steps.jsonl、audit.jsonl、ops-alerts.json、sanitized-config.json和可选的uds-detail.jsonl。manifest包含版本、时间窗、安装/组件版本、脱敏器版本、来源清单、各文件SHA-256、行数、缺源、截断与导出审计ID。诊断导出对Me/ShellAuth的展示资料只投影状态、更新时间与departmentPresent，省略department原值。部门查询日志及审计条目保留purpose和分类原因，诊断包按login_info/revalidate分别统计成功/失败数量，并断言login_info失败未出现关联撤销。配置只含源别名、固定接口路径、systemCode存在性、originSystemCode是否为空、复验周期的生效秒数及修订、脱敏会话的nextRevalidateAt、loginInfo状态和调度积压统计，省略token、真实凭据和个人目录路径。包中不得包含DSH journal、私有会话、vault、用户资源或完整环境。
 
-先在当前用户独享临时目录生成已经脱敏的条目，拒绝符号链接/重解析点和输出覆盖，再扫描秘密与个人字段，生成摘要后原子发布最终zip。日志损坏或无法安全脱敏时省略该条并记录计数，不输出原文。临时目录受用户ACL/0700保护，完成或失败后清理。单包上限50MiB，超限按时间分段或标明确截断，输出partial=true并以非零退出码提示缺源，绝不以空包声称成功。关闭详细开关时包里仍有已执行的登录、复验和撤销阶段基础信息。
+先在当前用户独享临时目录生成已经脱敏的条目，拒绝符号链接/重解析点和输出覆盖，再扫描秘密与个人字段，生成摘要后原子发布最终zip。日志损坏或无法安全脱敏时省略该条并记录计数，不输出原文。临时目录受用户ACL/0700保护，完成或失败后清理。单包上限50MiB，超限分段或明确截断。Desktop命令以partial=true和非零退出码提示缺源，IAM下载以响应头及manifest标明partial，界面展示不完整原因，不能以空包声称成功。关闭详细开关时包里仍有已执行的登录、复验和撤销阶段基础信息。
 
-诊断包保存到用户指定目录，现场用户主动发回。导出过程仅访问受信本地/部署观测源，默认不上传。
+Desktop诊断包保存到用户指定目录，服务器诊断包通过已认证下载交用户保存，现场用户主动发回。导出仅访问受信本地/部署观测源，默认不向第三方上传。
 
 ### 9.5 日志与诊断包验收
 
@@ -318,3 +353,13 @@ A与E交付前用同一替身分别测试登录链、到期复验链和撤销链
 详细开关默认关闭、启用/自动到期/重启关闭均需测试，关闭时无udsRawSanitized。开启时字段结构可诊断，任意嵌套秘密和个人值不可见。audit和ops必须断言实际接收的脱敏字段，Alloy/Loki局部测试使用本机替身或隔离采集器验证配置和查询，不访问真实部署。
 
 一键命令覆盖完整包、Loki缺源、audit拒绝、日志畸形、超过时间窗/大小上限、目录越界/符号链接、详细关闭以及重复执行，检查清单摘要与秘密扫描。真实UDS联调不要求，报告保留替身响应、日志断言、采集链证据及缺源状态。
+
+### 10. 返工后的实施验收补充
+
+A/E必须验证UAC初始关闭、通用创建不能启用或写config、通用PATCH修改UAC enabled/config返回400、UAC唯一写入口的允许列表/ETag/停用撤销，以及读取的修订一致。link匿名401、认证过旧拒绝、会话/账号/tenant代次变化拒绝，login仍允许匿名，取消和失败终态可区分。
+
+A/C验证设备授权来源绑定由IAM产生，伪造请求字段无效；UAC绑定缺失或伪造、来源会话退出/过期、复验拒绝、上游不可达、管理员停用和provider关闭后，刷新及其他audience兑换均拒绝，旧token连接关闭，快照reason准确。信息性部门查询失败仍保持登录成功和nextRevalidateAt。
+
+C验证浏览器一次性票据30秒、重复消费、错误端口/Host/Origin、缺内存令牌/CSRF、跨端口DSH页面与其他用户访问拒绝，静态页不泄身份，刷新重新拉起可恢复。IPChelper实际DACL/peer身份须在真实受支持OS验证，不能用伪造请求头替代。
+
+AUTH-K/A/E验证详细开关跨两个IAM副本一致、到期同时停输出、重启保留有效期、存储故障关闭详细输出及撤销通知丢失后的权威校验。A/E验证NAS默认安装的管理台下载按钮可用、拒绝跨tenant/provider/无权限、日志先脱敏和partial标志。C验证正式Desktop安装包的导出命令无需开发工具、同一脱敏器、目录越界/重解析点拒绝和缺源报告。C/D验证broker目录、版本及manifest摘要一致，只有D写插件打包接线。
