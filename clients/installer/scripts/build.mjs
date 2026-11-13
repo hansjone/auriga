@@ -48,12 +48,7 @@ export function validateResourceRoots(trust) {
       ),
     ).trust,
   ).map((k) => k.publicKeySpkiBase64);
-  if (
-    Object.values(trust).some((k) =>
-      fixtureKeys.includes(k.publicKeySpkiBase64),
-    )
-  )
-    throw new Error('public test resource key cannot be deployed');
+  const canonicalKeys = [];
   for (const role of ['release', 'revocation', 'downgrade']) {
     const root = trust[role];
     if (!root || !/^[A-Za-z0-9._-]{1,128}$/.test(root.kid))
@@ -65,10 +60,14 @@ export function validateResourceRoots(trust) {
     });
     if (key.asymmetricKeyType !== 'ed25519')
       throw new Error('resource trust must be Ed25519');
+    const canonical = key
+      .export({ type: 'spki', format: 'der' })
+      .toString('base64');
+    if (fixtureKeys.includes(canonical))
+      throw new Error('public test resource key cannot be deployed');
+    canonicalKeys.push(canonical);
   }
-  if (
-    new Set(Object.values(trust).map((k) => k.publicKeySpkiBase64)).size !== 3
-  )
+  if (new Set(canonicalKeys).size !== 3)
     throw new Error('resource trust roles require independent keys');
   return trust;
 }
