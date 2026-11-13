@@ -42,7 +42,7 @@
 
 ## SSO 导航与退出抑制（A/B）
 
-B 在渲染门户登录页时调用内部 `POST /api/iam/v1/internal/uac/navigation-proofs`，传 requestId/providerId/精确origin/固定continuation、实际 Fetch Metadata 头证据及当前事务/抑制cookie。device 续接必须携带 deviceGrantId，portal不能携带；不转发外部body来填这些字段。B以svc:edge内部服务JWT（aud=auriga.internal、受权tenant上下文）及已认证内部传输调用A；不是浏览器接口，也不复用用户bearer或DSH的mTLS信道。公开edge禁止转发该内部路径。A核受信入口、tenant/provider/device事务，自己计算auto资格；缺失导航证据时auto=false。B不得指定autoEligible或proofHash。
+B 在渲染门户登录页时调用内部 `POST /api/iam/v1/internal/uac/navigation-proofs`，传 requestId/providerId/精确origin/固定continuation、实际 Fetch Metadata 头证据及当前事务/抑制cookie。device 续接必须携带 deviceGrantId，portal不能携带；不转发外部body来填这些字段。B以svc:edge内部服务JWT（aud=auriga.internal、ptyp=internal_service、ctx=service）及已认证内部传输调用A；必填auriga-tenant-id头沿已有内部租户委派语义，从受信入口配置取值并剥离浏览器同名头，A须核svc:edge委派白名单，不能用内部JWT的平台tid替代目标tenant。这不是浏览器接口，也不复用用户bearer或DSH的mTLS信道。公开edge禁止转发该内部路径。A核受信入口、tenant/provider/device事务，自己计算auto资格；缺失导航证据时auto=false。B不得指定autoEligible或proofHash。
 
 A原子签发并持久化 UacNavigationProofBinding，只存32字节 proof 的 SHA-256，TTL120秒，绑定完整 Origin、tenant/provider、portal audience、login 用途、浏览器事务及 portal/device 续接。响应 UacNavigationIssued 含context、transactionCookie和ttlSeconds=120；B设置事务HttpOnly cookie，将context放入no-store登录HTML。GET仅签发导航证明，不建立登录会话、不调企业验证。requestId重用冲突；丢失签发响应重新渲染时作废旧证明。外部不可提交autoEligible/continuation或绑定记录，SSO消费仍由既有POST /login/uac/sso检查并CAS一次消费；过期/重复消费拒绝，不因重试续期。
 

@@ -1037,6 +1037,13 @@ test('SSO proof issuance is an internal edge to IAM port with evidence and a 120
   assert.equal(op['x-internal-only'], true);
   assert.equal(op['x-service-caller'], 'svc:edge');
   assert.deepEqual(op.security, [{ internalServiceAuth: [] }]);
+  assert.equal(
+    op.parameters.find((p) => p.name === 'auriga-tenant-id').required,
+    true,
+  );
+  assert.deepEqual(op.responses['201'].headers['Cache-Control'].schema.enum, [
+    'no-store',
+  ]);
   const request = validate(
     'auth/uac-control.schema.json',
     'UacNavigationIssueRequest',
