@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { requireValid, valid, contractFile } from './schema.mjs';
 import { boundedBody } from './platform.mjs';
 import { Streams } from './streams.mjs';
+import { TeamProxy } from './team.mjs';
 const operations = new Map(
   JSON.parse(
     contractFile('plugin/shell-business-operations.json'),
@@ -47,6 +48,7 @@ export function mapBusinessError(status, code, retryAfter) {
 export class BusinessProxy {
   constructor(broker, fetcher = globalThis.fetch, uploadDirectory) {
     this.streams = new Streams(broker, uploadDirectory);
+    this.team = new TeamProxy(broker, this.streams, fetcher);
     this.broker = broker;
     this.fetcher = fetcher;
     this.requests = new Map();
@@ -128,14 +130,7 @@ export class BusinessProxy {
       return this.streams.finishUpload(input.uploadId, context, owner);
     // These transports need their own signed-wire/stream machinery. Never treat
     // a broker:nats or upload reference as a general HTTP address.
-    if (
-      !definition ||
-      definition.route.startsWith('broker:') ||
-      (definition.stream &&
-        definition.operation !== 'createAiChatCompletionStream') ||
-      definition.tool ||
-      definition.route === '/ai/mcp'
-    )
+    if (!definition || definition.route.startsWith('broker:'))
       throw new Error('transport unavailable');
     let route = definition.route;
     const query = new URLSearchParams(),
@@ -150,11 +145,12 @@ export class BusinessProxy {
       throw Object.assign(new Error('invalid route'), {
         code: 'common.validation_failed',
       });
-    for (const key of ['tenantId', 'ownerId', 'deviceId']) {
+    for (const key of ['tenantId', 'ownerId', 'deviceId', 'clientId']) {
       const expected = {
         tenantId: context.identity.tenantId,
         ownerId: context.identity.memberId,
         deviceId: context.identity.deviceId,
+        clientId: context.identity.deviceId,
       }[key];
       if (
         input.body &&
@@ -172,13 +168,29 @@ export class BusinessProxy {
         });
       headers[key] = value;
     }
-    const token = await this.broker.tokenFor(definition.audience, context);
+    const isTeam =
+      definition.route === '/ai/mcp' ||
+      definition.route.startsWith('/ai/team/node/');
+    const token = isTeam
+      ? undefined
+      : await this.broker.tokenFor(definition.audience, context);
     this.broker.assert(context);
     const controller = new AbortController();
     this.controllers.add(controller);
     const timeout = setTimeout(() => controller.abort(), remaining);
     timeout.unref();
     try {
+      if (
+        definition.route === '/ai/mcp' ||
+        definition.route.startsWith('/ai/team/node/')
+      )
+        return await this.team.execute(
+          definition,
+          input,
+          context,
+          owner,
+          controller.signal,
+        );
       const method =
         definition.method?.toUpperCase() ??
         ([
@@ -261,6 +273,17 @@ export class BusinessProxy {
           body: { streamId: stream.id, encoding: 'sse_utf8' },
         };
       }
+      if (definition.stream && response.ok) {
+        if (!response.body) throw new Error('empty streaming response');
+        clearTimeout(timeout);
+        const reader = response.body.getReader();
+        const stream = this.streams.create(context, owner, () => {
+          controller.abort();
+          reader.cancel().catch(() => {});
+        });
+        this.pumpBinary(stream, reader).catch(() => {});
+        return { statusCode: response.status, body: { streamId: stream.id } };
+      }
       const raw = await boundedBody(response);
       this.broker.assert(context);
       let body;
@@ -296,6 +319,7 @@ export class BusinessProxy {
     }
   }
   close() {
+    this.team.close();
     this.streams.close();
     this.changed();
     this.broker.off('changed', this.changed);
@@ -325,6 +349,7 @@ export class BusinessProxy {
             .map((line) => line.slice(5).replace(/^ /, ''))
             .join('\n');
           this.streams.push(stream, frame);
+          await this.streams.waitDrain(stream);
           if (data === '[DONE]') {
             done = true;
             break;
@@ -335,6 +360,30 @@ export class BusinessProxy {
         if (!this.streams.streams.has(stream.id) || stream.terminal) return;
       }
       if (!done) throw new Error('SSE missing done');
+      this.streams.end(stream, 'end');
+    } catch {
+      this.streams.end(stream, 'error', 'common.unavailable');
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+  async pumpBinary(stream, reader) {
+    let size = 0;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.length;
+        if (size > 67108864) throw new Error('download limit');
+        for (let offset = 0; offset < chunk.value.length; offset += 65536) {
+          this.streams.push(
+            stream,
+            Buffer.from(chunk.value.subarray(offset, offset + 65536)),
+          );
+          await this.streams.waitDrain(stream);
+        }
+      }
       this.streams.end(stream, 'end');
     } catch {
       this.streams.end(stream, 'error', 'common.unavailable');

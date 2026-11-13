@@ -8,6 +8,118 @@ import { fixture, login } from './fixtures.mjs';
 import { BusinessProxy, mapBusinessError } from '../business.mjs';
 import { Streams } from '../streams.mjs';
 import { valid } from '../schema.mjs';
+test('MCP tool calls use only registered native execution context and clear it on logout', async () => {
+  const f = fixture();
+  await login(f);
+  f.platform.audience = async () => f.tokens;
+  const seen = [];
+  const proxy = new BusinessProxy(f.broker, async (_url, options) => {
+    const request = JSON.parse(options.body);
+    seen.push(request);
+    return new Response(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: { content: [] },
+      }),
+    );
+  });
+  const id = randomUUID(),
+    input = { executionContextId: id, arguments: { limit: 10 } };
+  const denied = await proxy.call(
+    call(f.broker, 'team_list_endpoints', input),
+    'one',
+  );
+  assert.equal(denied.error.code, 'common.forbidden');
+  assert.equal(seen.length, 0);
+  proxy.team.register('one', {
+    executionContextId: id,
+    endpointId: randomUUID(),
+    bindingId: randomUUID(),
+    meta: {
+      'auriga/sessionId': 'real-host-session',
+      'auriga/toolCallId': 'real-tool-call',
+      'auriga/rootCallId': 'real-root-call',
+    },
+  });
+  assert.equal(
+    (await proxy.call(call(f.broker, 'team_list_endpoints', input), 'other'))
+      .error.code,
+    'common.forbidden',
+  );
+  const result = await proxy.call(
+    call(f.broker, 'team_list_endpoints', input),
+    'one',
+  );
+  assert.ok(result.output.body.streamId);
+  assert.equal(seen[0].params._meta['auriga/sessionId'], 'real-host-session');
+  await f.broker.logout();
+  assert.equal(proxy.team.contexts.size, 0);
+  proxy.close();
+  await f.broker.close();
+});
+test('SSE preserves UTF-8 bytes across chunks and requires DONE before end', async () => {
+  const f = fixture();
+  await login(f);
+  f.platform.audience = async () => f.tokens;
+  const raw = Buffer.from('data: {"text":"你好"}\n\ndata: [DONE]\n\n');
+  const proxy = new BusinessProxy(
+    f.broker,
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const byte of raw) controller.enqueue(Uint8Array.of(byte));
+            controller.close();
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+  );
+  const result = await proxy.call(
+    call(f.broker, 'createAiChatCompletionStream', {
+      body: {
+        model: 'test',
+        max_tokens: 16,
+        messages: [{ role: 'user', content: 'test' }],
+        stream: true,
+      },
+    }),
+    'one',
+  );
+  assert.ok(result.output, result.error?.code);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const events = [],
+    subscription = {
+      streamId: result.output.body.streamId,
+      shellEpoch: f.broker.epoch,
+      expectedRevision: f.broker.revision,
+    };
+  let ended;
+  const end = new Promise((resolve) => {
+    ended = resolve;
+  });
+  proxy.streams.subscribe(subscription, 'one', (e) => {
+    events.push(e);
+    if (e.type === 'end' || e.type === 'error') ended();
+  });
+  await proxy.streams.command(
+    { ...subscription, action: 'credit', creditBytes: 1048576 },
+    'one',
+  );
+  await end;
+  assert.equal(events.at(-1).type, 'end');
+  assert.deepEqual(
+    Buffer.concat(
+      events
+        .filter((e) => e.type === 'data')
+        .map((e) => Buffer.from(e.data, 'base64')),
+    ),
+    raw,
+  );
+  proxy.close();
+  await f.broker.close();
+});
 const call = (broker, operation, input) => ({
   protocolVersion: 1,
   requestId: randomUUID(),

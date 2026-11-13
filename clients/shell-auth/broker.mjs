@@ -264,7 +264,7 @@ export class Broker extends EventEmitter {
   async drainRevocations() {
     if (this.draining) return this.draining;
     this.draining = (async () => {
-      for (const token of [...this.record.revocations]) {
+      for (const token of [...this.record.revocations].slice(0, 4)) {
         try {
           await this.platform.revoke(token);
           this.record.revocations = this.record.revocations.filter(
@@ -442,8 +442,12 @@ export class Broker extends EventEmitter {
     this.tokenMonoUntil = verified.tokenMonoUntil;
   }
   check() {
+    if (this.checking) return this.checking;
     this.health = this.health.catch(() => {}).then(() => this.checkOnce());
-    return this.health;
+    this.checking = this.health.finally(() => {
+      this.checking = undefined;
+    });
+    return this.checking;
   }
   async checkOnce() {
     if (!this.record.tokens || this.closed || this.attempt) return;

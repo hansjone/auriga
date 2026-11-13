@@ -16,6 +16,7 @@ export default [
           'FormData',
           'Blob',
           'Response',
+          'ReadableStream',
         ].map((name) => [name, 'readonly']),
       ),
     },

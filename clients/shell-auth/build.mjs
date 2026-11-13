@@ -56,7 +56,7 @@ export function buildBroker(output) {
   const loader = createRequire(
     new URL('../dsh-plugin/package.json', import.meta.url),
   );
-  const dependencyLoader=createRequire(loader.resolve('ajv/package.json'));
+  const dependencyLoader = createRequire(loader.resolve('ajv/package.json'));
   const walk = (directory, prefix) => {
     for (const item of readdirSync(directory, { withFileTypes: true })) {
       const path = prefix + '/' + item.name;
@@ -71,7 +71,11 @@ export function buildBroker(output) {
     'json-schema-traverse',
     'require-from-string',
   ]) {
-    const packageDirectory = dirname((name==='ajv'?loader:dependencyLoader).resolve(name + '/package.json'));
+    const packageDirectory = dirname(
+      (name === 'ajv' ? loader : dependencyLoader).resolve(
+        name + '/package.json',
+      ),
+    );
     const relative = 'node_modules/' + name;
     mkdirSync(join(output, 'node_modules'), { recursive: true });
     cpSync(packageDirectory, join(output, relative), {

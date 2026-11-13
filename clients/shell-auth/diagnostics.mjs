@@ -331,6 +331,35 @@ export async function exportDiagnostics({
         }
       if (!found || !tenantId) missing.push(source);
     }
+    const purposeStatistics = Object.fromEntries(
+      ['login_info', 'login_sso', 'revalidate'].map((purpose) => [
+        purpose,
+        {
+          success: logs.filter(
+            (e) =>
+              e.purpose === purpose &&
+              e.phase === 'end' &&
+              e.result === 'success',
+          ).length,
+          failure: logs.filter(
+            (e) =>
+              e.purpose === purpose &&
+              e.phase === 'end' &&
+              e.result === 'failure',
+          ).length,
+        },
+      ]),
+    );
+    const failedInformation = new Set(
+      logs
+        .filter((e) => e.purpose === 'login_info' && e.result === 'failure')
+        .map((e) => e.correlationId),
+    );
+    const loginInfoFailureRevocationObserved = logs.some(
+      (e) =>
+        e.stage === 'session_revoke' &&
+        failedInformation.has(e.parentCorrelationId),
+    );
     const files = {
       'uac-steps.jsonl': Buffer.from(
         logs.map((l) => JSON.stringify(l)).join('\n') +
@@ -339,7 +368,25 @@ export async function exportDiagnostics({
       'audit.jsonl': Buffer.alloc(0),
       'ops-alerts.json': Buffer.from('[]\n'),
       'sanitized-config.json': Buffer.from(
-        JSON.stringify({ brokerVersion: '1', localOnly: true }) + '\n',
+        JSON.stringify({
+          brokerVersion: '1',
+          localOnly: true,
+          purposeStatistics,
+          loginInfoFailureRevocationObserved,
+          ssoMissing: logs.filter(
+            (e) =>
+              e.stage === 'sso_cookie_check' &&
+              e.phase === 'end' &&
+              e.cookiePresent === false,
+          ).length,
+          ssoSuppressed: logs.filter(
+            (e) =>
+              e.stage === 'sso_cookie_check' &&
+              e.phase === 'end' &&
+              e.suppressed === true,
+          ).length,
+          droppedLogs: dropped,
+        }) + '\n',
       ),
     };
     const manifest = {
@@ -384,6 +431,16 @@ export async function exportDiagnostics({
       `uac-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.zip`,
     );
     safePath(destination);
+    createLog(
+      join(dataHome, 'auriga', 'logs'),
+      helper,
+    )({
+      stage: 'diagnostic_export',
+      phase: 'end',
+      result: 'success',
+      correlationId: auditId,
+      ...(tenantId ? { tenantId, providerId } : {}),
+    });
     linkSync(tempZip, destination); // atomic publish, never overwrite
     return {
       file: destination,

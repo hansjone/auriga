@@ -103,9 +103,10 @@ export class Streams {
     stream.queuedBytes += bytes;
   }
   push(stream, bytes) {
-    if (!this.streams.has(stream.id)) return;
+    if (!this.streams.has(stream.id) || stream.terminal) return;
     this.broker.assert(stream.context);
     for (let offset = 0; offset < bytes.length; offset += 65536) {
+      if (stream.terminal) return;
       const chunk = bytes.subarray(offset, offset + 65536);
       this.deliver(
         stream,
@@ -124,6 +125,10 @@ export class Streams {
       stream.reply?.(head.event);
       stream.reply = undefined;
       stream.listener(head.event);
+    }
+    if (!stream.queued.length) {
+      stream.drain?.();
+      stream.drain = undefined;
     }
     if (stream.terminal && !stream.queued.length && stream.listener) {
       stream.listener(stream.terminal);
@@ -148,6 +153,8 @@ export class Streams {
   end(stream, type, code) {
     if (!this.streams.has(stream.id) || stream.terminal) return;
     stream.cancel();
+    stream.drain?.();
+    stream.drain = undefined;
     if (stream.upload && type !== 'end') {
       const upload = this.uploads.get(stream.uploadId);
       if (upload) this.removeUpload(upload);
@@ -175,6 +182,14 @@ export class Streams {
       stream.terminal = event;
     }
     return event;
+  }
+  async waitDrain(stream) {
+    if (stream.queued.length && !stream.terminal)
+      await new Promise((resolve) => {
+        stream.drain = resolve;
+      });
+    if (stream.terminal || !this.streams.has(stream.id))
+      throw fault('common.unavailable');
   }
   command(command, owner) {
     requireValid('ShellAuthStreamCommand', command);
