@@ -189,15 +189,18 @@ IAM按内部资料映射选择完整token/account对：Portal体系优先，缺�
 
 用户已决定采用现场单IP、单域名方案。公司域内的实例、插件及生成内容可以读取脚本可读的企业SSO Cookie，用户接受这一取舍。企业Cookie沿现有同域部署接线传递，实例继续使用正常/open入口。SSO免扫码由既有开关及Cookie可用性决定。
 
-当前插件的 `src/managed/sdk.js` 提供ctx.get('auriga').identity()身份投影，`src/local/host.js`、`src/local/native-rpc.js`和原生工具注册代码提供宿主准入及调用上下文，托管模式已注入公开credentials服务。企业凭据读取沿已核对原型的handleAgentCredentials、resolveCredentialsForSession和shellEnv.register预留源码迁入这些现有接缝。原型提供“受控读取工号/token”及工具出站调用，shellEnv按本次工具执行传递会话权限。来源文件与核对细节记入执行报告。
+企业凭据按已核对的handleAgentCredentials、handleOutbound、resolveCredentialsForSession和shellEnv.register预留完整迁入插件，保持现场skill的路径、环境变量、helper模块和请求/响应兼容。当前Auriga插件的宿主准入、原生工具执行上下文及credentials服务承担接线，企业凭据handler按原型源码迁入。D随包保留uds-skill-auth/scripts/uds_skill_auth.py及其import名称，现场业务skill继续使用request()或resolve(apply_env_aliases=False)。
 
-沿用这一读取形态，插件后端仅为当前已认证用户自己的DSH会话内skill/工具提供empNo、当前有效token和updatedAt。内部应用确需Cookie格式时，额外返回该用户所需的私有配置Cookie键值。调用者身份、会话归属取宿主已验证的执行上下文及会话绑定。客户端工号参数不参与选择凭据。skill在工具进程内调用现有凭据读取handler，插件使用当前平台会话或已绑定设备凭据向 `POST /api/iam/v1/me/uac/credentials` 读取来源UAC会话材料，复用第2.4.1节来源会话/认证代次校验。
+- 推荐使用代发出站agent-outbound，原型路由和Python helper实际调用路径为 `POST /dsh-team/outbound`。请求JSON沿用url、method、headers、body、timeoutMs及sessionId、taskCapability，method默认POST，支持GET/POST/PUT/PATCH/DELETE/HEAD，超时默认30000毫秒、上限60000。成功响应沿用 `{statusCode, headers, body, json}`，HTTP状态取上游状态，响应头X-Dsh-Team-Outbound-Status保留上游状态。handler重建上游认证头，按私有字段映射注入本人最新工号/token。客户端header按原型允许content-type、accept、accept-language、x-lang-id、x-requested-with，响应header沿原型过滤token/Cookie项。目标URL须为HTTPS且无userinfo，hostname须精确匹配部署配置outboundAllowedHosts，空清单拒绝全部。真实允许主机及企业头映射继续放私有配置。
+- 原始凭据接口沿用 `GET /dsh-team/agent-credentials` 和 `POST /dsh-team/agent-credentials`。POST可带sessionId、taskCapability，GET通过请求头携带相同身份信息。成功JSON保留 `{empNo, token, updatedAt}`，updatedAt沿原型可为UTC字符串或null，响应Cache-Control为no-store。错误沿用 `{error, message}` 及原型HTTP状态，raw关闭为403 raw_token_disabled，未认证/会话归属或权限不符为401，非本机为403，非法请求为400，未就绪为503，outbound上游失败为502，目标不在清单为403 host_not_allowed。接口只返回本人的材料。
 
-该接口是本轮唯一新增的接口定义，用于取得IAM保存的当前值。请求仅空对象，响应为UacEnterpriseCredentials的empNo、token、updatedAt及可选cookies。插件的读取handler仍采用既有会话权限与owner核对，原型shellEnv调用预留只向执行进程传临时会话权限和接口位置。skill在内存中读取响应并直接用于内部应用请求，工具给AI的结果仅含业务结果或安全状态。交付给skill的凭据副本不写静态配置、文件、日志、stdout/stderr或会话记录，诊断只留token哈希前缀。IAM权威材料仍按第2.4节加密保存。
+两接口按真实socket对端检查仅本机调用，沿原型核对任务能力的audience、有效期、撤销状态和DSH会话owner。skill发送 `X-DSH-Session-Id: <DSH_SESSION_ID>` 与 `X-Dsh-Team-Task-Capability: <DSH_TEAM_TASK_CAPABILITY>`，兼容原型body的sessionId/dshSessionId和taskCapability/capability字段。原始读取要求本次任务credentials scope，代发要求outbound scope，按各自所需权限校验。调用者身份和会话归属从已验证任务及宿主会话取值，body.empNo不参与授权。
 
-每次调用读取当前会话对应的权威凭据，发送前复核当前认证代次，复验换发并提交bo.token后立即返回新值，按需组装的Cookie token字段也采用该当前值。退出、会话撤销/到期、成员或身份源停用后拒绝读取。并发切换账号时，沿既有认证代次检查丢弃旧结果，禁止把其他账号的最近登录缓存当作当前用户凭据。原型有按调用取值的handler及内存用法，本次交给skill的副本按上述要求即时使用。
+插件部署配置保留 `allowRawAgentToken`，默认false，沿原型使用实时配置读取，开关关闭后下一次原始读取即拒绝。默认shellEnv任务能力只含outbound，部署方开启raw后才可按原型注入credentials。shellEnv原样提供 `DSH_TEAM_TASK_CAPABILITY` 和 `DSH_TEAM_BASE`，后者为当前宿主回环地址加/dsh-team。宿主既有 `DSH_SESSION_ID` 仍表示本次agent会话，helper保留 `DSH_WEB_URL` 加/dsh-team的地址回退和 `DSH_TEAM_HELPERS` 的模块定位用法。任务能力沿原型600秒期限，执行结束/撤销时清理，后台任务沿已有jobs生命周期释放。UAC原始token由handler即时读取，环境注入只承载上述既有任务调用信息。
 
-A负责IAM读取接线，C负责Desktop现有broker读取与退出状态衔接，D负责把原型凭据handler/shellEnv预留迁入插件的现有本地/托管工具入口。验收本人skill读取、跨用户会话拒绝、token轮换后返回新值、退出/失效不可读，以及配置/临时文件/日志/工具结果与会话记录中没有凭据原文。真实域名、Cookie名与系统编码继续放私有配置。
+插件内部继续使用当前平台会话或已绑定设备凭据调用 `POST /api/iam/v1/me/uac/credentials`，请求空对象，取UacEnterpriseCredentials的empNo、最新token、updatedAt及必要的可选cookies。该IAM接口供handler读取权威当前值，现场skill仍调用上述兼容路径。复验换发并提交bo.token后，两handler下一次调用使用新值。退出、会话撤销/到期、成员或身份源停用后拒绝。复用既有认证代次检查处理并发账号切换，凭据始终归当前已认证用户自己的DSH会话。交给skill的凭据副本不写静态配置、文件、日志、stdout/stderr或会话记录，日志只留token哈希前缀，skill给AI的工具结果仅含业务结果或安全状态。IAM权威材料按第2.4节加密保存。
+
+A负责IAM读取接线，C负责Desktop现有broker读取与退出状态衔接，D负责将原型两handler及shellEnv预留迁入插件并保持接口兼容。D用原型示例skill的request()与resolve()调用方式，不改业务代码做替身验收，覆盖默认raw关闭而outbound可用、raw开启且credentials权限齐全时可读、权限不符/非本机/跨会话拒绝、目标主机清单、轮换后新值及退出后不可读。来源核对细节记入执行报告。
 
 ### 3.2 Desktop外壳与loopback控制页
 
@@ -296,6 +299,8 @@ Windows通过第3.2.1节helper使用禁远程访问的命名管道，DACL 仅当
 
 ## 6. 安全与验收要求
 
+本节遵循第8节第7条的两项用户决定，同域实例页面可读取公司SSO Cookie，企业登录信息可由第3.1.2节受控接口提供给本人DSH会话的skill/工具。
+
 二维码内容可能包含上游轮询所需的公开坐标，上游兼容校验值由公开参数即可计算。看到或转发扫码内容的人可能直接向UDS轮询并在受害者确认后拿到token，我方发起端绑定只保护Auriga事务，不能保护该上游token。门户没有Desktop的设备人工核码，外壳显示目标系统名也不能保证手机扫码人看到同一提示。当前受信团队试用保留这一残余风险，不能宣称二维码不可劫持。
 
 缓解包括短TTL、完成/取消立即作废我方挑战和清屏、二维码页提醒避免屏幕共享/转发、同挑战异常轮询频率及可取得时的扫码地点异常告警。上游全局作废依赖企业协议实际支持，不能把我方作废等同UDS作废。后续若要求门户额外核对或上游签名绑定，由独立产品/契约变更处理。
@@ -337,7 +342,7 @@ AUTH-K同时冻结第3.1.1节SSO导航证明、退出抑制与门户/设备续�
 
 ### 工作线 D，插件继承身份并删除旧登录
 
-范围为 clients/dsh-plugin/src/login、identity/local/managed 的平台分支和 web 设置/侧栏，现有资源与模型适配层只作必要调用迁移。依赖AUTH-K、C的状态/业务代理制品及B的UI迁出提交。D唯一维护插件内broker制品打包与启动适配。验收旧平台登录页和路由确实删除，托管无未登录页，未配置/跳过/离线的真实本地 DSH 可用，稍后登录推送生效，所有原平台功能走受限代理，旧凭据迁移与旧异步请求围栏完整。D校验broker事件与本地状态诊断，包中采用相同关联字段，企业skill凭据读取按第3.1.2节复用同一来源会话，插件诊断仅记哈希前缀。
+范围为 clients/dsh-plugin/src/login、identity/local/managed 的平台分支和 web 设置/侧栏，现有资源与模型适配层只作必要调用迁移。依赖AUTH-K、C的状态/业务代理制品及B的UI迁出提交。D唯一维护插件内broker制品打包与启动适配。验收旧平台登录页和路由确实删除，托管无未登录页，未配置/跳过/离线的真实本地 DSH 可用，稍后登录推送生效，所有原平台功能走受限代理，旧凭据迁移与旧异步请求围栏完整。D须以原型示例skill的request()/resolve()调用方式不改业务代码完成替身验收，核对兼容路径、环境变量、raw默认关闭及出站主机允许列表。D校验broker事件与本地状态诊断，包中采用相同关联字段，企业skill凭据读取按第3.1.2节复用同一来源会话，插件诊断仅记哈希前缀。
 
 ### 工作线 E，管理台配置
 
