@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
-import { createUacLoginView } from '../../../shared/src/native-login/uac';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+  createUacLoginView,
+  type UacPageEvent,
+} from '../../../shared/src/native-login/uac';
 import type { IAMComponents } from '@auriga/shared';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
@@ -13,139 +16,215 @@ import {
   type LoginTransaction,
   type StepInput,
   isApiError,
-  mapProblemMessage,
 } from '@auriga/shared';
 import { iamApi } from '../api';
 import DesktopDownload from '../components/DesktopDownload.vue';
 
-const { t } = useI18n();
-const route = useRoute();
-const router = useRouter();
-
-const providers = ref<LoginProvider[]>([]);
-const tx = ref<LoginTransaction | null>(null);
-const error = ref('');
-const loading = ref(true);
-const uacRoot = ref<globalThis.HTMLElement>();
-const uacActive = ref(false);
-let uacView: { dispose(): void } | undefined;
-onUnmounted(() => uacView?.dispose());
-
+const { t, locale } = useI18n();
+const emit = defineEmits<{ authEvent: [event: UacPageEvent] }>();
+const route = useRoute(),
+  router = useRouter();
+const providers = ref<LoginProvider[]>([]),
+  tx = ref<LoginTransaction | null>(null);
+const error = ref(''),
+  loading = ref(true),
+  busy = ref(false);
+const uacRoot = ref<globalThis.HTMLElement>(),
+  uacActive = ref(false);
+let uacView: ReturnType<typeof createUacLoginView> | undefined;
+watch(locale, (value) => uacView?.setLocale(value));
+let alive = true,
+  generation = 0;
+let uacContinuation = false;
+const current = (version: number) => alive && generation === version;
+function describe(error: unknown) {
+  const code = isApiError(error) ? error.problem.code : '';
+  const known = [
+    'iam.invalid_credentials',
+    'common.forbidden',
+    'common.unauthenticated',
+    'common.validation_failed',
+    'common.rate_limited',
+    'common.unavailable',
+  ];
+  const key = known.includes(code) ? 'errors.' + code : 'errors.unknown';
+  const message = t(key);
+  // Never render upstream problem detail/title, which may contain secrets.
+  return message === key ? t('errors.unknown') : message;
+}
+async function cancelTx(value: LoginTransaction | null) {
+  if (value?.purpose === 'login' && value.status === 'pending')
+    await iamApi.cancelLoginTransaction(value.id);
+}
+onUnmounted(() => {
+  alive = false;
+  generation++;
+  void uacView?.dispose();
+  void cancelTx(tx.value).catch(() => {});
+});
 onMounted(async () => {
+  const version = generation;
   try {
     const res = await iamApi.listLoginProviders();
+    if (!current(version)) return;
     providers.value = res.items;
     const preferred = res.items.find((p) => p.connectorType === 'uac');
     if (preferred && document.getElementById('auriga-uac-navigation'))
       await selectProvider(preferred);
   } catch (e) {
-    error.value = isApiError(e)
-      ? mapProblemMessage(e.problem, t)
-      : t('errors.unknown');
+    if (current(version)) error.value = describe(e);
   } finally {
-    loading.value = false;
+    if (alive) loading.value = false;
   }
 });
-
+function validate(value: LoginTransaction) {
+  if (value.purpose !== 'login') throw new Error('Invalid login purpose');
+  return value;
+}
 async function selectProvider(provider: LoginProvider) {
-  if (provider.connectorType === 'uac' && uacRoot.value) {
-    uacView?.dispose();
-    uacActive.value = true;
-    loading.value = false;
-    let navigation:
-      IAMComponents['schemas']['UacNavigationContext'] | undefined;
-    const context = document.getElementById('auriga-uac-navigation');
-    if (context) {
-      try {
-        navigation = JSON.parse(context.textContent ?? '');
-      } catch {
-        /* QR fallback */
+  if (!alive || busy.value) return;
+  const version = ++generation;
+  busy.value = true;
+  loading.value = true;
+  error.value = '';
+  const previous = tx.value;
+  tx.value = null;
+  const oldView = uacView;
+  uacView = undefined;
+  try {
+    await oldView?.dispose();
+    await cancelTx(previous);
+    if (!current(version)) return;
+    if (provider.connectorType === 'uac' && uacRoot.value) {
+      uacContinuation = true;
+      uacActive.value = true;
+      let navigation:
+        IAMComponents['schemas']['UacNavigationContext'] | undefined;
+      const context = document.getElementById('auriga-uac-navigation');
+      if (context) {
+        try {
+          navigation = JSON.parse(context.textContent ?? '');
+        } catch {
+          /* No proof: QR fallback. */
+        }
+        context.remove();
       }
-      context.remove();
+      uacView = createUacLoginView(uacRoot.value, {
+        api: iamApi,
+        providerId: provider.id,
+        navigation,
+        locale: locale.value,
+        onEvent: (event) => emit('authEvent', event),
+        invitationCode:
+          typeof route.query.invitation === 'string'
+            ? route.query.invitation
+            : undefined,
+        onComplete: (result) => {
+          if (!current(version)) return;
+          if (result.state === 'authenticated')
+            globalThis.location.assign('/instance-login.html');
+          else if (result.state === 'additional_step_required') {
+            busy.value = true;
+            void iamApi
+              .getLoginTransaction(result.transactionId)
+              .then((value) => {
+                if (!current(version)) return;
+                tx.value = validate(value);
+                uacActive.value = false;
+                void uacView?.dispose();
+              })
+              .catch((e) => {
+                if (current(version)) error.value = describe(e);
+              })
+              .finally(() => {
+                if (current(version)) busy.value = false;
+              });
+          }
+        },
+      });
+      return;
     }
-    uacView = createUacLoginView(uacRoot.value, {
-      api: iamApi,
+    uacActive.value = false;
+    uacContinuation = false;
+    const value = await iamApi.createLoginTransaction({
       providerId: provider.id,
-      navigation,
-      locale: document.documentElement.lang,
+      purpose: 'login',
+      returnTo:
+        typeof route.query.returnTo === 'string' ? route.query.returnTo : '/',
       invitationCode:
         typeof route.query.invitation === 'string'
           ? route.query.invitation
           : undefined,
-      onComplete: (result) => {
-        if (result.state === 'authenticated')
-          globalThis.location.assign('/instance-login.html');
-        else if (result.state === 'additional_step_required')
-          void iamApi
-            .getLoginTransaction(result.transactionId)
-            .then((value) => {
-              tx.value = value;
-              uacActive.value = false;
-              uacView?.dispose();
-            })
-            .catch(() => {
-              error.value = t('errors.unknown');
-            });
-      },
     });
-    return;
-  }
-  uacView?.dispose();
-  uacActive.value = false;
-  error.value = '';
-  loading.value = true;
-  try {
-    const returnTo =
-      typeof route.query.returnTo === 'string' ? route.query.returnTo : '/';
-    const invitationCode =
-      typeof route.query.invitation === 'string'
-        ? route.query.invitation
-        : undefined;
-    tx.value = await iamApi.createLoginTransaction({
-      providerId: provider.id,
-      purpose: 'login',
-      returnTo,
-      invitationCode,
-    });
+    if (!current(version)) {
+      await cancelTx(value);
+      return;
+    }
+    tx.value = validate(value);
   } catch (e) {
-    error.value = isApiError(e)
-      ? mapProblemMessage(e.problem, t)
-      : t('errors.unknown');
+    if (current(version)) error.value = describe(e);
   } finally {
-    loading.value = false;
+    if (current(version)) {
+      busy.value = false;
+      loading.value = false;
+    }
   }
 }
-
 async function onSubmit(input: StepInput) {
-  if (!tx.value) return;
+  if (!tx.value || busy.value || !alive) return;
+  const version = generation,
+    value = tx.value;
+  busy.value = true;
   error.value = '';
   try {
-    tx.value = await iamApi.advanceLoginTransaction(tx.value.id, input);
+    const result = await iamApi.advanceLoginTransaction(value.id, input);
+    if (current(version)) tx.value = validate(result);
   } catch (e) {
-    error.value = isApiError(e)
-      ? mapProblemMessage(e.problem, t)
-      : t('errors.unknown');
+    if (current(version)) error.value = describe(e);
+  } finally {
+    if (current(version)) busy.value = false;
   }
 }
-
 async function onRetry() {
   if (!tx.value) return;
-  tx.value = await iamApi.advanceLoginTransaction(tx.value.id, {
-    type: 'form',
-    formId: 'retry',
-    values: {},
-  });
+  const provider = providers.value.find((p) => p.id === tx.value?.provider.id);
+  if (provider) await selectProvider(provider);
 }
-
 function onComplete(redirectTo: string) {
-  void router.replace(redirectTo || '/');
+  if (alive && uacContinuation) {
+    globalThis.location.assign('/instance-login.html');
+    return;
+  }
+  if (
+    alive &&
+    redirectTo.startsWith('/') &&
+    !redirectTo.startsWith('//') &&
+    !redirectTo.includes('\\')
+  )
+    void router.replace(redirectTo || '/');
 }
-
-function backToProviders() {
-  error.value = '';
+async function backToProviders() {
+  if (!alive || busy.value) return;
+  const version = ++generation,
+    previous = tx.value,
+    view = uacView;
   tx.value = null;
+  uacContinuation = false;
+  uacView = undefined;
+  error.value = '';
+  busy.value = true;
+  try {
+    await view?.dispose();
+    await cancelTx(previous);
+  } catch (e) {
+    if (current(version)) error.value = describe(e);
+  } finally {
+    if (current(version)) {
+      uacActive.value = false;
+      busy.value = false;
+    }
+  }
 }
-
 const step = (): ClientStep | null =>
   (tx.value?.step as ClientStep | undefined) ?? null;
 </script>
@@ -165,21 +244,33 @@ const step = (): ClientStep | null =>
       {{ t('login.loading') }}
     </p>
     <div v-show="uacActive" ref="uacRoot" />
+    <button
+      v-if="uacActive"
+      type="button"
+      class="auriga-login-back"
+      :disabled="busy"
+      @click="backToProviders"
+    >
+      {{ t('login.back') }}
+    </button>
     <ProviderSelect
       v-if="!loading && !tx && !uacActive"
       :providers="providers"
       @select="selectProvider"
     />
     <template v-else-if="step()">
-      <StepContainer
-        :step="step()!"
-        @submit="onSubmit"
-        @retry="onRetry"
-        @complete="onComplete"
-      />
+      <fieldset class="auriga-login-step" :disabled="busy">
+        <StepContainer
+          :step="step()!"
+          @submit="onSubmit"
+          @retry="onRetry"
+          @complete="onComplete"
+        />
+      </fieldset>
       <button
         v-if="providers.length > 1 && step()!.type !== 'complete'"
         type="button"
+        :disabled="busy"
         class="auriga-login-back"
         @click="backToProviders"
       >
@@ -189,3 +280,12 @@ const step = (): ClientStep | null =>
     <DesktopDownload />
   </section>
 </template>
+
+<style scoped>
+.auriga-login-step {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+</style>

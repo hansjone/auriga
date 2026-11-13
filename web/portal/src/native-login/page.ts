@@ -1,4 +1,11 @@
-import { createUacLoginView } from '../../../shared/src/native-login/uac';
+import {
+  createUacLoginView,
+  type UacLoginOptions,
+} from '../../../shared/src/native-login/uac';
+import {
+  loginInfoText,
+  watchLoginInfo,
+} from '../../../shared/src/native-login/login-info';
 import type { components } from '../../../shared/src/generated/iam';
 import {
   createLoginView,
@@ -87,6 +94,7 @@ class ExpiredLogin extends Error {}
 export interface InstanceLoginOptions {
   fetch?: typeof fetch;
   navigate?: (path: string) => void;
+  uacObservability?: Pick<UacLoginOptions, 'onEvent' | 'resolveCorrelationId'>;
 }
 
 /** Mount the cloud-only entry. Credentials and transactions stay in memory/cookies. */
@@ -114,7 +122,9 @@ export function mountInstanceLogin(
   let tx: LoginTransaction | undefined;
   let providerId: string | undefined;
   let view: LoginView | undefined;
-  let uacView: { dispose(): void } | undefined;
+  let uacView: ReturnType<typeof createUacLoginView> | undefined;
+  let infoMonitor: ReturnType<typeof watchLoginInfo> | undefined;
+  let loginInfo: components['schemas']['UacLoginInfo'] | undefined;
   let workAbort: AbortController | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -139,6 +149,8 @@ export function mountInstanceLogin(
   header.append(title, languageLabel);
   const scope = doc.createElement('p');
   const notice = doc.createElement('p');
+  const identity = doc.createElement('p');
+  identity.dataset.testid = 'uac-department';
   const choices = doc.createElement('div');
   choices.className = 'providers';
   const loginRoot = doc.createElement('div');
@@ -160,6 +172,7 @@ export function mountInstanceLogin(
     header,
     scope,
     notice,
+    identity,
     choices,
     loginRoot,
     actions,
@@ -197,6 +210,8 @@ export function mountInstanceLogin(
     language.setAttribute('aria-label', words().language);
     language.disabled = authBusy;
     notice.textContent = words()[status];
+    identity.textContent = loginInfoText(loginInfo, locale);
+    identity.hidden = !authenticated || !identity.textContent;
     notice.setAttribute('role', alert ? 'alert' : 'status');
     shell.setAttribute('aria-busy', String(authBusy || workBusy));
     retry.textContent = words().retry;
@@ -209,7 +224,7 @@ export function mountInstanceLogin(
     retry.disabled = authBusy || workBusy || Date.now() < retryAt;
     cancel.hidden = !(authBusy || workBusy || tx || uacView);
     cancel.disabled = status === 'cancelled';
-    change.hidden = !tx || authenticated;
+    change.hidden = (!tx && !uacView) || authenticated;
     change.disabled = authBusy || workBusy;
     choices.replaceChildren();
     if (!tx && !uacView && !authenticated && !workBusy) {
@@ -242,6 +257,9 @@ export function mountInstanceLogin(
 
   function invalidate() {
     epoch++;
+    infoMonitor?.dispose();
+    infoMonitor = undefined;
+    loginInfo = undefined;
     stopWork();
     win!.clearTimeout(retryTimer);
     retryTimer = undefined;
@@ -259,9 +277,16 @@ export function mountInstanceLogin(
     if (error instanceof ExpiredLogin) message = 'expired';
     if (isApiError(error)) {
       if (error.status === 401) {
+        const expiredSession = authenticated;
         authenticated = false;
         tx = undefined;
         message = 'expired';
+        if (expiredSession) {
+          invalidate();
+          (options.navigate ?? ((target) => win!.location.assign(target)))(
+            entry,
+          );
+        }
       } else if (error.status === 403) message = 'forbidden';
       else if (error.status === 429) {
         message = 'limited';
@@ -291,11 +316,24 @@ export function mountInstanceLogin(
   }
 
   async function cancelAuthentication() {
+    const uacCleanup = uacView?.dispose();
+    uacView = undefined;
     const previous = tx;
     tx = undefined;
     const wasBusy = authBusy;
     invalidate();
     show('cancelled', false, true);
+    if (uacCleanup) {
+      authBusy = true;
+      render();
+      try {
+        await uacCleanup;
+      } finally {
+        authBusy = false;
+        render();
+      }
+      return;
+    }
     // A pending create/advance owns cleanup until it settles. Do not race a
     // replacement transaction against a late Set-Cookie from that operation.
     if (wasBusy) return;
@@ -449,6 +487,14 @@ export function mountInstanceLogin(
         providerId: id,
         locale,
         navigation,
+        onEvent: options.uacObservability?.onEvent,
+        resolveCorrelationId: options.uacObservability?.resolveCorrelationId,
+        onBusyChange: (busy) => {
+          if (current(version)) {
+            authBusy = busy;
+            render();
+          }
+        },
         onComplete: (result) => {
           if (!current(version)) return;
           if (result.state === 'authenticated') void verifyAndOpen();
@@ -539,6 +585,30 @@ export function mountInstanceLogin(
       )
         throw new Error('Portal session required');
       authenticated = true;
+      infoMonitor = watchLoginInfo(me, () => iam.getMe(), {
+        onInfo: (info) => {
+          loginInfo = info;
+          render();
+        },
+        onIdentityChanged: () => {
+          if (!current(version)) return;
+          authenticated = false;
+          invalidate();
+          show('expired', true);
+          (options.navigate ?? ((target) => win!.location.assign(target)))(
+            entry,
+          );
+        },
+        onExpired: () => {
+          if (!current(version)) return;
+          authenticated = false;
+          invalidate();
+          show('expired', true);
+          (options.navigate ?? ((target) => win!.location.assign(target)))(
+            entry,
+          );
+        },
+      });
       tx = undefined;
       show('preparing');
       await observe((await workspace.open(signal)).instance, version, signal);
@@ -635,6 +705,7 @@ export function mountInstanceLogin(
     locale = value.startsWith('en') ? 'en' : 'zh-CN';
     language.value = locale;
     view?.setLocale(locale);
+    uacView?.setLocale(locale);
     render();
   }
   const onLanguage = () => setLocale(language.value);

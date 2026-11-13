@@ -121,7 +121,7 @@ export function createIamApi(client: ApiClient) {
       return result;
     },
     getMe() {
-      return client.get<Me>(`${IAM}/me`);
+      return client.get<Me>(`${IAM}/me`, { cache: 'no-store' });
     },
     beginTotpEnrollment() {
       return client.post<components['schemas']['TotpEnrollment']>(
