@@ -73,6 +73,7 @@ public final class DeviceAccessAuthority {
           ObjectNode current = store.get("device", device, true);
           if (current == null
               || current.path("revoked").asBoolean()
+              || !UacSessions.boundTo(current, session)
               || !current.path("accountId").asString().equals(account)
               || !current.path("sessionId").asString().equals(session.path("sessionId").asString())
               || !current.path("scope").asString().equals("auriga.connect")) return null;

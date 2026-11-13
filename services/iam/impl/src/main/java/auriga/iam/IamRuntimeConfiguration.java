@@ -18,6 +18,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Explicit issuer + encryption key required; an unconfigured skeleton exposes no IAM endpoints. */
 @Configuration(proxyBeanMethods = false)
@@ -133,6 +134,60 @@ public class IamRuntimeConfiguration {
       AuditLogger audit,
       Clock clock) {
     return new UacProviderService(store, providers, adapter, sessions, audit, clock);
+  }
+
+  @Bean
+  UacCredentialCipher iamUacCredentialCipher(ContractSchemas schemas, Environment env) {
+    Map<String, String> keys =
+        Binder.get(env)
+            .bind("auriga.iam.uac.encryption.keys", Bindable.mapOf(String.class, String.class))
+            .orElse(Map.of());
+    String active = env.getProperty("auriga.iam.uac.encryption.active-key-id", "initial");
+    if (keys.isEmpty()) keys = Map.of(active, env.getRequiredProperty("auriga.iam.encryption-key"));
+    ObjectNode ring =
+        Json.object(
+            "activeKeyId",
+            active,
+            "decryptKeyIds",
+            keys.keySet().stream().sorted().toList(),
+            "revision",
+            env.getProperty("auriga.iam.uac.encryption.revision", Long.class, 0L));
+    return new UacCredentialCipher(schemas, ring, keys);
+  }
+
+  @Bean
+  UacSessions iamUacSessions(
+      IamStore store,
+      UacCredentialCipher cipher,
+      auriga.iam.api.UacEnterpriseAdapter adapter,
+      ProviderManager providers,
+      SessionManager sessions,
+      Clock clock,
+      UacRevalidationConfiguration policy) {
+    return new UacSessions(store, cipher, adapter, providers, sessions, clock, policy);
+  }
+
+  @Bean
+  UacFlow iamUacFlow(
+      IamStore store,
+      UacProviderService providers,
+      ProviderManager generic,
+      auriga.iam.api.UacEnterpriseAdapter adapter,
+      UacSessions uac,
+      LoginManager login,
+      SessionManager sessions,
+      Clock clock) {
+    return new UacFlow(store, providers, generic, adapter, uac, login, sessions, clock);
+  }
+
+  @Bean(initMethod = "start", destroyMethod = "destroy")
+  @ConditionalOnProperty(
+      prefix = "auriga.iam.uac.worker",
+      name = "enabled",
+      havingValue = "true",
+      matchIfMissing = true)
+  UacWorker iamUacWorker(UacSessions uac, AuditLogger audit) {
+    return new UacWorker(uac, audit);
   }
 
   @Bean
@@ -562,7 +617,8 @@ public class IamRuntimeConfiguration {
       AuditLogger audit,
       Clock clock,
       TokenService tokens,
-      OAuthProvider nativeDevices) {
+      OAuthProvider nativeDevices,
+      UacSessions uac) {
     var manager =
         new LoginManager(
             store,
@@ -578,6 +634,7 @@ public class IamRuntimeConfiguration {
             clock,
             tokens.issuer());
     manager.nativeDevices(nativeDevices);
+    manager.uacEstablished(uac::established);
     return manager;
   }
 

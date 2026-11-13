@@ -258,6 +258,11 @@ public final class OAuthProvider {
                   "used",
                   false),
               clock.instant().plusSeconds(60));
+          if (session.has("uacSessionBinding")) {
+            ObjectNode bound = store.get("oauth_grant", Secrets.hash(code), true);
+            bound.set("uacSessionBinding", session.path("uacSessionBinding"));
+            store.save("oauth_grant", bound);
+          }
           return redirect
               + (redirect.contains("?") ? "&" : "?")
               + "code="
@@ -334,6 +339,7 @@ public final class OAuthProvider {
 
   private boolean valid(ObjectNode grant, OAuthClient c, String kind) {
     return grant != null
+        && !grant.path("revoked").asBoolean()
         && grant.path("kind").asString().equals(kind)
         && !grant.path("used").asBoolean()
         && grant.path("clientId").asString().equals(c.id())
@@ -398,10 +404,12 @@ public final class OAuthProvider {
     }
     if (!valid(grant, c, "refresh")) return error("invalid_grant");
     ObjectNode session = sessions.activeById(grant.path("sessionId").asString());
-    if (session == null) return error("invalid_grant");
+    if (session == null || !UacSessions.boundTo(grant, session)) return error("invalid_grant");
     if (grant.has("deviceId")) {
       ObjectNode device = store.get("device", grant.path("deviceId").asString(), true);
-      if (device == null || device.path("revoked").asBoolean()) return error("invalid_grant");
+      if (device == null
+          || device.path("revoked").asBoolean()
+          || !UacSessions.boundTo(device, session)) return error("invalid_grant");
       if (grant.path("authorizationMode").asString().equals("native_tx")) {
         if (!c.nativeConnect()
             || !device.path("authorizationMode").asString().equals("native_tx")
@@ -446,6 +454,7 @@ public final class OAuthProvider {
       boolean issueRefresh,
       TokenService.IssuedToken issued) {
     boolean device = grant.has("deviceId");
+    if (!UacSessions.boundTo(grant, session)) return error("invalid_grant");
     String scope = grant.path("scope").asString();
     ObjectNode response =
         Json.object(
@@ -495,6 +504,8 @@ public final class OAuthProvider {
               "used",
               false);
       if (device) next.put("deviceId", grant.path("deviceId").asString());
+      if (session.has("uacSessionBinding"))
+        next.set("uacSessionBinding", session.path("uacSessionBinding"));
       if (grant.path("authorizationMode").asString().equals("native_tx"))
         next.put("authorizationMode", "native_tx");
       store.insert(
@@ -595,6 +606,8 @@ public final class OAuthProvider {
           IamError.require(session != null, "unauthenticated", 401);
           grant.put("status", approved ? "approved" : "denied");
           grant.put("sessionId", sessionId);
+          if (approved && session.has("uacSessionBinding"))
+            grant.set("uacSessionBinding", session.path("uacSessionBinding"));
           store.save("oauth_grant", grant);
           return null;
         });
@@ -612,6 +625,7 @@ public final class OAuthProvider {
     if (grant == null
         || !grant.path("clientId").asString().equals(c.id())
         || !grant.path("kind").asString().equals("device")
+        || grant.path("revoked").asBoolean()
         || grant.path("used").asBoolean()) return error("invalid_grant");
     boolean nativeTx = grant.path("authorizationMode").asString().equals("native_tx");
     if (nativeTx) {
@@ -637,7 +651,7 @@ public final class OAuthProvider {
     if (grant.path("status").asString().equals("pending")) return error("authorization_pending");
     if (grant.path("status").asString().equals("denied")) return error("access_denied");
     ObjectNode session = sessions.activeById(grant.path("sessionId").asString());
-    if (session == null) return error("invalid_grant");
+    if (session == null || !UacSessions.boundTo(grant, session)) return error("invalid_grant");
     if (nativeTx
         && (!tx.path("status").asString().equals("completed")
             || !tx.path("nativeAccountId").equals(session.path("accountId"))
@@ -672,6 +686,11 @@ public final class OAuthProvider {
             clock.instant().toString()),
         null);
     grant.put("deviceId", id);
+    if (session.has("uacSessionBinding")) {
+      ObjectNode deviceRow = store.get("device", id, true);
+      deviceRow.set("uacSessionBinding", session.path("uacSessionBinding"));
+      store.save("device", deviceRow);
+    }
     grant.put("used", true);
     store.save("oauth_grant", grant);
     return userTokens(c, grant, session, true);

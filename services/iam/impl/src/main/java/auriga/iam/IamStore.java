@@ -56,6 +56,29 @@ public final class IamStore {
     return jdbc;
   }
 
+  void uacTenant() {
+    jdbc.update(
+        "INSERT INTO iam.uac_work_tenant(tenant_id) VALUES (?) ON CONFLICT DO NOTHING",
+        TenantContext.require());
+  }
+
+  List<UUID> uacTenants(UUID after) {
+    return jdbc.query(
+        "SELECT tenant_id FROM iam.uac_work_tenant WHERE (?::uuid IS NULL OR tenant_id>?) ORDER BY tenant_id LIMIT 50",
+        (rs, i) -> rs.getObject(1, UUID.class),
+        after,
+        after);
+  }
+
+  List<ObjectNode> uacDue(Instant now) {
+    return jdbc.query(
+        "SELECT data::text FROM iam.uac_job WHERE tenant_id=? AND data->>'done' IS DISTINCT FROM 'true' AND next_at<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_at,id LIMIT 50",
+        (rs, i) -> Json.read(rs.getString(1)),
+        TenantContext.require(),
+        java.sql.Timestamp.from(now),
+        java.sql.Timestamp.from(now));
+  }
+
   public <T> T tx(Supplier<T> work) {
     TenantContext.require();
     TenantTransactionManager.verifyTransactionTenant();

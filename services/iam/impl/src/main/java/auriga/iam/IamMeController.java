@@ -51,15 +51,18 @@ public class IamMeController {
           ObjectNode account = store.get("account", principal.subject(), false);
           ObjectNode session = sessions.activeById(principal.sessionId());
           IamError.require(account != null && session != null, "unauthenticated", 401);
-          return Json.object(
-              "account",
-              accountView(account),
-              "session",
-              sessionView(session, principal.sessionId()),
-              "identities",
-              identities(principal.subject()),
-              "mfa",
-              accounts.mfaStatus(UUID.fromString(principal.subject()), true));
+          ObjectNode result =
+              Json.object(
+                  "account",
+                  accountView(account),
+                  "session",
+                  sessionView(session, principal.sessionId()),
+                  "identities",
+                  identities(principal.subject()),
+                  "mfa",
+                  accounts.mfaStatus(UUID.fromString(principal.subject()), true));
+          if (session.has("uacLoginInfo")) result.set("uacLoginInfo", session.path("uacLoginInfo"));
+          return result;
         });
   }
 
@@ -416,6 +419,8 @@ public class IamMeController {
             "expiresAt",
             session.path("expiresAt").asString());
     if (session.has("ip")) v.put("ip", session.path("ip").asString());
+    if (session.has("uacSessionBinding"))
+      v.set("uacSessionBinding", session.path("uacSessionBinding"));
     if (session.has("userAgent")) v.put("userAgent", session.path("userAgent").asString());
     if (session.has("idleExpiresAt"))
       v.put(
@@ -438,6 +443,7 @@ public class IamMeController {
             "createdAt",
             d.path("createdAt").asString());
     if (d.has("platform")) v.put("platform", d.path("platform").asString());
+    if (d.has("uacSessionBinding")) v.set("uacSessionBinding", d.path("uacSessionBinding"));
     if (d.has("clientVersion")) v.put("clientVersion", d.path("clientVersion").asString());
     if (d.has("lastSeenAt")) v.put("lastSeenAt", d.path("lastSeenAt").asString());
     if (d.has("lastIp")) v.put("lastIp", d.path("lastIp").asString());

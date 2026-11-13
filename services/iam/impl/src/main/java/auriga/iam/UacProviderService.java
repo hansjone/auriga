@@ -113,6 +113,7 @@ final class UacProviderService {
           && "pending".equals(tx.path("status").asString())) {
         tx = store.byId("login_tx", tx.path("id").asString(), true);
         tx.put("status", "cancelled");
+        tx.set("step", Json.object("type", "fail", "code", "iam.login_tx_cancelled"));
         tx.remove("pendingProfile");
         tx.remove("uacCredential");
         store.save("login_tx", tx);

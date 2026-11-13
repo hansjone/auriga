@@ -22,6 +22,12 @@ public final class SessionManager implements Sessions {
   private final EventPublisher events;
   private final AuditLogger audit;
   private java.util.function.Predicate<ObjectNode> managedValidator = row -> false;
+  private java.util.function.Predicate<ObjectNode> uacValidator =
+      row -> !row.has("uacCredentialId") && !row.has("uacSessionBinding");
+
+  void uacValidator(java.util.function.Predicate<ObjectNode> validator) {
+    this.uacValidator = Objects.requireNonNull(validator);
+  }
 
   public void managedValidator(java.util.function.Predicate<ObjectNode> validator) {
     managedValidator = Objects.requireNonNull(validator);
@@ -187,6 +193,7 @@ public final class SessionManager implements Sessions {
         || !clock.instant().isBefore(Instant.parse(row.path("idleExpiresAt").asString())))
       return false;
     if (row.has("managedInstance") && !managedValidator.test(row)) return false;
+    if (!uacValidator.test(row)) return false;
     ObjectNode account = store.get("account", row.path("accountId").asString(), false);
     return account != null && account.path("status").asString().equals("active");
   }
@@ -259,6 +266,18 @@ public final class SessionManager implements Sessions {
     row.remove("adminCsrfTokens");
     store.save("session", row);
     kv.delete(row.path("cookieHash").asString());
+    if (row.has("uacSessionBinding")) {
+      String source = row.path("sessionId").asString();
+      for (ObjectNode device : store.all("device"))
+        if (source.equals(device.path("sessionId").asString())) revokeDevice(device);
+      for (ObjectNode grant : store.all("oauth_grant"))
+        if (source.equals(grant.path("sessionId").asString())) {
+          grant = store.byId("oauth_grant", grant.path("id").asString(), true);
+          grant.put("revoked", true);
+          grant.put("status", "revoked");
+          store.save("oauth_grant", grant);
+        }
+    }
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("accountId", row.path("accountId").asString());
     data.put("sessionIds", List.of(row.path("sessionId").asString()));

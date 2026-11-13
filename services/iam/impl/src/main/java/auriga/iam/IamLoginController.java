@@ -70,6 +70,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   }
 
   private String primaryStep(ObjectNode provider) {
+    if (provider.path("connectorType").asString().equals("uac")) return "qr";
     if (!provider.path("connectorType").asString().equals("team-account")) return "form";
     try {
       ObjectNode cfg =
