@@ -17,8 +17,8 @@ import GroupsView from './views/GroupsView.vue';
 import InvitationsView from './views/InvitationsView.vue';
 import QuotasView from './views/QuotasView.vue';
 import RolesView from './views/RolesView.vue';
-import ResourcesView from './views/ResourcesView.vue';
-import ResourceGovernanceView from './views/resources/ResourceGovernanceView.vue';
+import ResourceCenterView from './views/resources/ResourceCenterView.vue';
+
 import IdentityProvidersView from './views/IdentityProvidersView.vue';
 import SettingsView from './views/SettingsView.vue';
 import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
@@ -92,10 +92,14 @@ export const router = createRouter({
         { path: 'audit', component: AuditView },
         { path: 'ops/alerts', component: AlertsView },
         { path: 'ops/notifications', component: NotificationsView },
-        { path: 'resources', component: ResourcesView },
+        {
+          path: 'resources',
+          component: ResourceCenterView,
+          props: { phase: 'directory' },
+        },
         ...(['review', 'published', 'distribution'] as const).map((phase) => ({
           path: 'resources/' + phase,
-          component: ResourceGovernanceView,
+          component: ResourceCenterView,
           props: { phase },
         })),
         { path: 'members', component: MembersView },
