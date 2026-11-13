@@ -868,41 +868,39 @@
                       "maxLength": 128
                     },
                     "keyset_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "refresh_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "check_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "business_key_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "rotation_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "preannounce_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "maturity_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "overlap_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "allowed_skew_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "review_period_days": {
-                      "const": 365
+                      "type": "integer"
                     },
                     "review_reminder_days": {
                       "type": "array",
                       "items": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 364
+                        "type": "integer"
                       },
                       "minItems": 3,
                       "uniqueItems": true
@@ -918,34 +916,34 @@
                       "maxLength": 128
                     },
                     "reload_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "leaf_days": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "leaf_renew_before_days": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "ca_years": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "ca_renew_before_years": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "forward_jump_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "backward_jump_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "clock_retry_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "migration_margin_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "freeze_seconds": {
-                      "type": "integer"
+                      "type": "number"
                     }
                   },
                   "required": [

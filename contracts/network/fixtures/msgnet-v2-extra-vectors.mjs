@@ -1,5 +1,6 @@
 import { sealTest } from './msgnet-v2-hpke.mjs';
 import { extendRoundThree } from './msgnet-v2-r3-vectors.mjs';
+import { extendRoundFour } from './msgnet-v2-r4-vectors.mjs';
 export function extendVectors(c) {
   const {
     add,
@@ -739,4 +740,5 @@ export function extendVectors(c) {
     push(id, 'config', expected, { config: value });
   }
   extendRoundThree({ ...c, transition, sealTest });
+  extendRoundFour({ ...c, transition, sealTest });
 }

@@ -212,26 +212,7 @@ export function evaluateBoundary(v) {
             err('invalid_transition');
         const reminders = [...c.review_reminder_days].sort((a, b) => b - a);
         if (
-          c.keyset_seconds > 86400 ||
-          c.refresh_seconds > 43200 ||
-          c.check_seconds > 60 ||
-          c.business_key_seconds > 691200 ||
-          c.rotation_seconds > 432000 ||
-          c.preannounce_seconds < 172800 ||
-          c.maturity_seconds < 86400 ||
-          c.overlap_seconds < 360 ||
-          c.allowed_skew_seconds > 60 ||
           c.review_period_days !== 365 ||
-          c.reload_seconds > 5 ||
-          c.leaf_days > 90 ||
-          c.leaf_renew_before_days < 30 ||
-          c.ca_years > 10 ||
-          c.ca_renew_before_years < 2 ||
-          c.forward_jump_seconds > 300 ||
-          c.backward_jump_seconds > 60 ||
-          c.clock_retry_seconds > 30 ||
-          c.migration_margin_seconds < 21600 ||
-          c.freeze_seconds > 600 ||
           c.refresh_seconds >= c.keyset_seconds ||
           c.rotation_seconds + c.preannounce_seconds > c.business_key_seconds ||
           c.preannounce_seconds < c.maturity_seconds ||

@@ -1,6 +1,6 @@
 # v2 共享向量输入和判定协议
 
-`msgnet-v2-vectors.schema.json`定义完整文件结构，引用生产schema的受签对象。反例只允许语义无效，字段/类型仍有定义；配置反例的数值范围特意在向量输入层放宽，生产配置schema不放宽。每例包含唯一id、input、expected；expected为accept或catalog错误的`collab.msgnet_`后缀。文件分三组，不能只运行其中一组。
+`msgnet-v2-vectors.schema.json`定义完整文件结构，受签对象引用生产schema。config输入提供字段完整的待安装JSON候选，允许小数及待拒绝的策略值，由参考判定器检查整数性、固定复核周期、生产范围和组合约束。每例包含唯一id、input、expected，expected为accept或catalog错误的`collab.msgnet_`后缀。文件分三组全部执行。
 
 ## 消费端 cases
 
@@ -54,8 +54,10 @@ node --test contracts/test/msgnet-v2.test.mjs
 
 两套生成器都使用明确标注的公开合成标签派生测试密钥，私钥仅在内存存在，输出仅公钥/证书/签名/合成密封数据。相同源码得到完全相同字节；--check发现漂移退出非0且不覆盖文件。合成种子可被任何人重建，绝不可作为安装/生产材料。npm check-schemas同时运行Node生成器--check；Go证书生成器--check由上述命令及Go线验收执行。
 
-## 第3轮变异自检
+## 逐条件变异自检
 
-`node contracts/network/fixtures/check-msgnet-v2-mutations.mjs`先运行所有正常判定器，确认全部expected一致。随后对两个参考判定器的每个if门禁逐条禁用，复合授权锚点和能力条件进一步按独立项禁用，边界触发条件和成熟期比较也分别变异。每个变异必须至少让一个共享向量的结果发生变化，否则脚本失败并报告源文件、行号和存活条件。新增if门禁会自动进入自检。校验逻辑统一写为if门禁，成熟期与授权边界保留已登记的表达式形式。
+`node contracts/network/fixtures/check-msgnet-v2-mutations.mjs`先运行所有正常判定器，确认全部expected一致。随后对两个参考判定器的每个if门禁逐条禁用，并递归拆分每个复合条件的全部AND/OR子条件。边界触发、时钟异常和成熟期表达式也逐项变异。新增if门禁及其子条件自动进入自检。范围校验统一读取生产RenewalConfig schema，逐字段越界向量覆盖每项上界、下界和组合政策。
+
+变异须被至少一个向量发现，存活项须与`fixtures/msgnet-v2-equivalent-mutations.json`逐项精确匹配。该清单逐条说明在合法输入域内的等价理由。未声明的存活项、重复声明、空理由、已经被向量发现的陈旧等价项均导致失败。测试明确断言存活数等于等价清单条数，以及被杀死数加等价数等于总数。当前共255个变异，248个被杀死，7个等价。四个等价项由受签schema固定字段推出，其余三个分别来自历史钥终态与唯一性、前置首发版本上界、墓碑相等比较。
 
 脚本输出逐项witness，标明发现该变异的向量。`contracts/test/msgnet-v2.test.mjs`已接入同一自检，npm check-schemas会自动执行。脚本通过data URL载入内存变异版本，源文件保持原字节。删除成熟期检查的自检使用首发账本完全一致、前驱签名有效的未成熟next向量。撤销授权、同代际保留active、各锚点字段、历史授权和三项能力的负例也分别保持其余约束合法。

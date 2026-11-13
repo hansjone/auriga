@@ -64,17 +64,13 @@ export function discoverPredicates(source) {
       end = closing(source, start - 1);
     // 删除整个检查，以及复合拒绝条件中的各独立分支。
     targets.push({ start, end, replacement: 'false' });
-    // 授权锚点及能力是各自独立的信任门禁，复合条件也逐项删除。
+    // 所有复合条件逐项删除，新增条件自动纳入。
     for (const atom of leaves(source, start, end))
-      if (
-        /\bt\.|capabilities\.includes|qc\.allowed_authorities|qc\.revoked_authority_ids|BigInt\(k\.generation\) <=/.test(
-          source.slice(atom.start, atom.end),
-        )
-      )
-        targets.push({ ...atom, replacement: 'false' });
+      targets.push({ ...atom, replacement: 'false' });
   }
-  const boundary = /const boundary\s*=\s*([\s\S]*?);/.exec(source);
-  if (boundary) {
+  for (const boundary of source.matchAll(
+    /const (?:boundary|bad)\s*=\s*([\s\S]*?);/g,
+  )) {
     const start = boundary.index + boundary[0].indexOf('=') + 1;
     for (const atom of leaves(
       source,
@@ -88,8 +84,7 @@ export function discoverPredicates(source) {
     const start = source.indexOf('return (', mature) + 'return ('.length,
       end = closing(source, start - 1);
     for (const atom of leaves(source, start, end))
-      if (source.slice(atom.start, atom.end).includes('next_maturity_seconds'))
-        targets.push({ ...atom, replacement: 'true' });
+      targets.push({ ...atom, replacement: 'true' });
   }
   return [
     ...new Map(
@@ -169,9 +164,41 @@ export async function checkMutations() {
       else survivors.push(record);
     }
   }
-  if (survivors.length)
-    throw Error(JSON.stringify({ mutants: count, survivors }, null, 2));
-  return { count, coverage };
+  const equivalents = JSON.parse(
+    readFileSync(new URL('msgnet-v2-equivalent-mutations.json', directory)),
+  );
+  const identity = (record) =>
+    JSON.stringify([record.file, record.expression, record.replacement]);
+  const declared = new Map(
+    equivalents.map((record) => [identity(record), record]),
+  );
+  const actual = new Set(survivors.map(identity));
+  const unexpected = survivors.filter(
+    (record) => !declared.has(identity(record)),
+  );
+  const stale = equivalents.filter(
+    (record) => !actual.has(identity(record)) || !record.reason?.trim(),
+  );
+  if (
+    declared.size !== equivalents.length ||
+    survivors.length !== actual.size ||
+    unexpected.length ||
+    stale.length
+  )
+    throw Error(
+      JSON.stringify(
+        { mutants: count, killed: coverage.length, unexpected, stale },
+        null,
+        2,
+      ),
+    );
+  return {
+    count,
+    killed: coverage.length,
+    equivalent: equivalents.length,
+    coverage,
+    survivors,
+  };
 }
 if (
   process.argv[1] &&

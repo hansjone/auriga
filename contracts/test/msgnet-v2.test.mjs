@@ -36,7 +36,16 @@ ajv.addSchema(vectorSchema);
 test('every oracle guard deletion is detected by a shared vector', async () => {
   const result = await checkMutations();
   assert.ok(result.count > 0);
-  assert.equal(result.coverage.length, result.count);
+  const equivalents = JSON.parse(
+    readFileSync(
+      new URL(
+        '../network/fixtures/msgnet-v2-equivalent-mutations.json',
+        import.meta.url,
+      ),
+    ),
+  );
+  assert.equal(result.survivors.length, equivalents.length);
+  assert.equal(result.killed + result.equivalent, result.count);
 });
 test('all shared input groups conform to vector schema', () => {
   const validate = ajv.getSchema(vectorSchema.$id);
