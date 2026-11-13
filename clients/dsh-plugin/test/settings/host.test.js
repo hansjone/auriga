@@ -10,6 +10,114 @@ import {
   installSettings,
 } from '../../src/settings/host.js';
 import { createSettingsStore } from '../../src/settings/store.js';
+import { createPrivateSkills } from '../../src/resources/private-skills.js';
+
+test('private skills use native owner admission and same-origin writes offline, including managed mode', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-private-route-'));
+  try {
+    const store = await createSettingsStore(join(dir, 'settings'));
+    const privateSkills = createPrivateSkills({ home: dir });
+    let rejected;
+    const handler = createSettingsHandler({
+      store,
+      privateSkills,
+      activeOrigin: '',
+      mode: 'managed',
+      auth: { requestRejection: () => rejected },
+    });
+    const source =
+      '---\nname: example\ndescription: "Private skill"\n---\nPrivate body';
+    const write = (body, headers = {}) =>
+      request('skills', {
+        method: 'POST',
+        origin: 'http://localhost:3000',
+        body,
+        headers: {
+          'content-type': 'application/json',
+          'x-auriga-settings': '1',
+          ...headers,
+        },
+      });
+    rejected = 401;
+    assert.equal(
+      (await send(handler, write({ action: 'create', source }))).status,
+      401,
+    );
+    rejected = undefined;
+    const cross = write({ action: 'create', source });
+    cross.headers.origin = 'https://evil.example.com';
+    assert.equal((await send(handler, cross)).status, 403);
+    assert.equal(
+      (
+        await send(
+          handler,
+          write({ action: 'create', source }, { 'x-auriga-settings': '0' }),
+        )
+      ).status,
+      403,
+    );
+    assert.deepEqual(
+      JSON.parse((await send(handler, request('skills'))).body).items,
+      [],
+    );
+    const created = await send(handler, write({ action: 'create', source }));
+    assert.equal(created.status, 200);
+    const row = JSON.parse(created.body);
+    assert.equal(row.name, 'example');
+    assert.equal(
+      (
+        await send(
+          handler,
+          write({
+            action: 'remove',
+            name: row.name,
+            enabled: true,
+            revision: 'stale',
+          }),
+        )
+      ).status,
+      409,
+    );
+    assert.equal(
+      (
+        await send(
+          handler,
+          write({
+            action: 'read',
+            name: row.name,
+            enabled: true,
+            home: 'untrusted',
+          }),
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (await send(handler, write({ action: 'create', source }))).status,
+      409,
+    );
+    assert.equal(
+      (
+        await send(
+          handler,
+          write({
+            action: 'disable',
+            name: row.name,
+            enabled: true,
+            revision: row.revision,
+          }),
+        )
+      ).status,
+      200,
+    );
+    const listed = JSON.parse(
+      (await send(handler, request('skills'))).body,
+    ).items;
+    assert.equal(listed[0].enabled, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test('plain HTTP ingress accepts trusted external HTTPS origin, never forwarded headers or invalid CSRF/native auth', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'auriga-settings-proxy-'));

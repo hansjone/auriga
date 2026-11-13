@@ -41,12 +41,22 @@ export async function createVault(directory) {
     closed = false;
   /** @type {Set<()=>Promise<void>>} */
   const resourceIdentityListeners = new Set();
+  /** @type {Set<(identity:{tenantId:string,ownerId:string,hostId:string}|undefined)=>Promise<void>>} */
+  const resourceIdentityGates = new Set();
   /** @param {any} value */
   const resourceIdentity = (value) =>
     ['tid', 'sub', 'did']
       .map((key) => value?.credential?.claims?.[key] ?? '')
       .join('/');
   return {
+    /** Fence resource views before publishing a different durable identity. IDs only; no credentials.
+     * @param {(identity:{tenantId:string,ownerId:string,hostId:string}|undefined)=>Promise<void>} gate */
+    subscribeResourceIdentityGate(gate) {
+      resourceIdentityGates.add(gate);
+      return () => {
+        resourceIdentityGates.delete(gate);
+      };
+    },
     /** Observe durable ownership changes so private resource code stops before logout completes.
      * @param {()=>Promise<void>} listener */
     subscribeResourceIdentity(listener) {
@@ -65,10 +75,39 @@ export async function createVault(directory) {
         if (closed) throw new Error('connect state closed');
         const next = structuredClone(state);
         await change(next);
+        const changed = resourceIdentity(state) !== resourceIdentity(next);
+        const signingOut = changed && !next.credential;
+        const c = next.credential?.claims,
+          identity = c
+            ? { tenantId: c.tid, ownerId: c.sub, hostId: c.did }
+            : undefined;
+        if (signingOut && resourceIdentityGates.size)
+          next.resourceIsolationPending = {
+            previous: resourceIdentity(state),
+            recordedAt: new Date().toISOString(),
+          };
+        if (changed && !signingOut) {
+          if (next.resourceIsolationPending && !resourceIdentityGates.size)
+            throw new Error('resource isolation pending');
+          await Promise.all(
+            [...resourceIdentityGates].map((gate) => gate(identity)),
+          );
+          delete next.resourceIsolationPending;
+        }
+        if (closed) throw new Error('connect state closed');
         await atomicWriteJson(path, sealSecret(key, JSON.stringify(next)));
         if (closed) throw new Error('connect state closed');
-        const changed = resourceIdentity(state) !== resourceIdentity(next);
         state = next;
+        if (signingOut) {
+          // Isolation is best effort after the durable credential tombstone. Do not let
+          // a 30-second resource-lock wait turn logout into an HTTP timeout.
+          // Keep the marker until the next successful pre-publication identity gate.
+          void Promise.allSettled(
+            [...resourceIdentityGates].map((gate) =>
+              Promise.resolve().then(() => gate(undefined)),
+            ),
+          );
+        }
         if (changed)
           await Promise.allSettled(
             [...resourceIdentityListeners].map((listener) =>
@@ -82,6 +121,7 @@ export async function createVault(directory) {
     close() {
       closed = true;
       resourceIdentityListeners.clear();
+      resourceIdentityGates.clear();
       state = null;
       key.fill(0);
     },

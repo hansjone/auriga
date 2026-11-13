@@ -1,4 +1,5 @@
 /* global AbortSignal */
+import { catalogRoutes, watchCatalogIdentity } from './catalog-routes.js';
 const prefix = '/auriga/resources';
 const uuid =
   '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
@@ -32,15 +33,17 @@ export function resourcePath(path) {
 
 /** Native authentication gates fixed reads and renderer-bound distribution writes.
  * Browser credentials never cross this boundary.
- * @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any, memberHandler?:(runtime:any,req:any,res:any)=>Promise<any>, fetchImpl?: typeof fetch}} options */
+ * @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any, memberHandler?:(runtime:any,req:any,res:any)=>Promise<any>, fetchImpl?: typeof fetch,ctx?:any}} options */
 export function createResourceHandler({
   auth,
   current,
   memberHandler,
   fetchImpl = fetch,
+  ctx,
 }) {
+  const catalog = catalogRoutes({ current, fetchImpl, ctx });
   /** @param {any} req @param {any} res */
-  return async (req, res) => {
+  const handle = async (req, res) => {
     /** @param {number} status @param {unknown} [body] */
     const send = (status, body = {}) => {
       res.writeHead(status, {
@@ -52,6 +55,7 @@ export function createResourceHandler({
     };
     const rejection = auth.requestRejection(req);
     if (rejection !== undefined) return send(rejection);
+    if (req.url?.startsWith(prefix + '/catalog/')) return catalog(req, res);
     if (req.url?.startsWith(prefix + '/local/')) {
       const runtime = current();
       if (!runtime || !memberHandler) return send(503);
@@ -193,6 +197,7 @@ export function createResourceHandler({
       return send(runtime.resolve(req) ? 503 : 401);
     }
   };
+  return Object.assign(handle, { reconcileCatalog: catalog.reconcile });
 }
 
 /** @param {any} ctx @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any,memberHandler?:(runtime:any,req:any,res:any)=>Promise<any>}} options */
@@ -202,14 +207,23 @@ export function installResourceChannel(ctx, options) {
     typeof ctx.webServer?.register !== 'function'
   )
     return false;
+  const handler = createResourceHandler({ ...options, ctx });
   ctx.effect(
     () =>
       ctx.webServer.register({
         kind: 'prefix',
         path: prefix,
-        handler: createResourceHandler(options),
+        handler,
       }),
     'auriga-dsh: resource catalogue and member distribution channel',
+  );
+  ctx.effect(
+    () =>
+      watchCatalogIdentity({
+        current: options.current,
+        onChange: handler.reconcileCatalog,
+      }),
+    'auriga-dsh: shared skill identity observer',
   );
   return true;
 }
