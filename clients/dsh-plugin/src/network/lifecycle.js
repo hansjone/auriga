@@ -244,6 +244,12 @@ export function createNetworkLifecycle(options) {
         throw new Error('messaging unavailable');
       return runtime.messagingUI(context);
     },
+    /** @param {unknown} input @param {unknown} context */
+    importControlPackage(input, context) {
+      if (!runtime || !authenticated || disposed)
+        throw new Error('network control import unavailable');
+      return runtime.importControlPackage(input, context);
+    },
     async close() {
       disposed = true;
       authenticated = false;

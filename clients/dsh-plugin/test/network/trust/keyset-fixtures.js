@@ -1,10 +1,14 @@
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { jcs } from '../../../../../contracts/test/network-lib.mjs';
-import { openTrustStore } from '../../../src/network/trust/store.js';
+import { openTrustStore } from './v1-store.js';
 import { signingInput } from '../../../src/network/trust/verifier.js';
+import { createV2Signer } from './v2-keyset-fixtures.js';
 
 const root = generateKeyPairSync('ed25519');
+const v2 = createV2Signer(root, 'test-offline-root');
+export const signedV2Keyset = v2.publication;
+export const signedV2Announcement = v2.announcement;
 export const testRoots = [
   {
     kid: 'test-offline-root',

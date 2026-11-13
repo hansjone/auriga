@@ -9,10 +9,17 @@ import {
   positiveVersion,
   publicKey,
 } from '../../clients/dsh-plugin/src/network/trust/keyset.js';
-import { openTrustStore } from '../../clients/dsh-plugin/src/network/trust/store.js';
+import { openV2TrustStore as openTrustStore } from '../../clients/dsh-plugin/src/network/trust/v2-store.js';
+import {
+  detach,
+  digest,
+  structure,
+  verifyControl,
+} from '../../clients/dsh-plugin/src/network/trust/v2.js';
+import { jsonLimits } from '../../clients/dsh-plugin/src/network/trust/v2-schema.js';
 
 const usage =
-  '用法：node scripts/network/export-installation.mjs <manifest.json> [新输出文件.json]';
+  '用法：node scripts/network/export-installation.mjs [--control] <manifest.json> [新输出文件.json]';
 const fail = (message) => {
   throw new Error(message);
 };
@@ -75,7 +82,7 @@ export async function exportInstallation(manifestFile, now = Date.now) {
     return path.resolve(path.dirname(path.resolve(manifestFile)), file);
   };
   const json = async (file) =>
-    parseStrictJson(await readLocal(local(file), 65536));
+    detach(await readLocal(local(file), jsonLimits.maxBytes));
   const spki = async (file) => {
     const encoded = (await readLocal(local(file), 44, true)).toString(
       'base64url',
@@ -166,11 +173,12 @@ export async function exportInstallation(manifestFile, now = Date.now) {
     },
     roots: connect.network.roots,
     realm: registration.realm,
+    tenant_id: registration.tenant,
     now,
     requireAnnouncement: true,
   });
-  await trust.announce(await json(manifest.announcementFile));
   await trust.update(await json(manifest.signedKeysetFile));
+  await trust.announce(await json(manifest.announcementFile));
   trust.assertUsable();
   if (BigInt(trust.version) < BigInt(manifest.minimumVersion))
     fail('根签清单低于受信最低版本');
@@ -179,8 +187,9 @@ export async function exportInstallation(manifestFile, now = Date.now) {
     fail('gateway 公钥配置无效');
   const checked = trust.key(gateway.kid, 'protocol_response', trust.version);
   if (
-    snapshot.publication.keyset.keys.find((key) => key.kid === gateway.kid)
-      ?.state !== 'active' ||
+    snapshot.publication.keyset.payload.keys.find(
+      (key) => key.kid === gateway.kid,
+    )?.state !== 'active' ||
     checked.publicKey
       .export({ format: 'der', type: 'spki' })
       .toString('base64url') !== (await spki(gateway.publicKeyFile))
@@ -189,11 +198,69 @@ export async function exportInstallation(manifestFile, now = Date.now) {
   return { connect };
 }
 
+/** Export only a root-verified public control package. The installation file is
+ * selected locally by the operator; the package never supplies its own roots. */
+export async function exportControlPackage(manifestFile) {
+  const manifest = detach(await readLocal(manifestFile, 65536));
+  if (
+    !exact(manifest, [
+      'installationFile',
+      'controlPackageFile',
+      'expectedIdentity',
+    ]) ||
+    !exact(manifest.expectedIdentity, ['tenant', 'realm', 'target'])
+  )
+    fail('控制导出 manifest 字段无效');
+  const local = (file) =>
+    path.resolve(path.dirname(path.resolve(manifestFile)), file);
+  const installation = detach(
+    await readLocal(local(manifest.installationFile), 65536),
+  );
+  const config = platformConfig(installation.connect);
+  const expected = manifest.expectedIdentity;
+  if (
+    !config.network ||
+    config.network.realm !== expected.realm ||
+    !positiveVersion(expected.realm) ||
+    typeof expected.tenant !== 'string' ||
+    !expected.tenant ||
+    typeof expected.target !== 'string' ||
+    !expected.target
+  )
+    fail('控制安装身份无效');
+  const pack = structure(
+    'ControlPackage',
+    detach(
+      await readLocal(local(manifest.controlPackageFile), jsonLimits.maxBytes),
+    ),
+  );
+  if (
+    pack.tenant_id !== expected.tenant ||
+    pack.realm !== expected.realm ||
+    pack.target_id !== expected.target ||
+    digest(pack.control) !== pack.control_digest ||
+    Buffer.from(pack.challenge, 'base64url').length < 32 ||
+    Buffer.from(pack.challenge, 'base64url').toString('base64url') !==
+      pack.challenge
+  )
+    fail('控制包绑定无效');
+  verifyControl(pack.control, {
+    tenant_id: expected.tenant,
+    realm: expected.realm,
+    roots: new Map(
+      config.network.roots.map((root) => [root.kid, root.public_key_spki]),
+    ),
+  });
+  return pack;
+}
+
 async function main(args) {
   if (args.length === 1 && args[0] === '--help') {
     process.stdout.write(usage + '\n');
     return;
   }
+  const controlOnly = args[0] === '--control';
+  if (controlOnly) args = args.slice(1);
   if (
     args.length < 1 ||
     args.length > 2 ||
@@ -201,7 +268,13 @@ async function main(args) {
   )
     fail(usage);
   const result =
-    JSON.stringify(await exportInstallation(args[0]), null, 2) + '\n';
+    JSON.stringify(
+      await (controlOnly
+        ? exportControlPackage(args[0])
+        : exportInstallation(args[0])),
+      null,
+      2,
+    ) + '\n';
   if (args[1]) await writeFile(args[1], result, { flag: 'wx', mode: 0o600 });
   else process.stdout.write(result);
 }

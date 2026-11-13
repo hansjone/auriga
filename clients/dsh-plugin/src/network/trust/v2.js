@@ -287,6 +287,23 @@ export function verifyPublication(context) {
   const known = new Map(
     (context.history ?? []).map((/** @type {any} */ x) => [x.kid, x]),
   );
+  for (const key of previous) {
+    const old = known.get(key.kid);
+    if (
+      old &&
+      ['public_key_spki', 'purpose', 'not_before', 'not_after'].some(
+        (f) => old[f] !== key[f],
+      )
+    )
+      reject('invalid_transition');
+    if (
+      [...known.values()].some(
+        (/** @type {any} */ old) =>
+          old.kid !== key.kid && old.public_key_spki === key.public_key_spki,
+      )
+    )
+      reject('invalid_transition');
+  }
   const ledger = new Map(
     (context.first_publication_ledger ?? []).map((/** @type {any} */ x) => [
       x.kid,
@@ -332,6 +349,14 @@ export function verifyPublication(context) {
     const first = k.first_publications.find(
       (/** @type {any} */ x) => x.kid === key.kid,
     );
+    if (!first) reject('invalid_transition');
+    // Root-permitted migration preserves existing PG first-publication facts.
+    if (
+      k.mode === 'migration' &&
+      context.migration_authorized &&
+      known.has(key.kid)
+    )
+      continue;
     if (
       !first ||
       first.committed_version !== k.keyset_version ||

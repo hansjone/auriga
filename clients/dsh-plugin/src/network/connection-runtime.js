@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { NatsTransport, createWsSocketFactory } from './transport/index.js';
 import { createFileLedgerStore } from './host/store.js';
 import { loadConnectionLedger } from './host/ledger.js';
-import { openTrustStore } from './trust/store.js';
+import { openV2TrustStore as openTrustStore } from './trust/v2-store.js';
+import { startTrustRefresh } from './trust/refresh-loop.js';
 import { canonicalize } from './trust/jcs.js';
 import { verifyEnvelopeWithRefresh } from './trust/verifier.js';
 import { bootstrapReady } from './session/bootstrap-ready.js';
@@ -279,6 +280,10 @@ export async function openConnectionRuntime(options) {
   let closing;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let deadline;
+  let stopTrustRefresh = () => {};
+  let trustRefreshStarted = false;
+  let controlImports = 0;
+  let controlFenced = false;
   /** @type {import('./host/store.js').LedgerStoreHandle[]} */
   const handles = [];
   /** @type {Set<Promise<unknown>>} */
@@ -464,9 +469,14 @@ export async function openConnectionRuntime(options) {
     value,
     current = () => !closed && !signal.aborted,
   ) {
-    await diagnostics
-      .scope('trust_refresh', 0, current)
-      .run(() => prepared.refresh(value, signal));
+    try {
+      await diagnostics
+        .scope('trust_refresh', 0, current)
+        .run(() => prepared.refresh(value, signal));
+    } finally {
+      if (controlFenced && controlImports === 0)
+        void close('revoked').catch(() => {});
+    }
     active();
     diagnostics
       .scope('trust_refresh', 0, current)
@@ -482,6 +492,17 @@ export async function openConnectionRuntime(options) {
       Math.max(0, value.expiresAt - now()),
     );
     deadline.unref?.();
+    if (!trustRefreshStarted) {
+      trustRefreshStarted = true;
+      stopTrustRefresh = startTrustRefresh({
+        refresh: () => refreshTrust(value),
+        expiresAt: () => value.expiresAt,
+        now,
+        onExpired: () => {
+          void close('key_unavailable').catch(() => {});
+        },
+      });
+    }
   }
   /** @param {string} name */
   async function handle(name) {
@@ -837,8 +858,11 @@ export async function openConnectionRuntime(options) {
         openTrustStore({
           cache: guarded(cache, 'trust'),
           roots: [...prepared.roots],
+          migrationPermit: prepared.migrationPermit,
           realm: registration.realm,
+          tenant_id: registration.tenant,
           requireAnnouncement: true,
+          identity_id: prepared.controlIdentity?.identity_id,
           now,
           refresh: async () => {
             await refreshTrust(trust);
@@ -847,6 +871,12 @@ export async function openConnectionRuntime(options) {
         }),
       );
       connectionTrust = trust;
+      trust.onIsolation(() => {
+        controlFenced = true;
+        connected = false;
+        retireRegistration();
+        void currentConnection?.stop().catch(() => {});
+      });
       active();
       if (ledger.state) await refreshTrust(trust);
       else {
@@ -1093,6 +1123,7 @@ export async function openConnectionRuntime(options) {
     retireRegistration();
     controller.abort();
     clearTimeout(deadline);
+    stopTrustRefresh();
     options.signal?.removeEventListener('abort', onAbort);
     const stopping = [...connections].map((entry) => entry.stop());
     closing = (async () => {
@@ -1128,6 +1159,27 @@ export async function openConnectionRuntime(options) {
   return {
     start,
     close,
+    /** @param {unknown} input @param {unknown} context */
+    async importControlPackage(input, context) {
+      if (!(await options.authorizeLocal(context)))
+        throw new Error('local control import forbidden');
+      if (!connectionTrust || !prepared.controlIdentity)
+        throw new Error('installation identity signer unavailable');
+      controlImports++;
+      try {
+        const receipt = await connectionTrust.importControlPackage(
+          input,
+          prepared.controlIdentity,
+        );
+        await prepared.confirmControlReceipt?.(receipt, signal);
+        if (prepared.confirmControlReceipt)
+          await connectionTrust.acknowledgeControlReceipt(receipt.package_id);
+        return receipt;
+      } finally {
+        controlImports--;
+        if (controlFenced) void close('revoked').catch(() => {});
+      }
+    },
     get diagnostics() {
       return {
         registration: registrationCapability?.status ?? {

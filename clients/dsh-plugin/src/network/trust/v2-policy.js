@@ -57,7 +57,8 @@ export function checkAnnouncementPair(context, announcement, persisted) {
     n.generation !== k.generation ||
     n.keyset_version !== k.keyset_version ||
     n.keyset_digest !== digest(p.keyset) ||
-    n.valid_until !== k.valid_until
+    n.valid_until !== k.valid_until ||
+    n.control_revision !== k.control_revision
   )
     reject('invalid_chain');
   verifyAnnouncement(
@@ -297,6 +298,7 @@ export function openSealedMaterial(sealed, receiver) {
         cipher.final(),
       ]),
     );
+    structure('ProjectionMaterial', plain);
     for (const field of [
       'tenant_id',
       'realm',

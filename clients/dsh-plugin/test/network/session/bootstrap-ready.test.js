@@ -8,7 +8,7 @@ import { bootstrapReady } from '../../../src/network/session/bootstrap-ready.js'
 import { createReadyRetry } from '../../../src/network/session/ready-retry.js';
 import { decodeJson, encodeJson } from '../../../src/network/session/frames.js';
 import { signingInput } from '../../../src/network/trust/verifier.js';
-import { openTrustStore } from '../../../src/network/trust/store.js';
+import { openTrustStore } from '../trust/v1-store.js';
 import { signedKeyset, testRoots } from '../trust/keyset-fixtures.js';
 
 const registration = Object.freeze({

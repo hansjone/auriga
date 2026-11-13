@@ -248,6 +248,29 @@ test('higher announcement fences immediately and remains blocked after disk fail
   await store.announce(f.announcement());
   store.assertUsable();
 });
+
+test('a root minimum-version fence disconnects the old snapshot while a matching new snapshot recovers', async () => {
+  const f = fixture(),
+    store = await openV2TrustStore(f.options);
+  await store.update(f.publish());
+  await store.announce(f.announcement());
+  let fenced = 0;
+  store.onIsolation(() => fenced++);
+  const base = f.control(3);
+  const control = f.rootSign(
+    { ...base.payload, minimum_keyset_version: '2' },
+    'Auriga.NetworkRootControl.v2',
+  );
+  await store.installControl(control);
+  assert.equal(fenced, 1);
+  assert.throws(() => store.assertUsable(), /unavailable/);
+  const publication = f.publish();
+  publication.control = control;
+  await store.update(publication);
+  await store.announce(f.announcement());
+  store.assertUsable();
+  assert.equal(store.isolated, false);
+});
 test('offline cross-year recovery retains more than 128 immutable history entries', async () => {
   const f = fixture();
   let store = await openV2TrustStore(f.options);
@@ -320,4 +343,53 @@ test('control package receipt is signed only after durable installation; replay 
     ),
     /invalid_transition/,
   );
+  assert.equal(reopened.pendingControlReceipts().length, 1);
+  await reopened.acknowledgeControlReceipt(pack.package_id);
+  const confirmed = await openV2TrustStore(f.options);
+  assert.equal(confirmed.pendingControlReceipts().length, 0);
 });
+
+test(
+  'late publication commit cannot clear a newer announcement whose own commit fails',
+  { timeout: 10000 },
+  async (t) => {
+    const f = fixture(),
+      store = await openV2TrustStore(f.options);
+    await store.update(f.publish());
+    await store.announce(f.announcement());
+    const next = f.publish(),
+      announce = f.announcement();
+    let entered, release;
+    const waiting = new Promise((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    t.after(() => release());
+    const original = f.cache.commit;
+    f.cache.commit = async (value) => {
+      if (
+        value.publication?.keyset.payload.keyset_version === '2' &&
+        value.announcement?.payload.keyset_version === '1'
+      ) {
+        entered();
+        await gate;
+      }
+      if (value.announcement?.payload.keyset_version === '2')
+        throw Error('announcement disk failure');
+      return original(value);
+    };
+    const update = store.update(next);
+    await waiting;
+    const announced = store.announce(announce);
+    const rejection = assert.rejects(announced, /announcement disk failure/);
+    release();
+    await update;
+    await rejection;
+    assert.throws(() => store.assertUsable(), /announcement/);
+    f.cache.commit = original;
+    await store.announce(announce);
+    store.assertUsable();
+  },
+);

@@ -17,7 +17,7 @@ import {
   signedAnnouncement,
   testRoots,
 } from './keyset-fixtures.js';
-import { openTrustStore as openRootTrustStore } from '../../../src/network/trust/store.js';
+import { openTrustStore as openRootTrustStore } from './v1-store.js';
 import { definitions } from '../../../src/generated/network/keyset-schema.js';
 import {
   verifyEnvelope,

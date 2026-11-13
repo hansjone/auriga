@@ -30,8 +30,8 @@ import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { decodeJson, encodeJson } from '../../src/network/session/frames.js';
 import { digest, signingInput } from '../../src/network/trust/verifier.js';
 import {
-  signedKeyset,
-  signedAnnouncement,
+  signedV2Keyset as signedKeyset,
+  signedV2Announcement as signedAnnouncement,
   testRoots,
   publicationFixture,
   signedReadyResult,
@@ -106,9 +106,9 @@ async function fixture(t, extra = {}) {
     async refresh(trust, signal) {
       await extra.refresh?.(trust, signal);
       signal.throwIfAborted();
-      await trust.announce(signedAnnouncement(payload));
-      signal.throwIfAborted();
       await trust.update(signedKeyset(payload));
+      signal.throwIfAborted();
+      await trust.announce(signedAnnouncement(payload));
     },
     async getTicket(signal) {
       signal.throwIfAborted();
@@ -2310,10 +2310,16 @@ test('real NATS WSS with official device factory closes C1 before T2, binds new 
     assert.equal(init.headers.authorization, 'Bearer native-device');
     if (path.endsWith('/register'))
       return Response.json({ ...identity, created: true });
+    if (path.endsWith('/controls'))
+      return Response.json(
+        signedKeyset(signer.payload, identity.tenant).control,
+      );
     if (path.endsWith('/announcement'))
-      return Response.json(signedAnnouncement(signer.payload));
+      return Response.json(
+        signedAnnouncement(signer.payload, {}, identity.tenant),
+      );
     if (path.endsWith('/keys'))
-      return Response.json(signedKeyset(signer.payload));
+      return Response.json(signedKeyset(signer.payload, identity.tenant));
     assert.equal(path, '/api/iam/v1/network/tickets');
     if (refreshMode) {
       if (refreshFailures++ === 0) return Response.json({}, { status: 503 });
@@ -2587,10 +2593,16 @@ test('plugin actual entry resumes verified native device into official factory, 
     if (path === '/oauth2/revoke') return Response.json({});
     if (path === '/api/iam/v1/network/register')
       return Response.json({ ...identity, created: true });
+    if (path.endsWith('/controls'))
+      return Response.json(
+        signedKeyset(signing.payload, identity.tenant).control,
+      );
     if (path.endsWith('/announcement'))
-      return Response.json(signedAnnouncement(signing.payload));
-    if (path === '/api/collab/v1/network/keys')
-      return Response.json(signedKeyset(signing.payload));
+      return Response.json(
+        signedAnnouncement(signing.payload, {}, identity.tenant),
+      );
+    if (path === '/api/collab/v2/network/keys')
+      return Response.json(signedKeyset(signing.payload, identity.tenant));
     assert.equal(path, '/api/iam/v1/network/tickets');
     const vector = vectors[ticketCount++];
     return Response.json({

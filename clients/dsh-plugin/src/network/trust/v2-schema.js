@@ -14,15 +14,24 @@ try {
   contract = (await import(generated.href)).schema;
 } catch (error) {
   if (/** @type {any} */ (error).code !== 'ERR_MODULE_NOT_FOUND') throw error;
-  contract = JSON.parse(
-    await readFile(
-      new URL(
-        '../../../../../contracts/network/auto-renewal-v2.schema.json',
-        import.meta.url,
-      ),
-      'utf8',
-    ),
+  const installed = new URL(
+    '../../../ui/network-auto-renewal-v2.schema.json',
+    import.meta.url,
   );
+  try {
+    contract = JSON.parse(await readFile(installed, 'utf8'));
+  } catch (readError) {
+    if (/** @type {any} */ (readError).code !== 'ENOENT') throw readError;
+    contract = JSON.parse(
+      await readFile(
+        new URL(
+          '../../../../../contracts/network/auto-renewal-v2.schema.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+  }
 }
 export const schema = contract;
 export const jsonLimits = Object.freeze({

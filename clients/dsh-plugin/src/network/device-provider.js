@@ -7,6 +7,7 @@ import { platformConfig, PlatformError } from '../local/platform.js';
 import { parseStrictJson } from './trust/jcs.js';
 import { positiveVersion } from './trust/keyset.js';
 import { diagnosticReason } from './diagnostics.js';
+import { jsonLimits } from './trust/v2-schema.js';
 
 const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
 /** Transient fetch failure only; validation and persistence errors never use it. */
@@ -49,12 +50,14 @@ const uuid = (value) =>
   /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 /** Fixed native device control only; no UI/model identity, service/AI token or
  * frame-provided URL is accepted. Raw bytes reach strict JSON/JCS validation.
- * @param {{config:any,getDevice:(signal:AbortSignal)=>Promise<{accessToken:string,claims:{tid:string,did:string,sub:string}}>,now?:()=>number}} options
+ * @param {{config:any,getDevice:(signal:AbortSignal)=>Promise<{accessToken:string,claims:{tid:string,did:string,sub:string}}>,now?:()=>number,controlIdentity?:import('./runtime-types.js').ControlIdentity,migrationPermit?:import('../generated/network/auto-renewal-v2.js').SignedMigrationPermit}} options
  * @returns {import('./runtime-types.js').DeviceNetworkProvider} */
 export function createDeviceProvider({
   config: input,
   getDevice,
   now = Date.now,
+  controlIdentity,
+  migrationPermit,
 }) {
   const config = platformConfig(input),
     installation = config.network;
@@ -174,7 +177,12 @@ export function createDeviceProvider({
               active.throwIfAborted();
               if (done) break;
               size += value.byteLength;
-              if (size > 65536) {
+              if (
+                size >
+                (path.startsWith('/api/collab/v2/')
+                  ? jsonLimits.maxBytes
+                  : 65536)
+              ) {
                 await reader.cancel();
                 throw diagnosticReason(
                   new Error('network control response too large'),
@@ -230,12 +238,44 @@ export function createDeviceProvider({
         url: installation.wssUrl,
         origin: config.platformOrigin,
         roots: installation.roots,
+        controlIdentity,
+        migrationPermit,
+        async confirmControlReceipt(receipt, active) {
+          await request(
+            '/api/collab/v2/network/controls/receipts',
+            receipt,
+            active,
+          );
+        },
         async refresh(trust, active) {
+          // Public control sync precedes every reconnect/refresh and does not
+          // depend on a message ticket or the possibly revoked message chain.
+          const control = await request(
+            '/api/collab/v2/network/bootstrap/controls',
+            undefined,
+            active,
+          );
+          await trust.installControl(control);
+          for (const receipt of trust.pendingControlReceipts()) {
+            await request(
+              '/api/collab/v2/network/controls/receipts',
+              receipt,
+              active,
+            );
+            await trust.acknowledgeControlReceipt(receipt.package_id);
+          }
+          active.throwIfAborted();
+          const keys = await run(
+            'keys_http',
+            () => request('/api/collab/v2/network/keys', undefined, active),
+            networkTiming.operationMs,
+          );
+          await run('keys_validate', () => trust.update(keys));
           const announcement = await run(
             'keys_announcement_http',
             () =>
               request(
-                '/api/collab/v1/network/keys/announcement',
+                '/api/collab/v2/network/keys/announcement',
                 undefined,
                 active,
               ),
@@ -244,13 +284,6 @@ export function createDeviceProvider({
           await run('keys_announcement_validate', () =>
             trust.announce(announcement),
           );
-          active.throwIfAborted();
-          const keys = await run(
-            'keys_http',
-            () => request('/api/collab/v1/network/keys', undefined, active),
-            networkTiming.operationMs,
-          );
-          await run('keys_validate', () => trust.update(keys));
           active.throwIfAborted();
           trust.assertUsable();
         },

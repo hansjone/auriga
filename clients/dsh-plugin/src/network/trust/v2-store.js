@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { SessionError } from '../session/errors.js';
 import {
   publicKey,
   positiveVersion,
@@ -51,6 +52,7 @@ export async function openV2TrustStore(options) {
   const history = new Map(),
     first = new Map(),
     receipts = new Map();
+  const receiptAcknowledged = new Set();
   let blocked = false,
     announcementUncertain = false,
     refreshRevision = 0;
@@ -76,6 +78,7 @@ export async function openV2TrustStore(options) {
         history: [...history.values()],
         first_publication_ledger: [...first.values()],
         receipts: [...receipts.values()],
+        receipt_acknowledged: [...receiptAcknowledged],
         v1_checkpoint: checkpoint,
         migration_permit: migrationPermit,
       }).filter(([, value]) => value !== undefined),
@@ -108,7 +111,11 @@ export async function openV2TrustStore(options) {
           options.identity_id,
         )) ||
         (!!a &&
-          (control.payload.revoked_authority_ids.includes(a.authority_id) ||
+          (publication.keyset.payload.generation !==
+            control.payload.minimum_generation ||
+            BigInt(publication.keyset.payload.keyset_version) <
+              BigInt(control.payload.minimum_keyset_version) ||
+            control.payload.revoked_authority_ids.includes(a.authority_id) ||
             !control.payload.allowed_authorities.some(
               (/** @type {any} */ x) =>
                 x.authority_id === a.authority_id &&
@@ -130,6 +137,7 @@ export async function openV2TrustStore(options) {
   async function installControl(input) {
     const candidate = detach(input);
     verifyControl(candidate, scope, control);
+    if (control && equal(candidate, control) && !blocked) return;
     // Fence before the first await. A failed write never restores the old chain.
     control = candidate;
     blocked = true;
@@ -151,12 +159,16 @@ export async function openV2TrustStore(options) {
     );
     if (
       permit.payload.realm !== realm ||
-      permit.payload.tenant_id !== tenant_id ||
-      publication
+      permit.payload.tenant_id !== tenant_id
     )
       reject('scope_denied');
-    if (migrationPermit && !equal(migrationPermit, permit))
+    if (
+      BigInt(permit.payload.minimum_v2_version) <=
+      BigInt(permit.payload.maximum_committed_v1_version)
+    )
       reject('invalid_transition');
+    if (migrationPermit && equal(migrationPermit, permit)) return;
+    if (publication || migrationPermit) reject('invalid_transition');
     migrationPermit = permit;
     blocked = true;
     return serialize(async () => {
@@ -196,15 +208,16 @@ export async function openV2TrustStore(options) {
         const permit = migrationPermit?.payload;
         if (
           !permit ||
-          payload.mode !== 'migration' ||
           BigInt(checkpoint.version) >
             BigInt(permit.maximum_committed_v1_version) ||
-          BigInt(payload.keyset_version) < BigInt(permit.minimum_v2_version) ||
-          payload.generation !== permit.minimum_generation
+          BigInt(payload.generation) < BigInt(permit.minimum_generation) ||
+          (payload.generation === permit.minimum_generation &&
+            BigInt(payload.keyset_version) < BigInt(permit.minimum_v2_version))
         )
           reject('invalid_transition');
         for (const old of history.values())
           if (
+            payload.mode === 'migration' &&
             old.state === 'active' &&
             now() < timeValue(old.not_after) &&
             !payload.keys.some((/** @type {any} */ key) => equal(key, old))
@@ -234,9 +247,10 @@ export async function openV2TrustStore(options) {
       publication = checked;
       blocked = true;
       const written = control;
+      const writtenAnnouncement = announcement;
       await cache.commit(snapshot());
       if (control === written) blocked = false;
-      announcementUncertain = false;
+      if (announcement === writtenAnnouncement) announcementUncertain = false;
     });
   }
   /** @param {any} input */
@@ -297,6 +311,21 @@ export async function openV2TrustStore(options) {
       }
       if (persisted.control)
         control = verifyControl(detach(persisted.control), scope);
+      checkpoint = persisted.v1_checkpoint;
+      migrationPermit = persisted.migration_permit;
+      if (migrationPermit) {
+        rootSignature(
+          migrationPermit,
+          roots,
+          'SignedMigrationPermit',
+          'Auriga.NetworkMigrationPermit.v2',
+        );
+        if (
+          migrationPermit.payload.tenant_id !== tenant_id ||
+          migrationPermit.payload.realm !== realm
+        )
+          reject('scope_denied');
+      }
       publication = persisted.publication && detach(persisted.publication);
       if (publication) {
         structure('Publication', publication);
@@ -327,18 +356,13 @@ export async function openV2TrustStore(options) {
       announcement = persisted.announcement && detach(persisted.announcement);
       if (announcement && publication && !isolation())
         verifyAnnouncement(announcement, publication.authority, control, scope);
-      checkpoint = persisted.v1_checkpoint;
-      migrationPermit = persisted.migration_permit;
-      if (migrationPermit)
-        rootSignature(
-          migrationPermit,
-          roots,
-          'SignedMigrationPermit',
-          'Auriga.NetworkMigrationPermit.v2',
-        );
       for (const r of persisted.receipts) {
         structure('InstallationReceipt', r);
         receipts.set(r.package_id, r);
+      }
+      for (const id of persisted.receipt_acknowledged ?? []) {
+        if (!receipts.has(id)) reject('invalid_transition');
+        receiptAcknowledged.add(id);
       }
     } else {
       // One-time audit import. A v1 snapshot can never satisfy assertUsable.
@@ -356,6 +380,9 @@ export async function openV2TrustStore(options) {
         if (history.has(key.kid)) unavailable('duplicate legacy history');
         history.set(key.kid, key);
       }
+      for (const key of old.keyset.keys)
+        if (!history.has(key.kid) || !equal(history.get(key.kid), key))
+          unavailable('incomplete legacy history');
       if (persisted.announcement)
         legacyAnnouncement(persisted.announcement, rootKeys);
       const high =
@@ -366,6 +393,10 @@ export async function openV2TrustStore(options) {
             ? high
             : old.keyset.keyset_version,
         digest: digest(persisted),
+        publication: old,
+        ...(persisted.announcement
+          ? { announcement: persisted.announcement }
+          : {}),
       };
       blocked = true;
       await cache.commit(snapshot());
@@ -385,6 +416,27 @@ export async function openV2TrustStore(options) {
     },
     get controlRevision() {
       return control?.payload.control_revision ?? '0';
+    },
+    get isolated() {
+      return isolation();
+    },
+    pendingControlReceipts() {
+      return [...receipts.values()]
+        .filter((r) => !receiptAcknowledged.has(r.package_id))
+        .map(detach);
+    },
+    /** @param {string} packageId */
+    async acknowledgeControlReceipt(packageId) {
+      if (!receipts.has(packageId)) reject('invalid_transition');
+      receiptAcknowledged.add(packageId);
+      try {
+        await serialize(async () => {
+          await cache.commit(snapshot());
+        });
+      } catch (error) {
+        receiptAcknowledged.delete(packageId);
+        throw error;
+      }
     },
     get expiresAt() {
       return Math.min(
@@ -434,6 +486,7 @@ export async function openV2TrustStore(options) {
           n.keyset_digest !== digest(publication.keyset) ||
           n.valid_until !== k.valid_until ||
           n.authority_id !== k.authority_id ||
+          n.control_revision !== k.control_revision ||
           n.authority_digest !== k.authority_digest ||
           now() >= timeValue(n.valid_until))
       )
@@ -454,7 +507,11 @@ export async function openV2TrustStore(options) {
         now() >= timeValue(key.not_after)
       )
         unavailable('key unavailable');
-      if (key.purpose !== purpose) unavailable('key purpose mismatch');
+      if (key.purpose !== purpose)
+        throw new SessionError(
+          'network.signature_invalid',
+          'key purpose mismatch',
+        );
       return {
         publicKey: publicKey(key.public_key_spki),
         realm,
@@ -542,6 +599,11 @@ export async function openV2TrustStore(options) {
           )
         )
           reject('invalid_transition');
+        // A prior receipt commit may have failed after signing. Persist again
+        // before returning an exact replay to the acknowledgement transport.
+        await serialize(async () => {
+          await cache.commit(snapshot());
+        });
         return detach(previous);
       }
       await installControl(pack.control);

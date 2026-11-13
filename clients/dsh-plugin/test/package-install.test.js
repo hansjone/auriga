@@ -77,7 +77,12 @@ test(
         telemetryDisabledEnv: undefined,
         packageManager: {
           command: process.execPath,
-          args: [process.env.AURIGA_DESKTOP_PNPM_CLI],
+          args: [
+            process.env.AURIGA_DESKTOP_PNPM_CLI,
+            ...(process.env.AURIGA_PNPM_STORE
+              ? ['--store-dir', process.env.AURIGA_PNPM_STORE]
+              : []),
+          ],
           env: { ELECTRON_RUN_AS_NODE: '1' },
         },
       };

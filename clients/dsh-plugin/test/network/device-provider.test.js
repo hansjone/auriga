@@ -11,7 +11,7 @@ import {
 } from '../../src/network/diagnostics.js';
 import { openConnectionRuntime } from '../../src/network/connection-runtime.js';
 import { createMemoryLedgerStore } from '../../src/network/host/store.js';
-import { openTrustStore } from '../../src/network/trust/store.js';
+import { openTrustStore } from './trust/v1-store.js';
 import {
   publicationFixture,
   signedKeyset,
