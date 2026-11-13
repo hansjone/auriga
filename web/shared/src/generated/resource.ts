@@ -1560,6 +1560,16 @@ export interface components {
       /** Format: int64 */
       releaseSequence: number;
       enabled: boolean;
+      /**
+       * Format: int64
+       * @description Resource-assigned persisted per-installation CAS revision. Preserved by signature renewal and echoed by node/Desktop reports. Omission is transport-compatible only: never accept applied without a positive expected revision.
+       */
+      installationRevision?: number;
+      /**
+       * @description Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values.
+       * @enum {string}
+       */
+      desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
     };
     UnifiedSelection: {
       identity: components['schemas']['UnifiedResourceIdentity'];
