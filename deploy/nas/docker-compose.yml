@@ -316,10 +316,12 @@ services:
       AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
       AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
       AURIGA_IAM_EDGE_DNS_SAN: edge.auriga.internal
-      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties,file:/etc/auriga/network/platform.properties
+      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties,file:/etc/auriga/network/platform.properties,optional:file:/etc/auriga/uac/uac.properties
       AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED: 'true'
       AURIGA_IAM_EDGE_INSTALLATION_SECRET_FILE: /run/auriga-installation/edge.secret
       AURIGA_IAM_EDGE_TOKEN_FILE: /run/auriga-internal/edge/service.jwt
+      AURIGA_IAM_UAC_SSO_COOKIE_ENABLED: ${AURIGA_IAM_UAC_SSO_COOKIE_ENABLED:-true}
+      AURIGA_IAM_UAC_DIAGNOSTICS_LOKI_ORIGIN: http://loki:3100
       AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:-3600}
       AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:-60}
       # Public PKCE/device client only: no secret, redirect, or browser OAuth grant.
@@ -355,9 +357,10 @@ services:
       - ${AURIGA_DATA_ROOT}/config/materials/pki:/etc/auriga/pki:ro
       - ${AURIGA_DATA_ROOT}/config/materials/templates:/etc/auriga/templates:ro
       - ${AURIGA_DATA_ROOT}/config/materials/runtime-keys:/etc/auriga/runtime-keys:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/uac:/etc/auriga/uac:ro
       - ${AURIGA_DATA_ROOT}/enrollment:/var/auriga
       - ${AURIGA_DATA_ROOT}/ops-runtime:/var/auriga-ops
-    networks: [internal, publish]
+    networks: [internal, publish, observability]
     expose:
       - '8081'
       - '7443'

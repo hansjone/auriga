@@ -341,6 +341,11 @@ inspect 各 30 秒、每次不可变 Id 导出各 3 分钟，失败取消并回�
 
 ## 可选集中日志
 
+UAC 诊断下载随平台服务发布。私有适配器/成员核实/密钥环、只读配置目录、
+详细开关、下载权限与缺源含义见 [UAC 后端部署说明](../../services/iam/impl/UAC.zh.md)。
+平台通过内部 observability 网络查询 Loki；关闭日志 profile 时下载显式标记 Loki 缺源。
+采集端同时处理普通 JSON 和 Docker 外包装中的转义 JSON，不把身份字段加入索引标签。
+
 NAS 也支持 `observability` profile，使用与 Compose 开发栈相同版本的
 Loki 3.5.5、Alloy 1.10.2。在可信渠道独立批准这两个版本的 linux/amd64 摘要，
 显式拉取后核对 `RepoDigests`、平台和本地 Id；在数据根的 `stack.env` 添加：
