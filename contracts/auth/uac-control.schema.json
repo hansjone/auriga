@@ -594,13 +594,8 @@
         "continuation": {
           "type": "string",
           "enum": [
-            "portal",
-            "device"
+            "portal"
           ]
-        },
-        "deviceGrantId": {
-          "type": "string",
-          "format": "uuid"
         },
         "transactionCookie": {
           "type": "string",
@@ -632,6 +627,11 @@
             }
           },
           "required": []
+        },
+        "csrfCookie": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "edge转发本入口现有CSRF cookie供IAM验证及复用；不得信任浏览器自报绑定。"
         }
       },
       "required": [
@@ -641,39 +641,7 @@
         "continuation",
         "fetchMetadata"
       ],
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "continuation": {
-                "const": "device"
-              }
-            },
-            "required": [
-              "continuation"
-            ]
-          },
-          "then": {
-            "required": [
-              "deviceGrantId"
-            ],
-            "properties": {
-              "deviceGrantId": {}
-            }
-          },
-          "else": {
-            "not": {
-              "required": [
-                "deviceGrantId"
-              ],
-              "properties": {
-                "deviceGrantId": {}
-              }
-            }
-          }
-        }
-      ],
-      "description": "仅可信edge调用；tenant来自内部授权，Origin必须与该tenant的受信入口完全匹配。Fetch Metadata为浏览器实际请求头证据，缺项不具备auto资格。deviceGrantId须由IAM核验未过期且与当前事务绑定；portal不可携带。"
+      "description": "仅可信edge签发门户导航；tenant来自内部授权，Origin与受信入口精确匹配。Fetch Metadata缺项不具备auto资格。设备续接只能调用device-navigation-proofs并传userCode；本端口拒绝device续接和任何deviceGrantId。"
     },
     "UacNavigationIssued": {
       "type": "object",
@@ -692,6 +660,11 @@
           "enum": [
             120
           ]
+        },
+        "csrfCookie": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "仅受认证内部响应交edge设置可读CSRF Cookie；不得进入HTML或日志。已有有效CSRF时复用并返回同值。"
         }
       },
       "required": [
@@ -699,6 +672,77 @@
         "transactionCookie",
         "ttlSeconds"
       ]
+    },
+    "UacDeviceNavigationIssueRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "origin": {
+          "type": "string",
+          "format": "uri"
+        },
+        "continuation": {
+          "type": "string",
+          "const": "device"
+        },
+        "transactionCookie": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "suppressionCookie": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "fetchMetadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "dest": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "mode": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "site": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "user": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": []
+        },
+        "userCode": {
+          "type": "string",
+          "pattern": "^[BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4}$"
+        },
+        "csrfCookie": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "edge转发本入口现有CSRF cookie供IAM验证及复用；不得信任浏览器自报绑定。"
+        }
+      },
+      "required": [
+        "requestId",
+        "providerId",
+        "origin",
+        "continuation",
+        "fetchMetadata",
+        "userCode"
+      ],
+      "description": "仅svc:edge使用。IAM在受委派tenant内规范化userCode（去连字符、大写），解析唯一、未过期且未消费的权威设备事务，核对provider和来源绑定；失败统一404。解析和导航证明绑定原子完成，不向浏览器返回grant ID。autoEligible恒false。"
     }
   }
 }
