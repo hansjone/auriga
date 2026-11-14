@@ -8,7 +8,9 @@ edge JSON 配置的 `uacProviderId` 指向本安装启用的 UAC 身份源。为
 
 普通门户 GET 调用内部 `navigation-proofs`；设备 GET 只向 `device-navigation-proofs` 传路径中的公开用户码，由 IAM 解析权威设备事务，不接受浏览器 grant ID。iframe、预取、错误 Origin、重复导航元数据及重复认证 Cookie 被拒绝。跨站顶层导航正常显示页面，将跨站证据传给 IAM，并确保不具备自动登录资格；缺少导航元数据时由 IAM 判为不具备自动登录资格。IAM 明确返回合法的 4xx problem 时正常输出 HTML，不注入导航上下文，保留团队登录及设备页自己的过期提示；传输失败或响应畸形仍返回 503。
 
-内部签发响应的事务 Cookie 仅设置为 HttpOnly/SameSite=Lax/Path=/；匿名 CSRF Cookie 对同源 JS 可读。浏览器 CSRF 值必须符合 43 位 base64url 格式，否则视为不存在，由 IAM 重新签发。复用既有值也重写同值 Cookie，寿命按新证明剩余期限向上取整，覆盖证明有效期。HTTPS 均 Secure 并使用 `__Host-` 前缀。页面响应 no-store、禁止嵌入，并只注入冻结的导航 context 和经过 UUID 校验的关联 ID。
+内部签发响应的事务 Cookie 仅设置为 HttpOnly/SameSite=Lax/Path=/；匿名 CSRF Cookie 对同源 JS 可读。浏览器 CSRF 值必须符合 43 位 base64url 格式，否则视为不存在，由 IAM 重新签发。没有门户会话 Cookie 时，复用的匿名 CSRF 也重写同值 Cookie，寿命按新证明剩余期限向上取整，覆盖证明有效期；携带门户会话 Cookie 且 IAM 复用同值 CSRF 时不写 CSRF Cookie，保留其原有会话寿命。会话 Cookie 的存在只用于保护已有寿命，不作为认证依据；会话有效性仍由 IAM 和既有写操作鉴权检查。HTTPS 均 Secure 并使用 `__Host-` 前缀。页面响应 no-store、禁止嵌入，并只注入冻结的导航 context 和经过 UUID 校验的关联 ID。
+
+内部导航签发返回合规的 401/403 时，edge 输出含状态码、关联 ID 和用途的 WARN，便于排查服务身份或委派配置；不记录 Cookie、证明或上游问题正文。
 
 门户 UAC 登录成功（包括额外验证）后优先返回合法的本地相对 `returnTo`，否则进入 `/instance-login.html`。设备页续接仍只回到核码确认，不创建或打开云端实例。
 

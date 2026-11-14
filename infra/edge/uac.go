@@ -96,7 +96,7 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 		return true
 	}
 	secure := g.requestSecureCookies(r)
-	names := []string{cookieName(secure, "auriga_portal_login_tx"), cookieName(secure, "auriga_portal_sso_suppression"), cookieName(secure, csrfCookieBase())}
+	names := []string{cookieName(secure, "auriga_portal_login_tx"), cookieName(secure, "auriga_portal_sso_suppression"), cookieName(secure, csrfCookieBase()), cookieName(secure, sessionCookieBase("portal"))}
 	values := make([]string, len(names))
 	for i, name := range names {
 		count := 0
@@ -169,6 +169,9 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 			fail(503)
 			return true
 		}
+		if g.Log != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			g.Log.WarnContext(r.Context(), "UAC navigation signing rejected", "status", resp.StatusCode, "correlationId", w.Header().Get(uacCorrelationHeader), "purpose", purpose)
+		}
 		html, err := g.uacPageHTML(r)
 		if err != nil {
 			fail(503)
@@ -236,8 +239,11 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 		return true
 	}
 	http.SetCookie(w, txCookie)
-	// Reissue the same value so an older anonymous cookie cannot expire first.
-	http.SetCookie(w, csrfCookie)
+	// Renew anonymous bindings, but preserve an existing session cookie's lifetime.
+	// Session-cookie presence only protects the lifetime; IAM still authenticates it.
+	if values[3] == "" || csrf != values[2] {
+		http.SetCookie(w, csrfCookie)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	addition := []byte("<meta name=\"auriga-uac-provider\" content=\"" + g.Cfg.UacProviderID + "\"><meta name=\"auriga-uac-correlation\" content=\"" + correlation + "\"><script type=\"application/json\" id=\"auriga-uac-navigation\">")
