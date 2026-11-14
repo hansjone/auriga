@@ -11,10 +11,10 @@ const file = join(root, 'policy.json');
 const supervisor = resolve('infra/agent/internal/renderer/resource_supervisor.mjs');
 const policy = expires => JSON.stringify({schemaVersion:1,newSessionRequired:false,trustedTime:new Date().toISOString(),leaseExpiresAt:new Date(expires).toISOString()});
 try {
-  for (const renew of [false, true]) {
+  for (const blocking of [false, true]) for (const renew of [false, true]) {
     const started = Date.now();
     await writeFile(file, policy(started + 1500));
-    const child = spawn(process.execPath, [supervisor, file, process.execPath, '-e', 'setInterval(()=>{},100)'], {windowsHide:true,stdio:'pipe'});
+    const child = spawn(process.execPath, [supervisor, file, process.execPath, '-e', blocking ? 'while(true){}' : 'setInterval(()=>{},100)'], {windowsHide:true,stdio:'pipe'});
     const exit = once(child, 'exit');
     let stderr = ''; child.stderr.on('data', data => stderr += data);
     const timeout = setTimeout(() => child.kill(), 8000);
@@ -31,5 +31,9 @@ try {
   const child=spawn(process.execPath,['--import','data:text/javascript,'+encodeURIComponent(rollback),supervisor,file,process.execPath,'-e','setInterval(()=>{},100)'],{windowsHide:true,stdio:'pipe'});
   const exit=once(child,'exit'), timeout=setTimeout(()=>child.kill(),8000);
   try { const [code]=await exit; assert.equal(code,78,'wall clock rollback did not stop child'); } finally {clearTimeout(timeout);if(child.exitCode===null&&child.signalCode===null){child.kill();await exit;}}
-  console.log('Independent supervisor stopped real child at expiry and clock rollback; atomic policy renewal extended deadline.');
+  await writeFile(file,policy(Date.now()+60000));
+  const crashed=spawn(process.execPath,[supervisor,file,process.execPath,'-e','process.exit(23)'],{windowsHide:true,stdio:'pipe'});
+  const crashExit=once(crashed,'exit'), crashTimeout=setTimeout(()=>crashed.kill(),8000);
+  try {const [code]=await crashExit;assert.equal(code,23,'supervisor did not observe child crash');}finally{clearTimeout(crashTimeout);if(crashed.exitCode===null&&crashed.signalCode===null){crashed.kill();await crashExit;}}
+  console.log('Independent supervisor stopped normal/blocking real children at expiry and clock rollback, observed crash; atomic policy renewal extended deadline.');
 } finally { await rm(root, {recursive:true,force:true}); }
