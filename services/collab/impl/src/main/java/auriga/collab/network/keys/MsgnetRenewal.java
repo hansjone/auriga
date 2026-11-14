@@ -1107,6 +1107,11 @@ public final class MsgnetRenewal {
       schema("RenewalStatusOutput", unpublished, "invalid_chain");
       return canonical(unpublished);
     }
+    var rootPolicy = state.path("control").path("payload");
+    if ("none".equals(failureCode)
+        && (!k.path("generation").equals(rootPolicy.path("minimum_generation"))
+            || number(k, "keyset_version").compareTo(number(rootPolicy, "minimum_keyset_version"))
+                < 0)) failureCode = "collab.msgnet_version_rollback";
     if ("none".equals(failureCode) && !clock.instant().isBefore(time(k, "valid_until")))
       failureCode = "collab.msgnet_invalid_transition";
     boolean announced =

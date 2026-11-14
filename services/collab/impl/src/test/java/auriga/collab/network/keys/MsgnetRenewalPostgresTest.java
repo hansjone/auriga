@@ -1093,6 +1093,9 @@ class MsgnetRenewalPostgresTest {
               number(control, "control_revision").add(java.math.BigInteger.ONE).toString())
           .put("minimum_keyset_version", "100");
       service().installControl(rootSigned(control, "NetworkRootControl"));
+      var waiting = NetworkJson.parse(service().status());
+      assertEquals("degraded", text(waiting, "state"));
+      assertEquals("collab.msgnet_version_rollback", text(waiting, "failure_code"));
       var called = new java.util.concurrent.atomic.AtomicBoolean();
       assertEquals(
           "collab.msgnet_version_rollback",
