@@ -209,6 +209,21 @@ printf 'AURIGA_AUDIT_NATS_URL=nats://bifrost_audit:%s@nats:4222\n' "$NATS_AUDIT"
 chmod 0600 "$CONFIG/bifrost-audit.env"
 chown_required 10003:10003 "$CONFIG/bifrost-audit.env"
 
+# Desktop trust is operator-provisioned; never generate or rotate a release key here.
+mkdir -p "$CONFIG/desktop" "$AURIGA_DATA_ROOT/desktop"
+[ ! -L "$CONFIG/desktop" ] && [ ! -L "$AURIGA_DATA_ROOT/desktop" ] || die 'Desktop directory symlink refused'
+chmod 0755 "$CONFIG/desktop"
+chmod 0700 "$AURIGA_DATA_ROOT/desktop"
+chown_required 10001:10001 "$AURIGA_DATA_ROOT/desktop"
+_desktop_tenant=${AURIGA_DESKTOP_PUBLISHER_TENANT_ID:-}
+if [ -n "$_desktop_tenant" ]; then
+  printf '%s\n' "$_desktop_tenant" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' || die 'invalid Desktop publisher tenant UUID'
+  _desktop_key="$CONFIG/desktop/release-public.pem"
+  [ -f "$_desktop_key" ] && [ ! -L "$_desktop_key" ] || die 'provision Desktop release public key before enabling Desktop'
+  openssl pkey -pubin -in "$_desktop_key" -text -noout | grep -q 'ED25519 Public-Key' || die 'Desktop public key must be Ed25519'
+  chmod 0644 "$_desktop_key"
+fi
+
 cat >"$CONFIG/platform.env" <<EOF
 SPRING_PROFILES_ACTIVE=$PROFILES
 AURIGA_OPS_RUNTIME_ENABLED=${AURIGA_OPS_RUNTIME_ENABLED:-false}
@@ -267,6 +282,13 @@ AURIGA_WORKSPACE_TEMPLATES_DIRECTORY=/etc/auriga/templates
 AURIGA_WORKSPACE_ARTIFACT_KEYS_DIRECTORY=/etc/auriga/runtime-keys
 AURIGA_PLATFORM_SEED=$SEED
 EOF
+if [ -n "$_desktop_tenant" ]; then
+  cat >>"$CONFIG/platform.env" <<EOF
+AURIGA_RESOURCE_DESKTOP_DIRECTORY=/var/lib/auriga/desktop
+AURIGA_RESOURCE_DESKTOP_PUBLIC_KEY_FILE=/etc/auriga/desktop/release-public.pem
+AURIGA_RESOURCE_DESKTOP_PUBLISHER_TENANT_ID=$_desktop_tenant
+EOF
+fi
 chmod 0600 "$CONFIG/platform.env"
 chown_required 10001:10001 "$CONFIG/platform.env"
 
