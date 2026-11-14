@@ -1,6 +1,6 @@
 # 共享宿主适配 P
 
-基线：`f6001a02`；协议以 `contracts/shared-dsh/**` 为准。这里实现自有调用路径，不替换原生浏览器的 Cookie、index 或 WS 身份。不修改 DSH 原型或私有方法，不写 `process.env`，不使用全局当前用户，不回退独立实例 owner。
+契约基线为 `f6001a02`，已合入 #337 后的 main `edcdb32b`。协议以 `contracts/shared-dsh/**` 为准。自有调用路径按请求校验归属，任务变量通过不可变对象传递。
 
 > 共享池仅限互信团队。成员可能互相看到文件，并可能以 owner 能力操作。成员之间会话内容可见，且可能以其他成员的身份操作内部应用、审计记在被冒用者名下。同一进程卡死、崩溃或取消超时会中断全池任务。需要保密或独立故障域请使用独立容器。
 
@@ -20,13 +20,17 @@ R 的共享 profile 选择包入口 `auriga-dsh/shared`，不得同时加载默�
 - `sessions.prepare(id,{meta:{cwd}})`、`publish(prepared)`、`discard(prepared)`：对接公开 SessionStore prepare/enter 与撤销生命周期。prepare 必须未发布；失败必须 discard。cwd 由 P 按 K 固定池路径生成，客户端只可传 parentSessionId。
 - `invoke(action,binding,args)`：有限 action 的公开宿主调用。P 调用前后都重核本人归属；不得将未经检查的 sessionId/cwd 从 args 再次传入宿主，以覆盖已核 binding。
 - `assertProfile(expected)`：同步核对实际加载配置，只有全部已卸载的能力与固定平台 skill 根符合预期才返回 true。执行工具、terminal、jobs、subagent、stdio MCP、动态安装、个人 Key、私有 skill 均关闭；includeDefaultRoots=false，customSkillDirs 只能是 R 的平台活跃根。返回 false、Promise 或缺失均拒绝启动。该接口不是 P 已实际卸载控制器的证明，真实 profile 验收留联合接线。
+
+工具行使用公开配置 `mode: native`，对应 SHARED_PROFILE.toolPresentation。该配置让有限工具可被模型直接调用。R 的 profile 核验同时检查这一配置，公开 ToolRuntime 测试也按此配置装配。
+
 - `disconnect(revocation)`：主动断开匹配 placement 的自有连接；W/节点撤销事件调用 `ctx.aurigaShared.revoke(event)`，清本地归属投影并使 remoteAccess 缓存失效。进程重启后的围栏仍由 W/IAM 持久化保证。
 - `issueTask(binding,execution,['outbound'])`：沿 IAM 既有授权接缝签发 K 能力；从真实 tools execution 获取任务，不接受模型指定成员、会话、taskId。有限企业工具不领取 credentials scope。
+- `finishTask(binding,execution,token)` 在任务结束时撤销该任务能力。有限企业工具在 finally 释放能力。受信 helper 使用 `ctx.aurigaShared.openTask(execution)` 返回的上下文，结束时调用 close()。该上下文提供 DSH_SESSION_ID、DSH_TEAM_TASK_CAPABILITY、DSH_TEAM_BASE、DSH_WEB_URL 和 DSH_TEAM_HELPERS，helperBase 由宿主设置为回环 `/dsh-team` 地址。变量只交给对应任务的受控 helper。
 - `config()`：实时读取私有部署配置 `{allowRawAgentToken,outboundAllowedHosts}`；raw 缺省为 true，明确 false 后下一次原始读取拒绝。空主机清单拒绝全部。
 
-`enterprise` 子对象提供 `taskId(token)`、`credentials(binding,claims)` 与 `outbound(request,material,binding)`。taskId 从任务能力解析，P 随后严格验签并与任务权威核对。credentials 调用既有 IAM 企业材料读取，须按本人绑定返回最新 `{empNo,token,updatedAt,credentialVersion,cookies?}`。outbound 由企业私有适配器重建认证头、禁重定向并执行 HTTPS 请求，按 timeoutMs 实际取消网络请求，返回 `{statusCode,headers,body,json}`；不得记录材料或在异常中夹带材料。P 只保留有限请求头、响应头，已知 token/Cookie 值与结构化认证字段脱敏，并在异步返回前再核能力和版本。
+`enterprise` 子对象提供 `taskId(token)`、`credentials(binding,claims)` 与可选的 `outbound(request,material,binding)`。taskId 从任务能力解析，P 随后严格验签并与任务权威核对。credentials 调用既有 IAM 企业材料读取，须按本人绑定返回最新 `{empNo,token,updatedAt,credentialVersion,cookies?}`。默认 `enterprise-transport.js` 从私有配置 empNoHeader/authValueHeader 重建认证头，以禁重定向和实际超时取消执行 HTTPS 请求，返回 `{statusCode,headers,body,json}`。部署可提供经过同等校验的 transport。P 只保留有限请求头、响应头，已知 token/Cookie 值与结构化认证字段脱敏，并在异步返回前再核能力和版本。
 
-以上端口必须真实实现后才能启用共享；本目录测试全部以替身装配，不冒充 IAM/R/N 已接线。
+启用共享前需要装配这些权威端口。W/IAM/R/N 在本目录以契约替身验收，rc.3 公开宿主组件另行实测。
 
 ## 自有 HTTP 与工具入口
 
@@ -36,10 +40,18 @@ R 的共享 profile 选择包入口 `auriga-dsh/shared`，不得同时加载默�
 
 注册有限工具 `auriga_enterprise_request`、`auriga_shared_resources`。执行时核真实 agent/session 对象，从登记表取归属，再取任务能力，不接收模型提交的企业 token。ToolRuntime guard 拒绝其余所有工具；pre-execute 的允许不能覆盖 guard 的单调拒绝。guard 外控制器须由 R 的 profile 实际关闭。
 
-本基线未包含设计引用的原型 handleAgentCredentials、handleOutbound、shellEnv 注册及 uds_skill_auth.py。此实现按冻结 wire 格式新增共享 handler，不假称已迁入原型 helper。共享模式禁 shell，不注册全局 shellEnv；既有 request()/resolve() 的 Python 原型原文、桌面兼容和真实 IAM broker 需由 auth-shell 原工作线串行提供后补核。
+Python helper 从 oclaw `0321a05b0db3797fdb5320aacabe5244436972f6` 的两处 `uds_skill_auth.py` 原文迁入，分别位于 `skills/uds-skill-auth/scripts` 和 `skill-helpers/python`，随包保留上游 MIT 许可。两 handler 已对照同版本 `dsh-team/lib/agent-auth.js` 的接口行为与 auth-shell 第3.1.2节，按 K 的共享签名能力及逐调用权威校验适配。测试用原 helper 的 `request()` 和 `resolve(apply_env_aliases=False)` 调用真实临时回环 handler，覆盖 raw 默认开启和关闭后的下一次拒绝。平台 skill 发布时由 R 放入签名活跃根。
+
+## N 模型与消息接线
+
+共享入口要求 `llm` 服务和 `ports.downstream`，向公开 LlmRuntime 注册 `auriga-shared` adapter。`ports.downstream.taskForSession(binding,signal)` 从真实在途任务返回 taskId 与稳定 callId，`issue(binding,taskId,audience,scopes,signal)` 接 N 的内部签发端口。`model(request)` 接 N SharedProvider.Invoke 并把流转为公开 LLM chunk。request 的 tenantId、sessionId 来自登记归属，taskId、callId 来自宿主，capability 经独立用途公钥校验。body 是模型参数，N 的内部传输适配负责序列化为 SharedRequest.Body。
+
+`send(request)` 和 `receive(request)` 对接 N SharedBroker 的发送/接收端口，保留 messageId、target、body，按登记会话取得 message.send 或 message.receive 能力。目标授权、64KiB 上限、背压、去重、收据和单次投递继续由 N/msgnet-v2 承担。P 在调用前后与每个模型分片发布前重核能力，关闭时合作取消在途模型流。生产传输桥须按 `infra/ai-gateway/SHARED-DSH.zh.md` 映射到 N 的 Go 内部端口，当前以契约替身验收。
 
 ## 验证与界限
 
 根目录执行 `node --test clients/dsh-plugin/src/shared/shared.test.mjs`；已纳入插件 test 脚本。测试密钥均运行时生成。schema 快照与 K 原文件逐对象比对，不改 contracts。签名及 schema 只覆盖使用的七种冻结消息，不把轻量校验器当通用 JSON Schema 引擎。
 
-双成员、双企业应用均为替身；临时 HTTP 服务只监听随机回环端口，结束即关闭。原生 owner 驱动 B 会话、按 B 企业身份执行业务且审计归 B 的测试是显式模拟反例，不是真实原生页面复测。真实 DSH、Web/WS、原生文件跨读、Linux、普通用户页面和 NAS 部署仍由主控串行联合验收。任何这些项目未测，都不能写“已隔离”“已交付”或“可验收”。
+公开 ToolRuntime 验证通过 `AURIGA_DSH_PUBLIC_PACKAGE_ROOT` 指向锁定安装了 rc.3 的独立 package 根目录，再执行 `node --test clients/dsh-plugin/src/shared/public-host.test.mjs`。它只组合公开 API，验证 pre-execute 返回 allow 后 guard 仍阻止工具体。未提供该路径时此项跳过。
+
+双成员归属与企业应用通过替身验收，临时 HTTP 服务使用随机回环端口并在结束时关闭。锁定 rc.3 公开组件实测了原生 Cookie 将 A/B 映射到同一个 owner，以及该 Peer 通过 Gateway 读取 B 会话目录和本人会话跨目录文件。企业调用按 B 身份执行、审计归 B 的反例继续由企业应用替身记录。正常门户页面、完整 Web/WS、Linux 及 NAS 部署转主控串行联合验收，并保留第3.1节全部共享风险披露。

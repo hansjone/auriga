@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { fail, SHARED_RISK } from './protocol.js';
+import { executionSession, openSharedTask } from './task-context.js';
 
 export const SHARED_PROFILE = Object.freeze({
   shell: false,
@@ -11,6 +12,7 @@ export const SHARED_PROFILE = Object.freeze({
   privateSkills: false,
   personalKeys: false,
   includeDefaultRoots: false,
+  toolPresentation: 'native',
 });
 const finiteTools = new Set([
   'auriga_enterprise_request',
@@ -79,25 +81,24 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
             ],
           },
           async execute(args, execution) {
-            const agent = execution.agent;
-            if (
-              !agent ||
-              ctx.sessions.get(agent.session?.id) !== agent.session ||
-              ctx.agents.get(agent.id) !== agent
-            )
-              fail();
-            const id = agent.session.id,
-              b = await runtime.session(id);
+            const id = executionSession(ctx, execution);
             if (name === 'auriga_shared_resources')
               return runtime.resources(id);
             // Capability issuer derives task identity from the live host execution.
-            const taskCapability = await ports.issueTask(b, execution, [
-              'outbound',
-            ]);
-            return enterprise.outbound({
-              remoteAddress: '127.0.0.1',
-              body: { ...args, dshSessionId: id, taskCapability },
+            const task = await openSharedTask({
+              ctx,
+              runtime,
+              ports,
+              execution,
             });
+            try {
+              return await enterprise.outbound({
+                remoteAddress: '127.0.0.1',
+                body: { ...args, dshSessionId: id, taskCapability: task.token },
+              });
+            } finally {
+              await task.close();
+            }
           },
         }),
       );
@@ -115,6 +116,24 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
     create: (peer, input) => runtime.create(peer, ports.sessions, input),
     async invoke(peer, action, sessionId, args) {
       const b = await runtime.authorize(peer, action, sessionId);
+      if (!args || typeof args !== 'object' || Array.isArray(args))
+        fail('common.validation_failed');
+      for (const key of [
+        'cwd',
+        'ownerId',
+        'tenantId',
+        'memberId',
+        'placementId',
+        'physicalInstanceId',
+        'epoch',
+        'authGeneration',
+      ]) {
+        if (Object.hasOwn(args, key)) fail('common.validation_failed');
+      }
+      for (const key of ['sessionId', 'dshSessionId', 'workspaceFileScopeId']) {
+        if (Object.hasOwn(args, key) && args[key] !== b.sessionId)
+          fail('shared.binding_mismatch');
+      }
       const result = await ports.invoke(action, b, args);
       await runtime.authorize(peer, action, sessionId);
       return result;

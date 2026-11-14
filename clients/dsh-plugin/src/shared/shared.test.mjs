@@ -4,11 +4,68 @@ import { randomUUID, generateKeyPairSync, sign } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { canonical, SHARED_RISK, verifyToken } from './protocol.js';
 import { createSharedRuntime } from './runtime.js';
 import { createEnterpriseAdapter } from './enterprise.js';
 import { installSharedHost } from './host.js';
 import { createSharedCarrier } from './carrier.js';
+import { openSharedTask } from './task-context.js';
+import { createSharedDownstream } from './downstream.js';
+import { createEnterpriseOutbound } from './enterprise-transport.js';
+
+test('enterprise HTTPS transport injects private headers and cancels timed-out requests', async () => {
+  const seen = [];
+  const config = () => ({
+    empNoHeader: 'x-test-member',
+    authValueHeader: 'x-test-auth',
+  });
+  const outbound = createEnterpriseOutbound({
+    config,
+    fetchImpl: async (url, options) => {
+      seen.push({ url, options });
+      return new Response(JSON.stringify({ ok: true }), { status: 202 });
+    },
+  });
+  const result = await outbound(
+    {
+      url: 'https://app-one.invalid/api',
+      method: 'POST',
+      headers: { accept: 'application/json' },
+      body: { query: 'test' },
+      timeoutMs: 1000,
+    },
+    { empNo: 'fixture-member', token: 'fixture-material' },
+  );
+  assert.equal(result.statusCode, 202);
+  assert.equal(result.json.ok, true);
+  assert.equal(seen[0].options.headers['x-test-member'], 'fixture-member');
+  assert.equal(seen[0].options.headers['x-test-auth'], 'fixture-material');
+  assert.equal(seen[0].options.redirect, 'error');
+  const blocked = createEnterpriseOutbound({
+    config,
+    fetchImpl: async (_url, options) =>
+      new Promise((_resolve, reject) =>
+        options.signal.addEventListener(
+          'abort',
+          () => reject(new Error('cancelled')),
+          { once: true },
+        ),
+      ),
+  });
+  await assert.rejects(
+    blocked(
+      {
+        url: 'https://app-two.invalid/api',
+        method: 'GET',
+        headers: {},
+        timeoutMs: 1,
+      },
+      { empNo: 'fixture-member', token: 'fixture-material' },
+    ),
+  );
+});
 
 function setup() {
   const key = generateKeyPairSync('ed25519'),
@@ -261,7 +318,7 @@ test('dual enterprise applications, concurrent member binding and response redac
   await assert.rejects(
     f.enterprise.credentials({
       ...f.call(sessions[0], f.token(sessions[0])),
-        remoteAddress: '192.0.2.1',
+      remoteAddress: '192.0.2.1',
     }),
   );
   await assert.rejects(
@@ -567,5 +624,206 @@ test('self-owned carrier rejects unknown methods and arbitrary create paths', as
   } finally {
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
+  }
+});
+
+test('original Python helper resolve/request runs with task-local variables and no parent env mutation', async () => {
+  const f = setup(),
+    binding = await f.runtime.create(await f.peer(0), f.host);
+  const agent = { id: binding.sessionId, session: { id: binding.sessionId } };
+  const execution = { agent };
+  const ctx = {
+    sessions: { get: () => agent.session },
+    agents: { get: () => agent },
+  };
+  const server = createServer(f.enterprise.handler);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const ports = {
+    config: () => ({ allowRawAgentToken: true }),
+    helperBase: `http://127.0.0.1:${server.address().port}/dsh-team`,
+    enterprise: f.enterprisePorts,
+    issueTask: async (b) => f.token(b),
+    finishTask: async () => {
+      f.states[0].active = false;
+    },
+  };
+  const snapshot = { ...process.env };
+  const task = await openSharedTask({
+    ctx,
+    runtime: f.runtime,
+    ports,
+    execution,
+    raw: true,
+  });
+  const runPython = (script) =>
+    new Promise((resolve, reject) => {
+      const child = spawn('python', ['-c', script], {
+        env: {
+          ...process.env,
+          ...task.env,
+          PYTHONPATH: task.env.DSH_TEAM_HELPERS,
+          PYTHONDONTWRITEBYTECODE: '1',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => (stderr += chunk.toString()));
+      child.stdout.resume();
+      child.on('error', reject);
+      child.on('close', (code) =>
+        code === 0
+          ? resolve()
+          : reject(new Error(`helper failed (${code}): ${stderr}`)),
+      );
+    });
+  try {
+    await runPython(
+      "from uds_skill_auth import resolve, request\nc=resolve(apply_env_aliases=False)\nassert c['token']=='runtime-material-1'\nr=request('POST','https://app-one.invalid/api',body={'query':'test'})\nassert r['statusCode']==200 and r['json']['application']=='app-one.invalid'\n",
+    );
+    f.setRaw(false);
+    await runPython(
+      "from uds_skill_auth import resolve, request, DshTeamError\ntry:\n resolve(apply_env_aliases=False)\n raise AssertionError('raw enabled')\nexcept DshTeamError as e:\n assert e.code=='raw_token_disabled'\nassert request('GET','https://app-two.invalid/api')['statusCode']==200\n",
+    );
+    assert.ok(
+      canonical({ ...process.env }) === canonical(snapshot),
+      'parent environment changed',
+    );
+    await task.close();
+    await assert.rejects(f.enterprise.credentials(f.call(binding, task.token)));
+    await assert.rejects(f.enterprise.outbound(f.call(binding, task.token)));
+    const skill = fileURLToPath(
+      new URL(
+        './skills/uds-skill-auth/scripts/uds_skill_auth.py',
+        import.meta.url,
+      ),
+    );
+    assert.deepEqual(
+      readFileSync(skill),
+      readFileSync(
+        fileURLToPath(
+          new URL('./skill-helpers/python/uds_skill_auth.py', import.meta.url),
+        ),
+      ),
+    );
+  } finally {
+    await task.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('N model/message ports bind concurrent members, preserve call IDs and discard late chunks', async () => {
+  const f = setup(),
+    bindings = await Promise.all(
+      [0, 1].map(async (i) => f.runtime.create(await f.peer(i), f.host)),
+    );
+  const modelKeys = generateKeyPairSync('ed25519'),
+    messageKeys = generateKeyPairSync('ed25519');
+  const modelMap = new Map([['test', modelKeys.publicKey]]),
+    messageMap = new Map([['test', messageKeys.publicKey]]);
+  const runtime = createSharedRuntime({
+    ports: f.ports,
+    identityKeys: f.keys,
+    capabilityKeys: {
+      'auriga.shared.model': modelMap,
+      'auriga.shared.message': messageMap,
+    },
+    physicalInstanceId: bindings[0].physicalInstanceId,
+    now: () => 1000,
+  });
+  const tasks = new Map(
+    bindings.map((b) => [
+      b.sessionId,
+      { taskId: randomUUID(), callId: randomUUID() },
+    ]),
+  );
+  const observed = [];
+  const ports = {
+    taskForSession: async (b) => tasks.get(b.sessionId),
+    issue: async (b, taskId, audience, scopes) => {
+      const original = f.token(b, { taskId, audience, scopes }),
+        claims = verifyToken(original, 'Capability', f.keys);
+      const header = Buffer.from(
+        canonical({
+          alg: 'EdDSA',
+          kid: 'test',
+          typ: 'auriga-shared-capability+jwt',
+        }),
+      ).toString('base64url');
+      const input =
+        header + '.' + Buffer.from(canonical(claims)).toString('base64url');
+      return (
+        input +
+        '.' +
+        sign(
+          null,
+          Buffer.from(input),
+          audience === 'auriga.shared.model'
+            ? modelKeys.privateKey
+            : messageKeys.privateKey,
+        ).toString('base64url')
+      );
+    },
+    async *model(request) {
+      observed.push(request);
+      yield { type: 'text-delta', text: request.sessionId };
+    },
+    send: async (request) => ({
+      messageId: request.messageId,
+      sessionId: request.sessionId,
+    }),
+    receive: async (request) => ({
+      messageId: request.messageId,
+      sessionId: request.sessionId,
+    }),
+  };
+  const downstream = createSharedDownstream({ runtime, ports });
+  try {
+    const collect = async (binding) => {
+      const output = [];
+      for await (const chunk of downstream.adapter.stream({
+        sessionId: binding.sessionId,
+        model: 'fixture',
+        messages: [],
+      }))
+        output.push(chunk);
+      return output;
+    };
+    const result = await Promise.all(bindings.map(collect));
+    assert.deepEqual(
+      result.map((chunks) => chunks[0].text),
+      bindings.map((b) => b.sessionId),
+    );
+    assert.deepEqual(
+      observed.map((request) => request.callId),
+      bindings.map((b) => tasks.get(b.sessionId).callId),
+    );
+    const id = randomUUID(),
+      b = bindings[0];
+    assert.equal(
+      (
+        await downstream.send(b.sessionId, {
+          messageId: id,
+          target: { sessionId: bindings[1].sessionId },
+          body: 'test',
+        })
+      ).sessionId,
+      b.sessionId,
+    );
+    assert.equal(
+      (await downstream.receive(b.sessionId, { messageId: id, body: 'test' }))
+        .messageId,
+      id,
+    );
+    ports.model = async function* (request) {
+      f.states[0].active = false;
+      yield { type: 'text-delta', text: request.sessionId };
+    };
+    await assert.rejects(collect(b));
+    await assert.rejects(collect({ sessionId: randomUUID() }));
+  } finally {
+    downstream.close();
+    runtime.close();
   }
 });

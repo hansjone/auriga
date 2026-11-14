@@ -233,6 +233,7 @@ export function createSharedRuntime({
     )
       fail();
     await current(b);
+    if (v.resources.some((resource) => resource.expiresAt <= now())) fail();
     return { ...copy(v), risk: SHARED_RISK };
   }
   // remoteAccess bindings are synchronous projections, never the authorization truth.
