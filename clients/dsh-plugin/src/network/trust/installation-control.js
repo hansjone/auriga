@@ -67,6 +67,7 @@ function canonicalPublic(encoded, algorithm) {
 /** Uses K's seven-field pin without inventing an enrollment identity.
  * @param {any} pinsInput @param {string|undefined} target @param {Buffer} privateDer @param {any} [expected] */
 export function installationIdentity(pinsInput, target, privateDer, expected) {
+  /** @type {import('../../generated/network/auto-renewal-v2.js').InstallationPins} */
   const pins = structure('InstallationPins', detach(pinsInput));
   const ids = new Set(),
     targets = new Set();
@@ -82,9 +83,7 @@ export function installationIdentity(pinsInput, target, privateDer, expected) {
     target ??
     expected?.target_id ??
     (pins.pins.length === 1 ? pins.pins[0].target_id : undefined);
-  const pin = pins.pins.find(
-    (/** @type {any} */ p) => p.target_id === selected,
-  );
+  const pin = pins.pins.find((p) => p.target_id === selected);
   if (
     !pin ||
     (expected &&
