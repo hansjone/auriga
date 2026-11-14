@@ -13,178 +13,126 @@ package msgnetapi
 import (
 	"encoding/json"
 	"fmt"
+	"gopkg.in/validator.v2"
 )
 
-// checks if the LocalProjectionResponse type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &LocalProjectionResponse{}
-
-// LocalProjectionResponse struct for LocalProjectionResponse
+// LocalProjectionResponse - struct for LocalProjectionResponse
 type LocalProjectionResponse struct {
-	Selector             LocalProjectionSelector `json:"selector"`
-	Phase                string                  `json:"phase"`
-	FailureCode          string                  `json:"failure_code"`
-	AdditionalProperties map[string]interface{}
+	LocalProjectionResponseOneOf  *LocalProjectionResponseOneOf
+	LocalProjectionResponseOneOf1 *LocalProjectionResponseOneOf1
 }
 
-type _LocalProjectionResponse LocalProjectionResponse
-
-// NewLocalProjectionResponse instantiates a new LocalProjectionResponse object
-// This constructor will assign default values to properties that have it defined,
-// and makes sure properties required by API are set, but the set of arguments
-// will change when the set of required properties is changed
-func NewLocalProjectionResponse(selector LocalProjectionSelector, phase string, failureCode string) *LocalProjectionResponse {
-	this := LocalProjectionResponse{}
-	this.Selector = selector
-	this.Phase = phase
-	this.FailureCode = failureCode
-	return &this
-}
-
-// NewLocalProjectionResponseWithDefaults instantiates a new LocalProjectionResponse object
-// This constructor will only assign default values to properties that have it defined,
-// but it doesn't guarantee that properties required by API are set
-func NewLocalProjectionResponseWithDefaults() *LocalProjectionResponse {
-	this := LocalProjectionResponse{}
-	return &this
-}
-
-// GetSelector returns the Selector field value
-func (o *LocalProjectionResponse) GetSelector() LocalProjectionSelector {
-	if o == nil {
-		var ret LocalProjectionSelector
-		return ret
+// LocalProjectionResponseOneOfAsLocalProjectionResponse is a convenience function that returns LocalProjectionResponseOneOf wrapped in LocalProjectionResponse
+func LocalProjectionResponseOneOfAsLocalProjectionResponse(v *LocalProjectionResponseOneOf) LocalProjectionResponse {
+	return LocalProjectionResponse{
+		LocalProjectionResponseOneOf: v,
 	}
-
-	return o.Selector
 }
 
-// GetSelectorOk returns a tuple with the Selector field value
-// and a boolean to check if the value has been set.
-func (o *LocalProjectionResponse) GetSelectorOk() (*LocalProjectionSelector, bool) {
-	if o == nil {
-		return nil, false
+// LocalProjectionResponseOneOf1AsLocalProjectionResponse is a convenience function that returns LocalProjectionResponseOneOf1 wrapped in LocalProjectionResponse
+func LocalProjectionResponseOneOf1AsLocalProjectionResponse(v *LocalProjectionResponseOneOf1) LocalProjectionResponse {
+	return LocalProjectionResponse{
+		LocalProjectionResponseOneOf1: v,
 	}
-	return &o.Selector, true
 }
 
-// SetSelector sets field value
-func (o *LocalProjectionResponse) SetSelector(v LocalProjectionSelector) {
-	o.Selector = v
-}
-
-// GetPhase returns the Phase field value
-func (o *LocalProjectionResponse) GetPhase() string {
-	if o == nil {
-		var ret string
-		return ret
-	}
-
-	return o.Phase
-}
-
-// GetPhaseOk returns a tuple with the Phase field value
-// and a boolean to check if the value has been set.
-func (o *LocalProjectionResponse) GetPhaseOk() (*string, bool) {
-	if o == nil {
-		return nil, false
-	}
-	return &o.Phase, true
-}
-
-// SetPhase sets field value
-func (o *LocalProjectionResponse) SetPhase(v string) {
-	o.Phase = v
-}
-
-// GetFailureCode returns the FailureCode field value
-func (o *LocalProjectionResponse) GetFailureCode() string {
-	if o == nil {
-		var ret string
-		return ret
-	}
-
-	return o.FailureCode
-}
-
-// GetFailureCodeOk returns a tuple with the FailureCode field value
-// and a boolean to check if the value has been set.
-func (o *LocalProjectionResponse) GetFailureCodeOk() (*string, bool) {
-	if o == nil {
-		return nil, false
-	}
-	return &o.FailureCode, true
-}
-
-// SetFailureCode sets field value
-func (o *LocalProjectionResponse) SetFailureCode(v string) {
-	o.FailureCode = v
-}
-
-func (o LocalProjectionResponse) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
-	if err != nil {
-		return []byte{}, err
-	}
-	return json.Marshal(toSerialize)
-}
-
-func (o LocalProjectionResponse) ToMap() (map[string]interface{}, error) {
-	toSerialize := map[string]interface{}{}
-	toSerialize["selector"] = o.Selector
-	toSerialize["phase"] = o.Phase
-	toSerialize["failure_code"] = o.FailureCode
-
-	for key, value := range o.AdditionalProperties {
-		toSerialize[key] = value
-	}
-
-	return toSerialize, nil
-}
-
-func (o *LocalProjectionResponse) UnmarshalJSON(data []byte) (err error) {
-	// This validates that all required properties are included in the JSON object
-	// by unmarshalling the object into a generic map with string keys and checking
-	// that every required field exists as a key in the generic map.
-	requiredProperties := []string{
-		"selector",
-		"phase",
-		"failure_code",
-	}
-
-	allProperties := make(map[string]interface{})
-
-	err = json.Unmarshal(data, &allProperties)
-
-	if err != nil {
-		return err
-	}
-
-	for _, requiredProperty := range requiredProperties {
-		if _, exists := allProperties[requiredProperty]; !exists {
-			return fmt.Errorf("no value given for required property %v", requiredProperty)
+// Unmarshal JSON data into one of the pointers in the struct
+func (dst *LocalProjectionResponse) UnmarshalJSON(data []byte) error {
+	var err error
+	match := 0
+	// try to unmarshal data into LocalProjectionResponseOneOf
+	err = newStrictDecoder(data).Decode(&dst.LocalProjectionResponseOneOf)
+	if err == nil {
+		jsonLocalProjectionResponseOneOf, _ := json.Marshal(dst.LocalProjectionResponseOneOf)
+		if string(jsonLocalProjectionResponseOneOf) == "{}" { // empty struct
+			dst.LocalProjectionResponseOneOf = nil
+		} else {
+			if err = validator.Validate(dst.LocalProjectionResponseOneOf); err != nil {
+				dst.LocalProjectionResponseOneOf = nil
+			} else {
+				match++
+			}
 		}
+	} else {
+		dst.LocalProjectionResponseOneOf = nil
 	}
 
-	varLocalProjectionResponse := _LocalProjectionResponse{}
-
-	err = json.Unmarshal(data, &varLocalProjectionResponse)
-
-	if err != nil {
-		return err
+	// try to unmarshal data into LocalProjectionResponseOneOf1
+	err = newStrictDecoder(data).Decode(&dst.LocalProjectionResponseOneOf1)
+	if err == nil {
+		jsonLocalProjectionResponseOneOf1, _ := json.Marshal(dst.LocalProjectionResponseOneOf1)
+		if string(jsonLocalProjectionResponseOneOf1) == "{}" { // empty struct
+			dst.LocalProjectionResponseOneOf1 = nil
+		} else {
+			if err = validator.Validate(dst.LocalProjectionResponseOneOf1); err != nil {
+				dst.LocalProjectionResponseOneOf1 = nil
+			} else {
+				match++
+			}
+		}
+	} else {
+		dst.LocalProjectionResponseOneOf1 = nil
 	}
 
-	*o = LocalProjectionResponse(varLocalProjectionResponse)
+	if match > 1 { // more than 1 match
+		// reset to nil
+		dst.LocalProjectionResponseOneOf = nil
+		dst.LocalProjectionResponseOneOf1 = nil
 
-	additionalProperties := make(map[string]interface{})
+		return fmt.Errorf("data matches more than one schema in oneOf(LocalProjectionResponse)")
+	} else if match == 1 {
+		return nil // exactly one match
+	} else { // no match
+		if err != nil {
+			return fmt.Errorf("data failed to match schemas in oneOf(LocalProjectionResponse): %v", err)
+		}
 
-	if err = json.Unmarshal(data, &additionalProperties); err == nil {
-		delete(additionalProperties, "selector")
-		delete(additionalProperties, "phase")
-		delete(additionalProperties, "failure_code")
-		o.AdditionalProperties = additionalProperties
+		return fmt.Errorf("data failed to match schemas in oneOf(LocalProjectionResponse)")
+	}
+}
+
+// Marshal data from the first non-nil pointers in the struct to JSON
+func (src LocalProjectionResponse) MarshalJSON() ([]byte, error) {
+	if src.LocalProjectionResponseOneOf != nil {
+		return json.Marshal(&src.LocalProjectionResponseOneOf)
 	}
 
-	return err
+	if src.LocalProjectionResponseOneOf1 != nil {
+		return json.Marshal(&src.LocalProjectionResponseOneOf1)
+	}
+
+	return nil, nil // no data in oneOf schemas
+}
+
+// Get the actual instance
+func (obj *LocalProjectionResponse) GetActualInstance() interface{} {
+	if obj == nil {
+		return nil
+	}
+	if obj.LocalProjectionResponseOneOf != nil {
+		return obj.LocalProjectionResponseOneOf
+	}
+
+	if obj.LocalProjectionResponseOneOf1 != nil {
+		return obj.LocalProjectionResponseOneOf1
+	}
+
+	// all schemas are nil
+	return nil
+}
+
+// Get the actual instance value
+func (obj LocalProjectionResponse) GetActualInstanceValue() interface{} {
+	if obj.LocalProjectionResponseOneOf != nil {
+		return *obj.LocalProjectionResponseOneOf
+	}
+
+	if obj.LocalProjectionResponseOneOf1 != nil {
+		return *obj.LocalProjectionResponseOneOf1
+	}
+
+	// all schemas are nil
+	return nil
 }
 
 type NullableLocalProjectionResponse struct {

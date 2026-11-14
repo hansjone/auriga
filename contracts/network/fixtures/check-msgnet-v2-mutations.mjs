@@ -116,7 +116,14 @@ export async function checkMutations() {
   const fixture = JSON.parse(
     readFileSync(new URL('auto-renewal-v2-vectors.json', directory)),
   );
+  fixture.local_cases = JSON.parse(
+    readFileSync(new URL('msgnet-local-projection-vectors.json', directory)),
+  );
   const modules = [
+    [
+      'msgnet-local-projection-oracle.mjs',
+      [['local_cases', 'evaluateLocalProjection']],
+    ],
     ['msgnet-v2-oracle.mjs', [['cases', 'evaluate']]],
     [
       'msgnet-v2-boundary-oracle.mjs',

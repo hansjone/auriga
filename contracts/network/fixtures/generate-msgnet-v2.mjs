@@ -503,7 +503,16 @@ extendVectors({
   jcs,
   generateKeyPairSync,
 });
-extendEndpoints({ cases, issuer_cases, boundary_cases, signed, auth, root, digest });
+extendEndpoints({
+  cases,
+  issuer_cases,
+  boundary_cases,
+  signed,
+  auth,
+  root,
+  runtime,
+  digest,
+});
 for (const v of cases)
   for (const [field, domain] of [
     ['keyset', 'Auriga.NetworkKeyset.v2'],
@@ -539,7 +548,8 @@ const serialized =
   JSON.stringify(
     {
       synthetic: true,
-      producer: 'Node Ed25519 runtime generated; exact endpoint vectors; no private keys persisted',
+      producer:
+        'Node Ed25519 runtime generated; exact endpoint vectors; no private keys persisted',
       cases,
       issuer_cases,
       boundary_cases,

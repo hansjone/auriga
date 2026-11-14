@@ -5,6 +5,27 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
+export type LocalProjectionResponse =
+  | {
+      phase?: 'loaded' | 'handshake_verified';
+      failure_code?: 'none';
+      [k: string]: unknown;
+    }
+  | {
+      phase?: 'failed';
+      failure_code?:
+        | 'version_rollback'
+        | 'same_version_conflict'
+        | 'invalid_chain'
+        | 'projection_pending';
+      [k: string]: unknown;
+    };
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "RenewalStatusOutput".
+ */
+export type RenewalStatusOutput = RenewalStatus | UnpublishedRenewalStatus;
+
 /**
  * 严格受签对象，拒绝未知字段和重复键。跨字段规则见 auto-renewal-v2.md。整数序列为十进制字符串，须检查 uint64 上界。
  */
@@ -868,11 +889,7 @@ export interface LocalProjectionRequest {
   operation: 'reload' | 'confirm';
   selector: LocalProjectionSelector;
 }
-/**
- * This interface was referenced by `AurigaV2`'s JSON-Schema
- * via the `definition` "LocalProjectionResponse".
- */
-export interface LocalProjectionResponse {
+export interface LocalProjectionResponse1 {
   selector: LocalProjectionSelector;
   phase: 'loaded' | 'handshake_verified' | 'failed';
   failure_code:
@@ -881,4 +898,100 @@ export interface LocalProjectionResponse {
     | 'same_version_conflict'
     | 'invalid_chain'
     | 'projection_pending';
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "InstallationPin".
+ */
+export interface InstallationPin {
+  target_id: string;
+  identity_id: string;
+  signing_spki: string;
+  component: 'network' | 'edge' | 'broker';
+  gateway_id: string;
+  sealing_spki: string;
+  subject: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "InstallationPins".
+ */
+export interface InstallationPins {
+  schema_version: 2;
+  tenant_id: string;
+  realm: string;
+  /**
+   * @maxItems 65536
+   */
+  pins: InstallationPin[];
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "UnpublishedRenewalStatus".
+ */
+export interface UnpublishedRenewalStatus {
+  tenant_id: string;
+  realm: string;
+  state:
+    'renewing' | 'paused' | 'clock_error' | 'authority_revoked' | 'degraded';
+  authority_id: string;
+  expiry_policy: 'no_hard_expiry';
+  control_revision: string;
+  review_due_at: string;
+  review_required: boolean;
+  announcement_confirmed: false;
+  failure_code:
+    | 'none'
+    | 'collab.msgnet_authority_revoked'
+    | 'collab.msgnet_authority_unknown'
+    | 'collab.msgnet_control_rollback'
+    | 'collab.msgnet_control_required'
+    | 'collab.msgnet_version_rollback'
+    | 'collab.msgnet_same_version_conflict'
+    | 'collab.msgnet_scope_denied'
+    | 'collab.msgnet_invalid_chain'
+    | 'collab.msgnet_invalid_transition'
+    | 'collab.msgnet_predecessor_required'
+    | 'collab.msgnet_clock_error'
+    | 'collab.msgnet_projection_pending'
+    | 'collab.msgnet_identity_quarantined'
+    | 'collab.msgnet_migration_expired'
+    | 'collab.msgnet_migration_outside_commitment';
+  has_publication: false;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "MigrationMaterialKey".
+ */
+export interface MigrationMaterialKey {
+  kid: string;
+  purpose: 'business_delivery' | 'protocol_response' | 'management_state';
+  public_key_spki: string;
+  not_before: string;
+  not_after: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "MigrationMaterialCommitment".
+ */
+export interface MigrationMaterialCommitment {
+  schema_version: 2;
+  /**
+   * @minItems 3
+   */
+  keys: [
+    MigrationMaterialKey,
+    MigrationMaterialKey,
+    MigrationMaterialKey,
+    ...MigrationMaterialKey[],
+  ];
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "MigrationCommitmentMember".
+ */
+export interface MigrationCommitmentMember {
+  version: string;
+  pair_digest: string;
+  material_digest: string;
 }

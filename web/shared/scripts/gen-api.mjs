@@ -1,3 +1,4 @@
+import { generatedRenewalFiles } from '../../../clients/dsh-plugin/scripts/gen-network-keyset.mjs';
 import { fileURLToPath } from 'node:url';
 import { mkdir, writeFile } from 'node:fs/promises';
 import openapiTS, { astToString, COMMENT_HEADER } from 'openapi-typescript';
@@ -80,5 +81,16 @@ for (const [name, filename] of [
         ),
       { parser: 'typescript', singleQuote: true },
     ),
+  );
+}
+
+// 与类型一同生成，现有 CI 的 generated 目录 diff 门禁覆盖运行时产物。
+for (const [name, content] of Object.entries(generatedRenewalFiles)) {
+  await writeFile(
+    new URL(
+      '../../../clients/dsh-plugin/src/generated/network/' + name,
+      import.meta.url,
+    ),
+    content,
   );
 }

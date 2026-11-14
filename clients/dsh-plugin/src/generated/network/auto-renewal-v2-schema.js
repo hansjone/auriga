@@ -1926,7 +1926,9 @@ export const schema = {
         },
         nonce: {
           type: 'string',
-          pattern: '^[A-Za-z0-9_-]+$',
+          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$',
+          minLength: 43,
+          maxLength: 43,
         },
         generation: {
           type: 'string',
@@ -2000,7 +2002,9 @@ export const schema = {
         },
         nonce: {
           type: 'string',
-          pattern: '^[A-Za-z0-9_-]+$',
+          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$',
+          minLength: 43,
+          maxLength: 43,
         },
         generation: {
           type: 'string',
@@ -2083,6 +2087,278 @@ export const schema = {
         },
       },
       required: ['selector', 'phase', 'failure_code'],
+      additionalProperties: false,
+      oneOf: [
+        {
+          properties: {
+            phase: {
+              enum: ['loaded', 'handshake_verified'],
+            },
+            failure_code: {
+              const: 'none',
+            },
+          },
+        },
+        {
+          properties: {
+            phase: {
+              const: 'failed',
+            },
+            failure_code: {
+              enum: [
+                'version_rollback',
+                'same_version_conflict',
+                'invalid_chain',
+                'projection_pending',
+              ],
+            },
+          },
+        },
+      ],
+    },
+    InstallationPin: {
+      type: 'object',
+      properties: {
+        target_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        identity_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        signing_spki: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_-]+$',
+          maxLength: 128,
+        },
+        component: {
+          type: 'string',
+          enum: ['network', 'edge', 'broker'],
+        },
+        gateway_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        sealing_spki: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_-]+$',
+          maxLength: 128,
+        },
+        subject: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+        },
+      },
+      required: [
+        'target_id',
+        'identity_id',
+        'signing_spki',
+        'component',
+        'gateway_id',
+        'sealing_spki',
+        'subject',
+      ],
+      additionalProperties: false,
+    },
+    InstallationPins: {
+      type: 'object',
+      properties: {
+        schema_version: {
+          const: 2,
+        },
+        tenant_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        realm: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        pins: {
+          type: 'array',
+          maxItems: 65536,
+          items: {
+            $ref: '#/$defs/InstallationPin',
+          },
+        },
+      },
+      required: ['schema_version', 'tenant_id', 'realm', 'pins'],
+      additionalProperties: false,
+    },
+    UnpublishedRenewalStatus: {
+      type: 'object',
+      properties: {
+        tenant_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        realm: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        state: {
+          type: 'string',
+          enum: [
+            'renewing',
+            'paused',
+            'clock_error',
+            'authority_revoked',
+            'degraded',
+          ],
+        },
+        authority_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        expiry_policy: {
+          const: 'no_hard_expiry',
+        },
+        control_revision: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        review_due_at: {
+          type: 'string',
+          format: 'date-time',
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$',
+          $comment: 'auriga-preserve-signature-text',
+        },
+        review_required: {
+          type: 'boolean',
+        },
+        announcement_confirmed: {
+          const: false,
+        },
+        failure_code: {
+          type: 'string',
+          enum: [
+            'none',
+            'collab.msgnet_authority_revoked',
+            'collab.msgnet_authority_unknown',
+            'collab.msgnet_control_rollback',
+            'collab.msgnet_control_required',
+            'collab.msgnet_version_rollback',
+            'collab.msgnet_same_version_conflict',
+            'collab.msgnet_scope_denied',
+            'collab.msgnet_invalid_chain',
+            'collab.msgnet_invalid_transition',
+            'collab.msgnet_predecessor_required',
+            'collab.msgnet_clock_error',
+            'collab.msgnet_projection_pending',
+            'collab.msgnet_identity_quarantined',
+            'collab.msgnet_migration_expired',
+            'collab.msgnet_migration_outside_commitment',
+          ],
+        },
+        has_publication: {
+          const: false,
+        },
+      },
+      required: [
+        'tenant_id',
+        'realm',
+        'state',
+        'authority_id',
+        'expiry_policy',
+        'control_revision',
+        'review_due_at',
+        'review_required',
+        'announcement_confirmed',
+        'failure_code',
+        'has_publication',
+      ],
+      additionalProperties: false,
+    },
+    RenewalStatusOutput: {
+      oneOf: [
+        {
+          $ref: '#/$defs/RenewalStatus',
+        },
+        {
+          $ref: '#/$defs/UnpublishedRenewalStatus',
+        },
+      ],
+    },
+    MigrationMaterialKey: {
+      type: 'object',
+      properties: {
+        kid: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        purpose: {
+          type: 'string',
+          enum: ['business_delivery', 'protocol_response', 'management_state'],
+        },
+        public_key_spki: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_-]{59}$',
+        },
+        not_before: {
+          type: 'string',
+          format: 'date-time',
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$',
+          $comment: 'auriga-preserve-signature-text',
+        },
+        not_after: {
+          type: 'string',
+          format: 'date-time',
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$',
+          $comment: 'auriga-preserve-signature-text',
+        },
+      },
+      required: [
+        'kid',
+        'purpose',
+        'public_key_spki',
+        'not_before',
+        'not_after',
+      ],
+      additionalProperties: false,
+    },
+    MigrationMaterialCommitment: {
+      type: 'object',
+      properties: {
+        schema_version: {
+          const: 2,
+        },
+        keys: {
+          type: 'array',
+          minItems: 3,
+          items: {
+            $ref: '#/$defs/MigrationMaterialKey',
+          },
+        },
+      },
+      required: ['schema_version', 'keys'],
+      additionalProperties: false,
+    },
+    MigrationCommitmentMember: {
+      type: 'object',
+      properties: {
+        version: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        pair_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+        material_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+      },
+      required: ['version', 'pair_digest', 'material_digest'],
       additionalProperties: false,
     },
   },

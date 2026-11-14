@@ -788,6 +788,103 @@ export interface components {
         | 'same_version_conflict'
         | 'invalid_chain'
         | 'projection_pending';
+    } & (
+      | {
+          /** @enum {unknown} */
+          phase?: 'loaded' | 'handshake_verified';
+          /** @constant */
+          failure_code?: 'none';
+        }
+      | {
+          /** @constant */
+          phase?: 'failed';
+          /** @enum {unknown} */
+          failure_code?:
+            | 'version_rollback'
+            | 'same_version_conflict'
+            | 'invalid_chain'
+            | 'projection_pending';
+        }
+    );
+    InstallationPin: {
+      target_id: string;
+      identity_id: string;
+      signing_spki: string;
+      /** @enum {string} */
+      component: 'network' | 'edge' | 'broker';
+      gateway_id: string;
+      sealing_spki: string;
+      subject: string;
+    };
+    InstallationPins: {
+      /** @constant */
+      schema_version: 2;
+      tenant_id: string;
+      realm: string;
+      pins: components['schemas']['InstallationPin'][];
+    };
+    UnpublishedRenewalStatus: {
+      tenant_id: string;
+      realm: string;
+      /** @enum {string} */
+      state:
+        | 'renewing'
+        | 'paused'
+        | 'clock_error'
+        | 'authority_revoked'
+        | 'degraded';
+      authority_id: string;
+      /** @constant */
+      expiry_policy: 'no_hard_expiry';
+      control_revision: string;
+      /** Format: date-time */
+      review_due_at: string;
+      review_required: boolean;
+      /** @constant */
+      announcement_confirmed: false;
+      /** @enum {string} */
+      failure_code:
+        | 'none'
+        | 'collab.msgnet_authority_revoked'
+        | 'collab.msgnet_authority_unknown'
+        | 'collab.msgnet_control_rollback'
+        | 'collab.msgnet_control_required'
+        | 'collab.msgnet_version_rollback'
+        | 'collab.msgnet_same_version_conflict'
+        | 'collab.msgnet_scope_denied'
+        | 'collab.msgnet_invalid_chain'
+        | 'collab.msgnet_invalid_transition'
+        | 'collab.msgnet_predecessor_required'
+        | 'collab.msgnet_clock_error'
+        | 'collab.msgnet_projection_pending'
+        | 'collab.msgnet_identity_quarantined'
+        | 'collab.msgnet_migration_expired'
+        | 'collab.msgnet_migration_outside_commitment';
+      /** @constant */
+      has_publication: false;
+    };
+    RenewalStatusOutput:
+      | components['schemas']['RenewalStatus']
+      | components['schemas']['UnpublishedRenewalStatus'];
+    MigrationMaterialKey: {
+      kid: string;
+      /** @enum {string} */
+      purpose: 'business_delivery' | 'protocol_response' | 'management_state';
+      public_key_spki: string;
+      /** Format: date-time */
+      not_before: string;
+      /** Format: date-time */
+      not_after: string;
+    };
+    MigrationMaterialCommitment: {
+      /** @constant */
+      schema_version: 2;
+      keys: components['schemas']['MigrationMaterialKey'][];
+    };
+    MigrationCommitmentMember: {
+      version: string;
+      pair_digest: string;
+      material_digest: string;
     };
   };
   responses: never;
@@ -909,7 +1006,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RenewalStatus'];
+          'application/json': components['schemas']['RenewalStatusOutput'];
         };
       };
       /** @description 无效契约或转换 */

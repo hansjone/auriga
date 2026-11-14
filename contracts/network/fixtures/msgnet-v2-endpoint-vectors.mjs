@@ -1,4 +1,4 @@
-﻿// 端点向量沿用有效签名快照，每次只移动一个端点。
+import { readFileSync } from 'node:fs'; // 端点向量沿用有效签名快照，每次只移动一个端点。
 export function extendEndpoints({
   cases,
   issuer_cases,
@@ -6,6 +6,7 @@ export function extendEndpoints({
   signed,
   auth,
   root,
+  runtime,
   digest,
 }) {
   const firstEndpoint = cases.length;
@@ -360,6 +361,233 @@ export function extendEndpoints({
       k.first_publications = clone(q.first_publications);
     },
   );
+
+  add(
+    'restart-future-active-after-clock-correction',
+    'mixed-recovery-activate-restart-preserve',
+    'accept',
+    (i) => {
+      const source = clone(
+        cases.find((x) => x.id === 'mature-next-activation').input,
+      );
+      const q = i.publication.predecessor.keyset.payload,
+        k = i.publication.keyset.payload;
+      const mq = source.publication.predecessor.keyset.payload,
+        mk = source.publication.keyset.payload;
+      for (const [dst, src] of [
+        [q, mq],
+        [k, mk],
+      ]) {
+        dst.keys = dst.keys
+          .filter((x) => x.purpose !== 'business_delivery')
+          .concat(src.keys.filter((x) => x.purpose === 'business_delivery'));
+        dst.first_publications = dst.first_publications
+          .filter((x) => !x.kid.endsWith('-0'))
+          .concat(src.first_publications.filter((x) => x.kid.endsWith('-0')));
+      }
+      for (const list of [q.keys, k.keys])
+        list.find((x) => x.kid === 'synthetic-business-0').not_after = i.now;
+      i.first_publication_ledger = clone(q.first_publications);
+      const old = q.keys.find((x) => x.purpose === 'management_state');
+      old.not_before = '2026-11-12T00:00:00Z';
+      k.keys = k.keys
+        .filter((x) => x.purpose !== 'management_state')
+        .concat(clone(old));
+      k.first_publications = k.first_publications.filter(
+        (x) => x.kid !== 'synthetic-restart-2',
+      );
+    },
+  );
+  add(
+    'mixed-recovery-activate-restart-preserve',
+    'mixed-recovery-all-unavailable',
+    'accept',
+    (i) => {
+      const q = i.publication.predecessor.keyset.payload,
+        k = i.publication.keyset.payload;
+      const original = clone(
+        cases.find(
+          (x) => x.id === 'restart-future-active-after-clock-correction',
+        ).input.publication.keyset.payload,
+      );
+      q.keys.find((x) => x.kid === 'synthetic-business-2').not_before =
+        '2026-11-15T00:00:00Z';
+      k.keys = k.keys
+        .filter((x) => x.purpose !== 'management_state')
+        .concat(original.keys.filter((x) => x.purpose === 'management_state'));
+      k.first_publications.push(
+        original.first_publications.find(
+          (x) => x.kid === 'synthetic-restart-2',
+        ),
+      );
+    },
+  );
+  add(
+    'mixed-recovery-activate-restart-preserve',
+    'mixed-recovery-cannot-use-unadvertised-next',
+    'invalid_transition',
+    (i) => {
+      const k = i.publication.keyset.payload;
+      const replacement = clone(
+        cases.find(
+          (x) => x.id === 'restart-future-active-after-clock-correction',
+        ).input.publication.keyset.payload,
+      );
+      k.keys.find((x) => x.kid === 'synthetic-next-0').state = 'next';
+      k.keys = k.keys.concat(
+        replacement.keys.filter((x) => x.kid === 'synthetic-restart-0'),
+      );
+      k.first_publications.push(
+        replacement.first_publications.find(
+          (x) => x.kid === 'synthetic-restart-0',
+        ),
+      );
+    },
+  );
+  add(
+    'mixed-recovery-activate-restart-preserve',
+    'mixed-recovery-cannot-replace-valid-purpose',
+    'invalid_transition',
+    (i) => {
+      const replacement = clone(
+        cases.find(
+          (x) => x.id === 'restart-future-active-after-clock-correction',
+        ).input.publication.keyset.payload,
+      );
+      const k = i.publication.keyset.payload;
+      k.keys = k.keys
+        .filter((x) => x.purpose !== 'management_state')
+        .concat(
+          replacement.keys.filter((x) => x.purpose === 'management_state'),
+        );
+      k.keys.find((x) => x.kid === 'synthetic-business-2').not_before =
+        '2026-11-12T00:00:00Z';
+      k.first_publications.push(
+        replacement.first_publications.find(
+          (x) => x.kid === 'synthetic-restart-2',
+        ),
+      );
+    },
+  );
+
+  const signBundle = (payload) =>
+    auth(
+      payload,
+      'Auriga.NetworkTransportTrustBundle.v2',
+      runtime,
+      'synthetic-runtime',
+    );
+  add(
+    'internal-ca-trust-renewal-chain',
+    'transport-second-ca-cycle',
+    'accept',
+    (i) => {
+      const current = i.transport.payload;
+      const previous = clone(current);
+      previous.bundle_version = '2';
+      previous.phase = 'retire_old';
+      previous.cas = previous.cas.slice(0, 1);
+      i.previous_transport = signBundle(previous);
+      i.previous_transport_phase = 'retire_old';
+      i.seen_bundle_version = '2';
+      current.bundle_version = '3';
+      current.previous_bundle_digest = digest(i.previous_transport);
+      i.transport = signBundle(current);
+    },
+  );
+  const cycleNegative = (id, change) =>
+    add('transport-second-ca-cycle', id, 'invalid_transition', (i) => {
+      change(i);
+      i.transport = signBundle(i.transport.payload);
+    });
+  cycleNegative(
+    'transport-cycle-missing-proof',
+    (i) => delete i.previous_transport,
+  );
+  cycleNegative(
+    'transport-cycle-wrong-digest',
+    (i) =>
+      (i.transport.payload.previous_bundle_digest = 'sha256:' + '0'.repeat(64)),
+  );
+  for (const field of [
+    'tenant_id',
+    'realm',
+    'authority_id',
+    'authority_digest',
+    'generation',
+    'phase',
+    'bundle_version',
+  ]) {
+    cycleNegative('transport-cycle-previous-' + field, (i) => {
+      i.previous_transport.payload[field] =
+        field === 'authority_digest'
+          ? 'sha256:' + 'f'.repeat(64)
+          : field === 'phase'
+            ? 'dual_trust'
+            : field === 'realm' || field === 'generation'
+              ? '2'
+              : 'synthetic-other';
+      if (field === 'bundle_version') i.previous_transport.payload[field] = '1';
+      i.previous_transport = signBundle(i.previous_transport.payload);
+      i.transport.payload.previous_bundle_digest = digest(i.previous_transport);
+    });
+  }
+  cycleNegative(
+    'transport-cycle-missing-retained-ca',
+    (i) => (i.transport.payload.cas = i.transport.payload.cas.slice(1)),
+  );
+  cycleNegative(
+    'transport-cycle-no-new-ca',
+    (i) => (i.transport.payload.cas = i.transport.payload.cas.slice(0, 1)),
+  );
+
+  const v1 = JSON.parse(
+    readFileSync(new URL('keyset-signature-vector.json', import.meta.url)),
+  );
+  const material = {
+    schema_version: 2,
+    keys: v1.signed.keyset.keys
+      .map(({ kid, purpose, public_key_spki, not_before, not_after }) => ({
+        kid,
+        purpose,
+        public_key_spki,
+        not_before,
+        not_after,
+      }))
+      .sort((a, b) => (a.kid < b.kid ? -1 : a.kid > b.kid ? 1 : 0)),
+  };
+  const migration = clone(
+    boundary_cases.find(
+      (x) => x.id === 'migration-queue-advanced-within-commitment',
+    ),
+  );
+  migration.id = 'migration-real-v1-pair-and-material';
+  const input = migration.input;
+  input.members = [
+    {
+      version: v1.signed.keyset.keyset_version,
+      pair_digest: digest(v1.signed),
+      material_digest: digest(material),
+    },
+  ];
+  input.current_version = v1.signed.keyset.keyset_version;
+  input.current_digest = digest(v1.signed);
+  input.first_v2_version = '6';
+  Object.assign(input.permit.payload, {
+    realm: v1.signed.keyset.realm,
+    ancestor_digest: digest(v1.signed),
+    queue_commitment_digest: digest(input.members),
+    maximum_committed_v1_version: input.current_version,
+    minimum_v2_version: '6',
+  });
+  input.permit = auth(
+    input.permit.payload,
+    'Auriga.NetworkMigrationPermit.v2',
+    root,
+    'synthetic-root',
+    true,
+  );
+  boundary_cases.push(migration);
   // 新增端点按名称稳定排列，便于跨语言实现逐项定位。
   cases.splice(
     firstEndpoint,

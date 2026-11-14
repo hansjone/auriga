@@ -40,5 +40,11 @@
     "expression": "k.terminal_state === 'active'",
     "replacement": "false",
     "reason": "持久Tombstone终态只允许retired或revoked，重新出现项为active时必然与墓碑不相等，保留的!eq(t,k)检查始终拒绝该输入。"
+  },
+  {
+    "file": "msgnet-local-projection-oracle.mjs",
+    "expression": "jcs(names) !== jcs([...new Set(names)].sort())",
+    "replacement": "false",
+    "reason": "保留的 Object.keys(files).sort() 与 names 精确相等检查已要求 names 排序且唯一，Object.keys 自身无重复，该检查重复同一约束。"
   }
 ]

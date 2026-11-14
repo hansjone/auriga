@@ -73,7 +73,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: ../network/auto-renewal-v2.schema.json#/$defs/RenewalStatus
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/RenewalStatusOutput
         "400":
           description: 无效契约或转换
         "403":
@@ -258,6 +258,8 @@ paths:
           description: 材料不可用或clock_error
   /api/collab/v2/network/bootstrap/materials:
     post:
+      security: []
+      x-auriga-installation-auth: ProjectionRequest.identity_auth bound to InstallationPins
       operationId: getSealedNetworkMaterial
       tags:
         - NetworkRenewal
@@ -449,3 +451,17 @@ components:
       $ref: ../network/auto-renewal-v2.schema.json#/$defs/LocalProjectionRequest
     LocalProjectionResponse:
       $ref: ../network/auto-renewal-v2.schema.json#/$defs/LocalProjectionResponse
+    InstallationPin:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/InstallationPin
+    InstallationPins:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/InstallationPins
+    UnpublishedRenewalStatus:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/UnpublishedRenewalStatus
+    RenewalStatusOutput:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/RenewalStatusOutput
+    MigrationMaterialKey:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/MigrationMaterialKey
+    MigrationMaterialCommitment:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/MigrationMaterialCommitment
+    MigrationCommitmentMember:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/MigrationCommitmentMember

@@ -25,7 +25,7 @@ type LocalProjectionSelector struct {
 	Realm             string `json:"realm" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
 	InstallationId    string `json:"installation_id"`
 	Component         string `json:"component"`
-	Nonce             string `json:"nonce" validate:"regexp=^[A-Za-z0-9_-]+$"`
+	Nonce             string `json:"nonce" validate:"regexp=^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"`
 	Generation        string `json:"generation" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
 	KeysetVersion     string `json:"keyset_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
 	PublicationDigest string `json:"publication_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`

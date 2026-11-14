@@ -35,7 +35,7 @@
 - bootstrap：只允许无历史的安装，无前驱，三用途全新 active；已有本地账本拒绝。
 - refresh：保留 active，可加 next，首发只有真实 PG 发布事务提交且时钟检查通过才记录 committed_at/version；重试下载不得刷新。clock_error 期间禁止首发入账；校正后的首次正常发布重新锚定，不把污染的未来首发当成熟证明。
 - activate：前驱 next 仍有效，首发距 issued_at >=86400秒，该用途旧 active 已过期或至少还剩360秒；原 next 身份/期限不变，原 active→retired。
-- restart_recovery：仅对没有有效 active 且没有成熟有效 next 的用途新增全新 active；not_before=issued_at，0<寿命<=604800秒，未来生效/过期/不成熟 next→retired 或 revoked。其余仍有效用途 active 必须保持。成熟有效 next 必须走 activate，不能生成替代新钥。全部三用途不可用时才新增三把 active。拒绝缺用途、缺前驱、伪首发、无必要恢复、7天超限和历史冲突。
+- restart_recovery：仅对没有有效 active 且没有成熟有效 next 的用途新增全新 active；not_before=issued_at，0<寿命<=604800秒，未来生效/过期/不成熟 next→retired 或 revoked。其余仍有效用途 active 必须保持。此模式按用途分别判定：active 仍有效则保留；active 不可用且存在成熟有效 next 则将该 next 激活并将旧 active 退役；active 不可用且无成熟有效 next 才生成受限全新 active。允许同一 restart_recovery 快照同时保留、激活和全新恢复不同用途，成熟有效 next 不得被全新钥替代。全部三用途均无有效 active 且无成熟有效 next 时才新增三把全新 active。拒绝缺用途、缺前驱、伪首发、无必要恢复、7天超限和历史冲突。
 - migration：仅一次根签许可及下述屏障允许；保持原有效 active、kid、期限和真实首发。
 - authority_transition：正常换授权、旧新均在当前控制允许列表时，使用根签新授权对应的运行钥签第一份新清单；前驱使用前驱自己的运行公钥和其当时的根签控制验链，同代际版本仍须递增。若旧授权已撤销或需要重设版本空间，最新根控制必须带 GenerationTransition，精确绑定 predecessor_digest、from_generation、to_generation、新 authority_id/完整摘要和 first_version；to_generation严格大于from_generation，并等于本控制minimum_generation，first_version等于minimum_keyset_version。转换第一份清单必须逐字段匹配该锚点，可重置版本为first_version；只比较同代际的版本，不用旧代际版本阻止根授权的重新起步。后续版本按通常单调规则。根签锚点只许可历史证明，不恢复旧授权的签发权；用被撤销旧授权签任何新快照都先被拒。事故恢复必须生成新的业务钥并将旧钥撤销，原材料与首发留审计；仍受用途、寿命、墓碑与撤销不复活约束。
 
@@ -89,7 +89,7 @@ OpenAPI生成接口/模型只表达数据和权限，不承载mTLS握手实现�
 
 ## 本地投影协议（K2 增补）
 
-N 的 projector、network reader、broker 同 UID 监督器和 I 的 edge reader 共用 LocalProjectionManifest / LocalProjectionSelector / LocalProjectionRequest / LocalProjectionResponse 生成模型。D 为每个安装身份与组件配置独立卷根和 Unix stream socket，固定卷内 `selector.json`、`generations/` 与 `reload.sock`。这些位置来自受控装配，消息字段只携带标识符。Unix peer credentials 必须匹配装配的 projector/reader UID，卷权限沿上文规定。
+N 的 projector、network reader、broker 同 UID 监督器和 I 的 edge reader 共用 LocalProjectionManifest / LocalProjectionSelector / LocalProjectionRequest / LocalProjectionResponse 生成模型。D 为每个安装身份与组件配置独立卷根和 Unix stream socket，材料卷内固定 `selector.json`、`generations/`，该组件独立私有控制卷内固定 `reload.sock`。这些位置来自受控装配，消息字段只携带标识符。监听方固定为该组件的 reader（network/edge）或 broker 监督器，连接方固定为 projector。network/broker 监听 UID 10001，edge 监听 UID 65532，服务端核 SO_PEERCRED 的连接 UID 必须为 10001，projector 核服务端 UID 与目标组件一致。reload.sock 仅放在该组件私有控制卷中，卷可写挂载给该 reader/监督器和专属 projector。控制卷目录 owner 为监听 UID、group 为10001、模式0710，socket owner 为监听 UID、group 为10001、模式0660，使 edge UID65532 的监听器与 projector UID10001 可连接。材料卷仍按只读 reader 挂载规则装配。只有该组件 reader/监督器与其专属 projector 挂载这对卷，其他组件与 projector 不挂这些卷。D 为每组件配置独立 projector 实例和材料/控制卷，不能将全部组件卷挂给一个共享实例。相同 UID 无法区分组件进程，隔离依靠卷挂载命名空间和固定私有 socket，peer UID 检查与此共同生效。卷权限沿上文规定。
 
 selector.json 为无 BOM、无换行的 UTF-8 JCS(LocalProjectionSelector)，最大 16384 字节。manifest.json 为 UTF-8 JCS(LocalProjectionManifest)，最大 65536 字节。代目录固定为 `generations/<manifest_digest去掉sha256:前缀>/`。读取时固定根目录、拒绝符号链接与非普通文件，每个文件限制 1048576 字节，整代至多 128 个数据文件。目录内仅有 manifest.json 和 manifest.files 列出的文件。files 按 name 的 ASCII 顺序排列且名称唯一，长度和 sha256 分别核原始文件字节数和 SHA256 原始字节。manifest_digest 是 SHA256(JCS(完整 manifest))。selector 除 manifest_digest 外逐字段等于 manifest 的绑定字段。
 
@@ -102,3 +102,16 @@ Unix stream 每条消息为 4 字节无符号大端长度加 UTF-8 JCS JSON，�
 每个 reader 持久保存最高 generation/keyset_version、bundle_version、material_revision 与该 revision 的 selector。低代际、同代际低 keyset_version、低 bundle_version 或低 material_revision 拒绝 version_rollback。同 revision 不同 selector 拒绝 same_version_conflict，陌生 manifest 摘要/字节拒绝 invalid_chain，尚未落盘/加载/握手返回 projection_pending。同代精确重试返回持久状态，失败不覆盖最近成功状态，按 1..60 秒退避持续重试，5 秒发现和60秒退流量沿现有规则。回执只确认精确 selector，不能用更早一次的成功解锁新代。
 
 N 从匹配的本地响应生成发 C 的签名 ProjectionReceipt，附 local_selector，nonce、generation、keyset_version、publication_digest、bundle_version、bundle_digest 与其逐字段一致。C 将 nonce 对应的已授权 ProjectionMaterial、完整叶子集与 local_selector 绑定持久化，同一 nonce 的其他 selector 拒绝。仅在同代 loaded 后接受 handshake_verified，同字节回执可幂等重试。I 采用相同生成模型、peer/文件校验与状态机消费 edge 卷。D 按固定布局配置 UID/卷/socket，并保留事务文件和 reader 账本跨重启。上述局部模型供本地协议消费，公有 bootstrap 仍遵循原密封材料流程。
+
+
+## 第2轮审查补充
+
+本地 selector/manifest 的 nonce 固定为32个随机字节的规范无填充 base64url，共43字符，最后字符必须符合尾位约束。LocalProjectionResponse 的成功 phase 只配 none，failed 只配非 none，schema 同时约束二者。
+
+C/I/D 共用 InstallationPins，schema_version 固定2，tenant_id/realm 绑定安装域，pins 为 InstallationPin 数组。每条固定 target_id、identity_id、signing_spki、component、gateway_id、sealing_spki、subject 七字段。signing_spki 是 Ed25519 SPKI DER 的规范 base64url，sealing_spki 是 X25519 SPKI DER 的规范 base64url，装载时解析算法及精确DER并拒绝非规范编码。subject 为 TLS 客户端证书 subject 的 RFC2253 精确文本，证书 subject、安装请求签名身份和 pin 必须一致。ProjectionRequest.installation_id 和 identity_auth.kid 必须等于 pin.identity_id。identity_id 与 target_id 各自在该安装域内唯一，component/gateway_id 决定唯一允许投影域，不能由请求覆盖。D 写受保护配置，C/I 只读装载，文件/目录权限0600/0700，修改须由已有独立安装管理通路完成。根控制撤销/隔离优先于 pin，pin 不授予解除隔离权限。原 identities-file 无版本数组由 D 在升级时转换成此对象。
+
+C 关于其他交接项的处理如下。初次启动没有成功清单时使用新增 UnpublishedRenewalStatus，通过 RenewalStatusOutput 表达，禁止伪造版本或成功时间。迁移成员摘要的完整输入按新增 MigrationCommitmentMember 及 MigrationMaterialCommitment 冻结，pair_digest 摘要完整 v1 SignedKeyset 对象，material_digest 摘要 JCS(MigrationMaterialCommitment)。keys 按 kid 的 ASCII 排序且唯一，只记录 kid/purpose/公钥SPKI/原期限，私钥以对应公钥关联，不参加摘要。成员按 version 的 uint64 数值排序且唯一，根许可的 queue_commitment_digest 摘要该完整成员数组。C 必须逐成员核真实受签 pair 和真实材料对应公钥，不能只接受摘要自报。
+
+公有 /bootstrap/materials 明确 security=[]，通过 x-auriga-installation-auth 声明以请求体 ProjectionRequest 的独立安装签名认证。x-permission 由该 pin 的投影权限执行，不要求已过期的服务 JWT 或内部 mTLS。仍须固定 HTTPS 端点、独立根控制/安装身份撤销检查、签名 nonce 防重放和 HPKE 密封输出，响应不得明文泄露材料。内部明文材料端口仍按既有 mTLS/JWT 限制。
+
+TransportTrustBundle 在一个周期内仍按 dual_trust→new_leaves→retire_old 推进。下一周期允许 retire_old→dual_trust，bundle_version 继续单调递增且不得重置。消费者从持久前驱或完整受签 previous_transport 验证该起点，前驱必须为已见最高 bundle_version 的 retire_old，当前 previous_bundle_digest 必须精确摘要它。前驱由当前仍允许的运行授权验签，tenant/realm/authority/代际与当前包一致，前驱全部 CA 必须逐字保留，当前包至少增加一个全新 ca_id。旧链保留到新一轮持久加载/真实握手回执齐全后才退休。前驱缺失、摘要/版本/阶段/scope 不一致、丢旧CA或未加新CA均拒绝。运行授权换代先在旧授权尚允许时完成该周期，随后按已有授权转换规则切换。共同向量包含第二周期及逐项负例。
