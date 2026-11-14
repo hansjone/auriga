@@ -390,6 +390,7 @@ export interface RootControl {
   minimum_generation: string;
   minimum_keyset_version: string;
   generation_transition?: GenerationTransition;
+  transport_transition?: TransportTransition;
 }
 /**
  * This interface was referenced by `AurigaV2`'s JSON-Schema
@@ -410,6 +411,19 @@ export interface GenerationTransition {
   authority_id: string;
   authority_digest: string;
   first_version: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportTransition".
+ */
+export interface TransportTransition {
+  mode: 'authority_transition' | 'emergency_recovery';
+  predecessor_digest: string;
+  from_generation: string;
+  to_generation: string;
+  authority_id: string;
+  authority_digest: string;
+  first_bundle_version: string;
 }
 /**
  * This interface was referenced by `AurigaV2`'s JSON-Schema
@@ -994,4 +1008,101 @@ export interface MigrationCommitmentMember {
   version: string;
   pair_digest: string;
   material_digest: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportPredecessor".
+ */
+export interface TransportPredecessor {
+  bundle: SignedTransportTrustBundle;
+  authority: SignedRuntimeAuthority;
+  control: SignedRootControl;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportReaderEvidence".
+ */
+export interface TransportReaderEvidence {
+  reader_id: string;
+  identity_id: string;
+  selector: LocalProjectionSelector;
+  phase: 'loaded' | 'handshake_verified' | 'isolated';
+  isolation_enforced: boolean;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportConfirmation".
+ */
+export interface TransportConfirmation {
+  tenant_id: string;
+  realm: string;
+  authority_id: string;
+  authority_digest: string;
+  control_revision: string;
+  bundle_version: string;
+  bundle_digest: string;
+  phase: 'dual_trust' | 'new_leaves' | 'retire_old';
+  /**
+   * @maxItems 65536
+   */
+  required_reader_ids: string[];
+  /**
+   * @maxItems 65536
+   */
+  readers: TransportReaderEvidence[];
+  challenge: string;
+  issued_at: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "SignedTransportConfirmation".
+ */
+export interface SignedTransportConfirmation {
+  payload: TransportConfirmation;
+  runtime_auth: Signature;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportConfirmationQuery".
+ */
+export interface TransportConfirmationQuery {
+  tenant_id: string;
+  realm: string;
+  bundle_version: string;
+  bundle_digest: string;
+  challenge: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "NodeControlPin".
+ */
+export interface NodeControlPin {
+  target_id: string;
+  node_id: string;
+  identity_id: string;
+  signing_spki: string;
+  identity_revision: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "NodeControlPins".
+ */
+export interface NodeControlPins {
+  schema_version: 2;
+  tenant_id: string;
+  realm: string;
+  /**
+   * @maxItems 65536
+   */
+  pins: NodeControlPin[];
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportTransitionProof".
+ */
+export interface TransportTransitionProof {
+  control: SignedRootControl;
+  predecessor: TransportPredecessor;
+  first_bundle: SignedTransportTrustBundle;
+  authority: SignedRuntimeAuthority;
 }

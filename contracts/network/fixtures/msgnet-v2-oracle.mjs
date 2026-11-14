@@ -252,6 +252,20 @@ export function evaluate(v) {
       )
         err('invalid_transition');
       const old = prev.find((x) => x.kid === key.kid);
+      if (
+        k.mode === 'restart_recovery' &&
+        old?.state === 'next' &&
+        key.state === 'next'
+      ) {
+        const first = p.predecessor.keyset.payload.first_publications.find(
+          (record) => record.kid === old.kid,
+        );
+        if (
+          !first ||
+          seconds(first.committed_at) > issued - a.limits.next_maturity_seconds
+        )
+          err('invalid_transition');
+      }
       if (old) {
         for (const f of [
           'public_key_spki',
