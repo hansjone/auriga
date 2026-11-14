@@ -101,8 +101,21 @@ public class OrgRuntimeConfiguration {
 
   @Bean
   @Primary
-  IdentityPolicyHooks orgIdentityPolicyHooks(OrgService org) {
-    return new OrgIdentityPolicyHooks(org);
+  IdentityPolicyHooks orgIdentityPolicyHooks(OrgService org, UacOrgPolicy uac) {
+    return new OrgIdentityPolicyHooks(org, uac);
+  }
+
+  @Bean
+  UacOrgPolicy orgUacPolicy(OrgStore store, OrgService org, Clock clock) {
+    return new UacOrgPolicy(store, org, clock);
+  }
+
+  @Bean
+  org.springframework.boot.ApplicationRunner orgUacVerificationRecords(
+      UacOrgPolicy uac, org.springframework.core.env.Environment env) {
+    String path = env.getProperty("auriga.org.uac-verifications-file");
+    return args ->
+        uac.provision(path == null || path.isBlank() ? null : java.nio.file.Path.of(path));
   }
 
   @Bean

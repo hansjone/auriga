@@ -105,14 +105,11 @@ class NetworkConnectionAnchorPostgresTest {
                     Set.of(),
                     Set.of("auriga.connect"),
                     Set.of(OAuthProvider.DEVICE, "refresh_token"),
-                    true)));
+                    true)),
+            StandardDevicePostgresTest.networkAuthorization());
     authority =
         new IamNetworkAuthority(
-            store,
-            new DeviceAccessAuthority(store, sessions, tokens),
-            mock(AuditLogger.class),
-            clock,
-            Set.of("server-a"));
+            store, oauth.deviceAuthority(), mock(AuditLogger.class), clock, Set.of("server-a"));
     rpc = new IamGrpcNetworkAuthority(authority, clock, mock(IamNetworkSourceAuthority.class));
     TenantContext.run(
         tenant,
@@ -123,7 +120,8 @@ class NetworkConnectionAnchorPostgresTest {
                     var provider = UUID.randomUUID();
                     store.insert(
                         "account", account.toString(), Json.object("status", "active"), null);
-                    store.insert("idp_provider", provider.toString(), Json.object(), null);
+                    store.insert(
+                        "idp_provider", provider.toString(), Json.object("enabled", true), null);
                     return sessions.create(
                         account,
                         provider,
@@ -331,17 +329,23 @@ class NetworkConnectionAnchorPostgresTest {
         tenant,
         () -> {
           String token =
-              tokens.access(
-                  tenant,
-                  owner,
-                  "auriga",
-                  "device",
-                  "device",
-                  null,
-                  UUID.fromString(did),
-                  clock.instant(),
-                  clock.instant(),
-                  "auriga.connect");
+              store
+                      .tx(() -> store.get("device", did, false))
+                      .path("authorizationMode")
+                      .asString()
+                      .equals(StandardDevices.MODE)
+                  ? standardToken(owner, did)
+                  : tokens.access(
+                      tenant,
+                      owner,
+                      "auriga",
+                      "device",
+                      "device",
+                      null,
+                      UUID.fromString(did),
+                      clock.instant(),
+                      clock.instant(),
+                      "auriga.connect");
           var next = authority.prepare(token, nodeId, "server-a");
           var b =
               new IngressBinding(
@@ -369,11 +373,31 @@ class NetworkConnectionAnchorPostgresTest {
         account.toString(), device, node.node(), "N" + "B".repeat(55), "43", "OTHER-BROKER");
   }
 
+  String standardToken(String owner, String did) {
+    var device = tx(() -> store.get("device", did, false));
+    var session = tx(() -> store.byId("session", device.path("sessionId").asString(), false));
+    return tokens.withSigningKey(
+        () ->
+            tokens
+                .standardDevice(
+                    new DeviceAccessAuthority.Identity(
+                        tenant.toString(),
+                        owner,
+                        did,
+                        Instant.parse(session.path("expiresAt").asString())),
+                    session,
+                    "auriga",
+                    "auriga.connect",
+                    Set.of("auriga.connect", "auriga.connect.collab.use"),
+                    "member")
+                .accessToken());
+  }
+
   String session(UUID owner) {
     return tx(
         () -> {
           UUID provider = UuidV7.next();
-          store.insert("idp_provider", provider.toString(), Json.object(), null);
+          store.insert("idp_provider", provider.toString(), Json.object("enabled", true), null);
           return sessions
               .create(owner, provider, "portal", true, Duration.ofHours(2), Duration.ofHours(2))
               .session()
@@ -551,7 +575,8 @@ class NetworkConnectionAnchorPostgresTest {
     var failing =
         new IamNetworkAuthority(
             failingStore,
-            new DeviceAccessAuthority(failingStore, sessions, tokens),
+            new DeviceAccessAuthority(failingStore, sessions, tokens)
+                .standardDevices(oauth.standardDevices()),
             mock(AuditLogger.class),
             clock,
             Set.of("server-a"));
@@ -648,7 +673,13 @@ class NetworkConnectionAnchorPostgresTest {
           } else if (change.equals("session") || change.equals("sessionOwner")) {
             if (change.equals("sessionOwner"))
               mutate("session", sessionId, "accountId", other.toString());
-            mutate("device", device, "sessionId", session(account));
+            String nextSession = session(account);
+            mutate("device", device, "sessionId", nextSession);
+            mutate(
+                "device",
+                device,
+                "providerId",
+                tx(() -> store.byId("session", nextSession, false)).path("providerId").asString());
           } else {
             if (change.equals("deviceOwner"))
               mutate("device", device, "accountId", other.toString());

@@ -19,7 +19,7 @@ export async function openAurigaPanel(page) {
     result.modelSetupDeferred = true;
   });
   try {
-    await page.getByRole('button', { name: 'Auriga', exact: true }).click();
+    await page.getByRole('button', { name: 'Auriga DSH', exact: true }).click();
     await page.locator('auriga-team-panel').waitFor({ state: 'visible' });
     return result;
   } finally {

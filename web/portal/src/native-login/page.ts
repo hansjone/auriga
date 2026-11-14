@@ -1,11 +1,25 @@
 import {
+  createUacLoginView,
+  type UacLoginOptions,
+} from '../../../shared/src/native-login/uac';
+import {
+  loginInfoText,
+  watchLoginInfo,
+} from '../../../shared/src/native-login/login-info';
+import type { components } from '../../../shared/src/generated/iam';
+import {
+  navigationCorrelationId,
+  navigationProviderId,
+  takeNavigationContext,
+} from '../../../shared/src/api/correlation';
+import {
   createLoginView,
   type LoginView,
-} from '../../../../clients/dsh-plugin/src/login/index.js';
+} from '../../../shared/src/native-login/index.js';
 import type {
   ClientStep,
   StepInput,
-} from '../../../../clients/dsh-plugin/src/generated/steps.js';
+} from '../../../shared/src/generated/steps';
 import { createApiClient } from '../../../shared/src/api/client';
 import {
   createIamApi,
@@ -21,7 +35,7 @@ const transactionIdPattern =
 const messages = {
   'zh-CN': {
     title: '登录并进入我的 DSH',
-    scope: '此入口支持表单登录。其他登录方式、邀请和扫码确认请使用原有门户。',
+    scope: '选择团队账号或企业登录，成功后准备并进入本人的 DSH。',
     portal: '打开原有登录门户',
     language: '语言 / Language',
     checking: '正在确认登录会话…',
@@ -49,7 +63,7 @@ const messages = {
   en: {
     title: 'Sign in and enter my DSH',
     scope:
-      'This entry supports form sign-in. Use the existing portal for other methods, invitations and QR confirmation.',
+      'Sign in with a team account or company identity, then prepare and enter your DSH.',
     portal: 'Open the existing sign-in portal',
     language: '语言 / Language',
     checking: 'Checking your sign-in session…',
@@ -85,6 +99,7 @@ class ExpiredLogin extends Error {}
 export interface InstanceLoginOptions {
   fetch?: typeof fetch;
   navigate?: (path: string) => void;
+  uacObservability?: Pick<UacLoginOptions, 'onEvent'>;
 }
 
 /** Mount the cloud-only entry. Credentials and transactions stay in memory/cookies. */
@@ -112,6 +127,9 @@ export function mountInstanceLogin(
   let tx: LoginTransaction | undefined;
   let providerId: string | undefined;
   let view: LoginView | undefined;
+  let uacView: ReturnType<typeof createUacLoginView> | undefined;
+  let infoMonitor: ReturnType<typeof watchLoginInfo> | undefined;
+  let loginInfo: components['schemas']['UacLoginInfo'] | undefined;
   let workAbort: AbortController | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -136,6 +154,8 @@ export function mountInstanceLogin(
   header.append(title, languageLabel);
   const scope = doc.createElement('p');
   const notice = doc.createElement('p');
+  const identity = doc.createElement('p');
+  identity.dataset.testid = 'uac-department';
   const choices = doc.createElement('div');
   choices.className = 'providers';
   const loginRoot = doc.createElement('div');
@@ -157,6 +177,7 @@ export function mountInstanceLogin(
     header,
     scope,
     notice,
+    identity,
     choices,
     loginRoot,
     actions,
@@ -194,6 +215,8 @@ export function mountInstanceLogin(
     language.setAttribute('aria-label', words().language);
     language.disabled = authBusy;
     notice.textContent = words()[status];
+    identity.textContent = loginInfoText(loginInfo, locale);
+    identity.hidden = !authenticated || !identity.textContent;
     notice.setAttribute('role', alert ? 'alert' : 'status');
     shell.setAttribute('aria-busy', String(authBusy || workBusy));
     retry.textContent = words().retry;
@@ -204,12 +227,12 @@ export function mountInstanceLogin(
     logout.hidden = !authenticated;
     retry.hidden = !retryable;
     retry.disabled = authBusy || workBusy || Date.now() < retryAt;
-    cancel.hidden = !(authBusy || workBusy || tx);
+    cancel.hidden = !(authBusy || workBusy || tx || uacView);
     cancel.disabled = status === 'cancelled';
-    change.hidden = !tx || authenticated;
+    change.hidden = (!tx && !uacView) || authenticated;
     change.disabled = authBusy || workBusy;
     choices.replaceChildren();
-    if (!tx && !authenticated && !workBusy) {
+    if (!tx && !uacView && !authenticated && !workBusy) {
       for (const provider of providers) {
         const button = doc.createElement('button');
         button.type = 'button';
@@ -239,11 +262,16 @@ export function mountInstanceLogin(
 
   function invalidate() {
     epoch++;
+    infoMonitor?.dispose();
+    infoMonitor = undefined;
+    loginInfo = undefined;
     stopWork();
     win!.clearTimeout(retryTimer);
     retryTimer = undefined;
     retryAt = 0;
     // Set epoch first: the renderer abort callback cannot revive this lifecycle.
+    uacView?.dispose();
+    uacView = undefined;
     view?.dispose();
     view = undefined;
   }
@@ -254,9 +282,16 @@ export function mountInstanceLogin(
     if (error instanceof ExpiredLogin) message = 'expired';
     if (isApiError(error)) {
       if (error.status === 401) {
+        const expiredSession = authenticated;
         authenticated = false;
         tx = undefined;
         message = 'expired';
+        if (expiredSession) {
+          invalidate();
+          (options.navigate ?? ((target) => win!.location.assign(target)))(
+            entry,
+          );
+        }
       } else if (error.status === 403) message = 'forbidden';
       else if (error.status === 429) {
         message = 'limited';
@@ -286,11 +321,24 @@ export function mountInstanceLogin(
   }
 
   async function cancelAuthentication() {
+    const uacCleanup = uacView?.dispose();
+    uacView = undefined;
     const previous = tx;
     tx = undefined;
     const wasBusy = authBusy;
     invalidate();
     show('cancelled', false, true);
+    if (uacCleanup) {
+      authBusy = true;
+      render();
+      try {
+        await uacCleanup;
+      } finally {
+        authBusy = false;
+        render();
+      }
+      return;
+    }
     // A pending create/advance owns cleanup until it settles. Do not race a
     // replacement transaction against a late Set-Cookie from that operation.
     if (wasBusy) return;
@@ -427,6 +475,48 @@ export function mountInstanceLogin(
     invalidate();
     tx = undefined;
     providerId = id;
+    if (providers.find((p) => p.id === id)?.connectorType === 'uac') {
+      const version = epoch;
+      const navigation = takeNavigationContext(doc, id);
+      uacView = createUacLoginView(loginRoot, {
+        api: iam,
+        providerId: id,
+        targetName: providers.find((p) => p.id === id)?.displayName,
+        locale,
+        navigation,
+        initialCorrelationId: navigationCorrelationId(doc),
+        onEvent: options.uacObservability?.onEvent,
+        onBusyChange: (busy) => {
+          if (current(version)) {
+            authBusy = busy;
+            render();
+          }
+        },
+        onComplete: (result) => {
+          if (!current(version)) return;
+          if (result.state === 'authenticated') void verifyAndOpen();
+          else if (result.state === 'additional_step_required') {
+            void mutation(
+              () => iam.getLoginTransaction(result.transactionId),
+              version,
+            )
+              .then((step) => {
+                if (current(version)) {
+                  uacView?.dispose();
+                  uacView = undefined;
+                  installView(step);
+                }
+              })
+              .catch((error: unknown) => {
+                if (current(version)) fail(error);
+              });
+          }
+        },
+      });
+      render();
+      return;
+    }
+
     const version = epoch;
     show('signing');
     try {
@@ -461,6 +551,11 @@ export function mountInstanceLogin(
       throw new Error('Invalid login providers');
     providers = result.items;
     show(providers.length ? 'providers' : 'empty');
+    const preferred = providers.find(
+      (p) => p.connectorType === 'uac' && p.id === navigationProviderId(doc),
+    );
+    if (preferred && doc.getElementById('auriga-uac-navigation'))
+      void selectProvider(preferred.id);
   }
 
   async function verifyAndOpen() {
@@ -489,6 +584,30 @@ export function mountInstanceLogin(
       )
         throw new Error('Portal session required');
       authenticated = true;
+      infoMonitor = watchLoginInfo(me, () => iam.getMe(), {
+        onInfo: (info) => {
+          loginInfo = info;
+          render();
+        },
+        onIdentityChanged: () => {
+          if (!current(version)) return;
+          authenticated = false;
+          invalidate();
+          show('expired', true);
+          (options.navigate ?? ((target) => win!.location.assign(target)))(
+            entry,
+          );
+        },
+        onExpired: () => {
+          if (!current(version)) return;
+          authenticated = false;
+          invalidate();
+          show('expired', true);
+          (options.navigate ?? ((target) => win!.location.assign(target)))(
+            entry,
+          );
+        },
+      });
       tx = undefined;
       show('preparing');
       await observe((await workspace.open(signal)).instance, version, signal);
@@ -585,6 +704,7 @@ export function mountInstanceLogin(
     locale = value.startsWith('en') ? 'en' : 'zh-CN';
     language.value = locale;
     view?.setLocale(locale);
+    uacView?.setLocale(locale);
     render();
   }
   const onLanguage = () => setLocale(language.value);

@@ -1,3 +1,4 @@
+import { BRAND_NAME } from './brand';
 import { createI18n } from 'vue-i18n';
 
 const errorMessagesZh = {
@@ -51,11 +52,11 @@ export const messages = {
     portal: '工作区',
     admin: '管理台',
     panel: '团队面板',
-    welcome: 'Auriga，一起工作的地方。',
+    welcome: 'Auriga DSH，一起工作的地方。',
     placeholder: '即将推出',
     language: 'English',
     theme: '切换主题',
-    brand: 'Auriga',
+    brand: BRAND_NAME,
     login: {
       title: '登录',
       chooseProvider: '选择登录方式',
@@ -126,11 +127,11 @@ export const messages = {
     portal: 'Workspace',
     admin: 'Administration',
     panel: 'Team panel',
-    welcome: 'Auriga. A place to work together.',
+    welcome: 'Auriga DSH. A place to work together.',
     placeholder: 'Coming soon',
     language: '中文',
     theme: 'Switch theme',
-    brand: 'Auriga',
+    brand: BRAND_NAME,
     login: {
       title: 'Sign in',
       chooseProvider: 'Choose a sign-in method',

@@ -5,6 +5,7 @@ import auriga.common.events.EventEnvelope;
 import auriga.common.events.EventPublisher;
 import auriga.common.security.AurigaPrincipal;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -39,7 +40,27 @@ public final class OutboxAuditLogger implements AuditLogger {
     if (entry.errorCode() != null) data.put("errorCode", entry.errorCode());
     if (entry.changes() != null) data.put("changes", entry.changes().asMap());
     if (entry.details() != null && !entry.details().isEmpty()) {
-      data.put("details", AuditChanges.redact(entry.details()));
+      @SuppressWarnings("unchecked")
+      Map<String, Object> details = (Map<String, Object>) AuditChanges.redact(entry.details());
+      // Restore only typed UAC metadata whose names overlap generic secret markers.
+      // No raw credential value or arbitrary string can bypass the normal redactor.
+      if (entry.action().startsWith("iam.uac.")) {
+        for (String field :
+            List.of("tokenHashPrefix", "oldTokenHashPrefix", "newTokenHashPrefix")) {
+          Object hash = entry.details().get(field);
+          if (hash instanceof String value && value.matches("[a-f0-9]{12}"))
+            details.put(field, value);
+        }
+        for (String field : List.of("tokenMissing", "tokenReplaced", "cookiePresent")) {
+          Object value = entry.details().get(field);
+          if (value instanceof Boolean) details.put(field, value);
+        }
+        Object family = entry.details().get("cookieFamily");
+        if (family instanceof String value
+            && java.util.Set.of("portal", "uds", "none").contains(value))
+          details.put("cookieFamily", value);
+      }
+      data.put("details", details);
     }
     if (request != null) data.put("requestId", request.requestId());
     return data;

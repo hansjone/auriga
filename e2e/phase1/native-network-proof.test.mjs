@@ -97,7 +97,7 @@ test('native receipt requires the exact external body and its durable native req
       content: [
         {
           type: 'text',
-          text: '[Auriga external message message-1]\nunique-marker',
+          text: '[Auriga DSH external message message-1]\nunique-marker',
         },
       ],
       source: { kind: 'user', rpcId: 'message-1' },
@@ -145,7 +145,7 @@ test('durable receipt binds distinct message and recipient IDs to an operator-re
       content: [
         {
           type: 'text',
-          text: '[Auriga external message message-1]\nunique-marker',
+          text: '[Auriga DSH external message message-1]\nunique-marker',
         },
       ],
       source: { kind: 'user', rpcId: 'recipient-2' },

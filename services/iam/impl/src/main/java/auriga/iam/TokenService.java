@@ -184,6 +184,30 @@ public final class TokenService
 
   record IssuedToken(String accessToken, Instant expiresAt) {}
 
+  IssuedToken standardDevice(
+      DeviceAccessAuthority.Identity identity,
+      ObjectNode session,
+      String audience,
+      String scope,
+      Set<String> effective,
+      String memberType) {
+    ObjectNode claims =
+        base(UUID.fromString(identity.tenant()), identity.account(), audience, "device", "device");
+    Instant expiry = clock.instant().plusSeconds(300);
+    if (identity.expiresAt().isBefore(expiry)) expiry = identity.expiresAt();
+    expiry = expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    IamError.require(clock.instant().isBefore(expiry), "invalid_grant", 400);
+    claims.put("exp", expiry.getEpochSecond());
+    claims.put("did", identity.device());
+    claims.put("scope", scope);
+    claims.put("mtyp", memberType);
+    claims.put("auth_time", Instant.parse(session.path("authTime").asString()).getEpochSecond());
+    claims.set("perms", Json.MAPPER.valueToTree(effective.stream().sorted().toList()));
+    if (session.has("uacSessionBinding"))
+      claims.set("uacSessionBinding", session.path("uacSessionBinding"));
+    return new IssuedToken(signAccess(claims), expiry);
+  }
+
   IssuedToken managedDevice(
       UUID tenant, String owner, UUID device, Instant expiresAt, String memberType) {
     ObjectNode claims = base(tenant, owner, "auriga", "device", "device");

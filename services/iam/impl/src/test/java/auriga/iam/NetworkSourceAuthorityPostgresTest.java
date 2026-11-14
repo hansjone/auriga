@@ -1331,7 +1331,7 @@ class NetworkSourceAuthorityPostgresTest {
     return new IamNetworkSourceAuthority(
         store,
         authority,
-        new DeviceAccessAuthority(store, sessions, tokens),
+        oauth.deviceAuthority(),
         r -> organization.getEffectivePermissions(r),
         clock,
         policy);
@@ -1392,14 +1392,11 @@ class NetworkSourceAuthorityPostgresTest {
                     Set.of(),
                     Set.of("auriga.connect"),
                     Set.of(OAuthProvider.DEVICE, "refresh_token"),
-                    true)));
+                    true)),
+            StandardDevicePostgresTest.networkAuthorization());
     authority =
         new IamNetworkAuthority(
-            store,
-            new DeviceAccessAuthority(store, sessions, tokens),
-            mock(AuditLogger.class),
-            clock,
-            Set.of("server-a"));
+            store, oauth.deviceAuthority(), mock(AuditLogger.class), clock, Set.of("server-a"));
     sources = authority(new IamNetworkSourceAuthority.Policy(30, 5));
     TenantContext.run(
         tenant,
@@ -1410,7 +1407,8 @@ class NetworkSourceAuthorityPostgresTest {
                     var provider = UUID.randomUUID();
                     store.insert(
                         "account", account.toString(), Json.object("status", "active"), null);
-                    store.insert("idp_provider", provider.toString(), Json.object(), null);
+                    store.insert(
+                        "idp_provider", provider.toString(), Json.object("enabled", true), null);
                     return sessions.create(
                         account,
                         provider,
@@ -1678,7 +1676,8 @@ class NetworkSourceAuthorityPostgresTest {
                     UUID provider = UUID.randomUUID();
                     store.insert(
                         "account", otherAccount.toString(), Json.object("status", "active"), null);
-                    store.insert("idp_provider", provider.toString(), Json.object(), null);
+                    store.insert(
+                        "idp_provider", provider.toString(), Json.object("enabled", true), null);
                     return sessions.create(
                         otherAccount,
                         provider,
@@ -1820,7 +1819,8 @@ class NetworkSourceAuthorityPostgresTest {
                           targetAccount.toString(),
                           Json.object("status", "active"),
                           null);
-                      store.insert("idp_provider", provider.toString(), Json.object(), null);
+                      store.insert(
+                          "idp_provider", provider.toString(), Json.object("enabled", true), null);
                       return sessions.create(
                           targetAccount,
                           provider,

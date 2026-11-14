@@ -8,8 +8,7 @@ const messages = {
     update: '更新',
     checkUpdate: '检查更新',
     autoCheck: '自动检查',
-    updateRestart:
-      '下载后请关闭 Auriga Desktop，退出时安装，下次启动使用新版。',
+    updateRestart: '下载后请关闭 Auriga DSH，退出时安装，下次启动使用新版。',
     platform: '平台',
     address: '平台地址',
     save: '保存',
@@ -68,7 +67,7 @@ const messages = {
     invalidSettings: '设置无效',
     invalidOrigin: '请输入纯平台地址',
     httpsRequired: '请使用 HTTPS',
-    invalidPlatform: '此地址不是 Auriga 平台',
+    invalidPlatform: '此地址不是 Auriga DSH 平台',
     http: '平台返回 HTTP ',
     tools: '平台工具',
     notProvided: '未提供',
@@ -83,7 +82,7 @@ const messages = {
     checkUpdate: 'Check for updates',
     autoCheck: 'Check automatically',
     updateRestart:
-      'After download, close Auriga Desktop to install. Reopen to use the new version.',
+      'After download, close Auriga DSH to install. Reopen to use the new version.',
     platform: 'Platform',
     address: 'Platform address',
     save: 'Save',
@@ -142,7 +141,7 @@ const messages = {
     invalidSettings: 'Invalid settings',
     invalidOrigin: 'Enter a platform origin',
     httpsRequired: 'HTTPS required',
-    invalidPlatform: 'Not an Auriga platform',
+    invalidPlatform: 'Not an Auriga DSH platform',
     http: 'Platform returned HTTP ',
     tools: 'Platform tools',
     notProvided: 'Not supplied',
@@ -261,13 +260,17 @@ export function createSettingsView(
   async function call(
     /** @type {string} */ path,
     /** @type {any} */ body = undefined,
+    /** @type {{ timeoutMs?: number | null }} */ options = {},
   ) {
     const response = await fetcher(localURL(path), {
       method: body === undefined ? 'GET' : 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
       redirect: 'error',
-      signal: AbortSignal.timeout(15000),
+      signal:
+        options.timeoutMs === null
+          ? undefined
+          : AbortSignal.timeout(options.timeoutMs ?? 15000),
       headers:
         body === undefined
           ? {}
@@ -889,7 +892,7 @@ export function createSettingsView(
       { className: 'auriga-settings-content' },
       h(
         'section',
-        { className: 'auriga-status-card', 'aria-label': 'Auriga status' },
+        { className: 'auriga-status-card', 'aria-label': 'Auriga DSH status' },
         h('p', { role: 'status' }, summary),
         !managed && (!loggedIn || !ready) && h('p', null, t.local),
         action,
@@ -933,7 +936,13 @@ export function createSettingsView(
             !state.desktop.restartRequired &&
             button(t.update, () =>
               run(async () => {
-                await call('auriga/settings/desktop', { action: 'update' });
+                // The runtime bounds transfer idle time. A status-read deadline
+                // must not cancel a healthy package download before it queues.
+                await call(
+                  'auriga/settings/desktop',
+                  { action: 'update' },
+                  { timeoutMs: null },
+                );
                 await readState();
               }),
             ),

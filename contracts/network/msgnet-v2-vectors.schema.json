@@ -988,6 +988,499 @@
           },
           "required": ["id", "operation", "expected", "input"],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "transport_transition"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "root_spki": {
+                  "type": "string"
+                },
+                "tenant_id": {
+                  "type": "string"
+                },
+                "realm": {
+                  "type": "string"
+                },
+                "latest_control": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRootControl"
+                },
+                "authority": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRuntimeAuthority"
+                },
+                "transport": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle"
+                },
+                "predecessor": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/TransportPredecessor"
+                },
+                "seen_generation": {
+                  "type": "string"
+                },
+                "seen_bundle_version": {
+                  "type": "string"
+                },
+                "seen_bundle_digest": {
+                  "type": "string"
+                },
+                "isolation_enforced": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "root_spki",
+                "tenant_id",
+                "realm",
+                "latest_control",
+                "authority",
+                "transport",
+                "predecessor",
+                "seen_generation",
+                "seen_bundle_version",
+                "seen_bundle_digest",
+                "isolation_enforced"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "transport_confirmation"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "tenant_id": {
+                  "type": "string"
+                },
+                "realm": {
+                  "type": "string"
+                },
+                "root_spki": {
+                  "type": "string"
+                },
+                "authority": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRuntimeAuthority"
+                },
+                "control": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRootControl"
+                },
+                "bundle": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle"
+                },
+                "evidence": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportConfirmation"
+                },
+                "challenge": {
+                  "type": "string"
+                },
+                "now": {
+                  "type": "string"
+                },
+                "required_phase": {
+                  "type": "string"
+                },
+                "expected_selectors": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "tenant_id",
+                "realm",
+                "root_spki",
+                "authority",
+                "control",
+                "bundle",
+                "evidence",
+                "challenge",
+                "now",
+                "required_phase",
+                "expected_selectors"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "node_control_binding"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "authenticated_node_id": {
+                  "type": "string"
+                },
+                "pin": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/NodeControlPin"
+                },
+                "target_id": {
+                  "type": "string"
+                },
+                "identity_id": {
+                  "type": "string"
+                },
+                "identity_revision": {
+                  "type": "string"
+                },
+                "compromised": {
+                  "type": "boolean"
+                },
+                "requests_private_material": {
+                  "type": "boolean"
+                },
+                "independent_enrollment": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "authenticated_node_id",
+                "pin",
+                "target_id",
+                "identity_id",
+                "identity_revision",
+                "compromised",
+                "requests_private_material",
+                "independent_enrollment"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "projection_access"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "component": {
+                  "type": "string"
+                },
+                "projector_uid": {
+                  "type": "integer"
+                },
+                "reader_uid": {
+                  "type": "integer"
+                },
+                "peer_uid": {
+                  "type": "integer"
+                },
+                "owner_uid": {
+                  "type": "integer"
+                },
+                "directory_mode": {
+                  "type": "integer"
+                },
+                "file_mode": {
+                  "type": "integer"
+                },
+                "component_private_mount": {
+                  "type": "boolean"
+                },
+                "cap_drop_all": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "component",
+                "projector_uid",
+                "reader_uid",
+                "peer_uid",
+                "owner_uid",
+                "directory_mode",
+                "file_mode",
+                "component_private_mount",
+                "cap_drop_all"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "transport_catchup"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "transition": {
+                  "type": "object",
+                  "properties": {
+                    "root_spki": {
+                      "type": "string"
+                    },
+                    "tenant_id": {
+                      "type": "string"
+                    },
+                    "realm": {
+                      "type": "string"
+                    },
+                    "latest_control": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRootControl"
+                    },
+                    "authority": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRuntimeAuthority"
+                    },
+                    "transport": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle"
+                    },
+                    "predecessor": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/TransportPredecessor"
+                    },
+                    "seen_generation": {
+                      "type": "string"
+                    },
+                    "seen_bundle_version": {
+                      "type": "string"
+                    },
+                    "seen_bundle_digest": {
+                      "type": "string"
+                    },
+                    "isolation_enforced": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "root_spki",
+                    "tenant_id",
+                    "realm",
+                    "latest_control",
+                    "authority",
+                    "transport",
+                    "predecessor",
+                    "seen_generation",
+                    "seen_bundle_version",
+                    "seen_bundle_digest",
+                    "isolation_enforced"
+                  ],
+                  "additionalProperties": false
+                },
+                "current": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle"
+                },
+                "control": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRootControl"
+                },
+                "seen_version": {
+                  "type": "string"
+                },
+                "seen_digest": {
+                  "type": "string"
+                },
+                "confirmation": {
+                  "type": "object",
+                  "properties": {
+                    "tenant_id": {
+                      "type": "string"
+                    },
+                    "realm": {
+                      "type": "string"
+                    },
+                    "root_spki": {
+                      "type": "string"
+                    },
+                    "authority": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRuntimeAuthority"
+                    },
+                    "control": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRootControl"
+                    },
+                    "bundle": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle"
+                    },
+                    "evidence": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportConfirmation"
+                    },
+                    "challenge": {
+                      "type": "string"
+                    },
+                    "now": {
+                      "type": "string"
+                    },
+                    "required_phase": {
+                      "type": "string"
+                    },
+                    "expected_selectors": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "tenant_id",
+                    "realm",
+                    "root_spki",
+                    "authority",
+                    "control",
+                    "bundle",
+                    "evidence",
+                    "challenge",
+                    "now",
+                    "required_phase",
+                    "expected_selectors"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "transition",
+                "current",
+                "control",
+                "seen_version",
+                "seen_digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
         }
       ]
     }

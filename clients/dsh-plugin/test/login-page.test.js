@@ -39,6 +39,16 @@ const status = (extra = {}) =>
 const flush = async () => {
   for (let i = 0; i < 60; i++) await Promise.resolve();
 };
+
+for (const logout of [false, true])
+  test(`standalone page owns its ${logout ? 'logout' : 'login'} title`, async (t) => {
+    const { root } = fixture(t, [new TypeError('offline')], { logout });
+    const title = `Auriga DSH · ${logout ? '退出登录 / Sign out' : '登录 / Sign in'}`;
+    assert.equal(root.ownerDocument.title, title);
+    await flush();
+    assert.equal(root.ownerDocument.title, title);
+  });
+
 for (const locale of ['zh-CN', 'en'])
   for (const [category, statusCode, zh, en] of [
     ['dns', undefined, '总部不可达', 'Platform unreachable'],

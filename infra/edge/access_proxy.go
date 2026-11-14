@@ -18,6 +18,9 @@ var invitationPreviewPath = regexp.MustCompile(`^/api/org/v1/invitations/preview
 
 func loginOperation(r *http.Request) bool {
 	p := r.URL.Path
+	if uacLoginOperation(r) {
+		return true
+	}
 	if p == "/api/iam/v1/login/providers" {
 		return r.Method == "GET"
 	}
@@ -78,6 +81,10 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		return
 	}
 	iam := target == g.iamURL
+	if r.URL.Path == "/api/iam/v1/login/uac/sso" && audience != "portal" {
+		fail(403, "common.forbidden")
+		return
+	}
 	if r.URL.Path == "/oauth2/revoke" && (r.Method != http.MethodPost || audience != "portal") {
 		fail(403, "common.forbidden")
 		return
@@ -330,6 +337,9 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap bool) (st
 			names = append(names, csrfCookieBase())
 		}
 	}
+	if e.role == "portal" && (uacLoginOperation(r) || r.URL.Path == "/api/iam/v1/logout") {
+		names = append(names, "auriga_portal_sso_suppression")
+	}
 	var selected []string
 	for _, base := range names {
 		name := cookieName(e.scheme == "https", base)
@@ -344,5 +354,46 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap bool) (st
 			return "", errString("ambiguous cookie")
 		}
 	}
+	if e.role == "portal" && r.URL.Path == "/api/iam/v1/login/uac/sso" {
+		raw, err := rawSSOCookies(r, g.Cfg.UacSSOCookieNames)
+		if err != nil {
+			return "", err
+		}
+		selected = append(selected, raw...)
+	}
 	return strings.Join(selected, "; "), nil
+}
+
+// Preserve private enterprise values byte-for-byte. net/http Cookie parsing and
+// serialization can discard quotes/spaces, silently turning SSO into QR fallback.
+func rawSSOCookies(r *http.Request, names []string) ([]string, error) {
+	allowed := map[string]bool{}
+	for _, name := range names {
+		allowed[name] = true
+	}
+	seen := map[string]bool{}
+	var selected []string
+	for _, line := range r.Header.Values("Cookie") {
+		for _, part := range strings.Split(line, ";") {
+			part = strings.TrimLeft(part, " \t")
+			name, value, hasValue := strings.Cut(part, "=")
+			if !allowed[name] {
+				continue
+			}
+			if !hasValue || seen[name] {
+				return nil, errString("ambiguous SSO cookie")
+			}
+			for _, c := range []byte(value) {
+				if c < 0x20 || c >= 0x7f {
+					return nil, errString("invalid SSO cookie value")
+				}
+			}
+			if strings.HasPrefix(value, `"`) && (len(value) < 2 || !strings.HasSuffix(value, `"`)) {
+				return nil, errString("invalid quoted SSO cookie value")
+			}
+			seen[name] = true
+			selected = append(selected, name+"="+value)
+		}
+	}
+	return selected, nil
 }

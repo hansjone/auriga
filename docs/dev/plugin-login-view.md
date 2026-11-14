@@ -1,6 +1,6 @@
 # 原生登录步骤模块
 
-`clients/dsh-plugin/src/login/index.js` 提供无框架、无构建要求的 ESM 模块及同名类型声明。宿主可直接加载模块，不依赖已授权 RPC 的 main 插槽；由宿主提供专用登录容器、DSH boot 样式和主题变量。布局参考既有 gate/desk 的品牌、居中卡片与标准表单，品牌为 Auriga，字体继承，颜色沿 `--dsw-alias-*`，没有独立主题调色板或系统主题监听。
+`clients/dsh-plugin/src/login/index.js` 提供无框架、无构建要求的 ESM 模块及同名类型声明。宿主可直接加载模块，不依赖已授权 RPC 的 main 插槽；由宿主提供专用登录容器、DSH boot 样式和主题变量。布局参考既有 gate/desk 的品牌、居中卡片与标准表单，品牌为 Auriga DSH，字体继承，颜色沿 `--dsw-alias-*`，没有独立主题调色板或系统主题监听。
 
 ## 接口
 

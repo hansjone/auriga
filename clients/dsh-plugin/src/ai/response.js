@@ -250,7 +250,8 @@ export function responseState(hostApi, model) {
             kind: 'error',
             failure: {
               code: 'CONTENT_FILTER',
-              message: 'Auriga AI: 内容过滤/拒绝 (content filtered/refused)',
+              message:
+                'Auriga DSH AI: 内容过滤/拒绝 (content filtered/refused)',
             },
           },
         });

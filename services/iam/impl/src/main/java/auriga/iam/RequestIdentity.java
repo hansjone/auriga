@@ -27,6 +27,11 @@ public final class RequestIdentity {
 
   private final DeploymentAccess access;
   private final Hop hop;
+  private IamStore uacStore;
+
+  void uacStore(IamStore store) {
+    this.uacStore = store;
+  }
 
   public RequestIdentity(DeploymentAccess access, Hop hop) {
     this.access = Objects.requireNonNull(access);
@@ -82,6 +87,16 @@ public final class RequestIdentity {
     } catch (IllegalArgumentException | AurigaException e) {
       throw new AurigaException(CommonErrors.FORBIDDEN);
     }
+  }
+
+  /** Same-origin browser polling is readable only through a same-origin fetch. */
+  void sameOriginFetch(HttpServletRequest request) {
+    if (!"same-origin".equals(single(request, "Sec-Fetch-Site", CommonErrors.FORBIDDEN))
+        || !Set.of("cors", "same-origin")
+            .contains(single(request, "Sec-Fetch-Mode", CommonErrors.FORBIDDEN))
+        || !"empty".equals(single(request, "Sec-Fetch-Dest", CommonErrors.FORBIDDEN)))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    if (request.getHeader("Origin") != null) sameOrigin(request);
   }
 
   private void authenticateHop(HttpServletRequest request) {
@@ -268,6 +283,8 @@ public final class RequestIdentity {
 
   public void issued(
       HttpServletRequest request, HttpServletResponse response, LoginManager.Result result) {
+    correlate(
+        request, response, result.transaction().path("id").asString(), result.bindingCookie());
     if (result.bindingCookie() != null)
       setCookie(request, response, transactionCookie(request), result.bindingCookie(), true, 300);
     if (result.session() != null) {
@@ -285,5 +302,24 @@ public final class RequestIdentity {
       setCookie(request, response, transactionCookie(request), "", true, 0);
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Pragma", "no-cache");
+  }
+
+  void correlate(
+      HttpServletRequest request, HttpServletResponse response, String id, String issuedBinding) {
+    if (uacStore != null && response != null) {
+      String proof = issuedBinding != null ? issuedBinding : binding(request);
+      if (proof != null)
+        uacStore.tx(
+            () -> {
+              var row = uacStore.get("login_tx", id, false);
+              if (row != null
+                  && row.has("correlationId")
+                  && origin(request).equals(row.path("origin").asString())
+                  && host(request).audience().equals(row.path("audience").asString())
+                  && Secrets.same(row.path("bindingHash").asString(), Secrets.hash(proof)))
+                UacCorrelation.set(response, row.path("correlationId").asString());
+              return null;
+            });
+    }
   }
 }
