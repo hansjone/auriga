@@ -4,10 +4,7 @@
     {
       "file": "ai/index.js",
       "evidence": "(response.url && response.url !== `${origin}/ai/v1/${path}`) ||",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listAiModels",
         "createAiChatCompletion",
@@ -18,10 +15,7 @@
     {
       "file": "ai/index.js",
       "evidence": "const pending = controlledFetch(`${origin}/ai/v1/${path}`, {",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listAiModels",
         "createAiChatCompletion",
@@ -32,10 +26,7 @@
     {
       "file": "ai/index.js",
       "evidence": "const trace = { trace_id: parent.slice(3, 35), path: `/ai/v1/${path}` };",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listAiModels",
         "createAiChatCompletion",
@@ -46,10 +37,7 @@
     {
       "file": "ai/managed-status.js",
       "evidence": "base.pathname !== '/ai/v1' ||",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listAiModels",
         "createAiChatCompletion",
@@ -60,9 +48,7 @@
     {
       "file": "ai/refresh-broker.js",
       "evidence": "tokens = await platform.request('/oauth2/token', {",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [],
       "control": "broker_token_refresh",
       "routePattern": "/oauth2/token"
@@ -70,31 +56,21 @@
     {
       "file": "local/member-profile.js",
       "evidence": "'/api/iam/v1/network/systems?limit=200' +",
-      "methods": [
-        "GET"
-      ],
-      "operations": [
-        "listNetworkSystems"
-      ],
+      "methods": ["GET"],
+      "operations": ["listNetworkSystems"],
       "routePattern": "/api/iam/v1/network/systems?limit=200"
     },
     {
       "file": "local/member-profile.js",
       "evidence": "const me = await platform.request('/api/iam/v1/me', { jar, signal });",
-      "methods": [
-        "GET"
-      ],
-      "operations": [
-        "profile_read"
-      ],
+      "methods": ["GET"],
+      "operations": ["profile_read"],
       "routePattern": "/api/iam/v1/me"
     },
     {
       "file": "local/platform.js",
       "evidence": "const jwks = await request(issuerPath + '/oauth2/jwks');",
-      "methods": [
-        "GET"
-      ],
+      "methods": ["GET"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/oauth2/jwks"
@@ -102,9 +78,7 @@
     {
       "file": "local/platform.js",
       "evidence": "new URL(config.issuer).pathname.replace(/\\/$/, '') + '/oauth2/jwks',",
-      "methods": [
-        "GET"
-      ],
+      "methods": ["GET"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/oauth2/jwks"
@@ -112,9 +86,7 @@
     {
       "file": "local/runtime.js",
       "evidence": ": '/api/iam/v1/login/transactions/' +",
-      "methods": [
-        "DELETE"
-      ],
+      "methods": ["DELETE"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/api/iam/v1/login/transactions/"
@@ -122,9 +94,7 @@
     {
       "file": "local/runtime.js",
       "evidence": "? '/api/iam/v1/logout'",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/api/iam/v1/logout"
@@ -132,9 +102,7 @@
     {
       "file": "local/runtime.js",
       "evidence": "'/api/iam/v1/login/providers',",
-      "methods": [
-        "GET"
-      ],
+      "methods": ["GET"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/api/iam/v1/login/providers"
@@ -142,9 +110,7 @@
     {
       "file": "local/runtime.js",
       "evidence": "'/api/iam/v1/login/transactions',",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/api/iam/v1/login/transactions"
@@ -152,9 +118,7 @@
     {
       "file": "local/runtime.js",
       "evidence": "'/api/iam/v1/login/transactions/' +",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/api/iam/v1/login/transactions/"
@@ -162,9 +126,7 @@
     {
       "file": "local/runtime.js",
       "evidence": "await platform.request('/oauth2/revoke', {",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/oauth2/revoke"
@@ -172,9 +134,7 @@
     {
       "file": "local/runtime.js",
       "evidence": "tokens = await platform.request('/oauth2/token', {",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/oauth2/token"
@@ -182,9 +142,7 @@
     {
       "file": "local/team.js",
       "evidence": "await transport('/ai/mcp', {",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [
         "team_initialize",
         "team_list_tools",
@@ -199,9 +157,7 @@
     {
       "file": "local/team.js",
       "evidence": "const result = await transport('/ai/mcp', {",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [
         "team_initialize",
         "team_list_tools",
@@ -216,9 +172,7 @@
     {
       "file": "local/team.js",
       "evidence": "const result = await transport('/ai/team/node/' + method, {",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [
         "team_node_register",
         "team_node_bind",
@@ -231,9 +185,7 @@
     {
       "file": "managed/heartbeat.js",
       "evidence": "'/api/workspace/v1/instance/heartbeat',",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [],
       "control": "managed_instance_heartbeat",
       "routePattern": "/api/workspace/v1/instance/heartbeat"
@@ -241,97 +193,63 @@
     {
       "file": "managed/models.js",
       "evidence": ": platform.request('/ai/v1/models', {",
-      "methods": [
-        "GET"
-      ],
-      "operations": [
-        "listAiModels"
-      ],
+      "methods": ["GET"],
+      "operations": ["listAiModels"],
       "routePattern": "/ai/v1/models"
     },
     {
       "file": "network/base-tools.js",
       "evidence": "export const DIAGNOSTIC_PATH = '/api/iam/v1/login/providers';",
-      "methods": [
-        "GET"
-      ],
-      "operations": [
-        "provider_diagnostic"
-      ],
+      "methods": ["GET"],
+      "operations": ["provider_diagnostic"],
       "routePattern": "/api/iam/v1/login/providers"
     },
     {
       "file": "network/device-provider.js",
       "evidence": "'/api/collab/v1/network/keys/announcement',",
-      "methods": [
-        "GET"
-      ],
-      "operations": [
-        "getNetworkKeyAnnouncement"
-      ],
+      "methods": ["GET"],
+      "operations": ["getNetworkKeyAnnouncement"],
       "routePattern": "/api/collab/v1/network/keys/announcement"
     },
     {
       "file": "network/device-provider.js",
       "evidence": "'/api/iam/v1/network/tickets',",
-      "methods": [
-        "POST"
-      ],
-      "operations": [
-        "network_open"
-      ],
+      "methods": ["POST"],
+      "operations": ["network_open"],
       "routePattern": "/api/iam/v1/network/tickets"
     },
     {
       "file": "network/device-provider.js",
       "evidence": "() => request('/api/collab/v1/network/keys', undefined, active),",
-      "methods": [
-        "GET"
-      ],
-      "operations": [
-        "getNetworkKeys"
-      ],
+      "methods": ["GET"],
+      "operations": ["getNetworkKeys"],
       "routePattern": "/api/collab/v1/network/keys"
     },
     {
       "file": "network/device-provider.js",
       "evidence": "() => request('/api/iam/v1/network/register', {}, active),",
-      "methods": [
-        "POST"
-      ],
-      "operations": [
-        "network_open"
-      ],
+      "methods": ["POST"],
+      "operations": ["network_open"],
       "routePattern": "/api/iam/v1/network/register"
     },
     {
       "file": "network/device-provider.js",
       "evidence": "path === '/api/iam/v1/network/register'",
-      "methods": [
-        "POST"
-      ],
-      "operations": [
-        "network_open"
-      ],
+      "methods": ["POST"],
+      "operations": ["network_open"],
       "routePattern": "/api/iam/v1/network/register"
     },
     {
       "file": "network/device-provider.js",
       "evidence": "return request('/api/ai/v1/network/submit', body, active);",
-      "methods": [
-        "POST"
-      ],
-      "operations": [
-        "network_submit"
-      ],
+      "methods": ["POST"],
+      "operations": ["network_submit"],
       "routePattern": "/api/ai/v1/network/submit"
     },
     {
       "file": "network/managed-device.js",
       "evidence": ".request('/oauth2/token', {",
-      "methods": [
-        "POST"
-      ],
+      "methods": ["POST"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/oauth2/token"
@@ -339,10 +257,7 @@
     {
       "file": "resources/catalog-api.js",
       "evidence": "!path.startsWith('/api/resource/v1/') ||",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -365,10 +280,7 @@
     {
       "file": "resources/catalog-api.js",
       "evidence": "const base = '/api/resource/v1/catalog';",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -391,10 +303,7 @@
     {
       "file": "resources/catalog-routes.js",
       "evidence": "'/api/resource/v1/catalog/' +",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -417,10 +326,7 @@
     {
       "file": "resources/catalog-service.js",
       "evidence": "'/api/resource/v1/catalog/packages?' +",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -443,10 +349,7 @@
     {
       "file": "resources/catalog-service.js",
       "evidence": "'/api/resource/v1/catalog/packages/' +",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -469,10 +372,7 @@
     {
       "file": "resources/catalog-service.js",
       "evidence": "'/api/resource/v1/catalog/packages/' +",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -495,10 +395,7 @@
     {
       "file": "resources/catalog-service.js",
       "evidence": "'/api/resource/v1/catalog/packages/' + input.packageId,",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -521,10 +418,7 @@
     {
       "file": "resources/catalog-service.js",
       "evidence": "'/api/resource/v1/catalog/packages/' + pack.value.id + '/versions',",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -547,10 +441,7 @@
     {
       "file": "resources/catalog-service.js",
       "evidence": "pack = await api.request('/api/resource/v1/catalog/packages', {",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "UnifiedListResourcePackages",
         "UnifiedCreateResourcePackage",
@@ -573,10 +464,7 @@
     {
       "file": "resources/channel.js",
       "evidence": "`^(?:/api/resource/v1/packages(?:/${uuid}(?:/versions(?:/${uuid})?)?)?|/api/resource/v1/distributions/${uuid})$`,",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listResourcePackages",
         "createResourcePackage",
@@ -601,10 +489,7 @@
     {
       "file": "resources/channel.js",
       "evidence": "if (write && path !== '/api/resource/v1/distributions') return send(405);",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listResourcePackages",
         "createResourcePackage",
@@ -629,10 +514,7 @@
     {
       "file": "resources/channel.js",
       "evidence": "write && raw === '/api/resource/v1/distributions'",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listResourcePackages",
         "createResourcePackage",
@@ -657,10 +539,7 @@
     {
       "file": "resources/member-api.js",
       "evidence": "`/api/resource/v1/packages/${packageId}/versions/${versionId}`,",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listResourcePackages",
         "createResourcePackage",
@@ -685,10 +564,7 @@
     {
       "file": "resources/member-api.js",
       "evidence": "const base = '/api/resource/v1/member';",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listResourcePackages",
         "createResourcePackage",
@@ -713,10 +589,7 @@
     {
       "file": "resources/member-api.js",
       "evidence": "const pack = await request(`/api/resource/v1/packages/${packageId}`);",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listResourcePackages",
         "createResourcePackage",
@@ -741,10 +614,7 @@
     {
       "file": "resources/member-api.js",
       "evidence": "revocations: () => request('/api/resource/v1/revocations'),",
-      "methods": [
-        "GET",
-        "POST"
-      ],
+      "methods": ["GET", "POST"],
       "operations": [
         "listResourcePackages",
         "createResourcePackage",
@@ -769,9 +639,7 @@
     {
       "file": "settings/store.js",
       "evidence": "const response = await fetcher(platform + '/oauth2/jwks', {",
-      "methods": [
-        "GET"
-      ],
+      "methods": ["GET"],
       "operations": [],
       "control": "shell_authentication_lifecycle",
       "routePattern": "/oauth2/jwks"
@@ -857,9 +725,7 @@
     {
       "file": "client.js",
       "channel": "local-browser-bridge",
-      "transports": [
-        "call:fetch"
-      ],
+      "transports": ["call:fetch"],
       "routePatterns": [],
       "reason": "生成的页面只访问同源DSH受准入桥接和健康/资源接口，平台身份留在后端；仍须原完整Origin与localURL边界。",
       "design": "docs/design/auth-shell.zh.md §3.3、§4.2"
@@ -867,9 +733,7 @@
     {
       "file": "settings/view.js",
       "channel": "local-settings-view",
-      "transports": [
-        "call:fetcher"
-      ],
+      "transports": ["call:fetcher"],
       "routePatterns": [],
       "reason": "个人设置和平台状态动作通过当前宿主localURL桥接，不直连平台成员API。",
       "design": "docs/design/auth-shell.zh.md §3.3"
@@ -926,9 +790,7 @@
       "file": "identity/oidc.js",
       "channel": "standalone-owner-oidc",
       "transports": [],
-      "routePatterns": [
-        "^/oauth2/(?:authorize|token|userinfo|jwks|revoke)$"
-      ],
+      "routePatterns": [],
       "reason": "仅standalone owner的受信身份源OIDC，不得用于Auriga平台设备认证。",
       "design": "docs/design/auth-shell.zh.md §3.3"
     },
@@ -941,30 +803,22 @@
         "call:customFetch",
         "call:undiciFetch"
       ],
-      "routePatterns": [
-        "^/oauth2/(?:authorize|token|userinfo|jwks|revoke)$"
-      ],
+      "routePatterns": [],
       "reason": "owner OIDC请求继续经过原issuer/DNS/无重定向守卫；node:net仅用于地址校验。",
       "design": "docs/design/auth-shell.zh.md §3.3"
     },
     {
       "file": "managed/heartbeat.js",
       "channel": "managed-instance-heartbeat",
-      "transports": [
-        "call:traceFetch"
-      ],
-      "routePatterns": [
-        "^/api/workspace/v1/instance/heartbeat$"
-      ],
+      "transports": ["call:traceFetch"],
+      "routePatterns": ["^/api/workspace/v1/instance/heartbeat$"],
       "reason": "托管实例以既有instance凭据向固定心跳端点报活动，不替代成员平台代理。",
       "design": "docs/design/auth-shell.zh.md §3.3"
     },
     {
       "file": "managed/host-auth.js",
       "channel": "managed-edge-admission",
-      "transports": [
-        "import:node:net"
-      ],
+      "transports": ["import:node:net"],
       "routePatterns": [],
       "reason": "保留edge身份头、来源及Host核验；node:net仅isIP，无网络请求授权。",
       "design": "docs/design/auth-shell.zh.md §3.3"
@@ -1004,21 +858,15 @@
     {
       "file": "managed/panel.js",
       "channel": "managed-signed-panel",
-      "transports": [
-        "call:traceFetch"
-      ],
-      "routePatterns": [
-        "^/panel/(?:manifest\\.json|[^?#]+)$"
-      ],
+      "transports": ["call:traceFetch"],
+      "routePatterns": [],
       "reason": "保留同源签名面板manifest/静态加载与完整性校验，不能借此直连成员API。",
       "design": "docs/design/auth-shell.zh.md §3.3"
     },
     {
       "file": "local/desktop.js",
       "channel": "desktop-signed-update",
-      "transports": [
-        "call:fetch"
-      ],
+      "transports": ["call:fetch"],
       "routePatterns": [],
       "reason": "保留安装器选定的同源制品下载和更新边界，不得携平台成员凭据或选择成员API。",
       "design": "docs/design/auth-shell.zh.md §3.2.1、§3.3"
@@ -1026,11 +874,7 @@
     {
       "file": "observability/index.js",
       "channel": "retained-channel-tracing",
-      "transports": [
-        "call:tracedFetch",
-        "call:traceFetch",
-        "call:fetcher"
-      ],
+      "transports": ["call:tracedFetch", "call:traceFetch", "call:fetcher"],
       "routePatterns": [],
       "reason": "仅给保留通道包装日志/追踪，调用方仍须单独白名单；不能增加平台路由或持有平台令牌。",
       "design": "docs/design/auth-shell.zh.md §3.3、§9"
@@ -1050,6 +894,54 @@
       "routePatterns": [],
       "reason": "保留原生个人模型挂接；平台取票/传输分支仍由D迁broker，白名单不放行直接fetch。",
       "design": "docs/design/auth-shell.zh.md §3.3、§4.2"
+    },
+    {
+      "file": "resources/catalog-api.js",
+      "channel": "fixed-resource-operation-selector",
+      "transports": [],
+      "routePatterns": ["^/api/resource/v1(?:/[^#\\\\]*)?$"],
+      "reason": "Existing resource paths select only frozen broker operations. No HTTP transport is permitted; ownership and signature checks remain in the adapters.",
+      "design": "docs/design/auth-shell.zh.md section 4.2"
+    },
+    {
+      "file": "resources/catalog-service.js",
+      "channel": "fixed-resource-operation-selector",
+      "transports": [],
+      "routePatterns": ["^/api/resource/v1(?:/[^#\\\\]*)?$"],
+      "reason": "Existing resource paths select only frozen broker operations. No HTTP transport is permitted; ownership and signature checks remain in the adapters.",
+      "design": "docs/design/auth-shell.zh.md section 4.2"
+    },
+    {
+      "file": "resources/catalog-routes.js",
+      "channel": "fixed-resource-operation-selector",
+      "transports": [],
+      "routePatterns": ["^/api/resource/v1(?:/[^#\\\\]*)?$"],
+      "reason": "Existing resource paths select only frozen broker operations. No HTTP transport is permitted; ownership and signature checks remain in the adapters.",
+      "design": "docs/design/auth-shell.zh.md section 4.2"
+    },
+    {
+      "file": "resources/channel.js",
+      "channel": "fixed-resource-operation-selector",
+      "transports": [],
+      "routePatterns": ["^/api/resource/v1(?:/[^#\\\\]*)?$"],
+      "reason": "Existing resource paths select only frozen broker operations. No HTTP transport is permitted; ownership and signature checks remain in the adapters.",
+      "design": "docs/design/auth-shell.zh.md section 4.2"
+    },
+    {
+      "file": "resources/member-api.js",
+      "channel": "fixed-resource-operation-selector",
+      "transports": [],
+      "routePatterns": ["^/api/resource/v1(?:/[^#\\\\]*)?$"],
+      "reason": "Existing resource paths select only frozen broker operations. No HTTP transport is permitted; ownership and signature checks remain in the adapters.",
+      "design": "docs/design/auth-shell.zh.md section 4.2"
+    },
+    {
+      "file": "local/enterprise.js",
+      "channel": "authorized-enterprise-skill-outbound",
+      "transports": ["import:node:https"],
+      "routePatterns": [],
+      "reason": "Task-scoped enterprise HTTPS only: loopback socket, owner/scope/expiry, private exact host allowlist and pinned DNS address. Never a platform proxy.",
+      "design": "docs/design/auth-shell.zh.md section 3.1.2"
     }
   ]
 }

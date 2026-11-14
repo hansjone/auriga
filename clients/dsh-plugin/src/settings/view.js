@@ -21,6 +21,7 @@ const messages = {
     account: '账号',
     identity: '成员',
     memberId: '成员 ID',
+    department: '部门',
     device: '设备名',
     loginTime: '登录时间',
     signedOut: '未登录',
@@ -93,6 +94,7 @@ const messages = {
     account: 'Account',
     identity: 'Member',
     memberId: 'Member ID',
+    department: 'Department',
     device: 'Device name',
     loginTime: 'Sign-in time',
     signedOut: 'Signed out',
@@ -150,7 +152,7 @@ const messages = {
 /** @param {any} React @param {{localURL:(path:string)=>string,fetcher?:typeof fetch,navigate:(url:string)=>void}} ports */
 export function createSettingsView(
   React,
-  { localURL, fetcher = fetch, navigate },
+  { localURL, fetcher = fetch, navigate: _navigate },
 ) {
   const h = React.createElement;
   function useReceiveSettings(
@@ -170,7 +172,7 @@ export function createSettingsView(
     React.useEffect(() => {
       let live = true;
       if (account?.loggedIn)
-        void fetcher(localURL('auriga/local-login/messaging/snapshot'), {
+        void fetcher(localURL('auriga/shell/messaging/snapshot'), {
           credentials: 'same-origin',
           cache: 'no-store',
         })
@@ -198,7 +200,7 @@ export function createSettingsView(
       setError('');
       try {
         const response = await fetcher(
-          localURL('auriga/local-login/messaging/receive'),
+          localURL('auriga/shell/messaging/receive'),
           {
             method: 'POST',
             credentials: 'same-origin',
@@ -257,6 +259,7 @@ export function createSettingsView(
   async function call(
     /** @type {string} */ path,
     /** @type {any} */ body = undefined,
+    /** @type {string|undefined} */ csrf = undefined,
   ) {
     const response = await fetcher(localURL(path), {
       method: body === undefined ? 'GET' : 'POST',
@@ -269,6 +272,7 @@ export function createSettingsView(
           ? {}
           : {
               'content-type': 'application/json',
+              ...(csrf ? { 'x-auriga-csrf': csrf } : {}),
               ...(path.startsWith('auriga/resources/catalog/')
                 ? { 'x-auriga-catalog': '1' }
                 : { 'X-Auriga-Settings': '1' }),
@@ -710,7 +714,7 @@ export function createSettingsView(
       setState(next);
       setAddress(next.platformOrigin ?? '');
       try {
-        const identity = await call('auriga/local-login/status');
+        const identity = await call('auriga/shell/status');
         if (
           typeof identity?.loggedIn !== 'boolean' ||
           (identity.loggedIn && typeof identity.account?.subject !== 'string')
@@ -730,9 +734,9 @@ export function createSettingsView(
         // Each read owns its cancellation guard; unmounted windows never publish.
         try {
           const next = await call('auriga/settings/state');
-          const identity = await call('auriga/local-login/status').catch(
-            (error) => ({ readError: explain(error) }),
-          );
+          const identity = await call('auriga/shell/status').catch((error) => ({
+            readError: explain(error),
+          }));
           if (!live) return;
           setState(next);
           if (first) setAddress(next.platformOrigin ?? '');
@@ -860,7 +864,15 @@ export function createSettingsView(
         { type: 'button', disabled: busy || disabled, onClick: action },
         label,
       );
-    const enter = () => navigate(localURL('auriga/local-login'));
+    const shellCommand = async (/** @type {string} */ action) => {
+      await call('auriga/shell/command', { action }, account?.csrf);
+      await reload();
+    };
+    const enter = () => {
+      void shellCommand('open_login').catch((error) =>
+        setNotice(explain(error)),
+      );
+    };
     const action = statusError
       ? button(t.retry, reload)
       : managed
@@ -878,7 +890,9 @@ export function createSettingsView(
             : !loggedIn
               ? button(t.login, enter)
               : button(t.refresh, reload);
-    const logout = () => navigate(localURL('auriga/local-login') + '?logout=1');
+    const logout = () => {
+      void shellCommand('logout').catch((error) => setNotice(explain(error)));
+    };
     const receiveControls = useReceiveSettings({ t, account, revision });
     return h(
       'div',
@@ -1011,6 +1025,8 @@ export function createSettingsView(
               (loggedIn || recovering) &&
                 (account.deviceName ?? state?.deviceName) &&
                 row(t.device, account.deviceName ?? state?.deviceName),
+              account.uacLoginInfo?.status === 'available' &&
+                row(t.department, account.uacLoginInfo.department),
               (loggedIn || recovering) &&
                 account.loginTime &&
                 row(

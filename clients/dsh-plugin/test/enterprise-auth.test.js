@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
@@ -27,7 +28,8 @@ async function fixture(t) {
     outboundAllowedHosts: ['service.example.com'],
     identityHeaders: { empNo: 'X-Test-Employee', token: 'X-Test-Credential' },
   };
-  let token = 'synthetic-v1',
+  const initialToken = randomBytes(32).toString('base64url');
+  let token = initialToken,
     time = Date.now(),
     ticks = 0,
     pending;
@@ -102,8 +104,10 @@ async function fixture(t) {
     base,
     port,
     sending,
+    token: () => token,
+    initialToken,
     rotate() {
-      token = 'synthetic-v2';
+      token = randomBytes(32).toString('base64url');
     },
     disable() {
       config = { ...config, allowRawAgentToken: false };
@@ -129,9 +133,9 @@ async function fixture(t) {
 
 test('raw default enabled, latest credentials read every time, logout rejects', async (t) => {
   const f = await fixture(t);
-  assert.equal((await (await f.raw()).json()).token, 'synthetic-v1');
+  assert.equal((await (await f.raw()).json()).token, f.initialToken);
   f.rotate();
-  assert.equal((await (await f.raw()).json()).token, 'synthetic-v2');
+  assert.equal((await (await f.raw()).json()).token, f.token());
   f.logout();
   assert.equal((await f.raw()).status, 401);
 });
@@ -245,7 +249,7 @@ test('shellEnv lifecycle and packaged unchanged Python request()/resolve() compa
   };
   const values = env.contributor.resolve(execution);
   assert.equal(values.DSH_TEAM_BASE, f.base);
-  assert.ok(!JSON.stringify(values).includes('synthetic-v1'));
+  assert.ok(!JSON.stringify(values).includes(f.initialToken));
   const child = spawn(
     'python',
     [

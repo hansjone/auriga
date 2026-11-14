@@ -1,5 +1,5 @@
 import { modelDirectory } from './catalog.js';
-import { newTraceparent, logEvent } from '../observability/index.js';
+
 import { AdapterError, check, integer, text } from './guard.js';
 import { buildRequest } from './request.js';
 import { responseState } from './response.js';
@@ -9,7 +9,7 @@ import { operation, readJson, readSse } from './transport.js';
  * @deepseek-ai/dsh-llm root. No host mutation until registerAurigaAdapter.
  * @param {import('./types.js').AdapterOptions} options */
 export function createAurigaAdapter(options) {
-  const { hostApi, fetch: controlledFetch, getAccessToken } = options;
+  const { hostApi, broker } = options;
   check(
     hostApi &&
       typeof hostApi.LlmAdapter === 'function' &&
@@ -20,11 +20,7 @@ export function createAurigaAdapter(options) {
       typeof hostApi.ToolCallId === 'function',
     'NO_ADAPTER',
   );
-  check(
-    typeof controlledFetch === 'function' &&
-      typeof getAccessToken === 'function',
-    'NO_ADAPTER',
-  );
+  check(broker && typeof broker.call === 'function', 'NO_ADAPTER');
   let base;
   try {
     base = new URL(options.apiBase);
@@ -41,7 +37,7 @@ export function createAurigaAdapter(options) {
     'NO_ADAPTER',
   );
   // Snapshot trusted options; later caller mutations cannot retarget a request.
-  const origin = base.origin;
+
   const limits = JSON.parse(JSON.stringify(options.modelLimits ?? {}));
   const mode = options.responseMode ?? 'sse';
   check(mode === 'sse' || mode === 'json', 'NO_ADAPTER');
@@ -51,6 +47,7 @@ export function createAurigaAdapter(options) {
     'auriga.retryPolicy',
   );
   const active = new Set();
+  const lifetime = new AbortController();
   let disposed = false;
   /** @type {{ids: string[], expiresAt: number, signal: AbortSignal} | undefined} */
   let catalog;
@@ -82,73 +79,43 @@ export function createAurigaAdapter(options) {
   /** @param {ReturnType<typeof operation>} op @param {'models' | 'chat/completions'} path @param {string | undefined} body */
   const send = async (op, path, body) => {
     op.assert();
-    const lease = await op.wait(
-      Promise.resolve().then(() => getAccessToken(op.signal)),
-    );
-    check(lease, 'MISSING_CREDENTIAL');
-    text(lease.token, 16384, 1);
-    check(/^[A-Za-z0-9._~+/-]+=*$/.test(lease.token), 'INVALID_CREDENTIAL');
-    integer(lease.expiresAt, 1);
-    check(
-      lease.signal && typeof lease.signal.addEventListener === 'function',
-      'AUTH',
-    );
-    const token = lease.token,
-      expiresAt = lease.expiresAt,
-      revoked = lease.signal;
-    op.watch(revoked, 'AUTH');
+    const fence = broker.state.fence();
+    const snapshot = broker.state.current();
+    const expiresAt = Date.parse(snapshot.expiresAt);
     op.expire(expiresAt);
-    op.assert();
-    const parent = newTraceparent();
-    const trace = { trace_id: parent.slice(3, 35), path: `/ai/v1/${path}` };
-    logEvent('INFO', 'AI request started', trace);
-    const pending = controlledFetch(`${origin}/ai/v1/${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: {
-        ...hostApi.attributionHeaders(),
-        traceparent: parent,
-        authorization: `Bearer ${token}`,
-        accept:
-          body === undefined || mode === 'json'
-            ? 'application/json'
-            : 'text/event-stream',
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      credentials: 'omit',
-      redirect: 'error',
-      cache: 'no-store',
-      referrerPolicy: 'no-referrer',
-      signal: op.signal,
-      ...(body === undefined ? {} : { body }),
-    }).then((response) => {
-      logEvent(response.ok ? 'INFO' : 'WARN', 'AI response received', {
-        ...trace,
-        http_status: response.status,
-      });
-      if (op.signal.aborted) void response.body?.cancel().catch(() => {});
-      return response;
-    });
-    const response = await op.wait(pending);
-    op.adopt(response);
-    if (
-      response.redirected ||
-      (response.url && response.url !== `${origin}/ai/v1/${path}`) ||
-      !response.ok
-    ) {
-      if (response.status === 401 || response.status === 403) {
-        catalogEpoch++;
-        catalog = undefined;
-      }
-      void response.body?.cancel().catch(() => {});
-      throw new AdapterError(
-        response.status === 401 || response.status === 403
-          ? 'AUTH'
-          : response.status === 429
-            ? 'RATE_LIMIT'
-            : 'SERVER',
+    let output;
+    if (path === 'models')
+      output = await op.wait(broker.call('listAiModels', {}));
+    else if (mode === 'json')
+      output = await op.wait(
+        broker.call('createAiChatCompletion', {
+          body: JSON.parse(body ?? '{}'),
+        }),
       );
-    }
-    return { response, lease: { expiresAt, signal: revoked } };
+    else
+      output = await op.wait(
+        broker.call('createAiChatCompletionStream', {
+          body: JSON.parse(body ?? '{}'),
+        }),
+      );
+    fence();
+    op.assert();
+    const response = new Response(
+      output.body?.streamId
+        ? broker.openStream(output.body.streamId, op.signal)
+        : JSON.stringify(output.body),
+      {
+        status: output.statusCode,
+        headers: output.headers ?? {
+          'content-type':
+            path === 'models' || mode === 'json'
+              ? 'application/json'
+              : 'text/event-stream',
+        },
+      },
+    );
+    op.adopt(response);
+    return { response, lease: { expiresAt, signal: lifetime.signal } };
   };
 
   class AurigaAdapter extends hostApi.LlmAdapter {
@@ -315,6 +282,7 @@ export function createAurigaAdapter(options) {
     }
     dispose() {
       disposed = true;
+      lifetime.abort();
       catalog = undefined;
       for (const op of active) op.close();
       active.clear();

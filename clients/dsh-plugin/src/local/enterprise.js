@@ -116,7 +116,7 @@ export async function enterpriseRequest(url, options) {
  * getOwner reads the host's trusted session ownership, not HTTP/model input.
  * credentials reads current IAM material through the authenticated broker.
  * @param {{snapshot:()=>any,getOwner:(id:string)=>string|null,
- * credentials:()=>Promise<any>,config?:()=>any,send?:typeof enterpriseRequest,
+ * credentials:(sessionId:string,purpose:'raw'|'outbound',executionContextId?:string)=>Promise<any>,onRevoke?:(id:string)=>void,config?:()=>any,send?:typeof enterpriseRequest,
  * now?:()=>number,monotonic?:()=>number}} options */
 export function createEnterpriseAuth(options) {
   const config = options.config ?? (() => ({}));
@@ -126,9 +126,14 @@ export function createEnterpriseAuth(options) {
   const capabilities = new Map();
   let closed = false;
   function revoke(/** @type {string} */ token) {
+    const cap = capabilities.get(token);
     capabilities.delete(token);
+    if (cap?.executionContextId) options.onRevoke?.(cap.executionContextId);
   }
-  function mint(/** @type {string} */ sessionId) {
+  function mint(
+    /** @type {string} */ sessionId,
+    /** @type {string|undefined} */ executionContextId = undefined,
+  ) {
     if (closed) return null;
     const snapshot = options.snapshot(),
       key = binding(snapshot);
@@ -140,6 +145,7 @@ export function createEnterpriseAuth(options) {
     const token = randomBytes(32).toString('base64url');
     capabilities.set(token, {
       sessionId,
+      executionContextId,
       key,
       audience: 'dsh-team-agent',
       scopes: raw() ? ['outbound', 'credentials'] : ['outbound'],
@@ -192,7 +198,7 @@ export function createEnterpriseAuth(options) {
         throw failure(403, 'raw_token_disabled');
     };
     check();
-    return check;
+    return { check, sessionId, executionContextId: cap.executionContextId };
   }
   async function body(/** @type {any} */ req) {
     if (req.method === 'GET') return {};
@@ -234,14 +240,18 @@ export function createEnterpriseAuth(options) {
         if (!(credentials ? ['GET', 'POST'] : ['POST']).includes(req.method))
           throw failure(405, 'method_not_allowed');
         const input = await body(req);
-        const check = authorize(
+        const { check, sessionId, executionContextId } = authorize(
           req,
           input,
           credentials ? 'credentials' : 'outbound',
         );
         let material;
         try {
-          material = await options.credentials();
+          material = await options.credentials(
+            sessionId,
+            credentials ? 'raw' : 'outbound',
+            executionContextId,
+          );
         } catch {
           check();
           throw failure(503, 'no_skill_credentials');

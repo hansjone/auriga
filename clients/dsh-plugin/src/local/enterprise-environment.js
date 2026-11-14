@@ -2,8 +2,8 @@ import { fileURLToPath } from 'node:url';
 
 /** Public shellEnv/tools-result/jobs adapter, matching the original host lifecycle.
  * resolve is called with a trusted tool execution, never a page/model payload.
- * @param {{auth:any,getServer:()=>any}} options */
-export function createEnterpriseEnvironment({ auth, getServer }) {
+ * @param {{auth:any,getServer:()=>any,prepare?:(execution:any)=>Promise<string|undefined>}} options */
+export function createEnterpriseEnvironment({ auth, getServer, prepare }) {
   /** @type {Map<any,any>} */ const issued = new Map();
   const helpers = fileURLToPath(
     new URL('../../skills/uds-skill-auth/scripts/', import.meta.url),
@@ -27,7 +27,10 @@ export function createEnterpriseEnvironment({ auth, getServer }) {
       DSH_TEAM_BASE: { description: 'Owned loopback enterprise endpoint.' },
       DSH_TEAM_HELPERS: { description: 'Packaged Python helper directory.' },
     },
-    resolve(/** @type {any} */ execution) {
+    resolve(
+      /** @type {any} */ execution,
+      /** @type {string|undefined} */ contextId = undefined,
+    ) {
       release(execution);
       const empty = {
         DSH_TEAM_TASK_CAPABILITY: '',
@@ -44,7 +47,7 @@ export function createEnterpriseEnvironment({ auth, getServer }) {
         port > 65535
       )
         return empty;
-      const cap = auth.mint(sessionId);
+      const cap = auth.mint(sessionId, contextId);
       if (!cap) return empty;
       const row = {
         cap,
@@ -64,6 +67,15 @@ export function createEnterpriseEnvironment({ auth, getServer }) {
       };
     },
   };
+  if (prepare) {
+    const resolve = contributor.resolve;
+    contributor.resolve = /** @type {any} */ (
+      async (/** @type {any} */ execution) => {
+        const context = await prepare(execution);
+        return resolve(execution, context);
+      }
+    );
+  }
   return {
     contributor,
     release,

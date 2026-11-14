@@ -778,7 +778,7 @@ window.__ModuleLoader__.load({
         const memberRequest = async (action, input, signal) => {
           let csrf;
           if (input !== undefined) {
-            const status = await fetch(localURL('auriga/local-login/status'), {
+            const status = await fetch(localURL('auriga/shell/status'), {
               signal,
               credentials: 'same-origin',
               redirect: 'error',
@@ -1097,7 +1097,7 @@ window.__ModuleLoader__.load({
           const write = input !== undefined;
           let csrf;
           {
-            const status = await fetch(localURL('auriga/local-login/status'), {
+            const status = await fetch(localURL('auriga/shell/status'), {
               credentials: 'same-origin',
               cache: 'no-store',
               redirect: 'error',
@@ -1116,7 +1116,7 @@ window.__ModuleLoader__.load({
             csrf = state.csrf;
           }
           const response = await fetch(
-            localURL('auriga/local-login/consent/' + action),
+            localURL('auriga/shell/consent/' + action),
             {
               credentials: 'same-origin',
               cache: 'no-store',

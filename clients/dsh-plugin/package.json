@@ -23,7 +23,8 @@
     "README.md",
     "ui",
     "skills",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "shell-auth"
   ],
   "scripts": {
     "lint": "eslint . && prettier --check .",

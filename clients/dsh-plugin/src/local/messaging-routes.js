@@ -19,7 +19,7 @@ export function createMessagingRoutes(runtime) {
       return send(401, { code: 'common.unauthenticated' });
     const action = (req.url ?? '')
       .split('?')[0]
-      .slice('/auriga/local-login/messaging/'.length);
+      .slice('/auriga/shell/messaging/'.length);
     try {
       if (req.method === 'GET' && action === 'snapshot')
         return send(200, await runtime.messagingUI(req).snapshot());

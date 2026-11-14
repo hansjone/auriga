@@ -43,13 +43,9 @@ export function createModelLifecycle({ broker, origin, generation }) {
       registration = registerAurigaAdapter(llm, {
         hostApi,
         apiBase: origin,
-        fetch,
+        broker,
         modelLimits,
         countInputTokens,
-        getAccessToken: async (signal) => {
-          if (signal.aborted || closed || !signedIn) return null;
-          return broker.getAiAccess();
-        },
       });
       diagnostic = 'model_metadata_unavailable';
     } catch {
@@ -110,9 +106,9 @@ export function createModelLifecycle({ broker, origin, generation }) {
         available: availability?.available === true,
         authorized: availability?.authorized === true,
         state: availability?.available ? 'model_ready' : diagnostic,
-        credentialState: broker.status.state,
+        credentialState: broker.state.current()?.state ?? 'unreachable',
         reauthenticationRequired:
-          broker.status.reauthenticationRequired === true,
+          broker.state.current()?.state === 'reauth_required',
       };
     },
   };

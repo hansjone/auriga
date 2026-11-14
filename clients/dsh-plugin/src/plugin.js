@@ -90,6 +90,21 @@ export async function apply(ctx, config) {
         protocol: ctx.webServer.protocol,
       });
       installNativeLoginRPC(ctx, () => current()?.runtime);
+      ctx.effect(
+        () =>
+          ctx.webServer.register({
+            kind: 'prefix',
+            path: '/dsh-team',
+            handler(req, res) {
+              const runtime = current()?.runtime;
+              if (runtime?.enterprise)
+                return runtime.enterprise.handle(req, res);
+              res.writeHead(503, { 'cache-control': 'no-store' });
+              res.end();
+            },
+          }),
+        'auriga: enterprise skill compatibility',
+      );
       installResourceChannel(ctx, {
         auth: admission.nativeAuth,
         current: () => current()?.runtime,
@@ -106,7 +121,7 @@ export async function apply(ctx, config) {
         () =>
           ctx.webServer.register({
             kind: 'prefix',
-            path: '/auriga/local-login',
+            path: '/auriga/shell',
             handler(req, res) {
               const active = current();
               if (active) return active.handler(req, res);
@@ -238,17 +253,6 @@ export async function apply(ctx, config) {
                 });
                 try {
                   await resources.beforeIdentity(runtime);
-                  const saved = runtime.vault.snapshot().credential;
-                  if (
-                    saved &&
-                    ((saved.platformOrigin ??
-                      new URL(saved.claims.iss).origin) !==
-                      effective.platformOrigin ||
-                      (saved.issuer ?? saved.claims.iss) !== effective.issuer ||
-                      (saved.clientId ?? effective.clientId) !==
-                        effective.clientId)
-                  )
-                    await runtime.resetAuthentication();
                   if (disposed || profileOwner !== owner) {
                     await runtime.close();
                     return;

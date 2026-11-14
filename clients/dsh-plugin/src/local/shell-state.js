@@ -140,6 +140,10 @@ export function createShellState(options) {
         if (typeof value.identity[key] === 'string')
           snapshot.identity[key] = value.identity[key];
     }
+    if (value.identity?.uacSessionBinding)
+      snapshot.identity.uacSessionBinding = JSON.parse(
+        JSON.stringify(value.identity.uacSessionBinding),
+      );
     if (reasons.has(value.reason)) snapshot.reason = value.reason;
     const info = value.uacLoginInfo;
     if (

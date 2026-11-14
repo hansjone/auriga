@@ -6,7 +6,7 @@ import { Buffer } from 'node:buffer';
 export function createConsentRoutes(runtime) {
   return async (/** @type {any} */ req, /** @type {any} */ res) => {
     const path = (req.url ?? '').split('?')[0];
-    const action = path.slice('/auriga/local-login/consent/'.length);
+    const action = path.slice('/auriga/shell/consent/'.length);
     const send = (
       /** @type {number} */ status,
       /** @type {unknown} */ body,

@@ -1,1070 +1,472 @@
-import { desktopUpdater } from './desktop.js';
-/* global AbortSignal */
-import { probeEndpoint } from '../network/diagnostic-probe.js';
-import {
-  readDeviceLedger,
-  baseStatus,
-  connectionReason,
-} from '../network/base-tools.js';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
-import { Buffer } from 'node:buffer';
-import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
-import { platformConfig, createPlatform, LoginJar } from './platform.js';
-import { createVault } from './vault.js';
-import { createTeam } from './team.js';
-import { createRefreshBroker } from '../ai/refresh-broker.js';
 import { createModelLifecycle } from '../ai/installation.js';
-import { createNetworkLifecycle } from '../network/lifecycle.js';
-import { createDeviceProvider } from '../network/device-provider.js';
-import {
-  deviceMemberName,
-  loginMemberName,
-  memberName,
-} from './member-profile.js';
-const random = () => randomBytes(32).toString('base64url');
-const accountName = (/** @type {any} */ saved) =>
-  [
-    saved?.displayName,
-    saved?.claims?.name,
-    saved?.claims?.preferred_username,
-    saved?.claims?.username,
-  ]
-    .map(memberName)
-    .find(Boolean);
-const equal = (/** @type {unknown} */ a, /** @type {unknown} */ b) =>
-  typeof a === 'string' &&
-  typeof b === 'string' &&
-  a.length === b.length &&
-  Buffer.byteLength(a) === Buffer.byteLength(b) &&
-  timingSafeEqual(Buffer.from(a), Buffer.from(b));
+import { randomBytes, createHash } from 'node:crypto';
+import { readFileSync, lstatSync } from 'node:fs';
+import { join } from 'node:path';
+import { desktopUpdater } from './desktop.js';
+import { createVault } from './vault.js';
+import { createBroker } from './broker.js';
+import { connectPackagedBroker } from './broker-package.js';
+import { createEnterpriseAuth } from './enterprise.js';
+import { createEnterpriseEnvironment } from './enterprise-environment.js';
 
-/** Publish the commit outcome before starting any asynchronous write, so
- * cancellation cannot compensate a backing session while its device is landing.
- * @param {any} attempt @param {()=>Promise<void>} write */
-export function persistNativeAttempt(attempt, write) {
-  if (attempt.commit) throw new Error('native device commit already started');
-  const result = Promise.resolve().then(write);
-  attempt.commit = result.then(
-    () => true,
-    () => false,
-  );
-  return result;
-}
+/** @param {string} code */
+const refuse = (code = 'common.unavailable') => {
+  throw Object.assign(new Error(code), { code });
+};
 
-/** A committed device owns its backing beyond a temporary Team failure or
- * browser cancellation. Explicit logout independently tombstones/revokes it.
- * @param {any} attempt @param {()=>Promise<void>} compensate */
-export function abandonNativeAttempt(attempt, compensate) {
-  if (attempt.abandoning) return attempt.abandoning;
-  attempt.version++;
-  attempt.controller.abort();
-  attempt.abandoning = (async () => {
-    try {
-      if (!(await (attempt.commit ?? false))) await compensate();
-    } finally {
-      attempt.jar.clear();
-      attempt.verifier = undefined;
-      attempt.device = undefined;
-    }
-  })();
-  return attempt.abandoning;
-}
-
-/** Verified platform sessions are owner-scoped and process-local.
- * @param {{config:import('../generated/connect-config.js').ConnectConfig,directory:string,ctx:any}} options */
-export async function createConnectRuntime({ config: input, directory, ctx }) {
-  const config = platformConfig(input),
-    platform = createPlatform(config),
-    vault = await createVault(directory);
-  /** @type {Map<string,any>} */
-  const sessions = new Map(),
-    attempts = new Map();
-  // DSH's admitted owner is one installation principal across carrier Peers.
-  // Only trusted admission binds requests; headers never select this state.
-  const ownerState = /** @type {any} */ ({});
-  let backgroundKey = '',
-    ownerSessionKey = '';
-  /** @type {WeakMap<object,any>} */
-  const nativeRequests = new WeakMap();
-  const attemptId = (/** @type {any} */ request) =>
-    nativeRequests.get(request)?.attemptId;
-  const forgetAttempt = (
-    /** @type {any} */ request,
-    expected = attemptId(request),
-  ) => {
-    attempts.delete(expected);
-    const owner = nativeRequests.get(request);
-    if (owner && owner.attemptId === expected) owner.attemptId = undefined;
-  };
-  const expiryTimer = setInterval(() => {
-    let renew = false;
-    for (const row of sessions.values()) {
-      if (row.expiresAt <= Date.now() || row.accessExpiresAt <= Date.now())
-        killSession(row);
-      else if (row.accessExpiresAt <= Date.now() + 30000) renew = true;
-    }
-    // Identity renewal belongs to live browser sessions, even if Team never
-    // starts. The broker owns refresh single-flight and failure-closed cleanup.
-    if (renew && !closed) void getAccess().catch(() => {});
-  }, 1000);
-  expiryTimer.unref();
-  /** @type {boolean} */
-  let closed = false,
-    disposed = false,
-    generation = 0,
-    online = false;
-  /** @type {ReturnType<typeof createTeam>|undefined} */
-  let team;
-  /** @type {ReturnType<typeof createTeam>|undefined} */
-  let startingTeam;
-  let communication = 'idle';
-  /** @type {string|null} */
-  let lastSuccessAt = null;
-  let connectionFailure = 'unknown';
-  /** @type {boolean|null} */ let hqReachable = null;
-  /** @type {Promise<void>|undefined} */
-  let teamStarting;
-  let teamFailures = 0,
-    teamRetryAt = 0;
-  let restoreFailures = 0,
-    restoreRetryAt = 0;
-  const retryDelay = (/** @type {number} */ failures) =>
-    Math.min(30000, 1000 * 2 ** Math.min(failures - 1, 5));
-  /** @type {Promise<void>|undefined} */
-  let revoking;
-  async function drainRevocations() {
-    if (closed) return;
-    if (revoking) return revoking;
-    revoking = (async () => {
-      for (const entry of vault.snapshot().revocations ?? []) {
-        if (
-          entry.platformOrigin !== config.platformOrigin ||
-          entry.clientId !== config.clientId
-        )
-          continue;
-        try {
-          await platform.request('/oauth2/revoke', {
-            method: 'POST',
-            form: true,
-            body: { client_id: entry.clientId, token: entry.token },
-            signal: AbortSignal.timeout(3000),
-          });
-          if (closed) return;
-          await vault.update((s) => {
-            s.revocations = (s.revocations ?? []).filter(
-              (/** @type {any} */ r) => r.id !== entry.id,
-            );
-          });
-        } catch {
-          return;
-        }
-      }
-    })();
-    try {
-      await revoking;
-    } finally {
-      revoking = undefined;
-    }
-  }
-  const revokeTimer = setInterval(() => {
-    void drainRevocations().catch(() => {});
-  }, 10000);
-  revokeTimer.unref();
-  void drainRevocations().catch(() => {});
-  const active = (g = generation) => {
-    if (closed || g !== generation)
-      throw new Error('local connection superseded');
-  };
-  let finalizing = Promise.resolve();
-  const sessionForKey = (/** @type {string|undefined} */ key) => {
-    if (closed || !key) return null;
-    const row = sessions.get(key);
-    if (
-      !row ||
-      row.expiresAt <= Date.now() ||
-      row.accessExpiresAt <= Date.now()
-    )
-      return null;
-    return row;
-  };
-  const resolve = (/** @type {any} */ request) => {
-    const owner = nativeRequests.get(request);
-    if (owner)
-      return sessionForKey(ownerSessionKey) ?? sessionForKey(backgroundKey);
-    return null;
-  };
-  const killSession = (/** @type {any} */ row) => {
-    sessions.delete(row.key);
-  };
-  const network = createNetworkLifecycle({
-    directory: join(directory, 'network'),
-    installation: config.network,
-    defaultProvider: config.network
-      ? createDeviceProvider({
-          config,
-          async getDevice(signal) {
-            const g = generation,
-              saved = vault.snapshot().credential;
-            const accessToken = await getAccess();
-            active(g);
-            signal.throwIfAborted();
-            if (!saved) throw new Error('device credential required');
-            const claims = await platform.verifyDevice(
-              accessToken,
-              saved.claims,
-            );
-            active(g);
-            signal.throwIfAborted();
-            if (
-              ['tid', 'sub', 'did'].some(
-                (key) =>
-                  vault.snapshot().credential?.claims[key] !== claims[key],
-              )
-            )
-              throw new Error('device credential changed');
-            return { accessToken, claims };
-          },
+/** Platform identity is inherited. Local owner admission never depends on IAM.
+ * The encrypted legacy vault is used only for local state; old platform material
+ * cannot be replayed. No import operation exists, so migration safely requires
+ * a fresh shell login and removes only old authentication fields.
+ * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any}} options */
+export async function createConnectRuntime({
+  config,
+  directory,
+  ctx,
+  connection,
+  enterpriseConfig,
+}) {
+  const vault = await createVault(directory);
+  const legacy = !!vault.snapshot().credential;
+  if (legacy)
+    await vault.update((s) => {
+      s.credential = null;
+      s.revocations = [];
+      s.endpoint = null;
+    });
+  const requests = new WeakSet();
+  const csrf = randomBytes(32).toString('base64url');
+  /** @type {Set<()=>Promise<void>>} */ const listeners = new Set();
+  /** @type {Set<(identity:any)=>Promise<void>>} */ const gates = new Set();
+  /** @type {Map<string,any>} */ const sessions = new Map();
+  /** @type {Map<string,string>} */ const owners = new Map();
+  /** @type {any} */ let principal;
+  let publishing = Promise.resolve();
+  let isolationPending = false;
+  let key = '',
+    closed = false;
+  /** @type {ReturnType<typeof createEnterpriseAuth>|undefined} */ let enterprise;
+  /** @type {ReturnType<typeof createEnterpriseEnvironment>|undefined} */ let environment;
+  /** @type {ReturnType<typeof createModelLifecycle>|undefined} */ let models;
+  const installed =
+    connection ?? (await connectPackagedBroker().catch(() => undefined));
+  const broker = await createBroker({
+    ipc: installed?.ipc,
+    validate: installed?.validate ?? (() => refuse()),
+    onInvalidate() {
+      principal = undefined;
+      models?.logout();
+      key = '';
+      sessions.clear();
+      enterprise?.revokeAll();
+      for (const listener of listeners)
+        void Promise.resolve()
+          .then(listener)
+          .catch(() => {});
+    },
+    onChange(snapshot) {
+      const next =
+        snapshot?.state === 'authenticated' ? snapshot.identity : undefined;
+      const fingerprint = next
+        ? JSON.stringify([snapshot.shellEpoch, snapshot.revision, next])
+        : '';
+      if (key === fingerprint) return;
+      key = fingerprint;
+      isolationPending = true;
+      const expected = fingerprint;
+      publishing = publishing
+        .catch(() => {})
+        .then(async () => {
+          const view = next
+            ? {
+                tenantId: next.tenantId,
+                ownerId: next.memberId,
+                hostId: next.deviceId,
+              }
+            : undefined;
+          for (const gate of gates) await gate(view);
+          if (closed || expected !== key) return;
+          principal = next
+            ? Object.freeze({
+                tenantId: next.tenantId,
+                ownerId: next.memberId,
+                clientId: next.deviceId,
+                providerId: next.providerId,
+                empNo: next.empNo,
+              })
+            : undefined;
+          isolationPending = false;
+          if (principal) models?.login();
+          else models?.logout();
+          for (const listener of listeners)
+            void Promise.resolve()
+              .then(listener)
+              .catch(() => {});
         })
-      : undefined,
-    ctx,
-    getAccess,
-    authorizeLocal: async (request) => !!resolve(request),
-    onRevoked: () => {
-      broker.invalidate('revoked');
-      models.logout();
-      for (const row of sessions.values()) killSession(row);
-      team?.close();
-      startingTeam?.close();
-      team = undefined;
-      online = false;
-      communication = 'unavailable';
-    },
-  });
-  const broker = createRefreshBroker({
-    vault,
-    platform,
-    config,
-    onPlatformAccess(claims) {
-      for (const row of sessions.values())
-        row.accessExpiresAt = claims.exp * 1000;
-    },
-    onUncertain() {
-      models.logout();
-      network.logout();
-      team?.close();
-      startingTeam?.close();
-      team = undefined;
-      online = false;
-      communication = 'unavailable';
-      for (const row of sessions.values()) killSession(row);
-    },
-  });
-  const models = createModelLifecycle({
-    broker,
-    origin: config.platformOrigin,
-  });
-  const desktop = await desktopUpdater({ origin: config.platformOrigin }).catch(
-    () => undefined,
-  );
-  let profileRetryAt = 0;
-  async function refreshMemberName() {
-    if (closed || Date.now() < profileRetryAt) return;
-    profileRetryAt = Date.now() + 60000;
-    const saved = vault.snapshot().credential;
-    if (!saved) return;
-    const expected = generation;
-    try {
-      const name = await deviceMemberName(
-        platform,
-        await getAccess(),
-        saved.claims.sub,
-        AbortSignal.timeout(4000),
-      );
-      if (!name || closed || expected !== generation) return;
-      await vault.update((s) => {
-        if (
-          !closed &&
-          expected === generation &&
-          s.credential?.claims.sub === saved.claims.sub &&
-          s.credential?.claims.did === saved.claims.did
-        )
-          s.credential.displayName = name;
-      });
-    } catch {
-      // A directory outage affects presentation, never the login lifetime.
-    }
-  }
-  /** @type {Promise<void>|undefined} */
-  let networkClosing;
-  async function getAccess() {
-    active();
-    return broker.getPlatformAccess();
-  }
-  /** @param {any} tokens @param {any} [expected] */
-  async function validateTokens(tokens, expected) {
-    if (
-      tokens.token_type?.toLowerCase() !== 'bearer' ||
-      !tokens.refresh_token ||
-      typeof tokens.refresh_token !== 'string' ||
-      tokens.scope !== 'auriga.connect'
-    )
-      throw new Error('invalid device token response');
-    const claims = await platform.verifyDevice(tokens.access_token, expected);
-    return {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      claims,
-      platformOrigin: config.platformOrigin,
-      issuer: config.issuer,
-      clientId: config.clientId,
-    };
-  }
-  function attemptFor(/** @type {any} */ request) {
-    const id = attemptId(request),
-      row = attempts.get(id);
-    if (!row || row.expiresAt <= Date.now())
-      throw new Error('login attempt expired');
-    return row;
-  }
-  async function abandon(/** @type {any} */ row) {
-    return abandonNativeAttempt(row, async () => {
-      if (!row.transactionId) return;
-      // Only an uncommitted attempt compensates its own cookie/CSRF session.
-      await platform
-        .request(
-          row.completed
-            ? '/api/iam/v1/logout'
-            : '/api/iam/v1/login/transactions/' +
-                encodeURIComponent(row.transactionId),
-          {
-            method: row.completed ? 'POST' : 'DELETE',
-            body: row.completed ? {} : undefined,
-            jar: row.jar,
-            signal: AbortSignal.timeout(3000),
-          },
-        )
-        .catch(() => {});
-    });
-  }
-  async function startTeam(assertAttempt = () => {}) {
-    if (
-      !ctx.tools?.register ||
-      !ctx.sessionController?.create ||
-      !ctx.sessionController?.prompt ||
-      !ctx.sessions?.get ||
-      !ctx.sessions?.flush
-    )
-      throw new Error('rc.3 tools and sessionController required');
-    const g = generation;
-    let starting = true;
-    const candidate = createTeam({
-      platform,
-      vault,
-      getAccess,
-      assertActive: () => {
-        active(g);
-        if (starting) assertAttempt();
-      },
-      ctx,
-      label: config.deviceName ?? 'Auriga DSH',
-      onState(state) {
-        if (closed || generation !== g) return;
-        online = state.connected;
-        if (state.connected || state.unauthorized) hqReachable = true;
-        else if (state.reason === 'hq_unreachable') hqReachable = false;
-        connectionFailure = state.reason ?? 'unknown';
-        if (state.connected) lastSuccessAt = new Date().toISOString();
-        communication = state.connected
-          ? team
-            ? 'ready'
-            : 'connecting'
-          : 'unavailable';
-        if (state.unauthorized) {
-          team?.close();
-          team = undefined;
-        }
-      },
-    });
-    startingTeam = candidate;
-    try {
-      await candidate.start();
-      active(g);
-      assertAttempt();
-      starting = false;
-      team = candidate;
-      communication = 'ready';
-    } catch (error) {
-      candidate.close();
-      throw error;
-    } finally {
-      if (startingTeam === candidate) startingTeam = undefined;
-    }
-  }
-  function connectTeam() {
-    if (teamStarting || closed || (team && online) || Date.now() < teamRetryAt)
-      return;
-    if (team && !online) {
-      team.close();
-      team = undefined;
-    }
-    const g = generation;
-    communication = 'connecting';
-    teamStarting = startTeam()
-      .then(() => {
-        teamFailures = 0;
-        teamRetryAt = 0;
-      })
-      .catch(() => {
-        if (!closed && generation === g) {
-          online = false;
-          communication = 'unavailable';
-          teamRetryAt = Date.now() + retryDelay(++teamFailures);
-        }
-      })
-      .finally(() => {
-        teamStarting = undefined;
-      });
-  }
-  /** Restore platform capabilities without granting any browser a session. */
-  async function restorePlatform() {
-    if (
-      closed ||
-      !vault.snapshot().credential ||
-      broker.status.reauthenticationRequired
-    )
-      return;
-    if (sessionForKey(ownerSessionKey) || sessionForKey(backgroundKey)) {
-      connectTeam();
-      return;
-    }
-    if (Date.now() < restoreRetryAt) return;
-    const g = generation;
-    try {
-      const saved = vault.snapshot().credential;
-      const token = await getAccess();
-      const claims = await platform.verifyDevice(token, saved.claims);
-      active(g);
-      if (!sessionForKey(backgroundKey)) {
-        backgroundKey = random();
-        sessions.set(backgroundKey, {
-          key: backgroundKey,
-          subject: claims.sub,
-          tenantId: claims.tid,
-          deviceId: claims.did,
-          csrf: random(),
-          expiresAt: Number.MAX_SAFE_INTEGER,
-          accessExpiresAt: claims.exp * 1000,
+        .catch(() => {
+          principal = undefined;
+          isolationPending = true;
         });
-      }
-      models.login();
-      network.login();
-      restoreFailures = 0;
-      restoreRetryAt = 0;
-      connectTeam();
-    } catch (error) {
-      if (!closed && generation === g) {
-        connectionFailure = connectionReason(error);
-        if (connectionFailure === 'hq_unreachable') hqReachable = false;
-        online = false;
-        communication = 'unavailable';
-        restoreRetryAt = Date.now() + retryDelay(++restoreFailures);
-      }
-    }
-  }
-  let restoring = false;
-  const restore = async () => {
-    if (restoring || closed) return;
-    restoring = true;
-    try {
-      await restorePlatform();
-    } finally {
-      restoring = false;
-    }
-  };
-  const restoreTimer = setInterval(() => {
-    void restore();
-  }, 1000);
-  restoreTimer.unref();
-  void restore();
-  function issueOwnerSession(
-    /** @type {any} */ row,
-    /** @type {any} */ request,
-    /** @type {any} */ credential,
-  ) {
-    const key = random(),
-      session = {
-        key,
-        subject: credential.claims.sub,
-        tenantId: credential.claims.tid,
-        deviceId: credential.claims.did,
-        csrf: random(),
-        expiresAt: Date.now() + 1800000,
-        accessExpiresAt: credential.claims.exp * 1000,
-      };
-    sessions.set(key, session);
-    ownerSessionKey = key;
-    models.login();
-    // Native identity is verified and durably owned before session issuance.
-    // Independent N1 must not wait for legacy Team/MCP availability.
-    network.login();
-    teamFailures = 0;
-    teamRetryAt = 0;
-    connectTeam();
-    row.jar.clear();
-    row.verifier = undefined;
-    row.device = undefined;
-    forgetAttempt(request);
-    return {
-      step: { type: 'complete', redirectTo: '/' },
-    };
-  }
-  /** Trusted settings changes also use the normal tombstone/revocation path.
-   * @param {any} [row] */
-  async function clearAuthentication(row) {
-    const owns = (/** @type {any} */ credential) =>
-      !row ||
-      (credential?.claims.sub === row.subject &&
-        credential?.claims.tid === row.tenantId &&
-        credential?.claims.did === row.deviceId);
-    if (!owns(vault.snapshot().credential))
-      throw new Error('local device ownership changed');
-    generation++;
-    broker.invalidate('signed_out');
-    models.logout();
-    network.logout();
-    const abandoned = [...attempts.values()];
-    attempts.clear();
-    for (const attempt of abandoned) attempt.controller.abort();
-    for (const session of sessions.values()) killSession(session);
-    // Close access immediately; persist the tombstone before reporting logout success.
-    team?.close();
-    startingTeam?.close();
-    team = undefined;
-    online = false;
-    communication = 'idle';
-    try {
-      await vault.update((s) => {
-        if (!owns(s.credential))
-          throw new Error('local device ownership changed');
-        if (s.credential) {
-          s.revocations ??= [];
-          if (s.revocations.length >= 256)
-            throw new Error('revocation queue full');
-          s.revocations.push({
-            id: random(),
-            platformOrigin:
-              s.credential.platformOrigin ??
-              new URL(s.credential.claims.iss).origin,
-            clientId: s.credential.clientId ?? config.clientId,
-            token: s.credential.refreshToken,
-          });
-        }
-        s.credential = null;
-        s.endpoint = null;
-        s.threads = {};
-        s.deliveries = {};
-        s.pendingOpens = {};
-        s.openOutcomes = {};
+    },
+  });
+  models = createModelLifecycle({
+    broker,
+    origin: config.platformOrigin || 'https://unconfigured.invalid',
+  });
+  if (principal) models.login();
+  const desktop = config.platformOrigin
+    ? await desktopUpdater({ origin: config.platformOrigin }).catch(
+        () => undefined,
+      )
+    : undefined;
+  const identity = () =>
+    broker.state.current()?.state === 'authenticated' ? principal : undefined;
+  async function session(/** @type {string} */ id) {
+    const who = identity();
+    if (!who || closed || !ctx.sessions?.get(id))
+      return refuse('common.unauthenticated');
+    const owner = owners.get(id);
+    if (owner && owner !== who.ownerId) return refuse('common.forbidden');
+    owners.set(id, who.ownerId);
+    let handle = sessions.get(id);
+    if (!handle || Date.parse(handle.expiresAt) <= Date.now()) {
+      handle = await broker.register({
+        kind: 'session',
+        hostSessionId: id,
+        expiresAt: new Date(Date.now() + 600000).toISOString(),
       });
-    } catch {
-      closed = true;
-      clearInterval(expiryTimer);
-      clearInterval(revokeTimer);
-      for (const value of sessions.values()) killSession(value);
-      throw new Error('logout persistence failed');
+      sessions.set(id, handle);
     }
-    for (const attempt of abandoned) await abandon(attempt);
-    await drainRevocations();
+    return handle;
   }
-  const baseState = () => {
-    const saved = vault.snapshot().credential;
-    return {
-      origin: config.platformOrigin,
-      reachable: hqReachable,
-      lastSuccessAt,
-      reason: connectionFailure,
-      loggedIn: !!saved,
-      verified: !!saved && !broker.status.reauthenticationRequired,
-      expiresAt: saved?.claims.exp * 1000 || null,
-      memberId: saved?.claims.sub,
-      displayName: accountName(saved),
-      network: network.status,
-      remoteAvailable: !!team && online && !closed,
-    };
-  };
-  const baseTools = {
-    getState: baseState,
-    generation: () => generation,
-    readLocal: () =>
-      readDeviceLedger(join(directory, 'network'), vault.snapshot().credential),
-    async probe(/** @type {string} */ path, /** @type {AbortSignal} */ signal) {
-      const g = generation;
-      try {
-        const result = await probeEndpoint(platform, path, signal);
-        active(g);
-        hqReachable = true;
-        connectionFailure = result.reason ?? 'unknown';
-        lastSuccessAt = new Date().toISOString();
-        return result;
-      } catch (error) {
-        if (!closed && g === generation) {
-          const reason = connectionReason(error);
-          if (reason === 'hq_unreachable') hqReachable = false;
-          connectionFailure = reason;
+  enterprise = createEnterpriseAuth({
+    snapshot: broker.state.current,
+    getOwner: (id) => owners.get(id) ?? null,
+    config:
+      enterpriseConfig ??
+      (() => {
+        const path = join(directory, 'enterprise.json');
+        try {
+          const stat = lstatSync(path);
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 65536)
+            throw new Error();
+          return JSON.parse(readFileSync(path, 'utf8'));
+        } catch (error) {
+          if (/** @type {any} */ (error).code === 'ENOENT') return {};
+          return { allowRawAgentToken: false, outboundAllowedHosts: [] };
         }
-        throw error;
-      }
+      }),
+    async credentials(_id, purpose, executionContextId) {
+      if (!executionContextId) return refuse('common.unauthenticated');
+      const result = await broker.credentials(executionContextId, purpose);
+      const s = broker.state.current(),
+        binding = result.binding;
+      if (
+        !s?.identity ||
+        !binding ||
+        ['tenantId', 'memberId', 'deviceId', 'providerId'].some(
+          (k) => binding[k] !== s.identity[k],
+        ) ||
+        Date.parse(binding.expiresAt) <= Date.now() ||
+        !Number.isSafeInteger(result.credentialVersion) ||
+        result.credentialVersion < 1 ||
+        (binding.credentialVersion !== undefined &&
+          binding.credentialVersion !== result.credentialVersion) ||
+        (s.identity.uacSessionBinding &&
+          ['sourceSessionId', 'authGeneration', 'providerId'].some(
+            (k) => binding[k] !== s.identity.uacSessionBinding[k],
+          ))
+      )
+        return refuse('common.conflict');
+      return result;
     },
-  };
-  return {
-    baseTools,
-    /** Only call from DSH's admitted owner RPC handler.
-     * @param {any} peer */
-    nativeRequest(peer) {
-      if (!peer || typeof peer !== 'object' || peer.principal?.kind !== 'owner')
-        throw new Error('native owner admission required');
-      const request = { headers: {} };
-      nativeRequests.set(request, ownerState);
-      return request;
+    onRevoke(id) {
+      void broker.revoke(id).catch(() => {});
     },
-    /** Bind a request only after the native carrier admitted this exact Peer.
-     * @param {object} peer @param {any} request */
-    bindNativeRequest(peer, request) {
-      this.nativeRequest(peer);
-      nativeRequests.set(request, ownerState);
-      return resolve(request);
+  });
+  if (typeof ctx.inject === 'function')
+    ctx.inject(['shellEnv', 'webServer'], (/** @type {any} */ child) => {
+      environment = createEnterpriseEnvironment({
+        auth: enterprise,
+        getServer: () => child.webServer,
+        async prepare(execution) {
+          const id =
+            execution?.agent?.session?.header?.id ??
+            execution?.agent?.session?.id;
+          if (
+            typeof id !== 'string' ||
+            !execution?.callId ||
+            !execution?.rootCallId ||
+            execution.signal?.aborted
+          )
+            return undefined;
+          const parent = await session(id);
+          const handle = await broker.register({
+            kind: 'tool',
+            hostSessionId: id,
+            toolCallId: execution.callId,
+            rootCallId: execution.rootCallId,
+            parentExecutionContextId: parent.executionContextId,
+            expiresAt: new Date(Date.now() + 600000).toISOString(),
+          });
+          return handle.executionContextId;
+        },
+      });
+      child.shellEnv.register(environment.contributor);
+      child.on(
+        'tools/result',
+        (/** @type {any} */ exec, /** @type {any} */ result) =>
+          environment?.finish(exec, result, child.jobs),
+      );
+      child.effect(
+        () => () => environment?.dispose(),
+        'auriga: enterprise task lifetime',
+      );
+    });
+  const runtime = {
+    baseTools: {
+      generation: () => key,
+      getState: () => ({
+        loggedIn: !!identity(),
+        verified: false,
+        reason: identity() ? 'not_ready' : 'unconfigured',
+      }),
+      async readLocal() {
+        return null;
+      },
+      async probe(
+        /** @type {string} */ _path,
+        /** @type {AbortSignal} */ signal,
+      ) {
+        signal.throwIfAborted();
+        const check = broker.state.fence();
+        const result = await broker.call('provider_diagnostic', {});
+        check();
+        signal.throwIfAborted();
+        return result.body;
+      },
     },
-    resetAuthentication: clearAuthentication,
     config,
-    resolve,
-    getAccess,
+    broker,
     desktop,
-    vault,
+    enterprise,
+    operations: installed?.operations ?? [],
+    identity,
+    // Compatibility for resource lifecycle subscriptions, with no credential store.
+    vault: {
+      snapshot: () => ({
+        resourceIsolationPending:
+          isolationPending || vault.snapshot().resourceIsolationPending,
+      }),
+      subscribeResourceIdentity(/** @type {()=>Promise<void>} */ listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      subscribeResourceIdentityGate(
+        /** @type {(identity:any)=>Promise<void>} */ gate,
+      ) {
+        gates.add(gate);
+        return () => gates.delete(gate);
+      },
+    },
+    nativeRequest(/** @type {any} */ peer) {
+      if (peer?.principal?.kind !== 'owner') return refuse('common.forbidden');
+      const req = { headers: {} };
+      requests.add(req);
+      return req;
+    },
+    bindNativeRequest(/** @type {any} */ peer, /** @type {any} */ req) {
+      if (peer?.principal?.kind !== 'owner') return null;
+      requests.add(req);
+      return this.resolve(req);
+    },
+    resolve(/** @type {any} */ req) {
+      return requests.has(req) ? identity() : undefined;
+    },
+    checkCsrf(/** @type {any} */ req) {
+      return requests.has(req) && req.headers?.['x-auriga-csrf'] === csrf;
+    },
+    status(/** @type {any} */ req) {
+      const s = broker.state.current(),
+        who = requests.has(req) ? identity() : undefined;
+      return {
+        available: true,
+        configured: !!config.platformOrigin,
+        loggedIn: !!who,
+        connected: false,
+        communication: 'idle',
+        platform: s?.state ?? 'unreachable',
+        reason: s?.reason,
+        brokerAvailable: !!s,
+        migrationRequired: legacy && !who,
+        account: who ? { subject: who.ownerId } : null,
+        csrf: requests.has(req) ? csrf : undefined,
+        ...(who && s.uacLoginInfo ? { uacLoginInfo: s.uacLoginInfo } : {}),
+        network: { available: false, connected: false, state: 'idle' },
+        models: { available: false, state: 'idle' },
+        capabilities: { consent: false },
+      };
+    },
+    prepare(/** @type {any} */ req) {
+      return { body: this.status(req) };
+    },
+    async command(/** @type {any} */ req, /** @type {string} */ action) {
+      if (!requests.has(req)) return refuse('common.forbidden');
+      await broker.state.command(action);
+      return this.status(req);
+    },
+    async resetAuthentication() {
+      broker.state.disconnect();
+    },
+    attachNetwork() {
+      return () => {};
+    },
     attachModels: models.attach,
+    get networkStatus() {
+      return { available: false, connected: false, state: 'idle' };
+    },
     get modelStatus() {
       return models.status;
     },
-    attachNetwork: network.attach,
-    consentUI: network.consentUI,
-    messagingUI: network.messagingUI,
     get consentAvailable() {
-      return network.consentAvailable;
+      return false;
     },
-    get networkStatus() {
-      return network.status;
+    consentUI() {
+      return refuse();
+    },
+    messagingUI() {
+      return refuse();
     },
     isReady() {
-      return !!team && online && !closed;
+      return !!identity();
     },
-    checkCsrf(/** @type {any} */ request) {
-      const token = request.headers['x-auriga-csrf'];
-      const row = resolve(request) ?? attempts.get(attemptId(request));
-      return !!row && equal(token, row.csrf);
-    },
-    status(/** @type {any} */ request) {
-      const row = resolve(request);
-      if (row) void refreshMemberName();
-      const saved = vault.snapshot().credential;
-      const resumable =
-        nativeRequests.has(request) &&
-        !!saved &&
-        !broker.status.reauthenticationRequired;
-      return {
-        available: true,
-        loggedIn: !!row,
-        resumeAvailable: resumable,
-        platform:
-          !row && resumable
-            ? 'recovering'
-            : row
-              ? 'authenticated'
-              : 'signed_out',
-        connected: !!row && !!team && online,
-        communication: row ? communication : 'idle',
-        networkDiagnostics: baseStatus(baseState()),
-        models: models.status,
-        capabilities: { consent: !!row && network.consentAvailable },
-        network: row
-          ? network.status
-          : { available: false, connected: false, state: 'idle' },
-        account:
-          row || resumable
-            ? {
-                subject: row?.subject ?? saved.claims.sub,
-                ...(accountName(saved)
-                  ? { displayName: accountName(saved) }
-                  : {}),
-              }
-            : null,
-        deviceName: config.deviceName ?? null,
-        loginTime:
-          row || resumable
-            ? (vault.snapshot().credential?.loginTime ?? null)
-            : null,
-        csrf: row?.csrf,
-        remoteRevocation: (vault.snapshot().revocations ?? []).length
-          ? 'pending'
-          : 'complete',
-        connection: row
-          ? {
-              endpointId: vault.snapshot().endpoint,
-              received: Object.keys(vault.snapshot().deliveries).filter(
-                (id) => vault.snapshot().deliveries[id].accepted,
-              ).length,
-              unsupported: Object.values(vault.snapshot().deliveries).filter(
-                (/** @type {any} */ delivery) =>
-                  delivery.status === 'unsupported',
-              ).length,
-              pendingSourceOpens: Object.keys(
-                vault.snapshot().pendingOpens ?? {},
-              ).length,
-              unknownSourceOpens: Object.keys(
-                vault.snapshot().openOutcomes ?? {},
-              ).length,
-            }
-          : null,
-      };
-    },
-    prepare(/** @type {any} */ request) {
-      active();
-      if (!nativeRequests.has(request))
-        throw new Error('native owner admission required');
-      const current = resolve(request);
-      if (current) {
-        // An authenticated page/status refresh is the explicit retry trigger;
-        // communication retries never hold up identity or mint a new session.
-        connectTeam();
-        return { body: this.status(request) };
-      }
-      let id = attemptId(request),
-        row = attempts.get(id);
-      if (!row || row.expiresAt <= Date.now()) {
-        for (const [key, value] of attempts)
-          if (value.expiresAt <= Date.now()) {
-            value.controller.abort();
-            value.jar.clear();
-            attempts.delete(key);
-          }
-        if (attempts.size >= 32) throw new Error('too many login attempts');
-        id = random();
-        row = {
-          csrf: random(),
-          jar: new LoginJar(),
-          controller: new AbortController(),
-          version: 0,
-          expiresAt: Date.now() + 300000,
-        };
-        attempts.set(id, row);
-      }
-      const owner = nativeRequests.get(request);
-      if (owner) owner.attemptId = id;
-      return {
-        body: {
-          ...this.status(request),
-          csrf: row.csrf,
-          resumeAvailable:
-            !!vault.snapshot().credential &&
-            !broker.status.reauthenticationRequired,
-        },
-      };
-    },
-    async login(/** @type {any} */ request, /** @type {any} */ input) {
-      const row = attemptFor(request),
-        id = attemptId(request),
-        g = generation;
-      if (row.busy) throw new Error('login attempt busy');
-      row.busy = true;
-      const version = ++row.version;
-      const check = () => {
-        active(g);
-        if (
-          row.version !== version ||
-          row.controller.signal.aborted ||
-          row.expiresAt <= Date.now()
-        )
-          throw new Error('login attempt superseded');
-      };
+    async upload(/** @type {Buffer} */ bytes, /** @type {string} */ mediaType) {
+      const opened = (
+        await broker.call('upload_open', {
+          sizeBytes: bytes.length,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          mediaType,
+        })
+      ).body;
+      // One chunk at a time; every chunk must be durably acknowledged.
+      let ack = -1,
+        error = false;
+      /** @type {(()=>void)|undefined} */ let acknowledged;
+      await broker.subscribeStream(opened.streamId, (event) => {
+        if (!event || event.type === 'error') error = true;
+        else if (event.type === 'upload_ack') ack = event.ackSequence;
+        acknowledged?.();
+      });
       try {
-        if (input.action === 'resume') {
-          const saved = vault.snapshot().credential;
-          if (!saved) throw new Error('no device credential');
-          const token = await getAccess();
-          check();
-          await platform.verifyDevice(token, saved.claims);
-          check();
-          return issueOwnerSession(row, request, vault.snapshot().credential);
-        }
-        let transaction;
-        if (input.action === 'begin') {
-          // Optional login can be reopened in any owner window. Preserve its
-          // current form and PKCE transaction until explicit restart/expiry.
-          if (row.transactionId && row.step) return { step: row.step };
-          if (!row.selectedProvider) {
-            const providers = await platform.request(
-              '/api/iam/v1/login/providers',
-              { signal: row.controller.signal },
-            );
-            check();
-            const teams = providers.items?.filter(
-              (/** @type {any} */ p) =>
-                p.connectorType === 'team-account' &&
-                p.primaryStep === 'form' &&
-                typeof p.id === 'string',
-            );
-            if (teams?.length !== 1)
-              throw new Error('team account login unavailable');
-            row.selectedProvider = teams[0].id;
-          }
-          if (row.transactionId)
-            throw new Error('restart login with a new attempt');
-          row.verifier = randomBytes(48).toString('base64url');
-          transaction = await platform.request(
-            '/api/iam/v1/login/transactions',
-            {
-              method: 'POST',
-              jar: row.jar,
-              signal: row.controller.signal,
-              body: {
-                providerId: row.selectedProvider,
-                purpose: 'login',
-                returnTo: '/',
-                nativeConnect: {
-                  clientId: config.clientId,
-                  codeChallenge: createHash('sha256')
-                    .update(row.verifier)
-                    .digest('base64url'),
-                  codeChallengeMethod: 'S256',
-                  ...(config.deviceName
-                    ? { deviceName: config.deviceName }
-                    : {}),
-                },
-              },
-            },
-          );
-          check();
-          if (
-            !/^[A-Za-z0-9_-]{1,128}$/.test(transaction.id) ||
-            typeof transaction.nativeDevice?.deviceCode !== 'string' ||
-            !transaction.nativeDevice.deviceCode ||
-            transaction.nativeDevice.deviceCode.length > 2048 ||
-            !Number.isFinite(Date.parse(transaction.nativeDevice.expiresAt)) ||
-            !Number.isSafeInteger(transaction.nativeDevice.interval) ||
-            transaction.nativeDevice.interval < 1 ||
-            transaction.nativeDevice.interval > 60
-          )
-            throw new Error('native login response incomplete');
-          row.transactionId = transaction.id;
-          row.device = transaction.nativeDevice;
-          row.nextPollAt = Date.now() + row.device.interval * 1000;
-        } else if (
-          input.action === 'advance' &&
-          row.transactionId &&
-          input.input?.type === 'form'
+        for (
+          let offset = 0, sequence = 0;
+          offset < bytes.length;
+          offset += 65536, sequence++
         ) {
-          transaction = await platform.request(
-            '/api/iam/v1/login/transactions/' +
-              encodeURIComponent(row.transactionId) +
-              '/advance',
-            {
-              method: 'POST',
-              jar: row.jar,
-              signal: row.controller.signal,
-              body: input.input,
-            },
-          );
-          check();
-        } else throw new Error('invalid login input');
-        if (
-          transaction.id !== row.transactionId ||
-          !['form', 'fail', 'complete'].includes(transaction.step?.type)
-        )
-          throw new Error('unsupported native login step');
-        if (transaction.step.type !== 'complete') {
-          row.step = transaction.step;
-          return { step: transaction.step };
-        }
-        if (
-          transaction.status !== 'completed' ||
-          Date.parse(row.device.expiresAt) <= Date.now()
-        )
-          throw new Error('native login not complete');
-        row.completed = true;
-        // One exchange only. A lost response requires another real login, never token replay.
-        let tokens,
-          interval = row.device.interval;
-        for (;;) {
-          check();
-          const wait = Math.max(0, row.nextPollAt - Date.now());
-          if (wait)
-            await delay(wait, undefined, { signal: row.controller.signal });
-          check();
-          try {
-            tokens = await platform.request('/oauth2/token', {
-              method: 'POST',
-              form: true,
-              jar: row.jar,
-              signal: row.controller.signal,
-              body: {
-                grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-                client_id: config.clientId,
-                device_code: row.device.deviceCode,
-                code_verifier: row.verifier,
-              },
-            });
-            break;
-          } catch (error) {
-            const code = /** @type {any} */ (error).code;
-            if (!['authorization_pending', 'slow_down'].includes(code))
-              throw error;
-            if (code === 'slow_down') interval += 5;
-            row.nextPollAt = Date.now() + interval * 1000;
-            if (
-              row.nextPollAt >=
-              Math.min(row.expiresAt, Date.parse(row.device.expiresAt))
-            )
-              throw new Error('native device grant expired');
-          }
-        }
-        check();
-        const verified = await validateTokens(tokens);
-        const displayName = await loginMemberName(
-          platform,
-          row.jar,
-          verified.claims.sub,
-          row.controller.signal,
-        ).catch(() => undefined);
-        const credential = {
-          ...verified,
-          ...(displayName ? { displayName } : {}),
-          loginTime: new Date().toISOString(),
-        };
-        check();
-        const finish = finalizing.then(async () => {
-          check();
-          await broker.commitLogin(() =>
-            persistNativeAttempt(row, () =>
-              vault.update((state) => {
-                check();
-                const old = state.credential;
-                if (
-                  old &&
-                  ((old.platformOrigin !== undefined &&
-                    old.platformOrigin !== config.platformOrigin) ||
-                    old.claims.iss !== config.issuer ||
-                    (old.clientId !== undefined &&
-                      old.clientId !== config.clientId))
-                )
-                  throw new Error(
-                    'platform binding changed; platform switching is unavailable',
-                  );
-                if (
-                  old &&
-                  (old.claims.tid !== credential.claims.tid ||
-                    old.claims.sub !== credential.claims.sub)
-                )
-                  throw new Error('local owner conflict');
-                if (old && old.claims.did !== credential.claims.did) {
-                  if (
-                    !old.refreshPending &&
-                    !broker.status.reauthenticationRequired
-                  )
-                    throw new Error(
-                      'sign out existing device before replacing connection',
-                    );
-                  // A complete fresh native login may recover an uncertain
-                  // exchange for the SAME owner, retaining remote compensation.
-                  state.revocations ??= [];
-                  if (state.revocations.length >= 256)
-                    throw new Error('revocation queue full');
-                  state.revocations.push({
-                    id: random(),
-                    platformOrigin: config.platformOrigin,
-                    clientId: config.clientId,
-                    token: old.refreshToken,
-                  });
-                  state.endpoint = null;
-                  state.threads = {};
-                  state.deliveries = {};
-                  state.pendingOpens = {};
-                  state.openOutcomes = {};
+          await broker.streamCommand({
+            streamId: opened.streamId,
+            action: 'upload_chunk',
+            sequence,
+            data: bytes.subarray(offset, offset + 65536).toString('base64'),
+          });
+          if (!error && ack !== sequence)
+            await new Promise((resolve, reject) => {
+              const timer = setTimeout(
+                () => reject(new Error('common.unavailable')),
+                30000,
+              );
+              acknowledged = () => {
+                if (error || ack !== sequence) {
+                  clearTimeout(timer);
+                  reject(new Error('common.conflict'));
+                } else {
+                  clearTimeout(timer);
+                  resolve(undefined);
                 }
-                state.credential = credential;
-              }),
-            ),
-          );
-          check();
-        });
-        finalizing = finish.catch(() => {});
-        await finish;
-        check();
-        return issueOwnerSession(row, request, credential);
+                acknowledged = undefined;
+              };
+            });
+          if (error || ack !== sequence) return refuse();
+        }
+        return (
+          await broker.call('upload_finish', { uploadId: opened.uploadId })
+        ).body;
       } catch (error) {
-        await abandon(row);
-        forgetAttempt(request, id);
+        await broker
+          .streamCommand({ streamId: opened.streamId, action: 'cancel' })
+          .catch(() => {});
         throw error;
-      } finally {
-        row.busy = false;
       }
     },
-    attemptToken: attemptId,
-    async cancelAttempt(
-      /** @type {any} */ request,
-      /** @type {string|undefined} */ expected = undefined,
-    ) {
-      const id = attemptId(request),
-        row = attempts.get(id);
-      if (!row || (expected !== undefined && expected !== id)) return;
-      forgetAttempt(request);
-      await abandon(row);
-    },
-    async logout(/** @type {any} */ request) {
-      if (!nativeRequests.has(request))
-        throw new Error('native owner admission required');
-      const row = resolve(request);
-      if (!row) {
-        if (nativeRequests.has(request) && vault.snapshot().credential)
-          await clearAuthentication();
-        await this.cancelAttempt(request);
-        return {
-          body: this.status(request),
-        };
-      }
-      await clearAuthentication(row);
-      return {
-        body: {
-          available: true,
-          loggedIn: false,
-          connected: false,
-          account: null,
-          remoteRevocation: (vault.snapshot().revocations ?? []).length
-            ? 'pending'
-            : 'complete',
-        },
-      };
+    async readStream(/** @type {string} */ streamId) {
+      const check = broker.state.fence();
+      return new Promise((resolve, reject) => {
+        const parts = /** @type {Buffer[]} */ ([]);
+        let sequence = 0,
+          bytes = 0;
+        const timer = setTimeout(() => {
+          reject(new Error('common.unavailable'));
+          void broker
+            .streamCommand({ streamId, action: 'cancel' })
+            .catch(() => {});
+        }, 30000);
+        void broker
+          .subscribeStream(streamId, (event) => {
+            try {
+              check();
+              if (!event || event.sequence !== sequence++)
+                throw new Error('common.conflict');
+              if (event.type === 'end') {
+                clearTimeout(timer);
+                resolve(Buffer.concat(parts));
+                return;
+              }
+              if (event.type !== 'data') throw new Error('common.unavailable');
+              const data = Buffer.from(event.data, 'base64');
+              if (
+                data.toString('base64') !== event.data ||
+                data.length > 65536 ||
+                (bytes += data.length) > 67108864
+              )
+                throw new Error('common.validation_failed');
+              parts.push(data);
+              void broker
+                .streamCommand({
+                  streamId,
+                  action: 'credit',
+                  creditBytes: data.length,
+                })
+                .catch(reject);
+            } catch (error) {
+              clearTimeout(timer);
+              reject(error);
+              void broker
+                .streamCommand({ streamId, action: 'cancel' })
+                .catch(() => {});
+            }
+          })
+          .then(() =>
+            broker.streamCommand({
+              streamId,
+              action: 'credit',
+              creditBytes: 1048576,
+            }),
+          )
+          .catch((error) => {
+            clearTimeout(timer);
+            reject(error);
+          });
+      });
     },
     close() {
-      if (disposed) return networkClosing;
-      disposed = true;
       closed = true;
-      broker.invalidate('closed');
-      models.close();
+      environment?.dispose();
+      enterprise?.close();
+      models?.close();
+      broker.close();
       desktop?.close();
-      clearInterval(expiryTimer);
-      clearInterval(revokeTimer);
-      clearInterval(restoreTimer);
-      generation++;
-      networkClosing = network.close();
-      team?.close();
-      startingTeam?.close();
-      for (const value of sessions.values()) killSession(value);
-      for (const row of attempts.values()) {
-        row.controller.abort();
-        row.jar.clear();
-      }
-      attempts.clear();
       vault.close();
-      return networkClosing;
     },
   };
+  return runtime;
 }

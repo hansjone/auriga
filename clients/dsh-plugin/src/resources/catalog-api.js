@@ -1,3 +1,4 @@
+import { resourceRequest } from './broker-transport.js';
 import { desiredState, requireInstallation } from './selection-state.js';
 /* global AbortSignal */
 import { randomUUID } from 'node:crypto';
@@ -17,9 +18,9 @@ export function catalogIdentity(runtime) {
   return { tenantId: r.tenantId, ownerId: r.ownerId, hostId: r.clientId };
 }
 /** @param {{runtime:any,current:()=>any,fetchImpl?:typeof fetch}} options */
-export function catalogApi({ runtime, current, fetchImpl = fetch }) {
+export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
   const who = catalogIdentity(runtime),
-    origin = runtime.config.platformOrigin;
+    _origin = runtime.config.platformOrigin;
   function check() {
     if (runtime.vault?.snapshot?.().resourceIsolationPending)
       refuse('resource.storage_unavailable');
@@ -43,15 +44,14 @@ export function catalogApi({ runtime, current, fetchImpl = fetch }) {
     )
       refuse('common.validation_failed');
     check();
-    const token = await runtime.getAccess();
+
     check();
-    const response = await fetchImpl(new URL(path, origin), {
+    const response = await resourceRequest(runtime, path, {
       method: body === undefined && !form ? 'GET' : 'POST',
       credentials: 'omit',
       redirect: 'error',
       signal: AbortSignal.timeout(30000),
       headers: {
-        authorization: 'Bearer ' + token,
         accept: binary ? 'application/octet-stream' : 'application/json',
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...(body === undefined && !form

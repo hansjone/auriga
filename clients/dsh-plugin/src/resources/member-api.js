@@ -1,3 +1,4 @@
+import { resourceRequest } from './broker-transport.js';
 /* global AbortSignal */
 import { randomUUID } from 'node:crypto';
 import { parseStrictJson } from './json.js';
@@ -7,13 +8,13 @@ import { counter, digest, uuid, refuse, instant } from './trust.js';
 /** Identity comes from the locally verified DEVICE grant, never a browser body.
  * @param {any} runtime */
 export function memberIdentity(runtime) {
-  const claims = runtime?.vault?.snapshot()?.credential?.claims;
-  if (!uuid(claims?.tid) || !uuid(claims?.sub) || !uuid(claims?.did))
+  const who = runtime?.identity?.();
+  if (!uuid(who?.tenantId) || !uuid(who?.ownerId) || !uuid(who?.clientId))
     return refuse('common.unauthenticated');
   return Object.freeze({
-    tenantId: claims.tid,
-    ownerId: claims.sub,
-    clientId: claims.did,
+    tenantId: who.tenantId,
+    ownerId: who.ownerId,
+    clientId: who.clientId,
   });
 }
 /** @param {any} row @param {string} clientId @returns {Installation} */
@@ -83,11 +84,11 @@ async function bytes(response, max) {
 export function createMemberApi({
   runtime,
   alive = () => true,
-  fetchImpl = fetch,
+  fetchImpl: _fetchImpl,
   now = Date.now,
 }) {
   const identity = memberIdentity(runtime),
-    origin = runtime.config.platformOrigin;
+    _origin = runtime.config.platformOrigin;
   function check() {
     const current = memberIdentity(runtime);
     if (
@@ -108,15 +109,14 @@ export function createMemberApi({
     timeout = 15000,
   ) {
     check();
-    const token = await runtime.getAccess();
+
     check();
-    const response = await fetchImpl(new URL(path, origin), {
+    const response = await resourceRequest(runtime, path, {
       method: input === undefined ? 'GET' : 'POST',
       credentials: 'omit',
       redirect: 'error',
       signal: AbortSignal.timeout(timeout),
       headers: {
-        authorization: 'Bearer ' + token,
         accept: binary ? 'application/gzip' : 'application/json',
         ...(input === undefined
           ? {}
