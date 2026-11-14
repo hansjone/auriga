@@ -1,3 +1,4 @@
+/* global AbortSignal */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
@@ -74,6 +75,23 @@ function text(tree) {
 const button = (tree, label) =>
   nodes(tree).find((n) => n.type === 'button' && text(n) === label);
 
+function mockTimeouts(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(AbortSignal, 'timeout', (ms) => {
+    const controller = new AbortController();
+    setTimeout(
+      () =>
+        controller.abort(
+          Object.assign(new Error('deadline elapsed'), {
+            name: 'TimeoutError',
+          }),
+        ),
+      ms,
+    );
+    return controller.signal;
+  });
+}
+
 const settings = {
   mode: 'connect',
   platformOrigin: 'https://example.com',
@@ -91,6 +109,84 @@ const signedIn = {
   network: { connected: true, state: 'ready' },
   models: { available: false },
 };
+
+test('Desktop download survives the status deadline and displays the queued result', async (t) => {
+  mockTimeouts(t);
+  let finishDownload,
+    updateSignal,
+    queued = false;
+  const fixture = harness(async (url, init) => {
+    if (url.endsWith('/desktop') && JSON.parse(init.body).action === 'update') {
+      updateSignal = init.signal;
+      return new Promise((resolve, reject) => {
+        init.signal?.addEventListener('abort', () =>
+          reject(init.signal.reason),
+        );
+        finishDownload = () => {
+          queued = true;
+          resolve(Response.json({ queued: true, restartRequired: true }));
+        };
+      });
+    }
+    return Response.json(
+      url.endsWith('/status')
+        ? signedIn
+        : {
+            ...settings,
+            desktop: {
+              enabled: true,
+              available: queued ? null : { version: '0.2.0' },
+              restartRequired: queued,
+            },
+          },
+    );
+  }, 'en');
+  try {
+    fixture.render();
+    await setImmediate();
+    const updating = button(fixture.render(), 'Update').props.onClick();
+    await setImmediate();
+    t.mock.timers.tick(16000);
+    await setImmediate();
+    assert.notEqual(updateSignal?.aborted, true);
+    assert.equal(button(fixture.render(), 'Update').props.disabled, true);
+    assert.doesNotMatch(text(fixture.render()), /timed out/);
+    finishDownload();
+    await updating;
+    const tree = fixture.render();
+    assert.equal(button(tree, 'Update'), undefined);
+    assert.ok(
+      nodes(tree).some(
+        (n) =>
+          n.props.role === 'status' && /close Auriga Desktop/.test(text(n)),
+      ),
+    );
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('ordinary settings reads still time out when the status service stalls', async (t) => {
+  mockTimeouts(t);
+  let stateSignal;
+  const fixture = harness(async (url, init) => {
+    if (!url.endsWith('/state')) return Response.json(signedIn);
+    stateSignal = init.signal;
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(init.signal.reason));
+    });
+  }, 'en');
+  try {
+    fixture.render();
+    await setImmediate();
+    t.mock.timers.tick(16000);
+    await setImmediate();
+    assert.equal(stateSignal.aborted, true);
+    assert.match(text(fixture.render()), /Status read timed out/);
+  } finally {
+    fixture.dispose();
+  }
+});
 for (const locale of ['zh', 'en'])
   test(
     'managed model status directs native manual synchronization without claiming invocation readiness: ' +
