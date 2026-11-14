@@ -1,0 +1,43 @@
+{
+  "recordedAt": "2026-11-14T16:54:31.525Z",
+  "commit": "5a0475c7ddb335be7b083d41764ae1552985448a",
+  "services": [
+    "edge",
+    "platform"
+  ],
+  "ids": {
+    "edge": "sha256:3131efe04ae7f06850dd58cb295d8168ca93dc82fcc804acdc49ea2996a36793",
+    "platform": "sha256:70cff9e6055ba9939346b02c2bcfc78178389e7f5a3ab60efa6c03340d77a420"
+  },
+  "archiveSha256": "f9e4379d61cb8b968612b65de8aefaa7415c019d643abd4a6c9effbc04eacedc",
+  "nasBatch": "/share/CACHEDEV1_DATA/Container/auriga-test/dev-5a0475c7-edge-platform",
+  "stackEnvBefore": "7748730275b526d6fd7a2fb2088c81c19af173e324b506e075efac50bebd02c4",
+  "stackEnvAfter": "cf13ba565a93f26eaf3d0c33166401d15f8571e4d675384a15784b63c2985554",
+  "imagesBefore": {
+    "AURIGA_IMAGE_PLATFORM": "sha256:d88609567ac7a4753829a43b2c310fa6e8301ad6dc19a2780f4603e27eaa2ead",
+    "AURIGA_IMAGE_EDGE": "sha256:80c503c9b8b0855e4836cc5db8465618ebae4727ce05ae99833f6c5548ff7959",
+    "AURIGA_IMAGE_POSTGRES": "sha256:82903352d6faf8f8a318bc4353d1cb1db67d4a5ff968d2799b2718e2cb00afa2"
+  },
+  "unchanged": [],
+  "deployExit": 0,
+  "containersStillOnOldImage": [],
+  "containers": [
+    "network|3131efe04ae7|Up 45 seconds (healthy)",
+    "collab|70cff9e6055b|Up About a minute (healthy)",
+    "network-broker|3131efe04ae7|Up About a minute",
+    "agent|c11e959eeadc|Up 3 minutes",
+    "ai-relay|3131efe04ae7|Up 3 minutes",
+    "edge|3131efe04ae7|Up 3 minutes (healthy)",
+    "egress|3131efe04ae7|Up 4 minutes (healthy)",
+    "panel-renew|3131efe04ae7|Up 4 minutes (healthy)",
+    "platform|70cff9e6055b|Up 4 minutes (healthy)",
+    "bifrost|abcaedb3836c|Up 16 hours (healthy)",
+    "collab-renew|424dc47e971b|Up 11 hours",
+    "postgres|82903352d6fa|Up 2 days (healthy)",
+    "alloy|622a4a32abf8|Up 10 days (healthy)",
+    "registry|26b2eb03618e|Up 10 days",
+    "nats|8b9f712ae214|Up 10 days (healthy)",
+    "litellm|9ab6d30d9c82|Up 12 days (healthy)",
+    "loki|fd1a879e62ca|Up 2 weeks (healthy)"
+  ]
+}

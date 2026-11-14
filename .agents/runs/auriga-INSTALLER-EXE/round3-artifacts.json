@@ -1,0 +1,35 @@
+{
+  "main": "9a2f328cc29c4cbd60463d688d6502593546914e",
+  "backendDeployCommit": "f23f49e71492e3f338bfe18b4e565e61dda9d8e9",
+  "installerCommit": "cbfa6e3a",
+  "items": [
+    {
+      "purpose": "old",
+      "version": "0.1.3-e2e.1",
+      "path": "clients/installer/target/AurigaDSH-Setup-0.1.3-e2e.1.exe",
+      "sizeBytes": 233386843,
+      "sha256": "7e542455fd40cdaa6ffe916bd2bf961469700702a58c2217fbc372ca98efec07",
+      "packageId": "0.1.3-e2e.1-dsh0.2.1-rc.3-289bdc6a4f68",
+      "pluginVersion": "0.1.15"
+    },
+    {
+      "purpose": "new",
+      "version": "0.1.3-e2e.2",
+      "path": "clients/installer/target/AurigaDSH-Setup-0.1.3-e2e.2.exe",
+      "sizeBytes": 233455302,
+      "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+      "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+      "pluginVersion": "0.1.17"
+    },
+    {
+      "purpose": "fault",
+      "version": "0.1.3-e2e.3",
+      "path": "clients/installer/target/AurigaDSH-Setup-0.1.3-e2e.3-broken.exe",
+      "sizeBytes": 233451129,
+      "sha256": "bf6c7a6d4840536844e5682fe20cc781678554354386d3d2a2daa652b3ad36f7",
+      "packageId": "0.1.3-e2e.3-dsh0.2.1-rc.3-1675e2e223f3",
+      "pluginVersion": "0.1.17"
+    }
+  ],
+  "edgeDeployCommit": "8b890cb9"
+}

@@ -1,0 +1,9 @@
+{
+  "fixture": "round3",
+  "exitCode": 0,
+  "rootRemoved": true,
+  "userDataKept": true,
+  "registryEntryRemoved": true,
+  "shortcutsRemoved": true,
+  "stdout": "{\"dataKept\":true,\"dataHome\":\"D:\\\\project\\\\chatgpt\\\\agent-wt\\\\auriga-INSTALLER-EXE-codex\\\\.agents\\\\runs\\\\auriga-INSTALLER-EXE\\\\sandbox\\\\round3\\\\data\"}\n"
+}

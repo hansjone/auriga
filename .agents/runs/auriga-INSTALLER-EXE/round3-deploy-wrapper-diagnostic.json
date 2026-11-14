@@ -1,0 +1,6 @@
+{
+  "hostPowerShellExit": 1,
+  "guardedDeployExit": 0,
+  "containersStillOnOldImage": [],
+  "cause": "Windows PowerShell wraps inherited WSL localhost-proxy stderr as NativeCommandError; fixed Node deployment tool reached its completion message and wrote successful guarded receipt. No WSL/global proxy settings changed. Subsequent wrappers explicitly exit with captured Node process code."
+}

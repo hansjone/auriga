@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "recordedAt": "2026-11-14T19:49:40.136356+00:00",
+  "scannedTextFiles": 152,
+  "patterns": [
+    "private-key",
+    "desktop-cookie",
+    "bearer",
+    "jwt"
+  ],
+  "livePasswordAndTotpLiteralCheck": true,
+  "findings": [],
+  "excluded": "gitignored JVM environment logs, private-configuration harnesses, sandbox and target binaries; screenshots inspected visually"
+}

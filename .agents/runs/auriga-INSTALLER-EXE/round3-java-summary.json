@@ -1,0 +1,16 @@
+{
+  "command": ".\\mvnw.cmd -pl services/resource/impl -am -Dtest=DesktopReleasesTest -Dsurefire.failIfNoSpecifiedTests=false -Dfrontend.skip=true test",
+  "exitCode": 0,
+  "realPostgresUsed": false,
+  "testSuites": [
+    {
+      "name": "auriga.resource.DesktopReleasesTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "6.804"
+    }
+  ],
+  "rawLogExcluded": "round3-java-local.log"
+}

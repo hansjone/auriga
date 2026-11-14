@@ -1,0 +1,12 @@
+real-exe-install {"reused":true,"version":"0.1.3-e2e.1"}
+manager-stepup-completed
+manager-files-selected
+manager-submit-clicked
+page-published-107 {"status":201,"version":"0.1.3-e2e.2","channel":"beta"}
+minimum-overrides-disabled-and-zero-rollout {"desktop":{"enabled":false,"channel":"beta","available":{"schema":2,"rolloutPercentage":0,"rollbackFrom":null,"product":"Auriga Desktop","version":"0.1.3-e2e.2","packageId":"0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462","channel":"beta","platform":"win-x64","sizeBytes":233455302,"sha256":"aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48","minimumVersion":"0.1.3-e2e.2","publishedAt":"2026-11-14T18:40:52.656Z","notAfter":"2026-11-28T18:40:52.656Z","sequence":107,"notes":"NAS development acceptance; not a production CI release","components":{"dshVersion":"0.2.1-rc.3","nodeVersion":"24.21.0","pluginVersion":"0.1.17"},"signature":{"alg":"Ed25519","kid":"auriga-desktop-release-1","value":"gSOzNFleJsokdYApx9eEije3fUEZkh77mdr88YidsPTRCq4nzjObtePwSd5Es2HDKmh3zHb6-RJKPrKUqJukDg"}},"required":true,"phase":"idle","busy":false,"downloading":false,"downloadedBytes":0,"totalBytes":0,"error":null,"restartRequired":false}}
+mandatory-policy-cannot-be-disabled {"checked":["enabled=false rejected","channel=stable rejected"]}
+normal-page-forced {"text":"新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n当前版本已停用，请更新并重启 · 0.1.3-e2e.2\n更新\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"}
+queued-forced {"versionBeforeRestart":"0.1.3-e2e.1","desktop":{"enabled":false,"channel":"beta","available":null,"required":true,"phase":"ready","busy":false,"downloading":false,"downloadedBytes":233455302,"totalBytes":233455302,"error":null,"restartRequired":true},"markerSha256":"53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f"}
+mandatory-update-completed {"installed":"0.1.3-e2e.2","markerSha256":"53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f"}
+normal-page-forced-completed {"text":"新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"}
+existing-profile-local-session-identity-preserved {"preserved":true}

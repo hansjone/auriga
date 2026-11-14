@@ -1,0 +1,12 @@
+[18:13:59] ref=origin/agent/codex/auriga-INSTALLER-EXE commit=8b890cb9093f72c445e6f17960dbc404362257f2 services=edge step=build
+[18:14:01] WSL 构建中（每个服务日志在 build-<服务>.log）…
+node.exe : wsl: �hKm0R localhost �NtM�n�FO*g\��P0R WSL0NAT !j_N�v WSL
+所在位置 行:2 字符: 279
++ ... DE -eq 0) { & "$env:LOCALAPPDATA/Programs/DeepSeek Harness/resources/ ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (wsl: �hKm0..._N�v WSL :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+N/ec localhost �Nt0
+
+[18:15:46] 构建完成 {"edge":"sha256:d26e98d2eed764ddc7a8c6a726e5f3f987a00ef9bc295bedcb9b10454bfd8bc1"}

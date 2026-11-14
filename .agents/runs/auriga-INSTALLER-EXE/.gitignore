@@ -9,3 +9,22 @@
 
 /round2-lint.log
 /round2-nas-preflight.log
+/round3-java*.log
+
+/round3-nas-material-paths.log
+
+/supervise-chain.ps1
+/continue-chain.ps1
+
+# Local NAS orchestration references workstation-private configuration.
+/nas-browser.mjs
+/nas-chain.mjs
+/nas-ops.py
+/desktop-fixture.mjs
+/desktop-network.cjs
+/cleanup-fixture.mjs
+/make-broken.mjs
+/transfer-compare.mjs
+/fetch-probe.mjs
+/download-transfer-probe.mjs
+/final-snapshot.mjs

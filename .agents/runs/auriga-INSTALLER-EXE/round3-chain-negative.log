@@ -1,0 +1,18 @@
+real-exe-install {"reused":true,"version":"0.1.3-e2e.2"}
+manager-stepup-completed
+manager-files-selected
+manager-submit-clicked
+page-published-108 {"status":201,"version":"0.1.3-e2e.3","channel":"beta"}
+normal-page-fault-required {"text":"新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n当前版本已停用，请更新并重启 · 0.1.3-e2e.3\n更新\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"}
+queued-smoke-failure {"versionBeforeRestart":"0.1.3-e2e.2","desktop":{"enabled":true,"channel":"beta","available":null,"required":true,"phase":"ready","busy":false,"downloading":false,"downloadedBytes":233451129,"totalBytes":233451129,"error":null,"restartRequired":true},"markerSha256":"53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f"}
+real-default-smoke-failed-old-version-restored {"installed":"0.1.3-e2e.2","install":{"dataHome":"D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\.agents\\runs\\auriga-INSTALLER-EXE\\sandbox\\round3\\data","current":"0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462","previous":"0.1.3-e2e.1-dsh0.2.1-rc.3-289bdc6a4f68"},"state":{"enabled":true,"channel":"beta","available":{"schema":2,"rolloutPercentage":0,"rollbackFrom":null,"product":"Auriga Desktop","version":"0.1.3-e2e.3","packageId":"0.1.3-e2e.3-dsh0.2.1-rc.3-1675e2e223f3","channel":"beta","platform":"win-x64","sizeBytes":233451129,"sha256":"bf6c7a6d4840536844e5682fe20cc781678554354386d3d2a2daa652b3ad36f7","minimumVersion":"0.1.3-e2e.3","publishedAt":"2026-11-14T19:07:04.045Z","notAfter":"2026-11-28T19:07:04.045Z","sequence":108,"notes":"NAS development FAULT FIXTURE: CLI exits 42; beta only; withdraw immediately after acceptance; not a production release","components":{"dshVersion":"0.2.1-rc.3","nodeVersion":"24.21.0","pluginVersion":"0.1.17"},"signature":{"alg":"Ed25519","kid":"auriga-desktop-release-1","value":"VbjxgQI2h9ZkuRik5GfPIZvNnfHoVS3bHGYmjvCao47q1l3y8W9fBWCoPSd7Gp_Kk_fxAnvTPGFGwxTEfMwOAQ"}},"required":true,"phase":"failed","busy":false,"downloading":false,"downloadedBytes":233451129,"totalBytes":233451129,"error":"updateFailed","restartRequired":false},"markerSha256":"53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f","injectedCliExit":42}
+normal-page-rollback {"text":"新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n当前版本已停用，请更新并重启 · 0.1.3-e2e.3\n更新\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"}
+broken-release-withdrawn-and-download-denied {"sequence":108,"status":404}
+manager-stepup-completed
+manager-files-selected
+manager-submit-clicked
+page-published-109 {"status":201,"version":"0.1.3-e2e.2","channel":"beta"}
+mandatory-policy-release-retains-native-panel-context {"sameElementStillMounted":true,"displayRestored":true}
+signed-administrative-rollback-recovers-observed-version {"highestVersion":"0.1.3-e2e.2","highestSequence":109,"installed":"0.1.3-e2e.2","required":false}
+normal-page-recovered {"text":"新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n更新失败，旧版和数据已保留，请重试\n更新\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"}
+existing-profile-local-session-identity-preserved {"preserved":true}

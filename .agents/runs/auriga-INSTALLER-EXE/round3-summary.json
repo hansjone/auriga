@@ -1,0 +1,266 @@
+{
+  "recordedAt": "2026-11-14T19:46:49.590940+00:00",
+  "status": "passed",
+  "implementationCommits": [
+    "5a0475c7ddb335be7b083d41764ae1552985448a",
+    "cbfa6e3a",
+    "f23f49e71492e3f338bfe18b4e565e61dda9d8e9",
+    "8b890cb9"
+  ],
+  "checks": [
+    {
+      "cwd": "clients/installer",
+      "command": "INSTALLER_STAGE=<final v2 stage> <Node24> --test test/*.test.mjs",
+      "exitCode": 0,
+      "passed": 218,
+      "failed": 0,
+      "skipped": 0,
+      "log": "round3-installer-built-final.log"
+    },
+    {
+      "cwd": "clients/installer",
+      "command": "node --test test/core.test.mjs",
+      "exitCode": 0,
+      "passed": 57,
+      "failed": 0,
+      "log": "round3-core-cleanup.log"
+    },
+    {
+      "cwd": "clients/dsh-plugin",
+      "command": "node --test test/settings/desktop.test.js test/settings/view.test.js",
+      "exitCode": 0,
+      "passed": 50,
+      "failed": 0,
+      "skipped": 0,
+      "log": "round3-plugin-settings.log"
+    },
+    {
+      "cwd": ".",
+      "command": ".\\mvnw.cmd -pl services/resource/impl -am -Dtest=DesktopReleasesTest -Dsurefire.failIfNoSpecifiedTests=false -Dfrontend.skip=true test",
+      "exitCode": 0,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "rawLog": "round3-java-local.log (local only; JVM environment diagnostics excluded)"
+    },
+    {
+      "cwd": "clients/dsh-plugin",
+      "command": "node ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json; node ../../node_modules/eslint/bin/eslint.js src/client.js src/local/desktop.js src/local/runtime.js src/settings/host.js src/settings/view.js",
+      "exitCode": 0
+    },
+    {
+      "cwd": "web/admin",
+      "command": "node ../../node_modules/vue-tsc/bin/vue-tsc.js --noEmit; node ../../node_modules/eslint/bin/eslint.js src/views/DesktopView.vue",
+      "exitCode": 0
+    },
+    {
+      "cwd": "clients/installer",
+      "command": "node ../../node_modules/eslint/bin/eslint.js runtime/core.mjs test/core.test.mjs; node ../../node_modules/prettier/bin/prettier.cjs --write runtime/core.mjs test/core.test.mjs",
+      "exitCode": 0
+    },
+    {
+      "cwd": ".",
+      "command": "mvnw.cmd -pl services/resource/impl -am '-Dtest=DesktopReleasesTest,ResourceBodyTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dfrontend.skip=true' test",
+      "exitCode": 0,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "round3-http-parser-regression.json"
+    },
+    {
+      "cwd": "web/admin",
+      "command": "<Node24> ../../node_modules/vitest/vitest.mjs run src/views/DesktopView.test.ts",
+      "exitCode": 0,
+      "passed": 4,
+      "failed": 0,
+      "log": "round3-admin-publish-test.log"
+    },
+    {
+      "cwd": "web/admin",
+      "command": "<Node24> ../../node_modules/vue-tsc/bin/vue-tsc.js --noEmit; <Node24> ../../node_modules/eslint/bin/eslint.js src/views/DesktopView.vue src/views/DesktopView.test.ts; <Node24> ../../node_modules/vite/bin/vite.js build",
+      "exitCode": 0,
+      "logs": [
+        "round3-admin-publish-type.log",
+        "round3-admin-publish-lint.log",
+        "round3-admin-publish-build.log"
+      ]
+    }
+  ],
+  "diagnostics": [
+    "First all-unit rerun without INSTALLER_STAGE: 215 passed and 3 built-package cases skipped. Final full run includes final stage: all 218 passed.",
+    "NAS readonly preflight command was split by Windows PowerShell native argv quoting; corrected by invoking nas_exec.py through Python subprocess argv. No NAS files changed by that preflight.",
+    "Native DSH first-run preview and account onboarding dialogs intercepted clicks. Isolated browser fixture now uses the normal Continue and Close buttons.",
+    "Client-only 4 MiB/s throttling is enabled for deterministic cancel/refresh/resume checks; no package bytes, server responses or trust checks are mocked.",
+    "Live schema 2 HTTP publication was rejected before upload because the shared strict parser rejected rollbackFrom:null. Added endpoint-only nullable opt-in and HTTP regression; new regression failed before fix and all 12 tests passed after fix.",
+    "Admin run(action+refresh) reported a failed action when the action committed and its post-upload ledger GET needed fresh step-up. UI now preserves publication/withdrawal success separately from refresh failure; 4 component tests passed.",
+    "DSH inherited external agent HTTP_PROXY and returned 502 for LAN API while direct probes returned 200. Only isolated desktop child environment now removes external proxy variables; no global network changes.",
+    "A Playwright 30-second state request timed out during synchronous real package verification. Original cookie-bearing call log was redacted; future errors omit call headers. Continued with complete SHA-verified NAS download and 600-second test requests.",
+    "PowerShell split unquoted dotted Maven properties and treated native stderr warnings as errors; final Java run used Python argv with an absolute mvnw.cmd and recorded process exit 0."
+  ],
+  "stableAcceptance": "round3-chain-stable-complete.json",
+  "forcedAcceptance": {
+    "evidence": "round3-chain-forced.json",
+    "exitCode": 0,
+    "releaseSequence": 107,
+    "from": "0.1.3-e2e.1",
+    "to": "0.1.3-e2e.2",
+    "minimumVersion": "0.1.3-e2e.2",
+    "rolloutPercentage": 0,
+    "optionalChecksEnabled": false,
+    "requiredUpdatePassed": true,
+    "disableOrSwitchChannelRejected": true,
+    "profileIdentityPreserved": true,
+    "userDataPreserved": true,
+    "command": "AURIGA_ACCEPTANCE_FIXTURE=round3-forced <Node24> .agents/runs/auriga-INSTALLER-EXE/nas-chain.mjs forced"
+  },
+  "passed": true,
+  "negativeAcceptance": {
+    "command": "<Node24> .agents/runs/auriga-INSTALLER-EXE/nas-chain.mjs negative",
+    "exitCode": 0,
+    "evidence": "round3-chain-negative.json",
+    "faultSequence": 108,
+    "faultVersion": "0.1.3-e2e.3",
+    "actualDefaultSmokeFailed": true,
+    "restoredVersion": "0.1.3-e2e.2",
+    "withdrawalDownloadStatus": 404,
+    "rollbackSequence": 109,
+    "rollbackFrom": "0.1.3-e2e.3",
+    "highestVersionAfter": "0.1.3-e2e.2",
+    "requiredAfter": false,
+    "sameNativePanelElementRetained": true,
+    "profileIdentityPreserved": true,
+    "dataPreserved": true
+  },
+  "finalNasAcceptance": {
+    "evidence": "round3-nas-final.json",
+    "exitCode": 0,
+    "stableSequence": 106,
+    "stableSchema": 1,
+    "betaSequence": 109,
+    "betaSchema": 2,
+    "faultsWithdrawn": true
+  },
+  "uninstallAcceptance": {
+    "exitCode": 0,
+    "evidence": [
+      "round3-uninstall-round3.json",
+      "round3-uninstall-round3-forced.json"
+    ],
+    "bothRootsRemoved": true,
+    "bothDataMarkersKept": true,
+    "bothShortcutSetsRemoved": true,
+    "bothRegistryEntriesRemoved": true
+  },
+  "processCleanup": {
+    "evidence": "round3-process-cleanup.json",
+    "remainingFixtureProcesses": 0,
+    "workerControllerPreserved": true
+  },
+  "deployment": {
+    "platform": {
+      "recordedAt": "2026-11-14T18:24:37.414Z",
+      "commit": "f23f49e71492e3f338bfe18b4e565e61dda9d8e9",
+      "services": [
+        "platform"
+      ],
+      "ids": {
+        "platform": "sha256:940cd2331286c592b9fe676e7e843ac0cb7aea7fae65cdb02b1afa35080752fb"
+      },
+      "archiveSha256": "c9d146f62b160e2e14df0dde2dc8e95e56ff48cd815e914bb9adfc883feeda6d",
+      "nasBatch": "/share/CACHEDEV1_DATA/Container/auriga-test/dev-f23f49e7-platform",
+      "stackEnvBefore": "cf13ba565a93f26eaf3d0c33166401d15f8571e4d675384a15784b63c2985554",
+      "stackEnvAfter": "c497d864d041c275d9421c9002543ae78ac74a846d262622f250c3fa24bcad63",
+      "imagesBefore": {
+        "AURIGA_IMAGE_PLATFORM": "sha256:70cff9e6055ba9939346b02c2bcfc78178389e7f5a3ab60efa6c03340d77a420",
+        "AURIGA_IMAGE_POSTGRES": "sha256:82903352d6faf8f8a318bc4353d1cb1db67d4a5ff968d2799b2718e2cb00afa2"
+      },
+      "unchanged": [],
+      "deployExit": 0,
+      "containersStillOnOldImage": [],
+      "containers": [
+        "network|3131efe04ae7|Up 31 seconds (healthy)",
+        "collab|940cd2331286|Up About a minute (healthy)",
+        "agent|c11e959eeadc|Up 2 minutes",
+        "edge|3131efe04ae7|Up 2 minutes (healthy)",
+        "ai-relay|3131efe04ae7|Up 2 minutes",
+        "platform|940cd2331286|Up 3 minutes (healthy)",
+        "network-broker|3131efe04ae7|Up 2 hours",
+        "egress|3131efe04ae7|Up 2 hours (healthy)",
+        "panel-renew|3131efe04ae7|Up 2 hours (healthy)",
+        "bifrost|abcaedb3836c|Up 18 hours (healthy)",
+        "collab-renew|424dc47e971b|Up About an hour",
+        "postgres|82903352d6fa|Up 2 days (healthy)",
+        "alloy|622a4a32abf8|Up 10 days (healthy)",
+        "registry|26b2eb03618e|Up 10 days",
+        "nats|8b9f712ae214|Up 10 days (healthy)",
+        "litellm|9ab6d30d9c82|Up 12 days (healthy)",
+        "loki|fd1a879e62ca|Up 2 weeks (healthy)"
+      ]
+    },
+    "edge": {
+      "recordedAt": "2026-11-14T18:36:19.252Z",
+      "commit": "8b890cb9093f72c445e6f17960dbc404362257f2",
+      "services": [
+        "edge"
+      ],
+      "ids": {
+        "edge": "sha256:d26e98d2eed764ddc7a8c6a726e5f3f987a00ef9bc295bedcb9b10454bfd8bc1"
+      },
+      "archiveSha256": "060ad1fc8d1b8ae3371af876f8d8450a0258cb18c36498101b938e5ecb14a1a5",
+      "nasBatch": "/share/CACHEDEV1_DATA/Container/auriga-test/dev-8b890cb9-edge",
+      "stackEnvBefore": "c497d864d041c275d9421c9002543ae78ac74a846d262622f250c3fa24bcad63",
+      "stackEnvAfter": "3406082864acc586f79a749786a6adaf594ea5b4e229c5d953853135f72b3705",
+      "imagesBefore": {
+        "AURIGA_IMAGE_EDGE": "sha256:3131efe04ae7f06850dd58cb295d8168ca93dc82fcc804acdc49ea2996a36793",
+        "AURIGA_IMAGE_POSTGRES": "sha256:82903352d6faf8f8a318bc4353d1cb1db67d4a5ff968d2799b2718e2cb00afa2"
+      },
+      "unchanged": [],
+      "deployExit": 0,
+      "containersStillOnOldImage": [],
+      "containers": [
+        "network|d26e98d2eed7|Up 58 seconds (healthy)",
+        "network-broker|d26e98d2eed7|Up About a minute",
+        "agent|c11e959eeadc|Up 2 minutes",
+        "ai-relay|d26e98d2eed7|Up 2 minutes",
+        "panel-renew|d26e98d2eed7|Up 2 minutes (healthy)",
+        "egress|d26e98d2eed7|Up 2 minutes (healthy)",
+        "edge|d26e98d2eed7|Up 2 minutes (healthy)",
+        "collab|940cd2331286|Up 9 minutes (healthy)",
+        "platform|940cd2331286|Up 15 minutes (healthy)",
+        "bifrost|abcaedb3836c|Up 18 hours (healthy)",
+        "collab-renew|424dc47e971b|Up 9 minutes",
+        "postgres|82903352d6fa|Up 2 days (healthy)",
+        "alloy|622a4a32abf8|Up 10 days (healthy)",
+        "registry|26b2eb03618e|Up 10 days",
+        "nats|8b9f712ae214|Up 10 days (healthy)",
+        "litellm|9ab6d30d9c82|Up 12 days (healthy)",
+        "loki|fd1a879e62ca|Up 2 weeks (healthy)"
+      ]
+    },
+    "finalRenewEvidence": [
+      "round3-renew-final-status.log",
+      "round3-renew-final-cycle.log",
+      "round3-renew-handoff.log"
+    ],
+    "imageMatchesStackEnv": true,
+    "cycleCompleted": true,
+    "pending": false,
+    "handoffStatus": {
+      "activationRequired": false,
+      "coverageUntil": "2026-11-21T12:00:00Z",
+      "status": "waiting_for_scheduled_publication",
+      "warning": ""
+    },
+    "historicalMessageWarning": "Earlier cycles reported message_network=degraded (consumers missing/stopped/unhealthy); handoff cycle warning is empty. No manual message network repair performed."
+  },
+  "finalFormatting": "round3-final-format-check.json",
+  "knownLimits": [
+    "Development NAS artifacts, not a main/tag CI production release.",
+    "No Authenticode certificate; SmartScreen may warn.",
+    "Initial HTTP installer/public-key bootstrap requires independent trusted verification.",
+    "Desktop fixture had no platform login; platform login/model calls/billing are outside this acceptance.",
+    "Synchronous large-package verification can delay state reads; acceptance requests use 600s timeout.",
+    "After signed recovery the historical updateFailed banner remains, while required=false and the same native panel is visible.",
+    "Protected contract change still needs a fresh non-author full review and exact-HEAD complete CI through the lead."
+  ]
+}

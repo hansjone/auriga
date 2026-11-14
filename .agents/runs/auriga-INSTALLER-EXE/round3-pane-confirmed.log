@@ -1,0 +1,45 @@
+node.exe : node:internal/modules/run_main:107
+所在位置 行:2 字符: 133
++ ... /node.exe'; & $node24 --input-type=module -e "import {chromium} from  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (node:internal/modules/run_main:107:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    triggerUncaughtException(
+    ^
+
+locator.click: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: 'Auriga DSH', exact: true })
+    - locator resolved to <button type="button" class="hHd-Xa_panelRow" aria-label="Auriga DSH">…</button>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div aria-hidden="true" class="_mask_o6lrb_18"></div> from <div role="presentation" class="_root_o6lrb_6">…
+</div> subtree intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div aria-hidden="true" class="_mask_o6lrb_18"></div> from <div role="presentation" class="_root_o6lrb_6">…
+</div> subtree intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    57 × waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div aria-hidden="true" class="_mask_o6lrb_18"></div> from <div role="presentation" class="_root_o6lrb_6">
+…</div> subtree intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+
+    at D:\project\chatgpt\agent-wt\auriga-INSTALLER-EXE-codex\[eval1]:1:366 {
+  name: 'TimeoutError'
+}
+
+Node.js v24.21.0

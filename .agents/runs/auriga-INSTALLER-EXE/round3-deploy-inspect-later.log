@@ -1,0 +1,27 @@
+$
+>>> [2026-11-15T00:53:18] {"String":"tail -25 /share/CACHEDEV1_DATA/Container/auriga-test/dev-5a0475c7-edge-platform/deploy.log; test ! -f /share/CACHEDEV1_DATA/Container/auriga-test/dev-5a0475c7-edge-platform/deploy.exit || cat /share/CACHEDEV1_DATA/Container/auriga-test/dev-5a0475c7-edge-platform/deploy.exit", "Match":"[hansjone@HANSJONE127 ~]#", "Timeout":0}
+ Container auriga-nas-test-audit-db-prepare-1  Starting
+ Container auriga-nas-test-postgres-1  Healthy
+ Container auriga-nas-test-collab-db-1  Starting
+ Container auriga-nas-test-network-broker-1  Started
+ Container auriga-nas-test-audit-db-prepare-1  Started
+ Container auriga-nas-test-audit-db-prepare-1  Waiting
+ Container auriga-nas-test-postgres-1  Waiting
+ Container auriga-nas-test-nats-1  Waiting
+ Container auriga-nas-test-collab-db-1  Started
+ Container auriga-nas-test-nats-1  Healthy
+ Container auriga-nas-test-postgres-1  Healthy
+ Container auriga-nas-test-audit-db-prepare-1  Exited
+ Container auriga-nas-test-platform-1  Waiting
+ Container auriga-nas-test-nats-1  Waiting
+ Container auriga-nas-test-collab-db-1  Waiting
+ Container auriga-nas-test-platform-1  Waiting
+ Container auriga-nas-test-nats-1  Healthy
+ Container auriga-nas-test-platform-1  Healthy
+ Container auriga-nas-test-platform-1  Healthy
+ Container auriga-nas-test-collab-db-1  Exited
+ Container auriga-nas-test-collab-1  Starting
+ Container auriga-nas-test-collab-1  Started
+ Container auriga-nas-test-platform-1  Waiting
+ Container auriga-nas-test-collab-1  Waiting
+ Container auriga-nas-test-platform-1  Healthy

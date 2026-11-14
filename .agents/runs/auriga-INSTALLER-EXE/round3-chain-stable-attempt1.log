@@ -1,0 +1,16 @@
+real-exe-install {"reused":true,"version":"0.1.3-e2e.1"}
+node.exe : page.waitForResponse: Timeout 300000ms exceeded while waiting for event "response"
+所在位置 行:2 字符: 318
++ ... /node.exe'; & $node24 .agents/runs/auriga-INSTALLER-EXE/nas-chain.mjs ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (page.waitForRes...vent "response":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    at Object.publish (D:\project\chatgpt\agent-wt\auriga-INSTALLER-EXE-codex\.agents\runs\auriga-INSTALLER-EXE\nas-bro
+wser.mjs:146:29)
+    at async publish (D:\project\chatgpt\agent-wt\auriga-INSTALLER-EXE-codex\.agents\runs\auriga-INSTALLER-EXE\nas-chai
+n.mjs:113:3)
+    at async file:///D:/project/chatgpt/agent-wt/auriga-INSTALLER-EXE-codex/.agents/runs/auriga-INSTALLER-EXE/nas-chain
+.mjs:213:5 {
+  name: 'TimeoutError'
+}

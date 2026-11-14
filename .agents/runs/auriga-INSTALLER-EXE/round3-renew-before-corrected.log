@@ -1,0 +1,9 @@
+$
+>>> [2026-11-15T00:11:03] {"String":"/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker ps --filter label=com.docker.compose.service=collab-renew --format '{{.ID}} {{.Image}} {{.Names}}'; grep -E '^AURIGA_IMAGE_PLATFORM=|^AURIGA_INSTALLER_IMAGE=' /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/stack.env; find /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-runtime -name .pending; find /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-operations -name .pending", "Match":"[hansjone@HANSJONE127 ~]#", "Timeout":0}
+/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker ps --filter label=com.docker.compose.service=collab-renew --format '{{.ID}} {{.Image}} {{.Names}}'; grep -E '^AURIGA_IMAGE_PLATFORM=|^AURIGA_INSTALLER_IMAGE=' /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/stack.env; find /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-runtime -name .pending; find /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-operations
+ -name .pending
+e53442658ef9 424dc47e971b auriga-nas-test-collab-renew-1
+AURIGA_INSTALLER_IMAGE=sha256:424dc47e971b17b874fd27d415403cd355760cc175f78808cfbab4a2f6131548
+AURIGA_IMAGE_PLATFORM=sha256:d88609567ac7a4753829a43b2c310fa6e8301ad6dc19a2780f4603e27eaa2ead
+find: ��/share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-runtime��: Permission denied
+find: ��/share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-operations��: Permission denied

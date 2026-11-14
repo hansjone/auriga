@@ -1,0 +1,7 @@
+{
+  "transport": "fetch; no test-only throttle",
+  "status": 206,
+  "bytes": 5242956,
+  "elapsedMs": 27971,
+  "contentRange": "bytes 1000000-233455301/233455302"
+}

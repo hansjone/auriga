@@ -1,0 +1,12 @@
+{
+  "recordedAt": "2026-11-14T19:45:48.5837760Z",
+  "remainingFixtureProcesses": [],
+  "fixtureProcessCount": 0,
+  "excludedWorkerControllerIds": [
+    20288
+  ],
+  "controllerPreserved": true,
+  "defaultRootExists": false,
+  "forcedRootExists": false,
+  "isolatedUninstallerPowerShellCacheRemoved": true
+}

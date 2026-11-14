@@ -1,0 +1,2 @@
+$
+>>> [2026-11-15T01:40:01] {"String":"/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker logs --since 15m auriga-nas-test-edge-1 2>&1 | grep -E 'desktop|502|dial tcp|timeout|proxy error' | tail -35", "Match":"[hansjone@HANSJONE127 ~]#", "Timeout":0}

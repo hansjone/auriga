@@ -1,0 +1,116 @@
+{
+  "startedAt": "2026-11-14T17:47:08.699Z",
+  "mode": "forced",
+  "checks": [
+    {
+      "name": "real-exe-install",
+      "at": "2026-11-14T17:47:10.776Z",
+      "reused": true,
+      "version": "0.1.3-e2e.1"
+    }
+  ],
+  "releases": [],
+  "markerBefore": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f",
+  "testOnlyRateBytesPerSecond": 4194304,
+  "error": {
+    "message": "manager page error: 操作失败，请检查权限、签名或服务配置",
+    "stack": "Error: manager page error: 操作失败，请检查权限、签名或服务配置\n    at file:///D:/project/chatgpt/agent-wt/auriga-INSTALLER-EXE-codex/.agents/runs/auriga-INSTALLER-EXE/nas-browser.mjs:158:15\n    at async Object.publish (file:///D:/project/chatgpt/agent-wt/auriga-INSTALLER-EXE-codex/.agents/runs/auriga-INSTALLER-EXE/nas-browser.mjs:162:22)\n    at async publish (file:///D:/project/chatgpt/agent-wt/auriga-INSTALLER-EXE-codex/.agents/runs/auriga-INSTALLER-EXE/nas-chain.mjs:122:3)\n    at async file:///D:/project/chatgpt/agent-wt/auriga-INSTALLER-EXE-codex/.agents/runs/auriga-INSTALLER-EXE/nas-chain.mjs:320:21"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/login/providers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db2b-9d29-7712-b315-5700d157364e/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db2b-9d29-7712-b315-5700d157364e/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db2c-2e79-7345-8e64-29e244439fdc/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db2c-2e79-7345-8e64-29e244439fdc/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db2c-ea4e-7d53-90c8-968d7bb593be/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db2c-ea4e-7d53-90c8-968d7bb593be/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "networkFailure": "net::ERR_CONNECTION_ABORTED"
+    }
+  ]
+}

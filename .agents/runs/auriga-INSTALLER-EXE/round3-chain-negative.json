@@ -1,0 +1,614 @@
+{
+  "startedAt": "2026-11-14T19:06:20.244Z",
+  "mode": "negative",
+  "checks": [
+    {
+      "name": "real-exe-install",
+      "at": "2026-11-14T19:06:23.320Z",
+      "reused": true,
+      "version": "0.1.3-e2e.2"
+    },
+    {
+      "name": "page-published-108",
+      "at": "2026-11-14T19:18:10.188Z",
+      "status": 201,
+      "version": "0.1.3-e2e.3",
+      "channel": "beta"
+    },
+    {
+      "name": "normal-page-fault-required",
+      "at": "2026-11-14T19:18:12.122Z",
+      "text": "新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n当前版本已停用，请更新并重启 · 0.1.3-e2e.3\n更新\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"
+    },
+    {
+      "name": "queued-smoke-failure",
+      "at": "2026-11-14T19:29:05.972Z",
+      "versionBeforeRestart": "0.1.3-e2e.2",
+      "desktop": {
+        "enabled": true,
+        "channel": "beta",
+        "available": null,
+        "required": true,
+        "phase": "ready",
+        "busy": false,
+        "downloading": false,
+        "downloadedBytes": 233451129,
+        "totalBytes": 233451129,
+        "error": null,
+        "restartRequired": true
+      },
+      "markerSha256": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f"
+    },
+    {
+      "name": "real-default-smoke-failed-old-version-restored",
+      "at": "2026-11-14T19:31:50.121Z",
+      "installed": "0.1.3-e2e.2",
+      "install": {
+        "dataHome": "D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\.agents\\runs\\auriga-INSTALLER-EXE\\sandbox\\round3\\data",
+        "current": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+        "previous": "0.1.3-e2e.1-dsh0.2.1-rc.3-289bdc6a4f68"
+      },
+      "state": {
+        "enabled": true,
+        "channel": "beta",
+        "available": {
+          "schema": 2,
+          "rolloutPercentage": 0,
+          "rollbackFrom": null,
+          "product": "Auriga Desktop",
+          "version": "0.1.3-e2e.3",
+          "packageId": "0.1.3-e2e.3-dsh0.2.1-rc.3-1675e2e223f3",
+          "channel": "beta",
+          "platform": "win-x64",
+          "sizeBytes": 233451129,
+          "sha256": "bf6c7a6d4840536844e5682fe20cc781678554354386d3d2a2daa652b3ad36f7",
+          "minimumVersion": "0.1.3-e2e.3",
+          "publishedAt": "2026-11-14T19:07:04.045Z",
+          "notAfter": "2026-11-28T19:07:04.045Z",
+          "sequence": 108,
+          "notes": "NAS development FAULT FIXTURE: CLI exits 42; beta only; withdraw immediately after acceptance; not a production release",
+          "components": {
+            "dshVersion": "0.2.1-rc.3",
+            "nodeVersion": "24.21.0",
+            "pluginVersion": "0.1.17"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "auriga-desktop-release-1",
+            "value": "VbjxgQI2h9ZkuRik5GfPIZvNnfHoVS3bHGYmjvCao47q1l3y8W9fBWCoPSd7Gp_Kk_fxAnvTPGFGwxTEfMwOAQ"
+          }
+        },
+        "required": true,
+        "phase": "failed",
+        "busy": false,
+        "downloading": false,
+        "downloadedBytes": 233451129,
+        "totalBytes": 233451129,
+        "error": "updateFailed",
+        "restartRequired": false
+      },
+      "markerSha256": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f",
+      "injectedCliExit": 42
+    },
+    {
+      "name": "normal-page-rollback",
+      "at": "2026-11-14T19:31:51.772Z",
+      "text": "新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n当前版本已停用，请更新并重启 · 0.1.3-e2e.3\n更新\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"
+    },
+    {
+      "name": "broken-release-withdrawn-and-download-denied",
+      "at": "2026-11-14T19:31:56.572Z",
+      "sequence": 108,
+      "status": 404
+    },
+    {
+      "name": "page-published-109",
+      "at": "2026-11-14T19:43:15.754Z",
+      "status": 201,
+      "version": "0.1.3-e2e.2",
+      "channel": "beta"
+    },
+    {
+      "name": "mandatory-policy-release-retains-native-panel-context",
+      "at": "2026-11-14T19:43:20.227Z",
+      "sameElementStillMounted": true,
+      "displayRestored": true
+    },
+    {
+      "name": "signed-administrative-rollback-recovers-observed-version",
+      "at": "2026-11-14T19:43:20.233Z",
+      "highestVersion": "0.1.3-e2e.2",
+      "highestSequence": 109,
+      "installed": "0.1.3-e2e.2",
+      "required": false
+    },
+    {
+      "name": "normal-page-recovered",
+      "at": "2026-11-14T19:43:21.863Z",
+      "text": "新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n更新失败，旧版和数据已保留，请重试\n更新\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"
+    },
+    {
+      "name": "existing-profile-local-session-identity-preserved",
+      "at": "2026-11-14T19:43:21.864Z",
+      "preserved": true
+    }
+  ],
+  "releases": [
+    {
+      "sequence": 108,
+      "channel": "beta",
+      "version": "0.1.3-e2e.3",
+      "sha256": "bf6c7a6d4840536844e5682fe20cc781678554354386d3d2a2daa652b3ad36f7",
+      "packageId": "0.1.3-e2e.3-dsh0.2.1-rc.3-1675e2e223f3",
+      "minimumVersion": "0.1.3-e2e.3",
+      "rolloutPercentage": 0,
+      "rollbackFrom": null
+    },
+    {
+      "sequence": 109,
+      "channel": "beta",
+      "version": "0.1.3-e2e.2",
+      "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+      "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+      "minimumVersion": "0.1.3-e2e.1",
+      "rolloutPercentage": 100,
+      "rollbackFrom": "0.1.3-e2e.3"
+    }
+  ],
+  "markerBefore": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f",
+  "testOnlyRateBytesPerSecond": 4194304,
+  "completedAt": "2026-11-14T19:43:21.864Z",
+  "passed": true,
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/login/providers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db74-1fd6-746b-9405-e7b15175e8ad/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db74-1fd6-746b-9405-e7b15175e8ad/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db74-c37c-7c25-9506-055ccd1c07be/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db74-c37c-7c25-9506-055ccd1c07be/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db75-8786-705a-8133-987d11e0d756/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db75-8786-705a-8133-987d11e0d756/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/org/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:07:55.133Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:07:55.159Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:07:55.215Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:07:55.294Z"
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:07:55.908Z"
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 201,
+      "throughPage": true,
+      "at": "2026-11-14T19:18:06.887Z"
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 201,
+      "throughPage": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 403,
+      "throughPage": true,
+      "at": "2026-11-14T19:18:07.057Z"
+    },
+    {
+      "publishCompletedNotice": "发行已发布，台账刷新失败，请验证身份并刷新。"
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db7e-eaae-7bf0-8b72-e20f22fb722a/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db7e-eaae-7bf0-8b72-e20f22fb722a/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/org/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:18:09.459Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:18:09.477Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:18:09.542Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:18:09.674Z"
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db8b-80ae-793c-aa56-89fc40c2a82e/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db8b-80ae-793c-aa56-89fc40c2a82e/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/resource/v1/admin/desktop/releases/108",
+      "status": 204
+    },
+    {
+      "method": "GET",
+      "path": "/api/org/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:31:55.798Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:31:55.803Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:31:55.890Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:31:56.043Z"
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db8b-91da-72ee-a500-1452a219ff08/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db8b-91da-72ee-a500-1452a219ff08/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db8c-7424-7dda-a5ed-2e24dcd70878/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db8c-7424-7dda-a5ed-2e24dcd70878/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/org/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:33:01.145Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:33:01.222Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:33:01.229Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:33:01.368Z"
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:33:01.898Z"
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 201,
+      "throughPage": true,
+      "at": "2026-11-14T19:43:12.216Z"
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 201,
+      "throughPage": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 403,
+      "throughPage": true,
+      "at": "2026-11-14T19:43:12.395Z"
+    },
+    {
+      "publishCompletedNotice": "发行已发布，台账刷新失败，请验证身份并刷新。"
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db95-e3bd-77af-b8c0-e606cd9f3f76/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db95-e3bd-77af-b8c0-e606cd9f3f76/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/org/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:43:14.995Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:43:15.005Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:43:15.106Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200,
+      "throughPage": true,
+      "at": "2026-11-14T19:43:15.249Z"
+    }
+  ]
+}

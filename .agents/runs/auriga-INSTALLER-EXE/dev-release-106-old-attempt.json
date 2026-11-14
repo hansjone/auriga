@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "product": "Auriga Desktop",
+  "version": "0.1.3-e2e.1",
+  "packageId": "0.1.3-e2e.1-dsh0.2.1-rc.3-289bdc6a4f68",
+  "channel": "stable",
+  "platform": "win-x64",
+  "sizeBytes": 233386843,
+  "sha256": "7e542455fd40cdaa6ffe916bd2bf961469700702a58c2217fbc372ca98efec07",
+  "minimumVersion": "0.1.3-e2e.1",
+  "publishedAt": "2026-11-14T16:59:05.878Z",
+  "notAfter": "2026-11-28T16:59:05.878Z",
+  "sequence": 106,
+  "notes": "NAS development acceptance; not a production CI release",
+  "components": {
+    "dshVersion": "0.2.1-rc.3",
+    "nodeVersion": "24.21.0",
+    "pluginVersion": "0.1.15"
+  },
+  "signature": {
+    "alg": "Ed25519",
+    "kid": "auriga-desktop-release-1",
+    "value": "O_as4gq7q8tNmDxuWbcml0olHGimC440pSxugQxQfGB_gptG_ZdqjV9tb5TWxo2sn355zS2G5HkViSTJ1EHlCg"
+  }
+}

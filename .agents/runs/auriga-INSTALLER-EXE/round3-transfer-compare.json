@@ -1,0 +1,73 @@
+{
+  "checks": [
+    {
+      "transport": "node:http direct",
+      "bytes": 1048576,
+      "elapsedMs": 6867,
+      "status": 400,
+      "expectedRejection": true
+    }
+  ],
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/login/providers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db18-ceb2-7b43-9c9e-a4692eaf03e9/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db18-ceb2-7b43-9c9e-a4692eaf03e9/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db18-dae5-7572-982a-7d9cbaf14352/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db18-dae5-7572-982a-7d9cbaf14352/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    }
+  ]
+}

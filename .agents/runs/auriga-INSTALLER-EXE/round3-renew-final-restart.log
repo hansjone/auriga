@@ -1,0 +1,8 @@
+$
+>>> [2026-11-15T02:36:50] {"String":"renew_id=$(/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker ps -q --filter label=com.docker.compose.service=collab-renew --filter label=com.docker.compose.project=auriga-nas-test); test -n "$renew_id" && /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker restart "$renew_id" && /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker top "$renew_id"; grep '^AURIGA_IMAGE_PLATFORM=' /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/stack.env", "Match":"[hansjone@HANSJONE127 ~]#", "Timeout":0}
+e53442658ef9
+PID                 Uid                 VmSize              Stat                Command
+21975               admin               2136                S                   /bin/sh /share/CACHEDEV1_DATA/Container/auriga-test/R9/release-agent-8be9394/bundle/deploy-nas/scripts/renew-collab-loop.sh
+22087               admin               2720                R                   env
+22088               admin               2336                S                   grep -q ^AURIGA_TRUSTED_PROXIES=
+AURIGA_IMAGE_PLATFORM=sha256:940cd2331286c592b9fe676e7e843ac0cb7aea7fae65cdb02b1afa35080752fb

@@ -1,0 +1,112 @@
+HIGHEST 105
+manager-stepup-completed
+manager-files-selected
+manager-submit-clicked
+node.exe : page.waitForResponse: Timeout 600000ms exceeded while waiting for event "response"
+所在位置 行:2 字符: 133
++ ... /node.exe'; & $node24 --input-type=module -e "import {openNas} from ' ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (page.waitForRes...vent "response":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+BODY Auriga DSH
+管理控制台
+概览
+资源治理
+成员与权限
+运行环境
+模型与用量
+安全与接入
+平台运维
+审计日志
+总部控制面
+管理控制台
+/
+平台运维
+EN
+A
+admin-491641906e
+告警与异常
+版本与升级
+客户端版本
+备份与恢复
+成员离职
+通知公告
+系统设置
+客户端版本
+验证身份并刷新
+
+发布策略包含在离线签名清单中。调整最低可用版本、渠道或灰度时，使用更高发行序号重新签名发布；服务端不持有私钥。
+
+低于最低可用版本的客户端必须更新，不受灰度比例限制。显式回滚需在清单中指定 rollbackFrom 来源版本。
+
+已签名清单
+安装包
+
+渠道：正式 · 最低可用版本：0.1.3-e2e.1 · 灰度：100%
+
+发布
+0.1.1-e2e.1
+
+155.9 MiB · 2026-11-14T00:16:22.153Z
+
+NAS E2E test release; local branch build, not production CI
+
+渠道：正式 · 最低可用版本：0.0.0 · 灰度：100%
+
+aba42450ac11d30a7e70dabaf77877243994fb54deac01b2e380559e91913b62
+
+已下架
+
+0.1.2-e2e.1
+
+155.9 MiB · 2026-11-14T05:11:58.486Z
+
+NAS E2E test release; main c6cf09de local E2E build; not production CI
+
+渠道：正式 · 最低可用版本：0.0.0 · 灰度：100%
+
+2a6feb0fd6e7d9d0321b9231ffd35589cd3f8510f906e3b1b3996ef3f2c75b7d
+下架
+0.1.2-e2e.2
+
+155.9 MiB · 2026-11-14T05:14:40.232Z
+
+NAS E2E test release; main c6cf09de local E2E build; not production CI
+
+渠道：正式 · 最低可用版本：0.0.0 · 灰度：100%
+
+e1fd0c1c9c1f1d0fffa76b9f8e82209061f688b3df668657f0eb1322e416a3a5
+下架
+0.1.2-e2e.3
+
+155.9 MiB · 2026-11-14T07:27:09.470Z
+
+NAS E2E test release; R4 UI timeout fix; local E2E build, not production CI
+
+渠道：正式 · 最低可用版本：0.0.0 · 灰度：100%
+
+6b6778ed9f2cdbfd0d7bbfb03c1515f4d0b4646ce2909f00b5be14b48721430f
+下架
+0.1.2-e2e.4
+
+155.9 MiB · 2026-11-14T07:29:18.717Z
+
+NAS E2E test release; R4 UI timeout fix; local E2E build, not production CI
+
+渠道：正式 · 最低可用版本：0.0.0 · 灰度：100%
+
+fdd25473242724b7c3d94190e61fc03f5c4a7071ac5bc2e7ebf5ab0a1b1e4598
+
+已下架
+
+0.1.2-e2e.5
+
+155.9 MiB · 2026-11-14T07:30:56.526Z
+
+NAS E2E test release; R4 UI timeout fix; local E2E build, not production CI
+
+渠道：正式 · 最低可用版本：0.0.0 · 灰度：100%
+
+44d2a8a021756a4369c3e968f96243496638ec59df1618056088c1d4ff19498b
+下架

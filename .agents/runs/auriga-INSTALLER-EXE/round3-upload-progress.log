@@ -1,0 +1,3 @@
+$
+>>> [2026-11-15T01:34:27] {"String":"/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker exec auriga-nas-test-platform-1 sh -c 'find /var/lib/auriga -type f -name ".upload-*.partial" -exec wc -c {} \;'", "Match":"[hansjone@HANSJONE127 ~]#", "Timeout":0}
+195695288 /var/lib/auriga/desktop/00000000-0000-0000-0000-000000000001/.upload-2665595284889077149.partial

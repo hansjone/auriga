@@ -1,0 +1,571 @@
+TAP version 13
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-GyLnkh\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-PxPumn\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-PxPumn\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Bgcyyo\\app\\versions\\1.0.0-dsh0.2.1-rc.3-9cefdfc6a7f2\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Bgcyyo\\app\\versions\\1.0.0-dsh0.2.1-rc.3-2d37bb6e8fd9\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-S3UUwr\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-leArp6\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QFpw6E\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QFpw6E\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-4dWkgj\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-4dWkgj\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-fAxYnP\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-fAxYnP\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-irHJBr\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-irHJBr\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-am6eUU\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-am6eUU\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-M660fw\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-M660fw\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Czhp2S\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Czhp2S\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Dmhgkw\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Dmhgkw\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-vGkp4Q\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-vGkp4Q\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-rbjDSr\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-rbjDSr\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Qgl9ZJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Qgl9ZJ\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-xRHghm\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-xRHghm\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-IlciVJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-IlciVJ\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-HKdeVd\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-HKdeVd\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-o76XTC\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-o76XTC\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-o76XTC\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-o76XTC\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-o76XTC\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-EaxtN2\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-EaxtN2\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OMU3TZ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OMU3TZ\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-v55CNP\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-v55CNP\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XwjiBQ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XwjiBQ\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-iPzFmQ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-iPzFmQ\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-TMEo0E\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-TMEo0E\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-JDf80k\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-JDf80k\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OVIhZ3\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OVIhZ3\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-JFYGQg\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-JFYGQg\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-40OnXO\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-FFrjR4\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-j15lhO\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-SvznxJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-gYjmzW\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-jTdRl5\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-jTdRl5\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-gLVO3d\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-gLVO3d\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-HsRnkh\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-HsRnkh\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-I2mG6O\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-I2mG6O\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-sVrVbx\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-sVrVbx\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Subtest: default smoke distinguishes command and missing-plugin failures with a safe reason code
+ok 1 - default smoke distinguishes command and missing-plugin failures with a safe reason code
+  ---
+  duration_ms: 12273.4762
+  type: 'test'
+  ...
+# Subtest: fresh install seeds profile, plugin, ownership marker and platform address
+ok 2 - fresh install seeds profile, plugin, ownership marker and platform address
+  ---
+  duration_ms: 1077.6908
+  type: 'test'
+  ...
+# Subtest: upgrade keeps user data and settings and keeps the previous version
+ok 3 - upgrade keeps user data and settings and keeps the previous version
+  ---
+  duration_ms: 633.3764
+  type: 'test'
+  ...
+# Subtest: components with equal versions but different content get different ids and replace the old ones
+ok 4 - components with equal versions but different content get different ids and replace the old ones
+  ---
+  duration_ms: 1799.8803
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-backup returns to the exact pre-upgrade state
+ok 5 - upgrade failing at after-backup returns to the exact pre-upgrade state
+  ---
+  duration_ms: 509.9518
+  type: 'test'
+  ...
+# Subtest: crash at after-backup is repaired by recover()
+ok 6 - crash at after-backup is repaired by recover()
+  ---
+  duration_ms: 509.3469
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-apply returns to the exact pre-upgrade state
+ok 7 - upgrade failing at after-apply returns to the exact pre-upgrade state
+  ---
+  duration_ms: 364.2859
+  type: 'test'
+  ...
+# Subtest: crash at after-apply is repaired by recover()
+ok 8 - crash at after-apply is repaired by recover()
+  ---
+  duration_ms: 521.0621
+  type: 'test'
+  ...
+# Subtest: upgrade failing at launcher-file returns to the exact pre-upgrade state
+ok 9 - upgrade failing at launcher-file returns to the exact pre-upgrade state
+  ---
+  duration_ms: 402.3571
+  type: 'test'
+  ...
+# Subtest: crash at launcher-file is repaired by recover()
+ok 10 - crash at launcher-file is repaired by recover()
+  ---
+  duration_ms: 323.3531
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-launchers returns to the exact pre-upgrade state
+ok 11 - upgrade failing at after-launchers returns to the exact pre-upgrade state
+  ---
+  duration_ms: 334.1596
+  type: 'test'
+  ...
+# Subtest: crash at after-launchers is repaired by recover()
+ok 12 - crash at after-launchers is repaired by recover()
+  ---
+  duration_ms: 682.7218
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-install-json returns to the exact pre-upgrade state
+ok 13 - upgrade failing at after-install-json returns to the exact pre-upgrade state
+  ---
+  duration_ms: 349.6285
+  type: 'test'
+  ...
+# Subtest: crash at after-install-json is repaired by recover()
+ok 14 - crash at after-install-json is repaired by recover()
+  ---
+  duration_ms: 349.9741
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-current-txt returns to the exact pre-upgrade state
+ok 15 - upgrade failing at after-current-txt returns to the exact pre-upgrade state
+  ---
+  duration_ms: 347.0667
+  type: 'test'
+  ...
+# Subtest: crash at after-current-txt is repaired by recover()
+ok 16 - crash at after-current-txt is repaired by recover()
+  ---
+  duration_ms: 298.4203
+  type: 'test'
+  ...
+# Subtest: a crash between the two pointer writes never leaves mixed pointers
+ok 17 - a crash between the two pointer writes never leaves mixed pointers
+  ---
+  duration_ms: 309.3412
+  type: 'test'
+  ...
+# Subtest: failed smoke check during upgrade restores everything
+ok 18 - failed smoke check during upgrade restores everything
+  ---
+  duration_ms: 285.619
+  type: 'test'
+  ...
+# Subtest: profile is fully backed up before it is modified
+ok 19 - profile is fully backed up before it is modified
+  ---
+  duration_ms: 289.5781
+  type: 'test'
+  ...
+# Subtest: an unfinished backup is never used for restoring
+ok 20 - an unfinished backup is never used for restoring
+  ---
+  duration_ms: 321.796
+  type: 'test'
+  ...
+# Subtest: first install failing leaves no pointers, profile or version behind
+ok 21 - first install failing leaves no pointers, profile or version behind
+  ---
+  duration_ms: 698.3449
+  type: 'test'
+  ...
+# Subtest: rollback restores previous version, plugin files and launchers
+ok 22 - rollback restores previous version, plugin files and launchers
+  ---
+  duration_ms: 465.7454
+  type: 'test'
+  ...
+# Subtest: rollback keeps settings changed after the upgrade
+ok 23 - rollback keeps settings changed after the upgrade
+  ---
+  duration_ms: 379.8029
+  type: 'test'
+  ...
+# Subtest: rollback failing at the smoke check restores plugin files and pointers
+ok 24 - rollback failing at the smoke check restores plugin files and pointers
+  ---
+  duration_ms: 415.194
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-backup leaves version and plugin consistent
+ok 25 - rollback failing at after-backup leaves version and plugin consistent
+  ---
+  duration_ms: 325.8576
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-apply leaves version and plugin consistent
+ok 26 - rollback failing at after-apply leaves version and plugin consistent
+  ---
+  duration_ms: 358.5337
+  type: 'test'
+  ...
+# Subtest: rollback failing at launcher-file leaves version and plugin consistent
+ok 27 - rollback failing at launcher-file leaves version and plugin consistent
+  ---
+  duration_ms: 382.2876
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-launchers leaves version and plugin consistent
+ok 28 - rollback failing at after-launchers leaves version and plugin consistent
+  ---
+  duration_ms: 401.2523
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-install-json leaves version and plugin consistent
+ok 29 - rollback failing at after-install-json leaves version and plugin consistent
+  ---
+  duration_ms: 403.5665
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-current-txt leaves version and plugin consistent
+ok 30 - rollback failing at after-current-txt leaves version and plugin consistent
+  ---
+  duration_ms: 375.0018
+  type: 'test'
+  ...
+# Subtest: rollback without previous version fails
+ok 31 - rollback without previous version fails
+  ---
+  duration_ms: 151.7587
+  type: 'test'
+  ...
+# Subtest: data directory inside the install directory is refused before any write
+ok 32 - data directory inside the install directory is refused before any write
+  ---
+  duration_ms: 52.1567
+  type: 'test'
+  ...
+# Subtest: install directory inside or above the data directory is refused
+ok 33 - install directory inside or above the data directory is refused
+  ---
+  duration_ms: 42.7794
+  type: 'test'
+  ...
+# Subtest: a drive or filesystem root is refused as install directory
+ok 34 - a drive or filesystem root is refused as install directory
+  ---
+  duration_ms: 41.9937
+  type: 'test'
+  ...
+# Subtest: a non-empty directory without our marker is refused and left untouched
+ok 35 - a non-empty directory without our marker is refused and left untouched
+  ---
+  duration_ms: 44.7985
+  type: 'test'
+  ...
+# Subtest: uninstall removes only what we own and keeps user data and foreign files
+ok 36 - uninstall removes only what we own and keeps user data and foreign files
+  ---
+  duration_ms: 151.9635
+  type: 'test'
+  ...
+# Subtest: uninstall never deletes a data directory that ended up inside the install directory
+ok 37 - uninstall never deletes a data directory that ended up inside the install directory
+  ---
+  duration_ms: 143.0499
+  type: 'test'
+  ...
+# Subtest: purge removes our marked profile only and refuses unmarked directories
+ok 38 - purge removes our marked profile only and refuses unmarked directories
+  ---
+  duration_ms: 293.656
+  type: 'test'
+  ...
+# Subtest: install rejects a corrupted package before copying anything
+ok 39 - install rejects a corrupted package before copying anything
+  ---
+  duration_ms: 47.9381
+  type: 'test'
+  ...
+# Subtest: install rejects unlisted extra file
+ok 40 - install rejects unlisted extra file
+  ---
+  duration_ms: 51.8656
+  type: 'test'
+  ...
+# Subtest: install rejects missing listed file
+ok 41 - install rejects missing listed file
+  ---
+  duration_ms: 46.3163
+  type: 'test'
+  ...
+# Subtest: install rejects id that does not match the component digest
+ok 42 - install rejects id that does not match the component digest
+  ---
+  duration_ms: 51.7098
+  type: 'test'
+  ...
+# Subtest: install rejects manifest without files
+ok 43 - install rejects manifest without files
+  ---
+  duration_ms: 41.476
+  type: 'test'
+  ...
+# Subtest: install rejects unsafe path in the manifest
+ok 44 - install rejects unsafe path in the manifest
+  ---
+  duration_ms: 46.3006
+  type: 'test'
+  ...
+# Subtest: install rejects upstream version different from the manifest
+ok 45 - install rejects upstream version different from the manifest
+  ---
+  duration_ms: 55.6267
+  type: 'test'
+  ...
+# Subtest: install rejects a plugin whose engines.dsh the upstream does not satisfy
+ok 46 - install rejects a plugin whose engines.dsh the upstream does not satisfy
+  ---
+  duration_ms: 48.2849
+  type: 'test'
+  ...
+# Subtest: a corrupted installed version is replaced when the package is installed again
+ok 47 - a corrupted installed version is replaced when the package is installed again
+  ---
+  duration_ms: 324.3048
+  type: 'test'
+  ...
+# Subtest: launch environment: own data home, bundled node and pnpm first on PATH
+ok 48 - launch environment: own data home, bundled node and pnpm first on PATH
+  ---
+  duration_ms: 0.317
+  type: 'test'
+  ...
+# Subtest: entry points exist at every moment of a launcher change (also after a crash in the middle)
+ok 49 - entry points exist at every moment of a launcher change (also after a crash in the middle)
+  ---
+  duration_ms: 367.1494
+  type: 'test'
+  ...
+# Subtest: a different data directory is refused for an existing installation
+ok 50 - a different data directory is refused for an existing installation
+  ---
+  duration_ms: 350.6916
+  type: 'test'
+  ...
+# Subtest: install rejects a modified upstream DSH file and leaves nothing behind
+ok 51 - install rejects a modified upstream DSH file and leaves nothing behind
+  ---
+  duration_ms: 115.9698
+  type: 'test'
+  ...
+# Subtest: install rejects an extra file in the upstream tree and leaves nothing behind
+ok 52 - install rejects an extra file in the upstream tree and leaves nothing behind
+  ---
+  duration_ms: 109.7316
+  type: 'test'
+  ...
+# Subtest: install rejects a removed upstream file and leaves nothing behind
+ok 53 - install rejects a removed upstream file and leaves nothing behind
+  ---
+  duration_ms: 55.9382
+  type: 'test'
+  ...
+# Subtest: install rejects a modified pnpm file and leaves nothing behind
+ok 54 - install rejects a modified pnpm file and leaves nothing behind
+  ---
+  duration_ms: 104.9186
+  type: 'test'
+  ...
+# Subtest: install rejects an extra file in the pnpm tree and leaves nothing behind
+ok 55 - install rejects an extra file in the pnpm tree and leaves nothing behind
+  ---
+  duration_ms: 109.2364
+  type: 'test'
+  ...
+# Subtest: an upstream file changed after installation is replaced when the package is installed again
+ok 56 - an upstream file changed after installation is replaced when the package is installed again
+  ---
+  duration_ms: 322.2234
+  type: 'test'
+  ...
+# Subtest: active shared state prevents rollback into a version without guardian
+ok 57 - active shared state prevents rollback into a version without guardian
+  ---
+  duration_ms: 409.2304
+  type: 'test'
+  ...
+1..57
+# tests 57
+# suites 0
+# pass 57
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 30505.1369

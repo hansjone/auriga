@@ -60,9 +60,9 @@ node scripts/sign-release.mjs manifest=<制品目录>/desktop-release.unsigned.j
 
 ### 同包续期
 
-自动更新清单默认有效 30 天。到期前可从原 tag 构建的已核对制品复制未签名清单，仅将 `sequence` 改成高于平台已见最高序号的新整数，将 `notAfter` 延长。保留原 EXE、构建记录、Desktop 版本、包 ID、SHA、大小和组件版本。重新执行上述 `--review-only` 和 `--confirm-sha256` 两步，再在管理台上传新签名清单和原 EXE。平台要求同版本的包身份相同且有效期严格延长，拒绝同版本替包。
+自动更新清单默认有效 30 天。到期前可从原 tag 构建的已核对制品复制未签名清单，仅将 `sequence` 改成高于平台已见最高序号的新整数，将 `notAfter` 延长。保留原 EXE、构建记录、Desktop 版本、包 ID、SHA、大小和组件版本。重新执行上述 `--review-only` 和 `--confirm-sha256` 两步，再在管理台上传新签名清单和原 EXE。平台要求同版本的包身份相同，拒绝同版本替包；同包策略调整和续期都使用更高序号重新签名。
 
-续期会成为新的上架记录并写发布审计。已安装该版本的客户端只记住新的序号，不重复安装。即使错过续期，登录页与匿名包下载仍提供最新上架的安装包供新用户下载；自动更新客户端继续严格拒绝过期清单，运营者须完成续期后才恢复自动更新。
+续期会成为新的上架记录并写发布审计。已安装该版本的客户端只记住新的序号，不重复安装。错过续期后，latest 与匿名包下载都会拒绝过期发行，自动更新客户端也严格拒绝过期清单；运营者须以更高序号续期，或发布仍在有效期内的新发行。
 
 ### 平台接线和发布
 
@@ -85,13 +85,13 @@ resource 服务需要以下配置。
 - `/api/resource/v1/desktop/latest`
 - `/api/resource/v1/desktop/packages/{sequence}`
 
-edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口，首启检查一次，此后每 6 小时检查，可在 Auriga 设置中关闭或手动检查。下载仅使用首启绑定的 HTTPS origin。
+edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口，启动检查一次，此后每 4–8 小时抖动检查，可在 Auriga 设置中关闭可选检查或手动检查；最低版本强制更新不能关闭。下载仅使用首启绑定并验证的 origin；IP 模式 HTTP 的限制见下文。
 
-用户点击更新后下载并校验暂存，须退出整个 Desktop/DSH 进程，启动器随后运行原有安装事务，下次启动进入新版。仅关闭浏览器页不足以退出 DSH。失败由安装事务还原旧版和 profile，用户数据保留。下载采用 60 秒无数据的空闲超时，持续接收数据不受总时长限制。一次更新最多自动尝试三次，中断后通过单个 `Range: bytes=<已下载长度>-` 续传，服务端返回 200 时安全重下，拼接后重新验证完整 SHA。重试耗尽或进程退出后，下次用户操作重新下载。进程被杀时残留锁记录 PID 和创建时间，下次启动在 DSH 启动前清理锁及暂存目录；卸载也清理残留。
+用户点击更新后下载并校验暂存，须退出整个 Desktop/DSH 进程，启动器随后运行原有安装事务，下次启动进入新版。仅关闭浏览器页不足以退出 DSH。失败由安装事务还原旧版和 profile，用户数据保留。下载采用 60 秒无数据的空闲超时，持续接收数据不受总时长限制。一次更新最多自动尝试三次，中断后通过单个 `Range: bytes=<已下载长度>-` 续传，服务端返回 200 时安全重下，拼接后重新验证完整 SHA。重试耗尽或进程退出后，下次用户操作从相同签名摘要的持久残片续传。进程被杀时残留锁记录 PID 和创建时间，下次启动在 DSH 启动前清理锁及暂存目录；卸载也清理残留。
 
 设置页的更新操作等待后台完成下载、校验和排队，不套用普通状态读取的 15 秒超时；下载的空闲超时和校验规则仍由后台执行。默认冒烟失败时，启动器仅输出固定原因码 `desktop.smoke_failed`，不输出上游配置或错误详情。
 
-下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝降级，可执行 `rollback.cmd`，或等待更高版本的修复包。下架保留最高序号，修复包须新版本、新序号，同包续期须新序号和延长有效期。第一代安装器需先人工安装一次带更新能力的包。
+下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝未授权降级；管理台须以更高序号发布含精确 `rollbackFrom` 的签名回滚清单，或发布更高版本修复包。下架保留最高序号，同包续期须新序号和延长有效期。第一代安装器需先人工安装一次带更新能力的包。
 
 隔离验证运行 `node --test test/update-e2e.test.mjs`，使用随机端口发布替身、真实 EXE、临时测试钥和安装事务，验证坏包拒绝、退出安装和数据保留。真实 DSH 宿主另按 `scripts/e2e.mjs` 验证。
 
@@ -153,11 +153,14 @@ zip 仅为内部诊断制品。latest JSON 字段结构不变，大小和摘要�
 
 未购买或申请 Authenticode 证书。Ed25519 清单不能替代 Windows 发布者签名；
 网络下载的未签名 exe 可能显示“Windows 已保护你的电脑”或“未知发布者”，具体受系统策略影响。
-后续可选 Microsoft Artifact Signing（需按地区核对当时报价），或受信任 CA 证书。
-DigiCert 官方资料示例约 USD 499–699/年，令牌和税费另计；签名不保证立即获得 SmartScreen 信誉。
+后续可选 Microsoft Artifact Signing：2026-11-15 核对官方 Basic 约 USD 9.99/月、5,000 次签名，
+须先核对身份验证、地区资格及付费 Azure 订阅；或申请受信任 CA 证书，DigiCert 页面列出的
+年订阅示例约 USD 696–972（配置不同，税费及密钥存储另核）。采购前须重新报价并经用户同意；
+签名不保证立即获得 SmartScreen 信誉，企业策略也可能阻止运行未签名程序。
 参考：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、
 [SmartScreen](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation)、
-[DigiCert 价格示例](https://www.digicert.com/resources/fact-sheet/digicert-code-signing-instilling-trust-in-your-users.pdf)。
+[Artifact Signing 价格](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-change-sku)、
+[DigiCert 订阅示例](https://www.digicert.com/signing/code-signing-certificates)。
 
 ## 桌面更新运营（清单 schema 2）
 
@@ -174,7 +177,9 @@ DigiCert 官方资料示例约 USD 499–699/年，令牌和税费另计；签�
 
 正式和测试渠道通过 `GET /api/resource/v1/desktop/latest?channel=stable|beta` 隔离，未传为正式。
 无签名的 HTTP 响应只能阻断可用性，不能授权安装、变更最低版本或回滚。
-降级只能由更高 sequence 的新签名授权，rollbackFrom 必须与受影响客户端的已装版本完全一致；
+实际降级只能由更高 sequence 的新签名授权，rollbackFrom 必须与受影响客户端的已装版本完全一致。
+若客户端只见过来源高版本（灰度未命中或冒烟失败回滚），也允许 rollbackFrom 精确匹配已见最高版本的替代发行，
+但替代版本不得低于本机实际已装版本；从未安装高版本的客户端不必先安装故障版才能恢复。
 管理台发布时还校验它等于该渠道上一发行版本，操作记入 rollback 审计。撤回保留账本及最高序号，撤回后包不可下载。
 过期清单不再用于最新发行或匿名下载，须以更高序号续期。
 

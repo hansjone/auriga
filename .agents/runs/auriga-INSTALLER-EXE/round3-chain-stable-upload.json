@@ -1,0 +1,103 @@
+{
+  "startedAt": "2026-11-14T17:24:24.791Z",
+  "mode": "stable",
+  "checks": [
+    {
+      "name": "real-exe-install",
+      "at": "2026-11-14T17:24:32.652Z",
+      "reused": true,
+      "version": "0.1.3-e2e.1"
+    },
+    {
+      "name": "page-published-106",
+      "at": "2026-11-14T17:36:07.206Z",
+      "status": 201,
+      "version": "0.1.3-e2e.2",
+      "channel": "stable"
+    }
+  ],
+  "releases": [
+    {
+      "sequence": 106,
+      "channel": "stable",
+      "version": "0.1.3-e2e.2",
+      "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+      "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+      "minimumVersion": "0.1.3-e2e.1"
+    }
+  ],
+  "markerBefore": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f",
+  "testOnlyRateBytesPerSecond": 4194304,
+  "error": {
+    "message": "Expected values to be strictly equal:\n\n416 !== 206\n",
+    "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n416 !== 206\n\n    at file:///D:/project/chatgpt/agent-wt/auriga-INSTALLER-EXE-codex/.agents/runs/auriga-INSTALLER-EXE/nas-chain.mjs:225:12"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/login/providers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db16-cf57-7132-aea1-4d1b703d7099/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db16-cf57-7132-aea1-4d1b703d7099/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db17-d6e2-780f-822d-616ec756563e/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db17-d6e2-780f-822d-616ec756563e/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 201,
+      "throughPage": true
+    }
+  ]
+}

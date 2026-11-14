@@ -1,0 +1,333 @@
+{
+  "startedAt": "2026-11-14T17:41:10.759Z",
+  "mode": "stable",
+  "checks": [
+    {
+      "name": "real-exe-install",
+      "at": "2026-11-14T17:41:12.673Z",
+      "reused": true,
+      "version": "0.1.3-e2e.1"
+    },
+    {
+      "name": "reuse-already-published-stable-release",
+      "at": "2026-11-14T17:41:32.714Z",
+      "sequence": 106,
+      "version": "0.1.3-e2e.2",
+      "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48"
+    },
+    {
+      "name": "portal-exe-entry",
+      "at": "2026-11-14T17:41:33.625Z",
+      "url": "http://10.0.0.133:8080/login",
+      "href": "/api/resource/v1/desktop/packages/106",
+      "responseStatus": 206,
+      "disposition": "attachment; filename=\"AurigaDSH-Setup-0.1.3-e2e.2.exe\"",
+      "magic": "MZ",
+      "contentRange": "bytes 0-233455301/233455302"
+    },
+    {
+      "name": "startup-auto-discovery",
+      "at": "2026-11-14T17:42:08.812Z",
+      "installed": "0.1.3-e2e.1",
+      "desktop": {
+        "enabled": true,
+        "channel": "stable",
+        "available": {
+          "schema": 1,
+          "product": "Auriga Desktop",
+          "version": "0.1.3-e2e.2",
+          "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+          "channel": "stable",
+          "platform": "win-x64",
+          "sizeBytes": 233455302,
+          "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+          "minimumVersion": "0.1.3-e2e.1",
+          "publishedAt": "2026-11-14T17:24:32.854Z",
+          "notAfter": "2026-11-28T17:24:32.855Z",
+          "sequence": 106,
+          "notes": "NAS development acceptance; not a production CI release",
+          "components": {
+            "dshVersion": "0.2.1-rc.3",
+            "nodeVersion": "24.21.0",
+            "pluginVersion": "0.1.17"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "auriga-desktop-release-1",
+            "value": "Yf2c87xO147_x7x4OYw-q3kCZl1sF_Xxs71ft4_YCjv_yp5cyfsUtc5M1b4vM_1PGdug3bxlLfVLl33UiR-ODQ"
+          }
+        },
+        "required": false,
+        "phase": "idle",
+        "busy": false,
+        "downloading": false,
+        "downloadedBytes": 0,
+        "totalBytes": 0,
+        "error": null,
+        "restartRequired": false
+      },
+      "manualCheckCalled": false
+    },
+    {
+      "name": "normal-page-available",
+      "at": "2026-11-14T17:42:10.523Z",
+      "text": "新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n发现桌面新版 · 0.1.3-e2e.2\n更新\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"
+    },
+    {
+      "name": "refresh-keeps-download",
+      "at": "2026-11-14T17:42:11.784Z",
+      "before": {
+        "enabled": true,
+        "channel": "stable",
+        "available": {
+          "schema": 1,
+          "product": "Auriga Desktop",
+          "version": "0.1.3-e2e.2",
+          "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+          "channel": "stable",
+          "platform": "win-x64",
+          "sizeBytes": 233455302,
+          "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+          "minimumVersion": "0.1.3-e2e.1",
+          "publishedAt": "2026-11-14T17:24:32.854Z",
+          "notAfter": "2026-11-28T17:24:32.855Z",
+          "sequence": 106,
+          "notes": "NAS development acceptance; not a production CI release",
+          "components": {
+            "dshVersion": "0.2.1-rc.3",
+            "nodeVersion": "24.21.0",
+            "pluginVersion": "0.1.17"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "auriga-desktop-release-1",
+            "value": "Yf2c87xO147_x7x4OYw-q3kCZl1sF_Xxs71ft4_YCjv_yp5cyfsUtc5M1b4vM_1PGdug3bxlLfVLl33UiR-ODQ"
+          }
+        },
+        "required": false,
+        "phase": "downloading",
+        "busy": true,
+        "downloading": true,
+        "downloadedBytes": 268939,
+        "totalBytes": 233455302,
+        "error": null,
+        "restartRequired": false
+      },
+      "after": {
+        "enabled": true,
+        "channel": "stable",
+        "available": {
+          "schema": 1,
+          "product": "Auriga Desktop",
+          "version": "0.1.3-e2e.2",
+          "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+          "channel": "stable",
+          "platform": "win-x64",
+          "sizeBytes": 233455302,
+          "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+          "minimumVersion": "0.1.3-e2e.1",
+          "publishedAt": "2026-11-14T17:24:32.854Z",
+          "notAfter": "2026-11-28T17:24:32.855Z",
+          "sequence": 106,
+          "notes": "NAS development acceptance; not a production CI release",
+          "components": {
+            "dshVersion": "0.2.1-rc.3",
+            "nodeVersion": "24.21.0",
+            "pluginVersion": "0.1.17"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "auriga-desktop-release-1",
+            "value": "Yf2c87xO147_x7x4OYw-q3kCZl1sF_Xxs71ft4_YCjv_yp5cyfsUtc5M1b4vM_1PGdug3bxlLfVLl33UiR-ODQ"
+          }
+        },
+        "required": false,
+        "phase": "downloading",
+        "busy": true,
+        "downloading": true,
+        "downloadedBytes": 662899,
+        "totalBytes": 233455302,
+        "error": null,
+        "restartRequired": false
+      }
+    },
+    {
+      "name": "cancel-retains-partial",
+      "at": "2026-11-14T17:42:11.909Z",
+      "desktop": {
+        "enabled": true,
+        "channel": "stable",
+        "available": {
+          "schema": 1,
+          "product": "Auriga Desktop",
+          "version": "0.1.3-e2e.2",
+          "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+          "channel": "stable",
+          "platform": "win-x64",
+          "sizeBytes": 233455302,
+          "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+          "minimumVersion": "0.1.3-e2e.1",
+          "publishedAt": "2026-11-14T17:24:32.854Z",
+          "notAfter": "2026-11-28T17:24:32.855Z",
+          "sequence": 106,
+          "notes": "NAS development acceptance; not a production CI release",
+          "components": {
+            "dshVersion": "0.2.1-rc.3",
+            "nodeVersion": "24.21.0",
+            "pluginVersion": "0.1.17"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "auriga-desktop-release-1",
+            "value": "Yf2c87xO147_x7x4OYw-q3kCZl1sF_Xxs71ft4_YCjv_yp5cyfsUtc5M1b4vM_1PGdug3bxlLfVLl33UiR-ODQ"
+          }
+        },
+        "required": false,
+        "phase": "cancelled",
+        "busy": false,
+        "downloading": false,
+        "downloadedBytes": 662899,
+        "totalBytes": 233455302,
+        "error": null,
+        "restartRequired": false
+      },
+      "partialBytes": 719179
+    },
+    {
+      "name": "process-restart-retains-progress",
+      "at": "2026-11-14T17:42:46.015Z",
+      "desktop": {
+        "enabled": true,
+        "channel": "stable",
+        "available": {
+          "schema": 1,
+          "product": "Auriga Desktop",
+          "version": "0.1.3-e2e.2",
+          "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+          "channel": "stable",
+          "platform": "win-x64",
+          "sizeBytes": 233455302,
+          "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+          "minimumVersion": "0.1.3-e2e.1",
+          "publishedAt": "2026-11-14T17:24:32.854Z",
+          "notAfter": "2026-11-28T17:24:32.855Z",
+          "sequence": 106,
+          "notes": "NAS development acceptance; not a production CI release",
+          "components": {
+            "dshVersion": "0.2.1-rc.3",
+            "nodeVersion": "24.21.0",
+            "pluginVersion": "0.1.17"
+          },
+          "signature": {
+            "alg": "Ed25519",
+            "kid": "auriga-desktop-release-1",
+            "value": "Yf2c87xO147_x7x4OYw-q3kCZl1sF_Xxs71ft4_YCjv_yp5cyfsUtc5M1b4vM_1PGdug3bxlLfVLl33UiR-ODQ"
+          }
+        },
+        "required": false,
+        "phase": "cancelled",
+        "busy": false,
+        "downloading": false,
+        "downloadedBytes": 662899,
+        "totalBytes": 233455302,
+        "error": null,
+        "restartRequired": false
+      }
+    }
+  ],
+  "releases": [
+    {
+      "schema": 1,
+      "product": "Auriga Desktop",
+      "version": "0.1.3-e2e.2",
+      "packageId": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+      "channel": "stable",
+      "platform": "win-x64",
+      "sizeBytes": 233455302,
+      "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48",
+      "minimumVersion": "0.1.3-e2e.1",
+      "publishedAt": "2026-11-14T17:24:32.854Z",
+      "notAfter": "2026-11-28T17:24:32.855Z",
+      "sequence": 106,
+      "notes": "NAS development acceptance; not a production CI release",
+      "components": {
+        "dshVersion": "0.2.1-rc.3",
+        "nodeVersion": "24.21.0",
+        "pluginVersion": "0.1.17"
+      },
+      "signature": {
+        "alg": "Ed25519",
+        "kid": "auriga-desktop-release-1",
+        "value": "Yf2c87xO147_x7x4OYw-q3kCZl1sF_Xxs71ft4_YCjv_yp5cyfsUtc5M1b4vM_1PGdug3bxlLfVLl33UiR-ODQ"
+      }
+    }
+  ],
+  "markerBefore": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f",
+  "testOnlyRateBytesPerSecond": 4194304,
+  "error": {
+    "message": "apiRequestContext.get: Timeout 30000ms exceeded.",
+    "stack": "    at state (D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\.agents\\runs\\auriga-INSTALLER-EXE\\desktop-fixture.mjs:169:46)\n    at until (D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\.agents\\runs\\auriga-INSTALLER-EXE\\nas-chain.mjs:47:19)\n    at async file:///D:/project/chatgpt/agent-wt/auriga-INSTALLER-EXE-codex/.agents/runs/auriga-INSTALLER-EXE/nas-chain.mjs:298:20"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/login/providers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db26-26bd-7241-985c-45da79ac88e8/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db26-26bd-7241-985c-45da79ac88e8/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db26-2e05-7599-81fe-da288ce2d7f6/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db26-2e05-7599-81fe-da288ce2d7f6/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200
+    }
+  ]
+}

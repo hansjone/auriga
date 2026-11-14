@@ -1,0 +1,3 @@
+real-exe-install {"reused":true,"version":"0.1.3-e2e.1"}
+reuse-already-published-stable-release {"sequence":106,"version":"0.1.3-e2e.2","sha256":"aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48"}
+portal-exe-entry {"url":"http://10.0.0.133:8080/login","href":"/api/resource/v1/desktop/packages/106","responseStatus":206,"disposition":"attachment; filename=\"AurigaDSH-Setup-0.1.3-e2e.2.exe\"","magic":"MZ","contentRange":"bytes 0-233455301/233455302"}

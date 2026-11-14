@@ -1,0 +1,34 @@
+[
+  {
+    "command": [
+      "C:\\Users\\zhout\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\primary-runtime\\dependencies\\node\\bin\\node.exe",
+      "node_modules/prettier/bin/prettier.cjs",
+      "--check",
+      "clients/installer/README.md"
+    ],
+    "exitCode": 0,
+    "stdout": "Checking formatting...\nAll matched files use Prettier code style!\n",
+    "stderr": "",
+    "recheckedAfterExpiryDocumentationCorrection": true
+  },
+  {
+    "command": [
+      "C:\\Users\\zhout\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\primary-runtime\\dependencies\\node\\bin\\node.exe",
+      "--check",
+      ".agents/runs/auriga-INSTALLER-EXE/final-snapshot.mjs"
+    ],
+    "exitCode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "C:\\Users\\zhout\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\primary-runtime\\dependencies\\node\\bin\\node.exe",
+      "--check",
+      ".agents/runs/auriga-INSTALLER-EXE/cleanup-fixture.mjs"
+    ],
+    "exitCode": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

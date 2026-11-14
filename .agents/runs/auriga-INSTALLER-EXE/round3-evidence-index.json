@@ -1,0 +1,920 @@
+{
+  "recordedAt": "2026-11-14T19:49:40.155029+00:00",
+  "baseDirectory": ".agents/runs/auriga-INSTALLER-EXE",
+  "fileCount": 150,
+  "entries": [
+    {
+      "file": "dev-release-106-old-attempt.json",
+      "sizeBytes": 799,
+      "sha256": "0337410130c8a972e6dcd5e5b022ac8d9d1c3707a36ca097768c53e812094265",
+      "purpose": "public signed development manifest; attempts were not published; sequence 108 withdrawn"
+    },
+    {
+      "file": "dev-release-106.json",
+      "sizeBytes": 799,
+      "sha256": "c48ff8aeae601edf7a0064ab5f56c1079aac1f7445d217d8d29e06cb81c7a322",
+      "purpose": "public signed development manifest; attempts were not published; sequence 108 withdrawn"
+    },
+    {
+      "file": "dev-release-107-http-null-attempt.json",
+      "sizeBytes": 847,
+      "sha256": "2f280b1f91e244d1c33fc36daa7e93e1937b573737db710d842564448711c0ef",
+      "purpose": "public signed development manifest; attempts were not published; sequence 108 withdrawn"
+    },
+    {
+      "file": "dev-release-107.json",
+      "sizeBytes": 847,
+      "sha256": "e830e7ac762e99aff4f4df7935ff1b2e784b72e0c57d1b45d88395ef520bd61e",
+      "purpose": "public signed development manifest; attempts were not published; sequence 108 withdrawn"
+    },
+    {
+      "file": "dev-release-108.json",
+      "sizeBytes": 911,
+      "sha256": "54dd8ffa8dac8bc3cb9d999eb9532a1520b256c875053880a6d1d2949f63c97d",
+      "purpose": "public signed development manifest; attempts were not published; sequence 108 withdrawn"
+    },
+    {
+      "file": "dev-release-109.json",
+      "sizeBytes": 858,
+      "sha256": "9f5952989f7fa48912856cc806c87a398e28543efe32c8fbca2cba1422df6f99",
+      "purpose": "public signed development manifest; attempts were not published; sequence 108 withdrawn"
+    },
+    {
+      "file": "round3-admin-before.png",
+      "sizeBytes": 56044,
+      "sha256": "920aa9628dd23985f85654465e2de5ffd1c47e00e7824cf7a98881d5b21e59e6",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-admin-preflight.log",
+      "sizeBytes": 74,
+      "sha256": "157d3d97cb5ccb46bcff9efdda119be44ee0dea37353cac006c8e924117f4c2f",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-admin-publish-build.log",
+      "sizeBytes": 997,
+      "sha256": "fb371abfdfc1a6c7b320d4625af7923f9b0fc6cde75d5a790bc3ca119682d7c0",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-admin-publish-lint.log",
+      "sizeBytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-admin-publish-test.log",
+      "sizeBytes": 314,
+      "sha256": "3e9e3deb492a395343c25090c0fa1bcc7197694646b67cdecd0839bd628fbd91",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-admin-publish-type.log",
+      "sizeBytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-artifacts.json",
+      "sizeBytes": 1269,
+      "sha256": "cc67dc906998e2518ed57c2b99527d48a6059a38303595be69a24947e4547b04",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-authenticode.json",
+      "sizeBytes": 387,
+      "sha256": "acf004bffcc92be153668b231d7c4a189d80e8333abbc24c58ab077cf13dad21",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-brand-and-signing.json",
+      "sizeBytes": 1059,
+      "sha256": "5843ea565febc6a7a975d608aea9581ff407ad44789ed527877aaab8a5386d08",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-browser-install.log",
+      "sizeBytes": 8714,
+      "sha256": "d15871fc8ecbf96fb2be16f34f2f81c3946fa4c74315e823b50739f066640e80",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-build-broken.log",
+      "sizeBytes": 325,
+      "sha256": "72422c663978e8eda1729138f14782774418d7f3464c82d415d842dd28c0f878",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-build-v2-final.log",
+      "sizeBytes": 489,
+      "sha256": "ed2aa618548ad6e7e239a5ab5492c3099f5c937fdc68e410303012c95d4b67f9",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-build-v2.log",
+      "sizeBytes": 489,
+      "sha256": "1c14ad82be1cceaf82c4b8ad6ff9f326c0700f15f52facd83f3d2686eb6429a3",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-chain-forced-http-null-attempt.json",
+      "sizeBytes": 3458,
+      "sha256": "d6b06565d0876808236b9991b2b9eade8269d17f61f3eb6a62d475d86fb1320d",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-chain-forced-http-null-attempt.log",
+      "sizeBytes": 1137,
+      "sha256": "6aa01f4be4ea54d0237f117beb56b356bbcee1f85dd5c939ccd7db665d9fab6a",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-chain-forced.json",
+      "sizeBytes": 9288,
+      "sha256": "d611e2cfd2edd98df7211fe7ce33cef14c4719af2d7f1b9d7a8547db5e9626fa",
+      "purpose": "passed real NAS acceptance conclusion"
+    },
+    {
+      "file": "round3-chain-forced.log",
+      "sizeBytes": 2397,
+      "sha256": "813aeb993b4f41a2c17e0cef7f07bcac6d96ee44e6c8250f3c2155f5221d9c86",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-chain-negative.json",
+      "sizeBytes": 16931,
+      "sha256": "8d62777d8f8b238013fc4309bb202cdaa314a4709528b0e8c2265999d58562c1",
+      "purpose": "passed real NAS acceptance conclusion"
+    },
+    {
+      "file": "round3-chain-negative.log",
+      "sizeBytes": 3541,
+      "sha256": "0451b58461e58a2dd5b3bd8f507eaa606225bcc64e04ff443231f4fdb539119a",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-chain-stable-apply.json",
+      "sizeBytes": 2753,
+      "sha256": "b44b59b664df18f1b23abd6e9b30e16c74c7da9da64ab305998fd34f7dc62f29",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-chain-stable-apply.log",
+      "sizeBytes": 1177,
+      "sha256": "40ad36b5a480b4e2c30567601fdd92f660cc481473e23e8925e2097bc1c8729d",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-chain-stable-attempt1.json",
+      "sizeBytes": 2247,
+      "sha256": "84b2262b2441c58ba7005f327705123c8d3a4b0c99d0b13965cc03494f1a7795",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-chain-stable-attempt1.log",
+      "sizeBytes": 923,
+      "sha256": "a302f8fd4852e7501fe0fd353be8051a06bb8dbd393c0cde311ad000b8cfe404",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-chain-stable-complete.json",
+      "sizeBytes": 1271,
+      "sha256": "ca2913424c32816df80754e48ff704caf17917d45e2e41c2993fd67eebc69371",
+      "purpose": "passed real NAS acceptance conclusion"
+    },
+    {
+      "file": "round3-chain-stable-proxy-attempt.json",
+      "sizeBytes": 1888,
+      "sha256": "4de200e54923c3d2a659abab4d080dff2f7094f9f638386b1878f139f949c583",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-chain-stable-proxy-attempt.log",
+      "sizeBytes": 468,
+      "sha256": "d616525a1c8100b64503034d0abfd25e777ae7d190301004f4af727ba5f7fe89",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-chain-stable-upload.json",
+      "sizeBytes": 2741,
+      "sha256": "e7fc77bb31929b6e0e75aec87336467c232179e3a2185a7796bef6348c158aa4",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-chain-stable-upload.log",
+      "sizeBytes": 892,
+      "sha256": "d1a197486277ba6edfc657effae44e32c171136be207205de9904a433ec4ed84",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-chain-stable.json",
+      "sizeBytes": 11336,
+      "sha256": "a5df2a8400d68a555e3b3cce80878b92a5990490bf836d0a9545b639bdba2e68",
+      "purpose": "partial stable chain: download completed, fixture state timeout; continued by stable-apply"
+    },
+    {
+      "file": "round3-chain-stable.log",
+      "sizeBytes": 6581,
+      "sha256": "7fcaded5d5995b0cbc46e32871aabdc5a31d460c2201991aa067bcd2f8e6d2ec",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-continue.log",
+      "sizeBytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-core-cleanup.log",
+      "sizeBytes": 28482,
+      "sha256": "08e9907c0be0cc2c926e4b703240b11ad5f60a4b5fb5d70f661598d497752972",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-deploy-admin-apply.log",
+      "sizeBytes": 3211,
+      "sha256": "644fbc1f22446e95dd7616f2274c8ce5a94f66312020d4ee9df87d250ca35617",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-deploy-admin-build.log",
+      "sizeBytes": 754,
+      "sha256": "af7cd5a9040996200cb0d100faf59b078664d2bfce3893457e8e3dc623048f56",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-deploy-admin-receipt.json",
+      "sizeBytes": 1716,
+      "sha256": "97b371d971814c293fee73d5f2f9e48dc61c5250b76caefaa55500b2b32bb59c",
+      "purpose": "guarded NAS deployment receipt"
+    },
+    {
+      "file": "round3-deploy-admin-upload.log",
+      "sizeBytes": 668,
+      "sha256": "0d98648191a1b54d88761df70e05d66511462ee2f6e9d1d3ff1a1309bb1c59eb",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-deploy-inspect-later.log",
+      "sizeBytes": 1562,
+      "sha256": "9b745a36c8d99869201ee7174c58ba9870a07f471f06631dccde2bed39b775de",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-deploy-inspect.log",
+      "sizeBytes": 1558,
+      "sha256": "b84473d8eb7effd2b67a51f4c9446c8247690ca29b94088b3d94fbfa6b66bb1a",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-deploy-parser-receipt.json",
+      "sizeBytes": 1729,
+      "sha256": "bf303e43d18d7361edafef355027e4c1035608c040b920af882312fb0ccfa6f3",
+      "purpose": "guarded NAS deployment receipt"
+    },
+    {
+      "file": "round3-deploy-parser.log",
+      "sizeBytes": 4028,
+      "sha256": "dbe9f60918ceb8b8c81eaa04146860d12c16bb529a5f13fed87f9515d7e643c4",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-deploy-receipt.json",
+      "sizeBytes": 1939,
+      "sha256": "8741797a5ec90fd54831637cad481204aa40e3a22008fee402baa4a6287db393",
+      "purpose": "guarded NAS deployment receipt"
+    },
+    {
+      "file": "round3-deploy-wrapper-diagnostic.json",
+      "sizeBytes": 393,
+      "sha256": "e981eb6fab3d42a51beaa8358ac596a2b3b3b058179f6246c4b9db37a8ea2fe4",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-deploy.log",
+      "sizeBytes": 4236,
+      "sha256": "a5a50b0a25e276b2f3aaaba936cbfbb7f7bb067137c127373450697727db187d",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-desktop-available.png",
+      "sizeBytes": 43219,
+      "sha256": "51d7c810c920fe2e0c50bd8606e46496eaac9ba4352e3434fa4cb5b36945f475",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-desktop-before.png",
+      "sizeBytes": 35949,
+      "sha256": "b055598a3e5535a72fb2126a5f6d4507872b10ac31c10edbfedae0063d57ca24",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-desktop-fault-required.png",
+      "sizeBytes": 32831,
+      "sha256": "2d292b1baf4ac02f7d13b12c7099f19bb7b973ad14207421735e7333b41130de",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-desktop-forced-completed.png",
+      "sizeBytes": 40721,
+      "sha256": "ef68f2743e4869d4054d6a93edc0467da721a4f0313f58aebc9d485152f2ed4b",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-desktop-forced.png",
+      "sizeBytes": 30579,
+      "sha256": "68c101e6bf2dff2050c01f251c777679dab14b9709adfac57a100121c3f1b2cb",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-desktop-preflight.log",
+      "sizeBytes": 553,
+      "sha256": "87a4828c83d2988e832cfc9c7dd4f04cd064ba05af2bff7c77463194fcdeffbc",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-desktop-recovered.png",
+      "sizeBytes": 44222,
+      "sha256": "bb0c50f822fd4b1c7b4c5e1449d0d5a42d63d74e1306f47a35ac77229cff4f02",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-desktop-request-inspect.log",
+      "sizeBytes": 2014,
+      "sha256": "005e96aeb9f15936fd42fcf6e2f8d0f7ce0e140c6ccfab719bcf5e689c06e823",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-desktop-rollback.png",
+      "sizeBytes": 32831,
+      "sha256": "2d292b1baf4ac02f7d13b12c7099f19bb7b973ad14207421735e7333b41130de",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-desktop-upgraded.png",
+      "sizeBytes": 40721,
+      "sha256": "ef68f2743e4869d4054d6a93edc0467da721a4f0313f58aebc9d485152f2ed4b",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-dialog-after.log",
+      "sizeBytes": 1073,
+      "sha256": "c370febf83ec001fe92817eef0796683a5eab31c2ba7e0df12474a207f0e142d",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-dialog-after.png",
+      "sizeBytes": 43362,
+      "sha256": "03863f29eb85de13ce49c62b032f9939ed1c77c9771bf2cf59a64e781da9ae1a",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-dialog-preflight.log",
+      "sizeBytes": 1106,
+      "sha256": "b0240a6d6503d5d6b2ca224c1cb025e405ef175257d48855e34358b27c51f61a",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-dialog-preflight.png",
+      "sizeBytes": 58939,
+      "sha256": "67e74337c71a49c7ea5fe7f7175911f5cae951f9aff67111513c5e32c5eeacc8",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-direct-transfer-probe.json",
+      "sizeBytes": 1636,
+      "sha256": "e3d381da2df2dae82bff78919ff96588bfbd3475495d5b639ee5cfbab2a1ac7f",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-direct-transfer-probe.log",
+      "sizeBytes": 134,
+      "sha256": "f9d6d355767ea1a14b9643771db7f2ec29b8b158684ade9e9506dd30fc8b6b19",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-download-transfer-probe.json",
+      "sizeBytes": 164,
+      "sha256": "ae4416784c973d5dff732261ce6baf4fdabc30888a878531d1d13a93451ae06a",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-download-transfer-probe.log",
+      "sizeBytes": 143,
+      "sha256": "37075978beb75bfecca0ccb4f7947aee87a33de9c7bdb0a71149560173dd67db",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-edge-diagnostic.log",
+      "sizeBytes": 257,
+      "sha256": "7ecfc9f5f15cc09042d5f102b54ef18ad4ad2441be6bf18d38b36c8d71fb7c4a",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-fetch-probe.log",
+      "sizeBytes": 492,
+      "sha256": "970a52460443215555057423322210247bca34aba29490f46837bf82401ae8de",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-final-format-check.json",
+      "sizeBytes": 1073,
+      "sha256": "a809b206aa7d459cee2442fb83c09a14cbceb9da44c08ef59b11a4e5298e80fb",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-forced-request-diagnostic.log",
+      "sizeBytes": 7272,
+      "sha256": "a7a6d9004c88bc773fa90b19229ba8ca6587b7e81d055ecea94ca1aac7baf5a3",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-forced-upload-progress.log",
+      "sizeBytes": 368,
+      "sha256": "f38d29dab4e551bd8d6c1d967d66f1fe47ac6c6094e62dc70dc0b2ee12780f03",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-http-parser-regression.json",
+      "sizeBytes": 1527,
+      "sha256": "5b327dcf5aa6947540de1a1390a5692946cb4321ec5d653f5693f7624343f814",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-install-forced-old.log",
+      "sizeBytes": 43,
+      "sha256": "75c0878d7684886ee97b8463fd5819ffd6cc5e6f2ae7ab0a8f426eb73fbabe7f",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-install-old.log",
+      "sizeBytes": 428,
+      "sha256": "e81c2354a6fb454a4a8dea8a985cd42199f1e5d9d0cdd18c7451515b01b73bfc",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-installer-built-final.log",
+      "sizeBytes": 39079,
+      "sha256": "2848cbace88f148c40302e8296ceebc5c4c9c9940f3a322064129cd95163cfcc",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-installer-final.log",
+      "sizeBytes": 65604,
+      "sha256": "92f3f1653640a577418da304cccd828b8ad43fe1e5a8d13ef80c2ed67fdf3bb4",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-installer.log",
+      "sizeBytes": 65562,
+      "sha256": "b88d5afc4cb9800cfc094ed8559d1971c9f04d96df2e90f6b6f70963542bbca4",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-java-summary.json",
+      "sizeBytes": 442,
+      "sha256": "d5dd3d0fa8416d133b462295f518022b4ea2648f4eb30e2db2d1a3003d023dce",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-dialog-after.log",
+      "sizeBytes": 521,
+      "sha256": "56c0cb70a7aec716b0d9c35cfd0e229fde5d6a2addcb8e2ec5e7a010fd5cb4b4",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-dialog-preflight.log",
+      "sizeBytes": 521,
+      "sha256": "ba8bf8d778eb184454d43897fb23026e45795c65bb1a1ae61fa6c43a07920684",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-forced-new.log",
+      "sizeBytes": 643,
+      "sha256": "92b3da88bc2db89f941da6504b76d873bfd08e303ab05ed945176a1d27cfdd35",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-forced-old.log",
+      "sizeBytes": 1059,
+      "sha256": "b1e1e21ea65cd3e0822ca8bacdcebc05c1ba7bf992147650c01f9aa513842bcb",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-negative-start.log",
+      "sizeBytes": 1061,
+      "sha256": "539e325efda105fffca1aa06f7051a58cf4255ad5862b15e169b8675a2731166",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-pane-confirmed.log",
+      "sizeBytes": 521,
+      "sha256": "e3cd609550b034dad0c7fb7fcfcf84b70157bd0aae802cdc40ccebb13e694b84",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-pane-final.log",
+      "sizeBytes": 521,
+      "sha256": "3086f94dde2ac7b07744115c690f292f51581089517d375a644aedac4ad1847a",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-pane-preflight.log",
+      "sizeBytes": 521,
+      "sha256": "6c3d18a7d6138322db7187e6637a795a4ed800bf6124d76a70fa93eac28cd1ee",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-pane-ready.log",
+      "sizeBytes": 521,
+      "sha256": "dc00052b997c9b65fe788b46ea5ac61c54a5d9444842462b52903778353555e9",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-preflight.log",
+      "sizeBytes": 395,
+      "sha256": "1d9d636f93e2a1dd75dc10622f9f431a550bbd0e6410573ddb1c274ed768ba0d",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-smoke-rollback.log",
+      "sizeBytes": 994,
+      "sha256": "2fd0a449d5d6cf2058c830941adee6a50f7a90812877ad3023e689486f42dd8f",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-stable-apply-old.log",
+      "sizeBytes": 773,
+      "sha256": "898592ce28300403ba109d6edacc7a64769804ead6a2566b2654df6888e32af8",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-stable-new.log",
+      "sizeBytes": 647,
+      "sha256": "026e8af692d868b1a6fc46fe1466cd7d50a867d781ed7c15fb4d2f80aa5a26ba",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-stable-old.log",
+      "sizeBytes": 653,
+      "sha256": "dd0b99a812d1cffe107c830165fb2bef3c48c082c2afe3c7c69f664ddc548441",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-launch-stable-resume.log",
+      "sizeBytes": 820,
+      "sha256": "ffb3f12beac760fe4efd4b034dbe14304e1c097564450773ed87aa5e65d14031",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-manager-106.png",
+      "sizeBytes": 72141,
+      "sha256": "3fe85778657084d198b80dbf69d6263f337f6a42771d7f638749bb3173fd153d",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-107.png",
+      "sizeBytes": 66722,
+      "sha256": "576b1c31b460a6591d0fb0f1d90b561a03776068c6071e310d15d13743a4d19b",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-108.png",
+      "sizeBytes": 66722,
+      "sha256": "576b1c31b460a6591d0fb0f1d90b561a03776068c6071e310d15d13743a4d19b",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-109.png",
+      "sizeBytes": 66722,
+      "sha256": "576b1c31b460a6591d0fb0f1d90b561a03776068c6071e310d15d13743a4d19b",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-final-latest.png",
+      "sizeBytes": 52033,
+      "sha256": "4505ab0a7609a10b759e9b179a7024298d3aee2ba8588eb5629be61522e27219",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-final-withdrawn.png",
+      "sizeBytes": 52033,
+      "sha256": "4505ab0a7609a10b759e9b179a7024298d3aee2ba8588eb5629be61522e27219",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-final.png",
+      "sizeBytes": 66722,
+      "sha256": "576b1c31b460a6591d0fb0f1d90b561a03776068c6071e310d15d13743a4d19b",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-publish-107.png",
+      "sizeBytes": 72026,
+      "sha256": "acd870025ab273712f3ebdb0c43ebfe72b031a630821c9507e74496b67e72d6d",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-publish-108.png",
+      "sizeBytes": 72081,
+      "sha256": "fe060607cdbc3ef0c6f2a46d161aa177d9f28302e34ddb263b67063737d5515d",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-publish-109.png",
+      "sizeBytes": 73574,
+      "sha256": "1cc8511f7db93fe566907bdec49315dc3223c26c4b6e2efe068b702452848abb",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-manager-withdrawn.png",
+      "sizeBytes": 66722,
+      "sha256": "576b1c31b460a6591d0fb0f1d90b561a03776068c6071e310d15d13743a4d19b",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-minimal-upload-probe.json",
+      "sizeBytes": 3277,
+      "sha256": "aded40b4865947a3b07b07865eb3c8ea4d4568d100c83a0e0e651ffdb576f966",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-minimal-upload-probe.log",
+      "sizeBytes": 2522,
+      "sha256": "c9e0d239f4be0dc73370720f45b232d5d6099d32c2be676217e57c7bb62ab10b",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-minimal-upload-probe.png",
+      "sizeBytes": 71231,
+      "sha256": "20b9619faab73efdb5c5ca1cdc3e86c420fed9b7288bcbb936e05a328eae179e",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-nas-final.json",
+      "sizeBytes": 6851,
+      "sha256": "317392c5ce55b08252f1a6f4a627a1e03626e5830d6ffbd7eac87d1fd177753d",
+      "purpose": "passed real NAS acceptance conclusion"
+    },
+    {
+      "file": "round3-nas-final.log",
+      "sizeBytes": 64,
+      "sha256": "503a23f4da3909bb856df1599ab7b31a1a78e13a2080d4bcb963fadb1a9011b0",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-negative-upload-progress.log",
+      "sizeBytes": 368,
+      "sha256": "43768f8d91e9a39c31d6371f82c1cf6712ac5aaa5bb5ceee80912107260f2901",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-pane-confirmed.log",
+      "sizeBytes": 1955,
+      "sha256": "6bf7631cd13a4511e7a852955bbc0db06b5b343fc97c6ffeaae428300a31786b",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-pane-final.log",
+      "sizeBytes": 212,
+      "sha256": "3ccd50adf9f47908045cb05d5c1e7235f2e99ba0e3c225ca40f68a4b8e206bd1",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-pane-final.png",
+      "sizeBytes": 40721,
+      "sha256": "ef68f2743e4869d4054d6a93edc0467da721a4f0313f58aebc9d485152f2ed4b",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-pane-preflight.log",
+      "sizeBytes": 1926,
+      "sha256": "c8c908228f5fa95ef1e77127bd28cd1c5f8277538bb526f1586b45678dbcfbea",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-pane-ready.log",
+      "sizeBytes": 2099,
+      "sha256": "f0ee12c8811d48ec778f28d2f22f13138049819a436a657ea8678f59e34ff838",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-platform-health.log",
+      "sizeBytes": 24261,
+      "sha256": "c7ea92c268adafe62b44959abbc6c4a8e7cff060de71c9fca01e16031debf0a5",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-plugin-settings.log",
+      "sizeBytes": 8953,
+      "sha256": "883ce589b9e9c8c865e8bb230b760288cd2473592bb72ed65a1642a31854ed70",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-portal-download.png",
+      "sizeBytes": 210143,
+      "sha256": "2b9deab5b6fcaa3be0d60aed92a438bc989c9da809e8b3e4c4bc2e3b9e5b69df",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-portal-final.png",
+      "sizeBytes": 210143,
+      "sha256": "2b9deab5b6fcaa3be0d60aed92a438bc989c9da809e8b3e4c4bc2e3b9e5b69df",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-process-cleanup.json",
+      "sizeBytes": 307,
+      "sha256": "4f98fca846664ff4564419673d216bd911bc61ec9a8cbd41f355065ac5cac286",
+      "purpose": "real fixture cleanup and data retention proof"
+    },
+    {
+      "file": "round3-publish-diagnostic.json",
+      "sizeBytes": 1229,
+      "sha256": "8e3ddea1c39d59cb8660bd6f4337e75b11332190d2e9a6a71154639c5b08b401",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-publish-diagnostic.log",
+      "sizeBytes": 2858,
+      "sha256": "2e86bbebf7fe09b32a34415b46d077f9014730c6db2b8ae9ac14923555d9f486",
+      "purpose": "diagnostic or failed attempt; not an acceptance pass"
+    },
+    {
+      "file": "round3-publish-diagnostic.png",
+      "sizeBytes": 49880,
+      "sha256": "33a681a9e14f15ccd492c4bade56eddbec1fd43ab54e58a39c18022d40d77e6f",
+      "purpose": "independent headless browser screenshot"
+    },
+    {
+      "file": "round3-recovery-upload-progress.log",
+      "sizeBytes": 369,
+      "sha256": "1e63cb14cbb9714800b4030059edd07a794d4c983ab4511c1b403f52726e31aa",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-after-cycle.log",
+      "sizeBytes": 3289,
+      "sha256": "8fa1056358fded8c988b95b90ee09c20111ac1a9c34852e5d18aaa862d0fa36e",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-before-corrected.log",
+      "sizeBytes": 1585,
+      "sha256": "bf8d45af21ce3ed078957935e2dddacc757c49346a79a47639be910fe9aa632d",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-before.log",
+      "sizeBytes": 1378,
+      "sha256": "9d684bcaca770e9ea8f6bfdff999dc19369feb9328c774da4978a9d40da18586",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-cycle-finished.log",
+      "sizeBytes": 3586,
+      "sha256": "c8b602603a0f67f11fa3f4460c39499b526d051e3428f2cf43ac967e55f7c366",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-final-cycle.log",
+      "sizeBytes": 4490,
+      "sha256": "33fa1e7c04783607567c12857865c6eefcc6b851e79defc0d0a5b59a9c8511c6",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-final-restart.log",
+      "sizeBytes": 1156,
+      "sha256": "479e0deb20ed55f953b258292b117f31670c52b8d9fbad5580f90b9587e3e8a6",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-final-status.log",
+      "sizeBytes": 4192,
+      "sha256": "7f3137e85697e85e9968f4dc370c09857c11fef1e9a3065f7e3c4a85bb4aaa8c",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-handoff.log",
+      "sizeBytes": 3280,
+      "sha256": "5707142ce4884b99a4f12ca3de5296834e7842bdca9e96fc386e43f20ed8866a",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-parser-cycle.log",
+      "sizeBytes": 3741,
+      "sha256": "4c1e795d71a2d669ffce1623cfaf80253ff8ee707de92cbe200ecee2d18e1614",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-parser-restart.log",
+      "sizeBytes": 1718,
+      "sha256": "86dc4e48b327e0a5adb4d10a6a3bd00a94306d25710763ea8f83806858c28e4a",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-parser-status.log",
+      "sizeBytes": 3495,
+      "sha256": "ffae3d665a3bd2708c21c0de1ba81422e479ce525f5fb6013b20416ca40bcf39",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-restart.log",
+      "sizeBytes": 959,
+      "sha256": "e1a38d138e9305db73355a5a190010ee3b44cdd3ce39d9a754a3b6c242a16434",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-renew-status.log",
+      "sizeBytes": 3089,
+      "sha256": "c163ddf94bce29bc9c94354cfeb860384bf7642485982d2e0ea31746fe35007e",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-sanitization.json",
+      "sizeBytes": 390,
+      "sha256": "978f267f106782bcfafef4fad99dd3cb7ed37f392b69e41774a9dbd6b2b0189f",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-summary.json",
+      "sizeBytes": 12051,
+      "sha256": "1e8f68fa5576ef73255f4049963f751da3fc01e4c306123dc1ca88df2813dfa4",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-supervise.log",
+      "sizeBytes": 1178,
+      "sha256": "05fdbb3ab7f4ea8388724991fb314944dfe63f485766d1414b7f7c11a6b103ea",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-targeted.log",
+      "sizeBytes": 9410,
+      "sha256": "9487e520ccab4a07a938941cdce64387f3db10a2f80fa6fcca94e1ca8f122d3e",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-transfer-compare.json",
+      "sizeBytes": 1638,
+      "sha256": "4fb4179514555a2ac4fd3b5c3db47779601947d881ac9c4f2fc89f144b2ebf81",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-transfer-compare.log",
+      "sizeBytes": 104,
+      "sha256": "7e5b7a001a92ed1725d3a9cb6e058af616426daa925a033a6ff98b6be1a30bc5",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-uninstall-default.log",
+      "sizeBytes": 314,
+      "sha256": "2f8043ec3a85905833a22ef2a817b071edfc873f1889f4f74db03cf94a1c6262",
+      "purpose": "real fixture cleanup and data retention proof"
+    },
+    {
+      "file": "round3-uninstall-forced.log",
+      "sizeBytes": 328,
+      "sha256": "add34776bfd3f472b318c0f9d199f90fae81cdfe4bcce5d09a0b7696e68c63d9",
+      "purpose": "real fixture cleanup and data retention proof"
+    },
+    {
+      "file": "round3-uninstall-round3-forced.json",
+      "sizeBytes": 357,
+      "sha256": "961d532fcc53aef4957c59674c6a54069fa2b1c0a2d8cafe3aa2e375c2d5a000",
+      "purpose": "real fixture cleanup and data retention proof"
+    },
+    {
+      "file": "round3-uninstall-round3.json",
+      "sizeBytes": 343,
+      "sha256": "2c3ef707e4a6dd3ec06c645efb462ed7593259f901caf0bff7b575620752bc6a",
+      "purpose": "real fixture cleanup and data retention proof"
+    },
+    {
+      "file": "round3-update.log",
+      "sizeBytes": 8971,
+      "sha256": "ad7910f2e23cd8d6802808c5ae613ae72e38b60ee7638aa17dbd0525cbf8d1d9",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    },
+    {
+      "file": "round3-upload-progress.log",
+      "sizeBytes": 368,
+      "sha256": "c8f9a4a1308507e07a25f8f77ee45790001803e9087ef84dfd9e5ff1ced8cb6e",
+      "purpose": "acceptance evidence or diagnostic (see report and summary)"
+    }
+  ],
+  "primaryConclusions": [
+    "round3-summary.json",
+    "round3-chain-stable-complete.json",
+    "round3-chain-forced.json",
+    "round3-chain-negative.json",
+    "round3-nas-final.json"
+  ],
+  "historicalEvidence": [
+    "validation.json",
+    "e2e-result.json",
+    "legacy-tar.json"
+  ],
+  "excluded": "target binaries; sandbox data; workstation-private harnesses; raw JVM environment logs; index self-hash"
+}

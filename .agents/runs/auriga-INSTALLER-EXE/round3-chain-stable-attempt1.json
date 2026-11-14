@@ -1,0 +1,71 @@
+{
+  "startedAt": "2026-11-14T16:58:46.932Z",
+  "mode": "stable",
+  "checks": [
+    {
+      "name": "real-exe-install",
+      "at": "2026-11-14T16:59:05.721Z",
+      "reused": true,
+      "version": "0.1.3-e2e.1"
+    }
+  ],
+  "releases": [],
+  "markerBefore": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f",
+  "testOnlyRateBytesPerSecond": 4194304,
+  "error": {
+    "message": "page.waitForResponse: Timeout 300000ms exceeded while waiting for event \"response\"",
+    "stack": "page.waitForResponse: Timeout 300000ms exceeded while waiting for event \"response\"\n    at Object.publish (D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\.agents\\runs\\auriga-INSTALLER-EXE\\nas-browser.mjs:146:29)\n    at async publish (D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\.agents\\runs\\auriga-INSTALLER-EXE\\nas-chain.mjs:113:3)\n    at async file:///D:/project/chatgpt/agent-wt/auriga-INSTALLER-EXE-codex/.agents/runs/auriga-INSTALLER-EXE/nas-chain.mjs:213:5"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/login/providers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1daff-91f7-7846-b5ba-16eb8934e43c/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1daff-91f7-7846-b5ba-16eb8934e43c/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource/v1/admin/desktop/releases",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db00-aa57-767c-93ce-af3a8f8b7f29/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db00-aa57-767c-93ce-af3a8f8b7f29/advance",
+      "status": 200
+    }
+  ]
+}

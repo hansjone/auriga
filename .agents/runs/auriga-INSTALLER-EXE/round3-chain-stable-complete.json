@@ -1,0 +1,38 @@
+{
+  "passed": true,
+  "versionBefore": "0.1.3-e2e.1",
+  "versionAfter": "0.1.3-e2e.2",
+  "releaseSequence": 106,
+  "sources": [
+    "round3-chain-stable-upload.json",
+    "round3-chain-stable.json",
+    "round3-chain-stable-apply.json",
+    "round3-launch-stable-resume.log"
+  ],
+  "rangeProof": {
+    "path": "/api/resource/v1/desktop/packages/106",
+    "channel": "stable",
+    "range": "bytes=719179-",
+    "status": 206,
+    "contentRange": "bytes 719179-233455301/233455302"
+  },
+  "checks": [
+    "cancel-retains-partial",
+    "normal-page-available",
+    "portal-exe-entry",
+    "process-restart-retains-progress",
+    "real-exe-install",
+    "refresh-keeps-download",
+    "reuse-already-published-stable-release",
+    "startup-auto-discovery",
+    "real-exe-install",
+    "reuse-complete-NAS-download-after-test-poll-timeout",
+    "queued-stable",
+    "real-launcher-upgraded",
+    "normal-page-upgraded",
+    "existing-profile-local-session-identity-preserved"
+  ],
+  "fixtureTimeoutResolved": "30s state request timed out during synchronous package verification. Continued using complete SHA-verified NAS bytes with 600s test request timeout; no reinstall or repeated full download.",
+  "dataMarkerPreserved": true,
+  "existingProfileIdentityPreserved": true
+}

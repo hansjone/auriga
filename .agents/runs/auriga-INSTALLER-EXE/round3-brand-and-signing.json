@@ -1,0 +1,28 @@
+{
+  "recordedAt": "2026-11-14T18:43:06.847478+00:00",
+  "iconPath": "assets/brand/auriga-dsh.ico",
+  "worktreeAndPortalHomeGitBlob": "ed5b3e04f0e1f072fbbab712e637c9639b4db623",
+  "authenticode": "NotSigned",
+  "privateKeyPurchasedOrRequested": false,
+  "costReferenceCheckedAt": "2026-11-15",
+  "references": [
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-change-sku",
+      "basicUsdPerMonth": 9.99,
+      "includedMonthlySignatures": 5000,
+      "subjectTo": "region / identity validation / paid Azure subscription"
+    },
+    {
+      "url": "https://www.digicert.com/signing/code-signing-certificates",
+      "annualSubscriptionUsdExamples": [
+        696,
+        972
+      ],
+      "subjectTo": "configuration / current quote / tax / key storage"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation",
+      "note": "Unsigned files may show unknown publisher / Windows protected your PC; signing does not immediately establish reputation."
+    }
+  ]
+}

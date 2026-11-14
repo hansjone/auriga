@@ -1,0 +1,11 @@
+[18:28:31] ref=8b890cb9 commit=8b890cb9093f72c445e6f17960dbc404362257f2 services=edge step=upload
+[18:28:36] 上传 58.7 MiB 到 /share/CACHEDEV1_DATA/Container/auriga-test/dev-8b890cb9-edge …
+node.exe : images-8b890cb9-edge.tar.gz.part000 ok (50331648 B)
+所在位置 行:4 字符: 1
++ & $deploymentNode D:/project/chatgpt/.agents/nas/auriga-dev-deploy/de ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (images-8b890cb9...ok (50331648 B):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+images-8b890cb9-edge.tar.gz.part001 ok (11182023 B)
+[18:31:24] 上传完成

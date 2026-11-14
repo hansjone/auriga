@@ -1,0 +1,15 @@
+$
+>>> [2026-11-15T00:55:50] {"String":"renew_id=$(/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker ps -q --filter label=com.docker.compose.service=collab-renew --filter label=com.docker.compose.project=auriga-nas-test); /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker top "$renew_id"; /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker logs --since 30m "$renew_id" 2>&1 | tail -35; /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker exec -u 0 "$renew_id" sh -c 'find /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-runtime -name .pending; find /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-operations -name .pending; ls -lt /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-operations | head -8'", "Match":"[hansjone@HANSJONE127 ~]#", "Timeout":0}
+renew_id=$(/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker ps -q --filter label=com.docker.compose.service=collab-renew --filter label=com.docker.compose.project=auriga-nas-test); /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker top "$renew_id"; /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker logs --since 30m "$renew_id" 2>&1 | tail -35; /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker exec -u 0 "$renew_id" sh -c 'find /share/CACHEDEV1_DATA/Contai
+ner/auriga-test/R2/auriga-data-r4/config/collab-runtime -name .pending; find /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-operations -name .pending; ls -lt /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/collab-operations | head -8'
+PID                 Uid                 VmSize              Stat                Command
+17562               admin               2012                S                   /bin/sh /share/CACHEDEV1_DATA/Container/auriga-test/R9/release-agent-8be9394/bundle/deploy-nas/scripts/renew-collab-loop.sh
+17839               admin               19304               S                   /share/CACHEDEV1_DATA/Container/auriga-test/R9/release-agent-8be9394/bundle/deploy-nas/bin/auriga-nas-bootstrap collab-rotation renew -data /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4 -recipe /share/CACHEDEV1_DATA/Container/auriga-test/R9/release-agent-8be9394/bundle/deploy-nas -image sha256:70cff9e6055ba9939346b02c2bcfc78178389e7f5a3ab60efa6c03340d77a420 -operator-jar-sha256 527ad973dc74f7b9231414d2d0f87525392f856f94af89e4cae125970f75f278
+total 792
+-rw-------+  1 root root 16092 Nov 14 12:14 activation-network-52f74fcef6ee9c37178a275d0069e5db792013875dd50e858a93d70220411561.json
+-rw-------+  1 root root 11692 Nov 14 12:13 activation-collab-f90222c55faacb0e650cf1d5d1cb79b0b16c4c4043585d1607acedfa51a434a4.json
+drwx------+ 21 root root  4096 Nov 14 12:13 gateway
+-rw-------+  1 root root    99 Nov 14 12:13 current.json
+drwx------+ 27 root root  4096 Nov 14 12:13 installs
+drwx------+ 28 root root  4096 Nov 14 12:13 releases
+-rw-------+  1 root root 15919 Nov 14 06:06 activation-network-dce740c52d3ab3e886fb4c449e166ead915248e9db5569eb85b278bdc3fa6b3e.json

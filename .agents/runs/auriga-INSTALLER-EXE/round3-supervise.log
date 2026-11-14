@@ -1,0 +1,17 @@
+powershell.exe : node.exe : Error: automatic startup discovery timeout: {"platformOrigin":"http://10.0.0.133:8080","dep
+loyment":"cloud",
+所在位置 行:27 字符: 1
++ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .agents/runs/ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (node.exe : Erro...yment":"cloud",:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+"desktop":{"enabled":true,"channel":"stable","available":null,"required":false,"phase":"idle","busy":false,"downloading
+":false,"downloadedBytes":0,"totalBytes":0,"error":null,"restartRequired":false},"mode":"connect","activeOrigin":"http:
+//10.0.0.133:8080","deviceName":null}
+At D:\project\chatgpt\agent-wt\auriga-INSTALLER-EXE-codex\.agents\runs\auriga-INSTALLER-EXE\supervise-chain.ps1:13 char
+:1
++ & $node24 "$runs/nas-chain.mjs" stable *> "$runs/round3-chain-stable. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Error: automati...viceName":null}:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError

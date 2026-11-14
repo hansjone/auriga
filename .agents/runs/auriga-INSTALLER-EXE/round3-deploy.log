@@ -1,0 +1,79 @@
+[15:45:34] ref=origin/agent/codex/auriga-INSTALLER-EXE commit=5a0475c7ddb335be7b083d41764ae1552985448a services=edge,platform step=all
+[15:45:35] WSL 构建中（每个服务日志在 build-<服务>.log）…
+node.exe : wsl: �hKm0R localhost �NtM�n�FO*g\��P0R WSL0NAT !j_N�v WSL
+所在位置 行:3 字符: 1
++ & $node24 D:/project/chatgpt/.agents/nas/auriga-dev-deploy/deploy.mjs ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (wsl: �hKm0..._N�v WSL :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+N/ec localhost �Nt0
+
+[16:34:01] 构建完成 {"edge":"sha256:3131efe04ae7f06850dd58cb295d8168ca93dc82fcc804acdc49ea2996a36793","platform":"sha256:70cff9e6055ba9939346b02c2bcfc78178389e7f5a3ab60efa6c03340d77a420"}
+[16:34:06] 上传 264.1 MiB 到 /share/CACHEDEV1_DATA/Container/auriga-test/dev-5a0475c7-edge-platform …
+images-5a0475c7-edge-platform.tar.gz.part000 ok (50331648 B)
+images-5a0475c7-edge-platform.tar.gz.part001 ok (50331648 B)
+images-5a0475c7-edge-platform.tar.gz.part002 ok (50331648 B)
+images-5a0475c7-edge-platform.tar.gz.part003 ok (50331648 B)
+images-5a0475c7-edge-platform.tar.gz.part004 ok (50331648 B)
+images-5a0475c7-edge-platform.tar.gz.part005 ok (25284311 B)
+[16:46:20] 上传完成
+[16:46:54] NAS 脚本已写入，后台启动 …
+[16:47:48] 部署中…
+[16:48:29] 部署中…
+[16:49:04] 部署中…
+[16:49:39] 部署中…
+[16:50:15] 部署中…
+[16:50:49] 部署中…
+[16:51:25] 部署中…
+[16:52:01] 部署中…
+[16:52:36] 部署中…
+[16:53:12] 部署中…
+[16:53:47] 部署中…
+$
+ALTER ROLE
+ALTER ROLE
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+DO
+CREATE SCHEMA
+psql:/docker-entrypoint-initdb.d/01-roles.sql:74: NOTICE:  schema "resource" already exists, skipping
+GRANT
+GRANT
+ALTER ROLE
+ALTER ROLE
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+starting project auriga-nas-test (no build, no pull)
+time="2026-11-15T00:49:22+08:00" level=warning msg="Found orphan containers ([auriga-nas-test-litellm-init-1 auriga-nas-test-litellm-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+time="2026-11-15T00:52:27+08:00" level=warning msg="Found orphan containers ([auriga-nas-test-litellm-init-1 auriga-nas-test-litellm-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+message_network=SERVICES_READY announcement_verification=pending; configure AURIGA_NETWORK_ANNOUNCEMENT_CHECK with an authorized read-only consumer check
+start requested; use status.sh / smoke.sh to verify
+after first seed start, set AURIGA_PLATFORM_SEED=false in stack.env and re-render
+emergency credentials require stdout to be a terminal; run sh deploy-nas/scripts/emergency.sh show in a private TTY (do not pipe or redirect)
+emergency handoff pending; in a private TTY run sh deploy-nas/scripts/emergency.sh show (requires root or Docker permission)
+PUBLIC_START_RETURNED
+network|3131efe04ae7|Up 10 seconds (healthy)
+collab|70cff9e6055b|Up 56 seconds (healthy)
+network-broker|3131efe04ae7|Up About a minute
+agent|c11e959eeadc|Up 2 minutes
+ai-relay|3131efe04ae7|Up 2 minutes
+edge|3131efe04ae7|Up 2 minutes (healthy)
+egress|3131efe04ae7|Up 4 minutes (healthy)
+panel-renew|3131efe04ae7|Up 4 minutes (healthy)
+platform|70cff9e6055b|Up 3 minutes (healthy)
+bifrost|abcaedb3836c|Up 16 hours (healthy)
+collab-renew|424dc47e971b|Up 11 hours
+postgres|82903352d6fa|Up 2 days (healthy)
+alloy|622a4a32abf8|Up 10 days (healthy)
+registry|26b2eb03618e|Up 10 days
+nats|8b9f712ae214|Up 10 days (healthy)
+litellm|9ab6d30d9c82|Up 12 days (healthy)
+loki|fd1a879e62ca|Up 2 weeks (healthy)
+DEPLOY_EXIT=0
+[16:54:31] 收据 D:\project\chatgpt\.agents\runs\auriga-nasdeploy-5a0475c7-edge-platform-20261114T164631.json
+wsl: �hKm0R localhost �NtM�n�FO*g\��P0R WSL0NAT !j_N�v WSL
+N/ec localhost �Nt0
+
+[16:55:05] 已清理本机镜像包与 WSL 镜像（--keep 可保留）
+[16:55:05] 完成。接着按 README 第 4 节做正常页面实测，再把入口/变化/待验点告诉用户。

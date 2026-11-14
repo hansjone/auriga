@@ -1,0 +1,5 @@
+{"stage":"shell_identity","phase":"end","result":"failure","state":"unreachable","reason":"shell_restarted","correlationId":"bdc3eca7-1c3e-4131-b0e0-eb6e1c8ea488","service":"shell-auth","level":"WARN","timestamp":"2026-11-14T16:26:36.104Z"}
+Auriga 平台认证暂不可用，继续使用本地 DSH。
+共享技能已停用，建议新建会话。
+dsh web: http://127.0.0.1:61455/?token=REDACTED
+[desktop-network] {"path":"/api/resource/v1/desktop/latest","channel":"stable","range":null,"status":502,"contentRange":null}

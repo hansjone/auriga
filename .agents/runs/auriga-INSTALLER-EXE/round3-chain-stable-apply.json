@@ -1,0 +1,89 @@
+{
+  "startedAt": "2026-11-14T17:57:58.865Z",
+  "mode": "stable-apply",
+  "checks": [
+    {
+      "name": "real-exe-install",
+      "at": "2026-11-14T17:58:01.568Z",
+      "reused": true,
+      "version": "0.1.3-e2e.1"
+    },
+    {
+      "name": "reuse-complete-NAS-download-after-test-poll-timeout",
+      "at": "2026-11-14T17:58:02.726Z",
+      "sizeBytes": 233455302,
+      "sha256": "aa1bf9928dbb3ee266cfbeddb63e4402f745af9316c615d25c408a5c18657f48"
+    },
+    {
+      "name": "queued-stable",
+      "at": "2026-11-14T17:59:30.172Z",
+      "installed": "0.1.3-e2e.1",
+      "desktop": {
+        "enabled": true,
+        "channel": "stable",
+        "available": null,
+        "required": false,
+        "phase": "ready",
+        "busy": false,
+        "downloading": false,
+        "downloadedBytes": 233455302,
+        "totalBytes": 233455302,
+        "error": null,
+        "restartRequired": true
+      }
+    },
+    {
+      "name": "real-launcher-upgraded",
+      "at": "2026-11-14T18:03:55.525Z",
+      "installed": "0.1.3-e2e.2",
+      "install": {
+        "dataHome": "D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\.agents\\runs\\auriga-INSTALLER-EXE\\sandbox\\round3\\data",
+        "current": "0.1.3-e2e.2-dsh0.2.1-rc.3-26d0ebd91462",
+        "previous": "0.1.3-e2e.1-dsh0.2.1-rc.3-289bdc6a4f68"
+      },
+      "markerSha256": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f"
+    },
+    {
+      "name": "normal-page-upgraded",
+      "at": "2026-11-14T18:03:57.477Z",
+      "text": "新会话\nCtrl\n+\nAlt\n+\nN\nAuriga DSH\n插件\n自动化任务\n更多\n工作区\n默认工作区\n新会话\n更多\n需要重新登录平台关闭\n平台连接暂不可用\n在会话中使用 Team 工具\n系统收件箱"
+    },
+    {
+      "name": "existing-profile-local-session-identity-preserved",
+      "at": "2026-11-14T18:03:57.478Z",
+      "preserved": true
+    }
+  ],
+  "releases": [],
+  "markerBefore": "53d300d54e15fb52697d36fe9d567013b75dd73a137f1a1804a60d1c7736654f",
+  "testOnlyRateBytesPerSecond": 4194304,
+  "completedAt": "2026-11-14T18:03:57.479Z",
+  "passed": true,
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/iam/v1/login/providers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db35-8b2a-7e8b-9203-66fb0c5d6b25/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/login/transactions/01a1db35-8b2a-7e8b-9203-66fb0c5d6b25/advance",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/iam/v1/admin/session/csrf-tokens",
+      "status": 200
+    }
+  ]
+}

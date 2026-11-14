@@ -1,0 +1,55 @@
+{
+  "red": {
+    "command": ".\\mvnw.cmd -pl services/resource/impl -am '-Dtest=DesktopReleasesTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dfrontend.skip=true' test",
+    "exitCode": 1,
+    "counts": {
+      "tests": "10",
+      "failures": "0",
+      "errors": "1",
+      "skipped": "0"
+    },
+    "case": "httpPublishAcceptsSignedNullableRollbackPolicy",
+    "reason": "HTTP parser rejected valid schema 2 rollbackFrom:null (common.validation_failed)"
+  },
+  "green": {
+    "args": [
+      "D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\mvnw.cmd",
+      "-pl",
+      "services/resource/impl",
+      "-am",
+      "-Dtest=DesktopReleasesTest,ResourceBodyTest",
+      "-Dsurefire.failIfNoSpecifiedTests=false",
+      "-Dfrontend.skip=true",
+      "test"
+    ],
+    "exitCode": 0,
+    "suites": [
+      {
+        "name": "auriga.resource.DesktopReleasesTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "auriga.resource.ResourceBodyTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ]
+  },
+  "formatCheck": {
+    "args": [
+      "D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\mvnw.cmd",
+      "-pl",
+      "services/resource/impl",
+      "-am",
+      "spotless:check",
+      "-DspotlessFiles=.*ResourceBody.java,.*DesktopController.java,.*DesktopReleasesTest.java,.*ResourceBodyTest.java",
+      "-Dfrontend.skip=true"
+    ],
+    "exitCode": 0
+  }
+}

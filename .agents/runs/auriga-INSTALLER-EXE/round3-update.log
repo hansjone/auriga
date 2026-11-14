@@ -1,0 +1,193 @@
+TAP version 13
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-21zrri\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-21zrri\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-SjWhoy\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-PRVC0d\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-m2ne37\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-m2ne37\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-DWzOYy\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-DWzOYy\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ov8ECl\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Subtest: 签名、篡改、降级、到期、未来、序号重放均拒绝
+ok 1 - 签名、篡改、降级、到期、未来、序号重放均拒绝
+  ---
+  duration_ms: 16.9345
+  type: 'test'
+  ...
+# Subtest: 更新只连接固定 HTTPS origin
+ok 2 - 更新只连接固定 HTTPS origin
+  ---
+  duration_ms: 8.4458
+  type: 'test'
+  ...
+# Subtest: 同一安装目录拒绝同时启动第二个 DSH，退出后可重开
+ok 3 - 同一安装目录拒绝同时启动第二个 DSH，退出后可重开
+  ---
+  duration_ms: 12.0468
+  type: 'test'
+  ...
+# Subtest: 成功更新保留数据并提示重启
+ok 4 - 成功更新保留数据并提示重启
+  ---
+  duration_ms: 671.9333
+  type: 'test'
+  ...
+# Subtest: badSha 拒绝并保持旧版且不留新版本目录
+ok 5 - badSha 拒绝并保持旧版且不留新版本目录
+  ---
+  duration_ms: 468.5798
+  type: 'test'
+  ...
+# Subtest: badId 拒绝并保持旧版且不留新版本目录
+ok 6 - badId 拒绝并保持旧版且不留新版本目录
+  ---
+  duration_ms: 379.2565
+  type: 'test'
+  ...
+# Subtest: smokeFails 拒绝并保持旧版且不留新版本目录
+ok 7 - smokeFails 拒绝并保持旧版且不留新版本目录
+  ---
+  duration_ms: 548.207
+  type: 'test'
+  ...
+# Subtest: 下载中断后重试成功；关闭检查后不请求
+ok 8 - 下载中断后重试成功；关闭检查后不请求
+  ---
+  duration_ms: 638.6667
+  type: 'test'
+  ...
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ov8ECl\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-yJvZxw\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-eGov47\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-eGov47\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-BsNbZG\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-5g2ME8\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-5g2ME8\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-RM3PsB\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-dHj1Bz\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XAz8V2\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Subtest: 真实子进程被杀后锁失效，下次更新成功并清理残留
+ok 9 - 真实子进程被杀后锁失效，下次更新成功并清理残留
+  ---
+  duration_ms: 785.558
+  type: 'test'
+  ...
+# Subtest: 启动前清理空锁等崩溃残留；卸载删除下载残留且保留用户数据
+ok 10 - 启动前清理空锁等崩溃残留；卸载删除下载残留且保留用户数据
+  ---
+  duration_ms: 244.0924
+  type: 'test'
+  ...
+# Subtest: Range 续传拼接完整包；忽略 Range 时安全重下；错误 Range 拒绝
+ok 11 - Range 续传拼接完整包；忽略 Range 时安全重下；错误 Range 拒绝
+  ---
+  duration_ms: 15.0493
+  type: 'test'
+  ...
+# Subtest: 同版本同包更高序号续期不会重复更新，周期检查不重新哈希安装树
+ok 12 - 同版本同包更高序号续期不会重复更新，周期检查不重新哈希安装树
+  ---
+  duration_ms: 499.7671
+  type: 'test'
+  ...
+# Subtest: HTTP requires confirmed literal IP binding; domain HTTP stays forbidden
+ok 13 - HTTP requires confirmed literal IP binding; domain HTTP stays forbidden
+  ---
+  duration_ms: 7.4576
+  type: 'test'
+  ...
+# Subtest: HTTP install confirmation persists once and updater uses it
+ok 14 - HTTP install confirmation persists once and updater uses it
+  ---
+  duration_ms: 211.5184
+  type: 'test'
+  ...
+# Subtest: a higher sequence cannot roll back a previously seen version
+ok 15 - a higher sequence cannot roll back a previously seen version
+  ---
+  duration_ms: 1.1876
+  type: 'test'
+  ...
+# Subtest: 签名渠道、最低版本、灰度和精确来源回滚授权
+ok 16 - 签名渠道、最低版本、灰度和精确来源回滚授权
+  ---
+  duration_ms: 6.3166
+  type: 'test'
+  ...
+# Subtest: 取消保留部分字节，刷新状态仍显示下载中，重建更新器后跨进程 Range 续传
+ok 17 - 取消保留部分字节，刷新状态仍显示下载中，重建更新器后跨进程 Range 续传
+  ---
+  duration_ms: 693.4282
+  type: 'test'
+  ...
+# Subtest: 强制最低版本绕过零灰度及检查偏好，不能关闭或切渠道逃避
+ok 18 - 强制最低版本绕过零灰度及检查偏好，不能关闭或切渠道逃避
+  ---
+  duration_ms: 316.5301
+  type: 'test'
+  ...
+# Subtest: 普通零灰度不提供更新，下载完成时撤回不会安装
+ok 19 - 普通零灰度不提供更新，下载完成时撤回不会安装
+  ---
+  duration_ms: 426.7112
+  type: 'test'
+  ...
+# Subtest: 启动检查并在4至8小时内带抖动重排，关闭取消定时器
+ok 20 - 启动检查并在4至8小时内带抖动重排，关闭取消定时器
+  ---
+  duration_ms: 408.9053
+  type: 'test'
+  ...
+# Subtest: 仅见过失败或灰度版本的客户端可接受更高序号的签名回滚替代版，但不能借此降低已装版本
+ok 21 - 仅见过失败或灰度版本的客户端可接受更高序号的签名回滚替代版，但不能借此降低已装版本
+  ---
+  duration_ms: 2.2944
+  type: 'test'
+  ...
+1..21
+# tests 21
+# suites 0
+# pass 21
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6593.5225

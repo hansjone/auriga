@@ -1,0 +1,32 @@
+$
+ReadTimeout:
+Pattern not detected: '\\[hansjone@HANSJONE127\\ \\~\\]\\$' in output.
+
+Things you might try to fix this:
+1. Explicitly set your pattern using the expect_string argument.
+2. Increase the read_timeout to a larger value.
+
+You can also look at the Netmiko session_log or debug log for more information.
+
+
+--- session log ---
+[hansjone@HANSJONE127 ~]$
+[hansjone@HANSJONE127 ~]$
+[hansjone@HANSJONE127 ~]$ terminal length 0
+-sh: terminal: command not found
+[hansjone@HANSJONE127 ~]$
+[hansjone@HANSJONE127 ~]$ /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker ps --filter label=com.docker.compose.service=collab-renew --format {{.ID}}
+e53442658ef9
+[hansjone@HANSJONE127 ~]$
+[hansjone@HANSJONE127 ~]$ {{.Image}}
+-sh: {{.Image}}: command not found
+[hansjone@HANSJONE127 ~]$
+[hansjone@HANSJONE127 ~]$ {{.Names}}; grep -E ^AURIGA_IMAGE_PLATFORM=|^AURIGA_INSTALLER_IMAGE= /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/stack.env
+-sh: {{.Names}}: command not found
+-sh: ^AURIGA_INSTALLER_IMAGE=: command not found
+python : NAS_EXEC_FAILED
+所在位置 行:2 字符: 1
++ python -I D:/project/chatgpt/.agents/nas/nas_exec.py '/share/CACHEDEV ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (NAS_EXEC_FAILED:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError

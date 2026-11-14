@@ -1,0 +1,8 @@
+$
+>>> [2026-11-15T02:26:11] {"String":"renew_id=$(/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker ps -q --filter label=com.docker.compose.service=collab-renew --filter label=com.docker.compose.project=auriga-nas-test); test -n "$renew_id" && /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker restart "$renew_id" && /share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker top "$renew_id"; grep '^AURIGA_IMAGE_PLATFORM=' /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/stack.env", "Match":"[hansjone@HANSJONE127 ~]#", "Timeout":0}
+e53442658ef9
+PID                 Uid                 VmSize              Stat                Command
+27667               admin               1952                S                   /bin/sh /share/CACHEDEV1_DATA/Container/auriga-test/R9/release-agent-8be9394/bundle/deploy-nas/scripts/renew-collab-loop.sh
+28051               admin               16032               S                   /share/CACHEDEV1_DATA/Container/auriga-test/R9/release-agent-8be9394/bundle/deploy-nas/bin/auriga-nas-bootstrap collab-rotation renew -data /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4 -recipe /share/CACHEDEV1_DATA/Container/auriga-test/R9/release-agent-8be9394/bundle/deploy-nas -image sha256:940cd2331286c592b9fe676e7e843ac0cb7aea7fae65cdb02b1afa35080752fb -operator-jar-sha256 527ad973dc74f7b9231414d2d0f87525392f856f94af89e4cae125970f75f278
+28102               10001               17044               S                   /tmp/auriga-base-verifier-2755896305/verifier collab-base /share/CACHEDEV1_DATA/Container/auriga-test/R2/auriga-data-r4/config/materials
+AURIGA_IMAGE_PLATFORM=sha256:940cd2331286c592b9fe676e7e843ac0cb7aea7fae65cdb02b1afa35080752fb

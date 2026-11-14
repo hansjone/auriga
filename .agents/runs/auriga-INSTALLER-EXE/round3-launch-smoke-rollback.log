@@ -1,0 +1,10 @@
+[desktop-network] {"path":"/api/resource/v1/desktop/latest","channel":"beta","range":null,"status":200,"contentRange":null}
+Auriga DSH 更新失败，已保留旧版。[desktop.smoke_failed]
+{"stage":"shell_identity","phase":"end","result":"failure","state":"unreachable","reason":"shell_restarted","correlationId":"4348fcc1-40bc-4125-85e7-beefc02970bc","service":"shell-auth","level":"WARN","timestamp":"2026-11-14T19:31:26.966Z"}
+Auriga 平台认证暂不可用，继续使用本地 DSH。
+共享技能已停用，建议新建会话。
+dsh web: http://127.0.0.1:61661/?token=REDACTED
+[desktop-network] {"path":"/api/resource/v1/desktop/latest","channel":"beta","range":null,"status":200,"contentRange":null}
+[auriga-dsh] local route failure {"operation":"status","category":"unexpected"}
+[auriga-dsh] local route failure {"operation":"status","category":"unexpected"}
+[desktop-network] {"path":"/api/resource/v1/desktop/latest","channel":"beta","range":null,"status":200,"contentRange":null}

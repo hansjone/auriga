@@ -1,0 +1,21 @@
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 1830 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.42 kB │ gzip:   0.30 kB
+dist/assets/index-2TP1mHET.css  399.20 kB │ gzip:  55.25 kB
+dist/assets/index-440ov3ui.js   967.15 kB │ gzip: 315.67 kB
+node.exe :
+所在位置 行:2 字符: 1
++ & "$env:LOCALAPPDATA/Programs/DeepSeek Harness/resources/runtime/prim ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-m
+anualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 17.80s

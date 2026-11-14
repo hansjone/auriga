@@ -1,0 +1,57 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/iam/v1/login/providers",
+    "status": 200
+  },
+  {
+    "method": "POST",
+    "path": "/api/iam/v1/login/transactions",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/iam/v1/login/transactions/01a1db07-676a-7103-911a-6b6abcda1d2f/advance",
+    "status": 200
+  },
+  {
+    "method": "POST",
+    "path": "/api/iam/v1/login/transactions/01a1db07-676a-7103-911a-6b6abcda1d2f/advance",
+    "status": 200
+  },
+  {
+    "method": "POST",
+    "path": "/api/iam/v1/admin/session/csrf-tokens",
+    "status": 200
+  },
+  {
+    "method": "GET",
+    "path": "/api/resource/v1/admin/desktop/releases",
+    "status": 200
+  },
+  {
+    "method": "POST",
+    "path": "/api/iam/v1/admin/session/csrf-tokens",
+    "status": 200
+  },
+  {
+    "method": "GET",
+    "path": "/api/iam/v1/me",
+    "status": 200
+  },
+  {
+    "method": "POST",
+    "path": "/api/iam/v1/login/transactions",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/iam/v1/login/transactions/01a1db07-6e75-735b-a69a-f37498c7505e/advance",
+    "status": 200
+  },
+  {
+    "method": "POST",
+    "path": "/api/iam/v1/login/transactions/01a1db07-6e75-735b-a69a-f37498c7505e/advance",
+    "status": 200
+  }
+]
