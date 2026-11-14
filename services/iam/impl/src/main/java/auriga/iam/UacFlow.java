@@ -176,6 +176,7 @@ final class UacFlow {
                 }
                 store.save("uac_challenge", old);
               }
+            replaceBoundTransactions(previous, audience, origin);
           }
           ObjectNode tx =
               transaction(
@@ -275,6 +276,28 @@ final class UacFlow {
     byte[] raw = new byte[16];
     new SecureRandom().nextBytes(raw);
     return HexFormat.of().formatHex(raw);
+  }
+
+  // Browser records expire before MFA does. Fence successors using the longer-lived
+  // transaction binding even when retention has already removed those records.
+  void replaceBoundTransactions(String binding, String audience, String origin) {
+    for (ObjectNode candidate : store.matching("login_tx", "bindingHash", Secrets.hash(binding))) {
+      ObjectNode tx = store.byId("login_tx", candidate.path("id").asString(), true);
+      if (tx == null
+          || !tx.has("uacPendingAccountId")
+          || !audience.equals(tx.path("audience").asString())
+          || !origin.equals(tx.path("origin").asString())
+          || !Secrets.same(tx.path("bindingHash").asString(), Secrets.hash(binding))) continue;
+      IamError.require(!tx.path("replaced").asBoolean(), "login_tx_finished", 409);
+      tx.put("replaced", true);
+      if ("pending".equals(tx.path("status").asString())) {
+        tx.put("status", "cancelled");
+        tx.remove("uacCredential");
+        tx.remove("pendingProfile");
+        tx.set("step", Json.object("type", "fail", "code", "iam.login_tx_cancelled"));
+      }
+      store.save("login_tx", tx);
+    }
   }
 
   private void replaceTransaction(String id) {

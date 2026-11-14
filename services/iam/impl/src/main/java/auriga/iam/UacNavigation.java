@@ -176,6 +176,7 @@ final class UacNavigation {
                   }
                 }
               }
+            flow.replaceBoundTransactions(old, "portal", origin);
           }
           if (csrf == null) csrf = Secrets.random();
           String binding = Secrets.random(), proof = Secrets.random();

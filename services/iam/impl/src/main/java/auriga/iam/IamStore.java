@@ -140,25 +140,26 @@ public final class IamStore {
     int deleted = 0;
     deleted +=
         jdbc.update(
-            "DELETE FROM iam.login_tx WHERE tenant_id=? AND id IN"
-                + " (SELECT id FROM iam.login_tx WHERE tenant_id=? AND jsonb_exists(data,'uacPendingAccountId') AND expires_at<=?"
-                + " ORDER BY expires_at,id LIMIT 50 FOR UPDATE SKIP LOCKED)",
+            "WITH batch AS MATERIALIZED (SELECT id FROM iam.login_tx WHERE tenant_id=?"
+                + " AND jsonb_exists(data,'uacPendingAccountId') AND expires_at<=?"
+                + " ORDER BY expires_at,id LIMIT 50 FOR UPDATE SKIP LOCKED)"
+                + " DELETE FROM iam.login_tx target USING batch WHERE target.tenant_id=? AND target.id=batch.id",
             TenantContext.require(),
-            TenantContext.require(),
-            java.sql.Timestamp.from(now));
+            java.sql.Timestamp.from(now),
+            TenantContext.require());
     for (String table : List.of("uac_challenge", "uac_navigation", "uac_suppression", "uac_job"))
       deleted +=
           jdbc.update(
-              "DELETE FROM iam."
-                  + table
-                  + " WHERE tenant_id=? AND id IN"
-                  + " (SELECT id FROM iam."
+              // Materialize once: a rescan of a locking LIMIT subquery can select another batch.
+              "WITH batch AS MATERIALIZED (SELECT id FROM iam."
                   + table
                   + " WHERE tenant_id=? AND expires_at<=?"
-                  + " ORDER BY expires_at,id LIMIT 50 FOR UPDATE SKIP LOCKED)",
+                  + " ORDER BY expires_at,id LIMIT 50 FOR UPDATE SKIP LOCKED) DELETE FROM iam."
+                  + table
+                  + " target USING batch WHERE target.tenant_id=? AND target.id=batch.id",
               TenantContext.require(),
-              TenantContext.require(),
-              java.sql.Timestamp.from(now));
+              java.sql.Timestamp.from(now),
+              TenantContext.require());
     var retired =
         jdbc.query(
             "SELECT data::text FROM iam.uac_credential WHERE tenant_id=?"
@@ -169,12 +170,13 @@ public final class IamStore {
     for (var credential : retired) {
       // Retired sessions keep audit metadata but no longer reference a deleted credential.
       jdbc.update(
-          "UPDATE iam.session SET data=data-'uacCredentialId'-'uacSessionBinding'"
-              + " WHERE tenant_id=? AND id IN (SELECT id FROM iam.session WHERE tenant_id=?"
-              + " AND uac_credential_id=?::uuid AND data->>'revoked'='true' LIMIT 50 FOR UPDATE SKIP LOCKED)",
+          "WITH batch AS MATERIALIZED (SELECT id FROM iam.session WHERE tenant_id=?"
+              + " AND uac_credential_id=?::uuid AND data->>'revoked'='true' ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED)"
+              + " UPDATE iam.session target SET data=target.data-'uacCredentialId'-'uacSessionBinding'"
+              + " FROM batch WHERE target.tenant_id=? AND target.id=batch.id",
           TenantContext.require(),
-          TenantContext.require(),
-          credential.path("id").asString());
+          credential.path("id").asString(),
+          TenantContext.require());
       deleted +=
           jdbc.update(
               "DELETE FROM iam.uac_credential c WHERE c.tenant_id=? AND c.id=?::uuid"

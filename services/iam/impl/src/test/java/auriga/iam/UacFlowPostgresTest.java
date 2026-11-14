@@ -27,6 +27,8 @@ import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.env.MockEnvironment;
 import tools.jackson.databind.JsonNode;
@@ -342,6 +344,172 @@ class UacFlowPostgresTest {
       if (verifyRelease.get() != null) verifyRelease.get().countDown();
       worker.destroy();
       server.stop(0);
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+  void reviewN1ReplacementCancelsMfaAfterBrowserRecordsExpire(
+      boolean fromNavigation, boolean toNavigation) throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var provider = store.get("idp_provider", f.provider, true);
+                    provider.withObject("/admission").put("mfa", "always");
+                    store.save("idp_provider", provider);
+                    return null;
+                  }));
+      when(f.hooks.verifyMfa(any(), any())).thenReturn(true);
+      var nav = navigation(f, "true");
+      String binding;
+      LoginManager.Result pending;
+      if (fromNavigation) {
+        var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+        binding = issued.path("transactionCookie").asString();
+        var prepared = prepare(f, nav, issued, "auto", null, null);
+        var verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
+        pending = f.call(() -> nav.finish(prepared, verified, binding)).result();
+      } else {
+        var challenge = f.begin();
+        binding = challenge.binding();
+        f.run();
+        pending = f.complete(challenge);
+      }
+      assertNull(pending.session());
+      assertEquals("platform_totp", pending.transaction().path("step").path("formId").asString());
+      String transaction = pending.transaction().path("id").asString();
+      var independent = f.begin();
+      var otherContexts =
+          f.call(
+              () ->
+                  store.tx(
+                      () ->
+                          List.of(
+                              f.flow.transaction(
+                                  f.provider,
+                                  "login",
+                                  "admin",
+                                  "https://admin.example.com",
+                                  "",
+                                  "",
+                                  null,
+                                  binding),
+                              f.flow.transaction(
+                                  f.provider,
+                                  "login",
+                                  "portal",
+                                  "https://other.example.com",
+                                  "",
+                                  "",
+                                  null,
+                                  binding))));
+      f.time.advance(121);
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    store.cleanUac(f.time.instant());
+                    assertTrue(
+                        store
+                            .matching("uac_navigation", "bindingHash", Secrets.hash(binding))
+                            .isEmpty());
+                    assertTrue(
+                        store
+                            .matching("uac_challenge", "bindingHash", Secrets.hash(binding))
+                            .isEmpty());
+                    assertEquals(
+                        "pending",
+                        store.get("login_tx", transaction, false).path("status").asString());
+                    return null;
+                  }));
+      if (toNavigation) {
+        var input = navigationInput(f, "portal").put("transactionCookie", binding);
+        f.call(() -> nav.issue(input, false));
+      } else {
+        f.call(
+            () ->
+                f.flow.create(
+                    Json.object("providerId", f.provider),
+                    "portal",
+                    "https://portal.example.com",
+                    "127.0.0.1",
+                    binding,
+                    null));
+      }
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var replaced = store.get("login_tx", transaction, false);
+                    assertEquals("cancelled", replaced.path("status").asString());
+                    assertFalse(replaced.has("uacCredential"));
+                    assertFalse(replaced.has("pendingProfile"));
+                    assertTrue(replaced.path("replaced").asBoolean());
+                    for (var other : otherContexts)
+                      assertEquals(
+                          "pending",
+                          store
+                              .get("login_tx", other.path("id").asString(), false)
+                              .path("status")
+                              .asString());
+                    assertEquals(
+                        "pending",
+                        store
+                            .get(
+                                "login_tx",
+                                independent.challenge().path("transactionId").asString(),
+                                false)
+                            .path("status")
+                            .asString());
+                    return null;
+                  }));
+      assertEquals(
+          "iam.login_tx_finished",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              f.login.advance(
+                                  transaction,
+                                  binding,
+                                  Json.object(
+                                      "type",
+                                      "form",
+                                      "formId",
+                                      "platform_totp",
+                                      "values",
+                                      Json.object("otp", "000000")),
+                                  false)))
+              .errorCode()
+              .code());
+      assertTrue(
+          f.call(() -> store.tx(() -> store.matching("session", "accountId", f.account.toString())))
+              .isEmpty());
+      var retry = navigationInput(f, "portal").put("transactionCookie", binding);
+      assertEquals(
+          "iam.login_tx_finished",
+          assertThrows(AurigaException.class, () -> f.call(() -> nav.issue(retry, false)))
+              .errorCode()
+              .code());
+      assertEquals(
+          "iam.login_tx_finished",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              f.flow.create(
+                                  Json.object("providerId", f.provider),
+                                  "portal",
+                                  "https://portal.example.com",
+                                  "127.0.0.1",
+                                  binding,
+                                  null)))
+              .errorCode()
+              .code());
     }
   }
 
@@ -1801,6 +1969,50 @@ class UacFlowPostgresTest {
       assertEquals(
           "001AB",
           f.read(qr.session().session().path("sessionId").asString()).path("empNo").asString());
+    }
+  }
+
+  @Test
+  void retentionBatchIsBoundedWithNestedLoopPlans() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var tables =
+                        List.of(
+                            "login_tx",
+                            "uac_challenge",
+                            "uac_navigation",
+                            "uac_suppression",
+                            "uac_job");
+                    for (String table : tables)
+                      for (int i = 0; i < 61; i++)
+                        store.insert(
+                            table,
+                            UUID.randomUUID().toString(),
+                            Json.object(
+                                "bindingHash",
+                                "expired",
+                                "providerId",
+                                f.provider,
+                                "uacPendingAccountId",
+                                f.account.toString(),
+                                "nextAt",
+                                f.time.instant().toString()),
+                            f.time.instant().minusSeconds(1));
+                    store.networkJdbc().execute("SET LOCAL enable_hashjoin=off");
+                    store.networkJdbc().execute("SET LOCAL enable_mergejoin=off");
+                    store.networkJdbc().execute("SET LOCAL enable_material=off");
+                    for (String table : tables)
+                      assertEquals(
+                          61, store.matching(table, "bindingHash", "expired").size(), table);
+                    assertEquals(250, store.cleanUac(f.time.instant()));
+                    for (String table : tables)
+                      assertEquals(
+                          11, store.matching(table, "bindingHash", "expired").size(), table);
+                    return null;
+                  }));
     }
   }
 
