@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createRequire } from 'node:module';
-import { contractFile } from './schema.mjs';
+import { contractFile, valid } from './schema.mjs';
 import { boundedBody } from './platform.mjs';
 import { safePath } from './vault.mjs';
 const packaged = existsSync(
@@ -131,13 +131,36 @@ export class NetworkProxy {
       signal.throwIfAborted();
       this.host.resolve(owner, input.executionContextId, 'session');
       this.check(record);
+      const registration = record.registration;
+      if (
+        !valid('ShellAuthNetworkRegistration', registration) ||
+        registration.tenant !== context.identity.tenantId ||
+        registration.device !== context.identity.deviceId ||
+        registration.realm !== this.config.realm ||
+        BigInt(registration.realm) > 18446744073709551615n ||
+        BigInt(registration.node) > 18446744073709551615n ||
+        registration.systemAddress !==
+          `aur1:${BigInt(registration.realm).toString(16)}.${BigInt(registration.node).toString(16)}.0`
+      )
+        throw fail();
       const stream = this.streams.create(context, owner, () => {
         record.streams.delete(stream.id);
         if (!record.streams.size) this.closeLink(record);
       });
       stream.executionContextId = execution.id;
       record.streams.add(stream.id);
-      return { statusCode: 200, body: { streamId: stream.id } };
+      return {
+        statusCode: 200,
+        body: {
+          streamId: stream.id,
+          registration: { ...registration },
+          binding: {
+            executionContextId: execution.id,
+            shellEpoch: context.epoch,
+            revision: context.revision,
+          },
+        },
+      };
     }
     if (definition.operation === 'network_send') {
       const stream = this.streams.get(input.streamId, owner),

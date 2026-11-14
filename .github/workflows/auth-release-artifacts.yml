@@ -1,0 +1,42 @@
+name: Shared authentication release artifacts
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  produce:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - run: pnpm install --frozen-lockfile
+        shell: bash
+      - name: Build broker and helper exactly once
+        run: node clients/shell-auth/build.mjs dist/broker
+      - name: Package plugin twice from identical broker bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=0.0.0-ci
+          if [[ "$GITHUB_REF_NAME" == plugin-v* ]]; then version="${GITHUB_REF_NAME#plugin-v}"; fi
+          node scripts/plugin/package.mjs --version "$version" --broker-artifact dist/broker --out dist/plugin
+          node scripts/plugin/package.mjs --version "$version" --broker-artifact dist/broker --out target/plugin-rebuild
+          cmp "dist/plugin/auriga-dsh-$version.tgz" "target/plugin-rebuild/auriga-dsh-$version.tgz"
+          (cd dist/plugin && sha256sum -c *.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: auth-broker
+          path: dist/broker/
+          include-hidden-files: true
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: auriga-dsh
+          path: dist/plugin/*
+          if-no-files-found: error

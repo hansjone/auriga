@@ -1839,3 +1839,46 @@ test('K2 standard devices have a fixed AI resource, token-possession revocation 
   const proto = read('proto/auriga/iam/v1/iam.proto');
   assert.match(proto, /rpc VerifyStandardDeviceAiAccess\(/);
 });
+
+test('AUTH-K3 registration and ticket wire shared vectors freeze strict output boundaries', () => {
+  const vectors = JSON.parse(read('test/auth-k3-fixtures.json'));
+  const registration = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthNetworkRegistration',
+  );
+  assert.ok(registration(vectors.registration));
+  for (const key of Object.keys(vectors.registration)) {
+    const bad = { ...vectors.registration };
+    delete bad[key];
+    assert.equal(registration(bad), false, key);
+  }
+  assert.equal(registration({ ...vectors.registration, created: 0 }), false);
+  assert.equal(
+    registration({ ...vectors.registration, token: 'secret' }),
+    false,
+  );
+  for (const operation of [
+    'UnifiedCreateDownloadTicket',
+    'UnifiedRenewInstallation',
+    'createMemberResourceDownloadTicket',
+  ]) {
+    const output = validate(
+      'plugin/shell-business.schema.json',
+      'ShellAuthOutput_' + operation,
+    );
+    for (const vector of vectors.wireCases) {
+      assert.equal(
+        Buffer.from(vector.wire, 'base64').toString('utf8'),
+        vector.raw,
+      );
+      assert.ok(output({ statusCode: 200, body: { wire: vector.wire } }));
+    }
+    for (const body of [
+      { wire: 'x'.repeat(87385) },
+      { wire: '!!' },
+      { wire: '' },
+      { wire: 'e30=', version: 1 },
+    ])
+      assert.equal(output({ statusCode: 200, body }), false);
+  }
+});

@@ -46,12 +46,31 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       'scripts/private.js',
     ])
       await writeFile(join(plugin, file), file);
+    const brokerArtifact = join(root, 'broker');
+    await mkdir(join(brokerArtifact, 'windows'), { recursive: true });
+    const files = [];
+    for (const path of [
+      'windows/shell-helper.exe',
+      'desktop.mjs',
+      'broker.mjs',
+    ]) {
+      await writeFile(join(brokerArtifact, path), path);
+      files.push({
+        path,
+        sha256: createHash('sha256').update(path).digest('hex'),
+      });
+    }
+    await writeFile(
+      join(brokerArtifact, 'broker-manifest.json'),
+      JSON.stringify({ version: 1, files }),
+    );
     const original = await readFile(join(plugin, 'package.json'), 'utf8');
     const first = await packagePlugin({
       root,
       version: '1.2.3-rc.1',
       outDir: join(root, 'one'),
       build: false,
+      brokerArtifact,
     });
     const bytes = await readFile(first.tarball);
     assert.equal(
@@ -73,6 +92,18 @@ test('package contains standalone runtime, version and matching digest; rebuild 
     assert.equal(unpack.status, 0, unpack.stderr);
     const packed = JSON.parse(
       await readFile(join(extraction, 'package/package.json')),
+    );
+    assert.deepEqual(
+      await readFile(
+        join(extraction, 'package/shell-auth/broker-manifest.json'),
+      ),
+      await readFile(join(brokerArtifact, 'broker-manifest.json')),
+    );
+    assert.deepEqual(
+      await readFile(
+        join(extraction, 'package/shell-auth/windows/shell-helper.exe'),
+      ),
+      await readFile(join(brokerArtifact, 'windows/shell-helper.exe')),
     );
     assert.equal(packed.version, '1.2.3-rc.1');
     assert.equal(packed.engines.dsh, '>=0.2.1-rc.3');
@@ -98,6 +129,7 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       version: '1.2.3-rc.1',
       outDir: join(root, 'two'),
       build: false,
+      brokerArtifact,
     });
     assert.deepEqual(await readFile(second.tarball), bytes);
     assert.equal(
@@ -110,6 +142,7 @@ test('package contains standalone runtime, version and matching digest; rebuild 
         version: '1.2.3-rc.1',
         outDir: join(root, 'one'),
         build: false,
+        brokerArtifact,
       }),
       /already exists/,
     );

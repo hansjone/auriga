@@ -94,6 +94,12 @@ export class BusinessProxy {
       // Cached results are still identity-bound, including tickets and reads.
       try {
         this.broker.assert(previous.context);
+        if (operation === 'network_open') {
+          this.host.resolve(owner, input.executionContextId, 'session');
+          const cached = await previous.result;
+          if (cached.output)
+            this.streams.get(cached.output.body.streamId, owner);
+        }
       } catch {
         return response({ error: error('common.unauthenticated') });
       }
@@ -314,11 +320,21 @@ export class BusinessProxy {
         this.pumpBinary(stream, reader).catch(() => {});
         return { statusCode: response.status, body: { streamId: stream.id } };
       }
-      const raw = await boundedBody(response);
+      const ticketWire = [
+        'UnifiedCreateDownloadTicket',
+        'UnifiedRenewInstallation',
+        'createMemberResourceDownloadTicket',
+      ].includes(definition.operation);
+      const raw = await boundedBody(response, ticketWire ? 65536 : undefined);
       this.broker.assert(context);
       let body;
       try {
-        body = raw.length ? JSON.parse(raw.toString('utf8')) : {};
+        body =
+          ticketWire && response.ok
+            ? { wire: raw.toString('base64') }
+            : raw.length
+              ? JSON.parse(raw.toString('utf8'))
+              : {};
       } catch {
         throw new Error('invalid business response');
       }
@@ -330,6 +346,49 @@ export class BusinessProxy {
             response.headers.get('retry-after'),
           ),
         });
+      if (definition.operation === 'profile_read') {
+        if (
+          !body?.account ||
+          body.account.id !== context.identity.memberId ||
+          body.account.tenantId !== context.identity.tenantId
+        )
+          throw new Error('invalid profile identity');
+        body = {
+          memberId: body.account.id,
+          displayName: body.account.displayName,
+        };
+      }
+      if (definition.operation === 'provider_diagnostic') {
+        if (
+          !body ||
+          !Array.isArray(body.items) ||
+          body.items.some(
+            (item) =>
+              !item ||
+              typeof item !== 'object' ||
+              Array.isArray(item) ||
+              typeof item.id !== 'string' ||
+              !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(item.id) ||
+              typeof item.connectorType !== 'string' ||
+              !item.displayName ||
+              typeof item.displayName !== 'object' ||
+              Array.isArray(item.displayName) ||
+              Object.values(item.displayName).some(
+                (text) => typeof text !== 'string',
+              ) ||
+              !Number.isInteger(item.order) ||
+              !['redirect', 'qr', 'form', 'webauthn', 'device'].includes(
+                item.primaryStep,
+              ),
+          )
+        )
+          throw new Error('invalid providers response');
+        body = {
+          available: body.items.some(
+            (item) => item.id === context.identity.providerId,
+          ),
+        };
+      }
       const safeHeaders = {};
       for (const key of definition.responseHeaders) {
         const value = response.headers.get(key);

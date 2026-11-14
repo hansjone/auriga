@@ -2398,15 +2398,6 @@ export interface components {
       };
       body: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
     };
-    ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket: {
-      ticket: string;
-      /** Format: uuid */
-      clientId: string;
-      /** Format: date-time */
-      expiresAt: string;
-      resourceEnvelope: components['schemas']['ShellAuthresource_signatures_schema_json__defs_ResourceEnvelope'];
-      revocations: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
-    };
     ShellAuthOutput_createMemberResourceDownloadTicket: {
       statusCode: number;
       headers?: {
@@ -2416,7 +2407,10 @@ export interface components {
         'content-range'?: string;
         'retry-after'?: string;
       };
-      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket'];
+      body: {
+        /** @description 解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string & unknown;
+      };
     };
     ShellAuthOutput_consumeMemberResourceDownloadTicket: {
       statusCode: number;
@@ -2901,6 +2895,34 @@ export interface components {
         streamId: string;
       };
     };
+    ShellAuthOutput_UnifiedCreateDownloadTicket: {
+      statusCode: number;
+      headers?: {
+        etag?: string;
+        'content-type'?: string;
+        'content-length'?: string;
+        'content-range'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        /** @description 解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string & unknown;
+      };
+    };
+    ShellAuthOutput_UnifiedDownloadArtifact: {
+      statusCode: number;
+      headers?: {
+        etag?: string;
+        'content-type'?: string;
+        'content-length'?: string;
+        'content-range'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        /** Format: uuid */
+        streamId: string;
+      };
+    };
     ShellAuthresource_unified_schema_json__defs_UnifiedArtifactDownload: {
       artifactId: string;
       digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
@@ -2936,39 +2958,6 @@ export interface components {
        * @enum {string}
        */
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
-    };
-    ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket: {
-      ticket: string;
-      /** Format: uuid */
-      clientId: string;
-      expiresAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
-      resource: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceRef'];
-      revocations: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
-    };
-    ShellAuthOutput_UnifiedCreateDownloadTicket: {
-      statusCode: number;
-      headers?: {
-        etag?: string;
-        'content-type'?: string;
-        'content-length'?: string;
-        'content-range'?: string;
-        'retry-after'?: string;
-      };
-      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket'];
-    };
-    ShellAuthOutput_UnifiedDownloadArtifact: {
-      statusCode: number;
-      headers?: {
-        etag?: string;
-        'content-type'?: string;
-        'content-length'?: string;
-        'content-range'?: string;
-        'retry-after'?: string;
-      };
-      body: {
-        /** Format: uuid */
-        streamId: string;
-      };
     };
     ShellAuthresource_unified_schema_json__defs_UnifiedInstallationReport: {
       /** Format: uuid */
@@ -3071,7 +3060,10 @@ export interface components {
         'content-range'?: string;
         'retry-after'?: string;
       };
-      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket'];
+      body: {
+        /** @description 解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string & unknown;
+      };
     };
     ShellAuthOutput_UnifiedDownloadVersionArtifact: {
       statusCode: number;
@@ -3288,6 +3280,16 @@ export interface components {
         available: boolean;
       };
     };
+    ShellAuthNetworkRegistration: {
+      /** Format: uuid */
+      tenant: string;
+      /** Format: uuid */
+      device: string;
+      realm: string;
+      node: string;
+      systemAddress: string;
+      created: boolean;
+    };
     ShellAuthOutput_network_open: {
       statusCode: number;
       headers?: {
@@ -3297,6 +3299,15 @@ export interface components {
       body: {
         /** Format: uuid */
         streamId: string;
+        registration: components['schemas']['ShellAuthNetworkRegistration'];
+        binding: {
+          /** Format: uuid */
+          executionContextId: string;
+          /** Format: uuid */
+          shellEpoch: string;
+          /** Format: int64 */
+          revision: number;
+        };
       };
     };
     ShellAuthOutput_upload_open: {

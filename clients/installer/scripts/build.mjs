@@ -25,7 +25,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
-import { buildBroker } from '../../shell-auth/build.mjs';
+import { copyBrokerArtifact } from '../../shell-auth/artifact.mjs';
 import { parse as parseVersion } from '../runtime/semver-lite.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
 import {
@@ -213,6 +213,8 @@ function readTgzPackageJson(tgz) {
 }
 
 export async function build(args) {
+  if (typeof args['broker-artifact'] !== 'string')
+    throw new Error('--broker-artifact is required');
   const config = JSON.parse(
     readFileSync(join(installerDir, 'upstream.json'), 'utf8'),
   );
@@ -401,7 +403,18 @@ export async function build(args) {
   }
 
   // 4. Our own runtime and Windows wrappers.
-  const shellAuthManifest = buildBroker(join(payload, 'auriga', 'shell-auth'));
+  const shellAuthManifest = copyBrokerArtifact(
+    args['broker-artifact'],
+    join(payload, 'auriga', 'shell-auth'),
+  );
+  const pluginBroker = join(plugin, 'node_modules', 'auriga-dsh', 'shell-auth');
+  for (const path of ['broker-manifest.json', 'windows/shell-helper.exe']) {
+    if (
+      sha256File(join(pluginBroker, path)) !==
+      sha256File(join(payload, 'auriga', 'shell-auth', path))
+    )
+      throw new Error('Desktop and plugin broker artifacts differ');
+  }
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });

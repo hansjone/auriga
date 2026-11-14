@@ -88,6 +88,18 @@ const wire = (source, maxBytes = 65536) => ({
     source +
     '；保留原始受签字节，不经生成模型重序列化。',
 });
+defs.ShellAuthNetworkRegistration = obj({
+  tenant: uuid,
+  device: uuid,
+  realm: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' },
+  node: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' },
+  systemAddress: {
+    type: 'string',
+    pattern: '^aur1:[0-9a-f]+\\.[0-9a-f]+\\.0$',
+    maxLength: 48,
+  },
+  created: { type: 'boolean' },
+});
 const codes = [
   'common.validation_failed',
   'common.unauthenticated',
@@ -294,7 +306,19 @@ for (const [operation, input, output] of [
     obj({ streamId: uuid }),
     obj({ available: { type: 'boolean' } }),
   ],
-  ['network_open', obj({ executionContextId: uuid }), obj({ streamId: uuid })],
+  [
+    'network_open',
+    obj({ executionContextId: uuid }),
+    obj({
+      streamId: uuid,
+      registration: { $ref: '#/$defs/ShellAuthNetworkRegistration' },
+      binding: obj({
+        executionContextId: uuid,
+        shellEpoch: uuid,
+        revision: integer,
+      }),
+    }),
+  ],
   [
     'upload_open',
     obj({
@@ -576,7 +600,20 @@ defs.ShellAuthStreamEvent.allOf = [
 for (const operation of operations) {
   operation.requestHeaders ??= [];
   operation.responseHeaders ??= ['content-type', 'retry-after'];
-  const bodySchema = defs[operation.output];
+  const ticketWire = [
+    'UnifiedCreateDownloadTicket',
+    'UnifiedRenewInstallation',
+    'createMemberResourceDownloadTicket',
+  ].includes(operation.operation);
+  const bodySchema = ticketWire
+    ? obj({
+        wire: {
+          ...wire('original download ticket response'),
+          minLength: 4,
+          allOf: [{ if: { minLength: 87384 }, then: { pattern: '==$' } }],
+        },
+      })
+    : defs[operation.output];
   defs[operation.output] = obj(
     {
       statusCode: { type: 'integer', minimum: 200, maximum: 299 },
