@@ -97,7 +97,11 @@ provider 接口：
 
 日常公钥刷新以 12 小时为基准并加入抖动，始终受受签有效期限制；失败指数退避，不延长原截止时间。健康连接续票复用仍可用的信任快照，官方公告、未知钥提示及失效快照仍触发必要刷新。前驱与本地同代际同版本时必须摘要完全一致，落后前驱直接拒绝；跳过中间前驱只允许本地清单已过期的离线恢复。空缓存的 migration 模式同样要求已安装根签许可。
 
-共同向量的验证证据分开记录：174 例调用生产 `verifyPublication`，13 个公告边界调用生产信任库的 `announce/assertUsable`，7 个签名域边界调用生产验签函数；其余 85 例为测试侧签发/投影/配置等策略夹具。测试侧判定和 HPKE 适配不打入插件包，不将全部 279 例表述为实际生产信任库路径验证。
+共同向量共 433 例：179 例调用生产 `verifyPublication`（包含 K3 重启恢复成熟期边界），13 个公告边界调用生产信任库的 `announce/assertUsable`，7 个签名域边界调用生产验签函数；K3 的 49 个运输授权转换、25 个离线追平、40 个全局确认证据向量分别调用生产 `verifyTransportTransition`、`verifyTransportCatchup`、`verifyTransportConfirmation`。合计 313 例走生产验证入口；另有 85 例为测试侧签发/投影/配置等策略夹具，不打入插件包。
+
+35 例明确跳过：8 个 `node_control_binding` 属于 K3“节点确认身份”，由 I 使用独立 NodeControlPins 核认证 node_id，插件仍用 InstallationPins；27 个 `projection_access` 属于 K3“UID 与材料权限”，由 N/I/D 验专属 projector 的 UID、SO_PEERCRED 和私有材料卷，插件不承担组件投影器职责。每个跳过例在测试输出附带对应理由；不把跳过例算作插件通过。
+
+生产运输验证入口 `verifyTransport` 支持由调用者提供 `transport_transition` / `transport_catchup` 证明，以及 `transport_confirmation`。根、安装域、最高运输代际/版本/摘要和隔离事实从独立 context 绑定；运输版本独立于业务 keyset。确认证据中的 challenge、now 和 expected_selectors 必须由可信查询及台账端口提供，不能从响应回填。另有两个入口装配测试验证正常路径及安装域、根和最高代际拒绝。这些纯验证证据不代表插件运输热激活、真实 TLS 握手或 NAS 正常入口已验收。
 
 管理员也可在释放该设备信任目录的写锁后，用 `node scripts/network/export-installation.mjs --import-control <manifest.json> [新回执文件.json]` 离线导入。外层 manifest 仅含 `controlManifestFile`（现有 `--control` 导出所用 manifest 的相对路径）及 `networkDirectory`（该 profile 的 `auriga-connect/network` 目录）；内层导出 manifest 仍指定独立安装文件、公有控制包与已核对的 tenant/realm/target。此命令复用下述受保护 pin/钥及正常设备缓存，拒绝绕过存储写锁，输出标准签名回执，不需要消息连接。不要将私钥路径放进控制包或浏览器请求。
 
