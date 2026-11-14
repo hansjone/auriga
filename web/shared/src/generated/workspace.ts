@@ -1,4 +1,168 @@
 export interface paths {
+  '/admin/members/{memberId}/placement': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 读取成员分配及独立授权
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+     */
+    get: operations['getMemberDshPlacement'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/members/{memberId}/dedicated-entitlement': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * 授予或撤销独立授权
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF 和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。
+     */
+    put: operations['setMemberDshDedicatedEntitlement'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/members/{memberId}/placement-switches/lookup': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 按原幂等键恢复切换查询
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+     */
+    get: operations['findDshPlacementSwitch'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/placement-rebuild-plans': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 持久化维护名单及继续独立选择
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF 和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。
+     */
+    post: operations['createDshRebuildPlan'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/placement-rebuild-plans/{planId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 读取维护名单
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+     */
+    get: operations['getDshRebuildPlan'];
+    /**
+     * 替换尚未执行的维护名单
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF 和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。
+     */
+    put: operations['updateDshRebuildPlan'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/placement-rebuild-plans/{planId}/start': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 确认导出窗口后批量重建
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF 和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。
+     */
+    post: operations['startDshRebuildPlan'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/placement-rebuild-plans/{planId}/progress': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 读取逐成员持久化进度
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+     */
+    get: operations['getDshRebuildProgress'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/placement-capacity': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 轮询实时池容量与全池影响
+     * @description 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+     */
+    get: operations['getDshPlacementCapacity'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/me/placement/open': {
     parameters: {
       query?: never;
@@ -828,6 +992,13 @@ export interface components {
       viewCleared: boolean;
       newSessionRequired: boolean;
     } & unknown;
+    DshDedicatedEntitlement: {
+      /** Format: uuid */
+      memberId: string;
+      granted: boolean;
+      /** Format: int64 */
+      revision: number;
+    };
     /**
      * @description 物理进程共享模式；不表示取得容器 root 权限。
      * @enum {string}
@@ -847,13 +1018,11 @@ export interface components {
       /** @enum {string} */
       state: 'pending' | 'ready' | 'switching' | 'unavailable';
     };
-    DshPlacementOpen: {
-      placement: components['schemas']['DshPlacement'];
-      ticket: string;
-      /** Format: uri-reference */
-      exchangeUrl: string;
-      /** Format: int64 */
-      expiresAt: number;
+    DshMemberPlacement: {
+      /** Format: uuid */
+      memberId: string;
+      entitlement: components['schemas']['DshDedicatedEntitlement'];
+      placement?: components['schemas']['DshPlacement'];
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -886,16 +1055,9 @@ export interface components {
       errors?: components['schemas']['FieldError'][];
       traceId?: string;
     };
-    DshPlacementSwitchRequest: {
-      targetMode: components['schemas']['DshInstanceMode'];
+    DshEntitlementRequest: {
+      granted: boolean;
       reason: string;
-      /** @enum {string} */
-      sessionPolicy: 'discard';
-      /**
-       * @description 已定规则：本人文件封存30天，新模式空目录，会话丢弃；不允许客户端选择自动迁移或即时删除。
-       * @enum {string}
-       */
-      filePolicy: 'archive-and-reset';
     };
     /** @description succeeded 不带 failureCode；failed/blocked 必须带；fromMode 与 targetMode 必须不同，服务端校验。 */
     DshPlacementSwitch: {
@@ -926,6 +1088,184 @@ export interface components {
         | 'revoked'
         | 'recovery-required';
     } & (unknown & unknown);
+    DshRebuildMember: {
+      /** Format: uuid */
+      memberId: string;
+      /** Format: uuid */
+      legacyInstanceId: string;
+      targetMode: components['schemas']['DshInstanceMode'];
+    };
+    DshRebuildPlanRequest: {
+      members: components['schemas']['DshRebuildMember'][];
+      reason: string;
+    };
+    DshRebuildPlan: {
+      /** Format: uuid */
+      planId: string;
+      /** Format: int64 */
+      revision: number;
+      /** @enum {string} */
+      state: 'draft' | 'running' | 'completed' | 'blocked';
+      members: components['schemas']['DshRebuildMember'][];
+      reason: string;
+    };
+    DshRebuildStartRequest: {
+      /** @constant */
+      exportConfirmed: true;
+      /** @enum {string} */
+      sessionPolicy: 'discard';
+      /** @enum {string} */
+      filePolicy: 'archive-and-reset';
+    };
+    DshRebuildMemberProgress: {
+      /** Format: uuid */
+      memberId: string;
+      /** Format: uuid */
+      operationId?: string;
+      /** Format: int64 */
+      revision: number;
+      sessionsDiscarded: boolean;
+      workspaceEmpty: boolean;
+      /** @enum {string} */
+      state:
+        | 'accepted'
+        | 'fencing'
+        | 'draining'
+        | 'preparing'
+        | 'committing'
+        | 'succeeded'
+        | 'failed'
+        | 'blocked';
+      /** @enum {string} */
+      failureCode?:
+        | 'capacity'
+        | 'stop-unconfirmed'
+        | 'prepare-failed'
+        | 'revoked'
+        | 'recovery-required';
+    } & (unknown & unknown);
+    DshRebuildProgress: {
+      /** Format: uuid */
+      planId: string;
+      /** Format: int64 */
+      revision: number;
+      /** @enum {string} */
+      state: 'running' | 'completed' | 'blocked';
+      members: components['schemas']['DshRebuildMemberProgress'][];
+    };
+    DshPoolCapacity: {
+      /** Format: uuid */
+      physicalInstanceId: string;
+      /** Format: int64 */
+      registered: number;
+      /** Format: int64 */
+      active: number;
+      /**
+       * Format: int64
+       * @constant
+       */
+      registeredLimit: 20;
+      /**
+       * Format: int64
+       * @constant
+       */
+      activeLimit: 4;
+      /**
+       * Format: int64
+       * @constant
+       */
+      perMemberActiveLimit: 1;
+      /** Format: int64 */
+      memoryUsedBytes: number;
+      /** Format: int64 */
+      memoryLimitBytes: number;
+      /**
+       * Format: int64
+       * @constant
+       */
+      admissionMemoryPercent: 80;
+      /**
+       * Format: int64
+       * @constant
+       */
+      workspaceBytesPerMember: 5368709120;
+      /**
+       * Format: int64
+       * @constant
+       */
+      workspaceInodesPerMember: 100000;
+      accepting: boolean;
+    };
+    Binding: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      memberId: string;
+      /** Format: uuid */
+      placementId: string;
+      /** Format: uuid */
+      physicalInstanceId: string;
+      /** @enum {string} */
+      mode: 'shared' | 'dedicated';
+      /** Format: int64 */
+      epoch: number;
+      /** Format: int64 */
+      revision: number;
+    };
+    GuardianImpact: {
+      /**
+       * Format: int64
+       * @constant
+       */
+      schemaVersion: 1;
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      physicalInstanceId: string;
+      /** Format: uuid */
+      operationId: string;
+      /** @enum {string} */
+      reason:
+        | 'resource-expired'
+        | 'resource-revoked'
+        | 'cancel-timeout'
+        | 'credential-stop-unconfirmed'
+        | 'crash';
+      /** @constant */
+      scope: 'pool';
+      affected: components['schemas']['Binding'][];
+      /** @enum {string} */
+      state: 'stopping' | 'stopped' | 'blocked';
+      /** Format: int64 */
+      observedAt: number;
+    };
+    DshCapacitySnapshot: {
+      /** Format: int64 */
+      observedAt: number;
+      /** Format: int64 */
+      validUntil: number;
+      pools: components['schemas']['DshPoolCapacity'][];
+      impacts: components['schemas']['GuardianImpact'][];
+    };
+    DshPlacementOpen: {
+      placement: components['schemas']['DshPlacement'];
+      ticket: string;
+      /** Format: uri-reference */
+      exchangeUrl: string;
+      /** Format: int64 */
+      expiresAt: number;
+    };
+    DshPlacementSwitchRequest: {
+      targetMode: components['schemas']['DshInstanceMode'];
+      reason: string;
+      /** @enum {string} */
+      sessionPolicy: 'discard';
+      /**
+       * @description 已定规则：本人文件封存30天，新模式空目录，会话丢弃；不允许客户端选择自动迁移或即时删除。
+       * @enum {string}
+       */
+      filePolicy: 'archive-and-reset';
+    };
     OpsUpgradeInventory: {
       /** Format: date-time */
       reportedAt: string;
@@ -1200,6 +1540,904 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getMemberDshPlacement: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        memberId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshMemberPlacement'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  setMemberDshDedicatedEntitlement: {
+    parameters: {
+      query?: never;
+      header: {
+        'If-Match': string;
+        'Idempotency-Key': string;
+      };
+      path: {
+        memberId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DshEntitlementRequest'];
+      };
+    };
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshDedicatedEntitlement'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  findDshPlacementSwitch: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key': string;
+      };
+      path: {
+        memberId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshPlacementSwitch'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  createDshRebuildPlan: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DshRebuildPlanRequest'];
+      };
+    };
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshRebuildPlan'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  getDshRebuildPlan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        planId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshRebuildPlan'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  updateDshRebuildPlan: {
+    parameters: {
+      query?: never;
+      header: {
+        'If-Match': string;
+        'Idempotency-Key': string;
+      };
+      path: {
+        planId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DshRebuildPlanRequest'];
+      };
+    };
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshRebuildPlan'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  startDshRebuildPlan: {
+    parameters: {
+      query?: never;
+      header: {
+        'If-Match': string;
+        'Idempotency-Key': string;
+      };
+      path: {
+        planId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DshRebuildStartRequest'];
+      };
+    };
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      202: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshRebuildProgress'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  getDshRebuildProgress: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        planId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshRebuildProgress'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  getDshPlacementCapacity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 权威快照；仅管理会话，同租户。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          /** @description 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshCapacitySnapshot'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden 或 iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict 或 shared.stop_unconfirmed */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，common.validation_failed */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   openMyDshPlacement: {
     parameters: {
       query?: never;

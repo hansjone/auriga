@@ -1,5 +1,7 @@
 # 共享 DSH 首期契约 v1
 
+第二批增量管理接口、逐条裁决及 W/IAM/U 接法见 [ADMIN.md](ADMIN.md)；旧 v1 控制面和数据面语义保持不变。
+
 本目录冻结 K 线控制面与数据面。schemaVersion=1；共享入口身份单独为2，绝不复用旧 owner 身份 v1。所有整数须为 JSON 安全整数，时间为 UTC Unix 秒。生成类型不代替 schema 和语义校验。未知模式、action、scope、签名字段和版本拒绝。旧独立/桌面协议保持原义。
 
 protobuf仅用于内部传输；签名及schema JSON须显式映射，不能直接签protojson（int64字符串/缺省字段与本协议不同）。适配器将有界int64转为JSON整数、输出全部必填字段，再按schema和语义检查；未知字符串枚举及空缺省值拒绝。Capability 的 credentialVersion 是对应 audience 授权材料的当前版本，企业场景对应 IAM 企业材料版本；模型/消息由各自权威适配维护，不含任何上游密钥。

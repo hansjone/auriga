@@ -1,0 +1,711 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.dev/contracts/shared-dsh/admin/v1",
+  "$defs": {
+    "DshInstanceMode": {
+      "type": "string",
+      "enum": [
+        "shared",
+        "dedicated"
+      ],
+      "description": "物理进程共享模式；不表示取得容器 root 权限。"
+    },
+    "DshPlacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberId",
+        "placementId",
+        "mode",
+        "epoch",
+        "revision",
+        "state"
+      ],
+      "properties": {
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "placementId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "mode": {
+          "$ref": "#/$defs/DshInstanceMode"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "switching",
+            "unavailable"
+          ]
+        }
+      },
+      "description": "epoch 是不可回退的授权代次；不向成员暴露物理 pool、路径或其他用户。"
+    },
+    "DshPlacementSwitch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "memberId",
+        "fromMode",
+        "targetMode",
+        "state",
+        "revision",
+        "sessionsDiscarded"
+      ],
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "fromMode": {
+          "$ref": "#/$defs/DshInstanceMode"
+        },
+        "targetMode": {
+          "$ref": "#/$defs/DshInstanceMode"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "fencing",
+            "draining",
+            "preparing",
+            "committing",
+            "succeeded",
+            "failed",
+            "blocked"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "sessionsDiscarded": {
+          "type": "boolean"
+        },
+        "failureCode": {
+          "type": "string",
+          "enum": [
+            "capacity",
+            "stop-unconfirmed",
+            "prepare-failed",
+            "revoked",
+            "recovery-required"
+          ]
+        }
+      },
+      "description": "succeeded 不带 failureCode；failed/blocked 必须带；fromMode 与 targetMode 必须不同，服务端校验。",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "failed",
+                  "blocked"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failureCode": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "failureCode"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failureCode": false,
+              "sessionsDiscarded": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "memberId",
+        "placementId",
+        "physicalInstanceId",
+        "mode",
+        "epoch",
+        "revision"
+      ],
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "placementId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "physicalInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "shared",
+            "dedicated"
+          ]
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "GuardianImpact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "physicalInstanceId",
+        "operationId",
+        "reason",
+        "scope",
+        "affected",
+        "state",
+        "observedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "physicalInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "resource-expired",
+            "resource-revoked",
+            "cancel-timeout",
+            "credential-stop-unconfirmed",
+            "crash"
+          ]
+        },
+        "scope": {
+          "const": "pool",
+          "type": "string"
+        },
+        "affected": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Binding"
+          }
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "stopping",
+            "stopped",
+            "blocked"
+          ]
+        },
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "DshDedicatedEntitlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberId",
+        "granted",
+        "revision"
+      ],
+      "properties": {
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "granted": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "DshMemberPlacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberId",
+        "entitlement"
+      ],
+      "properties": {
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "entitlement": {
+          "$ref": "#/$defs/DshDedicatedEntitlement"
+        },
+        "placement": {
+          "$ref": "#/$defs/DshPlacement"
+        }
+      }
+    },
+    "DshEntitlementRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "granted",
+        "reason"
+      ],
+      "properties": {
+        "granted": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "DshRebuildMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberId",
+        "legacyInstanceId",
+        "targetMode"
+      ],
+      "properties": {
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "legacyInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "targetMode": {
+          "$ref": "#/$defs/DshInstanceMode"
+        }
+      }
+    },
+    "DshRebuildPlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "members",
+        "reason"
+      ],
+      "properties": {
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DshRebuildMember"
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "DshRebuildPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planId",
+        "revision",
+        "state",
+        "members",
+        "reason"
+      ],
+      "properties": {
+        "planId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "running",
+            "completed",
+            "blocked"
+          ]
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DshRebuildMember"
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "DshRebuildStartRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exportConfirmed",
+        "sessionPolicy",
+        "filePolicy"
+      ],
+      "properties": {
+        "exportConfirmed": {
+          "type": "boolean",
+          "const": true
+        },
+        "sessionPolicy": {
+          "type": "string",
+          "enum": [
+            "discard"
+          ]
+        },
+        "filePolicy": {
+          "type": "string",
+          "enum": [
+            "archive-and-reset"
+          ]
+        }
+      }
+    },
+    "DshRebuildMemberProgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberId",
+        "revision",
+        "sessionsDiscarded",
+        "workspaceEmpty",
+        "state"
+      ],
+      "properties": {
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "sessionsDiscarded": {
+          "type": "boolean"
+        },
+        "workspaceEmpty": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "fencing",
+            "draining",
+            "preparing",
+            "committing",
+            "succeeded",
+            "failed",
+            "blocked"
+          ]
+        },
+        "failureCode": {
+          "type": "string",
+          "enum": [
+            "capacity",
+            "stop-unconfirmed",
+            "prepare-failed",
+            "revoked",
+            "recovery-required"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "failed",
+                  "blocked"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failureCode": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "failureCode"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "operationId"
+            ],
+            "properties": {
+              "operationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "failureCode": false,
+              "sessionsDiscarded": {
+                "const": true
+              },
+              "workspaceEmpty": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "DshRebuildProgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planId",
+        "revision",
+        "state",
+        "members"
+      ],
+      "properties": {
+        "planId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "blocked"
+          ]
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DshRebuildMemberProgress"
+          }
+        }
+      }
+    },
+    "DshPoolCapacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "physicalInstanceId",
+        "registered",
+        "active",
+        "registeredLimit",
+        "activeLimit",
+        "perMemberActiveLimit",
+        "memoryUsedBytes",
+        "memoryLimitBytes",
+        "admissionMemoryPercent",
+        "workspaceBytesPerMember",
+        "workspaceInodesPerMember",
+        "accepting"
+      ],
+      "properties": {
+        "physicalInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "registered": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "active": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "registeredLimit": {
+          "type": "integer",
+          "const": 20
+        },
+        "activeLimit": {
+          "type": "integer",
+          "const": 4
+        },
+        "perMemberActiveLimit": {
+          "type": "integer",
+          "const": 1
+        },
+        "memoryUsedBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "memoryLimitBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "admissionMemoryPercent": {
+          "type": "integer",
+          "const": 80
+        },
+        "workspaceBytesPerMember": {
+          "type": "integer",
+          "const": 5368709120
+        },
+        "workspaceInodesPerMember": {
+          "type": "integer",
+          "const": 100000
+        },
+        "accepting": {
+          "type": "boolean"
+        }
+      }
+    },
+    "DshCapacitySnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observedAt",
+        "validUntil",
+        "pools",
+        "impacts"
+      ],
+      "properties": {
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "validUntil": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DshPoolCapacity"
+          }
+        },
+        "impacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GuardianImpact"
+          }
+        }
+      }
+    }
+  }
+}
