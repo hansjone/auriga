@@ -12,8 +12,11 @@ import {
 const options = {
   hostApi,
   apiBase: 'https://gateway.example.com',
-  fetch,
-  getAccessToken: async (_signal: AbortSignal) => null,
+  broker: {
+    call: async () => {
+      throw new Error('type probe only');
+    },
+  },
 };
 const adapter: LlmAdapter = createAurigaAdapter(options);
 const input: GenerateOptions = {

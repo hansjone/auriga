@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { responseBroker } from './response-broker.js';
 import assert from 'node:assert/strict';
 import * as hostApi from '@deepseek-ai/dsh-llm';
 import { createRequire } from 'node:module';
@@ -16,14 +17,10 @@ test('production model lifecycle: public module resolution, registration, capabi
   const fiber = await ctx.plugin(hostApi.LlmRuntime);
   let acquired = 0;
   const models = createModelLifecycle({
-    broker: {
-      getAiAccess: async () => {
-        acquired++;
-        throw Error('must not exchange');
-      },
-      invalidate() {},
-      status: { state: 'sign_in_required' },
-    },
+    broker: responseBroker(() => {
+      acquired++;
+      throw Error('unexpected business call');
+    }),
     origin: 'https://portal.example.com',
   });
   try {
@@ -68,7 +65,9 @@ test('production model lifecycle: public module resolution, registration, capabi
 
 test('model lifecycle: missing public registration capability never disrupts Team/login', async () => {
   const models = createModelLifecycle({
-    broker: { status: {} },
+    broker: responseBroker(() => {
+      throw Error('unexpected business call');
+    }),
     origin: 'https://portal.example.com',
   });
   await models.attach({});
@@ -78,40 +77,45 @@ test('model lifecycle: missing public registration capability never disrupts Tea
   models.close();
 });
 
-test('model lifecycle: catalog and generation admit only visible models with trusted capacity and tokenizer', async (t) => {
+test('model lifecycle: catalog and generation admit only visible models with trusted capacity and tokenizer', async () => {
   const ctx = new Context();
   const fiber = await ctx.plugin(hostApi.LlmRuntime);
   const revoked = new AbortController();
   let visible = true,
     acquired = 0,
     posts = 0;
-  t.mock.method(globalThis, 'fetch', async (url, init) => {
-    assert.equal(init.credentials, 'omit');
-    if (new URL(url).pathname.endsWith('/models'))
-      return Response.json({
-        object: 'list',
-        data: visible
-          ? [{ id: 'trusted', object: 'model', created: 1, owned_by: 'auriga' }]
-          : [],
-      });
-    posts++;
-    return new Response(
-      `data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'trusted', choices: [{ index: 0, delta: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } })}\n\ndata: [DONE]\n\n`,
-      { headers: { 'content-type': 'text/event-stream' } },
-    );
-  });
-  const models = createModelLifecycle({
-    broker: {
-      getAiAccess: async () => {
-        acquired++;
-        return {
-          token: 'ai-token',
-          expiresAt: Date.now() + 60000,
-          signal: revoked.signal,
-        };
-      },
-      status: {},
+  const broker = responseBroker(
+    async (operation, input) => {
+      acquired++;
+      if (operation === 'listAiModels')
+        return Response.json(
+          {
+            object: 'list',
+            data: visible
+              ? [
+                  {
+                    id: 'trusted',
+                    object: 'model',
+                    created: 1,
+                    owned_by: 'auriga',
+                  },
+                ]
+              : [],
+          },
+          { signal: revoked.signal },
+        );
+      assert.equal(operation, 'createAiChatCompletionStream');
+      assert.equal(input.body.model, 'trusted');
+      posts++;
+      return new Response(
+        `data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'trusted', choices: [{ index: 0, delta: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } })}\n\ndata: [DONE]\n\n`,
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
     },
+    { signal: revoked.signal },
+  );
+  const models = createModelLifecycle({
+    broker,
     origin: 'https://portal.example.com',
     generation: {
       modelLimits: {
@@ -174,12 +178,13 @@ for (const generation of [
     countInputTokens: 'not-a-port',
   },
 ])
-  test('model lifecycle: incomplete generation ports keep directory usable and refuse generation before exchange', async (t) => {
+  test('model lifecycle: incomplete generation ports keep directory usable and refuse generation before exchange', async () => {
     const ctx = new Context();
     const fiber = await ctx.plugin(hostApi.LlmRuntime);
     let acquired = 0;
-    t.mock.method(globalThis, 'fetch', async (url) => {
-      assert.equal(new URL(url).pathname, '/ai/v1/models');
+    const broker = responseBroker(async (operation) => {
+      acquired++;
+      assert.equal(operation, 'listAiModels');
       return Response.json({
         object: 'list',
         data: [
@@ -188,17 +193,7 @@ for (const generation of [
       });
     });
     const models = createModelLifecycle({
-      broker: {
-        getAiAccess: async () => {
-          acquired++;
-          return {
-            token: 'ai-token',
-            expiresAt: Date.now() + 60000,
-            signal: new AbortController().signal,
-          };
-        },
-        status: {},
-      },
+      broker,
       origin: 'https://portal.example.com',
       generation,
     });

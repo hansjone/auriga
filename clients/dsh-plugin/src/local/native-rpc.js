@@ -27,8 +27,11 @@ export function installNativeLoginRPC(ctx, getRuntime) {
       if (!NATIVE_LOGIN_METHODS.has(method)) return fail('common.not_found');
       if (
         !payload ||
+        Array.isArray(payload) ||
         Object.keys(payload).join(',') !== 'args' ||
         !payload.args ||
+        Array.isArray(payload.args) ||
+        typeof payload.args !== 'object' ||
         Object.keys(payload.args).length
       )
         return fail('common.validation_failed');
@@ -48,6 +51,7 @@ export function installNativeLoginRPC(ctx, getRuntime) {
                     ? 'logout'
                     : 'cancel_login',
               );
+        signal.throwIfAborted();
         const safe = { ...value };
         delete safe.csrf;
         return { ok: true, value: safe };

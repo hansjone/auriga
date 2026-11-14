@@ -6,6 +6,10 @@ import { parseStrictJson } from './trust/jcs.js';
  * @param {{broker:any,contexts:any}} options */
 export function createBrokerNetworkPort({ broker, contexts }) {
   /** @type {Map<string,any>} */ const connections = new Map();
+  /** @type {Map<string,Promise<any>>} */ const opening = new Map();
+  const unsubscribe = broker.state.subscribeInvalidation(() => {
+    for (const port of connections.values()) void port.close();
+  });
   let closed = false;
   const fail = () => {
     throw Object.assign(new Error('network.unauthorized'), {
@@ -23,23 +27,78 @@ export function createBrokerNetworkPort({ broker, contexts }) {
     check();
     const hostSessionId = tool.hostSessionId,
       source = await contexts.session(hostSessionId);
+    check();
+    if (
+      closed ||
+      !contexts.validSession(hostSessionId, source.executionContextId)
+    )
+      return fail();
     const old = connections.get(hostSessionId);
-    if (old && old.context === source.executionContextId) return old;
+    if (old && old.context === source.executionContextId) {
+      old.listen(receive);
+      return old;
+    }
+    await old?.close();
+    let pending = opening.get(hostSessionId);
+    if (!pending) {
+      pending = establish(hostSessionId, source, check, receive);
+      opening.set(hostSessionId, pending);
+    }
+    try {
+      const port = await pending;
+      check();
+      if (port.context !== source.executionContextId) return fail();
+      port.listen(receive);
+      return port;
+    } finally {
+      if (opening.get(hostSessionId) === pending) opening.delete(hostSessionId);
+    }
+  }
+  async function establish(
+    /** @type {string} */ hostSessionId,
+    /** @type {any} */ source,
+    /** @type {()=>void} */ check,
+    /** @type {(bytes:Buffer)=>void} */ firstReceiver,
+  ) {
     const result = await broker.call('network_open', {
       executionContextId: source.executionContextId,
     });
-    check();
     const streamId = result.body.streamId;
+    try {
+      check();
+      if (
+        closed ||
+        !contexts.validSession(hostSessionId, source.executionContextId)
+      )
+        return fail();
+    } catch (error) {
+      await broker
+        .streamCommand({ streamId, action: 'cancel' })
+        .catch(() => {});
+      throw error;
+    }
+    /** @type {Set<(bytes:Buffer)=>void>} */ const receivers = new Set([
+      firstReceiver,
+    ]);
     let retired = false,
       sequence = 0;
     const current = () => {
       check();
-      if (closed || retired || connections.get(hostSessionId) !== port)
+      if (
+        closed ||
+        retired ||
+        !contexts.validSession(hostSessionId, source.executionContextId) ||
+        connections.get(hostSessionId) !== port
+      )
         return fail();
     };
     const port = {
       context: source.executionContextId,
       hostSessionId,
+      listen(/** @type {(bytes:Buffer)=>void} */ receive) {
+        current();
+        receivers.add(receive);
+      },
       async send(/** @type {Uint8Array} */ bytes) {
         current();
         if (bytes.byteLength > 65536) return fail();
@@ -54,6 +113,7 @@ export function createBrokerNetworkPort({ broker, contexts }) {
       async close() {
         if (retired) return;
         retired = true;
+        receivers.clear();
         if (connections.get(hostSessionId) === port)
           connections.delete(hostSessionId);
         await broker
@@ -72,7 +132,7 @@ export function createBrokerNetworkPort({ broker, contexts }) {
           if (bytes.length > 65536 || bytes.toString('base64') !== event.data)
             return fail();
           parseStrictJson(bytes);
-          receive(bytes);
+          for (const receive of receivers) receive(bytes);
           current();
           void broker
             .streamCommand({
@@ -113,6 +173,8 @@ export function createBrokerNetworkPort({ broker, contexts }) {
           requestWire: Buffer.from(request).toString('base64'),
         });
         check();
+        if (closed || !contexts.valid(context.executionContextId))
+          return fail();
         return result.body;
       } finally {
         await contexts.finish(context.executionContextId);
@@ -120,6 +182,7 @@ export function createBrokerNetworkPort({ broker, contexts }) {
     },
     close() {
       closed = true;
+      unsubscribe();
       for (const port of connections.values()) void port.close();
       connections.clear();
     },

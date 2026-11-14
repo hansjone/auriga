@@ -1,3 +1,6 @@
+import { createBroker } from '../../src/local/broker.js';
+import { brokerFixture } from '../broker-fixture.js';
+import { responseBroker } from './response-broker.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ReadableStream } from 'node:stream/web';
@@ -51,19 +54,20 @@ export const sse = (events, size = 7) => {
     { headers: { 'content-type': 'text/event-stream' } },
   );
 };
-export const setup = (fetch, extra = {}) => {
+export const setup = (respond, extra = {}) => {
   const revoked = new AbortController();
+  const broker = responseBroker(respond, {
+    signal: revoked.signal,
+    expiresAt: extra.expiresAt,
+    before: extra.beforeCall,
+  });
   return {
     revoked,
+    broker,
     adapter: createAurigaAdapter({
       hostApi,
       apiBase: 'https://gateway.example.com',
-      fetch,
-      getAccessToken: async () => ({
-        token: 'test-only-token',
-        expiresAt: Date.now() + 60000,
-        signal: revoked.signal,
-      }),
+      broker,
       modelLimits: { 'team-model': { maxOutputTokens: 32, tools: true } },
       ...extra,
     }),
@@ -74,13 +78,12 @@ const collect = async (adapter, input = options()) =>
 
 test('SSE: byte fragmentation UTF-8, usage, terminal ordering and transport whitelist', async () => {
   let posts = 0;
-  const { adapter } = setup(async (url, init) => {
+  const { adapter } = setup(async (operation, input) => {
     posts++;
-    assert.equal(url, 'https://gateway.example.com/ai/v1/chat/completions');
-    assert.equal(init.credentials, 'omit');
-    assert.equal(init.redirect, 'error');
-    assert.equal(init.headers.authorization, 'Bearer test-only-token');
-    assert.equal(JSON.parse(init.body).n, undefined);
+    assert.equal(operation, 'createAiChatCompletionStream');
+    assert.deepEqual(Object.keys(input), ['body']);
+    assert.equal(input.body.n, undefined);
+    assert.equal(input.headers, undefined);
     return sse(
       [
         packet({ content: '你好🌏' }),
@@ -210,11 +213,10 @@ test('JSON: visible text, tool calls, authoritative usage and length finish', as
 
 test('catalog: only authorized ids, no invented capacities, costs or quotas', async () => {
   let gets = 0;
-  const { adapter } = setup(async (url, init) => {
+  const { adapter } = setup(async (operation, input) => {
     gets++;
-    assert.equal(url, 'https://gateway.example.com/ai/v1/models');
-    assert.equal(init.method, 'GET');
-    assert.equal(init.body, undefined);
+    assert.equal(operation, 'listAiModels');
+    assert.deepEqual(input, {});
     return new Response(
       JSON.stringify({
         object: 'list',
@@ -243,49 +245,44 @@ test('catalog: only authorized ids, no invented capacities, costs or quotas', as
   );
 });
 
-test('no login, expired/revoked/malformed token and invalid input fail before POST', async () => {
+test('missing, signed out, revoked and expired shell authority reject before fixed business calls', async () => {
   let posts = 0;
-  const revoked = new AbortController();
-  revoked.abort();
-  for (const getAccessToken of [
-    async () => null,
-    async () => ({
-      token: 'test',
-      expiresAt: Date.now() - 1,
-      signal: new AbortController().signal,
-    }),
-    async () => ({
-      token: 'test',
-      expiresAt: Date.now() + 10000,
-      signal: revoked.signal,
-    }),
-    async () => ({
-      token: 'test\nprivate',
-      expiresAt: Date.now() + 10000,
-      signal: revoked.signal,
-    }),
+  for (const snapshot of [
+    undefined,
+    { state: 'signed_out' },
+    { state: 'revoked' },
+    {
+      state: 'authenticated',
+      expiresAt: new Date(Date.now() - 1).toISOString(),
+    },
   ]) {
-    const { adapter } = setup(
+    const broker = responseBroker(
       async () => {
         posts++;
-        throw new Error('must not post');
+        throw Error('must not call');
       },
-      { getAccessToken },
+      { expiresAt: Date.now() - 1 },
     );
-    assert.equal((await collect(adapter)).at(-1).reason.kind, 'error');
+    broker.state.current = () => snapshot;
+    const { adapter } = setup(async () => assert.fail('unexpected peer'), {
+      broker,
+    });
+    assert.equal((await collect(adapter)).at(-1).reason.failure.code, 'AUTH');
     await assert.rejects(adapter.listModels('auriga'));
+    adapter.dispose();
   }
   const { adapter } = setup(async () => {
     posts++;
-    throw new Error('must not post');
+    throw Error('must not call');
   });
   assert.equal(
-    (await collect(adapter, { ...options(), url: 'https://example.com' })).at(
-      -1,
-    ).reason.kind,
+    (
+      await collect(adapter, { ...options(), url: 'https://other.example.com' })
+    ).at(-1).reason.kind,
     'error',
   );
   assert.equal(posts, 0);
+  adapter.dispose();
   assert.throws(() => createAurigaAdapter({}), { code: 'NO_ADAPTER' });
   for (const apiBase of [
     'https://example.com/ai/v1',
@@ -301,12 +298,11 @@ test('no login, expired/revoked/malformed token and invalid input fail before PO
 test('cancel/revoke/dispose: stalled read is interrupted and body cancelled once', async () => {
   for (const kind of ['caller', 'revocation', 'dispose', 'consumer']) {
     let cancelled = 0,
-      posts = 0,
-      signal;
+      posts = 0;
     const caller = new AbortController();
-    const { adapter, revoked } = setup(async (_url, init) => {
+    const { adapter, revoked } = setup(async () => {
       posts++;
-      signal = init.signal;
+
       return new Response(
         new ReadableStream({
           start(controller) {
@@ -340,13 +336,12 @@ test('cancel/revoke/dispose: stalled read is interrupted and body cancelled once
       );
       assert.equal((await stream.next()).done, true);
     }
-    assert.equal(signal.aborted, true);
     assert.equal(cancelled, 1);
     assert.equal(posts, 1);
   }
 });
 
-test('token expiry: cancels a paused stream using absolute expiry, never finishes successfully', async (t) => {
+test('snapshot expiry cancels a paused stream without reporting success', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 100000 });
   let cancelled = 0;
   const { adapter } = setup(
@@ -356,7 +351,9 @@ test('token expiry: cancels a paused stream using absolute expiry, never finishe
           start(controller) {
             controller.enqueue(
               Buffer.from(
-                `data: ${JSON.stringify(packet({ content: 'partial' }))}\n\n`,
+                'data: ' +
+                  JSON.stringify(packet({ content: 'partial' })) +
+                  '\n\n',
               ),
             );
           },
@@ -366,21 +363,15 @@ test('token expiry: cancels a paused stream using absolute expiry, never finishe
         }),
         { headers: { 'content-type': 'text/event-stream' } },
       ),
-    {
-      getAccessToken: async () => ({
-        token: 'test',
-        expiresAt: Date.now() + 100,
-        signal: new AbortController().signal,
-      }),
-    },
+    { expiresAt: 100100 },
   );
   const stream = adapter.stream(options());
   await stream.next();
   t.mock.timers.tick(101);
-  const terminal = (await stream.next()).value;
-  assert.equal(terminal.reason.failure.code, 'AUTH');
+  assert.equal((await stream.next()).value.reason.failure.code, 'AUTH');
   assert.equal(cancelled, 1);
   await stream.return();
+  adapter.dispose();
 });
 
 test('cancel: broker/fetch that ignore signal settle promptly; late body is closed', async () => {
@@ -394,6 +385,7 @@ test('cancel: broker/fetch that ignore signal settle promptly; late body is clos
       release = resolve;
     });
     let cancelled = 0;
+    const bodyCancelled = Promise.withResolvers();
     const { adapter } = setup(
       async () => {
         entered();
@@ -401,7 +393,7 @@ test('cancel: broker/fetch that ignore signal settle promptly; late body is clos
       },
       stage === 'broker'
         ? {
-            getAccessToken: async () => {
+            beforeCall: async () => {
               entered();
               return stalled;
             },
@@ -420,12 +412,12 @@ test('cancel: broker/fetch that ignore signal settle promptly; late body is clos
           new ReadableStream({
             cancel() {
               cancelled++;
+              bodyCancelled.resolve();
             },
           }),
         ),
       );
-      await Promise.resolve();
-      await Promise.resolve();
+      await bodyCancelled.promise;
       assert.equal(cancelled, 1);
     } else release(null);
   }
@@ -691,28 +683,29 @@ test('failure/finish: close body and remove abort listeners before terminal is o
     assert.equal(terminal.reason.kind, bad ? 'error' : 'stop');
     assert.equal(cancelled, 1);
     assert.equal(getEventListeners(caller.signal, 'abort').length, 0);
+    assert.equal(
+      getEventListeners(revoked.signal, 'abort').length,
+      1,
+      'one adapter lifetime subscription remains',
+    );
+    adapter.dispose();
     assert.equal(getEventListeners(revoked.signal, 'abort').length, 0);
     await stream.return();
   }
 });
 
-test('expiry: wall clock deadline is enforced when timer callback has not run', async (t) => {
+test('snapshot wall clock expiry fences buffered chunks before a delayed timer callback', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 100000 });
   const { adapter } = setup(
     async () => sse([packet({ content: 'hello' }, 'stop'), '[DONE]']),
-    {
-      getAccessToken: async () => ({
-        token: 'test',
-        expiresAt: 100100,
-        signal: new AbortController().signal,
-      }),
-    },
+    { expiresAt: 100100 },
   );
   const stream = adapter.stream(options());
   await stream.next();
   t.mock.timers.setTime(100101);
   assert.equal((await stream.next()).value.reason.failure.code, 'AUTH');
   await stream.return();
+  adapter.dispose();
 });
 
 test('byte budgets: fragmented oversized event and cumulative bounded events fail and cancel', async () => {
@@ -744,60 +737,60 @@ test('byte budgets: fragmented oversized event and cumulative bounded events fai
   }
 });
 
-test('redirects and response URL changes fail closed with one fetch', async () => {
-  for (const type of ['redirect', 'foreign']) {
-    let calls = 0,
-      cancelled = 0;
-    const { adapter } = setup(async () => {
+test('invalid broker redirect and foreign URL outputs fail producer validation before a stream opens', async (t) => {
+  for (const output of [
+    {
+      statusCode: 302,
+      headers: { location: 'https://other.example.com' },
+      body: {},
+    },
+    { statusCode: 200, url: 'https://other.example.com', body: {} },
+  ]) {
+    const connection = brokerFixture(),
+      original = connection.ipc.call.bind(connection.ipc);
+    let calls = 0;
+    connection.ipc.call = async (message) => {
+      if (!message.call) return original(message);
       calls++;
-      const response = new Response(
-        new ReadableStream({
-          cancel() {
-            cancelled++;
-          },
-        }),
-        type === 'redirect'
-          ? { status: 302, headers: { location: 'https://example.com/' } }
-          : {},
-      );
-      if (type === 'foreign')
-        Object.defineProperty(response, 'url', {
-          value: 'https://example.com/ai/v1/chat/completions',
-        });
-      return response;
-    });
+      return {
+        requestId: message.requestId,
+        operation: message.call.operation,
+        output,
+      };
+    };
+    const broker = await createBroker(connection);
+    t.after(() => broker.close());
+    const { adapter } = setup(() => assert.fail('no direct peer'), { broker });
     assert.equal((await collect(adapter)).at(-1).reason.kind, 'error');
     assert.equal(calls, 1);
-    assert.equal(cancelled, 1);
+    adapter.dispose();
   }
 });
 
-test('token rotation: each new request reads once; in-flight headers stay fixed', async () => {
-  const headers = [];
-  let reads = 0;
-  const { adapter } = setup(
-    async (_url, init) => {
-      headers.push(init.headers.authorization);
-      return sse([packet({}, 'stop'), '[DONE]']);
-    },
-    {
-      getAccessToken: async () => ({
-        token: `test-token-${++reads}`,
-        expiresAt: Date.now() + 10000,
-        signal: new AbortController().signal,
-      }),
-    },
-  );
+test('each generation uses one fixed operation and never passes credentials or headers', async () => {
+  const calls = [];
+  const { adapter } = setup(async (operation, input) => {
+    calls.push({ operation, input });
+    return sse([packet({}, 'stop'), '[DONE]']);
+  });
   for (let i = 0; i < 2; i++)
     assert.equal((await collect(adapter)).at(-1).reason.kind, 'stop');
-  assert.deepEqual(headers, ['Bearer test-token-1', 'Bearer test-token-2']);
-  assert.equal(reads, 2);
+  assert.equal(calls.length, 2);
+  assert.ok(
+    calls.every(
+      (c) =>
+        c.operation === 'createAiChatCompletionStream' &&
+        Object.keys(c.input).join(',') === 'body',
+    ),
+  );
+  assert.equal(JSON.stringify(calls).includes('authorization'), false);
+  adapter.dispose();
 });
 
 test('tool history: projected requests submit once while raw developer/content/call id violations submit zero', async () => {
   const bodies = [];
-  const { adapter } = setup(async (_url, init) => {
-    bodies.push(JSON.parse(init.body));
+  const { adapter } = setup(async (_operation, input) => {
+    bodies.push(input.body);
     return sse([packet({}, 'stop'), '[DONE]']);
   });
   const input = {
@@ -890,16 +883,12 @@ test('timeouts: broker, fetch, idle and total deadlines interrupt without replay
         );
       },
       {
-        getAccessToken: async () => {
+        beforeCall: async () => {
           if (stage === 'broker') {
             entered();
             return never;
           }
-          return {
-            token: 'test-token',
-            expiresAt: Date.now() + 600000,
-            signal: new AbortController().signal,
-          };
+          return;
         },
       },
     );
@@ -986,13 +975,9 @@ for (const mode of ['json', 'sse'])
         },
         {
           responseMode: mode,
-          getAccessToken: async () => {
+          beforeCall: async () => {
             tokens++;
-            return {
-              token: 'test-token',
-              expiresAt: Date.now() + 60000,
-              signal: new AbortController().signal,
-            };
+            return;
           },
         },
       );

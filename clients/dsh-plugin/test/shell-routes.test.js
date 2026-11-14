@@ -14,7 +14,8 @@ async function fixture(t) {
         requestRejection: (req) =>
           req.headers['x-test-owner'] === 'owner' ? undefined : 401,
       },
-      sameOrigin: (req) => req.headers.origin === `http://${req.headers.host}`,
+      sameOrigin: (req, write) =>
+        !write || req.headers.origin === `http://${req.headers.host}`,
     },
     runtime: {
       prepare: () => ({ body: { loggedIn: false, csrf } }),

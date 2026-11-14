@@ -1,3 +1,4 @@
+import { responseBroker } from './response-broker.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -151,29 +152,30 @@ test(
       apiBase: 'https://gateway.example.com',
       responseMode: 'json',
       modelLimits: { 'team-model': { maxOutputTokens: 32 } },
-      getAccessToken: async () => ({
-        token: 'test-token',
-        expiresAt: Date.now() + 60000,
-        signal: new AbortController().signal,
-      }),
-      fetch: async () =>
-        new Response(
-          JSON.stringify({
-            id: 'response',
-            object: 'chat.completion',
-            model: 'team-model',
-            created: 1,
-            choices: [
-              {
-                index: 0,
-                message: { role: 'assistant', content: '你好' },
-                finish_reason: 'stop',
+      broker: responseBroker(
+        async () =>
+          new Response(
+            JSON.stringify({
+              id: 'response',
+              object: 'chat.completion',
+              model: 'team-model',
+              created: 1,
+              choices: [
+                {
+                  index: 0,
+                  message: { role: 'assistant', content: '你好' },
+                  finish_reason: 'stop',
+                },
+              ],
+              usage: {
+                prompt_tokens: 1,
+                completion_tokens: 2,
+                total_tokens: 3,
               },
-            ],
-            usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
-          }),
-          { headers: { 'content-type': 'application/json' } },
-        ),
+            }),
+            { headers: { 'content-type': 'application/json' } },
+          ),
+      ),
     };
     let registration;
     try {
@@ -300,13 +302,8 @@ test(
           measured.push(JSON.parse(JSON.stringify(body)));
           return inputTokens;
         },
-        getAccessToken: async () => ({
-          token: 'test-only-token',
-          expiresAt: Date.now() + 60000,
-          signal: new AbortController().signal,
-        }),
-        fetch: async (_url, init) => {
-          const body = JSON.parse(init.body);
+        broker: responseBroker(async (operation, { body }) => {
+          assert.equal(operation, 'createAiChatCompletion');
           bodies.push(body);
           assert.ok(valid(body), JSON.stringify(valid.errors));
           assert.equal('toolHistory' in body, false);
@@ -337,7 +334,7 @@ test(
             }),
             { headers: { 'content-type': 'application/json' } },
           );
-        },
+        }),
       });
       const adapterStream = registration.adapter.stream.bind(
         registration.adapter,
@@ -501,15 +498,8 @@ for (const mode of ['json', 'sse'])
         apiBase: 'https://gateway.example.com',
         responseMode: mode,
         modelLimits: { 'team-model': { maxOutputTokens: 32 } },
-        getAccessToken: async () => {
+        broker: responseBroker(async () => {
           tokens++;
-          return {
-            token: 'test-token',
-            expiresAt: Date.now() + 60000,
-            signal: new AbortController().signal,
-          };
-        },
-        fetch: async () => {
           posts++;
           const envelope = { id: 'filtered', created: 1, model: 'team-model' };
           if (mode === 'json')
@@ -547,7 +537,7 @@ for (const mode of ['json', 'sse'])
               .join(''),
             { headers: { 'content-type': 'text/event-stream' } },
           );
-        },
+        }),
       });
       try {
         const assembler = new hostApi.BlockAssembler(),

@@ -1,4 +1,4 @@
-import { BRAND_NAME } from '../login/brand.js';
+import { BRAND_NAME } from '../brand.js';
 import { modelDirectory } from './catalog.js';
 
 import { AdapterError, check, integer, text } from './guard.js';
@@ -78,17 +78,36 @@ export function createAurigaAdapter(options) {
   const begin = (caller) => {
     check(!disposed, 'NO_ADAPTER');
     const op = operation(caller);
+    let fence;
+    try {
+      fence = broker.state.fence();
+    } catch {
+      op.close();
+      throw new AdapterError('AUTH');
+    }
+    const verify = () => {
+      op.assert();
+      try {
+        fence();
+      } catch {
+        op.abort('AUTH');
+        op.assert();
+      }
+    };
     op.watch(lifetime.signal, 'AUTH');
     active.add(op);
-    return op;
+    return Object.assign(op, { verify });
   };
   /** @param {ReturnType<typeof operation>} op @param {'models' | 'chat/completions'} path @param {string | undefined} body */
   const send = async (op, path, body) => {
     op.assert();
     const fence = broker.state.fence();
     const snapshot = broker.state.current();
-    const expiresAt = Date.parse(snapshot.expiresAt);
-    check(snapshot.state === 'authenticated' && expiresAt > Date.now(), 'AUTH');
+    const expiresAt = Date.parse(snapshot?.expiresAt);
+    check(
+      snapshot?.state === 'authenticated' && expiresAt > Date.now(),
+      'AUTH',
+    );
     // Snapshot expiry is a renewable freshness lease, not a fixed request TTL.
     // Its invalidation subscription interrupts active calls/streams; an ordinary
     // same-generation refresh must not truncate a longer generation at 30s.
@@ -212,7 +231,7 @@ export function createAurigaAdapter(options) {
               : { context: { contextWindow: item.context_window } }),
           }),
         );
-        op.assert();
+        op.verify();
         check(epoch === catalogEpoch, 'AUTH');
         catalog = { ids: models.map((item) => item.id), ...lease };
         return models;
@@ -249,7 +268,7 @@ export function createAurigaAdapter(options) {
     /** @param {import('./types.js').GenerateOptions} input
      * @returns {AsyncGenerator<import('./types.js').StreamChunk>} */
     async *stream(input) {
-      /** @type {ReturnType<typeof operation> | undefined} */
+      /** @type {ReturnType<typeof begin> | undefined} */
       let op;
       try {
         route(input.provider);
@@ -273,11 +292,11 @@ export function createAurigaAdapter(options) {
         if (mode === 'json') {
           check(contentType === 'application/json', 'SERVER');
           for (const chunk of state.json(await readJson(response, op))) {
-            op.assert();
+            op.verify();
             yield chunk;
           }
           for (const chunk of state.complete()) {
-            op.assert();
+            op.verify();
             if (chunk.type === 'finish') {
               op.close();
               active.delete(op);
@@ -289,7 +308,7 @@ export function createAurigaAdapter(options) {
           for await (const event of readSse(response, op)) {
             if (event === '[DONE]') {
               for (const chunk of state.complete()) {
-                op.assert();
+                op.verify();
                 if (chunk.type === 'finish') {
                   op.close();
                   active.delete(op);
@@ -301,7 +320,7 @@ export function createAurigaAdapter(options) {
             const packet = JSON.parse(event);
             if (packet?.error) throw new AdapterError('SERVER');
             for (const chunk of state.accept(packet)) {
-              op.assert();
+              op.verify();
               yield chunk;
             }
           }

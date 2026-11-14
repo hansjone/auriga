@@ -1,4 +1,4 @@
-import { BRAND_NAME } from '../login/brand.js';
+import { BRAND_NAME } from '../brand.js';
 import { createPlatform } from '../local/platform.js';
 import { modelDirectory } from '../ai/catalog.js';
 import { operation } from '../ai/transport.js';

@@ -124,6 +124,8 @@ export async function createVault(directory) {
       resourceIdentityGates.clear();
       state = null;
       key.fill(0);
+      // Fence immediately, then let callers drain an already-started atomic write.
+      return queue;
     },
   };
 }

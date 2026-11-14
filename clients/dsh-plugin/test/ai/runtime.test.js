@@ -1,347 +1,150 @@
-import { ownerRequest } from '../owner-request.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, sign } from 'node:crypto';
-import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
-import { setImmediate } from 'node:timers/promises';
-import { performance } from 'node:perf_hooks';
-import * as hostApi from '@deepseek-ai/dsh-llm';
-import { runtimePeer } from '../local-runtime-peer.js';
+import { randomUUID } from 'node:crypto';
+import { setImmediate as nextTurn } from 'node:timers/promises';
+import { shellRuntimePeer } from '../shell-runtime-peer.js';
 
-const require = createRequire(
-  createRequire(import.meta.url).resolve('@deepseek-ai/dsh-llm'),
-);
-const { Context } = await import(
-  pathToFileURL(require.resolve('@deepseek-ai/cordis'))
-);
-
-async function waitFor(condition) {
-  const deadline = performance.now() + 3000;
-  while (!condition()) {
-    assert.ok(performance.now() < deadline, 'Team state did not settle');
-    await setImmediate();
+async function models(t, options = {}) {
+  const f = await shellRuntimePeer(t, options),
+    registrations = new Set(),
+    retired = [];
+  const detach = await f.runtime.attachModels({
+    registerAdapter(_providers, adapter) {
+      registrations.add(adapter);
+      return () => {
+        registrations.delete(adapter);
+        retired.push(adapter);
+      };
+    },
+  });
+  t.after(() => detach());
+  return { ...f, registrations, retired, detach };
+}
+async function waitFor(predicate) {
+  const until = Date.now() + 5000;
+  while (!predicate()) {
+    assert.ok(Date.now() < until, 'runtime state did not settle');
+    await nextTurn();
   }
 }
-
-test('runtime: Team 401 disconnects communication without rejecting verified resume or removing models', async (t) => {
-  const f = await runtimePeer(t);
-  const ctx = new Context(),
-    fiber = await ctx.plugin(hostApi.LlmRuntime);
-  const detach = await f.runtime.attachModels(ctx.llm);
-  const previous = globalThis.fetch;
-  t.mock.method(globalThis, 'fetch', (url, init) =>
-    new URL(url).pathname === '/ai/mcp' ||
-    new URL(url).pathname.startsWith('/ai/team/node/')
-      ? Promise.resolve(
-          Response.json({ code: 'common.unauthenticated' }, { status: 401 }),
-        )
-      : previous(url, init),
+test('runtime Team broker failure leaves inherited identity and model registration independent', async (t) => {
+  const f = await models(t, {
+    ctx: {
+      tools: {
+        register() {
+          return () => {};
+        },
+      },
+    },
+  });
+  await waitFor(
+    () => f.runtime.status(f.request).communication === 'unavailable',
   );
-  try {
-    const attempt = f.runtime.nativeRequest({ principal: { kind: 'owner' } });
-    f.runtime.prepare(attempt);
-
-    assert.equal(f.runtime.status(attempt).loggedIn, true);
-
-    await waitFor(
-      () => f.runtime.status(attempt).communication === 'unavailable',
-    );
-    assert.ok(f.runtime.resolve(f.request));
-    assert.ok(f.runtime.resolve(attempt));
-    assert.equal(f.runtime.status(attempt).loggedIn, true);
-    assert.equal(f.runtime.status(attempt).connected, false);
-    assert.equal(f.registered.size, 0);
-    assert.equal(f.runtime.modelStatus.reauthenticationRequired, false);
-    assert.equal(ctx.llm.listProviders().length, 1);
-  } finally {
-    detach();
-    f.runtime.close();
-    await fiber.dispose();
-  }
+  assert.ok(f.runtime.resolve(f.request));
+  assert.equal(f.registrations.size, 1);
+  assert.equal(f.runtime.modelStatus.reauthenticationRequired, false);
+  assert.equal(f.runtime.status(f.request).connected, false);
 });
-
-for (const status of [400, 401, 403])
-  test(`runtime: IAM platform refresh HTTP ${status} still revokes browser and model access`, async (t) => {
-    t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-    const f = await runtimePeer(t, { accessLifetimeSeconds: 60 });
-    const ctx = new Context(),
-      fiber = await ctx.plugin(hostApi.LlmRuntime);
-    const detach = await f.runtime.attachModels(ctx.llm);
-    const previous = globalThis.fetch;
-    let exchanges = 0;
-    t.mock.method(globalThis, 'fetch', (url, init) => {
-      if (new URL(url).pathname !== '/oauth2/token') return previous(url, init);
-      const body = new URLSearchParams(init.body);
-      assert.equal(body.get('grant_type'), 'refresh_token');
-      assert.equal(body.get('resource'), null);
-      exchanges++;
-      return Promise.resolve(
-        Response.json({ error: 'invalid_grant' }, { status }),
-      );
-    });
-    try {
-      assert.ok(f.runtime.resolve(f.request));
-      assert.equal(ctx.llm.listProviders().length, 1);
-      t.mock.timers.tick(31000);
-      assert.ok(
-        f.runtime.resolve(f.request),
-        'the browser and access token have not expired',
-      );
-      await assert.rejects(f.runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
-      assert.equal(f.runtime.resolve(f.request), null);
-      assert.equal(f.runtime.status(f.request).connected, false);
-      assert.equal(f.registered.size, 0);
-      assert.equal(f.runtime.modelStatus.reauthenticationRequired, true);
-      assert.deepEqual(ctx.llm.listProviders(), []);
-      assert.equal(f.runtime.vault.snapshot().credential.refreshPending, true);
-      await assert.rejects(f.runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
-      assert.equal(exchanges, 1, 'rejected refresh is never replayed');
-    } finally {
-      detach();
-      f.runtime.close();
-      await fiber.dispose();
-    }
+for (const state of ['reauth_required', 'revoked', 'signed_out'])
+  test(`runtime shell ${state} removes models and all old identity authority`, async (t) => {
+    const f = await models(t);
+    assert.equal(f.registrations.size, 1);
+    f.connection.transition(state);
+    assert.equal(f.registrations.size, 0);
+    assert.equal(f.runtime.resolve(f.request), undefined);
+    assert.equal(
+      f.runtime.modelStatus.reauthenticationRequired,
+      state === 'reauth_required',
+    );
+    assert.equal(f.runtime.status(f.request).available, true);
+    assert.equal(f.runtime.getAccess, undefined);
+    assert.equal(f.runtime.vault.snapshot().credential, undefined);
   });
-
-for (const scenario of ['same_owner', 'other_owner', 'other_platform'])
-  test(`runtime: fresh native login after unknown refresh enforces owner and platform binding (${scenario})`, async (t) => {
-    const sameOwner = scenario !== 'other_owner';
-    t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-    const f = await runtimePeer(t);
-    const { privateKey, publicKey } = generateKeyPairSync('ec', {
-      namedCurve: 'P-256',
+for (const scenario of ['same_member_revision', 'other_member', 'other_tenant'])
+  test(`runtime ${scenario} fences the old adapter and awaits identity isolation before new registration`, async (t) => {
+    const f = await models(t),
+      old = [...f.registrations][0],
+      gate = Promise.withResolvers(),
+      entered = Promise.withResolvers();
+    const off = f.runtime.vault.subscribeResourceIdentityGate(async () => {
+      entered.resolve();
+      await gate.promise;
     });
-    const previous = globalThis.fetch;
-    const ctx = new Context(),
-      fiber = await ctx.plugin(hostApi.LlmRuntime);
-    const detach = await f.runtime.attachModels(ctx.llm);
-    t.mock.method(globalThis, 'fetch', async (url, init) => {
-      const path = new URL(url).pathname;
-      if (path === '/api/iam/v1/login/transactions')
-        return Response.json({
-          id: 'native-fixture',
-          nativeDevice: {
-            deviceCode: 'test-code',
-            expiresAt: new Date(Date.now() + 300000).toISOString(),
-            interval: 1,
+    t.after(off);
+    const patch =
+      scenario === 'other_member'
+        ? { memberId: randomUUID() }
+        : scenario === 'other_tenant'
+          ? { tenantId: randomUUID() }
+          : {};
+    f.connection.transition('authenticated', patch);
+    await entered.promise;
+    assert.equal(f.registrations.size, 0);
+    assert.equal(f.runtime.resolve(f.request), undefined);
+    assert.throws(() => old.providerInfo('auriga'), { code: 'NO_ADAPTER' });
+    gate.resolve();
+    await waitFor(() => f.registrations.size === 1);
+    assert.notEqual([...f.registrations][0], old);
+    assert.equal(
+      f.runtime.resolve(f.request).ownerId,
+      f.connection.identity.memberId,
+    );
+  });
+for (const failure of ['permission', 'unavailable', 'none'])
+  test(`runtime catalog ${failure} never performs plugin token exchange and leaves shell login authoritative`, async (t) => {
+    const f = await models(t),
+      original = f.connection.ipc.call.bind(f.connection.ipc);
+    let calls = 0;
+    f.connection.ipc.call = async (message) => {
+      if (message.call?.operation !== 'listAiModels') return original(message);
+      calls++;
+      if (failure !== 'none')
+        throw Object.assign(Error('PRIVATE_UPSTREAM_DETAIL'), {
+          code:
+            failure === 'permission'
+              ? 'common.forbidden'
+              : 'common.unavailable',
+        });
+      return {
+        requestId: message.requestId,
+        operation: message.call.operation,
+        output: {
+          statusCode: 200,
+          headers: { 'content-type': 'application/json' },
+          body: {
+            object: 'list',
+            data: [
+              {
+                id: 'authorized',
+                object: 'model',
+                created: 1,
+                owned_by: 'auriga',
+              },
+            ],
           },
-          step: { type: 'form' },
-        });
-      if (path === '/api/iam/v1/login/transactions/native-fixture/advance')
-        return Response.json({
-          id: 'native-fixture',
-          status: 'completed',
-          step: { type: 'complete' },
-        });
-      if (path === '/oauth2/jwks')
-        return Response.json({
-          keys: [
-            { ...publicKey.export({ format: 'jwk' }), kid: 'fresh-login' },
-          ],
-        });
-      if (path === '/oauth2/token') {
-        const body = new URLSearchParams(init.body);
-        if (body.get('resource')) throw Error('response lost');
-        assert.equal(
-          body.get('grant_type'),
-          'urn:ietf:params:oauth:grant-type:device_code',
-        );
-        const claims = {
-          ...f.credential.claims,
-          did: 'new-device',
-          sub: sameOwner ? f.credential.claims.sub : 'other-owner',
-          exp: Math.floor(Date.now() / 1000) + 120,
-        };
-        const encoded = [{ alg: 'ES256', kid: 'fresh-login' }, claims]
-          .map((value) =>
-            Buffer.from(JSON.stringify(value)).toString('base64url'),
-          )
-          .join('.');
-        return Response.json({
-          access_token:
-            encoded +
-            '.' +
-            sign('sha256', Buffer.from(encoded), {
-              key: privateKey,
-              dsaEncoding: 'ieee-p1363',
-            }).toString('base64url'),
-          token_type: 'Bearer',
-          scope: 'auriga.connect',
-          refresh_token: 'fresh-native-refresh',
-        });
-      }
-      return previous(url, init);
-    });
-    try {
-      await assert.rejects(ctx.llm.listModels('auriga'));
-      if (scenario === 'other_platform')
-        await f.runtime.vault.update((s) => {
-          s.credential.platformOrigin = 'https://other.example.com';
-        });
-      const request = { headers: {} },
-        prepared = f.runtime.prepare(ownerRequest(f.runtime, request));
-      assert.equal(prepared.body.resumeAvailable, false);
-
-      await f.runtime.login(request, { action: 'begin' });
-      t.mock.timers.tick(1000);
-      const complete = f.runtime.login(request, {
-        action: 'advance',
-        input: { type: 'form', values: {} },
-      });
-      if (!sameOwner || scenario === 'other_platform') {
-        await assert.rejects(
-          complete,
-          scenario === 'other_platform'
-            ? /platform binding changed/
-            : /local owner conflict/,
-        );
-        assert.equal(
-          f.runtime.vault.snapshot().credential.refreshPending,
-          true,
-        );
-        assert.equal(
-          f.runtime.vault.snapshot().credential.claims.sub,
-          f.credential.claims.sub,
-        );
-        assert.deepEqual(ctx.llm.listProviders(), []);
-      } else {
-        await complete;
-
-        const state = f.runtime.vault.snapshot();
-        assert.equal(state.credential.refreshToken, 'fresh-native-refresh');
-        assert.equal(state.credential.claims.did, 'new-device');
-        assert.equal(state.revocations.length, 1);
-        assert.equal(state.revocations[0].token, f.credential.refreshToken);
-        assert.equal(f.runtime.status(request).loggedIn, true);
-        assert.equal(f.runtime.modelStatus.reauthenticationRequired, false);
-        assert.equal(ctx.llm.listProviders().length, 1);
-        await waitFor(() => f.runtime.status(request).connected);
-      }
-    } finally {
-      detach();
-      f.runtime.close();
-      await fiber.dispose();
-    }
-  });
-
-for (const failure of ['permission', 'unknown', 'none'])
-  test(`runtime public model registration: ${failure}, Team separation and logout/unload`, async (t) => {
-    const f = await runtimePeer(t);
-    const { runtime, request } = f;
-    const priorFetch = globalThis.fetch;
-    const { privateKey, publicKey } = generateKeyPairSync('ec', {
-      namedCurve: 'P-256',
-    });
-    let exchanges = 0;
-    t.mock.method(globalThis, 'fetch', async (url, init) => {
-      const path = new URL(url).pathname;
-      if (path === '/oauth2/token') {
-        exchanges++;
-        assert.equal(
-          new URLSearchParams(init.body).get('resource'),
-          'urn:auriga:ai-gateway',
-        );
-        if (failure === 'permission')
-          return Response.json({ error: 'invalid_grant' }, { status: 400 });
-        if (failure === 'unknown') throw Error('test response lost');
-        const now = Math.floor(Date.now() / 1000);
-        const claims = {
-          ...f.credential.claims,
-          aud: 'auriga.ai-gateway',
-          iat: now,
-          exp: now + 120,
-          perms: ['auriga.connect.models.invoke'],
-        };
-        const body = [
-          { alg: 'ES256', kid: 'model-fixture', typ: 'at+jwt' },
-          claims,
-        ]
-          .map((value) =>
-            Buffer.from(JSON.stringify(value)).toString('base64url'),
-          )
-          .join('.');
-        const token =
-          body +
-          '.' +
-          sign('sha256', Buffer.from(body), {
-            key: privateKey,
-            dsaEncoding: 'ieee-p1363',
-          }).toString('base64url');
-        return Response.json({
-          access_token: token,
-          token_type: 'Bearer',
-          scope: 'auriga.connect',
-          expires_in: 120,
-          refresh_token: 'test-rotated-refresh',
-        });
-      }
-      if (path === '/oauth2/jwks')
-        return Response.json({
-          keys: [
-            { ...publicKey.export({ format: 'jwk' }), kid: 'model-fixture' },
-          ],
-        });
-      if (path === '/ai/v1/models')
-        return Response.json({
-          object: 'list',
-          data: [
-            {
-              id: 'synthetic',
-              object: 'model',
-              created: 1,
-              owned_by: 'auriga',
-            },
-          ],
-        });
-      return priorFetch(url, init);
-    });
-    const ctx = new Context(),
-      fiber = await ctx.plugin(hostApi.LlmRuntime);
-    const detach = await runtime.attachModels(ctx.llm);
-    try {
-      assert.equal(ctx.llm.listProviders().length, 1);
-      assert.equal(runtime.status(request).connected, true);
-      if (failure === 'none') {
-        assert.equal((await ctx.llm.listModels('auriga'))[0].id, 'synthetic');
-        assert.equal(
-          runtime.vault.snapshot().credential.accessToken,
-          f.credential.accessToken,
-        );
-        assert.equal(
-          runtime.vault.snapshot().credential.refreshToken,
-          'test-rotated-refresh',
-        );
-      } else {
-        await assert.rejects(ctx.llm.listModels('auriga'));
-        assert.equal(
-          runtime.status(request).connected,
-          failure === 'permission',
-        );
-        assert.equal(
-          runtime.status(request).models.reauthenticationRequired,
-          failure === 'unknown',
-        );
-        assert.equal(f.registered.size > 0, failure === 'permission');
-        await assert.rejects(ctx.llm.listModels('auriga'));
-        assert.equal(exchanges, 1);
-      }
-      assert.doesNotMatch(
-        JSON.stringify(runtime.status(request)),
-        /access_token|test-rotated-refresh|eyJ/,
+        },
+      };
+    };
+    t.mock.method(globalThis, 'fetch', () =>
+      assert.fail('no direct platform fetch'),
+    );
+    const adapter = [...f.registrations][0];
+    if (failure === 'none')
+      assert.equal((await adapter.listModels('auriga')).length, 1);
+    else
+      await assert.rejects(
+        adapter.listModels('auriga'),
+        (error) => !error.message.includes('PRIVATE_UPSTREAM_DETAIL'),
       );
-      if (failure !== 'unknown') {
-        assert.equal(runtime.status(request).models.available, false);
-        await runtime.logout(request);
-        assert.equal(runtime.vault.snapshot().credential, null);
-        assert.equal(f.registered.size, 0);
-      }
-      assert.deepEqual(ctx.llm.listProviders(), []);
-      runtime.close();
-      assert.deepEqual(ctx.llm.listProviders(), []);
-    } finally {
-      detach();
-      runtime.close();
-      await fiber.dispose();
-    }
+    assert.equal(calls, 1);
+    assert.ok(f.runtime.resolve(f.request));
+    assert.equal(f.registrations.size, 1);
+    assert.equal(
+      f.runtime.modelStatus.available,
+      false,
+      'discovery cannot invent generation capacities or tokenizer',
+    );
+    await f.rpc('aurigaAuth/logout');
+    assert.equal(f.registrations.size, 0);
+    assert.equal(f.runtime.resolve(f.request), undefined);
   });

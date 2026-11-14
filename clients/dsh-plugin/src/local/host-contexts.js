@@ -171,6 +171,17 @@ export function createHostContexts({ broker, identity, ctx }) {
     session,
     tool,
     finish: retireTool,
+    validSession(/** @type {string} */ id, /** @type {string} */ contextId) {
+      const row = sessions.get(id);
+      return !!(
+        !closed &&
+        row &&
+        row.stamp === stamp() &&
+        row.handle.executionContextId === contextId &&
+        ctx.sessions?.get(id) === row.native &&
+        Date.parse(row.handle.expiresAt) > Date.now()
+      );
+    },
     valid(/** @type {string} */ id) {
       const row = tools.get(id);
       const current =

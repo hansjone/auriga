@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as hostApi from '@deepseek-ai/dsh-llm';
+import { responseBroker } from './response-broker.js';
 import { createAurigaAdapter } from '../../src/ai/index.js';
 
 const page = (visible) =>
@@ -19,15 +20,10 @@ test('catalog: a late response cannot restore an older ACL result', async () => 
   const adapter = createAurigaAdapter({
     hostApi,
     apiBase: 'https://portal.example.com',
-    fetch: async () => {
+    broker: responseBroker(async () => {
       const index = requests++;
       entered[index].resolve();
       return [first, second][index].promise;
-    },
-    getAccessToken: async () => ({
-      token: 'ai-token',
-      expiresAt: Date.now() + 60000,
-      signal: new AbortController().signal,
     }),
     modelLimits: { trusted: { contextWindow: 128, maxOutputTokens: 32 } },
     countInputTokens: () => 3,
@@ -58,13 +54,9 @@ test('catalog: expiry and failed directory refresh invalidate availability', asy
   const adapter = createAurigaAdapter({
     hostApi,
     apiBase: 'https://portal.example.com',
-    fetch: async () =>
+    broker: responseBroker(async () =>
       denied ? new Response(null, { status: 403 }) : page(true),
-    getAccessToken: async () => ({
-      token: 'ai-token',
-      expiresAt: Date.now() + 60000,
-      signal: new AbortController().signal,
-    }),
+    ),
     modelLimits: { trusted: { contextWindow: 128, maxOutputTokens: 32 } },
     countInputTokens: () => 3,
   });

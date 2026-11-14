@@ -1,112 +1,78 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setTimeout as delay } from 'node:timers/promises';
-import { runtimePeer } from './local-runtime-peer.js';
-import {
-  loginMemberName,
-  deviceMemberName,
-  memberName,
-} from '../src/local/member-profile.js';
-
-test('member profile: restored native owner reads the current name and persists it for offline display', async (t) => {
-  const subject = '00000000-0000-4000-8000-000000000002';
-  const { runtime, request } = await runtimePeer(t, {
-    claims: { sub: subject },
-    memberDirectory: {
-      items: [{ ownerUserId: subject, ownerDisplayName: 'Alice' }],
-    },
+import { shellRuntimePeer } from './shell-runtime-peer.js';
+import { memberName } from '../src/local/member-profile.js';
+import { setImmediate as nextTurn } from 'node:timers/promises';
+import { randomUUID } from 'node:crypto';
+function profilePeer(reply) {
+  return (c) => {
+    const original = c.ipc.call.bind(c.ipc);
+    c.ipc.call = async (message) =>
+      message.call?.operation === 'profile_read'
+        ? {
+            requestId: message.requestId,
+            operation: 'profile_read',
+            output: { statusCode: 200, body: await reply(c) },
+          }
+        : original(message);
+  };
+}
+test('member name uses the fixed profile operation, never a plugin credential or directory fetch', async (t) => {
+  const f = await shellRuntimePeer(t, {
+    configure: profilePeer((c) => ({
+      memberId: c.identity.memberId,
+      displayName: ' Alice ',
+    })),
   });
-  runtime.status(request);
-  const deadline = Date.now() + 3000;
-  while (!runtime.vault.snapshot().credential.displayName) {
-    assert.ok(
-      Date.now() < deadline,
-      'authenticated member name was not persisted',
-    );
-    await delay(5);
-  }
-  assert.equal(runtime.status(request).account.displayName, 'Alice');
-  assert.equal(runtime.vault.snapshot().credential.displayName, 'Alice');
+  t.mock.method(globalThis, 'fetch', () => assert.fail('no directory lookup'));
+  await nextTurn();
+  assert.equal(f.runtime.status(f.request).account.displayName, 'Alice');
+  assert.equal(f.runtime.baseTools.getState().displayName, 'Alice');
+  assert.equal(f.runtime.vault.snapshot().credential, undefined);
 });
-
-test('member profile: IAM /me is bound to the verified local login subject', async () => {
-  const jar = {};
-  const signal = new AbortController().signal;
-  const platform = {
-    async request(path, options) {
-      assert.equal(path, '/api/iam/v1/me');
-      assert.equal(options.jar, jar);
-      assert.equal(options.signal, signal);
-      return { account: { id: 'alice', displayName: ' Alice ' } };
-    },
-  };
-  assert.equal(await loginMemberName(platform, jar, 'alice', signal), 'Alice');
-  await assert.rejects(
-    loginMemberName(platform, jar, 'bob', signal),
-    /identity changed/,
-  );
+test('unadmitted requests cannot read the authenticated profile, and foreign member names are rejected', async (t) => {
+  const f = await shellRuntimePeer(t, {
+    configure: profilePeer(() => ({
+      memberId: randomUUID(),
+      displayName: 'Other member',
+    })),
+  });
+  await nextTurn();
+  assert.equal(f.runtime.status({ headers: {} }).account, null);
+  assert.equal(f.runtime.status(f.request).account.displayName, undefined);
+  assert.ok(f.runtime.resolve(f.request));
 });
-
-test('member profile: directory pagination uses device auth and selects only the owner', async () => {
-  let calls = 0;
-  const platform = {
-    async request(path, options) {
-      assert.equal(options.token, 'device');
-      assert.equal(options.jar, undefined);
-      if (++calls === 1)
-        return {
-          items: [{ ownerUserId: 'bob', ownerDisplayName: 'Bob' }],
-          nextCursor: 'next',
-        };
-      assert.match(path, /cursor=next$/);
-      return { items: [{ ownerUserId: 'alice', ownerDisplayName: 'Alice' }] };
-    },
-  };
-  assert.equal(
-    await deviceMemberName(
-      platform,
-      'device',
-      'alice',
-      new AbortController().signal,
-    ),
-    'Alice',
-  );
-  assert.equal(calls, 2);
+test('logout or identity change fences a late profile response', async (t) => {
+  const gate = Promise.withResolvers(),
+    entered = Promise.withResolvers();
+  const f = await shellRuntimePeer(t, {
+    configure: profilePeer(async (c) => {
+      entered.resolve();
+      const memberId = c.identity.memberId;
+      await gate.promise;
+      return { memberId, displayName: 'Old member' };
+    }),
+  });
+  await entered.promise;
+  f.connection.logout();
+  gate.resolve();
+  await nextTurn();
+  assert.equal(f.runtime.status(f.request).account, null);
+  assert.equal(f.runtime.baseTools.getState().displayName, undefined);
 });
-
-test('member profile: absent, malformed, cyclic and unavailable directory never fabricate a name', async () => {
-  const signal = new AbortController().signal;
-  assert.equal(
-    await deviceMemberName(
-      { request: async () => ({ items: [] }) },
-      'device',
-      'alice',
-      signal,
-    ),
-    undefined,
-  );
-  await assert.rejects(
-    deviceMemberName(
-      { request: async () => ({ items: [], nextCursor: 'same' }) },
-      'device',
-      'alice',
-      signal,
-    ),
-    /cursor/,
-  );
-  await assert.rejects(
-    deviceMemberName(
-      {
-        request: async () => {
-          throw Error('unavailable');
-        },
-      },
-      'device',
-      'alice',
-      signal,
-    ),
-    /unavailable/,
-  );
+test('unsafe or unavailable profile data never invents a name or changes verified identity', async (t) => {
   for (const value of ['', '  ', null, 3, 'x'.repeat(257), 'Alice\nBob'])
     assert.equal(memberName(value), undefined);
+  const f = await shellRuntimePeer(t, {
+    configure: profilePeer((c) => ({
+      memberId: c.identity.memberId,
+      displayName: 'Alice\nBob',
+    })),
+  });
+  await nextTurn();
+  assert.equal(f.runtime.status(f.request).account.displayName, undefined);
+  assert.equal(
+    f.runtime.status(f.request).account.subject,
+    f.connection.identity.memberId,
+  );
 });

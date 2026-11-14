@@ -18,6 +18,7 @@ export function createManagedNetwork(options) {
   };
   return {
     start() {
+      if (closed) return opening ?? Promise.resolve();
       if (opening) return opening;
       opening = (async () => {
         const candidate = await createConnectRuntime({
@@ -25,9 +26,13 @@ export function createManagedNetwork(options) {
           config: { platformOrigin: options.platformOrigin ?? '' },
           ctx: options.ctx,
           connection: options.connection,
+          expectedIdentity: {
+            tenantId: options.tenantId,
+            ownerId: options.ownerId,
+          },
         });
         if (closed) {
-          candidate.close();
+          await candidate.close();
           return;
         }
         runtime = candidate;
@@ -81,9 +86,10 @@ export function createManagedNetwork(options) {
     },
     async close() {
       closed = true;
-      runtime?.close();
+      const closing = runtime?.close();
       await opening?.catch(() => {});
-      runtime?.close();
+      await closing;
+      await runtime?.close();
       runtime = undefined;
     },
   };

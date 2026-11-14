@@ -182,6 +182,12 @@ export function brokerFixture() {
     refresh() {
       changed(event(sub));
     },
+    transition(next, patch = {}) {
+      state = next;
+      Object.assign(identity, patch);
+      revision++;
+      changed?.(event(sub));
+    },
     logout() {
       state = 'signed_out';
       revision++;

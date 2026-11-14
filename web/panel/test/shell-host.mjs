@@ -301,11 +301,11 @@ export function surfaceHost(
         ),
       );
     }
-    if (path.includes('/auriga/local-login/consent/'))
+    if (path.includes('/auriga/shell/consent/'))
       return consentFetch
         ? consentFetch(url, init)
         : Promise.resolve(response(503, { code: 'common.unavailable' }));
-    if (path.endsWith('/auriga/local-login/status'))
+    if (path.endsWith('/auriga/shell/status'))
       return Promise.resolve(fetchImpl(url, init)).then(async (result) => {
         if (result.ok === false) return result;
         const data = await result.json();

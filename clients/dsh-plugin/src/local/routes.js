@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { createConsentRoutes } from './consent-routes.js';
 import { createMessagingRoutes } from './messaging-routes.js';
+import { parseStrictJson } from '../network/trust/jcs.js';
 const BASE = '/auriga/shell';
 const actions = new Set(['open_login', 'cancel_login', 'logout']);
 /** @param {any} res @param {number} status @param {any} body */
@@ -17,7 +18,10 @@ function json(res, status, body) {
 export function createUnconfiguredLoginRoutes(connection) {
   return createConnectRoutes({
     runtime: null,
-    admission: { nativeAuth: connection, sameOrigin: () => false },
+    admission: {
+      nativeAuth: connection,
+      sameOrigin: (/** @type {any} */ req) => req.method === 'GET',
+    },
   });
 }
 /** @param {{runtime:any,admission:any,diagnostic?:(value:any)=>void}} options */
@@ -28,7 +32,11 @@ export function createConnectRoutes({ runtime, admission }) {
     const rejected = admission.nativeAuth.requestRejection(req);
     if (rejected !== undefined)
       return json(res, rejected, { code: 'common.forbidden' });
+    if (!admission.sameOrigin(req, req.method !== 'GET'))
+      return json(res, 403, { code: 'common.forbidden' });
     const path = (req.url ?? '').split('?')[0];
+    if (path !== BASE && !path.startsWith(BASE + '/'))
+      return json(res, 404, { code: 'common.not_found' });
     if (req.method === 'GET' && path === BASE + '/status')
       return json(
         res,
@@ -49,7 +57,7 @@ export function createConnectRoutes({ runtime, admission }) {
     if (path.startsWith(BASE + '/messaging/')) return messaging(req, res);
     if (req.method !== 'POST' || path !== BASE + '/command')
       return json(res, 404, { code: 'common.not_found' });
-    if (!admission.sameOrigin(req, true) || !runtime.checkCsrf(req))
+    if (!runtime.checkCsrf(req))
       return json(res, 403, { code: 'common.forbidden' });
     if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] ?? ''))
       return json(res, 400, { code: 'common.validation_failed' });
@@ -61,9 +69,16 @@ export function createConnectRoutes({ runtime, admission }) {
           return json(res, 400, { code: 'common.validation_failed' });
         chunks.push(chunk);
       }
-      const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      let value;
+      try {
+        value = parseStrictJson(Buffer.concat(chunks));
+      } catch {
+        return json(res, 400, { code: 'common.validation_failed' });
+      }
       if (
         !value ||
+        typeof value !== 'object' ||
+        Array.isArray(value) ||
         Object.keys(value).join(',') !== 'action' ||
         !actions.has(value.action)
       )

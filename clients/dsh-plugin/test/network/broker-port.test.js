@@ -120,3 +120,54 @@ test('network submit uses a tool context and drops it after the bounded fixed op
     code: 'network.unauthorized',
   });
 });
+
+test('parallel opens for one native session share a stream and each receiver', async (t) => {
+  const f = await fixture(t),
+    a = [],
+    b = [];
+  const [first, second] = await Promise.all([
+    f.port.open(f.execution, (bytes) => a.push(bytes.toString())),
+    f.port.open(f.execution, (bytes) => b.push(bytes.toString())),
+  ]);
+  assert.equal(first, second);
+  assert.equal(f.calls.filter((c) => c.operation === 'network_open').length, 1);
+  f.emit(0, '{}');
+  assert.deepEqual(a, ['{}']);
+  assert.deepEqual(b, ['{}']);
+  await first.close();
+  assert.equal(f.commands.filter((c) => c.action === 'cancel').length, 1);
+});
+test('closing while open is pending cancels the late stream and cannot revive it', async (t) => {
+  const f = await fixture(t),
+    entered = Promise.withResolvers(),
+    release = Promise.withResolvers();
+  const call = f.connection.ipc.call;
+  f.connection.ipc.call = async (message) => {
+    if (message.call?.operation === 'network_open') {
+      entered.resolve();
+      await release.promise;
+    }
+    return call(message);
+  };
+  const pending = f.port.open(f.execution, () =>
+    assert.fail('closed receiver'),
+  );
+  const rejected = assert.rejects(pending, { code: 'network.unauthorized' });
+  await entered.promise;
+  f.port.close();
+  release.resolve();
+  await rejected;
+  assert.ok(f.commands.some((c) => c.action === 'cancel'));
+});
+test('invalidating the source fences send and receive even before the next snapshot', async (t) => {
+  const f = await fixture(t);
+  const connection = await f.port.open(f.execution, () =>
+    assert.fail('retired source'),
+  );
+  f.switchTenant();
+  f.emit(0, '{}');
+  await assert.rejects(connection.send(Buffer.from('{}')), {
+    code: 'network.unauthorized',
+  });
+  assert.equal(f.commands.filter((c) => c.action === 'cancel').length, 1);
+});

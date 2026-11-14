@@ -10,6 +10,8 @@ import { createBroker } from './broker.js';
 import { connectPackagedBroker } from './broker-package.js';
 import { createEnterpriseAuth } from './enterprise.js';
 import { createEnterpriseEnvironment } from './enterprise-environment.js';
+import { memberName } from './member-profile.js';
+import { connectionReason, DIAGNOSTIC_PATH } from '../network/base-tools.js';
 
 /** @param {string} code */
 const refuse = (code = 'common.unavailable') => {
@@ -20,13 +22,14 @@ const refuse = (code = 'common.unavailable') => {
  * The encrypted legacy vault is used only for local state; old platform material
  * cannot be replayed. No import operation exists, so migration safely requires
  * a fresh shell login and removes only old authentication fields.
- * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any}} options */
+ * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any,expectedIdentity?:{tenantId:string,ownerId:string}}} options */
 export async function createConnectRuntime({
   config,
   directory,
   ctx,
   connection,
   enterpriseConfig,
+  expectedIdentity,
 }) {
   const vault = await createVault(directory);
   const savedAuthentication = vault.snapshot();
@@ -46,9 +49,15 @@ export async function createConnectRuntime({
   /** @type {Set<(identity:any)=>Promise<void>>} */ const gates = new Set();
 
   /** @type {any} */ let principal;
+  /** @type {{displayName:string}|undefined} */ let memberProfile;
+  /** @type {{reachable:boolean,lastSuccessAt:string}|undefined} */ let probeEvidence;
   /** @type {ReturnType<typeof createHostContexts>|undefined} */ let contexts;
   /** @type {ReturnType<typeof createTeam>|undefined} */ let team;
   /** @type {Awaited<ReturnType<typeof createVault>>|undefined} */ let teamVault;
+  /** @type {ReturnType<typeof createVault>|undefined} */ let openingTeamVault;
+  /** @type {ReturnType<typeof createTeam>|undefined} */ let startingTeam;
+  /** @type {Awaited<ReturnType<typeof createVault>>|undefined} */ let startingVault;
+  /** @type {Promise<any>|undefined} */ let closing;
   let teamGeneration = 0,
     communication = 'idle';
   /** @type {Promise<void>|undefined} */ let teamStarting;
@@ -69,10 +78,14 @@ export async function createConnectRuntime({
     validate: installed?.validate ?? (() => refuse()),
     onInvalidate() {
       principal = undefined;
+      memberProfile = undefined;
+      probeEvidence = undefined;
       models?.logout();
       key = '';
       contexts?.invalidate();
       teamGeneration++;
+      startingTeam?.close();
+      void startingVault?.close();
       team?.close();
       team = undefined;
       teamVault?.close();
@@ -85,13 +98,21 @@ export async function createConnectRuntime({
           .catch(() => {});
     },
     onChange(snapshot) {
-      const next =
+      const candidate =
         snapshot?.state === 'authenticated' ? snapshot.identity : undefined;
+      const next =
+        candidate &&
+        (!expectedIdentity ||
+          (candidate.tenantId === expectedIdentity.tenantId &&
+            candidate.memberId === expectedIdentity.ownerId))
+          ? candidate
+          : undefined;
       const fingerprint = next
         ? JSON.stringify([snapshot.shellEpoch, snapshot.revision, next])
         : '';
       if (key === fingerprint) return;
       key = fingerprint;
+      memberProfile = undefined;
       isolationPending = true;
       const expected = fingerprint;
       publishing = publishing
@@ -119,6 +140,7 @@ export async function createConnectRuntime({
           if (principal) {
             models?.login();
             void beginTeam();
+            if (contexts) void refreshProfile(expected);
           } else models?.logout();
           for (const listener of listeners)
             void Promise.resolve()
@@ -145,6 +167,30 @@ export async function createConnectRuntime({
     broker.state.current()?.state === 'authenticated' ? principal : undefined;
   contexts = createHostContexts({ broker, identity, ctx });
   const sessionContexts = contexts;
+  async function refreshProfile(/** @type {string} */ expected) {
+    const who = identity();
+    if (!who) return;
+    try {
+      const check = broker.state.fence();
+      const result = await broker.call('profile_read', {});
+      check();
+      if (
+        closed ||
+        expected !== key ||
+        who !== identity() ||
+        result.body.memberId !== who.ownerId
+      )
+        return;
+      const displayName = memberName(result.body.displayName);
+      memberProfile = displayName ? { displayName } : undefined;
+      for (const listener of listeners)
+        void Promise.resolve()
+          .then(listener)
+          .catch(() => {});
+    } catch {
+      // Presentation failure cannot change the shell's identity authority.
+    }
+  }
   async function beginTeam() {
     if (
       !contexts ||
@@ -169,7 +215,10 @@ export async function createConnectRuntime({
           ]),
         )
         .digest('hex');
-      const saved = await createVault(join(directory, 'team', partition));
+      openingTeamVault = createVault(join(directory, 'team', partition));
+      const saved = await openingTeamVault;
+      openingTeamVault = undefined;
+      startingVault = saved;
       let candidate;
       try {
         if (closed || expected !== teamGeneration || !identity()) {
@@ -192,6 +241,7 @@ export async function createConnectRuntime({
               communication = value.connected ? 'ready' : 'unavailable';
           },
         });
+        startingTeam = candidate;
         await candidate.start();
         check();
         if (closed || expected !== teamGeneration) {
@@ -206,6 +256,9 @@ export async function createConnectRuntime({
         candidate?.close();
         saved.close();
         if (expected === teamGeneration) communication = 'unavailable';
+      } finally {
+        if (startingTeam === candidate) startingTeam = undefined;
+        if (startingVault === saved) startingVault = undefined;
       }
     })();
     teamStarting = work;
@@ -302,22 +355,58 @@ export async function createConnectRuntime({
       generation: () => key,
       getState: () => ({
         loggedIn: !!identity(),
-        verified: false,
-        reason: identity() ? 'not_ready' : 'unconfigured',
+        verified: !!identity(),
+        memberId: identity()?.ownerId,
+        displayName: memberProfile?.displayName,
+        origin: config.platformOrigin || null,
+        reachable: probeEvidence?.reachable ?? null,
+        lastSuccessAt: probeEvidence?.lastSuccessAt ?? null,
+        reason: identity()
+          ? 'not_ready'
+          : config.platformOrigin
+            ? 'unauthorized'
+            : 'unconfigured',
       }),
       async readLocal() {
         return null;
       },
       async probe(
-        /** @type {string} */ _path,
+        /** @type {string} */ path,
         /** @type {AbortSignal} */ signal,
       ) {
         signal.throwIfAborted();
+        if (path !== DIAGNOSTIC_PATH) return refuse('common.validation_failed');
         const check = broker.state.fence();
-        const result = await broker.call('provider_diagnostic', {});
-        check();
-        signal.throwIfAborted();
-        return result.body;
+        try {
+          const result = await broker.call('provider_diagnostic', {});
+          check();
+          signal.throwIfAborted();
+          probeEvidence = {
+            reachable: true,
+            lastSuccessAt: new Date().toISOString(),
+          };
+          return {
+            httpStatus: result.statusCode,
+            apiReady: result.body.available === true,
+            reason: result.body.available === true ? null : 'unknown',
+          };
+        } catch (error) {
+          check();
+          signal.throwIfAborted();
+          const status = /** @type {any} */ (error).status;
+          if (!Number.isInteger(status) || status < 100 || status > 599)
+            throw error;
+          const reason = connectionReason(error);
+          probeEvidence = {
+            reachable: true,
+            lastSuccessAt: new Date().toISOString(),
+          };
+          return {
+            httpStatus: status,
+            apiReady: false,
+            reason: reason === 'hq_unreachable' ? 'unknown' : reason,
+          };
+        }
       },
     },
     config,
@@ -373,11 +462,16 @@ export async function createConnectRuntime({
         reason: s?.reason,
         brokerAvailable: !!s,
         migrationRequired: legacy && !who,
-        account: who ? { subject: who.ownerId } : null,
+        account: who
+          ? {
+              subject: who.ownerId,
+              ...(memberProfile ? memberProfile : {}),
+            }
+          : null,
         csrf: requests.has(req) ? csrf : undefined,
         ...(who && s.uacLoginInfo ? { uacLoginInfo: s.uacLoginInfo } : {}),
         network: { available: false, connected: false, state: 'idle' },
-        models: { available: false, state: 'idle' },
+        models: models?.status ?? { available: false, state: 'idle' },
         capabilities: { consent: false },
       };
     },
@@ -533,19 +627,26 @@ export async function createConnectRuntime({
       });
     },
     close() {
-      if (closed) return;
+      if (closed) return closing;
       closed = true;
       clearInterval(teamRetry);
       contexts?.close();
       teamGeneration++;
+      startingTeam?.close();
       team?.close();
-      teamVault?.close();
+      const storage = [
+        teamVault?.close(),
+        startingVault?.close(),
+        openingTeamVault?.then((saved) => saved.close()),
+        vault.close(),
+      ];
       environment?.dispose();
       enterprise?.close();
       models?.close();
       broker.close();
       desktop?.close();
-      vault.close();
+      closing = Promise.allSettled(storage);
+      return closing;
     },
   };
   if (typeof ctx.inject === 'function')
@@ -567,5 +668,6 @@ export async function createConnectRuntime({
   }, 5000);
   teamRetry.unref();
   void beginTeam();
+  void refreshProfile(key);
   return runtime;
 }

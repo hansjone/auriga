@@ -27,14 +27,14 @@ test('R2 unsupported consent route is absent, preserves authentication and never
     },
   };
   await route(
-    { method: 'GET', url: '/auriga/local-login/consent/snapshot', headers: {} },
+    { method: 'GET', url: '/auriga/shell/consent/snapshot', headers: {} },
     res,
   );
   assert.equal(code, 404);
   assert.equal(body.code, 'common.not_found');
   runtime.resolve = () => false;
   await route(
-    { method: 'GET', url: '/auriga/local-login/consent/snapshot', headers: {} },
+    { method: 'GET', url: '/auriga/shell/consent/snapshot', headers: {} },
     res,
   );
   assert.equal(code, 401);
@@ -103,7 +103,7 @@ test('consent HTTP bridge binds native session, origin and CSRF, returning only 
     );
     Object.assign(req, {
       method,
-      url: '/auriga/local-login/consent/' + action,
+      url: '/auriga/shell/consent/' + action,
       headers: {
         cookie,
         origin,
