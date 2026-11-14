@@ -62,7 +62,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	if err := cfg.validateUacCookieNames(); err != nil {
 		return nil, err
 	}
-	if err := cfg.DevicePresence.validate(); err != nil {
+	if err := cfg.DevicePresence.validateWithProjection(cfg.MsgnetProjection != nil); err != nil {
 		return nil, err
 	}
 	limit := cfg.Static.GzipCacheBytes

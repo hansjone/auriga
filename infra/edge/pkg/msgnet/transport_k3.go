@@ -56,6 +56,9 @@ func VerifyTransportTransition(proof api.TransportTransitionProof, domain Transp
 	if !allowed(oldControl.Payload, oldAuthority) {
 		return Fault("authority_unknown")
 	}
+	if lt(oldControl.Payload.ControlRevision, p.ControlRevision) || lt(p.Generation, oldControl.Payload.MinimumGeneration) {
+		return Fault("control_required")
+	}
 	if slices.Contains(oldControl.Payload.RevokedAuthorityIds, p.AuthorityId) {
 		return Fault("authority_revoked")
 	}

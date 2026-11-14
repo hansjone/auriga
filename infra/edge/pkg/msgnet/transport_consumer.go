@@ -74,6 +74,9 @@ func (t *TransportConsumer) root(c api.SignedRootControl) error {
 	return signedRoot(c, t.Domain.RootSPKI)
 }
 func (t *TransportConsumer) authority(a api.SignedRuntimeAuthority, c api.SignedRootControl) error {
+	if a.Payload.PublicKeySpki == t.Domain.RootSPKI {
+		return Fault("scope_denied")
+	}
 	if a.RootAuth.Kid != t.RootKid || a.Payload.TenantId != t.Domain.Tenant || a.Payload.Realm != t.Domain.Realm || a.Payload.ExpiryPolicy != "no_hard_expiry" || stamp(a.Payload.NotBefore).After(t.now()) || !slices.Contains(a.Payload.Capabilities, "network_transport") {
 		return Fault("scope_denied")
 	}
@@ -155,6 +158,10 @@ func (t *TransportConsumer) bundle(b api.SignedTransportTrustBundle, a api.Signe
 		if e != nil || !cert.IsCA || !cert.BasicConstraintsValid || cert.KeyUsage&x509.KeyUsageCertSign == 0 || cert.CheckSignatureFrom(cert) != nil || cert.NotBefore.UTC().Format(time.RFC3339) != ca.NotBefore || cert.NotAfter.UTC().Format(time.RFC3339) != ca.NotAfter || !cert.NotAfter.After(cert.NotBefore) || cert.NotAfter.After(cert.NotBefore.AddDate(10, 0, 0)) {
 			return Fault("invalid_chain")
 		}
+		spki := base64.RawURLEncoding.EncodeToString(cert.RawSubjectPublicKeyInfo)
+		if spki == a.Payload.PublicKeySpki || spki == t.Domain.RootSPKI {
+			return Fault("scope_denied")
+		}
 	}
 	return nil
 }
@@ -176,6 +183,9 @@ func (t *TransportConsumer) stage(ctx context.Context, b api.SignedTransportTrus
 	}
 	if e = t.root(p.Control); e != nil {
 		return e
+	}
+	if lt(p.Control.Payload.ControlRevision, p.Bundle.Payload.ControlRevision) || !allowed(p.Control.Payload, p.Authority) || slices.Contains(p.Control.Payload.RevokedAuthorityIds, p.Bundle.Payload.AuthorityId) {
+		return Fault("invalid_chain")
 	}
 	if e = t.bundle(p.Bundle, p.Authority); e != nil {
 		return e
@@ -291,6 +301,12 @@ func (t *TransportConsumer) Accept(ctx context.Context, b api.SignedTransportTru
 		var checkedPrev api.TransportPredecessor
 		if e = t.model("TransportPredecessor", p, &checkedPrev); e != nil {
 			return e
+		}
+		if e = t.root(p.Control); e != nil {
+			return e
+		}
+		if lt(p.Control.Payload.ControlRevision, p.Bundle.Payload.ControlRevision) || !allowed(p.Control.Payload, p.Authority) || slices.Contains(p.Control.Payload.RevokedAuthorityIds, p.Bundle.Payload.AuthorityId) {
+			return Fault("invalid_chain")
 		}
 		if e = t.bundle(p.Bundle, p.Authority); e != nil {
 			return e

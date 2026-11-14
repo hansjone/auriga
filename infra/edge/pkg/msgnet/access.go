@@ -36,6 +36,9 @@ type ProjectionAccess struct {
 }
 
 func VerifyProjectionAccess(f ProjectionAccess) error {
+	if f.Component != "edge" && f.Component != "network" && f.Component != "broker" {
+		return Fault("scope_denied")
+	}
 	uid := 10001
 	if f.Component == "edge" {
 		uid = 65532

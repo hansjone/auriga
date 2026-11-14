@@ -32,6 +32,9 @@ type DevicePresenceConfig struct {
 }
 
 func (c DevicePresenceConfig) validate() error {
+	return c.validateWithProjection(c.msgnet != nil)
+}
+func (c DevicePresenceConfig) validateWithProjection(projected bool) error {
 	if c == (DevicePresenceConfig{}) {
 		return nil
 	}
@@ -40,7 +43,10 @@ func (c DevicePresenceConfig) validate() error {
 		return errDevicePresence
 	}
 	plain := u.Scheme == "nats" && net.ParseIP(u.Hostname()) != nil && net.ParseIP(u.Hostname()).IsLoopback()
-	if !plain && (u.Scheme != "tls" || c.msgnet == nil && (c.CAFile == "" || c.CertFile == "" || c.KeyFile == "")) {
+	if projected && u.Scheme != "tls" {
+		return errDevicePresence
+	}
+	if !plain && (u.Scheme != "tls" || !projected && (c.CAFile == "" || c.CertFile == "" || c.KeyFile == "")) {
 		return errDevicePresence
 	}
 	if (c.CAFile != "" || c.CertFile != "" || c.KeyFile != "") && (c.CAFile == "" || c.CertFile == "" || c.KeyFile == "") {

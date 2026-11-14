@@ -13,7 +13,7 @@ import (
 // DecodeTLSGeneration checks the exact immutable file set and private/public
 // pairs. roleSAN is installation configuration, never an untrusted leaf claim.
 // Trust signatures and durable control/version fences are separate required gates.
-func DecodeTLSGeneration(g *Generation, schemas *Schemas, pin api.InstallationPin, roleSAN map[string]string, now time.Time) (api.Publication, api.SignedTransportTrustBundle, *TLSSet, error) {
+func DecodeTLSGeneration(g *Generation, schemas *Schemas, pin api.InstallationPin, rootSPKI string, roleSAN map[string]string, now time.Time) (api.Publication, api.SignedTransportTrustBundle, *TLSSet, error) {
 	var p api.Publication
 	var b api.SignedTransportTrustBundle
 	fail := func(e error) (api.Publication, api.SignedTransportTrustBundle, *TLSSet, error) { return p, b, nil, e }
@@ -33,6 +33,25 @@ func DecodeTLSGeneration(g *Generation, schemas *Schemas, pin api.InstallationPi
 		return fail(Fault("invalid_chain"))
 	}
 	m := api.ProjectionMaterial{TenantId: s.TenantId, Realm: s.Realm, InstallationId: s.InstallationId, Component: s.Component, Nonce: s.Nonce, Generation: s.Generation, KeysetVersion: s.KeysetVersion, PublicationDigest: s.PublicationDigest, Bundle: b}
+	forbidden := map[string]bool{rootSPKI: true, p.Authority.Payload.PublicKeySpki: true, pin.SigningSpki: true, pin.SealingSpki: true}
+	for _, key := range p.Keyset.Payload.Keys {
+		forbidden[key.PublicKeySpki] = true
+	}
+	for _, ca := range b.Payload.Cas {
+		der, e := binaryText(ca.CertificateDer)
+		if e != nil {
+			return fail(e)
+		}
+		cert, e := x509.ParseCertificate(der)
+		if e != nil {
+			return fail(e)
+		}
+		spki := base64.RawURLEncoding.EncodeToString(cert.RawSubjectPublicKeyInfo)
+		if forbidden[spki] {
+			return fail(Fault("scope_denied"))
+		}
+		forbidden[spki] = true
+	}
 	for j := 0; j < 126; j++ {
 		raw, ok := g.Files[fmt.Sprintf("leaf-%03d.cert.pem", j)]
 		if !ok {
@@ -50,6 +69,11 @@ func DecodeTLSGeneration(g *Generation, schemas *Schemas, pin api.InstallationPi
 		if e != nil {
 			return fail(Fault("invalid_chain"))
 		}
+		spki := base64.RawURLEncoding.EncodeToString(cert.RawSubjectPublicKeyInfo)
+		if forbidden[spki] {
+			return fail(Fault("scope_denied"))
+		}
+		forbidden[spki] = true
 		role := ""
 		for name, san := range roleSAN {
 			if san != "" && slices.Contains(cert.DNSNames, san) {

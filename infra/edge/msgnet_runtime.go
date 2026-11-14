@@ -148,14 +148,14 @@ func (x *edgeMsgnet) withdrawLocked() bool {
 	return !x.closeFailure
 }
 func (x *edgeMsgnet) prepare(s api.LocalProjectionSelector, m api.LocalProjectionManifest, files map[string][]byte) (func() error, error) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	c, e := x.source.Control(ctx)
 	if e != nil {
 		return nil, e
 	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
 	if e = x.consumer.UpdateControl(c); e != nil {
 		return nil, e
 	}
@@ -166,7 +166,7 @@ func (x *edgeMsgnet) prepare(s api.LocalProjectionSelector, m api.LocalProjectio
 		return nil, trust.Fault("authority_revoked")
 	}
 	g := &trust.Generation{Selector: s, Manifest: m, Files: files}
-	p, b, set, e := trust.DecodeTLSGeneration(g, x.consumer.Schemas, x.cfg.Installation, map[string]string{"edge": x.cfg.SubmitLeafSAN, "edge-presence": x.cfg.PresenceLeafSAN}, time.Now())
+	p, b, set, e := trust.DecodeTLSGeneration(g, x.consumer.Schemas, x.cfg.Installation, x.cfg.RootSPKI, map[string]string{"edge": x.cfg.SubmitLeafSAN, "edge-presence": x.cfg.PresenceLeafSAN}, time.Now())
 	if e != nil {
 		return nil, e
 	}
@@ -299,6 +299,7 @@ func (x *edgeMsgnet) presenceOptions(serverName string) ([]nats.Option, func(), 
 // Run uses fixed discovery and retries indefinitely. Loss of the authoritative
 // control source withdraws message traffic after 60 seconds; success recovers.
 func (x *edgeMsgnet) Run(ctx context.Context) error {
+	defer x.source.Close()
 	listenErr := make(chan error, 1)
 	go func() { listenErr <- x.reader.Listen(ctx) }()
 	tick := time.NewTicker(5 * time.Second)
@@ -306,10 +307,10 @@ func (x *edgeMsgnet) Run(ctx context.Context) error {
 	var failed time.Time
 	defer func() { x.mu.Lock(); x.withdrawLocked(); x.mu.Unlock() }()
 	for {
-		x.mu.Lock()
 		query, cancel := context.WithTimeout(ctx, 10*time.Second)
 		c, e := x.source.Control(query)
 		cancel()
+		x.mu.Lock()
 		if e == nil {
 			e = x.consumer.UpdateControl(c)
 			if e == nil && x.currentLocked() != nil {

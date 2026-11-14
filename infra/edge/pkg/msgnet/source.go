@@ -22,6 +22,8 @@ type HTTPSource struct {
 	token   func(context.Context) (string, error)
 }
 
+func (s *HTTPSource) Close() { s.client.CloseIdleConnections() }
+
 func NewHTTPSource(origin string, client *http.Client, schemas *Schemas, token func(context.Context) (string, error)) (*HTTPSource, error) {
 	u, e := url.Parse(origin)
 	if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || u.Path != "" && u.Path != "/" || client == nil || schemas == nil || token == nil {

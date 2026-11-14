@@ -410,7 +410,7 @@ func (c Config) parseNetworkSubmitUpstream() (*url.URL, error) {
 		return nil, fmt.Errorf("network-submit requires HTTPS without plaintext fallback")
 	}
 	name, _, nameErr := parseAuthority(hop.ServerName, "https")
-	if nameErr != nil || !strings.EqualFold(name, hop.ServerName) || net.ParseIP(name) != nil || hop.CertFile == "" || hop.KeyFile == "" || hop.CAFile == "" {
+	if nameErr != nil || !strings.EqualFold(name, hop.ServerName) || net.ParseIP(name) != nil || c.MsgnetProjection == nil && (hop.CertFile == "" || hop.KeyFile == "" || hop.CAFile == "") {
 		return nil, fmt.Errorf("networkSubmitHop requires fixed DNS serverName, certFile, keyFile and caFile")
 	}
 	return u, nil
