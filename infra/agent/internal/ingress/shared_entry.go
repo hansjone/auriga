@@ -31,7 +31,7 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 		}
 	}
 	if len(values) != 1 {
-		return nil, nil, sharedInvalid
+		return nil, nil, errSharedInvalid
 	}
 	c, err := sharedVerify(values[0], e.Keys, true, s.cfg.Now().Unix())
 	if err != nil {
@@ -39,7 +39,7 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 	}
 	b := c["binding"].(map[string]any)
 	if b["physicalInstanceId"] != id || b["mode"] != "shared" || c["method"] != r.Method || c["canonicalPath"] != path {
-		return nil, nil, sharedInvalid
+		return nil, nil, errSharedInvalid
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	stop, err := e.Authority.Watch(ctx, b, sharedString(c["platformSessionId"]), cancel)

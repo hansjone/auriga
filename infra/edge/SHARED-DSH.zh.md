@@ -18,8 +18,16 @@
 
 交换严格检查 body（包括重复字段）、签名用途、规范 JSON、完整绑定、期限以及原子一次性消费；cookie 为 HttpOnly、host-only，沿当前 Secure/Path 命名规则。逐请求签发 v2 身份，绑定去部署前缀后的原始 escaped path、大写 method 与平台会话。节点拒绝缺失/多值身份、错误签名/用途、方法/路径差异、跨成员、旧 epoch/revision、过期、重放及权威失效。节点身份一次性消费通过受保护的 bbolt 控制 DB 事务持久化至到期，重启继续拒绝重放。组合根须注入 `SharedIdentityReplayStore{DB: db}`，DB 生命周期由节点管理；缺存储拒绝。每物理实例保留唯一 ingress，禁止给同实例配置不同 DB 的并行入口。
 
-两个模块的 `shared_wire.go` 是模块本地 wire 校验，不新增对外共享类型。共享库抽取需 K 分配路径。`TestSharedKOracleInterop` 直接使用 K 的 `EntryDouble`/`exchangeTicket`/签名 oracle 双向验签，需先在 `services/contracts` 执行锁定的 `npm ci --ignore-scripts --no-audit --no-fund`；无依赖的 Go 环境会明确 skip 此跨语言测试。其余测试不依赖 Node。所有测试签名密钥运行时生成。
+两个模块的 `shared_wire.go` 是模块本地 wire 校验，不新增对外共享类型。共享库抽取需 K 分配路径。`TestSharedKOracleInterop` 直接使用 K 的 `EntryDouble`/`exchangeTicket`/签名 oracle 双向验签，需先在 `services/contracts` 执行锁定的 `npm ci --ignore-scripts --no-audit --no-fund`；Go 工作流在 Linux/Windows 上显式安装这些锁定依赖并单独执行互通测试，缺依赖时测试直接失败。其余测试不依赖 Node。所有测试签名密钥运行时生成。
 
 ## 已接受风险
 
 首期互信团队仍接受：原生 owner 旁路；跨成员读取文件和会话；驱动他人会话后以其企业身份操作、审计错归该成员；一个进程故障影响全池。平台身份检查和撤销不代表原生 DSH 已隔离，也不代表原生 Cookie/browserPeer、`/connect` 不能以 owner 操作。真实反例、部署网络边界与完整门户验收由主控按 W→IAM→E→R→N→P→U→V 串行接线后保留证据。
+
+## 实例模式缓存失效
+
+`Gateway.Shared` 按物理实例 UUID 缓存成功的 `IsShared` 结果，查询失败不入缓存。缓存仅选择入口认证流程，共享成员的 Binding、epoch、revision 和平台会话仍逐请求查权威。已缓存的独立实例在分配服务故障时沿旧实例认证流程继续服务，未知实例查询失败返回503。
+
+缓存以控制面事件失效，不设按时间自动过期。联合接线时，控制面应在 W 权威状态提交后、发布新路由及节点配置并放行入口前，在每个 edge 副本调用 `SharedEntry.InvalidateInstanceMode(id)`。失效与正在进行的模式查询交错时，旧查询返回503并丢弃结果。删除事件同时释放缓存项，重启或更换 SharedEntry 时缓存为空。成员在共享与独立模式之间切换若分配新物理 UUID，首次请求自然重新查询。多副本需先完成全部失效，再放行新入口和节点注册。
+
+独审低项②的 bbolt 写锁与过期记录扫描吞吐，留给 V 线按真实静态资源负载压测。

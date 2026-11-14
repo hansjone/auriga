@@ -38,7 +38,11 @@ func TestSharedReplayDurableAndConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	s.DB = db
 	if err = s.consume(context.Background(), sharedTestID, 160, 101); err == nil {
 		t.Fatal("restart replay accepted")

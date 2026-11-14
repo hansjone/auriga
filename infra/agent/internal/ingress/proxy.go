@@ -56,6 +56,10 @@ func (s *Server) serveInstanceProxy(w http.ResponseWriter, r *http.Request, inst
 		writeProblem(w, http.StatusNotFound, CodeInstanceNotFound, "Not Found", "instance not found")
 		return
 	}
+	if !inst.Shared && len(s.cfg.IdentityKeys) == 0 {
+		writeProblem(w, http.StatusServiceUnavailable, CodeUnauthorized, "Unavailable", "identity verification keys required")
+		return
+	}
 	canonical := strings.TrimPrefix(r.URL.EscapedPath(), "/i/"+instanceID)
 	if canonical == "" {
 		canonical = "/"

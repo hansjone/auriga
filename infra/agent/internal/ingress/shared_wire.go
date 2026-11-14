@@ -16,7 +16,7 @@ import (
 )
 
 var sharedUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-var sharedInvalid = errors.New("shared.signature_invalid")
+var errSharedInvalid = errors.New("shared.signature_invalid")
 
 func sharedObject(v any, fields string) (map[string]any, bool) {
 	m, ok := v.(map[string]any)
@@ -110,31 +110,31 @@ func sharedDecode(raw []byte) (map[string]any, error) {
 	d.UseNumber()
 	var m map[string]any
 	if d.Decode(&m) != nil {
-		return nil, sharedInvalid
+		return nil, errSharedInvalid
 	}
 	var tail any
 	if d.Decode(&tail) != io.EOF {
-		return nil, sharedInvalid
+		return nil, errSharedInvalid
 	}
 	b, e := sharedMarshal(m)
 	if e != nil || !bytes.Equal(b, raw) {
-		return nil, sharedInvalid
+		return nil, errSharedInvalid
 	}
 	return m, nil
 }
 func sharedVerify(token string, keys map[string]ed25519.PublicKey, identity bool, now int64) (map[string]any, error) {
 	if len(token) > 16384 {
-		return nil, sharedInvalid
+		return nil, errSharedInvalid
 	}
 	p := strings.Split(token, ".")
 	if len(p) != 3 {
-		return nil, sharedInvalid
+		return nil, errSharedInvalid
 	}
 	parts := make([][]byte, 3)
 	for i, s := range p {
 		b, e := base64.RawURLEncoding.Strict().DecodeString(s)
 		if e != nil || base64.RawURLEncoding.EncodeToString(b) != s {
-			return nil, sharedInvalid
+			return nil, errSharedInvalid
 		}
 		parts[i] = b
 	}
@@ -143,7 +143,7 @@ func sharedVerify(token string, keys map[string]ed25519.PublicKey, identity bool
 		return nil, e
 	}
 	if _, ok := sharedObject(h, "alg kid typ"); !ok {
-		return nil, sharedInvalid
+		return nil, errSharedInvalid
 	}
 	typ := "auriga-shared-ticket+jwt"
 	if identity {
@@ -152,31 +152,17 @@ func sharedVerify(token string, keys map[string]ed25519.PublicKey, identity bool
 	kid := sharedString(h["kid"])
 	key := keys[kid]
 	if h["alg"] != "EdDSA" || h["typ"] != typ || len(kid) == 0 || len(kid) > 128 || len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, []byte(p[0]+"."+p[1]), parts[2]) {
-		return nil, sharedInvalid
+		return nil, errSharedInvalid
 	}
 	m, e := sharedDecode(parts[1])
 	if e != nil || !sharedClaims(m, identity) {
-		return nil, sharedInvalid
+		return nil, errSharedInvalid
 	}
 	iat, exp := sharedInt(m["issuedAt"]), sharedInt(m["expiresAt"])
 	if iat > now || exp <= now || exp <= iat || exp-iat > 60 {
 		return nil, errors.New("shared.expired")
 	}
 	return m, nil
-}
-func sharedSign(m map[string]any, kid string, key ed25519.PrivateKey) (string, error) {
-	// Normalize numbers to the same representation used by the verifier.
-	b, e := sharedMarshal(m)
-	if e != nil {
-		return "", e
-	}
-	m, e = sharedDecode(b)
-	if e != nil || !sharedClaims(m, true) || len(key) != ed25519.PrivateKeySize || kid == "" || len(kid) > 128 {
-		return "", sharedInvalid
-	}
-	h, _ := sharedMarshal(map[string]string{"alg": "EdDSA", "kid": kid, "typ": "auriga-shared-identity+jwt"})
-	input := base64.RawURLEncoding.EncodeToString(h) + "." + base64.RawURLEncoding.EncodeToString(b)
-	return input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(input))), nil
 }
 
 // JavaScript canonical() uses literal UTF-8 and does not HTML-escape strings.

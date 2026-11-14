@@ -35,7 +35,7 @@ func (s *SharedIdentityReplayStore) consume(ctx context.Context, jti string, exp
 			}
 		}
 		if b.Get([]byte(jti)) != nil {
-			return sharedInvalid
+			return errSharedInvalid
 		}
 		var value [8]byte
 		binary.BigEndian.PutUint64(value[:], uint64(expiresAt))

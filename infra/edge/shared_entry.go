@@ -43,6 +43,7 @@ type SharedEntry struct {
 	TicketKeys  map[string]ed25519.PublicKey
 	IdentityKey ed25519.PrivateKey
 	IdentityKid string
+	modes       sharedModeCache
 }
 
 func sharedJTI() string {
@@ -99,7 +100,7 @@ func (g *Gateway) serveShared(w http.ResponseWriter, r *http.Request, id, path, 
 		sharedError(w, r, nil)
 		return true
 	}
-	shared, err := e.Authority.IsShared(r.Context(), id)
+	shared, err := e.instanceShared(r.Context(), id)
 	if err != nil {
 		sharedError(w, r, err)
 		return true
@@ -244,7 +245,7 @@ func (e *SharedEntry) exchange(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 20000))
-	var body map[string]json.RawMessage = make(map[string]json.RawMessage)
+	body := make(map[string]json.RawMessage)
 	opening, parseErr := d.Token()
 	if parseErr != nil || opening != json.Delim('{') {
 		fail("common.validation_failed")
@@ -324,4 +325,4 @@ func (g *Gateway) sharedTicketRequest(r *http.Request) bool {
 	return len(parts) == 5 && parts[1] == "i" && canonicalInstanceID(parts[2]) && parts[3] == "_auriga" && parts[4] == "placement-ticket"
 }
 
-var sharedTicketShape = regexp.MustCompile("^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$")
+var sharedTicketShape = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)

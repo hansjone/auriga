@@ -14,7 +14,7 @@ import (
 
 func TestSharedKOracleInterop(t *testing.T) {
 	if _, err := os.Stat("../../services/contracts/node_modules/ajv"); err != nil {
-		t.Skip("K oracle requires npm ci in services/contracts")
+		t.Fatal("K oracle dependencies missing: run npm ci --ignore-scripts --no-audit --no-fund in services/contracts")
 	}
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Now().Unix()

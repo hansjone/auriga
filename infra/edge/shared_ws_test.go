@@ -26,12 +26,21 @@ func TestSharedWebSocketRevocation(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		conn.SetDeadline(time.Now().Add(5 * time.Second))
+		defer func() { _ = conn.Close() }()
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Error(err)
+			return
+		}
 		sum := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
-		rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + base64.StdEncoding.EncodeToString(sum[:]) + "\r\n\r\n")
-		rw.Flush()
-		io.Copy(io.Discard, rw)
+		if _, err := rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + base64.StdEncoding.EncodeToString(sum[:]) + "\r\n\r\n"); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := rw.Flush(); err != nil {
+			t.Error(err)
+			return
+		}
+		_, _ = io.Copy(io.Discard, rw) // Connection cancellation is the expected end of this stream.
 	}))
 	now := time.Now()
 	c := sharedTestClaims(false, now.Unix())
@@ -50,8 +59,10 @@ func TestSharedWebSocketRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	req, _ := http.NewRequest("GET", u.String(), nil)
 	for _, cookie := range b.client.Jar.Cookies(u) {
 		req.AddCookie(cookie)

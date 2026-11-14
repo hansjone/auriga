@@ -60,7 +60,11 @@ func TestSharedIngressBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	s := New(Config{Shared: &SharedIngress{Replay: &SharedIdentityReplayStore{DB: db}, Keys: map[string]ed25519.PublicKey{"test": pub}, Authority: a}, Registry: NewMapRegistry(&Instance{ID: sharedTestID, Shared: true, Upstream: u}), Now: func() time.Time { return now }})
 	req := func(path, method string, values []string) int {
 		r := httptest.NewRequest(method, "http://node/i/"+sharedTestID+path, nil)
