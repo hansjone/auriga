@@ -192,6 +192,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
               return found;
             });
     if (ticket == null) return denied();
+    store.requireTransactionReleased();
+    if (!online(store.tx(() -> node(nodeId)))) return denied();
     Connection result =
         transaction(
             () -> {
@@ -299,6 +301,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   public boolean active(String realm, String nodeId) {
     caller("svc:ai-gateway", "svc:collab");
     if (!validNumber(realm, false) || !validNumber(nodeId, false)) return false;
+    store.requireTransactionReleased();
+    if (!online(store.tx(() -> node(nodeId)))) return false;
     return transaction(() -> config().path("enabled").asBoolean(true) && live(node(nodeId), realm));
   }
 
@@ -331,27 +335,28 @@ public final class IamNetworkAuthority implements NetworkAuthority {
       result.put(key, false);
     }
     if (result.isEmpty()) return result;
-    return store.tx(
-        () -> {
-          long timeoutMillis = 2000;
-          var deadline = io.grpc.Context.current().getDeadline();
-          if (deadline != null)
-            timeoutMillis =
-                Math.min(
-                    timeoutMillis,
-                    deadline.timeRemaining(java.util.concurrent.TimeUnit.MILLISECONDS));
-          if (timeoutMillis <= 0 || io.grpc.Context.current().isCancelled())
-            throw new AurigaException(CommonErrors.UNAVAILABLE);
-          jdbc.execute("SET LOCAL statement_timeout='" + timeoutMillis + "ms'");
-          if (!config().path("enabled").asBoolean(true)) return result;
-          var ids = result.keySet().stream().map(NodeReference::node).distinct().toList();
-          var args = new ArrayList<Object>();
-          args.add(TenantContext.require());
-          args.add(java.sql.Timestamp.from(clock.instant()));
-          args.add(java.sql.Timestamp.from(clock.instant()));
-          for (var id : ids) args.add(number(id));
-          String sql =
-              """
+    var checked =
+        store.tx(
+            () -> {
+              long timeoutMillis = 2000;
+              var deadline = io.grpc.Context.current().getDeadline();
+              if (deadline != null)
+                timeoutMillis =
+                    Math.min(
+                        timeoutMillis,
+                        deadline.timeRemaining(java.util.concurrent.TimeUnit.MILLISECONDS));
+              if (timeoutMillis <= 0 || io.grpc.Context.current().isCancelled())
+                throw new AurigaException(CommonErrors.UNAVAILABLE);
+              jdbc.execute("SET LOCAL statement_timeout='" + timeoutMillis + "ms'");
+              if (!config().path("enabled").asBoolean(true)) return result;
+              var ids = result.keySet().stream().map(NodeReference::node).distinct().toList();
+              var args = new ArrayList<Object>();
+              args.add(TenantContext.require());
+              args.add(java.sql.Timestamp.from(clock.instant()));
+              args.add(java.sql.Timestamp.from(clock.instant()));
+              for (var id : ids) args.add(number(id));
+              String sql =
+                  """
           SELECT r.realm::text,n.node::text FROM iam.network_node n
           JOIN iam.network_realm r USING(tenant_id)
           JOIN iam.device d ON d.tenant_id=n.tenant_id AND d.id=n.device_id
@@ -360,7 +365,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
           WHERE n.tenant_id=? AND NOT n.revoked
             AND d.data->>'accountId'=n.account_id::text
             AND NOT COALESCE((d.data->>'revoked')::boolean,false)
-            AND d.data->>'scope'='auriga.connect'
+            AND d.data->>'scope' ~ '(^| )auriga[.]connect( |$)'
             AND s.data->>'tenantId'=n.tenant_id::text
             AND s.data->>'accountId'=n.account_id::text
             AND s.data->>'audience'='portal'
@@ -369,33 +374,46 @@ public final class IamNetworkAuthority implements NetworkAuthority {
             AND (s.data->>'idleExpiresAt')::timestamptz>?
             AND a.data->>'status'='active' AND n.node IN (
           """
-                  + String.join(",", Collections.nCopies(ids.size(), "?"))
-                  + ")";
-          for (var key :
-              jdbc.query(
-                  sql,
-                  (rs, i) -> new NodeReference(rs.getString(1), rs.getString(2)),
-                  args.toArray())) if (result.containsKey(key)) result.put(key, true);
-          for (var entry : result.entrySet()) {
-            if (!entry.getValue()) continue;
-            Node n = node(entry.getKey().node());
-            var device = store.get("device", n.device(), false);
-            if (device != null
-                && "managed".equals(device.path("deviceType").asString())
-                && devices.credential(TenantContext.require().toString(), n.account(), n.device())
-                    == null) entry.setValue(false);
-          }
-          return result;
-        });
+                      + String.join(",", Collections.nCopies(ids.size(), "?"))
+                      + ")";
+              for (var key :
+                  jdbc.query(
+                      sql,
+                      (rs, i) -> new NodeReference(rs.getString(1), rs.getString(2)),
+                      args.toArray())) if (result.containsKey(key)) result.put(key, true);
+              for (var entry : result.entrySet()) {
+                if (!entry.getValue()) continue;
+                Node n = node(entry.getKey().node());
+                var device = store.get("device", n.device(), false);
+                if (device != null
+                    && "managed".equals(device.path("deviceType").asString())
+                    && devices.credential(
+                            TenantContext.require().toString(), n.account(), n.device())
+                        == null) entry.setValue(false);
+              }
+              return result;
+            });
+    store.requireTransactionReleased();
+    for (var entry : checked.entrySet()) {
+      if (entry.getValue() && !online(store.tx(() -> node(entry.getKey().node()))))
+        entry.setValue(false);
+    }
+    return checked;
   }
 
   @Override
   public Decision check(Check request) {
     caller("svc:ai-gateway", "svc:collab");
+    store.requireTransactionReleased();
+    boolean authorized =
+        request != null
+            && online(store.tx(() -> node(request.sourceNode())))
+            && (request.operation() == Operation.CONNECT
+                || online(store.tx(() -> node(request.targetNode()))));
     return transaction(
         () -> {
           var limits = limits();
-          boolean allowed = permitted(request, limits);
+          boolean allowed = authorized && permitted(request, limits);
           return new Decision(allowed, allowed ? "allowed" : "network_denied", limits);
         });
   }
@@ -467,6 +485,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
         || !binding.ingress().matches("[a-z2-7]{26}")) return null;
     TargetSnapshot before = store.tx(() -> targetSnapshot(binding, false));
     if (before == null) return null;
+    if (!online(before.node())) return null;
     // credential() reuses the canonical owner/device/backing-session checks, without idle touch.
     var credential =
         devices.credential(
@@ -825,6 +844,13 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     var credential =
         devices.credential(TenantContext.require().toString(), node.account(), node.device());
     return credential != null && clock.instant().isBefore(credential.expiresAt());
+  }
+
+  private boolean online(Node node) {
+    return node != null
+        && (!devices.standard(node.device())
+            || devices.standardOnline(
+                TenantContext.require().toString(), node.account(), node.device()));
   }
 
   private Node node(String id) {

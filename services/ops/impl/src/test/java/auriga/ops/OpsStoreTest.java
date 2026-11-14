@@ -62,6 +62,64 @@ class OpsStoreTest {
   }
 
   @Test
+  void uacSignalUsesExistingDeduplicationAndDiagnosticReadIsTenantProviderBound() {
+    UUID tenant = UUID.randomUUID(), provider = UUID.randomUUID();
+    ops.observe(tenant, "iam_uac", provider.toString(), "warning", true);
+    ops.observe(tenant, "iam_uac", provider.toString(), "warning", true);
+    ops.observe(UUID.randomUUID(), "iam_uac", provider.toString(), "warning", true);
+    var now = java.time.Instant.now();
+    var p =
+        new auriga.common.security.AurigaPrincipal(
+            UUID.randomUUID().toString(),
+            tenant,
+            auriga.common.security.PrincipalType.USER,
+            auriga.common.security.TokenContext.ADMIN,
+            UUID.randomUUID().toString(),
+            null,
+            "member",
+            List.of(),
+            Set.of("ops.alerts.read"),
+            now,
+            null,
+            UUID.randomUUID().toString());
+    auriga.common.context.RequestContext.start(null, null)
+        .withPrincipal(p)
+        .run(
+            () ->
+                TenantContext.run(
+                    tenant,
+                    () -> {
+                      var page =
+                          ops.readUac(now.minusSeconds(60), now.plusSeconds(60), provider, 100);
+                      assertEquals(1, page.alerts().size());
+                      assertFalse(page.truncated());
+                      assertTrue(
+                          ops.readUac(
+                                  now.minusSeconds(60), now.plusSeconds(60), UUID.randomUUID(), 100)
+                              .alerts()
+                              .isEmpty());
+                      TenantContext.run(
+                          UUID.randomUUID(),
+                          () ->
+                              assertEquals(
+                                  "common.forbidden",
+                                  assertThrows(
+                                          AurigaException.class,
+                                          () ->
+                                              ops.readUac(
+                                                  now.minusSeconds(60),
+                                                  now.plusSeconds(60),
+                                                  provider,
+                                                  100))
+                                      .errorCode()
+                                      .code()));
+                    }));
+    ops.observe(tenant, "iam_uac", provider.toString(), "warning", false);
+    TenantContext.run(
+        tenant, () -> assertFalse(ops.alerts().path("items").get(0).path("resolved_at").isNull()));
+  }
+
+  @Test
   void isolatesTenantsAndNeverReturnsSecrets() {
     var t = UUID.randomUUID();
     var other = UUID.randomUUID();
