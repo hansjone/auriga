@@ -89,7 +89,7 @@ test('fresh install seeds profile, plugin, ownership marker and platform address
   const result = put(
     f,
     { name: 'a' },
-    { platformOrigin: 'https://portal.example.com/ignored/path' },
+    { platformOrigin: 'https://portal.example.com' },
   );
   assert.deepEqual(result, {
     id: result.payload.id,

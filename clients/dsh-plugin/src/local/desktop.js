@@ -72,7 +72,14 @@ export async function desktopUpdater({ origin }) {
   const root = process.env.AURIGA_DESKTOP_ROOT;
   if (!root || !process.env.AURIGA_DESKTOP_RUNTIME) return undefined;
   const state = JSON.parse(await readFile(join(root, 'install.json'), 'utf8'));
-  if (!origin.startsWith('https:')) return undefined;
+
+  if (!origin.startsWith('https:')) {
+    try {
+      await readFile(join(root, 'desktop-origin.json'));
+    } catch {
+      return undefined;
+    }
+  }
   try {
     await writeFile(
       join(root, 'desktop-origin.json'),
@@ -86,7 +93,7 @@ export async function desktopUpdater({ origin }) {
   const bound = JSON.parse(
     await readFile(join(root, 'desktop-origin.json'), 'utf8'),
   );
-  if (bound.origin !== origin || !origin.startsWith('https:')) return undefined;
+  if (bound.origin !== origin) return undefined;
   const modulePath = resolve(
     root,
     'versions',
@@ -96,6 +103,7 @@ export async function desktopUpdater({ origin }) {
   if (modulePath !== resolve(process.env.AURIGA_DESKTOP_RUNTIME))
     return undefined;
   const module = await import(pathToFileURL(modulePath).href);
+  module.platformUrl(origin, 'latest', bound);
   const lifetime = new AbortController();
   const updater = module.createUpdater({
     root,

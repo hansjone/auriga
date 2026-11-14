@@ -1,3 +1,4 @@
+import { updateOrigin } from './platform-origin.mjs';
 import { cleanupDownloads } from './update-state.mjs';
 import { createRequire } from 'node:module';
 import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
@@ -213,7 +214,7 @@ function seedProfile(dataHome, { platformOrigin, target }) {
         // The loader row must be complete: with only platformOrigin the plugin
         // rejects the config (issuer/clientId/providerId required) and the
         // login runtime never starts.
-        `  config: ${JSON.stringify({ connect: { platformOrigin: origin, issuer: origin, clientId: CLIENT_ID, providerId: PROVIDER_ID } })}`,
+        `  config: ${JSON.stringify({ connect: { ...(origin.startsWith('http:') ? { allowLocalHttp: true } : {}), platformOrigin: origin, issuer: origin, clientId: CLIENT_ID, providerId: PROVIDER_ID } })}`,
       );
     } else {
       rows.push('  config: {}');
@@ -521,9 +522,11 @@ export function install({
   root,
   dataHome,
   platformOrigin,
+  platformBinding = {},
   smoke = defaultSmoke,
   fault = noFault,
 }) {
+  if (platformOrigin) updateOrigin(platformOrigin, platformBinding);
   root = resolve(root);
   dataHome = resolve(dataHome);
   assertLayout(root, dataHome);
@@ -588,6 +591,8 @@ export function install({
   if (platformOrigin && !existsSync(join(root, 'desktop-origin.json')))
     writeJsonAtomic(join(root, 'desktop-origin.json'), {
       origin: new URL(platformOrigin).origin,
+      accessMode: platformBinding.accessMode,
+      confirmedOrigin: platformBinding.confirmedOrigin,
     });
   return { id, previous, upgraded: Boolean(previous && previous !== id) };
 }

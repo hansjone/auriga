@@ -70,7 +70,7 @@ test('Desktop 仅绑定首次 HTTPS 平台，普通 DSH 不挂更新器', async 
     );
     await writeFile(
       runtime,
-      'export function createUpdater(){return {status:()=>({enabled:true}), start:()=>()=>{}}}',
+      `export { platformUrl } from ${JSON.stringify(new URL('../../../installer/runtime/update.mjs', import.meta.url).href)}; export function createUpdater(){return {status:()=>({enabled:true}), start:()=>()=>{}}}`,
     );
     process.env.AURIGA_DESKTOP_ROOT = root;
     process.env.AURIGA_DESKTOP_RUNTIME = runtime;
