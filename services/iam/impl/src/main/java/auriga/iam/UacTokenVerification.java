@@ -26,7 +26,8 @@ final class UacTokenVerification {
           .build();
 
   // This is an internal decision, not a replacement for a generated wire model.
-  record Decision(String failureClass, String faultReason, String replacementToken) {
+  record Decision(
+      String failureClass, String faultReason, String replacementToken, String employee) {
     boolean success() {
       return failureClass == null;
     }
@@ -89,19 +90,19 @@ final class UacTokenVerification {
         || !inner.isString()
         || inner.asString().isBlank()) return fault("invalid_code");
     if (!outer.asString().equals("0000") || !inner.asString().equals("0000"))
-      return new Decision("business_rejected", null, null);
+      return new Decision("business_rejected", null, null, null);
     JsonNode user = root.path("bo").path("user"), token = root.path("bo").path("token");
     if (!user.isString()
         || !validUser(user.asString())
         || !token.isString()
         || !validToken(token.asString())) return fault("invalid_success_payload");
     if (!fold(user.asString()).equals(fold(verifiedAccount)))
-      return new Decision("identity_mismatch", null, null);
-    return new Decision(null, null, token.asString());
+      return new Decision("identity_mismatch", null, null, null);
+    return new Decision(null, null, token.asString(), user.asString().strip());
   }
 
   private static Decision fault(String reason) {
-    return new Decision("upstream_fault", reason, null);
+    return new Decision("upstream_fault", reason, null, null);
   }
 
   private static boolean validUser(String value) {

@@ -89,6 +89,16 @@ public final class RequestIdentity {
     }
   }
 
+  /** Same-origin browser polling is readable only through a same-origin fetch. */
+  void sameOriginFetch(HttpServletRequest request) {
+    if (!"same-origin".equals(single(request, "Sec-Fetch-Site", CommonErrors.FORBIDDEN))
+        || !Set.of("cors", "same-origin")
+            .contains(single(request, "Sec-Fetch-Mode", CommonErrors.FORBIDDEN))
+        || !"empty".equals(single(request, "Sec-Fetch-Dest", CommonErrors.FORBIDDEN)))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    if (request.getHeader("Origin") != null) sameOrigin(request);
+  }
+
   private void authenticateHop(HttpServletRequest request) {
     String peer = request.getRemoteAddr();
     if (!hop.peerAddresses().contains(peer)) throw new AurigaException(CommonErrors.FORBIDDEN);

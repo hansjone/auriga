@@ -64,7 +64,7 @@ final class UacOrgPolicy {
                 store
                     .jdbc()
                     .queryForList(
-                        "SELECT i.id,i.max_uses FROM invitation i JOIN uac_invitation_employee u ON u.tenant_id=i.tenant_id AND u.invitation_id=i.id WHERE i.tenant_id=? AND i.code_hash=? AND u.provider_id=? AND u.employee=? AND u.purpose='uac_login' FOR UPDATE OF i,u",
+                        "SELECT i.id,i.max_uses FROM invitation i JOIN uac_invitation_employee u ON u.tenant_id=i.tenant_id AND u.invitation_id=i.id WHERE i.tenant_id=? AND i.code_hash=? AND u.provider_id=? AND u.employee=? AND u.purpose='uac_login' AND (u.active OR i.status='used') FOR UPDATE OF i,u",
                         store.tenantId(),
                         OrgService.hashCode(code),
                         provider,
@@ -184,27 +184,46 @@ final class UacOrgPolicy {
               if (!"uac_login".equals(record.path("purpose").asString()))
                 throw new IllegalArgumentException("Invalid UAC invitation purpose");
               UUID invitation = UUID.fromString(record.path("invitationId").asString());
+              store
+                  .jdbc()
+                  .update(
+                      "UPDATE uac_invitation_employee u SET active=false FROM invitation i"
+                          + " WHERE u.tenant_id=? AND u.provider_id=? AND u.employee=? AND u.active"
+                          + " AND i.tenant_id=u.tenant_id AND i.id=u.invitation_id"
+                          + " AND (i.status<>'active' OR i.uses>=i.max_uses OR i.expires_at<=?)",
+                      tenant,
+                      provider,
+                      subject,
+                      java.sql.Timestamp.from(clock.instant()));
               var invites =
                   store
                       .jdbc()
                       .queryForList(
-                          "SELECT max_uses FROM invitation WHERE tenant_id=? AND id=? FOR UPDATE",
+                          "SELECT max_uses,uses,status,expires_at FROM invitation WHERE tenant_id=? AND id=? FOR UPDATE",
                           tenant,
                           invitation);
               if (invites.size() != 1
                   || ((Number) invites.getFirst().get("max_uses")).intValue() != 1)
                 throw new IllegalArgumentException("UAC invitation must be single use");
+              var invite = invites.getFirst();
+              boolean active =
+                  "active".equals(invite.get("status"))
+                      && ((Number) invite.get("uses")).intValue() < 1
+                      && clock
+                          .instant()
+                          .isBefore(((java.sql.Timestamp) invite.get("expires_at")).toInstant());
               store
                   .jdbc()
                   .update(
-                      "INSERT INTO uac_invitation_employee(id,tenant_id,invitation_id,provider_id,employee,purpose,verified_by,verified_at) VALUES (?,?,?,?,?,'uac_login',?,?) ON CONFLICT(tenant_id,invitation_id) DO NOTHING",
+                      "INSERT INTO uac_invitation_employee(id,tenant_id,invitation_id,provider_id,employee,purpose,verified_by,verified_at,active) VALUES (?,?,?,?,?,'uac_login',?,?,?) ON CONFLICT(tenant_id,invitation_id) DO UPDATE SET active=EXCLUDED.active",
                       UuidV7.next(),
                       tenant,
                       invitation,
                       provider,
                       subject,
                       by,
-                      java.sql.Timestamp.from(at));
+                      java.sql.Timestamp.from(at),
+                      active);
               var bound =
                   store
                       .jdbc()

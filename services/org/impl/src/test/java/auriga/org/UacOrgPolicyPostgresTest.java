@@ -236,4 +236,70 @@ class UacOrgPolicyPostgresTest {
         IllegalArgumentException.class,
         () -> provision(record().put("purpose", "team_signup").put("invitationId", id.toString())));
   }
+
+  @Test
+  void invitationReservationIsReleasedAfterExpiryRevocationAndUse() throws Exception {
+    UUID first = invite(UUID.randomUUID().toString(), "active", 1);
+    provision(record().put("invitationId", first.toString()).put("purpose", "uac_login"));
+    UUID next = invite(UUID.randomUUID().toString(), "active", 1);
+    UUID duplicate = next;
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            provision(
+                record().put("invitationId", duplicate.toString()).put("purpose", "uac_login")));
+    // No status refresh is required when wall-clock expiry alone makes the old invitation unusable.
+    store.tenant(
+        tenant,
+        () -> {
+          store
+              .jdbc()
+              .update(
+                  "UPDATE invitation SET expires_at=? WHERE tenant_id=? AND id=?",
+                  Timestamp.from(CLOCK.instant().minusSeconds(1)),
+                  tenant,
+                  first);
+          return null;
+        });
+    provision(record().put("invitationId", next.toString()).put("purpose", "uac_login"));
+    for (String status : List.of("revoked", "used")) {
+      UUID current = next;
+      store.tenant(
+          tenant,
+          () -> {
+            store
+                .jdbc()
+                .update(
+                    "UPDATE invitation SET status=? WHERE tenant_id=? AND id=?",
+                    status,
+                    tenant,
+                    current);
+            return null;
+          });
+      next = invite(UUID.randomUUID().toString(), "active", 1);
+      provision(record().put("invitationId", next.toString()).put("purpose", "uac_login"));
+    }
+    assertEquals(
+        1,
+        store.tenant(
+            tenant,
+            () ->
+                store
+                    .jdbc()
+                    .queryForObject(
+                        "SELECT count(*) FROM uac_invitation_employee WHERE tenant_id=? AND active",
+                        Integer.class,
+                        tenant)));
+    assertEquals(
+        4,
+        store.tenant(
+            tenant,
+            () ->
+                store
+                    .jdbc()
+                    .queryForObject(
+                        "SELECT count(*) FROM uac_invitation_employee WHERE tenant_id=?",
+                        Integer.class,
+                        tenant)));
+  }
 }

@@ -16,6 +16,29 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.*;
 
 class UacNavigationBoundaryTest {
+  @Test
+  void challengePollingRequiresSameOriginFetchAndChecksOptionalOrigin() {
+    var identity =
+        new RequestIdentity(
+            HttpBoundaryTest.fixture("domain-proxy.json"),
+            new RequestIdentity.Hop(Set.of("127.0.0.1"), null, true));
+    var request = HttpBoundaryTest.request(HttpBoundaryTest.fixture("domain-proxy.json"), "portal");
+    request.addHeader("Sec-Fetch-Site", "same-origin");
+    request.addHeader("Sec-Fetch-Mode", "cors");
+    request.addHeader("Sec-Fetch-Dest", "empty");
+    assertDoesNotThrow(() -> identity.sameOriginFetch(request));
+    for (String site : List.of("cross-site", "same-site", "none")) {
+      request.removeHeader("Sec-Fetch-Site");
+      request.addHeader("Sec-Fetch-Site", site);
+      assertThrows(AurigaException.class, () -> identity.sameOriginFetch(request));
+    }
+    request.removeHeader("Sec-Fetch-Site");
+    assertThrows(AurigaException.class, () -> identity.sameOriginFetch(request));
+    request.addHeader("Sec-Fetch-Site", "same-origin");
+    request.addHeader("Origin", "https://attacker.example.com");
+    assertThrows(AurigaException.class, () -> identity.sameOriginFetch(request));
+  }
+
   static AurigaPrincipal principal(
       String subject, PrincipalType type, TokenContext context, UUID tenant, String sid) {
     return new AurigaPrincipal(

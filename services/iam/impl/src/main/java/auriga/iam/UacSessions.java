@@ -154,17 +154,7 @@ final class UacSessions {
     sequence.put("generation", generation);
     store.save("uac_credential", sequence);
     String hash = Secrets.hash(secret.path("token").asString());
-    ObjectNode credential =
-        store.all("uac_credential").stream()
-            .filter(
-                c ->
-                    "credential".equals(c.path("kind").asString())
-                        && provider.equals(c.path("providerId").asString())
-                        && account.equals(c.path("accountId").asString())
-                        && hash.equals(c.path("tokenHash").asString())
-                        && !c.path("invalid").asBoolean())
-            .findFirst()
-            .orElse(null);
+    ObjectNode credential = store.uacCredential(provider, account, hash);
     if (credential == null)
       credential =
           store.insert(
@@ -321,12 +311,40 @@ final class UacSessions {
     ObjectNode credential =
         store.byId("uac_credential", session.path("uacCredentialId").asString(), false);
     ObjectNode secret = open(credential.path("envelope"), session.path("providerId").asString());
-    return Json.object(
-        "empNo",
-        secret.path("empNo"),
-        "token",
-        secret.path("token"),
-        "updatedAt",
-        credential.path("updatedAt"));
+    ObjectNode result =
+        Json.object(
+            "empNo",
+            secret.path("empNo"),
+            "token",
+            secret.path("token"),
+            "updatedAt",
+            credential.path("updatedAt"),
+            "credentialVersion",
+            credential.path("version"));
+    // A browser user has no device identity. Only the authenticated device consumer
+    // receives the complete frozen UacCredentialBinding; never invent a device ID.
+    if (principal.type() == PrincipalType.DEVICE) {
+      ObjectNode device = store.get("device", principal.deviceId(), false);
+      Instant expiry =
+          StandardDevices.minimum(
+              Instant.parse(session.path("expiresAt").asString()),
+              Instant.parse(session.path("idleExpiresAt").asString()));
+      if (device.has("expiresAt"))
+        expiry =
+            StandardDevices.minimum(expiry, Instant.parse(device.path("expiresAt").asString()));
+      if (!clock.instant().isBefore(expiry))
+        throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+      ObjectNode binding = ((ObjectNode) session.path("uacSessionBinding")).deepCopy();
+      binding.put("tenantId", TenantContext.require().toString());
+      binding.put("memberId", session.path("accountId").asString());
+      binding.put("deviceId", principal.deviceId());
+      binding.put("expiresAt", expiry.toString());
+      binding.set("credentialVersion", credential.path("version"));
+      result.set("binding", binding);
+      new ContractSchemas()
+          .validate(
+              "plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostCredentials", result);
+    }
+    return result;
   }
 }

@@ -14,6 +14,43 @@ import tools.jackson.databind.node.ObjectNode;
 
 class UacConfiguredAdapterTest {
   @Test
+  void qrTimeoutIsConfigurableAndCancelsTheUpstreamRequest() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    var interrupted = new java.util.concurrent.CountDownLatch(1);
+    server.createContext(
+        "/qr",
+        exchange -> {
+          try {
+            interrupted.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            exchange.sendResponseHeaders(200, 0);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          } finally {
+            exchange.close();
+          }
+        });
+    server.start();
+    try {
+      String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+      var settings = settings(origin);
+      settings.withObject("/qr").put("timeoutSeconds", 1);
+      var adapter = new UacConfiguredAdapter(settings, true);
+      long start = System.nanoTime();
+      var result =
+          adapter.scan(
+              Json.object("baseUrl", origin, "systemCode", "test-system"),
+              Json.object("x", "0".repeat(32), "y", "0".repeat(32)));
+      assertEquals("unavailable", result.path("state").asString());
+      assertTrue(java.time.Duration.ofNanos(System.nanoTime() - start).toSeconds() < 4);
+      settings.withObject("/qr").put("timeoutSeconds", 0);
+      assertThrows(IllegalArgumentException.class, () -> new UacConfiguredAdapter(settings, true));
+    } finally {
+      interrupted.countDown();
+      server.stop(0);
+    }
+  }
+
+  @Test
   void privateDerivedQrIntegrityAndStaticIpAreValidatedWithoutBrowserOverrides() throws Exception {
     var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     AtomicReference<JsonNode> observed = new AtomicReference<>();

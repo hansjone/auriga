@@ -95,17 +95,25 @@ final class UacKeyRotation {
         () -> {
           int changed = 0;
           for (Envelope envelope : ENVELOPES) {
+            String key = "data->'" + envelope.field() + "'->>'keyId'";
             var rows =
                 store
                     .networkJdbc()
                     .query(
                         "SELECT data::text FROM iam."
                             + envelope.table()
-                            + " WHERE tenant_id=? AND data->'"
+                            + " WHERE tenant_id=? AND jsonb_exists(data,'"
                             + envelope.field()
-                            + "'->>'keyId'<>? ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED",
+                            + "') AND ("
+                            + key
+                            + "<? OR "
+                            + key
+                            + ">? OR "
+                            + key
+                            + " IS NULL) ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED",
                         (rs, i) -> Json.read(rs.getString(1)),
                         TenantContext.require(),
+                        cipher.activeKeyId(),
                         cipher.activeKeyId(),
                         limit - changed);
             for (var row : rows) {

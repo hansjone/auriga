@@ -61,11 +61,16 @@ final class UacWorker
       uac.telemetry.flushQueue();
       uac.telemetry.flushAudit();
     }
+    store.tx(
+        () -> {
+          retireUnused();
+          return store.cleanUac(uac.clock.instant());
+        });
     new UacKeyRotation(store, uac.cipher).rotateBatch(50);
     store.tx(
         () -> {
           int expired = 0;
-          for (ObjectNode candidate : store.all("uac_credential")) {
+          for (ObjectNode candidate : store.uacExpiredRetries(uac.clock.instant())) {
             if (expired >= 50) break;
             if (candidate.has("retryDeadline")
                 && !candidate.path("invalid").asBoolean()
@@ -107,6 +112,27 @@ final class UacWorker
       uac.telemetry.clean();
     }
     return count;
+  }
+
+  private void retireUnused() {
+    Instant now = uac.clock.instant();
+    for (ObjectNode candidate : store.uacRetirementDue(now)) {
+      String provider = candidate.path("providerId").asString();
+      store.lock("uac-slots:" + provider);
+      // Serialize with credential reuse during login, before locking the credential.
+      store.lock("uac-account:" + provider + ":" + candidate.path("accountId").asString());
+      store.lock("uac-credential:" + candidate.path("id").asString());
+      ObjectNode credential = store.byId("uac_credential", candidate.path("id").asString(), true);
+      if (credential == null || credential.path("invalid").asBoolean()) continue;
+      var sources = store.matching("session", "uacCredentialId", credential.path("id").asString());
+      if (sources.stream().anyMatch(uac.sessions::valid)) {
+        store.deferUacRetirement(credential.path("id").asString(), now.plusSeconds(86400));
+        continue;
+      }
+      for (ObjectNode source : sources)
+        if (!source.path("revoked").asBoolean()) uac.sessions.revokeOne(source, "expired");
+      invalidate(credential, "expired");
+    }
   }
 
   private ObjectNode claim() {
@@ -663,17 +689,19 @@ final class UacWorker
   }
 
   private void invalidate(ObjectNode credential, String reason) {
-    for (ObjectNode session : store.all("session"))
+    for (ObjectNode session :
+        store.matching("session", "uacCredentialId", credential.path("id").asString()))
       if (session.path("uacCredentialId").equals(credential.path("id"))
           && UacSessions.roundContains(credential, session)
           && !session.path("revoked").asBoolean()) uac.sessions.revokeOne(session, reason);
     boolean remains =
-        store.all("session").stream()
+        store.matching("session", "uacCredentialId", credential.path("id").asString()).stream()
             .anyMatch(
                 s ->
                     s.path("uacCredentialId").equals(credential.path("id"))
                         && !s.path("revoked").asBoolean());
     credential.put("invalid", !remains);
+    if (!remains) credential.put("expiresAt", uac.clock.instant().plusSeconds(86400).toString());
     clearRound(credential);
     store.save("uac_credential", credential);
   }
@@ -700,6 +728,7 @@ final class UacWorker
 
   private void done(ObjectNode job) {
     job.put("done", true);
+    job.put("expiresAt", uac.clock.instant().plusSeconds(300).toString());
     job.remove("leaseToken");
     job.remove("leaseUntil");
     store.save("uac_job", job);

@@ -282,9 +282,9 @@ public final class SessionManager implements Sessions {
       kv.delete(row.path("cookieHash").asString());
       if (row.has("uacSessionBinding")) {
         String source = row.path("sessionId").asString();
-        for (ObjectNode device : store.all("device"))
+        for (ObjectNode device : store.matching("device", "sessionId", source))
           if (source.equals(device.path("sessionId").asString())) revokeDevice(device);
-        for (ObjectNode grant : store.all("oauth_grant"))
+        for (ObjectNode grant : store.matching("oauth_grant", "sessionId", source))
           if (source.equals(grant.path("sessionId").asString())) {
             grant = store.byId("oauth_grant", grant.path("id").asString(), true);
             grant.put("revoked", true);

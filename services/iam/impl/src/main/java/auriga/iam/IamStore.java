@@ -56,6 +56,135 @@ public final class IamStore {
     return jdbc;
   }
 
+  List<ObjectNode> portalCsrf(String hash) {
+    return jdbc.query(
+        "SELECT data::text FROM iam.session WHERE tenant_id=? AND data->>'csrfHash'=? AND data->>'audience'='portal' AND data->>'revoked'='false'",
+        (rs, i) -> Json.read(rs.getString(1)),
+        TenantContext.require(),
+        hash);
+  }
+
+  /** Fixed internal fields only; hot paths fetch the relevant binding, never the tenant table. */
+  List<ObjectNode> matching(String table, String field, String value) {
+    table(table);
+    if (!Set.of("bindingHash", "sessionId", "uacCredentialId", "providerId", "accountId")
+        .contains(field)) throw new IllegalArgumentException("Unsupported IAM lookup");
+    String predicate = "data->>'" + field + "'=?";
+    if (table.equals("session") && field.equals("uacCredentialId"))
+      predicate = "uac_credential_id=?::uuid";
+    if (Set.of("session", "login_tx", "uac_challenge", "uac_credential").contains(table)
+        && field.equals("providerId")) predicate = "provider_id=?::uuid";
+    return jdbc.query(
+        "SELECT data::text FROM iam.\"" + table + "\" WHERE tenant_id=? AND " + predicate,
+        (rs, i) -> Json.read(rs.getString(1)),
+        TenantContext.require(),
+        value);
+  }
+
+  List<ObjectNode> pendingDeviceCode(String code, Instant now) {
+    return jdbc.query(
+        "SELECT data::text FROM iam.oauth_grant WHERE tenant_id=? AND replace(data->>'userCode','-','')=?"
+            + " AND data->>'kind'='device' AND data->>'status'='pending'"
+            + " AND data->>'used' IS DISTINCT FROM 'true' AND data->>'revoked' IS DISTINCT FROM 'true'"
+            + " AND data->>'authorizationMode' IS DISTINCT FROM 'native_tx' AND expires_at>? LIMIT 2",
+        (rs, i) -> Json.read(rs.getString(1)),
+        TenantContext.require(),
+        code,
+        java.sql.Timestamp.from(now));
+  }
+
+  ObjectNode uacCredential(String provider, String account, String hash) {
+    var rows =
+        jdbc.query(
+            "SELECT data::text FROM iam.uac_credential WHERE tenant_id=? AND provider_id=?::uuid"
+                + " AND data->>'kind'='credential' AND data->>'accountId'=? AND data->>'tokenHash'=?"
+                + " AND data->>'invalid'='false' LIMIT 1",
+            (rs, i) -> Json.read(rs.getString(1)),
+            TenantContext.require(),
+            provider,
+            account,
+            hash);
+    return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  List<ObjectNode> uacExpiredRetries(Instant now) {
+    return jdbc.query(
+        "SELECT data::text FROM iam.uac_credential WHERE tenant_id=? AND data->>'invalid'='false'"
+            + " AND retry_deadline<=? ORDER BY retry_deadline,id LIMIT 50",
+        (rs, i) -> Json.read(rs.getString(1)),
+        TenantContext.require(),
+        java.sql.Timestamp.from(now));
+  }
+
+  /** Every table and credential/session fanout is bounded and protected by tenant RLS. */
+  List<ObjectNode> uacRetirementDue(Instant now) {
+    return jdbc.query(
+        "SELECT data::text FROM iam.uac_credential WHERE tenant_id=?"
+            + " AND data->>'kind'='credential' AND data->>'invalid'='false' AND cleanup_at<=?"
+            + " ORDER BY cleanup_at,id LIMIT 50",
+        (rs, i) -> Json.read(rs.getString(1)),
+        TenantContext.require(),
+        java.sql.Timestamp.from(now));
+  }
+
+  void deferUacRetirement(String credential, Instant next) {
+    jdbc.update(
+        "UPDATE iam.uac_credential SET cleanup_at=? WHERE tenant_id=? AND id=?::uuid",
+        java.sql.Timestamp.from(next),
+        TenantContext.require(),
+        credential);
+  }
+
+  /** Every table and credential/session fanout is bounded and protected by tenant RLS. */
+  int cleanUac(Instant now) {
+    int deleted = 0;
+    deleted +=
+        jdbc.update(
+            "DELETE FROM iam.login_tx WHERE tenant_id=? AND id IN"
+                + " (SELECT id FROM iam.login_tx WHERE tenant_id=? AND jsonb_exists(data,'uacPendingAccountId') AND expires_at<=?"
+                + " ORDER BY expires_at,id LIMIT 50 FOR UPDATE SKIP LOCKED)",
+            TenantContext.require(),
+            TenantContext.require(),
+            java.sql.Timestamp.from(now));
+    for (String table : List.of("uac_challenge", "uac_navigation", "uac_suppression", "uac_job"))
+      deleted +=
+          jdbc.update(
+              "DELETE FROM iam."
+                  + table
+                  + " WHERE tenant_id=? AND id IN"
+                  + " (SELECT id FROM iam."
+                  + table
+                  + " WHERE tenant_id=? AND expires_at<=?"
+                  + " ORDER BY expires_at,id LIMIT 50 FOR UPDATE SKIP LOCKED)",
+              TenantContext.require(),
+              TenantContext.require(),
+              java.sql.Timestamp.from(now));
+    var retired =
+        jdbc.query(
+            "SELECT data::text FROM iam.uac_credential WHERE tenant_id=?"
+                + " AND data->>'invalid'='true' AND expires_at<=? ORDER BY expires_at,id LIMIT 50 FOR UPDATE SKIP LOCKED",
+            (rs, i) -> Json.read(rs.getString(1)),
+            TenantContext.require(),
+            java.sql.Timestamp.from(now));
+    for (var credential : retired) {
+      // Retired sessions keep audit metadata but no longer reference a deleted credential.
+      jdbc.update(
+          "UPDATE iam.session SET data=data-'uacCredentialId'-'uacSessionBinding'"
+              + " WHERE tenant_id=? AND id IN (SELECT id FROM iam.session WHERE tenant_id=?"
+              + " AND uac_credential_id=?::uuid AND data->>'revoked'='true' LIMIT 50 FOR UPDATE SKIP LOCKED)",
+          TenantContext.require(),
+          TenantContext.require(),
+          credential.path("id").asString());
+      deleted +=
+          jdbc.update(
+              "DELETE FROM iam.uac_credential c WHERE c.tenant_id=? AND c.id=?::uuid"
+                  + " AND NOT EXISTS(SELECT 1 FROM iam.session s WHERE s.tenant_id=c.tenant_id AND s.uac_credential_id=c.id)",
+              TenantContext.require(),
+              credential.path("id").asString());
+    }
+    return deleted;
+  }
+
   void uacTenant() {
     jdbc.update(
         "INSERT INTO iam.uac_work_tenant(tenant_id) VALUES (?) ON CONFLICT DO NOTHING",

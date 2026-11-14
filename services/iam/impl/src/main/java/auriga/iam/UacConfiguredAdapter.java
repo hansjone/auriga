@@ -19,12 +19,18 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
           .build();
   private final JsonNode settings;
   private final UacHttp http;
+  private final int scanTimeoutSeconds;
 
   UacConfiguredAdapter(JsonNode settings, boolean testLoopback) {
     String ip = settings.path("clientIP").asString("");
     if (settings.has("clientIP") && !settings.path("clientIP").isString())
       throw new IllegalArgumentException("Invalid private UAC client IP");
     literalIp(ip);
+    JsonNode timeout = settings.path("qr").path("timeoutSeconds");
+    if (!timeout.isMissingNode()
+        && (!timeout.isIntegralNumber() || timeout.asInt() < 1 || timeout.asInt() > 15))
+      throw new IllegalArgumentException("Invalid private UAC QR timeoutSeconds (1..15)");
+    scanTimeoutSeconds = timeout.isMissingNode() ? 15 : timeout.asInt();
     this.settings = settings.deepCopy();
     this.http = new UacHttp(settings, testLoopback);
   }
@@ -225,7 +231,7 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
               target,
               expand(mapping.path("body"), values(config, coordinates, mapping)),
               headers(mapping, values(config, coordinates, mapping)),
-              25);
+              scanTimeoutSeconds);
       UacTelemetry.capture(response.status(), response.body());
       if (response.status() < 200 || response.status() >= 300)
         return failure("unavailable", "transport_error");
@@ -354,7 +360,9 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
               ? Boolean.TRUE
               : "identity_mismatch".equals(decision.failureClass()) ? Boolean.FALSE : null,
           "token",
-          decision.replacementToken());
+          decision.replacementToken(),
+          "empNo",
+          decision.employee());
     } catch (java.io.IOException e) {
       return Json.object(
           "success", false, "failureClass", "upstream_fault", "faultReason", "transport_error");

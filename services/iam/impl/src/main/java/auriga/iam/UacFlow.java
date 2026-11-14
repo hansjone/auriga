@@ -132,12 +132,14 @@ final class UacFlow {
               404);
           if (previous != null) {
             store.lock("uac-binding:" + audience + ":" + Secrets.hash(previous));
-            for (ObjectNode navigation : store.all("uac_navigation"))
+            for (ObjectNode navigation :
+                store.matching("uac_navigation", "bindingHash", Secrets.hash(previous)))
               if (origin.equals(navigation.path("origin").asString())
                   && audience.equals(navigation.path("audience").asString())
                   && Secrets.same(
                       navigation.path("bindingHash").asString(), Secrets.hash(previous))) {
                 navigation = store.byId("uac_navigation", navigation.path("id").asString(), true);
+                if (navigation == null) continue;
                 IamError.require(
                     !navigation.path("replaced").asBoolean(), "login_tx_finished", 409);
                 navigation.put("replaced", true);
@@ -152,11 +154,13 @@ final class UacFlow {
                     sessions.revokeOne(issued, "security");
                 }
               }
-            for (ObjectNode old : store.all("uac_challenge"))
+            for (ObjectNode old :
+                store.matching("uac_challenge", "bindingHash", Secrets.hash(previous)))
               if (Secrets.same(old.path("bindingHash").asString(), Secrets.hash(previous))
                   && origin.equals(old.path("origin").asString())
                   && audience.equals(old.path("audience").asString())) {
                 old = store.byId("uac_challenge", old.path("id").asString(), true);
+                if (old == null) continue;
                 IamError.require(!old.path("replaced").asBoolean(), "login_tx_finished", 409);
                 old.put("replaced", true);
                 if (!old.path("consumed").asBoolean()) {

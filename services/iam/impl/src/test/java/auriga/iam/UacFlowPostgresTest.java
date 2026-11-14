@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 
 import auriga.common.audit.AuditLogger;
 import auriga.common.audit.OutboxAuditLogger;
+import auriga.common.context.RequestContext;
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.common.events.EventPublisher;
@@ -101,6 +102,8 @@ class UacFlowPostgresTest {
                 List.of(Json.object("employee", "001Ab", "department", "Test department"))));
     final AtomicReference<JsonNode> verifyBody = new AtomicReference<>();
     final AtomicReference<String> scanState = new AtomicReference<>("success");
+    final AtomicReference<String> scanEmployee = new AtomicReference<>("001Ab"),
+        expectedVerifyAccount = new AtomicReference<>("001Ab");
     final AtomicReference<CountDownLatch> verifyEntered = new AtomicReference<>(),
         verifyRelease = new AtomicReference<>();
     final String token = Secrets.random(), replacement = Secrets.random();
@@ -114,7 +117,7 @@ class UacFlowPostgresTest {
               "code",
               Json.object("code", "0000"),
               "bo",
-              Json.object("code", "0000", "user", "001AB", "token", replacement)));
+              Json.object("code", "0000", "user", "001Ab", "token", replacement)));
       server.createContext(
           "/",
           exchange -> {
@@ -126,7 +129,8 @@ class UacFlowPostgresTest {
                 scans.incrementAndGet();
                 assertEquals(32, request.path("first").asString().length());
                 response =
-                    Json.object("state", scanState.get(), "employee", "001Ab", "token", token);
+                    Json.object(
+                        "state", scanState.get(), "employee", scanEmployee.get(), "token", token);
               }
               case "/department" -> {
                 departments.incrementAndGet();
@@ -136,7 +140,7 @@ class UacFlowPostgresTest {
               case "/verify" -> {
                 verifications.incrementAndGet();
                 assertTrue(request.has("clientIP"));
-                assertEquals("001Ab", request.path("account").asString());
+                assertEquals(expectedVerifyAccount.get(), request.path("account").asString());
                 if (verifyEntered.get() != null) verifyEntered.get().countDown();
                 if (verifyRelease.get() != null)
                   try {
@@ -1627,6 +1631,124 @@ class UacFlowPostgresTest {
   }
 
   @Test
+  void reviewF1NavigationPreservesPortalCsrfWithoutTransactionCookie() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var logged = f.login();
+      var input = navigationInput(f, "portal").put("csrfCookie", logged.session().csrf());
+      var issued = f.call(() -> navigation(f, "true").issue(input, false));
+      assertEquals(logged.session().csrf(), issued.path("csrfCookie").asString());
+      var access = HttpBoundaryTest.fixture("domain-proxy.json");
+      var request = HttpBoundaryTest.request(access, "portal");
+      var identity =
+          spy(
+              new RequestIdentity(
+                  access, new RequestIdentity.Hop(Set.of("127.0.0.1"), null, true)));
+      doReturn(new RequestIdentity.Host(f.tenant, "portal", true)).when(identity).host(request);
+      request.addHeader("Origin", access.portalUrl());
+      request.addHeader("X-Auriga-CSRF", issued.path("csrfCookie").asString());
+      request.setCookies(
+          new jakarta.servlet.http.Cookie(
+              identity.cookieName(request, "auriga_csrf"), issued.path("csrfCookie").asString()),
+          new jakarta.servlet.http.Cookie(
+              identity.cookieName(request, "auriga_session"), logged.session().cookie()));
+      String sid = logged.session().session().path("sessionId").asString();
+      RequestContext.start(null, null)
+          .withPrincipal(f.principal(sid))
+          .run(
+              () ->
+                  f.call(
+                      () ->
+                          store.tx(
+                              () -> {
+                                var source = identity.browserSession(request, f.sessions, true);
+                                f.sessions.revokeOne(source, "logout");
+                                return null;
+                              })));
+      assertTrue(f.session(sid).path("revoked").asBoolean());
+    }
+  }
+
+  @Test
+  void reviewF1NavigationPreservesAcknowledgedQrSession() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var challenge = f.begin();
+      f.run();
+      var logged = f.complete(challenge);
+      var input =
+          navigationInput(f, "portal")
+              .put("csrfCookie", logged.session().csrf())
+              .put("transactionCookie", challenge.binding());
+      var issued = f.call(() -> navigation(f, "true").issue(input, false));
+      assertFalse(
+          f.session(logged.session().session().path("sessionId").asString())
+              .path("revoked")
+              .asBoolean());
+      assertEquals(logged.session().csrf(), issued.path("csrfCookie").asString());
+    }
+  }
+
+  @Test
+  void reviewF2DeviceCredentialsCarryAuthoritativeBindingAndCurrentVersion() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var logged = f.login();
+      String sid = logged.session().session().path("sessionId").asString();
+      String deviceId = UUID.randomUUID().toString();
+      f.call(
+          () ->
+              store.tx(
+                  () ->
+                      store.insert(
+                          "device",
+                          deviceId,
+                          Json.object(
+                              "accountId",
+                              f.account.toString(),
+                              "sessionId",
+                              sid,
+                              "scope",
+                              "auriga.connect",
+                              "revoked",
+                              false,
+                              "uacSessionBinding",
+                              f.session(sid).path("uacSessionBinding")),
+                          null)));
+      var principal =
+          new AurigaPrincipal(
+              f.account.toString(),
+              f.tenant,
+              PrincipalType.DEVICE,
+              TokenContext.DEVICE,
+              null,
+              deviceId,
+              "member",
+              List.of(),
+              Set.of(),
+              f.time.instant(),
+              null,
+              UUID.randomUUID().toString());
+      var before = f.call(() -> store.tx(() -> f.uac.credentials(principal)));
+      assertTrue(before.has("binding"));
+      assertTrue(before.has("credentialVersion"));
+      new ContractSchemas()
+          .validate(
+              "plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostCredentials", before);
+      assertEquals(deviceId, before.path("binding").path("deviceId").asString());
+      assertEquals(f.tenant.toString(), before.path("binding").path("tenantId").asString());
+      assertEquals(f.account.toString(), before.path("binding").path("memberId").asString());
+      assertEquals(sid, before.path("binding").path("sourceSessionId").asString());
+      f.time.advance(7231);
+      f.run();
+      var after = f.call(() -> store.tx(() -> f.uac.credentials(principal)));
+      assertTrue(
+          after.path("credentialVersion").asLong() > before.path("credentialVersion").asLong());
+      assertEquals(f.replacement, after.path("token").asString());
+      assertEquals(
+          before.path("binding").path("authGeneration"),
+          after.path("binding").path("authGeneration"));
+    }
+  }
+
+  @Test
   void rejectedPortalCookieDoesNotTryAnotherAccountOrRestoreOldToken() throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       f.verifyBody.set(
@@ -1652,6 +1774,251 @@ class UacFlowPostgresTest {
                     assertTrue(store.all("session").isEmpty());
                     return null;
                   }));
+    }
+  }
+
+  @Test
+  void reviewL1SsoUsesVerifiedEmployeeAndSharesQrIdentity() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      ((ObjectNode) f.verifyBody.get()).withObject("/bo").put("user", " 001AB ");
+      when(f.hooks.resolveUacEmployee(UUID.fromString(f.provider), "001AB"))
+          .thenReturn(Optional.of(f.account));
+      var nav = navigation(f, "true");
+      var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var prepared = prepare(f, nav, issued, "auto", null, null);
+      var result =
+          f.call(
+              () ->
+                  nav.finish(
+                      prepared,
+                      nav.verify(prepared, ssoCookies(f)),
+                      issued.path("transactionCookie").asString()));
+      String sid = result.result().session().session().path("sessionId").asString();
+      assertEquals("001AB", f.read(sid).path("empNo").asString());
+      f.scanEmployee.set(" 001AB ");
+      var qr = f.login();
+      assertEquals(f.account.toString(), qr.session().session().path("accountId").asString());
+      assertEquals(
+          "001AB",
+          f.read(qr.session().session().path("sessionId").asString()).path("empNo").asString());
+    }
+  }
+
+  @Test
+  void reviewM1RetentionIsBoundedTenantScopedAndErasesExpiredSessionRecovery() throws Exception {
+    try (var f = new Fixture("token-verify", 3);
+        var other = new Fixture("token-verify", 3)) {
+      var challenge = f.begin();
+      f.run();
+      var logged = f.complete(challenge);
+      String id = challenge.challenge().path("id").asString();
+      assertTrue(
+          f.call(() -> store.tx(() -> store.byId("uac_challenge", id, false))).has("issued"));
+      var untouched = other.begin();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    for (int i = 0; i < 61; i++)
+                      store.insert(
+                          "uac_navigation",
+                          UUID.randomUUID().toString(),
+                          Json.object("bindingHash", "expired"),
+                          f.time.instant().minusSeconds(1));
+                    return null;
+                  }));
+      f.time.advance(121);
+      f.call(() -> store.tx(() -> store.cleanUac(f.time.instant())));
+      assertNull(f.call(() -> store.tx(() -> store.byId("uac_challenge", id, false))));
+      assertEquals(
+          11,
+          f.call(
+              () ->
+                  store.tx(
+                      () -> store.matching("uac_navigation", "bindingHash", "expired").size())));
+      assertNotNull(
+          other.call(
+              () ->
+                  store.tx(
+                      () ->
+                          store.byId(
+                              "uac_challenge",
+                              untouched.challenge().path("id").asString(),
+                              false))));
+      String sid = logged.session().session().path("sessionId").asString();
+      assertNotNull(f.read(sid));
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var session = store.byId("session", sid, false);
+                    var credential =
+                        store.byId(
+                            "uac_credential", session.path("uacCredentialId").asString(), true);
+                    f.sessions.revokeOne(session, "security");
+                    credential.put("invalid", true);
+                    credential.put("expiresAt", f.time.instant().minusSeconds(1).toString());
+                    store.save("uac_credential", credential);
+                    return null;
+                  }));
+      f.call(() -> store.tx(() -> store.cleanUac(f.time.instant())));
+      assertFalse(f.session(sid).has("uacCredentialId"));
+      assertFalse(
+          f.call(() -> store.tx(() -> store.all("uac_credential"))).stream()
+              .anyMatch(c -> c.path("invalid").asBoolean()));
+    }
+  }
+
+  @Test
+  void reviewL2DeviceCodeIgnoresOldRowsRejectsAmbiguityAndLimitsAnonymousRequests()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var nav = navigation(f, "true");
+      String live = UUID.randomUUID().toString();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    for (String status : List.of("used", "expired", "pending")) {
+                      Instant expiry =
+                          status.equals("expired")
+                              ? f.time.instant().minusSeconds(1)
+                              : f.time.instant().plusSeconds(600);
+                      store.insert(
+                          "oauth_grant",
+                          status.equals("pending") ? live : UUID.randomUUID().toString(),
+                          Json.object(
+                              "kind",
+                              "device",
+                              "userCode",
+                              "BCDF-GHJK",
+                              "status",
+                              "pending",
+                              "used",
+                              status.equals("used"),
+                              "expiresAt",
+                              expiry.toString()),
+                          expiry);
+                    }
+                    return null;
+                  }));
+      var input = navigationInput(f, "device").put("userCode", "BCDF-GHJK");
+      assertNotNull(f.call(() -> nav.issue(input, true)));
+      f.call(
+          () ->
+              store.tx(
+                  () ->
+                      store.insert(
+                          "oauth_grant",
+                          UUID.randomUUID().toString(),
+                          Json.object(
+                              "kind",
+                              "device",
+                              "userCode",
+                              "BCDFGHJK",
+                              "status",
+                              "pending",
+                              "expiresAt",
+                              f.time.instant().plusSeconds(600).toString()),
+                          f.time.instant().plusSeconds(600))));
+      assertEquals(
+          "common.not_found",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              nav.issue(
+                                  navigationInput(f, "device").put("userCode", "BCDF-GHJK"), true)))
+              .errorCode()
+              .code());
+      for (int i = 0; i < 28; i++)
+        assertThrows(
+            AurigaException.class,
+            () ->
+                f.call(
+                    () ->
+                        nav.issue(
+                            navigationInput(f, "device").put("userCode", "BCDF-GHJK"), true)));
+      assertEquals(
+          "common.rate_limited",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      f.call(
+                          () ->
+                              nav.issue(
+                                  navigationInput(f, "device").put("userCode", "BCDFGHJK"), true)))
+              .errorCode()
+              .code());
+    }
+  }
+
+  @Test
+  void reviewM1UnusedCredentialsRetireWhileLiveSourcesKeepTheirCredential() throws Exception {
+    try (var f = new Fixture("token-verify", 3);
+        var live = new Fixture("token-verify", 3)) {
+      var logged = f.login();
+      String sid = logged.session().session().path("sessionId").asString();
+      String credential = f.session(sid).path("uacCredentialId").asString();
+      var other = live.login();
+      String otherSid = other.session().session().path("sessionId").asString();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    f.sessions.revokeOne(f.session(sid), "logout");
+                    return null;
+                  }));
+      live.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var source = store.byId("session", otherSid, true);
+                    source.put("idleExpiresAt", live.time.instant().plusSeconds(604800).toString());
+                    store.save("session", source);
+                    return null;
+                  }));
+      f.time.advance(86401);
+      live.time.advance(86401);
+      f.run();
+      live.run();
+      assertTrue(
+          f.call(() -> store.tx(() -> store.byId("uac_credential", credential, false)))
+              .path("invalid")
+              .asBoolean());
+      assertNotNull(live.read(otherSid));
+      f.time.advance(86401);
+      f.run();
+      assertNull(f.call(() -> store.tx(() -> store.byId("uac_credential", credential, false))));
+      assertFalse(f.session(sid).has("uacCredentialId"));
+    }
+  }
+
+  @Test
+  void reviewCrossSiteNavigationAllowsQrAndExplicitContinueButNeverAutoSso() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      var nav = navigation(f, "true");
+      var input = navigationInput(f, "portal");
+      input.withObject("/fetchMetadata").put("site", "cross-site");
+      var issued = f.call(() -> nav.issue(input, false));
+      assertFalse(issued.path("context").path("autoEligible").asBoolean());
+      assertFalse(prepare(f, nav, issued, "auto", null, null).attempt());
+      assertEquals(0, f.verifications.get());
+      input.put("requestId", UUID.randomUUID().toString());
+      var next = f.call(() -> nav.issue(input, false));
+      var prepared = prepare(f, nav, next, "continue", null, null);
+      assertTrue(prepared.attempt());
+      assertEquals(
+          "authenticated",
+          f.call(
+                  () ->
+                      nav.finish(
+                          prepared,
+                          nav.verify(prepared, ssoCookies(f)),
+                          next.path("transactionCookie").asString()))
+              .state());
+      assertNotNull(f.begin());
     }
   }
 

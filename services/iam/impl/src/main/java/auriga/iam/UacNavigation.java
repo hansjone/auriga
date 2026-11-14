@@ -49,6 +49,13 @@ final class UacNavigation {
             "auth/uac-control.schema.json#/$defs/"
                 + (userCode ? "UacDeviceNavigationIssueRequest" : "UacNavigationIssueRequest"),
             input);
+    if (userCode) {
+      store.limit("uac-device-navigation", clock.instant(), 1000);
+      store.limit(
+          "uac-device-code:" + Secrets.hash(input.path("userCode").asString().replace("-", "")),
+          clock.instant(),
+          30);
+    }
     return store.tx(
         () -> {
           ObjectNode normalized = ((ObjectNode) input).deepCopy();
@@ -104,13 +111,20 @@ final class UacNavigation {
             store.save("oauth_grant", device);
           }
           String old = normalized.path("transactionCookie").asString("");
-          String csrf = null;
+          String csrf =
+              SessionManager.canonicalCsrf(csrfInput)
+                      && store.portalCsrf(Secrets.hash(csrfInput)).stream()
+                          .anyMatch(uac.sessions::valid)
+                  ? csrfInput
+                  : null;
           if (!old.isEmpty()) {
             store.lock("uac-binding:portal:" + Secrets.hash(old));
-            for (ObjectNode nav : store.all("uac_navigation"))
+            for (ObjectNode nav :
+                store.matching("uac_navigation", "bindingHash", Secrets.hash(old)))
               if (origin.equals(nav.path("origin").asString())
                   && Secrets.same(nav.path("bindingHash").asString(), Secrets.hash(old))) {
                 nav = store.byId("uac_navigation", nav.path("id").asString(), true);
+                if (nav == null) continue; // Concurrent expiry cleanup already retired it.
                 IamError.require(!nav.path("replaced").asBoolean(), "login_tx_finished", 409);
                 nav.put("replaced", true);
                 if (SessionManager.canonicalCsrf(csrfInput)
@@ -137,11 +151,13 @@ final class UacNavigation {
                   }
                 }
               }
-            for (ObjectNode challenge : store.all("uac_challenge"))
+            for (ObjectNode challenge :
+                store.matching("uac_challenge", "bindingHash", Secrets.hash(old)))
               if (origin.equals(challenge.path("origin").asString())
                   && "portal".equals(challenge.path("audience").asString())
                   && Secrets.same(challenge.path("bindingHash").asString(), Secrets.hash(old))) {
                 challenge = store.byId("uac_challenge", challenge.path("id").asString(), true);
+                if (challenge == null) continue;
                 IamError.require(!challenge.path("replaced").asBoolean(), "login_tx_finished", 409);
                 challenge.put("replaced", true);
                 challenge.put("state", "cancelled");
@@ -152,8 +168,12 @@ final class UacNavigation {
                 if (previousTx != null && previousTx.has("uacIssuedSessionId")) {
                   ObjectNode issued =
                       store.byId("session", previousTx.path("uacIssuedSessionId").asString(), true);
-                  if (issued != null && !issued.path("revoked").asBoolean())
-                    uac.sessions.revokeOne(issued, "security");
+                  if (issued != null && !issued.path("revoked").asBoolean()) {
+                    if (SessionManager.canonicalCsrf(csrfInput)
+                        && Secrets.same(issued.path("csrfHash").asString(), Secrets.hash(csrfInput))
+                        && uac.sessions.valid(issued)) csrf = csrfInput;
+                    else uac.sessions.revokeOne(issued, "security");
+                  }
                 }
               }
           }
@@ -251,12 +271,9 @@ final class UacNavigation {
   private ObjectNode deviceByCode(String code) {
     if (!code.matches("[A-Z]{4}-?[A-Z]{4}")) throw new AurigaException(CommonErrors.NOT_FOUND);
     String normalized = code.replace("-", "");
-    ObjectNode found =
-        store.all("oauth_grant").stream()
-            .filter(g -> normalized.equals(g.path("userCode").asString().replace("-", "")))
-            .findFirst()
-            .orElse(null);
-    if (found == null) throw new AurigaException(CommonErrors.NOT_FOUND);
+    var candidates = store.pendingDeviceCode(normalized, clock.instant());
+    if (candidates.size() != 1) throw new AurigaException(CommonErrors.NOT_FOUND);
+    ObjectNode found = candidates.getFirst();
     found = store.byId("oauth_grant", found.path("id").asString(), true);
     devicePending(found);
     return found;
@@ -447,12 +464,16 @@ final class UacNavigation {
     if (!result.path("success").asBoolean()
         || !result.path("token").isString()
         || result.path("token").asString().isBlank()
-        || result.path("token").asString().length() > 16384) {
+        || result.path("token").asString().length() > 16384
+        || !result.path("empNo").isString()
+        || result.path("empNo").asString().strip().isEmpty()
+        || result.path("empNo").asString().strip().length() > 128) {
       if (check != null) check.end("scan_required", checked);
       return Json.object("success", false);
     }
     ObjectNode credential = ((ObjectNode) pair).deepCopy();
     credential.set("token", result.path("token"));
+    credential.put("empNo", result.path("empNo").asString().strip());
     if (check != null) check.end("success", checked);
     return Json.object("success", true, "credential", credential);
   }

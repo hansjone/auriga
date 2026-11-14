@@ -101,24 +101,26 @@ final class UacProviderService {
   }
 
   void disable(String providerId) {
-    for (ObjectNode challenge : store.all("uac_challenge"))
+    for (ObjectNode challenge : store.matching("uac_challenge", "providerId", providerId))
       if (providerId.equals(challenge.path("providerId").asString())) {
         challenge = store.byId("uac_challenge", challenge.path("id").asString(), true);
+        if (challenge == null) continue;
         challenge.put("state", "cancelled");
         challenge.remove("credential");
         store.save("uac_challenge", challenge);
       }
-    for (ObjectNode tx : store.all("login_tx"))
+    for (ObjectNode tx : store.matching("login_tx", "providerId", providerId))
       if (providerId.equals(tx.path("providerId").asString())
           && "pending".equals(tx.path("status").asString())) {
         tx = store.byId("login_tx", tx.path("id").asString(), true);
+        if (tx == null) continue;
         tx.put("status", "cancelled");
         tx.set("step", Json.object("type", "fail", "code", "iam.login_tx_cancelled"));
         tx.remove("pendingProfile");
         tx.remove("uacCredential");
         store.save("login_tx", tx);
       }
-    for (ObjectNode session : store.all("session"))
+    for (ObjectNode session : store.matching("session", "providerId", providerId))
       if (providerId.equals(session.path("providerId").asString())
           && !session.path("revoked").asBoolean()) sessions.revokeOne(session, "provider_disabled");
   }

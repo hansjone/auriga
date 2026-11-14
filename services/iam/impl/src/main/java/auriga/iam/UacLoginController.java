@@ -87,6 +87,7 @@ public class UacLoginController {
     return requests.call(
         request,
         () -> {
+          requests.sameOriginFetch(request);
           noStore(response);
           UacCorrelation.set(
               response,

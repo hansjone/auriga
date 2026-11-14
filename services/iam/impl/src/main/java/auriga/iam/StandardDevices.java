@@ -493,7 +493,7 @@ final class StandardDevices {
     return false;
   }
 
-  private static Instant minimum(Instant a, Instant b) {
+  static Instant minimum(Instant a, Instant b) {
     return a.isBefore(b) ? a : b;
   }
 

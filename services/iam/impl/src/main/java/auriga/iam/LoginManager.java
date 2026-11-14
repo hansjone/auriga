@@ -216,7 +216,8 @@ public final class LoginManager {
         () -> {
           if (previousBinding != null) {
             store.lock("login-binding:" + audience + ":" + Secrets.hash(previousBinding));
-            for (ObjectNode old : store.all("login_tx"))
+            for (ObjectNode old :
+                store.matching("login_tx", "bindingHash", Secrets.hash(previousBinding)))
               if (old.path("audience").asString().equals(audience)
                   && old.path("origin").asString().equals(origin)
                   && Secrets.same(
@@ -605,7 +606,7 @@ public final class LoginManager {
   private ObjectNode callbackTransaction(String providerId, Map<String, String> params) {
     String state = params.getOrDefault("state", params.getOrDefault("RelayState", ""));
     IamError.require(!state.isEmpty(), "not_found", 404);
-    return store.all("login_tx").stream()
+    return store.matching("login_tx", "providerId", providerId).stream()
         .filter(
             t ->
                 t.path("providerId").asString().equals(providerId)
@@ -656,7 +657,7 @@ public final class LoginManager {
           409);
       accountId = tx.path("accountId").asString();
       if (uac)
-        for (ObjectNode other : store.all("identity"))
+        for (ObjectNode other : store.matching("identity", "accountId", accountId))
           IamError.require(
               !pid.equals(other.path("providerId").asString())
                   || !accountId.equals(other.path("accountId").asString())
