@@ -163,6 +163,7 @@ export class TeamProxy {
       )
         throw new Error('invalid remote MCP result');
       if (definition.operation === 'team_initialize') {
+        this.host.checkPeer(this.host.peers.get(owner));
         if (rpc.result.protocolVersion !== '2025-06-18')
           throw new Error('unsupported MCP version');
         this.broker.assert(context);

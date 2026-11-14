@@ -1,0 +1,418 @@
+import { networkTiming } from '../dsh-plugin/src/network/timing.js';
+import { clockToleranceMs } from '../dsh-plugin/src/network/clock.js';
+import { tracedFetch } from '../dsh-plugin/src/observability/index.js';
+import { createHash } from 'node:crypto';
+import { platformConfig } from '../dsh-plugin/src/local/config.js';
+import { PlatformError } from '../dsh-plugin/src/local/platform-error.js';
+import { parseStrictJson } from '../dsh-plugin/src/network/trust/jcs.js';
+import { positiveVersion } from '../dsh-plugin/src/network/trust/keyset.js';
+import { diagnosticReason } from '../dsh-plugin/src/network/diagnostics.js';
+import { jsonLimits } from '../dsh-plugin/src/network/trust/v2-schema.js';
+import { detach, structure } from '../dsh-plugin/src/network/trust/v2.js';
+
+const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+// Fixed v2 installation transport; no caller-selected platform route.
+const v2ControlPaths = Object.freeze({
+  keys: '/api/collab/v2/network/keys',
+  announcement: '/api/collab/v2/network/keys/announcement',
+  control: '/api/collab/v2/network/bootstrap/controls',
+  receipts: '/api/collab/v2/network/controls/receipts',
+});
+/** Validate the persisted installation receipt's exact server acknowledgement.
+ * @param {import('../dsh-plugin/src/generated/network/auto-renewal-v2.js').InstallationReceipt} receipt @param {any} input */
+export function verifyControlReceiptRecord(receipt, input) {
+  const record = structure('IsolationRecord', detach(input));
+  if (
+    ['tenant_id', 'realm', 'target_id', 'challenge', 'control_digest'].some(
+      (f) => record[f] !== /** @type {any} */ (receipt)[f],
+    ) ||
+    record.minimum_control_revision !== receipt.control_revision
+  )
+    throw new Error('control confirmation binding mismatch');
+  return record;
+}
+export {
+  DeviceControlUnavailable,
+  isDeviceRevocationError,
+} from '../dsh-plugin/src/network/device-provider.js';
+import {
+  DeviceControlUnavailable,
+  isDeviceRevocationError,
+} from '../dsh-plugin/src/network/device-provider.js';
+/** @param {string} ticket */
+function ingressFor(ticket) {
+  let bits = 0,
+    accumulator = 0,
+    out = '';
+  for (const byte of createHash('sha256')
+    .update(ticket, 'ascii')
+    .digest()
+    .subarray(0, 16)) {
+    accumulator = (accumulator << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      out += alphabet[(accumulator >>> bits) & 31];
+    }
+  }
+  if (bits) out += alphabet[(accumulator << (5 - bits)) & 31];
+  return out;
+}
+/** @param {any} value @param {string[]} fields */
+const exact = (value, fields) =>
+  value &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  Object.keys(value).sort().join(',') === fields.sort().join(',');
+/** @param {any} value */
+const uuid = (value) =>
+  typeof value === 'string' &&
+  /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
+/** Fixed native device control only; no UI/model identity, service/AI token or
+ * frame-provided URL is accepted. Raw bytes reach strict JSON/JCS validation.
+ * @param {{config:any,getDevice:(signal:AbortSignal)=>Promise<{accessToken:string,claims:{tid:string,did:string,sub:string}}>,now?:()=>number,controlIdentity?:import('../dsh-plugin/src/network/runtime-types.js').ControlIdentity,migrationPermit?:import('../dsh-plugin/src/generated/network/auto-renewal-v2.js').SignedMigrationPermit,loadInstallation?:(scope:{tenant_id:string,realm:string,target_id:string})=>Promise<any>}} options
+ * @returns {import('../dsh-plugin/src/network/runtime-types.js').DeviceNetworkProvider} */
+export function createDeviceProvider({
+  config: input,
+  getDevice,
+  now = Date.now,
+  controlIdentity,
+  migrationPermit,
+  loadInstallation,
+}) {
+  const config = platformConfig(input),
+    installation = config.network;
+  if (!installation) throw new Error('network installation required');
+  /** @param {any} value @param {{tid:string,did:string}} claims @param {boolean} created @returns {import('../dsh-plugin/src/network/runtime-types.js').DeviceRegistration} */
+  function registration(value, claims, created) {
+    if (
+      !exact(value, [
+        'tenant',
+        'realm',
+        'node',
+        'device',
+        'systemAddress',
+        ...(created ? ['created'] : []),
+      ]) ||
+      !uuid(value.tenant) ||
+      !uuid(value.device) ||
+      value.tenant !== claims.tid ||
+      value.device !== claims.did ||
+      value.realm !== installation?.realm ||
+      !positiveVersion(value.realm) ||
+      !positiveVersion(value.node) ||
+      value.systemAddress !==
+        `aur1:${BigInt(value.realm).toString(16)}.${BigInt(value.node).toString(16)}.0` ||
+      (created && typeof value.created !== 'boolean')
+    )
+      throw diagnosticReason(
+        new Error('invalid device registration'),
+        'response_invalid',
+      );
+    return value;
+  }
+  return {
+    kind: 'device-connection',
+    async prepare({ signal, diagnostics }) {
+      signal.throwIfAborted();
+      const device = await getDevice(signal);
+      signal.throwIfAborted();
+      const expected = { ...device.claims };
+      const installed = await loadInstallation?.({
+        tenant_id: expected.tid,
+        realm: installation.realm,
+        target_id: expected.did,
+      });
+      signal.throwIfAborted();
+      /** @template T @param {string} phase @param {()=>Promise<T>|T} operation @param {number} [budget] */
+      const run = (phase, operation, budget = 0) =>
+        diagnostics
+          ? diagnostics.scope(phase, budget).deferred(operation)
+          : operation();
+      /** @param {string} path @param {unknown} body @param {AbortSignal} active */
+      async function request(path, body, active) {
+        active.throwIfAborted();
+        const publicControl = path === v2ControlPaths.control;
+        const current = publicControl ? device : await getDevice(active);
+        active.throwIfAborted();
+        if (
+          ['tid', 'did', 'sub'].some(
+            (key) =>
+              /** @type {any} */ (current.claims)[key] !==
+              /** @type {any} */ (expected)[key],
+          )
+        )
+          throw new PlatformError(401, 'network.revoked');
+        const response = await tracedFetch(
+          new URL(path, config.platformOrigin),
+          {
+            method: body === undefined ? 'GET' : 'POST',
+            credentials: 'omit',
+            redirect: 'error',
+            signal: AbortSignal.any([
+              active,
+              AbortSignal.timeout(networkTiming.operationMs),
+            ]),
+            headers: {
+              ...(publicControl
+                ? {}
+                : { authorization: 'Bearer ' + current.accessToken }),
+              accept: 'application/json',
+              ...(body === undefined
+                ? {}
+                : { 'content-type': 'application/json' }),
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          },
+        ).catch(() => {
+          active.throwIfAborted();
+          throw diagnosticReason(
+            new DeviceControlUnavailable('network control unavailable'),
+            'control_unavailable',
+          );
+        });
+        active.throwIfAborted();
+        try {
+          const endpoint =
+            path === '/api/iam/v1/network/register'
+              ? 'register'
+              : path.endsWith('/keys/announcement')
+                ? 'keys_announcement'
+                : path.endsWith('/keys')
+                  ? 'keys'
+                  : path.endsWith('/tickets')
+                    ? 'tickets'
+                    : 'submit';
+          diagnostics?.observedHttp?.({
+            endpoint,
+            traceId: response.headers.get('X-Trace-Id') ?? '',
+            status: response.status,
+          });
+        } catch {
+          // Reading diagnostic response metadata cannot affect the request.
+        }
+        const parts = [];
+        let size = 0;
+        if (response.body) {
+          const reader = response.body.getReader();
+          try {
+            for (;;) {
+              const { done, value } = await reader.read().catch(() => {
+                active.throwIfAborted();
+                throw diagnosticReason(
+                  new DeviceControlUnavailable('network control unavailable'),
+                  'control_unavailable',
+                );
+              });
+              active.throwIfAborted();
+              if (done) break;
+              size += value.byteLength;
+              if (
+                size >
+                (Object.values(v2ControlPaths).some((route) => route === path)
+                  ? jsonLimits.maxBytes
+                  : 65536)
+              ) {
+                await reader.cancel();
+                throw diagnosticReason(
+                  new Error('network control response too large'),
+                  'response_too_large',
+                );
+              }
+              parts.push(value);
+            }
+          } finally {
+            reader.releaseLock();
+          }
+        }
+        if (!response.ok) {
+          let code;
+          try {
+            const problem = parseStrictJson(Buffer.concat(parts));
+            if (problem?.code === 'network.revoked') code = problem.code;
+          } catch {
+            // An unreadable error body never upgrades a denial to revocation.
+          }
+          const error = new PlatformError(response.status, code);
+          if ([401, 403].includes(response.status))
+            Object.assign(error, {
+              businessError: {
+                code:
+                  response.status === 403
+                    ? 'common.forbidden'
+                    : 'common.unauthenticated',
+                retryable: false,
+                upstreamStatus: response.status,
+              },
+            });
+          throw error;
+        }
+        active.throwIfAborted();
+        return Buffer.concat(parts);
+      }
+      /** @param {import('../dsh-plugin/src/generated/network/auto-renewal-v2.js').InstallationReceipt} receipt @param {AbortSignal} active */
+      async function confirmReceipt(receipt, active) {
+        verifyControlReceiptRecord(
+          receipt,
+          await request(v2ControlPaths.receipts, receipt, active),
+        );
+      }
+
+      /** @type {import('../dsh-plugin/src/network/runtime-types.js').DeviceRegistration|undefined} */
+      let registered;
+      let registering = false;
+      return {
+        kind: 'device-connection',
+        storageKey: createHash('sha256')
+          .update(JSON.stringify([config.issuer, expected.tid, expected.did]))
+          .digest('hex'),
+        async submit(body, active) {
+          return request('/api/ai/v1/network/submit', body, active);
+        },
+        async register(active) {
+          if (registering)
+            throw new Error('device registration already consumed');
+          registering = true;
+          const bytes = await run(
+            'register_http',
+            () => request('/api/iam/v1/network/register', {}, active),
+            networkTiming.operationMs,
+          );
+          const result = await run('register_validate', () =>
+            registration(parseStrictJson(bytes), expected, true),
+          );
+          active.throwIfAborted();
+          registered = Object.freeze(result);
+          return result;
+        },
+        url: installation.wssUrl,
+        origin: config.platformOrigin,
+        roots: installation.roots,
+        controlIdentity: installed?.controlIdentity ?? controlIdentity,
+        migrationPermit: installed?.migrationPermit ?? migrationPermit,
+        confirmControlReceipt: confirmReceipt,
+        async refresh(trust, active) {
+          // Public control sync precedes every reconnect/refresh and does not
+          // depend on a message ticket or the possibly revoked message chain.
+          const control = await request(
+            v2ControlPaths.control,
+            undefined,
+            active,
+          );
+          await trust.installControl(control);
+          for (const receipt of trust.pendingControlReceipts()) {
+            try {
+              await confirmReceipt(receipt, active);
+              await trust.acknowledgeControlReceipt(receipt.package_id);
+            } catch (error) {
+              if (isDeviceRevocationError(error)) throw error;
+              active.throwIfAborted(); /* Keep durable pending receipts; a stale one must not starve newer confirmations or public key refresh. */
+            }
+          }
+          active.throwIfAborted();
+          const keys = await run(
+            'keys_http',
+            () => request(v2ControlPaths.keys, undefined, active),
+            networkTiming.operationMs,
+          );
+          await run('keys_validate', () => trust.update(keys));
+          const announcement = await run(
+            'keys_announcement_http',
+            () => request(v2ControlPaths.announcement, undefined, active),
+            networkTiming.operationMs,
+          );
+          await run('keys_announcement_validate', () =>
+            trust.announce(announcement),
+          );
+          active.throwIfAborted();
+          trust.assertUsable();
+        },
+        async getTicket(active) {
+          if (!registered) throw new Error('device registration required');
+          const identity = registered;
+          const bytes = await run(
+            'ticket_http',
+            () =>
+              request(
+                '/api/iam/v1/network/tickets',
+                { node: identity.node },
+                active,
+              ),
+            networkTiming.operationMs,
+          );
+          return run('ticket_validate', () => {
+            const raw = parseStrictJson(bytes);
+            registration(raw.identity, expected, false);
+            const ingress =
+              typeof raw.ticket === 'string' &&
+              /^[A-Za-z0-9_-]{43}$/.test(raw.ticket)
+                ? ingressFor(raw.ticket)
+                : '';
+            const shard =
+              alphabet[createHash('sha256').update(ingress).digest()[0] & 31];
+            const expires = Date.parse(raw.expiresAt),
+              connectionExpires = Date.parse(raw.connectionExpiresAt),
+              currentTime = now();
+            if (
+              !exact(raw, [
+                'identity',
+                'ticket',
+                'serverAudience',
+                'expiresAt',
+                'connectionExpiresAt',
+                'ingress',
+                'upSubject',
+                'downSubject',
+                'replyPrefix',
+                'protocolVersion',
+              ]) ||
+              raw.identity.node !== identity.node ||
+              raw.identity.systemAddress !== identity.systemAddress ||
+              !ingress ||
+              raw.ingress !== ingress ||
+              raw.upSubject !== `auriga.net.up.${shard}.${ingress}` ||
+              raw.downSubject !== `auriga.net.down.${ingress}` ||
+              raw.replyPrefix !== `auriga.net.reply.${ingress}` ||
+              raw.protocolVersion !== 1 ||
+              typeof raw.serverAudience !== 'string' ||
+              !/^[A-Za-z0-9._:-]{1,256}$/.test(raw.serverAudience) ||
+              ![raw.expiresAt, raw.connectionExpiresAt].every(
+                (v) =>
+                  typeof v === 'string' &&
+                  /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(v),
+              ) ||
+              !Number.isFinite(expires) ||
+              expires <= currentTime - clockToleranceMs ||
+              expires > currentTime + 30000 + clockToleranceMs ||
+              !Number.isFinite(connectionExpires) ||
+              connectionExpires < expires ||
+              connectionExpires <= currentTime - clockToleranceMs ||
+              connectionExpires > currentTime + 3600000 + clockToleranceMs
+            )
+              throw diagnosticReason(
+                new Error('invalid device network ticket'),
+                'response_invalid',
+              );
+            active.throwIfAborted();
+            return {
+              auth: {
+                token: JSON.stringify({
+                  tenant: identity.tenant,
+                  node: identity.node,
+                  device: identity.device,
+                  ticket: raw.ticket,
+                }),
+              },
+              expiresAtMs: connectionExpires,
+              subjects: {
+                upSubject: raw.upSubject,
+                downSubject: raw.downSubject,
+                inboxPrefix: raw.replyPrefix,
+              },
+            };
+          });
+        },
+      };
+    },
+  };
+}

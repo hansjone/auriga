@@ -205,18 +205,26 @@ export function connectIpc(descriptor) {
   child.stderr.resume();
   const lines = createInterface({ input: child.stdout }),
     pending = new Map();
-  let readyResolve, readyReject;
+  let readyResolve,
+    readyReject,
+    closed = false;
   const ready = new Promise((resolve, reject) => {
     readyResolve = resolve;
     readyReject = reject;
   });
-  child.on('error', readyReject);
-  child.on('exit', () => {
-    readyReject(new Error('shell IPC disconnected'));
-    for (const entry of pending.values())
-      entry.reject(new Error('shell IPC disconnected'));
+  // A caller may close before the handshake or while callbacks are retiring.
+  // Settle every waiter and handle stdin errors before ending the helper pipe.
+  void ready.catch(() => {});
+  const disconnect = (error) => {
+    closed = true;
+    readyReject(error);
+    const entries = [...pending.values()];
     pending.clear();
-  });
+    for (const entry of entries) entry.reject(error);
+  };
+  child.on('error', disconnect);
+  child.stdin.on('error', disconnect);
+  child.on('exit', () => disconnect(new Error('shell IPC disconnected')));
   lines.on('line', (line) => {
     let event;
     try {
@@ -243,6 +251,7 @@ export function connectIpc(descriptor) {
   return {
     async call(command) {
       await ready;
+      if (closed) throw new Error('shell IPC disconnected');
       return new Promise((resolve, reject) => {
         pending.set(command.requestId, { resolve, reject });
         child.stdin.write(JSON.stringify(command) + '\n');
@@ -282,6 +291,7 @@ export function connectIpc(descriptor) {
     },
     async subscribe(command, listener) {
       await ready;
+      if (closed) throw new Error('shell IPC disconnected');
       pending.set(command.requestId, {
         listener,
         reject: () => listener(null),
@@ -289,6 +299,8 @@ export function connectIpc(descriptor) {
       child.stdin.write(JSON.stringify(command) + '\n');
     },
     close() {
+      if (closed) return;
+      disconnect(new Error('shell IPC disconnected'));
       child.stdin.end();
       child.kill();
       lines.close();

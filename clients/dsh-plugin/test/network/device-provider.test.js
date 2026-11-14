@@ -22,7 +22,7 @@ import {
 async function deviceFixture(t, clockOffset = 0, diagnostics) {
   const { createDeviceProvider } = await import(
     process.env.AURIGA_DEVICE_PROVIDER_MODULE ??
-      '../../src/network/device-provider.js'
+      '../../../shell-auth/device-provider.mjs'
   );
   const { payload, now } = publicationFixture();
   const identity = {
@@ -399,7 +399,7 @@ for (const code of [
 
 test('native fetch and body-stream failure are transient control errors, not validation errors', async (t) => {
   const { DeviceControlUnavailable } =
-    await import('../../src/network/device-provider.js');
+    await import('../../../shell-auth/device-provider.mjs');
   const f = await deviceFixture(t);
   await f.prepared.register(f.controller.signal);
   f.respond(() => {
@@ -566,7 +566,7 @@ test('root signed announcement hard deadline does not extend on repeated GET', a
 test('device factory uses exact authenticated routes, IAM sharded subjects and connection lifetime', async (t) => {
   const { createDeviceProvider } = await import(
     process.env.AURIGA_DEVICE_PROVIDER_MODULE ??
-      '../../src/network/device-provider.js'
+      '../../../shell-auth/device-provider.mjs'
   );
   const { payload, now } = publicationFixture();
   const registration = {

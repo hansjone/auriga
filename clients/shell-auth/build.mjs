@@ -22,7 +22,12 @@ export function buildBroker(output) {
   const files = readdirSync(source).filter(
     (f) =>
       f.endsWith('.mjs') &&
-      !['build.mjs', 'eslint.config.mjs', 'network-core.mjs'].includes(f),
+      ![
+        'build.mjs',
+        'eslint.config.mjs',
+        'network-core.mjs',
+        'device-provider.mjs',
+      ].includes(f),
   );
   for (const part of ['public', 'windows']) {
     mkdirSync(join(output, part), { recursive: true });
