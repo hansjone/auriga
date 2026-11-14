@@ -36,31 +36,31 @@ openssl pkey -in <私有目录>/desktop-private.pem -pubout -out <公钥目录>/
 
 发行序号为严格递增正整数，默认采用工作流 run number。重跑或下架后发行仍须选择比已发布最高序号更大的值。tag 的版本后缀作为构建版本。
 
-CI 制品包含完整 ZIP、EXE、`desktop.sha256`、`desktop-release.unsigned.json` 和 `desktop-build.json`。构建记录包含源码 commit、Desktop 和各组件版本、ZIP SHA-256、EXE SHA-256、包 ID、workflow 路径、run、event、ref、main 祖先检查结果，以及包内公钥 SPKI DER 的 SHA-256 指纹。工作流执行安装器单测、包校验和隔离安装/启动/卸载验证后上传制品。
+CI 制品包含完整 EXE、内部 ZIP、`desktop.sha256`、`desktop-release.unsigned.json` 和 `desktop-build.json`。构建记录包含源码 commit、Desktop 和各组件版本、制品 SHA-256、EXE SHA-256、包 ID、workflow 路径、run、event、ref、main 祖先检查结果，以及包内公钥 SPKI DER 的 SHA-256 指纹。工作流执行安装器单测、包校验和隔离安装/启动/卸载验证后上传制品。
 
 ### 审阅与离线签名
 
-主控下载 CI 制品，先核对工作流来源、源码 commit、版本和 CI 记录，并用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 和 EXE 的摘要。将 ZIP、未签名清单及构建记录放到签名机。
+主控下载 CI 制品，先核对工作流来源、源码 commit、版本和 CI 记录，并用 `Get-FileHash -Algorithm SHA256` 核对完整 EXE 的摘要。将 EXE、未签名清单及构建记录放到签名机。
 
 从 `clients/installer` 运行审阅命令。
 
 ```powershell
-node scripts/sign-release.mjs --review-only manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整ZIP> output=<输出目录>/desktop-release.json
+node scripts/sign-release.mjs --review-only manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整EXE> output=<输出目录>/desktop-release.json
 ```
 
-脚本核对 ZIP 与 CI 清单/记录，实际解包并验证包内文件和公钥指纹，输出版本、包摘要、上游组件、序号、有效期、workflow、ref、commit、公钥指纹和 `reviewSha256`，并保存 `<output>.review.json` 本地审阅检查点。审阅阶段无需私钥。来源必须是通过 main 祖先检查的 `desktop-v<版本>` tag 构建，否则拒签。构建记录仍须与 GitHub 对应运行人工核对，记录本身不是 CI 来源的加密证明。
+脚本核对 EXE 与 CI 清单/记录，实际解包并验证包内文件和公钥指纹，输出版本、包摘要、上游组件、序号、有效期、workflow、ref、commit、公钥指纹和 `reviewSha256`，并保存 `<output>.review.json` 本地审阅检查点。审阅阶段无需私钥。来源必须是通过 main 祖先检查的 `desktop-v<版本>` tag 构建，否则拒签。构建记录仍须与 GitHub 对应运行人工核对，记录本身不是 CI 来源的加密证明。
 
 核对输出与 CI 记录一致后，使用刚审阅的 `reviewSha256` 确认。
 
 ```powershell
-node scripts/sign-release.mjs manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整ZIP> output=<输出目录>/desktop-release.json keyFile=<私有目录>/desktop-private.pem --confirm-sha256=<reviewSha256>
+node scripts/sign-release.mjs manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整EXE> output=<输出目录>/desktop-release.json keyFile=<私有目录>/desktop-private.pem --confirm-sha256=<reviewSha256>
 ```
 
-确认摘要绑定完整未签名清单与构建记录。审阅后改变版本、摘要、说明、有效期等参数会被拒绝，须重新审阅。签名私钥推导出的公钥必须与 ZIP 内固定公钥指纹相同。输出文件须尚不存在。签名成功后清理检查点。私钥及其路径不会出现在脚本输出里。
+确认摘要绑定完整未签名清单与构建记录。审阅后改变版本、摘要、说明、有效期等参数会被拒绝，须重新审阅。签名私钥推导出的公钥必须与 EXE 内固定公钥指纹相同。输出文件须尚不存在。签名成功后清理检查点。私钥及其路径不会出现在脚本输出里。
 
 ### 同包续期
 
-自动更新清单默认有效 30 天。到期前可从原 tag 构建的已核对制品复制未签名清单，仅将 `sequence` 改成高于平台已见最高序号的新整数，将 `notAfter` 延长。保留原 ZIP、构建记录、Desktop 版本、包 ID、SHA、大小和组件版本。重新执行上述 `--review-only` 和 `--confirm-sha256` 两步，再在管理台上传新签名清单和原 ZIP。平台要求同版本的包身份相同且有效期严格延长，拒绝同版本替包。
+自动更新清单默认有效 30 天。到期前可从原 tag 构建的已核对制品复制未签名清单，仅将 `sequence` 改成高于平台已见最高序号的新整数，将 `notAfter` 延长。保留原 EXE、构建记录、Desktop 版本、包 ID、SHA、大小和组件版本。重新执行上述 `--review-only` 和 `--confirm-sha256` 两步，再在管理台上传新签名清单和原 EXE。平台要求同版本的包身份相同且有效期严格延长，拒绝同版本替包。
 
 续期会成为新的上架记录并写发布审计。已安装该版本的客户端只记住新的序号，不重复安装。即使错过续期，登录页与匿名包下载仍提供最新上架的安装包供新用户下载；自动更新客户端继续严格拒绝过期清单，运营者须完成续期后才恢复自动更新。
 
@@ -74,13 +74,13 @@ resource 服务需要以下配置。
 
 卷须支持 OS 文件锁和原子 rename。插件市场对象存储上限为 64 MiB，Desktop 使用独立卷存放大包。发行卷与 resource 数据库须纳入备份。反向代理允许上传实际包大小，产品上限 4 GiB，并设置足够超时。签名清单放在 base64url `X-Desktop-Manifest` 头中，代理和服务端头上限至少 44 KiB。
 
-管理台进入“运维 → 客户端版本” `/ops/desktop`，完成近期身份验证，选择签名清单和 ZIP 发布。管理操作要求有效 ADMIN 会话、`resource.versions.publish` 和 step-up。平台验证签名、有效期、SHA、大小、版本和序号后发布。
+管理台进入“运维 → 客户端版本” `/ops/desktop`，完成近期身份验证，选择签名清单和 EXE 发布。管理操作要求有效 ADMIN 会话、`resource.versions.publish` 和 step-up。平台验证签名、有效期、SHA、大小、版本和序号后发布。
 
 发布和下架先原子持久化发行状态及待投递审计，再经 resource outbox 向统一审计链路投递。数据库收据防止重试产生重复事件，审计暂不可用时每 30 秒补送。统一审计页可按 `resource.desktop.publish` 或 `resource.desktop.withdraw` 查询。
 
 ### 下载、更新和撤回
 
-云端登录首页显示版本、大小、发布时间、SHA-256 和 Windows 下载按钮。以下两个 GET 接口允许匿名访问，返回公开签名清单和 ZIP，复用 edge 的按客户端 IP 限速。
+云端登录首页显示版本、大小、发布时间、SHA-256 和 Windows 下载按钮。以下两个 GET 接口允许匿名访问，返回公开签名清单和 EXE，复用 edge 的按客户端 IP 限速。
 
 - `/api/resource/v1/desktop/latest`
 - `/api/resource/v1/desktop/packages/{sequence}`
@@ -93,7 +93,7 @@ edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口�
 
 下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝降级，可执行 `rollback.cmd`，或等待更高版本的修复包。下架保留最高序号，修复包须新版本、新序号，同包续期须新序号和延长有效期。第一代安装器需先人工安装一次带更新能力的包。
 
-隔离验证运行 `node --test test/update-e2e.test.mjs`，使用随机端口发布替身、真实 ZIP、临时测试钥和安装事务，验证坏包拒绝、退出安装和数据保留。真实 DSH 宿主另按 `scripts/e2e.mjs` 验证。
+隔离验证运行 `node --test test/update-e2e.test.mjs`，使用随机端口发布替身、真实 EXE、临时测试钥和安装事务，验证坏包拒绝、退出安装和数据保留。真实 DSH 宿主另按 `scripts/e2e.mjs` 验证。
 
 # P1-E 集成状态
 
@@ -128,3 +128,33 @@ node payload/auriga/runtime/cli.mjs install --payload payload --root <独立安�
 更新的信任根始终是安装包内固定的发行 Ed25519 公钥，绝不从平台下载公钥。签名覆盖版本、序号、签发时间和包 SHA-256；客户端持久化已见最高版本、序号和签发时间，并拒绝版本回退、旧清单和篡改。下载完成先核对签名清单的包 SHA-256，再解包验证文件摘要和包 ID，最后执行安装事务及冒烟回滚。HTTP 仍会泄露下载元数据，也可被阻断；签名不能保证可用性或保密性。
 
 首次下载的安装程序及公钥需要通过受信的独立渠道核验 SHA-256 或人工预置，不能把 HTTP 首次下载本身当作信任来源。门户 HTTP 下载入口可用不代表首次引导已经具备安全认证。
+
+## Windows exe 安装向导
+
+用户下载件：`AurigaDSH-Setup-<Desktop版本>.exe`。双击显示中文向导，仅为当前用户安装，
+默认 `%LOCALAPPDATA%\Programs\AurigaDesktop`，无需管理员权限，可改路径。
+自动创建开始菜单快捷方式，桌面快捷方式可选，完成后默认启动。
+从 Windows“应用”卸载会询问是否保留数据，默认“是”，取消则终止。
+自动化安装用 `/VERYSILENT`，路径沿用 `AURIGA_INSTALL_DIR` 等环境变量或 `-InstallDir` 参数；
+自动化卸载用 `bin/uninstall.ps1 -Quiet`，默认保留数据。
+
+工具沿用 Windows 自带 .NET Framework C# 编译器与本仓库开源 WinForms 向导，
+无需付费工具或额外下载。`app.manifest` 明确 `asInvoker`。
+`--installer-icon <PORTAL-HOME产出的ico>` 注入 PE 图标；未提供时为编译器默认占位图标。
+换图标须重新构建、计算摘要和离线签名。
+
+CI 把 exe 作为 `make-release.mjs archive=` 输入，签名字段 `sha256`/`sizeBytes` 覆盖完整 exe。
+zip 仅为内部诊断制品。latest JSON 字段结构不变，大小和摘要改指 exe，响应头
+`X-Desktop-Filename` 返回文件名；下载响应 `Content-Disposition` 返回版本化 exe 文件名，支持 Range。
+管理台选择 exe，服务端存储使用 exe 扩展名，不读取旧 zip 存储。
+离线审阅从 exe 提取载荷验证包身份、公钥指纹和构建记录。
+更新器先验签、下载并校验整个 exe 的 SHA，再读取内嵌 ZIP，绝不执行下载的 exe；
+保留原有安装冒烟和失败回滚。旧 Windows 更新器的 System32 tar 也可读取该自解压 ZIP 格式。
+
+未购买或申请 Authenticode 证书。Ed25519 清单不能替代 Windows 发布者签名；
+网络下载的未签名 exe 可能显示“Windows 已保护你的电脑”或“未知发布者”，具体受系统策略影响。
+后续可选 Microsoft Artifact Signing（需按地区核对当时报价），或受信任 CA 证书。
+DigiCert 官方资料示例约 USD 499–699/年，令牌和税费另计；签名不保证立即获得 SmartScreen 信誉。
+参考：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、
+[SmartScreen](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation)、
+[DigiCert 价格示例](https://www.digicert.com/resources/fact-sheet/digicert-code-signing-instilling-trust-in-your-users.pdf)。

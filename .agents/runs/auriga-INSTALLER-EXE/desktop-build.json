@@ -1,0 +1,20 @@
+{
+  "event": null,
+  "ref": null,
+  "workflow": ".github/workflows/installer.yml",
+  "sourceOnMain": false,
+  "publicKeyFingerprint": null,
+  "exeSha256": "b26cde7c1e10fe2e33f570dd898fab6b7e49d602f29bf2ce69695d2c1604bafb",
+  "sourceCommit": "0180ff3675ed3bae851e781bebc7a44fe110d1ba",
+  "desktopVersion": "0.1.0",
+  "packageId": "0.1.0-dsh0.2.1-rc.3-8446d967ad35",
+  "components": {
+    "dshVersion": "0.2.1-rc.3",
+    "nodeVersion": "24.21.0",
+    "pluginVersion": "0.1.15"
+  },
+  "sha256": "b26cde7c1e10fe2e33f570dd898fab6b7e49d602f29bf2ce69695d2c1604bafb",
+  "sizeBytes": 233362855,
+  "builtAt": "2026-11-14T12:00:02.753Z",
+  "workflowRun": null
+}

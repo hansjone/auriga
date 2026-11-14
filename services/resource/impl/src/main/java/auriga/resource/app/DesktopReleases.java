@@ -180,7 +180,7 @@ public final class DesktopReleases {
                   }
                 }
                 try {
-                  Path blob = store.root().resolve(body.path("sha256").asString() + ".zip");
+                  Path blob = store.root().resolve(body.path("sha256").asString() + ".exe");
                   if (Files.exists(blob)) Files.delete(stage);
                   else Files.move(stage, blob, StandardCopyOption.ATOMIC_MOVE);
                 } catch (IOException e) {
@@ -274,6 +274,9 @@ public final class DesktopReleases {
     for (var item : store(publisherTenant).read().withArray("items")) {
       if (item.path("withdrawn").asBoolean()) continue;
       var manifest = (ObjectNode) item.path("manifest");
+      if (!Files.isRegularFile(
+          store(publisherTenant).root().resolve(manifest.path("sha256").asString() + ".exe"),
+          LinkOption.NOFOLLOW_LINKS)) continue;
       try {
         verify(manifest, true);
       } catch (AurigaException e) {
@@ -286,7 +289,7 @@ public final class DesktopReleases {
     return best;
   }
 
-  public record Download(InputStream stream, long size) {}
+  public record Download(InputStream stream, long size, String filename) {}
 
   public Download download(long sequence) {
     var store = store(publisherTenant);
@@ -299,9 +302,12 @@ public final class DesktopReleases {
               try {
                 var stream =
                     Files.newInputStream(
-                        store.root().resolve(body.path("sha256").asString() + ".zip"),
+                        store.root().resolve(body.path("sha256").asString() + ".exe"),
                         LinkOption.NOFOLLOW_LINKS);
-                return new Download(stream, body.path("sizeBytes").asLong());
+                return new Download(
+                    stream,
+                    body.path("sizeBytes").asLong(),
+                    "AurigaDSH-Setup-" + body.path("version").asString() + ".exe");
               } catch (IOException e) {
                 throw new AurigaException(UNAVAILABLE);
               }

@@ -1,0 +1,6 @@
+/sandbox/
+/java*.log
+/unit.log
+/release-tests.log
+/cleanup-first.log
+/uninstall-prompt-*.log

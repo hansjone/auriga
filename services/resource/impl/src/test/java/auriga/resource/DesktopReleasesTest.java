@@ -160,6 +160,12 @@ class DesktopReleasesTest {
     assertEquals(200, controller.latest().getStatusCode().value());
     var response = controller.download(2, null);
     assertEquals(200, response.getStatusCode().value());
+    assertEquals(
+        "attachment; filename=\"AurigaDSH-Setup-2.0.0.exe\"",
+        response.getHeaders().getFirst("Content-Disposition"));
+    assertEquals(
+        "AurigaDSH-Setup-2.0.0.exe",
+        controller.latest().getHeaders().getFirst("X-Desktop-Filename"));
     response.getBody().getInputStream().close();
     rejects(controller::list, CommonErrors.UNAUTHENTICATED);
     var second = sign(envelope().put("version", "3.0.0").put("sequence", 3));

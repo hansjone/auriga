@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "product": "Auriga Desktop",
+  "version": "0.1.0",
+  "packageId": "0.1.0-dsh0.2.1-rc.3-8446d967ad35",
+  "channel": "stable",
+  "platform": "win-x64",
+  "sizeBytes": 233362855,
+  "sha256": "b26cde7c1e10fe2e33f570dd898fab6b7e49d602f29bf2ce69695d2c1604bafb",
+  "minimumVersion": "0.0.0",
+  "publishedAt": "2026-11-14T11:59:24.529Z",
+  "notAfter": "2026-12-14T00:00:00Z",
+  "sequence": 1,
+  "notes": "",
+  "components": {
+    "dshVersion": "0.2.1-rc.3",
+    "nodeVersion": "24.21.0",
+    "pluginVersion": "0.1.15"
+  }
+}

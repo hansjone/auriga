@@ -1,0 +1,31 @@
+{
+  "artifact": "clients/installer/target/AurigaDSH-Setup-0.1.0.exe",
+  "sizeBytes": 233362855,
+  "sha256": "b26cde7c1e10fe2e33f570dd898fab6b7e49d602f29bf2ce69695d2c1604bafb",
+  "developmentOnly": true,
+  "sourceBase": "0180ff3675ed3bae851e781bebc7a44fe110d1ba",
+  "tests": {
+    "installerWithBuiltPackage": {
+      "passed": 211,
+      "failed": 0,
+      "skipped": 0
+    },
+    "desktopReleases": {
+      "passed": 8,
+      "failed": 0
+    },
+    "windowsExeE2E": true,
+    "eslintExitCode": 0,
+    "prettierExitCode": 0
+  },
+  "commands": [
+    "node clients/installer/scripts/build.mjs --exe --out clients/installer/target",
+    "node --test \"clients/installer/test/**/*.test.mjs\" (INSTALLER_STAGE set)",
+    "node clients/installer/scripts/e2e.mjs --old clients/installer/target/AurigaDSH-Setup-0.1.0.exe --sandbox .agents/runs/auriga-INSTALLER-EXE/sandbox"
+  ],
+  "knownLimitations": [
+    "Default placeholder icon; pass --installer-icon for PORTAL-HOME .ico",
+    "No Authenticode certificate",
+    "Not deployed; development version 0.1.0 must be replaced with a higher release version/tag"
+  ]
+}

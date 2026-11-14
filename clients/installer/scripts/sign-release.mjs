@@ -67,6 +67,7 @@ export function reviewRelease(options) {
     record = JSON.parse(readFileSync(options.buildRecord, 'utf8'));
     if (
       record.sha256 !== body.sha256 ||
+      (record.exeSha256 && record.exeSha256 !== body.sha256) ||
       record.sizeBytes !== body.sizeBytes ||
       record.packageId !== body.packageId ||
       record.desktopVersion !== body.version ||

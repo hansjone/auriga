@@ -62,7 +62,12 @@ public class DesktopController {
   @GetMapping("/desktop/latest")
   @PublicEndpoint
   public ResponseEntity<JsonNode> latest() {
-    return response(releases.latest(), 200);
+    var manifest = releases.latest();
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .header(
+            "X-Desktop-Filename", "AurigaDSH-Setup-" + manifest.path("version").asString() + ".exe")
+        .body(manifest);
   }
 
   @GetMapping("/desktop/packages/{sequence}")
@@ -100,7 +105,7 @@ public class DesktopController {
         .cacheControl(CacheControl.noStore())
         .contentType(MediaType.APPLICATION_OCTET_STREAM)
         .contentLength(result.size() - offset)
-        .header("Content-Disposition", "attachment; filename=\"Auriga-Desktop.zip\"")
+        .header("Content-Disposition", "attachment; filename=\"" + result.filename() + "\"")
         .body(new InputStreamResource(result.stream()));
   }
 }

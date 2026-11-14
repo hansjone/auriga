@@ -91,7 +91,7 @@ onMounted(async () => {
           >{{ t('desktopArchive') }}
           <input
             type="file"
-            accept=".zip"
+            accept=".exe"
             :disabled="busy"
             @change="selected($event, 'archive')"
         /></label>

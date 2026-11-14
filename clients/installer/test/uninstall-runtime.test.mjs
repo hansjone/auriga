@@ -61,6 +61,7 @@ if (process.platform === 'win32')
         'Bypass',
         '-File',
         wrapper,
+        '-Quiet',
       ],
       { encoding: 'utf8', timeout: 60000, windowsHide: true },
     );

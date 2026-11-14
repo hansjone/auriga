@@ -1,3 +1,4 @@
+import { unpackSetup } from './setup-archive.mjs';
 import { BRAND_NAME } from './brand.mjs';
 /* global setInterval, clearInterval */
 /** Anonymous transport is bound to the configured platform origin. */
@@ -32,8 +33,10 @@ export function platformUrl(origin, path, binding) {
 
 export function extractArchive(archive, directory) {
   mkdirSync(directory);
+  const zip = join(directory, 'payload.zip');
+  unpackSetup(archive, zip);
   // Only a fully signature/hash-verified publisher archive reaches tar.
-  const listed = spawnSync(systemTool('tar'), ['-tf', archive], {
+  const listed = spawnSync(systemTool('tar'), ['-tf', zip], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 ** 2,
   });
@@ -51,14 +54,11 @@ export function extractArchive(archive, directory) {
       )
   )
     throw new Error('unsafe update archive');
-  const result = spawnSync(
-    systemTool('tar'),
-    ['-xf', archive, '-C', directory],
-    {
-      encoding: 'utf8',
-    },
-  );
+  const result = spawnSync(systemTool('tar'), ['-xf', zip, '-C', directory], {
+    encoding: 'utf8',
+  });
   if (result.status !== 0) throw new Error('update archive extraction failed');
+  rmSync(zip);
   return join(directory, 'payload');
 }
 
@@ -187,7 +187,7 @@ export function createUpdater({
           )
             throw new Error('cannot secure update staging');
         }
-        const archive = join(temporary, 'desktop.zip');
+        const archive = join(temporary, 'desktop.exe');
         await downloadPackage(
           request,
           platformUrl(origin, `packages/${body.sequence}`, binding),
@@ -330,7 +330,7 @@ export async function applyPending(
       highestVersion: saved.highestVersion,
       acceptedDigest: saved.acceptedDigest,
     });
-    const archive = join(queued, 'desktop.zip');
+    const archive = join(queued, 'desktop.exe');
     if (sha256File(archive) !== body.sha256)
       throw new Error('queued package SHA mismatch');
     const unpacked = join(queued, 'apply');

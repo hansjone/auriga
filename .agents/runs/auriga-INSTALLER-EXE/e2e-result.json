@@ -1,0 +1,61 @@
+{
+  "ok": true,
+  "steps": [
+    {
+      "name": "install old package",
+      "ok": true,
+      "detail": "0.1.0-dsh0.2.1-rc.3-8446d967ad35"
+    },
+    {
+      "name": "plugin copied into profile",
+      "ok": true
+    },
+    {
+      "name": "start menu and desktop shortcuts created",
+      "ok": true
+    },
+    {
+      "name": "HKCU uninstall entry written",
+      "ok": true,
+      "detail": "AurigaDesktop-e2e-test"
+    },
+    {
+      "name": "bundled pnpm resolves from launch PATH",
+      "ok": true,
+      "detail": "11.28.5"
+    },
+    {
+      "name": "dsh plugin add through bundled pnpm keeps the Auriga plugin",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "old: plugin route registered",
+      "ok": true,
+      "detail": "/auriga/=401, unknown=404"
+    },
+    {
+      "name": "old: plugin enabled, platform address",
+      "ok": true,
+      "detail": "{\"platformOrigin\":\"\",\"deployment\":\"cloud\",\"mode\":\"connect\",\"activeOrigin\":\"\",\"deviceName\":null}"
+    },
+    {
+      "name": "configure platform address through plugin settings",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "uninstall removes install root",
+      "ok": true,
+      "detail": "{\"dataKept\":true,\"dataHome\":\"D:\\\\project\\\\chatgpt\\\\agent-wt\\\\auriga-INSTALLER-EXE-codex\\\\.agents\\\\runs\\\\auriga-INSTALLER-EXE\\\\sandbox\\\\data\"}"
+    },
+    {
+      "name": "uninstall removes shortcuts and registry entry",
+      "ok": true
+    },
+    {
+      "name": "uninstall keeps user data by default",
+      "ok": true
+    }
+  ]
+}

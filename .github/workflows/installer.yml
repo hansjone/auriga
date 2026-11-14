@@ -77,7 +77,7 @@ jobs:
           if [ -n "$PLATFORM_ORIGIN" ]; then extra+=(--platform-origin "$PLATFORM_ORIGIN"); fi
           node scripts/build.mjs "${extra[@]}" --out "$RUNNER_TEMP/installer" --exe
           echo "INSTALLER_STAGE=$(ls -d "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64)" >> "$GITHUB_ENV"
-          echo "INSTALLER_EXE=$(ls "$RUNNER_TEMP"/installer/Auriga-Desktop-Setup-*.exe)" >> "$GITHUB_ENV"
+          echo "INSTALLER_EXE=$(ls "$RUNNER_TEMP"/installer/AurigaDSH-Setup-*.exe)" >> "$GITHUB_ENV"
           echo "INSTALLER_ZIP=$(ls "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64.zip)" >> "$GITHUB_ENV"
       - name: Generate unsigned manifest, SHA-256 and source build record
         working-directory: clients/installer
@@ -87,7 +87,7 @@ jobs:
           MINIMUM_VERSION: ${{ inputs.minimum_version || '0.0.0' }}
         run: |
           expiry=$(node -e 'console.log(new Date(Date.now()+30*86400000).toISOString())')
-          node scripts/make-release.mjs "payload=$INSTALLER_STAGE/payload" "archive=$INSTALLER_ZIP" "exe=$INSTALLER_EXE" "output=$RUNNER_TEMP/installer" "sequence=$RELEASE_SEQUENCE" "minimumVersion=$MINIMUM_VERSION" "notAfter=$expiry" "workflowRun=$GITHUB_RUN_ID"
+          node scripts/make-release.mjs "payload=$INSTALLER_STAGE/payload" "archive=$INSTALLER_EXE" "exe=$INSTALLER_EXE" "output=$RUNNER_TEMP/installer" "sequence=$RELEASE_SEQUENCE" "minimumVersion=$MINIMUM_VERSION" "notAfter=$expiry" "workflowRun=$GITHUB_RUN_ID"
       - name: Package checks (manifest, checksums, version lock, licences, pnpm, no secrets)
         run: pnpm --filter @auriga/installer test
       - name: Isolated install from the setup exe, launch, uninstall

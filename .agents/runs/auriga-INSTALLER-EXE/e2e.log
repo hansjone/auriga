@@ -1,0 +1,12 @@
+ok   install old package - 0.1.0-dsh0.2.1-rc.3-8446d967ad35
+ok   plugin copied into profile
+ok   start menu and desktop shortcuts created
+ok   HKCU uninstall entry written - AurigaDesktop-e2e-test
+ok   bundled pnpm resolves from launch PATH - 11.28.5
+ok   dsh plugin add through bundled pnpm keeps the Auriga plugin - 0
+ok   old: plugin route registered - /auriga/=401, unknown=404
+ok   old: plugin enabled, platform address - {"platformOrigin":"","deployment":"cloud","mode":"connect","activeOrigin":"","deviceName":null}
+ok   configure platform address through plugin settings - HTTP 200
+ok   uninstall removes install root - {"dataKept":true,"dataHome":"D:\\project\\chatgpt\\agent-wt\\auriga-INSTALLER-EXE-codex\\.agents\\runs\\auriga-INSTALLER-EXE\\sandbox\\data"}
+ok   uninstall removes shortcuts and registry entry
+ok   uninstall keeps user data by default

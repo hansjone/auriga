@@ -1,3 +1,4 @@
+import { wrapSetupFixture } from './helpers.mjs';
 /* global fetch */
 /** Isolated publisher/transport substitute, real archive checks and install transactions. */
 import test from 'node:test';
@@ -41,6 +42,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     spawnSync(systemTool('tar'), ['-a', '-cf', zip, '-C', stage, '.']).status,
     0,
   );
+  wrapSetupFixture(zip);
   const signingOptions = {
     payload: next.dir,
     archive: zip,

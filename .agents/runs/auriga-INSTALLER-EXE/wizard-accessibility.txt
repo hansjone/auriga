@@ -1,0 +1,18 @@
+Window: "Auriga DSH 安装程序", App: AurigaDSH-Setup-0.1.0.exe.
+	0 窗口 Auriga DSH 安装程序 Secondary Actions: Raise
+		1 文本 安装 Auriga DSH ID: 18089830
+		2 文本 仅为当前用户安装，无需管理员权限。可在 Windows 应用中卸载。 ID: 12261640
+		3 编辑 (settable, string) 仅为当前用户安装，无需管理员权限。可在 Windows 应用中卸载。 Value: C:\Users\zhout\AppData\Local\Programs\AurigaDesktop ID: 7409596
+		4 按钮 浏览… ID: 26415396
+		5 复选框 创建桌面快捷方式 ID: 26023812
+		6 复选框 安装完成后启动 Auriga DSH ID: 14879164
+		7 文本 将创建开始菜单快捷方式；升级会保留用户数据。 ID: 8525860
+		8 按钮 安装 ID: 36182116
+		9 标题栏 (settable, string) Value: Auriga DSH 安装程序
+			10 菜单栏 系统 ID: MenuBar
+				15 菜单项目 系统
+			12 按钮 最小化
+			13 按钮 (disabled) 最大化
+			14 按钮 关闭
+
+The focused UI element is 3 编辑 (settable, string) 仅为当前用户安装，无需管理员权限。可在 Windows 应用中卸载。 Value: C:\Users\zhout\AppData\Local\Programs\AurigaDesktop ID: 7409596.

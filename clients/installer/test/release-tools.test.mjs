@@ -1,3 +1,4 @@
+import { wrapSetupFixture } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -31,6 +32,7 @@ test('CI 制品记录与离线审阅确认绑定，变更后必须重新审阅',
       .status,
     0,
   );
+  wrapSetupFixture(archive);
   const record = makeRelease({
     payload: payload.dir,
     archive,
