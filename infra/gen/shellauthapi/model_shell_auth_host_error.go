@@ -11,280 +11,168 @@ API version: 1.0.0
 package shellauthapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"gopkg.in/validator.v2"
 )
 
-// ShellAuthHostError - struct for ShellAuthHostError
+// checks if the ShellAuthHostError type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &ShellAuthHostError{}
+
+// ShellAuthHostError struct for ShellAuthHostError
 type ShellAuthHostError struct {
-	ShellAuthHostErrorOneOf  *ShellAuthHostErrorOneOf
-	ShellAuthHostErrorOneOf1 *ShellAuthHostErrorOneOf1
-	ShellAuthHostErrorOneOf2 *ShellAuthHostErrorOneOf2
-	ShellAuthHostErrorOneOf3 *ShellAuthHostErrorOneOf3
-	ShellAuthHostErrorOneOf4 *ShellAuthHostErrorOneOf4
-	ShellAuthHostErrorOneOf5 *ShellAuthHostErrorOneOf5
+	Code      string `json:"code"`
+	Reason    string `json:"reason"`
+	Retryable bool   `json:"retryable"`
 }
 
-// ShellAuthHostErrorOneOfAsShellAuthHostError is a convenience function that returns ShellAuthHostErrorOneOf wrapped in ShellAuthHostError
-func ShellAuthHostErrorOneOfAsShellAuthHostError(v *ShellAuthHostErrorOneOf) ShellAuthHostError {
-	return ShellAuthHostError{
-		ShellAuthHostErrorOneOf: v,
+type _ShellAuthHostError ShellAuthHostError
+
+// NewShellAuthHostError instantiates a new ShellAuthHostError object
+// This constructor will assign default values to properties that have it defined,
+// and makes sure properties required by API are set, but the set of arguments
+// will change when the set of required properties is changed
+func NewShellAuthHostError(code string, reason string, retryable bool) *ShellAuthHostError {
+	this := ShellAuthHostError{}
+	this.Code = code
+	this.Reason = reason
+	this.Retryable = retryable
+	return &this
+}
+
+// NewShellAuthHostErrorWithDefaults instantiates a new ShellAuthHostError object
+// This constructor will only assign default values to properties that have it defined,
+// but it doesn't guarantee that properties required by API are set
+func NewShellAuthHostErrorWithDefaults() *ShellAuthHostError {
+	this := ShellAuthHostError{}
+	return &this
+}
+
+// GetCode returns the Code field value
+func (o *ShellAuthHostError) GetCode() string {
+	if o == nil {
+		var ret string
+		return ret
 	}
+
+	return o.Code
 }
 
-// ShellAuthHostErrorOneOf1AsShellAuthHostError is a convenience function that returns ShellAuthHostErrorOneOf1 wrapped in ShellAuthHostError
-func ShellAuthHostErrorOneOf1AsShellAuthHostError(v *ShellAuthHostErrorOneOf1) ShellAuthHostError {
-	return ShellAuthHostError{
-		ShellAuthHostErrorOneOf1: v,
+// GetCodeOk returns a tuple with the Code field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthHostError) GetCodeOk() (*string, bool) {
+	if o == nil {
+		return nil, false
 	}
+	return &o.Code, true
 }
 
-// ShellAuthHostErrorOneOf2AsShellAuthHostError is a convenience function that returns ShellAuthHostErrorOneOf2 wrapped in ShellAuthHostError
-func ShellAuthHostErrorOneOf2AsShellAuthHostError(v *ShellAuthHostErrorOneOf2) ShellAuthHostError {
-	return ShellAuthHostError{
-		ShellAuthHostErrorOneOf2: v,
+// SetCode sets field value
+func (o *ShellAuthHostError) SetCode(v string) {
+	o.Code = v
+}
+
+// GetReason returns the Reason field value
+func (o *ShellAuthHostError) GetReason() string {
+	if o == nil {
+		var ret string
+		return ret
 	}
+
+	return o.Reason
 }
 
-// ShellAuthHostErrorOneOf3AsShellAuthHostError is a convenience function that returns ShellAuthHostErrorOneOf3 wrapped in ShellAuthHostError
-func ShellAuthHostErrorOneOf3AsShellAuthHostError(v *ShellAuthHostErrorOneOf3) ShellAuthHostError {
-	return ShellAuthHostError{
-		ShellAuthHostErrorOneOf3: v,
+// GetReasonOk returns a tuple with the Reason field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthHostError) GetReasonOk() (*string, bool) {
+	if o == nil {
+		return nil, false
 	}
+	return &o.Reason, true
 }
 
-// ShellAuthHostErrorOneOf4AsShellAuthHostError is a convenience function that returns ShellAuthHostErrorOneOf4 wrapped in ShellAuthHostError
-func ShellAuthHostErrorOneOf4AsShellAuthHostError(v *ShellAuthHostErrorOneOf4) ShellAuthHostError {
-	return ShellAuthHostError{
-		ShellAuthHostErrorOneOf4: v,
+// SetReason sets field value
+func (o *ShellAuthHostError) SetReason(v string) {
+	o.Reason = v
+}
+
+// GetRetryable returns the Retryable field value
+func (o *ShellAuthHostError) GetRetryable() bool {
+	if o == nil {
+		var ret bool
+		return ret
 	}
+
+	return o.Retryable
 }
 
-// ShellAuthHostErrorOneOf5AsShellAuthHostError is a convenience function that returns ShellAuthHostErrorOneOf5 wrapped in ShellAuthHostError
-func ShellAuthHostErrorOneOf5AsShellAuthHostError(v *ShellAuthHostErrorOneOf5) ShellAuthHostError {
-	return ShellAuthHostError{
-		ShellAuthHostErrorOneOf5: v,
+// GetRetryableOk returns a tuple with the Retryable field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthHostError) GetRetryableOk() (*bool, bool) {
+	if o == nil {
+		return nil, false
 	}
+	return &o.Retryable, true
 }
 
-// Unmarshal JSON data into one of the pointers in the struct
-func (dst *ShellAuthHostError) UnmarshalJSON(data []byte) error {
-	var err error
-	match := 0
-	// try to unmarshal data into ShellAuthHostErrorOneOf
-	err = newStrictDecoder(data).Decode(&dst.ShellAuthHostErrorOneOf)
-	if err == nil {
-		jsonShellAuthHostErrorOneOf, _ := json.Marshal(dst.ShellAuthHostErrorOneOf)
-		if string(jsonShellAuthHostErrorOneOf) == "{}" { // empty struct
-			dst.ShellAuthHostErrorOneOf = nil
-		} else {
-			if err = validator.Validate(dst.ShellAuthHostErrorOneOf); err != nil {
-				dst.ShellAuthHostErrorOneOf = nil
-			} else {
-				match++
-			}
+// SetRetryable sets field value
+func (o *ShellAuthHostError) SetRetryable(v bool) {
+	o.Retryable = v
+}
+
+func (o ShellAuthHostError) MarshalJSON() ([]byte, error) {
+	toSerialize, err := o.ToMap()
+	if err != nil {
+		return []byte{}, err
+	}
+	return json.Marshal(toSerialize)
+}
+
+func (o ShellAuthHostError) ToMap() (map[string]interface{}, error) {
+	toSerialize := map[string]interface{}{}
+	toSerialize["code"] = o.Code
+	toSerialize["reason"] = o.Reason
+	toSerialize["retryable"] = o.Retryable
+	return toSerialize, nil
+}
+
+func (o *ShellAuthHostError) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"code",
+		"reason",
+		"retryable",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err
+	}
+
+	for _, requiredProperty := range requiredProperties {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
 		}
-	} else {
-		dst.ShellAuthHostErrorOneOf = nil
 	}
 
-	// try to unmarshal data into ShellAuthHostErrorOneOf1
-	err = newStrictDecoder(data).Decode(&dst.ShellAuthHostErrorOneOf1)
-	if err == nil {
-		jsonShellAuthHostErrorOneOf1, _ := json.Marshal(dst.ShellAuthHostErrorOneOf1)
-		if string(jsonShellAuthHostErrorOneOf1) == "{}" { // empty struct
-			dst.ShellAuthHostErrorOneOf1 = nil
-		} else {
-			if err = validator.Validate(dst.ShellAuthHostErrorOneOf1); err != nil {
-				dst.ShellAuthHostErrorOneOf1 = nil
-			} else {
-				match++
-			}
-		}
-	} else {
-		dst.ShellAuthHostErrorOneOf1 = nil
+	varShellAuthHostError := _ShellAuthHostError{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varShellAuthHostError)
+
+	if err != nil {
+		return err
 	}
 
-	// try to unmarshal data into ShellAuthHostErrorOneOf2
-	err = newStrictDecoder(data).Decode(&dst.ShellAuthHostErrorOneOf2)
-	if err == nil {
-		jsonShellAuthHostErrorOneOf2, _ := json.Marshal(dst.ShellAuthHostErrorOneOf2)
-		if string(jsonShellAuthHostErrorOneOf2) == "{}" { // empty struct
-			dst.ShellAuthHostErrorOneOf2 = nil
-		} else {
-			if err = validator.Validate(dst.ShellAuthHostErrorOneOf2); err != nil {
-				dst.ShellAuthHostErrorOneOf2 = nil
-			} else {
-				match++
-			}
-		}
-	} else {
-		dst.ShellAuthHostErrorOneOf2 = nil
-	}
+	*o = ShellAuthHostError(varShellAuthHostError)
 
-	// try to unmarshal data into ShellAuthHostErrorOneOf3
-	err = newStrictDecoder(data).Decode(&dst.ShellAuthHostErrorOneOf3)
-	if err == nil {
-		jsonShellAuthHostErrorOneOf3, _ := json.Marshal(dst.ShellAuthHostErrorOneOf3)
-		if string(jsonShellAuthHostErrorOneOf3) == "{}" { // empty struct
-			dst.ShellAuthHostErrorOneOf3 = nil
-		} else {
-			if err = validator.Validate(dst.ShellAuthHostErrorOneOf3); err != nil {
-				dst.ShellAuthHostErrorOneOf3 = nil
-			} else {
-				match++
-			}
-		}
-	} else {
-		dst.ShellAuthHostErrorOneOf3 = nil
-	}
-
-	// try to unmarshal data into ShellAuthHostErrorOneOf4
-	err = newStrictDecoder(data).Decode(&dst.ShellAuthHostErrorOneOf4)
-	if err == nil {
-		jsonShellAuthHostErrorOneOf4, _ := json.Marshal(dst.ShellAuthHostErrorOneOf4)
-		if string(jsonShellAuthHostErrorOneOf4) == "{}" { // empty struct
-			dst.ShellAuthHostErrorOneOf4 = nil
-		} else {
-			if err = validator.Validate(dst.ShellAuthHostErrorOneOf4); err != nil {
-				dst.ShellAuthHostErrorOneOf4 = nil
-			} else {
-				match++
-			}
-		}
-	} else {
-		dst.ShellAuthHostErrorOneOf4 = nil
-	}
-
-	// try to unmarshal data into ShellAuthHostErrorOneOf5
-	err = newStrictDecoder(data).Decode(&dst.ShellAuthHostErrorOneOf5)
-	if err == nil {
-		jsonShellAuthHostErrorOneOf5, _ := json.Marshal(dst.ShellAuthHostErrorOneOf5)
-		if string(jsonShellAuthHostErrorOneOf5) == "{}" { // empty struct
-			dst.ShellAuthHostErrorOneOf5 = nil
-		} else {
-			if err = validator.Validate(dst.ShellAuthHostErrorOneOf5); err != nil {
-				dst.ShellAuthHostErrorOneOf5 = nil
-			} else {
-				match++
-			}
-		}
-	} else {
-		dst.ShellAuthHostErrorOneOf5 = nil
-	}
-
-	if match > 1 { // more than 1 match
-		// reset to nil
-		dst.ShellAuthHostErrorOneOf = nil
-		dst.ShellAuthHostErrorOneOf1 = nil
-		dst.ShellAuthHostErrorOneOf2 = nil
-		dst.ShellAuthHostErrorOneOf3 = nil
-		dst.ShellAuthHostErrorOneOf4 = nil
-		dst.ShellAuthHostErrorOneOf5 = nil
-
-		return fmt.Errorf("data matches more than one schema in oneOf(ShellAuthHostError)")
-	} else if match == 1 {
-		return nil // exactly one match
-	} else { // no match
-		if err != nil {
-			return fmt.Errorf("data failed to match schemas in oneOf(ShellAuthHostError): %v", err)
-		}
-
-		return fmt.Errorf("data failed to match schemas in oneOf(ShellAuthHostError)")
-	}
-}
-
-// Marshal data from the first non-nil pointers in the struct to JSON
-func (src ShellAuthHostError) MarshalJSON() ([]byte, error) {
-	if src.ShellAuthHostErrorOneOf != nil {
-		return json.Marshal(&src.ShellAuthHostErrorOneOf)
-	}
-
-	if src.ShellAuthHostErrorOneOf1 != nil {
-		return json.Marshal(&src.ShellAuthHostErrorOneOf1)
-	}
-
-	if src.ShellAuthHostErrorOneOf2 != nil {
-		return json.Marshal(&src.ShellAuthHostErrorOneOf2)
-	}
-
-	if src.ShellAuthHostErrorOneOf3 != nil {
-		return json.Marshal(&src.ShellAuthHostErrorOneOf3)
-	}
-
-	if src.ShellAuthHostErrorOneOf4 != nil {
-		return json.Marshal(&src.ShellAuthHostErrorOneOf4)
-	}
-
-	if src.ShellAuthHostErrorOneOf5 != nil {
-		return json.Marshal(&src.ShellAuthHostErrorOneOf5)
-	}
-
-	return nil, nil // no data in oneOf schemas
-}
-
-// Get the actual instance
-func (obj *ShellAuthHostError) GetActualInstance() interface{} {
-	if obj == nil {
-		return nil
-	}
-	if obj.ShellAuthHostErrorOneOf != nil {
-		return obj.ShellAuthHostErrorOneOf
-	}
-
-	if obj.ShellAuthHostErrorOneOf1 != nil {
-		return obj.ShellAuthHostErrorOneOf1
-	}
-
-	if obj.ShellAuthHostErrorOneOf2 != nil {
-		return obj.ShellAuthHostErrorOneOf2
-	}
-
-	if obj.ShellAuthHostErrorOneOf3 != nil {
-		return obj.ShellAuthHostErrorOneOf3
-	}
-
-	if obj.ShellAuthHostErrorOneOf4 != nil {
-		return obj.ShellAuthHostErrorOneOf4
-	}
-
-	if obj.ShellAuthHostErrorOneOf5 != nil {
-		return obj.ShellAuthHostErrorOneOf5
-	}
-
-	// all schemas are nil
-	return nil
-}
-
-// Get the actual instance value
-func (obj ShellAuthHostError) GetActualInstanceValue() interface{} {
-	if obj.ShellAuthHostErrorOneOf != nil {
-		return *obj.ShellAuthHostErrorOneOf
-	}
-
-	if obj.ShellAuthHostErrorOneOf1 != nil {
-		return *obj.ShellAuthHostErrorOneOf1
-	}
-
-	if obj.ShellAuthHostErrorOneOf2 != nil {
-		return *obj.ShellAuthHostErrorOneOf2
-	}
-
-	if obj.ShellAuthHostErrorOneOf3 != nil {
-		return *obj.ShellAuthHostErrorOneOf3
-	}
-
-	if obj.ShellAuthHostErrorOneOf4 != nil {
-		return *obj.ShellAuthHostErrorOneOf4
-	}
-
-	if obj.ShellAuthHostErrorOneOf5 != nil {
-		return *obj.ShellAuthHostErrorOneOf5
-	}
-
-	// all schemas are nil
-	return nil
+	return err
 }
 
 type NullableShellAuthHostError struct {

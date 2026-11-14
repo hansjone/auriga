@@ -594,13 +594,8 @@
         "continuation": {
           "type": "string",
           "enum": [
-            "portal",
-            "device"
+            "portal"
           ]
-        },
-        "deviceGrantId": {
-          "type": "string",
-          "format": "uuid"
         },
         "transactionCookie": {
           "type": "string",
@@ -646,39 +641,7 @@
         "continuation",
         "fetchMetadata"
       ],
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "continuation": {
-                "const": "device"
-              }
-            },
-            "required": [
-              "continuation"
-            ]
-          },
-          "then": {
-            "required": [
-              "deviceGrantId"
-            ],
-            "properties": {
-              "deviceGrantId": {}
-            }
-          },
-          "else": {
-            "not": {
-              "required": [
-                "deviceGrantId"
-              ],
-              "properties": {
-                "deviceGrantId": {}
-              }
-            }
-          }
-        }
-      ],
-      "description": "仅可信edge调用；tenant来自内部授权，Origin必须与该tenant的受信入口完全匹配。Fetch Metadata为浏览器实际请求头证据，缺项不具备auto资格。deviceGrantId须由IAM核验未过期且与当前事务绑定；portal不可携带。"
+      "description": "仅可信edge签发门户导航；tenant来自内部授权，Origin与受信入口精确匹配。Fetch Metadata缺项不具备auto资格。设备续接只能调用device-navigation-proofs并传userCode；本端口拒绝device续接和任何deviceGrantId。"
     },
     "UacNavigationIssued": {
       "type": "object",

@@ -5,7 +5,10 @@ import Ajv2020 from '../../services/contracts/node_modules/ajv/dist/2020.js';
 import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/index.js';
 import YAML from '../../services/contracts/node_modules/yaml/dist/index.js';
 import { spawnSync } from 'node:child_process';
-import { checkPlatformMigration } from './auth-k-source-scan.mjs';
+import {
+  checkPlatformMigration,
+  readPluginSources,
+} from './auth-k-source-scan.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
@@ -1062,7 +1065,7 @@ test('SSO proof issuance is an internal edge to IAM port with evidence and a 120
   assert.equal(request({ ...good, continuation: 'device' }), false);
   assert.equal(
     request({ ...good, continuation: 'device', deviceGrantId: id }),
-    true,
+    false,
   );
   assert.equal(request({ ...good, deviceGrantId: id }), false);
   for (const key of [
@@ -1315,6 +1318,167 @@ test('K2 migration gate allows unrelated edits and removal but rejects new or re
     );
   assert.throws(() =>
     checkPlatformMigration({ ...broker, calls: legacy.calls }, operations, {}),
+  );
+});
+
+test('K2 broker migration preserves actual documented local, managed and personal channels', () => {
+  const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
+  const sources = readPluginSources();
+  for (const file of [
+    'managed/heartbeat.js',
+    'managed/host-auth.js',
+    'managed/keys.js',
+    'identity/oidc-http.js',
+    'local/host.js',
+    'client.js',
+    'settings/view.js',
+    'ai/transport.js',
+  ])
+    assert.ok(
+      inventory.retainedChannels.some((channel) => channel.file === file),
+      file,
+    );
+  const retained = Object.fromEntries(
+    inventory.retainedChannels.map((channel) => {
+      assert.ok(
+        channel.reason &&
+          channel.design.includes('docs/design/auth-shell.zh.md'),
+        channel.file,
+      );
+      assert.ok(Object.hasOwn(sources, channel.file), channel.file);
+      return [channel.file, sources[channel.file]];
+    }),
+  );
+  const broker = { ...inventory, migrationState: 'broker', calls: [] };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, retained),
+  );
+  // 迁移后结构夹具：仅以broker替身替换D待迁的旧平台文件及NATS传输，
+  // 其它真实插件文件完整保留，证明合法原代码不会令最终状态不可达。
+  const migrated = { ...sources };
+  const retainedFiles = new Set(
+    inventory.retainedChannels.map((channel) => channel.file),
+  );
+  for (const call of inventory.calls)
+    if (!retainedFiles.has(call.file))
+      migrated[call.file] = '// platform branches migrated';
+  migrated['network/transport/ws-socket.js'] = '// broker-owned NATS transport';
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, migrated),
+  );
+  // 纯协议字段、文案、类型注释和个人流处理不再因为出现fetch/WS字样被误拦。
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, {
+      ...retained,
+      'network/protocol.js':
+        "const frame = {type:'fetch'}; // WebSocket\n/** @type {import('node:http').Server} */",
+    }),
+  );
+  for (const source of [
+    "fetch('/api/iam/v1/me')",
+    'fetch(computedUrl)',
+    "import http from 'node:https'",
+    'new WebSocket(url)',
+  ])
+    assert.throws(
+      () =>
+        checkPlatformMigration(broker, operations, {
+          ...retained,
+          'unlisted.js': source,
+        }),
+      /direct/,
+      source,
+    );
+  // 白名单不是整文件豁免：心跳文件不能新增成员API，也不能新增其它传输。
+  assert.throws(
+    () =>
+      checkPlatformMigration(broker, operations, {
+        'managed/heartbeat.js': "fetch('/api/iam/v1/me')",
+      }),
+    /direct platform route/,
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(broker, operations, {
+        'managed/heartbeat.js': 'new WebSocket(url)',
+      }),
+    /direct transport/,
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(broker, operations, {
+        'client.js': "fetch('/api/org/v1/members')",
+      }),
+    /direct platform route/,
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(
+        { ...broker, retainedChannels: [{ file: 'unlisted.js' }] },
+        operations,
+        {},
+      ),
+    /invalid retained channel/,
+  );
+});
+
+test('K2 legacy normalizes literal route formatting and documents dynamic-analysis limits', () => {
+  const legacy = {
+    migrationState: 'legacy',
+    calls: [{ file: 'x.js', evidence: "fetch('/api/iam/v1/me')" }],
+  };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(legacy, operations, {
+      'x.js': '// comment\nfetch (\n  "/api/iam/v1/me",\n {}\n)',
+    }),
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(legacy, operations, {
+        'x.js': "fetch('/api/iam/v1/new')",
+      }),
+    /new direct/,
+  );
+  const dynamic = "fetch('/api/' + family + '/v1/new')";
+  // legacy不执行常量折叠或方法/调用数分析；必须在文档中明示，不宣称它证明迁移完成。
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(legacy, operations, { 'x.js': dynamic }),
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(
+        { migrationState: 'broker', calls: [] },
+        operations,
+        { 'x.js': dynamic },
+      ),
+    /direct transport/,
+  );
+  const policy = read('plugin/shell-auth-migration.md');
+  for (const term of ['动态拼接', '方法', 'broker', '固定接缝'])
+    assert.ok(policy.includes(term));
+});
+
+test('K2 fixed broker seam forbids common renaming and checks the operation whitelist', () => {
+  const broker = { migrationState: 'broker', calls: [] };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, {
+      'x.js': "const result = broker . call ( 'profile_read', {} )",
+    }),
+  );
+  for (const source of [
+    "const bridge=broker; bridge.call('invented',{})",
+    "import {broker as bridge} from './adapter.js'",
+    'const {call}=broker',
+    "broker.call('invented',{})",
+  ])
+    assert.throws(() =>
+      checkPlatformMigration(broker, operations, { 'x.js': source }),
+    );
+  // 无来源信息的任意对象不是可识别的broker；该静态局限不冒充类型/导入溯源。
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, {
+      'x.js': "other.call('not-a-broker-method')",
+    }),
   );
 });
 

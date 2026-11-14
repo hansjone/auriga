@@ -356,109 +356,175 @@
         "reason",
         "retryable"
       ],
-      "oneOf": [
+      "allOf": [
         {
-          "properties": {
-            "code": {
-              "const": "common.validation_failed"
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "invalid_message"
+                ]
+              }
             },
-            "reason": {
-              "enum": [
-                "invalid_message"
-              ]
-            },
-            "retryable": {
-              "not": {
-                "const": true
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.validation_failed"
+              },
+              "retryable": {
+                "not": {
+                  "const": true
+                }
               }
             }
           }
         },
         {
-          "properties": {
-            "code": {
-              "const": "common.unauthenticated"
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "not_authenticated"
+                ]
+              }
             },
-            "reason": {
-              "enum": [
-                "not_authenticated"
-              ]
-            },
-            "retryable": {
-              "not": {
-                "const": true
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.unauthenticated"
+              },
+              "retryable": {
+                "not": {
+                  "const": true
+                }
               }
             }
           }
         },
         {
-          "properties": {
-            "code": {
-              "const": "common.forbidden"
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "peer_not_allowed",
+                  "owner_mismatch",
+                  "expired",
+                  "context_revoked",
+                  "raw_token_disabled"
+                ]
+              }
             },
-            "reason": {
-              "enum": [
-                "peer_not_allowed",
-                "owner_mismatch",
-                "expired",
-                "context_revoked",
-                "raw_token_disabled"
-              ]
-            },
-            "retryable": {
-              "not": {
-                "const": true
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.forbidden"
+              },
+              "retryable": {
+                "not": {
+                  "const": true
+                }
               }
             }
           }
         },
         {
-          "properties": {
-            "code": {
-              "const": "common.conflict"
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "stale_identity"
+                ]
+              }
             },
-            "reason": {
-              "enum": [
-                "stale_identity"
-              ]
-            },
-            "retryable": {
-              "not": {
-                "const": true
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.conflict"
+              },
+              "retryable": {
+                "not": {
+                  "const": true
+                }
               }
             }
           }
         },
         {
-          "properties": {
-            "code": {
-              "const": "common.rate_limited"
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "capacity_exceeded"
+                ]
+              }
             },
-            "reason": {
-              "enum": [
-                "capacity_exceeded"
-              ]
-            },
-            "retryable": {
-              "not": {
-                "const": false
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.rate_limited"
+              },
+              "retryable": {
+                "not": {
+                  "const": false
+                }
               }
             }
           }
         },
         {
-          "properties": {
-            "code": {
-              "const": "common.unavailable"
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "credentials_unavailable"
+                ]
+              }
             },
-            "reason": {
-              "enum": [
-                "credentials_unavailable"
-              ]
-            },
-            "retryable": {
-              "not": {
-                "const": false
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.unavailable"
+              },
+              "retryable": {
+                "not": {
+                  "const": false
+                }
               }
             }
           }

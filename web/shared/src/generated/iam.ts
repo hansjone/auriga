@@ -50,7 +50,7 @@ export interface paths {
     put?: never;
     /**
      * edge向IAM签发并登记SSO导航事务
-     * @description 仅内部受认证传输：svc:edge的auriga.internal服务JWT（ptyp=internal_service、ctx=service）和auriga-tenant-id受委派tenant，分离部署必须mTLS，禁止公网或浏览器调用。B从真实门户导航读取完整Origin和Fetch Metadata，A核对受信入口/tenant/provider和设备续接绑定，自己计算autoEligible，原子登记120秒一次性proof哈希及事务cookie绑定；GET门户不建session。返回context由B放入no-store HTML，transactionCookie仅由B设置HttpOnly同入口cookie，不交脚本。设备用途autoEligible恒false，缺证据显示扫码/显式继续。SSO POST由A核精确Origin/CSRF/cookie并CAS消费证明。requestId重放冲突；丢失响应由新页面签发新事务并作废旧证明。
+     * @description 仅内部受认证传输：svc:edge的auriga.internal服务JWT（ptyp=internal_service、ctx=service）和auriga-tenant-id受委派tenant，分离部署必须mTLS，禁止公网或浏览器调用。B从真实门户导航读取完整Origin和Fetch Metadata，A核对受信门户入口/tenant/provider，自己计算autoEligible，原子登记120秒一次性proof哈希及事务cookie绑定；GET门户不建session。返回context由B放入no-store HTML，transactionCookie仅由B设置HttpOnly同入口cookie，不交脚本。本端点仅portal续接，拒绝deviceGrantId；设备用途仅调用device-navigation-proofs并传userCode，autoEligible恒false。缺证据显示扫码/显式继续。SSO POST由A核精确Origin/CSRF/cookie并CAS消费证明。requestId重放冲突；丢失响应由新页面签发新事务并作废旧证明。
      */
     post: operations['issueUacNavigationProof'];
     delete?: never;
@@ -1431,7 +1431,7 @@ export interface components {
       /** @description edge转发本入口现有CSRF cookie供IAM验证及复用；不得信任浏览器自报绑定。 */
       csrfCookie?: string;
     };
-    /** @description 仅可信edge调用；tenant来自内部授权，Origin必须与该tenant的受信入口完全匹配。Fetch Metadata为浏览器实际请求头证据，缺项不具备auto资格。deviceGrantId须由IAM核验未过期且与当前事务绑定；portal不可携带。 */
+    /** @description 仅可信edge签发门户导航；tenant来自内部授权，Origin与受信入口精确匹配。Fetch Metadata缺项不具备auto资格。设备续接只能调用device-navigation-proofs并传userCode；本端口拒绝device续接和任何deviceGrantId。 */
     UacNavigationIssueRequest: {
       /** Format: uuid */
       requestId: string;
@@ -1440,9 +1440,7 @@ export interface components {
       /** Format: uri */
       origin: string;
       /** @enum {string} */
-      continuation: 'portal' | 'device';
-      /** Format: uuid */
-      deviceGrantId?: string;
+      continuation: 'portal';
       transactionCookie?: string;
       suppressionCookie?: string;
       fetchMetadata: {
@@ -1453,7 +1451,7 @@ export interface components {
       };
       /** @description edge转发本入口现有CSRF cookie供IAM验证及复用；不得信任浏览器自报绑定。 */
       csrfCookie?: string;
-    } & unknown;
+    };
     UacNavigationIssued: {
       context: components['schemas']['UacNavigationContext'];
       transactionCookie: string;

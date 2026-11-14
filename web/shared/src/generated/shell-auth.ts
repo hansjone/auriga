@@ -1252,55 +1252,7 @@ export interface components {
         | 'capacity_exceeded'
         | 'not_authenticated';
       retryable: boolean;
-    } & (
-      | {
-          /** @constant */
-          code?: 'common.validation_failed';
-          /** @enum {unknown} */
-          reason?: 'invalid_message';
-          retryable?: unknown;
-        }
-      | {
-          /** @constant */
-          code?: 'common.unauthenticated';
-          /** @enum {unknown} */
-          reason?: 'not_authenticated';
-          retryable?: unknown;
-        }
-      | {
-          /** @constant */
-          code?: 'common.forbidden';
-          /** @enum {unknown} */
-          reason?:
-            | 'peer_not_allowed'
-            | 'owner_mismatch'
-            | 'expired'
-            | 'context_revoked'
-            | 'raw_token_disabled';
-          retryable?: unknown;
-        }
-      | {
-          /** @constant */
-          code?: 'common.conflict';
-          /** @enum {unknown} */
-          reason?: 'stale_identity';
-          retryable?: unknown;
-        }
-      | {
-          /** @constant */
-          code?: 'common.rate_limited';
-          /** @enum {unknown} */
-          reason?: 'capacity_exceeded';
-          retryable?: unknown;
-        }
-      | {
-          /** @constant */
-          code?: 'common.unavailable';
-          /** @enum {unknown} */
-          reason?: 'credentials_unavailable';
-          retryable?: unknown;
-        }
-    );
+    } & (unknown & unknown & unknown & unknown & unknown & unknown);
     /** @description 由已认证插件后端从宿主可信会话/工具执行回调采集；页面和模型参数不得构造。session先登记，tool引用同owner同宿主会话的有效session句柄。 */
     ShellAuthHostContext: {
       /** @enum {string} */
