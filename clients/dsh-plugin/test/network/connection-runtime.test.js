@@ -30,8 +30,8 @@ import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { decodeJson, encodeJson } from '../../src/network/session/frames.js';
 import { digest, signingInput } from '../../src/network/trust/verifier.js';
 import {
-  signedKeyset,
-  signedAnnouncement,
+  signedV2Keyset as signedKeyset,
+  signedV2Announcement as signedAnnouncement,
   testRoots,
   publicationFixture,
   signedReadyResult,
@@ -53,7 +53,18 @@ import {
 async function fixture(t, extra = {}) {
   const { openConnectionRuntime } =
     await import('../../src/network/connection-runtime.js');
-  const { pair, payload, now } = publicationFixture();
+  const { pair, payload, now: initialNow } = publicationFixture();
+  let clock = initialNow();
+  const now = () => clock;
+  if (extra.longTrust) {
+    payload.valid_until = new Date(clock + 24 * 3600000 - 60000)
+      .toISOString()
+      .replace('.000Z', 'Z');
+    for (const key of payload.keys)
+      key.not_after = new Date(clock + 7 * 86400000)
+        .toISOString()
+        .replace('.000Z', 'Z');
+  }
   const businessPair = extra.businessDelivery
     ? generateKeyPairSync('ed25519')
     : undefined;
@@ -106,9 +117,9 @@ async function fixture(t, extra = {}) {
     async refresh(trust, signal) {
       await extra.refresh?.(trust, signal);
       signal.throwIfAborted();
-      await trust.announce(signedAnnouncement(payload));
-      signal.throwIfAborted();
       await trust.update(signedKeyset(payload));
+      signal.throwIfAborted();
+      await trust.announce(signedAnnouncement(payload));
     },
     async getTicket(signal) {
       signal.throwIfAborted();
@@ -320,6 +331,9 @@ async function fixture(t, extra = {}) {
     prepared,
     payload,
     trustStore,
+    advance: (milliseconds) => {
+      clock += milliseconds;
+    },
   };
 }
 
@@ -1679,8 +1693,9 @@ test('invalid refreshed ticket still fails closed on a healthy connection', asyn
 });
 
 test('healthy refresh retries a control fetch failure but rejects trust validation failure', async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, { longTrust: true });
   await f.runtime.start();
+  f.advance(13 * 3600000);
   const original = f.prepared.refresh;
   f.prepared.refresh = async () => {
     throw new DeviceControlUnavailable('network control unavailable');
@@ -1690,16 +1705,20 @@ test('healthy refresh retries a control fetch failure but rejects trust validati
   assert.equal(f.runtime.status.connected, true);
   f.prepared.refresh = original;
   await f.connections[1].ticket();
-  f.prepared.refresh = async () => {
+  const broken = await fixture(t, { longTrust: true });
+  await broken.runtime.start();
+  broken.advance(13 * 3600000);
+  broken.prepared.refresh = async () => {
     throw new TypeError('invalid keyset');
   };
-  await assert.rejects(f.connections[1].ticket(), /invalid keyset/);
-  assert.equal(f.runtime.status.available, false);
+  await assert.rejects(broken.connections[1].ticket(), /invalid keyset/);
+  assert.equal(broken.runtime.status.available, false);
 });
 
 test('transient refresh never preserves connected past a newer announcement without its full keyset', async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, { longTrust: true });
   await f.runtime.start();
+  f.advance(13 * 3600000);
   const gate = latch();
   let entered = false;
   f.prepared.refresh = async (trust) => {
@@ -1903,7 +1922,7 @@ test('logout while C2 unknown-key verification refresh is pending cannot write a
       }
     },
     refresh: async () => {
-      if (++refreshes === 4) {
+      if (++refreshes === 2) {
         entered = true;
         await gate.promise;
       }
@@ -2307,13 +2326,22 @@ test('real NATS WSS with official device factory closes C1 before T2, binds new 
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const path = url.pathname;
     assert.equal(init.headers.cookie, undefined);
-    assert.equal(init.headers.authorization, 'Bearer native-device');
+    assert.equal(
+      init.headers.authorization,
+      path.endsWith('/bootstrap/controls') ? undefined : 'Bearer native-device',
+    );
     if (path.endsWith('/register'))
       return Response.json({ ...identity, created: true });
+    if (path.endsWith('/controls'))
+      return Response.json(
+        signedKeyset(signer.payload, identity.tenant).control,
+      );
     if (path.endsWith('/announcement'))
-      return Response.json(signedAnnouncement(signer.payload));
+      return Response.json(
+        signedAnnouncement(signer.payload, {}, identity.tenant),
+      );
     if (path.endsWith('/keys'))
-      return Response.json(signedKeyset(signer.payload));
+      return Response.json(signedKeyset(signer.payload, identity.tenant));
     assert.equal(path, '/api/iam/v1/network/tickets');
     if (refreshMode) {
       if (refreshFailures++ === 0) return Response.json({}, { status: 503 });
@@ -2556,7 +2584,7 @@ test('plugin actual entry resumes verified native device into official factory, 
       });
     assert.equal(
       new Headers(init.headers).get('authorization'),
-      'Bearer ' + accessToken,
+      path.endsWith('/bootstrap/controls') ? null : 'Bearer ' + accessToken,
     );
     if (path === '/ai/team/node/register')
       return Response.json({
@@ -2587,10 +2615,16 @@ test('plugin actual entry resumes verified native device into official factory, 
     if (path === '/oauth2/revoke') return Response.json({});
     if (path === '/api/iam/v1/network/register')
       return Response.json({ ...identity, created: true });
+    if (path.endsWith('/controls'))
+      return Response.json(
+        signedKeyset(signing.payload, identity.tenant).control,
+      );
     if (path.endsWith('/announcement'))
-      return Response.json(signedAnnouncement(signing.payload));
-    if (path === '/api/collab/v1/network/keys')
-      return Response.json(signedKeyset(signing.payload));
+      return Response.json(
+        signedAnnouncement(signing.payload, {}, identity.tenant),
+      );
+    if (path === '/api/collab/v2/network/keys')
+      return Response.json(signedKeyset(signing.payload, identity.tenant));
     assert.equal(path, '/api/iam/v1/network/tickets');
     const vector = vectors[ticketCount++];
     return Response.json({
@@ -2786,4 +2820,17 @@ test('initial commit diagnostics use the real final JSON sink and distinguish li
     else process.env.XDG_STATE_HOME = oldState;
     await nodeFs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('repeated ticket renewals reuse valid trust without repeating control HTTP refresh', async (t) => {
+  let refreshes = 0;
+  const f = await fixture(t, {
+    refresh: async () => {
+      refreshes++;
+    },
+  });
+  await f.runtime.start();
+  const initial = refreshes;
+  for (let i = 0; i < 5; i++) await f.connections[1].ticket();
+  assert.equal(refreshes, initial);
 });

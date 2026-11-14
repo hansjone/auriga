@@ -13,12 +13,14 @@ import {
 import {
   openTestTrust as openTrustStore,
   publicationFixture,
-  signedKeyset,
-  signedAnnouncement,
+  signedV2Keyset as signedKeyset,
+  signedV2Announcement as signedAnnouncement,
   testRoots,
+  signedV2Control,
 } from './keyset-fixtures.js';
-import { openTrustStore as openRootTrustStore } from '../../../src/network/trust/store.js';
-import { definitions } from '../../../src/generated/network/keyset-schema.js';
+import { openSignedTrust as openRootTrustStore } from './keyset-fixtures.js';
+import { schema as v2Schema } from '../../../src/generated/network/auto-renewal-v2-schema.js';
+const definitions = v2Schema.$defs;
 import {
   verifyEnvelope,
   verifyEnvelopeWithRefresh,
@@ -29,6 +31,8 @@ import {
   seal,
 } from '../../../../../contracts/test/network-lib.mjs';
 
+import { fixture } from './v2-cache-fixture.js';
+import { openV2TrustStore } from '../../../src/network/trust/v2-store.js';
 const vectors = JSON.parse(
   await readFile(
     new URL(
@@ -88,8 +92,8 @@ test('an unknown schema keyword rejects an otherwise valid root-signed keyset pu
   schema.futureConstraint = true;
   try {
     await assert.rejects(
-      openTrustStore({ cache: cache(), config: config(), now }),
-      code('network.key_unavailable'),
+      import('../../../src/network/trust/v2-schema.js?unknown-keyword'),
+      /unsupported_schema/,
     );
   } finally {
     delete schema.futureConstraint;
@@ -191,7 +195,13 @@ test('trust rejects unknown, revoked, expired, inactive and wrong-algorithm keys
   ]) {
     const c = config();
     change(c);
-    const trust = await openTrustStore({ cache: cache(), config: c, now });
+    let trust;
+    try {
+      trust = await openTrustStore({ cache: cache(), config: c, now });
+    } catch (e) {
+      assert.match(e.message, /invalid_transition/);
+      continue;
+    }
     assert.throws(
       () => verifyEnvelope(value, { trust, context, now }),
       code('network.key_unavailable'),
@@ -201,7 +211,7 @@ test('trust rejects unknown, revoked, expired, inactive and wrong-algorithm keys
   c.keys[0].alg = 'RSA';
   await assert.rejects(
     openTrustStore({ cache: cache(), config: c, now }),
-    code('network.key_unavailable'),
+    /invalid_chain/,
   );
   const trust = await openTrustStore({ cache: cache(), config: config(), now });
   const pair = generateKeyPairSync('ed25519');
@@ -212,23 +222,36 @@ test('trust rejects unknown, revoked, expired, inactive and wrong-algorithm keys
       .export({ format: 'der', type: 'spki' })
       .toString('base64url'),
   };
-  await trust.update({
-    ...config(),
-    keyset_version: '6',
-    keys: [...config().keys, replacement],
+  const rotatedTrust = await openTrustStore({
+    cache: cache(),
+    now,
+    config: {
+      ...config(),
+      keys: [
+        ...config().keys.map((key) =>
+          key.purpose === replacement.purpose
+            ? { ...key, state: 'retired' }
+            : key,
+        ),
+        replacement,
+      ],
+    },
   });
-  assert.ok(trust.key('test-r2-business-1', 'business_delivery', '5'));
-  assert.ok(trust.key('rotated-business', 'business_delivery', '6'));
+  assert.ok(rotatedTrust.key('test-r2-business-1', 'business_delivery', '5'));
+  assert.ok(rotatedTrust.key('rotated-business', 'business_delivery', '5'));
   const rotated = structuredClone(value);
   rotated.server_auth.kid = replacement.kid;
-  rotated.server_auth.keyset_version = '6';
+  rotated.server_auth.keyset_version = '5';
   rotated.server_auth.signature = sign(
     null,
     signingInput(rotated),
     pair.privateKey,
   ).toString('base64url');
   assert.equal(verifyEnvelope(value, { trust, context, now }), true);
-  assert.equal(verifyEnvelope(rotated, { trust, context, now }), true);
+  assert.equal(
+    verifyEnvelope(rotated, { trust: rotatedTrust, context, now }),
+    true,
+  );
 });
 
 test('file cache persists revoked keys/version across close and process-style reopen', async () => {
@@ -241,11 +264,17 @@ test('file cache persists revoked keys/version across close and process-style re
         config: config(),
         now,
       });
-      await trust.update({
-        ...config(),
-        keyset_version: '6',
-        keys: config().keys.map((k) => ({ ...k, state: 'revoked' })),
-      });
+      const state = await file.load();
+      await trust.installControl(
+        signedV2Control({
+          ...state.control.payload,
+          control_revision: '3',
+          allowed_authorities: [],
+          revoked_authority_ids: [
+            state.publication.authority.payload.authority_id,
+          ],
+        }),
+      );
       await assert.rejects(openFileTrustCache({ dir }));
     } finally {
       await file.close();
@@ -253,10 +282,7 @@ test('file cache persists revoked keys/version across close and process-style re
     const reopened = await openFileTrustCache({ dir });
     try {
       const trust = await openTrustStore({ cache: reopened, now });
-      await assert.rejects(
-        trust.update(config()),
-        code('network.key_unavailable'),
-      );
+      await assert.rejects(trust.update(config()), /authority_revoked/);
       assert.throws(
         () => trust.key(vectors.keys[0].kid, 'business_delivery', '5'),
         code('network.key_unavailable'),
@@ -272,24 +298,24 @@ test('file cache persists revoked keys/version across close and process-style re
 test('persistent cache survives reopen and refuses rollback, same-version changes, expiry and failed writes', async () => {
   const disk = cache();
   const trust = await openTrustStore({ cache: disk, config: config(), now });
-  const newer = {
-    ...config(),
-    keyset_version: '6',
-    keys: config().keys.map((k) => ({ ...k, state: 'revoked' })),
-  };
-  await trust.update(newer);
+  const state = await disk.load();
+  await trust.installControl(
+    signedV2Control({
+      ...state.control.payload,
+      control_revision: '3',
+      allowed_authorities: [],
+      revoked_authority_ids: [state.publication.authority.payload.authority_id],
+    }),
+  );
   const restored = await openTrustStore({ cache: disk, now });
   assert.throws(
     () => restored.key(vectors.keys[0].kid, 'business_delivery', '5'),
     code('network.key_unavailable'),
   );
-  await assert.rejects(
-    restored.update(config()),
-    code('network.key_unavailable'),
-  );
+  await assert.rejects(restored.update(config()), /authority_revoked/);
   await assert.rejects(
     restored.update({ ...config(), keyset_version: '6' }),
-    code('network.key_unavailable'),
+    /authority_revoked/,
   );
   const expired = await openTrustStore({
     cache: disk,
@@ -299,20 +325,21 @@ test('persistent cache survives reopen and refuses rollback, same-version change
     () => expired.key(vectors.keys[0].kid, 'business_delivery', '5'),
     code('network.key_unavailable'),
   );
-  const failing = await openTrustStore({
+  const f = fixture(),
+    clean = await openV2TrustStore(f.options);
+  await clean.update(f.publish());
+  await clean.announce(f.announcement());
+  const failing = await openV2TrustStore({
+    ...f.options,
     cache: {
-      load: disk.load,
-      async commit() {
+      load: f.cache.load,
+      commit: async () => {
         throw Error('disk full');
       },
     },
-    now,
   });
-  await assert.rejects(failing.update({ ...config(), keyset_version: '7' }));
-  assert.throws(
-    () => failing.key(vectors.keys[0].kid, 'business_delivery', '5'),
-    code('network.key_unavailable'),
-  );
+  await assert.rejects(failing.update(f.publish()), /disk full/);
+  assert.throws(() => failing.assertUsable(), code('network.key_unavailable'));
 });
 
 test('genuine signatures still reject wrong audience/request/nonce and expired time', async () => {
@@ -384,7 +411,7 @@ test('cache hard limit is 24h and same-version reload cannot extend it; missing 
   });
   assert.ok(trust.key(vectors.keys[0].kid, 'business_delivery', '5'));
   clock = Date.parse('2026-10-26T00:00:00Z');
-  await trust.update(c);
+  await assert.rejects(trust.update(c), /expired/);
   assert.throws(
     () => trust.key(vectors.keys[0].kid, 'business_delivery', '5'),
     code('network.key_unavailable'),
@@ -440,7 +467,8 @@ test('higher keyset version refreshes once for concurrent verification and persi
 });
 
 test('unknown kid refreshes trusted configuration and retries the original signature', async () => {
-  let calls = 0;
+  let calls = 0,
+    clock = Date.parse('2026-10-24T00:01:00Z');
   const c = config();
   const pair = generateKeyPairSync('ed25519');
   const introduced = {
@@ -452,17 +480,31 @@ test('unknown kid refreshes trusted configuration and retries the original signa
   };
   const trust = await openTrustStore({
     cache: cache(),
-    config: c,
-    now,
+    config: {
+      ...c,
+      issued_at: '2026-10-24T00:00:00Z',
+      valid_until: '2026-10-25T00:00:00Z',
+      keys: [...c.keys, { ...introduced, state: 'next' }],
+    },
+    now: () => clock,
     refresh: async () => {
       calls++;
       return {
         ...c,
         keyset_version: '6',
-        keys: [...c.keys, introduced],
+        mode: 'activate',
+        keys: [
+          ...c.keys.map((key) =>
+            key.purpose === introduced.purpose
+              ? { ...key, state: 'retired' }
+              : key,
+          ),
+          introduced,
+        ],
       };
     },
   });
+  clock = now();
   const value = refreshedEnvelope('5', 'introduced');
   value.server_auth.signature = sign(
     null,

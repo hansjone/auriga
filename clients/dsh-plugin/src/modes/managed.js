@@ -266,6 +266,9 @@ export async function createManaged(options = {}) {
     get baseTools() {
       return network?.baseTools;
     },
+    get networkControl() {
+      return network?.networkControl;
+    },
     protocol: PROTOCOL_VERSION,
     protocolInfo: protocolInfo(),
     instanceId,
