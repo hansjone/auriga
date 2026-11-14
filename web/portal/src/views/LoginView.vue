@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   createUacLoginView,
   type UacPageEvent,
@@ -8,7 +8,6 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
   BrandMark,
-  ProviderSelect,
   StepContainer,
   type ClientStep,
   type LoginProvider,
@@ -23,7 +22,8 @@ import {
   navigationProviderId,
   takeNavigationContext,
 } from '../../../shared/src/api/correlation';
-import DesktopDownload from '../components/DesktopDownload.vue';
+import PortalProviders from '../components/PortalProviders.vue';
+import { pickLocalized } from '@auriga/shared';
 import { loginReturnTo } from '../login-return';
 
 const { t, locale } = useI18n();
@@ -34,6 +34,21 @@ const route = useRoute(),
   router = useRouter();
 const providers = ref<LoginProvider[]>([]),
   tx = ref<LoginTransaction | null>(null);
+const selectedProvider = ref<LoginProvider | null>(null);
+const heading = computed(() => {
+  const kind = selectedProvider.value?.connectorType;
+  if (kind === 'uac')
+    return locale.value === 'en' ? 'Scan to sign in' : '扫码登录';
+  if (kind === 'team-account')
+    return locale.value === 'en' ? 'Team account' : '团队账号';
+  if (kind === 'emergency')
+    return locale.value === 'en' ? 'Emergency account' : '应急账号';
+  return selectedProvider.value
+    ? pickLocalized(selectedProvider.value.displayName, locale.value)
+    : locale.value === 'en'
+      ? 'Sign in to your workspace'
+      : '登录团队工作台';
+});
 const error = ref(''),
   loading = ref(true),
   busy = ref(false);
@@ -92,8 +107,14 @@ onMounted(async () => {
       (p) =>
         p.connectorType === 'uac' && p.id === navigationProviderId(document),
     );
-    if (preferred && document.getElementById('auriga-uac-navigation'))
-      await selectProvider(preferred);
+    const initial =
+      (preferred && document.getElementById('auriga-uac-navigation')
+        ? preferred
+        : undefined) ??
+      res.items.find((p) => p.connectorType === 'uac') ??
+      res.items.find((p) => p.connectorType !== 'emergency') ??
+      res.items[0];
+    if (initial) await selectProvider(initial);
   } catch (e) {
     if (current(version)) error.value = describe(e);
   } finally {
@@ -104,8 +125,15 @@ function validate(value: LoginTransaction) {
   if (value.purpose !== 'login') throw new Error('Invalid login purpose');
   return value;
 }
-async function selectProvider(provider: LoginProvider) {
+async function selectProvider(provider: LoginProvider, restart = false) {
   if (!alive || busy.value) return;
+  if (
+    !restart &&
+    selectedProvider.value?.id === provider.id &&
+    (uacActive.value || tx.value)
+  )
+    return;
+  selectedProvider.value = provider;
   const version = ++generation;
   busy.value = true;
   loading.value = true;
@@ -114,6 +142,7 @@ async function selectProvider(provider: LoginProvider) {
   tx.value = null;
   const oldView = uacView;
   uacView = undefined;
+  uacActive.value = false;
   try {
     await oldView?.dispose();
     await cancelTx(previous);
@@ -205,7 +234,7 @@ async function onSubmit(input: StepInput) {
 async function onRetry() {
   if (!tx.value) return;
   const provider = providers.value.find((p) => p.id === tx.value?.provider.id);
-  if (provider) await selectProvider(provider);
+  if (provider) await selectProvider(provider, true);
 }
 function onComplete(redirectTo: string) {
   if (alive && props.deviceContinuation) {
@@ -258,20 +287,54 @@ const step = (): ClientStep | null =>
 </script>
 
 <template>
-  <section class="auriga-login">
-    <header class="auriga-login-head">
-      <BrandMark :size="40" />
-      <div>
-        <p class="auriga-login-name">
-          {{ t('brand') }}
+  <section
+    class="auriga-login login-panel"
+    :class="{ 'auriga-qr-login': uacActive }"
+  >
+    <header class="qr-heading">
+      <BrandMark :size="24" />
+      <h1>{{ heading }}</h1>
+    </header>
+    <div class="login-content">
+      <p v-if="error" class="auriga-login-error" role="alert">{{ error }}</p>
+      <p v-if="loading && !uacActive" class="auriga-login-status" role="status">
+        {{ t('login.loading') }}
+      </p>
+      <div v-show="uacActive" ref="uacRoot" />
+      <fieldset v-if="step()" class="auriga-login-step" :disabled="busy">
+        <StepContainer
+          :key="tx!.id"
+          :step="step()!"
+          @submit="onSubmit"
+          @retry="onRetry"
+          @complete="onComplete"
+        />
+      </fieldset>
+      <div v-if="!loading && !tx && !uacActive" class="login-idle">
+        <button
+          v-if="selectedProvider"
+          class="restart"
+          type="button"
+          :disabled="busy"
+          @click="selectProvider(selectedProvider)"
+        >
+          {{ locale === 'en' ? 'Continue sign-in' : '继续登录' }}
+        </button>
+        <p v-else role="status">
+          {{
+            locale === 'en'
+              ? 'No sign-in methods available. Contact your administrator.'
+              : '暂无可用登录方式，请联系管理员。'
+          }}
         </p>
       </div>
-    </header>
-    <p v-if="error" class="auriga-login-error" role="alert">{{ error }}</p>
-    <p v-if="loading" class="auriga-login-status" role="status">
-      {{ t('login.loading') }}
-    </p>
-    <div v-show="uacActive" ref="uacRoot" />
+    </div>
+    <PortalProviders
+      :providers="providers"
+      :selected-id="selectedProvider?.id"
+      :disabled="busy || loading"
+      @select="selectProvider"
+    />
     <button
       v-if="uacActive"
       type="button"
@@ -279,41 +342,85 @@ const step = (): ClientStep | null =>
       :disabled="busy"
       @click="backToProviders"
     >
-      {{ t('login.back') }}
+      {{ locale === 'en' ? 'Cancel' : '取消' }}
     </button>
-    <ProviderSelect
-      v-if="!loading && !tx && !uacActive"
-      :providers="providers"
-      @select="selectProvider"
-    />
-    <template v-else-if="step()">
-      <fieldset class="auriga-login-step" :disabled="busy">
-        <StepContainer
-          :step="step()!"
-          @submit="onSubmit"
-          @retry="onRetry"
-          @complete="onComplete"
-        />
-      </fieldset>
-      <button
-        v-if="providers.length > 1 && step()!.type !== 'complete'"
-        type="button"
-        :disabled="busy"
-        class="auriga-login-back"
-        @click="backToProviders"
-      >
-        {{ t('login.back') }}
-      </button>
-    </template>
-    <DesktopDownload />
+    <a v-if="!deviceContinuation && !uacActive" class="home-link" href="/">{{
+      locale === 'en' ? 'Back to home' : '返回首页'
+    }}</a>
   </section>
 </template>
-
 <style scoped>
+.login-panel {
+  width: min(384px, 100%);
+  min-height: 552px;
+  padding: 32px;
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.qr-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+.qr-heading h1 {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  margin: 0;
+  color: var(--auriga-text);
+}
+.login-content {
+  width: 100%;
+  flex: 1;
+}
+.auriga-qr-login :deep([data-testid='uac-target']),
+.auriga-qr-login :deep(.uac-cancel) {
+  display: none;
+}
+.auriga-login-back,
+.home-link {
+  display: block;
+  margin: 16px 0 0;
+  padding: 8px;
+  line-height: 16px;
+  font-size: 12px;
+  color: var(--auriga-muted);
+  text-decoration: none;
+}
 .auriga-login-step {
   border: 0;
   padding: 0;
   margin: 0;
   min-width: 0;
+}
+.login-idle {
+  text-align: center;
+  color: var(--auriga-muted);
+  font-size: 13px;
+  padding: 48px 0;
+}
+.restart {
+  font: inherit;
+  color: var(--auriga-text);
+  background: transparent;
+  border: 1px solid var(--auriga-border);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--auriga-accent-line);
+  outline-offset: 2px;
+}
+@media (max-width: 390px) {
+  .login-panel {
+    padding-inline: 24px;
+  }
 }
 </style>

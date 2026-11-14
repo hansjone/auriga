@@ -1,37 +1,34 @@
 <script setup lang="ts">
 withDefaults(defineProps<{ size?: number }>(), { size: 28 });
 </script>
-
 <template>
   <svg
     class="auriga-mark"
     :width="size"
     :height="size"
-    viewBox="0 0 32 32"
+    viewBox="0 0 64 64"
     fill="none"
     aria-hidden="true"
   >
-    <rect
-      x="0.75"
-      y="0.75"
-      width="30.5"
-      height="30.5"
-      rx="9"
-      stroke="currentColor"
-      stroke-opacity="0.28"
-      stroke-width="1.5"
-    />
+    <rect width="64" height="64" rx="16" fill="#10283b" />
     <path
-      d="M16 7.5 23.6 13 20.7 22.5H11.3L8.4 13Z"
-      stroke="currentColor"
-      stroke-opacity="0.5"
-      stroke-width="1.2"
+      d="M31 10 51 25 44 51 18 49 11 24Z"
+      fill="none"
+      stroke="#8fb9d6"
+      stroke-width="3"
       stroke-linejoin="round"
     />
-    <circle cx="16" cy="7.5" r="2.1" fill="currentColor" />
-    <circle cx="23.6" cy="13" r="1.6" fill="currentColor" />
-    <circle cx="20.7" cy="22.5" r="1.6" fill="currentColor" />
-    <circle cx="11.3" cy="22.5" r="1.6" fill="currentColor" />
-    <circle cx="8.4" cy="13" r="1.6" fill="currentColor" />
+    <path
+      d="m18 49 13-26 13 28M24 37h14"
+      fill="none"
+      stroke="#e8f0f7"
+      stroke-width="3"
+      stroke-linejoin="round"
+    />
+    <circle cx="31" cy="10" r="4" fill="#e8f0f7" />
+    <circle cx="51" cy="25" r="3" fill="#8fb9d6" />
+    <circle cx="44" cy="51" r="3" fill="#8fb9d6" />
+    <circle cx="18" cy="49" r="3" fill="#8fb9d6" />
+    <circle cx="11" cy="24" r="3" fill="#8fb9d6" />
   </svg>
 </template>

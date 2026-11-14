@@ -118,6 +118,10 @@ describe('portal UAC normal entry', () => {
     );
     expect(wrapper.find('svg').exists()).toBe(true);
     expect(wrapper.get('[data-testid=uac-target]').text()).toBe('示例企业系统');
+    expect(wrapper.get('.qr-heading h1').text()).toBe('扫码登录');
+    expect(wrapper.find('.auriga-login-head').exists()).toBe(false);
+    expect(wrapper.find('.home-link').exists()).toBe(false);
+    expect(wrapper.get('button.auriga-login-back').text()).toBe('取消');
     expect(document.getElementById('auriga-uac-navigation')).toBeNull();
     expect(calls.slice(0, 3)).toEqual([
       '/api/iam/v1/login/providers',
@@ -132,7 +136,9 @@ describe('portal UAC normal entry', () => {
     await wrapper.get('button.auriga-login-back').trigger('click');
     await flushPromises();
     expect(calls.at(-1)).toBe('/api/iam/v1/login/uac/challenges/' + id);
-    expect(wrapper.find('[data-testid=provider-select]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid=login-methods]').exists()).toBe(true);
+    expect(wrapper.get('.restart').text()).toBe('继续登录');
+    expect(wrapper.get('.home-link').attributes('href')).toBe('/');
     wrapper.unmount();
   });
   it.each([
