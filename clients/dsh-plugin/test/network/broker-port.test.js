@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { nativeContexts } from '../host-context-fixture.js';
 import { createBrokerNetworkPort } from '../../src/network/broker-port.js';
 
-async function fixture(t) {
+async function fixture(t, change = (body) => body) {
   const f = await nativeContexts(t),
     original = f.connection.ipc.call.bind(f.connection.ipc),
     streamId = randomUUID(),
@@ -22,7 +22,22 @@ async function fixture(t) {
         statusCode: 200,
         body:
           message.call.operation === 'network_open'
-            ? { streamId }
+            ? change({
+                streamId,
+                registration: {
+                  tenant: f.connection.identity.tenantId,
+                  device: f.connection.identity.deviceId,
+                  realm: '2',
+                  node: '64',
+                  systemAddress: 'aur1:2.40.0',
+                  created: true,
+                },
+                binding: {
+                  executionContextId: message.call.input.executionContextId,
+                  shellEpoch: message.shellEpoch,
+                  revision: message.expectedRevision,
+                },
+              })
             : message.call.operation === 'network_send'
               ? { sequence: 0 }
               : { resultWire: Buffer.from('{}').toString('base64') },
@@ -96,6 +111,65 @@ test('network bridge rejects forged execution before registration and platform w
   );
   assert.equal(f.calls.length, 0);
   assert.equal(f.connection.contexts.size, 0);
+});
+test('registration creation authority is consumed once and copies cannot alter it', async (t) => {
+  const f = await fixture(t);
+  const connection = await f.port.open(f.execution, () => {});
+  const first = connection.takeRegistration();
+  assert.equal(first.created, true);
+  first.created = true;
+  first.node = '99';
+  assert.equal(connection.takeRegistration().created, false);
+  assert.equal(connection.takeRegistration().node, '64');
+  await connection.close();
+  assert.throws(() => connection.takeRegistration());
+});
+test('opening does not wait for credit response before upstream READY can be sent', async (t) => {
+  const f = await fixture(t);
+  const credit = Promise.withResolvers();
+  f.connection.ipc.streamCommand = async (command) => {
+    if (command.action === 'credit') return credit.promise;
+    credit.resolve();
+  };
+  const connection = await f.port.open(f.execution, () => {});
+  await connection.send(Buffer.from('{}'));
+  assert.equal(f.calls.at(-1).operation, 'network_send');
+  await connection.close();
+});
+for (const field of ['executionContextId', 'shellEpoch', 'revision']) {
+  test(`registration rejects mismatched ${field} and cancels the stream`, async (t) => {
+    const f = await fixture(t, (body) => ({
+      ...body,
+      binding: {
+        ...body.binding,
+        [field]:
+          field === 'revision' ? body.binding.revision + 1 : randomUUID(),
+      },
+    }));
+    await assert.rejects(
+      f.port.open(f.execution, () => assert.fail('unbound stream')),
+      { code: 'network.unauthorized' },
+    );
+    assert.ok(f.commands.some((c) => c.action === 'cancel'));
+    assert.equal(
+      f.commands.some((c) => c.action === 'credit'),
+      false,
+    );
+  });
+}
+test('closed stream notifies every consumer and cancels despite a failing consumer', async (t) => {
+  const f = await fixture(t);
+  const connection = await f.port.open(f.execution, () => {});
+  let retired = false;
+  connection.onClosed(() => {
+    throw new Error('consumer closed');
+  });
+  connection.onClosed(() => {
+    retired = true;
+  });
+  await connection.close();
+  assert.equal(retired, true);
+  assert.equal(f.commands.filter((c) => c.action === 'cancel').length, 1);
 });
 test('network bridge rejects stream reordering and cancels before releasing any payload', async (t) => {
   const f = await fixture(t),

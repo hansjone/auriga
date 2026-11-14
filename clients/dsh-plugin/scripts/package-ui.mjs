@@ -1,4 +1,3 @@
-import { verifyBrokerPackage } from '../src/local/broker-package.js';
 /** Release preparation only; published installs never run a build or contact the platform. */
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -9,9 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { packageNetworkTrust } from './package-network-trust.mjs';
 await packageNetworkTrust();
 const root = new URL('../../../', import.meta.url);
-await verifyBrokerPackage(
-  fileURLToPath(new URL('../shell-auth/', import.meta.url)),
-);
 const require = createRequire(new URL('package.json', root));
 const vite = join(dirname(require.resolve('vite/package.json')), 'bin/vite.js');
 const result = spawnSync(process.execPath, [vite, 'build'], {

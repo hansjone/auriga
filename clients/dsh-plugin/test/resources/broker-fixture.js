@@ -151,7 +151,13 @@ export function resourceBroker(runtime, fetcher) {
       return {
         statusCode: response.status,
         headers: headersOut,
-        body: parseStrictJson(bytes, true),
+        body: [
+          'UnifiedCreateDownloadTicket',
+          'UnifiedRenewInstallation',
+          'createMemberResourceDownloadTicket',
+        ].includes(operation)
+          ? { wire: bytes.toString('base64') }
+          : parseStrictJson(bytes, true),
       };
     },
   };

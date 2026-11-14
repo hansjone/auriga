@@ -21,7 +21,7 @@ function trustedOrigin(value) {
 /** Public host service adapter. Business preferences do not modify loader config
  * or reuse credentials when an origin changes.
  * @param {any} ctx @param {any} config
- * @param {{uiOrigin?:string,activeOrigin?:()=>string,desktop?:()=>any,networkControl?:()=>any,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
+ * @param {{uiOrigin?:string,activeOrigin?:()=>string,desktop?:()=>any,networkControl?:()=>any,broker?:()=>any,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
 export function installSettings(
   ctx,
   config,
@@ -30,6 +30,7 @@ export function installSettings(
     activeOrigin,
     desktop,
     networkControl,
+    broker,
     nativeAuth,
     mode = 'connect',
   } = {},
@@ -69,6 +70,7 @@ export function installSettings(
             store,
             desktop,
             networkControl,
+            broker,
             mode,
             privateSkills: createPrivateSkills({
               home: process.env.DSH_HOME || join(homedir(), '.dsh'),
@@ -88,7 +90,7 @@ export function installSettings(
   return { getStore };
 }
 
-/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,networkControl?:()=>any,uiOrigin?:string,mode?:string,privateSkills?:ReturnType<typeof createPrivateSkills>}} options */
+/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,networkControl?:()=>any,broker?:()=>any,uiOrigin?:string,mode?:string,privateSkills?:ReturnType<typeof createPrivateSkills>}} options */
 export function createSettingsHandler({
   store,
   desktop,
@@ -99,6 +101,7 @@ export function createSettingsHandler({
   mode = 'connect',
   privateSkills,
   networkControl,
+  broker,
 }) {
   const expectedOrigin = trustedOrigin(uiOrigin);
   const snapshot = () => ({
@@ -335,7 +338,16 @@ export function createSettingsHandler({
       if (path === '/auriga/settings/test') {
         if (!input || Object.keys(input).join(',') !== 'platformOrigin')
           return json(400, { reason: 'invalidSettings' });
-        return json(200, await probe(input.platformOrigin));
+        return json(
+          200,
+          await probe(input.platformOrigin, {
+            origin:
+              typeof activeOrigin === 'function'
+                ? activeOrigin()
+                : activeOrigin,
+            broker: broker?.(),
+          }),
+        );
       }
       await store.save(input);
       return json(200, snapshot());

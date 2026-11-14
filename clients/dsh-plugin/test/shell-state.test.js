@@ -214,3 +214,42 @@ for (const action of ['cancel_login', 'logout']) {
     assert.equal(f.shell.current(), undefined);
   });
 }
+
+test('login reply acknowledges uninterrupted progress already received by subscription', async (t) => {
+  const f = await fixture(t);
+  f.next('signed_out');
+  f.event();
+  f.override(async (command) => {
+    f.next('authenticating');
+    f.event();
+    const snapshot = f.shell.current();
+    f.next('authenticating');
+    f.event();
+    f.next('authenticated');
+    f.event();
+    return { requestId: command.requestId, type: 'snapshot', snapshot };
+  });
+  await f.shell.command('open_login');
+  assert.equal(f.shell.current().state, 'authenticated');
+  assert.equal(f.shell.current().revision, 5);
+});
+test('login reply cannot acknowledge progress interrupted by cancellation and a new login', async (t) => {
+  const f = await fixture(t);
+  f.next('signed_out');
+  f.event();
+  f.override(async (command) => {
+    f.next('authenticating');
+    f.event();
+    const snapshot = f.shell.current();
+    f.next('signed_out');
+    f.event();
+    f.next('authenticating');
+    f.event();
+    return { requestId: command.requestId, type: 'snapshot', snapshot };
+  });
+  await assert.rejects(f.shell.command('open_login'), {
+    code: 'common.conflict',
+  });
+  assert.equal(f.shell.current().state, 'authenticating');
+  assert.equal(f.shell.current().revision, 5);
+});

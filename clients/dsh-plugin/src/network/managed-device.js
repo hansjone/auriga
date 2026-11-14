@@ -61,6 +61,9 @@ export function createManagedNetwork(options) {
         ? runtime?.networkStatus
         : { available: false, connected: false, state: 'unavailable' };
     },
+    get networkControl() {
+      return valid() ? runtime?.networkControl : undefined;
+    },
     get account() {
       return valid() ? { subject: options.ownerId } : undefined;
     },

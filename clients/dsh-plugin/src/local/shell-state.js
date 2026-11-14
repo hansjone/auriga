@@ -53,11 +53,14 @@ export function createShellState(options) {
     connection = 0;
   /** @type {string|undefined} */ let subscription;
   /** @type {Set<()=>void>} */ const invalidations = new Set();
+  /** @type {Map<string,{revision:number,interrupted:boolean,owner?:string}>} */
+  const loginCommands = new Map();
   const notifyInvalidation = () => {
     for (const callback of invalidations) callback();
     options.onInvalidate?.();
   };
   function invalidate() {
+    for (const pending of loginCommands.values()) pending.interrupted = true;
     generation++;
     clearTimeout(timer);
     snapshot = undefined;
@@ -119,6 +122,17 @@ export function createShellState(options) {
     epoch = value.shellEpoch;
     lastRevision = value.revision;
     lastExpiry = Date.parse(value.expiresAt);
+    for (const pending of loginCommands.values()) {
+      if (value.revision <= pending.revision) continue;
+      if (!['authenticating', 'authenticated'].includes(value.state))
+        pending.interrupted = true;
+      if (value.state === 'authenticated') {
+        const owner = identity(value);
+        if (pending.owner && pending.owner !== owner)
+          pending.interrupted = true;
+        pending.owner = owner;
+      }
+    }
     const changed =
       !snapshot ||
       snapshot.shellEpoch !== value.shellEpoch ||
@@ -201,6 +215,21 @@ export function createShellState(options) {
   ) {
     const active = current(),
       reply = event?.snapshot;
+    const progress = loginCommands.get(command.requestId);
+    if (
+      active &&
+      progress &&
+      !progress.interrupted &&
+      event.requestId === command.requestId &&
+      ['snapshot', 'changed'].includes(event.type) &&
+      reply?.shellEpoch === command.shellEpoch &&
+      reply.shellEpoch === active.shellEpoch &&
+      reply.revision > command.expectedRevision &&
+      reply.revision <= active.revision &&
+      reply.state === 'authenticating' &&
+      ['authenticating', 'authenticated'].includes(active.state)
+    )
+      return true;
     return (
       !!active &&
       ['snapshot', 'changed'].includes(event?.type) &&
@@ -310,7 +339,16 @@ export function createShellState(options) {
           accept(event.snapshot);
         return;
       }
-      await receive(command);
+      if (action === 'open_login')
+        loginCommands.set(command.requestId, {
+          revision: command.expectedRevision,
+          interrupted: false,
+        });
+      try {
+        await receive(command);
+      } finally {
+        loginCommands.delete(command.requestId);
+      }
     },
     /** Capture a generation before any asynchronous platform operation.
      * Calling check before effects and before publishing rejects late results. */

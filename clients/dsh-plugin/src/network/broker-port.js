@@ -25,8 +25,15 @@ export function createBrokerNetworkPort({ broker, contexts }) {
     const tool = await contexts.tool(execution);
     await contexts.finish(tool.executionContextId);
     check();
-    const hostSessionId = tool.hostSessionId,
-      source = await contexts.session(hostSessionId);
+    return openSession(tool.hostSessionId, receive);
+  }
+  async function openSession(
+    /** @type {string} */ hostSessionId,
+    /** @type {(bytes:Buffer)=>void} */ receive,
+  ) {
+    if (closed) return fail();
+    const check = broker.state.fence();
+    const source = await contexts.session(hostSessionId);
     check();
     if (
       closed ||
@@ -60,12 +67,29 @@ export function createBrokerNetworkPort({ broker, contexts }) {
     /** @type {()=>void} */ check,
     /** @type {(bytes:Buffer)=>void} */ firstReceiver,
   ) {
+    const snapshot = broker.state.current();
     const result = await broker.call('network_open', {
       executionContextId: source.executionContextId,
     });
     const streamId = result.body.streamId;
+    let registration = result.body.registration;
     try {
       check();
+      const binding = result.body.binding;
+      if (
+        binding?.executionContextId !== source.executionContextId ||
+        binding?.shellEpoch !== snapshot?.shellEpoch ||
+        binding?.revision !== snapshot?.revision ||
+        registration?.tenant !== snapshot?.identity?.tenantId ||
+        registration?.device !== snapshot?.identity?.deviceId ||
+        !/^[1-9][0-9]*$/.test(registration?.realm ?? '') ||
+        !/^[1-9][0-9]*$/.test(registration?.node ?? '') ||
+        BigInt(registration.realm) > 18446744073709551615n ||
+        BigInt(registration.node) > 18446744073709551615n ||
+        registration.systemAddress !==
+          `aur1:${BigInt(registration.realm).toString(16)}.${BigInt(registration.node).toString(16)}.0`
+      )
+        return fail();
       if (
         closed ||
         !contexts.validSession(hostSessionId, source.executionContextId)
@@ -80,6 +104,7 @@ export function createBrokerNetworkPort({ broker, contexts }) {
     /** @type {Set<(bytes:Buffer)=>void>} */ const receivers = new Set([
       firstReceiver,
     ]);
+    /** @type {Set<()=>void>} */ const closedListeners = new Set();
     let retired = false,
       sequence = 0;
     const current = () => {
@@ -95,6 +120,17 @@ export function createBrokerNetworkPort({ broker, contexts }) {
     const port = {
       context: source.executionContextId,
       hostSessionId,
+      takeRegistration() {
+        current();
+        const result = { ...registration };
+        registration = { ...registration, created: false };
+        return result;
+      },
+      onClosed(/** @type {()=>void} */ listener) {
+        current();
+        closedListeners.add(listener);
+        return () => closedListeners.delete(listener);
+      },
       listen(/** @type {(bytes:Buffer)=>void} */ receive) {
         current();
         receivers.add(receive);
@@ -113,7 +149,16 @@ export function createBrokerNetworkPort({ broker, contexts }) {
       async close() {
         if (retired) return;
         retired = true;
+        registration = undefined;
         receivers.clear();
+        for (const listener of closedListeners) {
+          try {
+            listener();
+          } catch {
+            // One consumer cannot retain the retired shell stream.
+          }
+        }
+        closedListeners.clear();
         if (connections.get(hostSessionId) === port)
           connections.delete(hostSessionId);
         await broker
@@ -145,11 +190,15 @@ export function createBrokerNetworkPort({ broker, contexts }) {
           void port.close();
         }
       });
-      await broker.streamCommand({
-        streamId,
-        action: 'credit',
-        creditBytes: 65536,
-      });
+      // Credit replies carry the next downstream event. Waiting here would
+      // prevent the caller from sending the READY that produces that event.
+      void broker
+        .streamCommand({
+          streamId,
+          action: 'credit',
+          creditBytes: 65536,
+        })
+        .catch(() => port.close());
       current();
       return port;
     } catch (error) {
@@ -159,6 +208,7 @@ export function createBrokerNetworkPort({ broker, contexts }) {
   }
   return {
     open,
+    openSession,
     async submit(
       /** @type {any} */ execution,
       /** @type {Uint8Array} */ request,

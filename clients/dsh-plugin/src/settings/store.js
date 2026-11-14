@@ -1,4 +1,3 @@
-/* global AbortSignal */
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -46,54 +45,28 @@ export function normalizeOrigin(input) {
   return url.origin;
 }
 
-/** Checks the documented public JWKS endpoint only; never sends credentials.
- * A reachable JWKS is not proof of login, Team or model authorization.
- * @param {string} origin @param {typeof fetch} [fetcher] */
-export async function probe(origin, fetcher = fetch) {
+/** Probe only the current shell installation through its fixed operation.
+ * A provider response proves reachability, without granting platform authority.
+ * @param {string} origin @param {{origin?:string,broker?:any}} [connection] */
+export async function probe(origin, connection = {}) {
   const platform = normalizeOrigin(origin);
+  if (platform !== connection.origin || !connection.broker)
+    return { reachable: false, reason: 'unavailable' };
+  const { broker } = connection;
   try {
-    const response = await fetcher(platform + '/oauth2/jwks', {
-      redirect: 'error',
-      credentials: 'omit',
-      signal: AbortSignal.timeout(10000),
-      headers: { accept: 'application/json' },
-    });
-    if (!response.ok)
-      return { reachable: false, reason: 'http', status: response.status };
-    const reader = response.body?.getReader();
-    if (!reader) return { reachable: false, reason: 'invalidPlatform' };
-    let size = 0;
-    const chunks = [];
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > 131072) {
-          await reader.cancel();
-          return { reachable: false, reason: 'invalidPlatform' };
-        }
-        chunks.push(value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    let data;
-    try {
-      data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    } catch {
-      return { reachable: false, reason: 'invalidPlatform' };
-    }
-    return Array.isArray(data?.keys)
+    const response = await broker.call('provider_diagnostic', {});
+    if (response.statusCode < 200 || response.statusCode >= 300)
+      return { reachable: false, reason: 'http', status: response.statusCode };
+    return typeof response.body?.available === 'boolean'
       ? { reachable: true }
       : { reachable: false, reason: 'invalidPlatform' };
   } catch (error) {
+    const value = /** @type {any} */ (error);
     return {
       reachable: false,
-      reason:
-        error instanceof Error && error.name === 'TimeoutError'
-          ? 'timeout'
-          : 'network',
+      ...(Number.isInteger(value?.status)
+        ? { reason: 'http', status: value.status }
+        : { reason: value?.name === 'TimeoutError' ? 'timeout' : 'network' }),
     };
   }
 }

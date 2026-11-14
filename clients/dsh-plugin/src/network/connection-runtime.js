@@ -728,6 +728,8 @@ export async function openConnectionRuntime(options) {
         if (!entry.live || closed || currentConnection !== entry) return;
         if (state.error !== undefined) transportFailure.fail(state.error);
         if (state.state !== 'ready') {
+          if (state.state === 'stopped')
+            void close('unavailable').catch(() => {});
           connected = false;
           retireRegistration();
           entry.proof = undefined;

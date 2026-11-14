@@ -5,12 +5,11 @@ import {
 } from '../../src/observability/index.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sign, generateKeyPairSync } from 'node:crypto';
+import { sign, generateKeyPairSync, createHash } from 'node:crypto';
 import tls from 'node:tls';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
-import * as Plugin from '../../src/plugin.js';
 import { createVault } from '../../src/local/vault.js';
 import { setImmediate } from 'node:timers/promises';
 import {
@@ -41,7 +40,7 @@ import { TransportError } from '../../src/network/transport/errors.js';
 import {
   createDeviceProvider,
   DeviceControlUnavailable,
-} from '../../src/network/device-provider.js';
+} from '../../../shell-auth/device-provider.mjs';
 import { startNatsServer } from './transport/support/nats-server.js';
 import { ensureNatsServer } from './transport/support/nats-binary.js';
 import {
@@ -2523,13 +2522,8 @@ test('plugin actual entry resumes verified native device into official factory, 
   );
   const wire = [],
     subjects = [],
-    calls = [],
-    tools = new Set(),
-    routes = new Map(),
-    effects = [],
-    jobs = [];
-  let ticketCount = 0,
-    hostCalls = 0;
+    calls = [];
+  let ticketCount = 0;
   peer.subscribe('auriga.net.up.*.*', {
     callback: (error, msg) => {
       assert.ifError(error);
@@ -2547,29 +2541,8 @@ test('plugin actual entry resumes verified native device into official factory, 
     },
   });
   await peer.flush();
-  const http = createServer((req, res) => {
-    const row = [...routes.values()].find((route) =>
-      req.url.startsWith(route.path),
-    );
-    if (row) void row.handler(req, res);
-    else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-  await new Promise((resolve) => http.listen(0, '127.0.0.1', resolve));
-  t.after(
-    () =>
-      new Promise((resolve) => {
-        http.closeAllConnections();
-        http.close(resolve);
-      }),
-  );
-  const localOrigin = 'http://127.0.0.1:' + http.address().port,
-    nativeFetch = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
     url = new URL(url);
-    if (url.origin === localOrigin) return nativeFetch(url, init);
     const path = url.pathname;
     calls.push(path);
     assert.equal(new Headers(init.headers).has('cookie'), false);
@@ -2638,95 +2611,128 @@ test('plugin actual entry resumes verified native device into official factory, 
       protocolVersion: 1,
     });
   });
-  const localOwnerPeer = { principal: { kind: 'owner' } };
-  const ctx = {
-    profileContext: { dir: profile },
-    webServer: {
-      protocol: 'http:',
-      register(route) {
-        routes.set(route.path, route);
-        return () => routes.delete(route.path);
-      },
-    },
-    connection: {
-      admit: () => ({ peer: localOwnerPeer }),
-      authorizeIndex: () => true,
-      isTrusted: () => true,
-      requestRejection: () => undefined,
-    },
-    tools: {
-      register(tool) {
-        tools.add(tool.name);
-        return () => tools.delete(tool.name);
-      },
-    },
-    sessions: {
-      get() {
-        hostCalls++;
-      },
-      flush() {
-        hostCalls++;
-      },
-    },
-    sessionController: {
-      create() {
-        hostCalls++;
-      },
-      prompt() {
-        hostCalls++;
-      },
-    },
-    on() {
-      return () => {};
-    },
-    effect(fn) {
-      effects.push(fn());
-    },
-    inject(names, fn) {
-      if (names.every((name) => ctx[name]))
-        jobs.push(Promise.resolve().then(() => fn(ctx)));
-    },
+  const { fixture: brokerFixture, login } =
+    await import('../../../shell-auth/test/fixtures.mjs');
+  const { BusinessProxy } = await import('../../../shell-auth/business.mjs');
+  const core = await import('../../../shell-auth/network-core.mjs');
+  const { buildBroker } = await import('../../../shell-auth/build.mjs');
+  const { startIpc } = await import('../../../shell-auth/ipc.mjs');
+  const { spawn } = await import('node:child_process');
+  const source = brokerFixture();
+  Object.assign(source.identity, {
+    tenantId: claims.tid,
+    memberId: claims.sub,
+    deviceId: claims.did,
+  });
+  Object.assign(source.claims, claims);
+  source.tokens.access_token = accessToken;
+  const connectionConfig = {
+    platformOrigin: claims.iss,
+    issuer: claims.iss,
+    clientId: 'auriga-dsh',
+    providerId: source.identity.providerId,
+    network: { realm: '2', roots: testRoots, wssUrl: server.url },
   };
+  source.platform.config = connectionConfig;
+  const begin = source.platform.begin;
+  source.platform.begin = async () => ({
+    ...(await begin()),
+    verification_uri: claims.iss + '/device',
+  });
+  source.platform.audience = async () => source.tokens;
+  await login(source);
+  const artifact = join(profile, 'broker');
+  buildBroker(artifact);
+  const isolatedBase = fileURLToPath(new URL('../../target/', import.meta.url));
+  await mkdir(isolatedBase, { recursive: true });
+  const isolated = await mkdtemp(join(isolatedBase, 'auth-k3-entry-'));
+  assert.ok(isolated.startsWith(isolatedBase));
+  await nodeFs.cp(
+    fileURLToPath(new URL('../../src', import.meta.url)),
+    join(isolated, 'src'),
+    { recursive: true },
+  );
+  await nodeFs.copyFile(
+    fileURLToPath(new URL('../../package.json', import.meta.url)),
+    join(isolated, 'package.json'),
+  );
+  await nodeFs.cp(artifact, join(isolated, 'shell-auth'), { recursive: true });
+  const uploads = join(profile, 'uploads'),
+    networkDirectory = join(profile, 'broker-network');
+  await mkdir(uploads);
+  await mkdir(networkDirectory);
+  const business = new BusinessProxy(source.broker, globalThis.fetch, uploads, {
+    networkDirectory,
+    networkCore: core,
+  });
+  const ipc = await startIpc({
+    helper: join(artifact, 'windows/shell-helper.exe'),
+    broker: source.broker,
+    business,
+  });
+  let child;
   t.after(async () => {
-    for (const dispose of effects.reverse()) dispose?.();
-    await waitFor(() => Promise.resolve(true), 'effects');
+    child?.kill();
+    await ipc.close();
+    business.close();
+    await source.broker.close();
+    await nodeFs.rm(isolated, { recursive: true, force: true });
   });
-  await Plugin.apply(ctx, {
-    connect: {
-      platformOrigin: claims.iss,
-      issuer: claims.iss,
-      clientId: 'auriga-dsh',
-      providerId: 'team',
-      network: { realm: '2', roots: testRoots, wssUrl: server.url },
+  child = spawn(
+    process.execPath,
+    [
+      fileURLToPath(new URL('../k3-plugin-entry-child.mjs', import.meta.url)),
+      isolated,
+      profile,
+      JSON.stringify(connectionConfig),
+    ],
+    {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        LOCALAPPDATA: join(profile, 'local-state'),
+        XDG_STATE_HOME: join(profile, 'local-state'),
+      },
     },
+  );
+  let output = '';
+  child.stdout.on('data', (bytes) => {
+    output += bytes;
   });
-  await Promise.all(jobs);
-  const before = await nativeFetch(localOrigin + '/auriga/local-login/status');
-  const login = await before.json();
-  assert.equal(typeof login.network.connected, 'boolean');
+  child.stderr.on('data', (bytes) => {
+    output += bytes;
+  });
+  const exited = once(child, 'exit');
+  await ipc.attach(child);
+  const [code] = await exited;
+  assert.equal(code, 0, output);
+  const result = JSON.parse(
+    await readFile(join(profile, 'entry-result.json'), 'utf8'),
+  );
+  assert.equal(typeof result.status.network.connected, 'boolean');
   assert.ok(
     calls.length > 0,
-    'saved device restores platform capabilities without a browser login',
+    'shell device restores platform capabilities without a plugin browser login',
   );
-  const cookie = '';
-  const state = await waitFor(async () => {
-    const response = await nativeFetch(
-      localOrigin + '/auriga/local-login/status',
-      { headers: { cookie } },
-    );
-    const value = await response.json();
-    return value.network.connected && value;
-  }, 'plugin official connected');
-  assert.equal(state.network.connected, true);
+  assert.equal(result.status.loggedIn, true);
+  assert.equal(result.status.network.connected, true);
+  assert.equal(result.status.network.state, 'ready');
   assert.equal(ticketCount, 2);
   assert.notEqual(subjects[0], subjects[1]);
   assert.equal(wire.length, 2);
-  assert.equal(hostCalls, 0);
-  assert.equal(tools.has('auriga_send_message'), false);
+  assert.equal(result.hostCalls, 0);
+  assert.equal(result.hasSendTool, false);
   const deviceDirectories = await nodeFs.readdir(
     join(profile, 'auriga-connect/network/devices'),
   );
   assert.equal(deviceDirectories.length, 1);
+  assert.equal(
+    deviceDirectories[0],
+    createHash('sha256')
+      .update(JSON.stringify([claims.iss, claims.tid, claims.did]))
+      .digest('hex'),
+  );
   const hostDirectory = join(
     profile,
     'auriga-connect/network/devices',
@@ -2737,27 +2743,17 @@ test('plugin actual entry resumes verified native device into official factory, 
     await readFile(join(hostDirectory, 'ledger.json'), 'utf8'),
   );
   assert.equal(ledger.identity.nodeIncarnation, 'inc-1');
-  const logout = await nativeFetch(localOrigin + '/auriga/local-login/logout', {
-    method: 'POST',
-    headers: {
-      origin: localOrigin,
-      cookie,
-      'content-type': 'application/json',
-      'x-auriga-csrf': state.csrf,
-    },
-    body: '{}',
-  });
-  assert.equal(logout.status, 200);
+  assert.equal(result.logoutStatus, 200);
   await waitFor(async () => {
     try {
       await readFile(join(hostDirectory, 'ledger.lock'));
       return false;
-    } catch (e) {
-      return e.code === 'ENOENT';
+    } catch (error) {
+      return error.code === 'ENOENT';
     }
   }, 'logout releases host writer');
   assert.equal(ticketCount, 2);
-  assert.equal(hostCalls, 0);
+  assert.equal(result.hostCalls, 0);
 });
 
 test('initial commit diagnostics use the real final JSON sink and distinguish lifecycle generation', async (t) => {

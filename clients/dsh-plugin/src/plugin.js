@@ -51,6 +51,7 @@ export async function apply(ctx, config) {
       : {
           activeOrigin: () => binding?.runtime.config.platformOrigin ?? '',
           desktop: () => binding?.runtime.desktop,
+          broker: () => binding?.runtime.broker,
           networkControl: () => binding?.runtime.networkControl,
           nativeAuth: {
             requestRejection: (req) =>

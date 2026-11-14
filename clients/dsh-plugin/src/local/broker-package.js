@@ -11,7 +11,8 @@ import {
 } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { fstatSync, readSync } from 'node:fs';
+import { fstatSync, createReadStream } from 'node:fs';
+import { isatty } from 'node:tty';
 import { resolve, relative, isAbsolute, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
@@ -82,22 +83,51 @@ export async function verifyBrokerPackage(directory) {
  * setting, HTTP header or page may choose a helper or connection capability. */
 /** @type {any} */ let descriptorCache;
 let descriptorRead = false;
-function inheritedDescriptor() {
+async function inheritedDescriptor() {
   if (descriptorRead) return descriptorCache;
   descriptorRead = true;
   try {
-    if (!fstatSync(3).isFIFO()) return undefined;
-    const bytes = Buffer.alloc(65537);
-    let size = 0;
-    for (;;) {
-      const n = readSync(3, bytes, size, bytes.length - size, null);
-      size += n;
-      if (!n) break;
-      if (size >= bytes.length) throw new Error('broker descriptor limit');
-    }
-    descriptorCache = JSON.parse(bytes.subarray(0, size).toString('utf8'));
-    return descriptorCache;
+    const stat = fstatSync(3);
+    // Windows inherited anonymous pipes have no POSIX FIFO type. A regular
+    // file, terminal, directory or Node's own IPC channel cannot carry this boot descriptor.
+    if (
+      stat.isFile() ||
+      stat.isDirectory() ||
+      isatty(3) ||
+      /** @type {any} */ (process.channel)?.fd === 3
+    )
+      return undefined;
+    if (process.platform !== 'win32' && !stat.isFIFO() && !stat.isSocket())
+      return undefined;
+    descriptorCache = new Promise((resolve, reject) => {
+      const input = createReadStream('', { fd: 3, autoClose: false });
+      /** @type {Buffer[]} */ const parts = [];
+      let size = 0;
+      const timer = setTimeout(() => {
+        input.destroy();
+        reject(new Error('broker descriptor timeout'));
+      }, 5000);
+      input.on('data', (bytes) => {
+        size += bytes.length;
+        if (size > 65536) input.destroy(new Error('broker descriptor limit'));
+        else parts.push(Buffer.from(bytes));
+      });
+      input.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      input.once('end', () => {
+        clearTimeout(timer);
+        try {
+          resolve(JSON.parse(Buffer.concat(parts).toString('utf8')));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    return await descriptorCache;
   } catch {
+    descriptorCache = undefined;
     return undefined;
   }
 }
@@ -151,7 +181,7 @@ export async function writeBrokerInstallation(root, config) {
 
 /** @param {{directory?:string,config?:any,dataHome?:string}} [options] */
 export async function connectPackagedBroker(options = {}) {
-  let descriptor = inheritedDescriptor();
+  let descriptor = await inheritedDescriptor();
   /** @type {import('node:child_process').ChildProcess|undefined} */ let child;
   const stop = () => {
     if (!child || child.exitCode !== null) return;

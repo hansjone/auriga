@@ -1,5 +1,5 @@
 import test from 'node:test';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -8,6 +8,8 @@ import { createConnectRuntime } from '../src/local/runtime.js';
 import { resourceRequest } from '../src/resources/broker-transport.js';
 import { createVault } from '../src/local/vault.js';
 import { brokerFixture } from './broker-fixture.js';
+import { openLedger } from '../src/network/host/ledger.js';
+import { createFileLedgerStore } from '../src/network/host/store.js';
 
 async function fixture(t, legacy = false) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-shell-runtime-'));
@@ -42,6 +44,45 @@ test('actual connect runtime inherits shell identity without platform credential
   assert.equal(runtime.vault.snapshot().credential, undefined);
   assert.equal(runtime.getAccess, undefined);
   assert.equal(runtime.status({ headers: {} }).loggedIn, false);
+});
+test('shell identity reads the existing device ledger without changing its writer or retaining access after logout', async (t) => {
+  const { runtime, connection, directory, req } = await fixture(t);
+  const key = createHash('sha256')
+    .update(
+      JSON.stringify([
+        '',
+        connection.identity.tenantId,
+        connection.identity.deviceId,
+      ]),
+    )
+    .digest('hex');
+  const dir = join(directory, 'network', 'devices', key, 'host');
+  const ledger = await openLedger({
+    identity: {
+      tenant: connection.identity.tenantId,
+      realm: '2',
+      node: '64',
+      nodeIncarnation: 'inc-1',
+    },
+    store: createFileLedgerStore({ dir }),
+    initialize: true,
+  });
+  t.after(() => ledger.close());
+  const before = await readFile(join(dir, 'ledger.json'), 'utf8');
+  const lock = await readFile(join(dir, 'ledger.lock'), 'utf8');
+  assert.deepEqual(
+    (await runtime.baseTools.readLocal()).identity,
+    ledger.peek().identity,
+  );
+  assert.equal(await readFile(join(dir, 'ledger.json'), 'utf8'), before);
+  assert.equal(await readFile(join(dir, 'ledger.lock'), 'utf8'), lock);
+  assert.deepEqual(runtime.baseTools.getState().network, runtime.networkStatus);
+  assert.equal(
+    runtime.status(req).capabilities.consent,
+    runtime.consentAvailable,
+  );
+  connection.logout();
+  assert.equal(await runtime.baseTools.readLocal(), null);
 });
 test('host contexts and latest credential version use the K2 IPC envelopes', async (t) => {
   const { runtime, connection } = await fixture(t);

@@ -21,14 +21,16 @@ DSH owner admission and local/personal-model use remain independent of the
 platform snapshot. Expired, revoked or mismatched shell identity fences platform
 operations immediately, including pending calls and buffered model output.
 
-This branch is an implementation candidate. The broker network stream port is
-present, but the full network READY/ledger/source/consent/durable runtime is not
-yet connected: `network_open` does not carry the trusted first-registration
-projection needed for safe bootstrap. The protocol implementation described below
-remains independently tested; it does not establish a working installed network
-path. Platform model generation also still requires trusted capacity/tokenizer
-ports (see [AI status](src/ai/README.md)). Real isolated DSH/Desktop acceptance
-has not been completed.
+The network runtime consumes the shell's identity-bound registration projection
+and stream. C owns device HTTP requests, tickets and the NATS connection. The
+plugin retains signed READY verification, its durable ledger and native session
+capabilities. The isolated Node entry regression exercises the packaged helper,
+Windows private pipe, C1/C2 handshake and logout against test platform services.
+Settings connection tests use the current shell's fixed provider diagnostic
+operation. Save a changed platform address before testing that installation.
+Platform model generation requires trusted capacity/tokenizer ports supplied by
+native composition (see [AI status](src/ai/README.md)). Full DSH/Desktop GUI
+acceptance is recorded separately from these automated regressions.
 
 ## Library
 

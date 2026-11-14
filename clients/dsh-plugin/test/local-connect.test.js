@@ -1,5 +1,5 @@
 import { test } from 'node:test';
-/* global Headers, structuredClone */
+/* global structuredClone */
 import assert from 'node:assert/strict';
 import {
   mkdtemp,
@@ -9,7 +9,7 @@ import {
   rm,
   readdir,
 } from 'node:fs/promises';
-import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { setImmediate } from 'node:timers/promises';
 import { createSettingsStore } from '../src/settings/store.js';
 import { tmpdir } from 'node:os';
@@ -18,16 +18,9 @@ import { createVault } from '../src/local/vault.js';
 import { createServer } from 'node:http';
 import { platformConfig } from '../src/local/config.js';
 import { createPlatform } from '../../shell-auth/platform.mjs';
-import { createConnectRuntime } from '../src/local/runtime.js';
 import { createTeam } from '../src/local/team.js';
-import { runtimePeer } from './local-runtime-peer.js';
-import { createDeviceProvider } from '../src/network/device-provider.js';
-import {
-  publicationFixture,
-  testRoots,
-  signedV2Keyset as signedKeyset,
-  signedV2Announcement as signedAnnouncement,
-} from './network/trust/keyset-fixtures.js';
+import { shellNetworkPeer } from './shell-network-peer.js';
+import { testRoots } from './network/trust/keyset-fixtures.js';
 
 const config = {
   platformOrigin: 'https://portal.example.com',
@@ -44,156 +37,6 @@ async function until(predicate, message) {
   }
 }
 
-// Unit peer only: real native token validation, encrypted vault and default N1
-// provider. Registration is denied deliberately; this never claims WSS/READY.
-async function nativeNetworkPeer(t, options = {}) {
-  const directory = await mkdtemp(join(tmpdir(), 'auriga-native-network-'));
-  const { publicKey, privateKey } = generateKeyPairSync('ec', {
-    namedCurve: 'P-256',
-  });
-  const claims = {
-    iss: config.issuer,
-    aud: 'auriga',
-    ptyp: 'device',
-    ctx: 'device',
-    scope: 'auriga.connect',
-    tid: randomUUID(),
-    sub: randomUUID(),
-    did: randomUUID(),
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
-  };
-  const unsigned = [{ alg: 'ES256', kid: 'native-test', typ: 'at+jwt' }, claims]
-    .map((value) => Buffer.from(JSON.stringify(value)).toString('base64url'))
-    .join('.');
-  const accessToken =
-    unsigned +
-    '.' +
-    sign('sha256', Buffer.from(unsigned), {
-      key: privateKey,
-      dsaEncoding: 'ieee-p1363',
-    }).toString('base64url');
-  const tokens = {
-    access_token: accessToken,
-    refresh_token: 'invalid-native-network-test-proof',
-    token_type: 'Bearer',
-    scope: 'auriga.connect',
-  };
-  const requests = [];
-  let runtime;
-  t.mock.method(globalThis, 'fetch', async (url, init) => {
-    const path = new URL(url).pathname;
-    requests.push(path);
-    if (path === '/api/iam/v1/login/providers')
-      return Response.json({
-        items: [
-          { id: 'team', connectorType: 'team-account', primaryStep: 'form' },
-        ],
-      });
-    if (path === '/oauth2/jwks')
-      return Response.json({
-        keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'native-test' }],
-      });
-    if (path === '/api/iam/v1/login/transactions')
-      return Response.json({
-        id: 'native-transaction',
-        nativeDevice: {
-          deviceCode: 'invalid-native-device-code',
-          expiresAt: new Date(Date.now() + 60000).toISOString(),
-          interval: 1,
-        },
-        step: { type: 'form', form: 'password' },
-      });
-    if (path.endsWith('/native-transaction/advance')) {
-      const input = JSON.parse(init.body);
-      return Response.json({
-        id: 'native-transaction',
-        status: input.values?.totp ? 'completed' : 'pending',
-        step: input.values?.totp
-          ? { type: 'complete' }
-          : { type: 'form', form: 'totp' },
-      });
-    }
-    if (path === '/oauth2/token') {
-      assert.equal(
-        new URLSearchParams(init.body).get('grant_type'),
-        'urn:ietf:params:oauth:grant-type:device_code',
-      );
-      return options.exchange
-        ? options.exchange(tokens)
-        : Response.json(tokens);
-    }
-    if (path === '/ai/mcp')
-      return options.teamRequest
-        ? options.teamRequest(init)
-        : Response.json({ code: 'common.unavailable' }, { status: 503 });
-    if (path === '/api/iam/v1/network/register') {
-      assert.equal(
-        new Headers(init.headers).get('authorization'),
-        'Bearer ' + accessToken,
-      );
-      assert.equal(init.credentials, 'omit');
-      assert.equal(new Headers(init.headers).get('origin'), null);
-      assert.equal(init.body, '{}');
-      assert.equal(
-        runtime.vault.snapshot().credential.accessToken,
-        accessToken,
-      );
-      assert.equal(runtime.vault.snapshot().credential.claims.sub, claims.sub);
-      assert.ok((await readFile(join(directory, 'connect.json'))).length > 0);
-      return options.register
-        ? options.register(init)
-        : Response.json({ code: 'common.forbidden' }, { status: 403 });
-    }
-    if (
-      path === '/oauth2/revoke' ||
-      path === '/api/iam/v1/logout' ||
-      (path.endsWith('/native-transaction') && init.method === 'DELETE')
-    )
-      return Response.json({});
-    throw new Error('unexpected native network path ' + path);
-  });
-  runtime = await createConnectRuntime({
-    directory,
-    config: {
-      ...config,
-      network: {
-        realm: '2',
-        wssUrl: 'wss://network.example.com/',
-        roots: testRoots,
-      },
-    },
-    ctx: {
-      webServer: { protocol: 'http:' },
-      ...(options.noTeamCapabilities
-        ? {}
-        : {
-            tools: { register: () => () => {} },
-            sessionController: { create() {}, prompt() {} },
-            sessions: { get() {}, flush() {} },
-          }),
-    },
-  });
-  t.after(async () => {
-    await runtime.close();
-    await rm(directory, { recursive: true, force: true });
-  });
-  const request = runtime.nativeRequest({ principal: { kind: 'owner' } });
-  runtime.prepare(request);
-
-  const advance = (values) =>
-    runtime.login(request, {
-      action: 'advance',
-      input: { type: 'form', values },
-    });
-  async function complete() {
-    await runtime.login(request, { action: 'begin' });
-    await advance({ password: 'invalid-test-password' });
-    return advance({ totp: 'invalid-test-totp' });
-  }
-  return { runtime, request, requests, tokens, claims, advance, complete };
-}
-
 for (const noTeamCapabilities of [false, true])
   test(
     'committed native identity starts default N1 despite ' +
@@ -201,71 +44,83 @@ for (const noTeamCapabilities of [false, true])
         ? 'missing legacy Team capabilities'
         : 'legacy MCP failure'),
     async (t) => {
-      const peer = await nativeNetworkPeer(t, { noTeamCapabilities });
-      const { runtime, request, requests, complete } = peer;
-      await complete();
-
+      const f = await shellNetworkPeer(t, { noTeamCapabilities });
+      await f.complete();
       await until(
-        () => runtime.networkStatus.reason === 'forbidden',
-        'default provider must reach the denied register endpoint independently of Team',
+        () => f.runtime.networkStatus.reason === 'forbidden',
+        'default network register denial',
       );
-      assert.equal(runtime.status(request).loggedIn, true);
-      assert.equal(runtime.status(request).connected, false);
-      assert.equal(runtime.status(request).communication, 'unavailable');
-      assert.equal(runtime.networkStatus.connected, false);
-      assert.equal(requests.includes('/api/iam/v1/network/register'), true);
-      assert.equal(requests.includes('/ai/mcp'), !noTeamCapabilities);
+      assert.equal(f.runtime.status(f.request).loggedIn, true);
+      assert.equal(f.runtime.status(f.request).connected, false);
       assert.equal(
-        requests.some((path) => /network\/(tickets|keys)/.test(path)),
+        f.runtime.status(f.request).communication,
+        noTeamCapabilities ? 'idle' : 'unavailable',
+      );
+      assert.equal(f.runtime.networkStatus.connected, false);
+      assert.equal(f.requests.includes('/api/iam/v1/network/register'), true);
+      assert.equal(f.requests.includes('/ai/mcp'), !noTeamCapabilities);
+      assert.equal(
+        f.requests.some((path) => /network\/tickets|net\/v1/.test(path)),
         false,
       );
     },
   );
 
 test('password, TOTP, pending token exchange and uncommitted vault cannot start default N1', async (t) => {
+  const password = Promise.withResolvers(),
+    totp = Promise.withResolvers(),
+    exchange = Promise.withResolvers(),
+    commit = Promise.withResolvers();
   let exchangeStarted = false,
-    releaseExchange,
-    commitStarted = false,
-    releaseCommit;
-  const peer = await nativeNetworkPeer(t, {
-    exchange: (tokens) => {
-      exchangeStarted = true;
-      return new Promise((resolve) => {
-        releaseExchange = () => resolve(Response.json(tokens));
-      });
+    commitStarted = false;
+  t.after(() => {
+    password.resolve();
+    totp.resolve();
+    exchange.resolve();
+    commit.resolve();
+  });
+  const f = await shellNetworkPeer(t, {
+    configure(source) {
+      source.platform.poll = async () => {
+        await password.promise;
+        await totp.promise;
+        exchangeStarted = true;
+        await exchange.promise;
+        return source.tokens;
+      };
+      const save = source.broker.vault.save.bind(source.broker.vault);
+      source.broker.vault.save = async (value) => {
+        if (value.tokens) {
+          commitStarted = true;
+          await commit.promise;
+        }
+        return save(value);
+      };
     },
   });
-  const { runtime, request, requests, advance } = peer;
-  const update = runtime.vault.update;
-  runtime.vault.update = async (write) => {
-    commitStarted = true;
-    await new Promise((resolve) => {
-      releaseCommit = resolve;
-    });
-    return update(write);
+  const stopped = () => {
+    assert.equal(f.runtime.networkStatus.state, 'idle');
+    assert.equal(f.runtime.resolve(f.request), undefined);
+    assert.equal(f.requests.includes('/api/iam/v1/network/register'), false);
+    assert.equal(f.runtime.vault.snapshot().credential, undefined);
   };
-  const assertStopped = () => {
-    assert.equal(runtime.networkStatus.state, 'idle');
-    assert.equal(runtime.resolve(request), null);
-    assert.equal(requests.includes('/api/iam/v1/network/register'), false);
-    assert.equal(runtime.vault.snapshot().credential, null);
-  };
-  assertStopped();
-  await runtime.login(request, { action: 'begin' });
-  assertStopped();
-  await advance({ password: 'invalid-test-password' });
-  assertStopped();
-  const completing = advance({ totp: 'invalid-test-totp' });
-  await until(() => exchangeStarted, 'token exchange started');
-  assertStopped();
-  releaseExchange();
-  await until(() => commitStarted, 'vault commit started');
-  assertStopped();
-  releaseCommit();
-  await completing;
+  stopped();
+  await f.runtime.command(f.request, 'open_login');
+  stopped();
+  password.resolve();
+  await setImmediate();
+  stopped();
+  totp.resolve();
+  await until(() => exchangeStarted, 'exchange reached');
+  stopped();
+  exchange.resolve();
+  await until(() => commitStarted, 'durable shell commit reached');
+  stopped();
+  commit.resolve();
+  await Promise.allSettled([...f.source.broker.inflight]);
   await until(
-    () => runtime.networkStatus.reason === 'forbidden',
-    'committed device reaches default registration',
+    () => f.runtime.networkStatus.reason === 'forbidden',
+    'committed device starts network',
   );
 });
 
@@ -276,51 +131,42 @@ for (const failure of [
   'owner-conflict',
 ])
   test('native ' + failure + ' never starts default N1', async (t) => {
-    const { runtime, request, requests, complete, claims } =
-      await nativeNetworkPeer(t, {
-        exchange: (tokens) =>
-          Response.json(
-            failure === 'unknown-exchange'
-              ? { code: 'common.unavailable' }
-              : {
-                  ...tokens,
-                  access_token:
-                    failure === 'invalid-token'
-                      ? 'invalid-jwt'
-                      : tokens.access_token,
-                },
-            { status: failure === 'unknown-exchange' ? 503 : 200 },
-          ),
-      });
-    let owner;
-    if (failure === 'owner-conflict') {
-      owner = {
-        accessToken: 'invalid-existing-owner-proof',
-        refreshToken: 'invalid-existing-refresh-proof',
-        claims: { ...claims, sub: randomUUID() },
-      };
-      await runtime.vault.update((state) => {
-        state.credential = owner;
-      });
-    }
-    if (failure === 'failed-commit')
-      runtime.vault.update = async () => {
-        throw new Error('simulated vault write failure');
-      };
-    await assert.rejects(
-      complete(),
-      failure === 'unknown-exchange'
-        ? (error) => error.status === 503 && error.code === 'common.unavailable'
-        : failure === 'owner-conflict'
-          ? /local owner conflict/
-          : failure === 'failed-commit'
-            ? /simulated vault write failure/
-            : /invalid device credential/,
+    const f = await shellNetworkPeer(t, {
+      expectedIdentity:
+        failure === 'owner-conflict'
+          ? { tenantId: randomUUID(), ownerId: randomUUID() }
+          : undefined,
+      configure(source) {
+        if (failure === 'unknown-exchange')
+          source.platform.poll = async () => {
+            throw Object.assign(new Error('common.unavailable'), {
+              status: 503,
+              code: 'common.unavailable',
+            });
+          };
+        if (failure === 'invalid-token')
+          source.platform.verifyDevice = async () => {
+            throw new Error('invalid device credential');
+          };
+        if (failure === 'failed-commit')
+          source.broker.vault.save = async () => {
+            throw new Error('simulated vault write failure');
+          };
+      },
+    });
+    await f.complete().catch((error) => {
+      assert.equal(error.code, 'common.conflict');
+      assert.notEqual(f.source.broker.snapshot().state, 'authenticated');
+    });
+    assert.equal(f.runtime.resolve(f.request), undefined);
+    assert.equal(f.runtime.networkStatus.state, 'idle');
+    assert.equal(f.requests.includes('/api/iam/v1/network/register'), false);
+    assert.equal(f.runtime.vault.snapshot().credential, undefined);
+    assert.equal(f.runtime.status(f.request).loggedIn, false);
+    assert.equal(
+      f.source.broker.snapshot().state === 'authenticated',
+      failure === 'owner-conflict',
     );
-    assert.equal(runtime.resolve(request), null);
-    assert.equal(runtime.networkStatus.state, 'idle');
-    assert.equal(requests.includes('/api/iam/v1/network/register'), false);
-    assert.deepEqual(runtime.vault.snapshot().credential, owner ?? null);
   });
 
 for (const stop of ['logout', 'reset', 'close'])
@@ -328,8 +174,8 @@ for (const stop of ['logout', 'reset', 'close'])
     stop +
       ' retires default N1 and late legacy MCP/register responses cannot revive it',
     async (t) => {
-      let releaseTeam, releaseRegister, registerSignal;
-      const peer = await nativeNetworkPeer(t, {
+      let releaseTeam, releaseRegister;
+      const f = await shellNetworkPeer(t, {
         teamRequest: (init) =>
           new Promise((resolve) => {
             const body = JSON.parse(init.body);
@@ -342,14 +188,13 @@ for (const stop of ['logout', 'reset', 'close'])
                 }),
               );
           }),
-        register: (init) =>
+        register: () =>
           new Promise((resolve) => {
-            registerSignal = init.signal;
             releaseRegister = () =>
               resolve(
                 Response.json({
-                  tenant: peer.claims.tid,
-                  device: peer.claims.did,
+                  tenant: f.source.identity.tenantId,
+                  device: f.source.identity.deviceId,
                   realm: '2',
                   node: '64',
                   systemAddress: 'aur1:2.40.0',
@@ -358,32 +203,33 @@ for (const stop of ['logout', 'reset', 'close'])
               );
           }),
       });
-      const { runtime, request, requests, complete } = peer;
-      await complete();
-
+      await f.complete();
       await until(
-        () => releaseRegister && releaseTeam,
-        'default register and legacy MCP both in flight',
+        () => releaseTeam && releaseRegister,
+        'register and Team both pending',
       );
-      const closing = stop === 'close' ? runtime.close() : undefined;
-      if (stop === 'logout') await runtime.logout(request);
-      else if (stop === 'reset') await runtime.resetAuthentication();
-      assert.equal(registerSignal.aborted, true);
-      const count = requests.length;
+      if (stop === 'logout') await f.runtime.command(f.request, 'logout');
+      if (stop === 'reset') await f.runtime.resetAuthentication();
+      if (stop === 'close') await f.runtime.close();
+      assert.equal(f.runtime.resolve(f.request), undefined);
+      const count = f.requests.length;
       releaseTeam();
       releaseRegister();
-      await closing;
-      // Drain both resolved HTTP response streams and their continuation microtasks.
       await setImmediate();
-      assert.equal(runtime.resolve(request), null);
+      await setImmediate();
+      assert.equal(f.runtime.resolve(f.request), undefined);
       if (stop !== 'close')
-        assert.equal(runtime.vault.snapshot().credential, null);
+        assert.equal(f.runtime.vault.snapshot().credential, undefined);
       assert.equal(
-        runtime.networkStatus.state,
+        f.runtime.networkStatus.state,
         stop === 'close' ? 'stopped' : 'idle',
       );
-      assert.equal(runtime.networkStatus.connected, false);
-      assert.deepEqual(requests.slice(count), []);
+      assert.equal(f.runtime.networkStatus.connected, false);
+      assert.deepEqual(f.requests.slice(count), []);
+      assert.equal(
+        f.runtime.broker.state.current()?.state === 'authenticated',
+        false,
+      );
     },
   );
 
@@ -393,203 +239,158 @@ for (const status of [403, 401])
       status +
       ' has the correct native login and model scope',
     async (t) => {
-      const { runtime, request, credential } = await runtimePeer(t);
-      const before = runtime.modelStatus;
+      const f = await shellNetworkPeer(t, { loggedIn: true });
+      await until(
+        () => f.runtime.status(f.request).communication === 'unavailable',
+        'Team settled',
+      );
+      const before = f.runtime.modelStatus;
+      const tokens = structuredClone(f.source.broker.record.tokens);
       let denied = false;
-      runtime.attachNetwork({
+      f.runtime.attachNetwork({
         kind: 'device-connection',
         async prepare() {
           denied = true;
           throw Object.assign(new Error('network denied'), { status });
         },
       });
-      const deadline = Date.now() + 2000;
-      while (!denied || runtime.networkStatus.state === 'connecting') {
-        assert.ok(Date.now() < deadline, 'network denial handled');
-        await setImmediate();
-      }
-      {
-        assert.ok(
-          runtime.resolve(request),
-          'native session survives a network-only denial',
-        );
-        assert.deepEqual(runtime.modelStatus, before);
-        assert.equal(
-          runtime.vault.snapshot().credential.accessToken,
-          credential.accessToken,
-        );
-        assert.equal(
-          runtime.networkStatus.reason,
-          status === 403 ? 'forbidden' : 'unavailable',
-        );
-      }
+      await until(
+        () => denied && f.runtime.networkStatus.state !== 'connecting',
+        'network-only denial settled',
+      );
+      assert.ok(
+        f.runtime.resolve(f.request),
+        'native identity survives a network-only denial',
+      );
+      assert.deepEqual(f.runtime.modelStatus, before);
+      assert.deepEqual(f.source.broker.record.tokens, tokens);
+      assert.equal(
+        f.runtime.networkStatus.reason,
+        status === 403 ? 'forbidden' : 'unavailable',
+      );
     },
   );
+
 for (const point of ['register', 'tickets'])
   test(
     'real official provider HTTP 403 at ' +
       point +
       ' preserves native session and model login',
     async (t) => {
-      const { runtime, request, credential } = await runtimePeer(t);
-      const { payload } = publicationFixture();
-      const originalFetch = globalThis.fetch;
-      t.after(() => {
-        globalThis.fetch = originalFetch;
-      });
       let denied = false;
-      globalThis.fetch = async (url, init) => {
-        const path = new URL(url).pathname;
-        if (path.endsWith('/' + point)) {
+      const f = await shellNetworkPeer(t, {
+        register: (_init, source) =>
+          point === 'register'
+            ? ((denied = true),
+              Response.json({ code: 'common.forbidden' }, { status: 403 }))
+            : Response.json({
+                tenant: source.identity.tenantId,
+                device: source.identity.deviceId,
+                realm: '2',
+                node: '64',
+                systemAddress: 'aur1:2.40.0',
+                created: true,
+              }),
+        ticketDenied: () => {
           denied = true;
-          return Response.json({ code: 'common.forbidden' }, { status: 403 });
-        }
-        if (path.endsWith('/network/register'))
-          return Response.json({
-            tenant: credential.claims.tid,
-            device: credential.claims.did,
-            realm: '2',
-            node: '64',
-            systemAddress: 'aur1:2.40.0',
-            created: true,
-          });
-        if (path.endsWith('/keys/announcement'))
-          return Response.json(
-            signedAnnouncement(payload, {}, credential.claims.tid),
-          );
-        if (path.endsWith('/bootstrap/controls'))
-          return Response.json(
-            signedKeyset(payload, credential.claims.tid).control,
-          );
-        if (path.endsWith('/network/keys'))
-          return Response.json(signedKeyset(payload, credential.claims.tid));
-        return originalFetch(url, init);
-      };
-      const before = runtime.modelStatus;
-      runtime.attachNetwork(
-        createDeviceProvider({
-          config: {
-            ...config,
-            network: {
-              realm: '2',
-              roots: testRoots,
-              wssUrl: 'wss://network.example.com/',
-            },
-          },
-          getDevice: async () => ({
-            accessToken: credential.accessToken,
-            claims: credential.claims,
-          }),
-        }),
+        },
+      });
+      await f.complete();
+      await until(
+        () => f.runtime.status(f.request).communication === 'unavailable',
+        'Team settled',
       );
-      const deadline = Date.now() + 3000;
-      while (!denied || runtime.networkStatus.reason !== 'forbidden') {
-        assert.ok(Date.now() < deadline, 'official network denial diagnosed');
-        await setImmediate();
-      }
-      assert.ok(runtime.resolve(request));
-      assert.deepEqual(runtime.modelStatus, before);
-      assert.equal(
-        runtime.vault.snapshot().credential.accessToken,
-        credential.accessToken,
+      const before = f.runtime.modelStatus;
+      const tokens = structuredClone(f.source.broker.record.tokens);
+      await until(
+        () => denied && f.runtime.networkStatus.reason === 'forbidden',
+        'official C provider denial settled',
       );
+      assert.ok(f.runtime.resolve(f.request));
+      assert.deepEqual(f.runtime.modelStatus, before);
+      assert.deepEqual(f.source.broker.record.tokens, tokens);
+      assert.equal(f.runtime.vault.snapshot().credential, undefined);
     },
   );
 
 test('loader network installation selects official device default after login and never leaks to settings/status', async (t) => {
   const network = {
-    realm: '1',
+    realm: '2',
+    roots: testRoots.map((r) => ({ ...r })),
     wssUrl: 'wss://network.example.com:9443/custom/ws',
-    roots: [
-      {
-        kid: 'root',
-        public_key_spki: generateKeyPairSync('ed25519')
-          .publicKey.export({ format: 'der', type: 'spki' })
-          .toString('base64url'),
-      },
-    ],
   };
   const expected = structuredClone(network);
   let registerStarted = false,
-    releaseRegister;
-  const registerResponse = new Promise((resolve) => {
-    releaseRegister = resolve;
+    finish;
+  const response = new Promise((resolve) => {
+    finish = resolve;
   });
-  const denyRegister = () =>
-    releaseRegister(
-      Response.json({ code: 'common.forbidden' }, { status: 403 }),
-    );
-  t.after(denyRegister);
-  const { runtime, request, directory, requests, registered } =
-    await runtimePeer(t, {
-      config: { network },
-      networkRegister() {
-        registerStarted = true;
-        return registerResponse;
-      },
-    });
-  network.realm = '2';
+  const deny = () =>
+    finish(Response.json({ code: 'common.forbidden' }, { status: 403 }));
+  t.after(deny);
+  const f = await shellNetworkPeer(t, {
+    config: { network },
+    register: () => {
+      registerStarted = true;
+      return response;
+    },
+  });
+  await f.complete();
+  network.realm = '3';
   network.roots[0].kid = 'injected';
-  // Team readiness is independent of network startup. Hold the real default
-  // provider at register so this assertion cannot sample a closing candidate.
-  await until(() => registerStarted, 'official default reached register');
-  assert.equal(runtime.networkStatus.available, true);
-  assert.equal(runtime.networkStatus.state, 'connecting');
-  assert.equal(runtime.networkStatus.connected, false);
+  await until(() => registerStarted, 'trusted installation reached register');
+  assert.equal(f.runtime.networkStatus.available, true);
+  assert.equal(f.runtime.networkStatus.state, 'connecting');
+  assert.equal(f.runtime.networkStatus.connected, false);
   assert.equal(
-    requests.some((path) => /tickets|keys|net\/v1/.test(path)),
+    f.requests.some((path) => /tickets|net\/v1/.test(path)),
     false,
   );
   assert.equal(
-    [...registered].some((name) => /send/i.test(name)),
+    [...f.registered].some((name) => /send/i.test(name)),
     false,
   );
-  // Official default may already own its writer lock while register is pending.
-  assert.ok(Array.isArray(await readdir(directory)));
-  const settings = await createSettingsStore(directory, config.platformOrigin);
+  assert.ok(Array.isArray(await readdir(f.directory)));
+  const settings = await createSettingsStore(
+    f.directory,
+    config.platformOrigin,
+  );
   await assert.rejects(
     settings.save({ ...settings.snapshot(), network: expected }),
     /invalidSettings/,
   );
   for (const value of [
-    runtime.status(request),
-    runtime.networkStatus,
+    f.runtime.status(f.request),
+    f.runtime.networkStatus,
     settings.snapshot(),
   ]) {
     assert.equal(JSON.stringify(value).includes('public_key_spki'), false);
     assert.equal(JSON.stringify(value).includes(expected.wssUrl), false);
   }
-  denyRegister();
+  deny();
   await until(
-    () => runtime.networkStatus.reason === 'forbidden',
-    'official default completed denied register cleanup',
+    () => f.runtime.networkStatus.reason === 'forbidden',
+    'denied register retired',
   );
-  assert.equal(runtime.networkStatus.available, true);
-  assert.equal(runtime.networkStatus.connected, false);
-  // Even an internal adapter bypass cannot promote request data to installation authority.
-  const attempt = runtime.nativeRequest({ principal: { kind: 'owner' } });
-  runtime.prepare(attempt);
-
-  assert.equal(runtime.status(attempt).loggedIn, true);
+  assert.equal(f.runtime.networkStatus.available, true);
+  assert.equal(f.runtime.networkStatus.connected, false);
+  const request = f.runtime.nativeRequest({ principal: { kind: 'owner' } });
+  assert.equal(f.runtime.prepare(request).body.loggedIn, true);
   let prepared;
-  const detach = runtime.attachNetwork({
+  const detach = f.runtime.attachNetwork({
     ports: {},
     prepare(input) {
       prepared = input;
       return new Promise(() => {});
     },
   });
-
-  const deadline = Date.now() + 2000;
-  while (!prepared) {
-    assert.ok(Date.now() < deadline, 'trusted prepare timeout');
-    await setImmediate();
-  }
+  await until(() => prepared, 'trusted native provider attached');
   assert.deepEqual(prepared.installation, expected);
   assert.ok(Object.isFrozen(prepared.installation.roots[0]));
   detach();
-  await runtime.close();
+  await f.runtime.close();
 });
+
 test('real HTTP negatives preserve 401 and Node requests omit browser Origin; redirects are refused', async () => {
   const seen = [];
   const server = createServer((req, res) => {

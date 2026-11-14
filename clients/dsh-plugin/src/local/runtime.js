@@ -1,3 +1,7 @@
+import { networkInstallation } from '../network/installation.js';
+import { createNetworkLifecycle } from '../network/lifecycle.js';
+import { createBrokerNetworkProvider } from '../network/broker-provider.js';
+import { createControlInstallation } from '../network/trust/installation-control.js';
 import { createHostContexts } from './host-contexts.js';
 import { createTeam } from './team.js';
 import { createModelLifecycle } from '../ai/installation.js';
@@ -11,7 +15,11 @@ import { connectPackagedBroker } from './broker-package.js';
 import { createEnterpriseAuth } from './enterprise.js';
 import { createEnterpriseEnvironment } from './enterprise-environment.js';
 import { memberName } from './member-profile.js';
-import { connectionReason, DIAGNOSTIC_PATH } from '../network/base-tools.js';
+import {
+  connectionReason,
+  DIAGNOSTIC_PATH,
+  readDeviceLedger,
+} from '../network/base-tools.js';
 
 /** @param {string} code */
 const refuse = (code = 'common.unavailable') => {
@@ -32,6 +40,10 @@ export async function createConnectRuntime({
   expectedIdentity,
   signal,
 }) {
+  config = Object.freeze({
+    ...config,
+    ...(config.network ? { network: networkInstallation(config.network) } : {}),
+  });
   const vault = await createVault(directory);
   const savedAuthentication = vault.snapshot();
   const legacy =
@@ -79,6 +91,7 @@ export async function createConnectRuntime({
   /** @type {ReturnType<typeof createEnterpriseAuth>|undefined} */ let enterprise;
   /** @type {ReturnType<typeof createEnterpriseEnvironment>|undefined} */ let environment;
   /** @type {ReturnType<typeof createModelLifecycle>|undefined} */ let models;
+  /** @type {ReturnType<typeof createNetworkLifecycle>|undefined} */ let network;
   const installed =
     connection ??
     (await connectPackagedBroker({ config, dataHome: directory }).catch(
@@ -93,6 +106,7 @@ export async function createConnectRuntime({
       memberProfile = undefined;
       probeEvidence = undefined;
       models?.logout();
+      network?.logout();
       key = '';
       contexts?.invalidate();
       teamGeneration++;
@@ -151,9 +165,13 @@ export async function createConnectRuntime({
           isolationPending = false;
           if (principal) {
             models?.login();
+            network?.login();
             void beginTeam();
             if (contexts) void refreshProfile(expected);
-          } else models?.logout();
+          } else {
+            models?.logout();
+            network?.logout();
+          }
           for (const listener of listeners)
             void Promise.resolve()
               .then(listener)
@@ -179,6 +197,49 @@ export async function createConnectRuntime({
     broker.state.current()?.state === 'authenticated' ? principal : undefined;
   contexts = createHostContexts({ broker, identity, ctx });
   const sessionContexts = contexts;
+  const controlInstallation = createControlInstallation({
+    config,
+    directory: join(directory, 'network'),
+    getScope: () => {
+      const who = identity();
+      return (
+        who && {
+          tenant_id: who.tenantId,
+          realm: config.network?.realm,
+          target_id: who.clientId,
+        }
+      );
+    },
+  });
+  const networkProvider = config.network
+    ? createBrokerNetworkProvider({
+        broker,
+        contexts,
+        ctx,
+        issuer: config.issuer ?? config.platformOrigin,
+        origin: config.platformOrigin,
+        installation: config.network,
+        loadInstallation: controlInstallation.prepare,
+      })
+    : undefined;
+  network = createNetworkLifecycle({
+    directory: join(directory, 'network'),
+    ctx,
+    installation: config.network,
+    offlineControl: controlInstallation,
+    defaultProvider: networkProvider,
+    getAccess: async () => {
+      broker.state.fence();
+      return '';
+    },
+    authorizeLocal: async (context) =>
+      !!identity() &&
+      typeof context === 'object' &&
+      context !== null &&
+      requests.has(context),
+  });
+  if (identity()) network.login();
+
   async function refreshProfile(/** @type {string} */ expected) {
     const who = identity();
     if (!who) return;
@@ -380,6 +441,8 @@ export async function createConnectRuntime({
         origin: config.platformOrigin || null,
         reachable: probeEvidence?.reachable ?? null,
         lastSuccessAt: probeEvidence?.lastSuccessAt ?? null,
+        network: network.status,
+        remoteAvailable: communication === 'ready',
         reason: identity()
           ? 'not_ready'
           : config.platformOrigin
@@ -387,7 +450,19 @@ export async function createConnectRuntime({
             : 'unconfigured',
       }),
       async readLocal() {
-        return null;
+        const who = identity();
+        if (!who) return null;
+        const check = broker.state.fence();
+        // The shell identity supplies only the existing local cache namespace.
+        const saved = await readDeviceLedger(join(directory, 'network'), {
+          claims: {
+            iss: config.issuer ?? config.platformOrigin,
+            tid: who.tenantId,
+            did: who.clientId,
+          },
+        });
+        check();
+        return saved;
       },
       async probe(
         /** @type {string} */ path,
@@ -490,9 +565,9 @@ export async function createConnectRuntime({
           : null,
         csrf: requests.has(req) ? csrf : undefined,
         ...(who && s.uacLoginInfo ? { uacLoginInfo: s.uacLoginInfo } : {}),
-        network: { available: false, connected: false, state: 'idle' },
+        network: network.status,
         models: models?.status ?? { available: false, state: 'idle' },
-        capabilities: { consent: false },
+        capabilities: { consent: !!who && network.consentAvailable },
       };
     },
     prepare(/** @type {any} */ req) {
@@ -504,26 +579,27 @@ export async function createConnectRuntime({
       return this.status(req);
     },
     async resetAuthentication() {
-      broker.state.disconnect();
+      broker.close();
     },
-    attachNetwork(/** @type {any} */ _provider) {
-      return () => {};
-    },
+    attachNetwork: network.attach,
     attachModels: models.attach,
     get networkStatus() {
-      return { available: false, connected: false, state: 'idle' };
+      return network.status;
     },
     get modelStatus() {
       return models.status;
     },
     get consentAvailable() {
-      return false;
+      return network.consentAvailable;
     },
-    consentUI(/** @type {any} */ _context) {
-      return refuse();
-    },
-    messagingUI(/** @type {any} */ _context) {
-      return refuse();
+    consentUI: network.consentUI,
+    messagingUI: network.messagingUI,
+    networkControl: {
+      get available() {
+        return controlInstallation.available;
+      },
+      importPackage: (/** @type {any} */ input) =>
+        network.importControlOffline(input),
     },
     isReady() {
       return !!identity() && communication === 'ready';
@@ -664,9 +740,11 @@ export async function createConnectRuntime({
       environment?.dispose();
       enterprise?.close();
       models?.close();
+      const networkClosed = network?.close();
+      networkProvider?.close();
       broker.close();
       desktop?.close();
-      closing = Promise.allSettled(storage);
+      closing = Promise.allSettled([...storage, networkClosed]);
       return closing;
     },
   };

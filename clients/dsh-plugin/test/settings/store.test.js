@@ -71,48 +71,85 @@ test('settings accepts HTTPS and explicit local HTTP origins only', () => {
     assert.throws(() => normalizeOrigin(value));
 });
 
-test('connection probe refuses redirects and distinguishes HTTP, transport and invalid platform failures', async () => {
-  /** @type {RequestInit} */
-  let options = {};
-  const fetcher = async (
-    /** @type {string|URL|Request} */ _url,
-    /** @type {RequestInit} */ init = {},
-  ) => {
-    options = init;
-    return Response.json({ keys: [] });
-  };
-  assert.deepEqual(await probe('https://example.com', fetcher), {
-    reachable: true,
+test('connection probe uses only the fixed current-shell operation and classifies failures', async () => {
+  const origin = 'https://example.com';
+  let calls = 0;
+  const connection = (work) => ({
+    origin,
+    broker: {
+      call: async (operation, input) => {
+        calls++;
+        assert.equal(operation, 'provider_diagnostic');
+        assert.deepEqual(input, {});
+        return work();
+      },
+    },
   });
-  assert.equal(options.redirect, 'error');
-  assert.equal(options.credentials, 'omit');
+  assert.deepEqual(await probe(origin), {
+    reachable: false,
+    reason: 'unavailable',
+  });
   assert.deepEqual(
     await probe(
-      'https://example.com',
-      async () => new Response(null, { status: 401 }),
+      'https://other.example.com',
+      connection(() => assert.fail('foreign installation')),
+    ),
+    { reachable: false, reason: 'unavailable' },
+  );
+  assert.equal(calls, 0);
+  assert.deepEqual(
+    await probe(
+      origin,
+      connection(() => ({ statusCode: 200, body: { available: true } })),
+    ),
+    { reachable: true },
+  );
+  assert.deepEqual(
+    await probe(
+      origin,
+      connection(() => ({ statusCode: 200, body: { available: false } })),
+    ),
+    { reachable: true },
+  );
+  assert.deepEqual(
+    await probe(
+      origin,
+      connection(() => ({ statusCode: 401 })),
     ),
     { reachable: false, reason: 'http', status: 401 },
   );
   assert.deepEqual(
-    await probe('https://example.com', async () => {
-      throw new Error('private');
-    }),
+    await probe(
+      origin,
+      connection(() => {
+        throw Object.assign(new Error(), { status: 403 });
+      }),
+    ),
+    { reachable: false, reason: 'http', status: 403 },
+  );
+  assert.deepEqual(
+    await probe(
+      origin,
+      connection(() => {
+        throw new Error('private');
+      }),
+    ),
     { reachable: false, reason: 'network' },
   );
   assert.deepEqual(
-    await probe('https://example.com', async () => Response.json({})),
+    await probe(
+      origin,
+      connection(() => ({ statusCode: 200, body: {} })),
+    ),
     { reachable: false, reason: 'invalidPlatform' },
   );
-  for (const body of ['invalid-json', 'x'.repeat(131073)]) {
-    assert.deepEqual(
-      await probe('https://example.com', async () => new Response(body)),
-      { reachable: false, reason: 'invalidPlatform' },
-    );
-  }
   assert.deepEqual(
-    await probe('https://example.com', async () => {
-      throw Object.assign(new Error(), { name: 'TimeoutError' });
-    }),
+    await probe(
+      origin,
+      connection(() => {
+        throw Object.assign(new Error(), { name: 'TimeoutError' });
+      }),
+    ),
     { reachable: false, reason: 'timeout' },
   );
 });

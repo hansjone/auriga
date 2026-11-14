@@ -99,6 +99,24 @@ export async function resourceRequest(runtime, path, options = {}) {
     return Response.json({}, { status });
   }
   let value = output.body;
+  if (
+    [
+      'UnifiedCreateDownloadTicket',
+      'UnifiedRenewInstallation',
+      'createMemberResourceDownloadTicket',
+    ].includes(operation.operation)
+  ) {
+    const wire = value?.wire;
+    const bytes =
+      typeof wire === 'string' ? Buffer.from(wire, 'base64') : Buffer.alloc(0);
+    if (
+      !bytes.length ||
+      bytes.length > 65536 ||
+      bytes.toString('base64') !== wire
+    )
+      fail();
+    value = bytes;
+  }
   if (value?.streamId) value = await runtime.readStream(value.streamId);
   return new Response(
     value instanceof Uint8Array ? new Uint8Array(value) : JSON.stringify(value),
