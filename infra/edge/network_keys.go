@@ -64,11 +64,20 @@ func (g *Gateway) proxyNetworkKeys(w http.ResponseWriter, r *http.Request, audie
 		writeProblem(w, problem(status, code, http.StatusText(status), "network keys request rejected", rid))
 	}
 	path := r.URL.Path
-	if g.collabURL == nil || (path != "/api/collab/v1/network/keys" && path != "/api/collab/v1/network/keys/announcement") || r.URL.EscapedPath() != path {
+	expectedMethod := http.MethodGet
+	switch path {
+	case "/api/collab/v1/network/keys", "/api/collab/v1/network/keys/announcement", "/api/collab/v2/network/keys", "/api/collab/v2/network/keys/announcement", "/api/collab/v2/network/keys/status":
+	case "/api/collab/v2/network/controls/packages", "/api/collab/v2/network/controls/receipts", "/api/collab/v2/network/isolation":
+		expectedMethod = http.MethodPost
+	default:
 		fail(404, "common.not_found")
 		return
 	}
-	if r.Method != http.MethodGet {
+	if g.collabURL == nil || r.URL.EscapedPath() != path {
+		fail(404, "common.not_found")
+		return
+	}
+	if r.Method != expectedMethod {
 		fail(405, "common.validation_failed")
 		return
 	}

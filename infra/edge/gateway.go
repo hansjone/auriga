@@ -407,6 +407,9 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Platform API / oauth routes
 	if path == "/api/collab" || strings.HasPrefix(path, "/api/collab/") {
+		if g.proxyMsgnetBootstrap(w, r, rid) {
+			return
+		}
 		g.proxyNetworkKeys(w, r, audience, clientIP, rid)
 		return
 	}
