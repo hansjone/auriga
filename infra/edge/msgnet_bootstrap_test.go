@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestMsgnetBootstrapIndependentAuthenticationAndFixedRoutes(t *testing.T) {
@@ -86,5 +88,63 @@ func TestMsgnetBootstrapIndependentAuthenticationAndFixedRoutes(t *testing.T) {
 	r = httptest.NewRequest("POST", "https://portal.example.com/api/collab/v2/network/projections/transport", nil)
 	if g.proxyMsgnetBootstrap(httptest.NewRecorder(), r, "test") {
 		t.Fatal("plaintext material endpoint exposed")
+	}
+}
+
+func TestMsgnetBootstrapThroughActualHTTPSGatewayWithoutServiceJWT(t *testing.T) {
+	publicPKI, collabPKI := createAccessPKI(t), createAccessPKI(t)
+	var calls atomic.Int32
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 {
+			t.Error("collab hop skipped mTLS")
+		}
+		if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
+			t.Error("bootstrap depended on stale bearer/cookie")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sealed_or_public":true}`))
+	}))
+	upstream.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{collabPKI.server}, ClientCAs: collabPKI.roots, ClientAuth: tls.RequireAndVerifyClientCert}
+	upstream.StartTLS()
+	defer upstream.Close()
+	g, addresses, _ := accessFixtureConfigured(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("bootstrap touched unrelated API")
+		w.WriteHeader(500)
+	}), func(c *Config, doc map[string]any) {
+		c.TLS = writeAccessServerTLS(t, publicPKI)
+		c.Upstreams["collab"], c.CollabHop = upstream.URL, collabPKI.hop
+		for _, role := range []string{"portal", "admin"} {
+			doc[role+"Origin"].(map[string]any)["scheme"] = "https"
+			doc["listeners"].(map[string]any)[role].(map[string]any)["tls"] = true
+		}
+	})
+	closeAIAdminTransports(t, g)
+	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: publicPKI.hop.ServerName, RootCAs: publicPKI.roots}}}
+	defer client.CloseIdleConnections()
+	for _, endpoint := range []string{"controls", "transport", "keys", "materials"} {
+		method := http.MethodGet
+		var body io.Reader
+		if endpoint == "materials" {
+			method, body = http.MethodPost, strings.NewReader(`{"signed":"request"}`)
+		}
+		r, e := http.NewRequest(method, "https://"+addresses["portal"]+"/api/collab/v2/network/bootstrap/"+endpoint, body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		r.Header.Set("Authorization", "Bearer expired")
+		r.Header.Set("Cookie", "old=expired")
+		response, e := client.Do(r)
+		if e != nil {
+			t.Fatal(e)
+		}
+		data, e := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if e != nil || response.StatusCode != 200 {
+			t.Fatalf("%s: %d %s, %v", endpoint, response.StatusCode, data, e)
+		}
+	}
+	if calls.Load() != 4 {
+		t.Fatalf("public bootstrap calls: %d", calls.Load())
 	}
 }
