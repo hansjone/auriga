@@ -132,11 +132,24 @@ test(
         assert.equal(rejected.error?.code, 'not-bundle');
       }
       const spec = process.env.AURIGA_PACKAGE_INSTALL_SPEC ?? 'link:' + source;
+      if (process.env.AURIGA_PACKAGE_UPGRADE_FROM) {
+        const previous = await ctx.pluginManager.installBundle(
+          process.env.AURIGA_PACKAGE_UPGRADE_FROM,
+          { registry: 'https://registry.npmjs.org/' },
+        );
+        assert.equal(previous.application, 'applied');
+        console.log('REAL_UPGRADE_FROM', previous.version);
+      }
       const installed = await ctx.pluginManager.installBundle(spec, {
         registry: 'https://registry.npmjs.org/',
       });
       console.log('REAL_INSTALL', JSON.stringify(installed));
       assert.equal(installed.application, 'applied');
+      assert.equal(
+        installed.version,
+        JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
+          .version,
+      );
       const rows = await ctx.pluginManager.listPlugins();
       const row = rows.find((r) => r.moduleName === 'auriga-dsh');
       assert.ok(row);
