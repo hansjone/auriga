@@ -13,12 +13,13 @@
 - SignedKeysetV2：`Auriga.NetworkKeyset.v2`
 - SignedKeysetAnnouncementV2：`Auriga.NetworkKeysetAnnouncement.v2`
 - SignedTransportTrustBundle：`Auriga.NetworkTransportTrustBundle.v2`
+- SignedTransportConfirmation：`Auriga.NetworkTransportConfirmation.v2`
 - SignedMigrationPermit：`Auriga.NetworkMigrationPermit.v2`
 - InstallationReceipt：`Auriga.NetworkControlReceipt.v2`
 - ProjectionRequest：`Auriga.NetworkProjectionRequest.v2`
 - ProjectionReceipt：`Auriga.NetworkProjectionReceipt.v2`
 
-后三种对移除 identity_auth 后的完整对象签名。运行钥只允许前三种运行对象（清单、公告、transport bundle）；不得签业务封装、根控制、授权、X.509、IAM、发行、资源或再委托。业务三用途钥与 CA 钥保持独立。授权没有 not_after，也不允许增加硬截止、通配能力或再委托字段。365天复核不改变授权有效性。
+后三种对移除 identity_auth 后的完整对象签名。运行钥允许四种运行对象（清单、公告、TransportTrustBundle、TransportConfirmation）。后两种均要求根授权包含 `network_transport` 能力。不得签业务封装、根控制、授权、X.509、IAM、发行、资源或再委托。业务三用途钥与 CA 钥保持独立。授权没有 not_after，也不允许增加硬截止、通配能力或再委托字段。365天复核不改变授权有效性。
 
 ## 控制、代际和原子持久化
 

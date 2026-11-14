@@ -65084,6 +65084,1941 @@
         },
         "previous_transport_phase": "retire_old"
       }
+    },
+    {
+      "id": "restart-old-next-86400-next",
+      "expected": "accept",
+      "input": {
+        "root_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "now": "2026-11-14T00:00:00Z",
+        "latest_control": {
+          "payload": {
+            "schema_version": 2,
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "control_revision": "2",
+            "issued_at": "2026-11-14T00:00:00Z",
+            "allowed_authorities": [
+              {
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+              }
+            ],
+            "revoked_authority_ids": [],
+            "revoked_installation_ids": [],
+            "minimum_generation": "1",
+            "minimum_keyset_version": "1"
+          },
+          "root_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-root",
+            "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+          }
+        },
+        "seen_control_revision": "2",
+        "seen_generation": "1",
+        "seen_version": "9",
+        "seen_digest": "sha256:faf655198cde6f83cc1887f3edef1f136b06f35998f980f26ad4e5cc6769b8b0",
+        "previous_digest": "sha256:bf643ed90d3754f5cf8f3385863b908556387f744288059b53347e79430c7fa8",
+        "first_publication_ledger": [
+          {
+            "kid": "synthetic-business-0",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-1",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-2",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-k3-restart-old-next",
+            "committed_version": "8",
+            "committed_at": "2026-11-13T00:00:00Z"
+          }
+        ],
+        "publication": {
+          "keyset": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+              "control_revision": "2",
+              "generation": "1",
+              "keyset_version": "10",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "valid_until": "2026-11-15T00:00:00Z",
+              "mode": "restart_recovery",
+              "keys": [
+                {
+                  "kid": "synthetic-restart-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "active",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-21T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "retired",
+                  "not_before": "2026-11-15T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                },
+                {
+                  "kid": "synthetic-business-0",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "alg": "Ed25519",
+                  "purpose": "protocol_response",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "next",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAr7ru0UN1PwxUW4D8U7JNYggZf8lYYB982AH2p_iQSXQ"
+                }
+              ],
+              "first_publications": [
+                {
+                  "kid": "synthetic-business-0",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-restart-2",
+                  "committed_version": "10",
+                  "committed_at": "2026-11-14T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "committed_version": "8",
+                  "committed_at": "2026-11-13T00:00:00Z"
+                }
+              ],
+              "archive": {
+                "before": "2026-11-11T00:00:00Z",
+                "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            },
+            "runtime_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-runtime",
+              "signature": "CTsWay_OFjNAVnVkK1p5Sm_KEbTmBrIcg27CrhYTcwKKCiiWE9aj6tUZLcX47DFPOE-N4DObUvU1f0QqFdHbAw"
+            }
+          },
+          "authority": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_revision": "1",
+              "runtime_kid": "synthetic-runtime",
+              "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+              "not_before": "2026-01-01T00:00:00Z",
+              "expiry_policy": "no_hard_expiry",
+              "review_period_days": 365,
+              "capabilities": [
+                "keyset",
+                "announcement",
+                "business_rotation",
+                "restart_recovery",
+                "history_archive",
+                "network_transport"
+              ],
+              "limits": {
+                "keyset_seconds": 86400,
+                "business_key_seconds": 691200,
+                "restart_key_seconds": 604800,
+                "next_maturity_seconds": 86400,
+                "overlap_seconds": 360,
+                "archive_grace_seconds": 360
+              },
+              "transport_scope": [
+                {
+                  "component": "network",
+                  "identity_id": "synthetic-projector",
+                  "sans": [
+                    "submit.example.com"
+                  ],
+                  "ekus": [
+                    "serverAuth"
+                  ]
+                }
+              ]
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+            }
+          },
+          "control": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "control_revision": "2",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "allowed_authorities": [
+                {
+                  "authority_id": "synthetic-authority",
+                  "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                }
+              ],
+              "revoked_authority_ids": [],
+              "revoked_installation_ids": [],
+              "minimum_generation": "1",
+              "minimum_keyset_version": "1"
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+            }
+          },
+          "predecessor": {
+            "keyset": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+                "control_revision": "2",
+                "generation": "1",
+                "keyset_version": "9",
+                "issued_at": "2026-11-13T00:00:00Z",
+                "valid_until": "2026-11-14T00:00:00Z",
+                "mode": "refresh",
+                "keys": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "alg": "Ed25519",
+                    "purpose": "protocol_response",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "alg": "Ed25519",
+                    "purpose": "management_state",
+                    "state": "active",
+                    "not_before": "2026-11-15T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "next",
+                    "not_before": "2026-11-14T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAr7ru0UN1PwxUW4D8U7JNYggZf8lYYB982AH2p_iQSXQ"
+                  }
+                ],
+                "first_publications": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "committed_version": "8",
+                    "committed_at": "2026-11-13T00:00:00Z"
+                  }
+                ],
+                "archive": {
+                  "before": "2026-11-11T00:00:00Z",
+                  "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                }
+              },
+              "runtime_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-runtime",
+                "signature": "UNca4xxHStDtUudEpvwnQNPucR6hpRtEZFSrzmESXimhWcQ0IDemfwmoMb9zyxBUj1DZuGqanz76n9gij3rSAg"
+              }
+            },
+            "keyset_digest": "sha256:bf643ed90d3754f5cf8f3385863b908556387f744288059b53347e79430c7fa8",
+            "authority": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_revision": "1",
+                "runtime_kid": "synthetic-runtime",
+                "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+                "not_before": "2026-01-01T00:00:00Z",
+                "expiry_policy": "no_hard_expiry",
+                "review_period_days": 365,
+                "capabilities": [
+                  "keyset",
+                  "announcement",
+                  "business_rotation",
+                  "restart_recovery",
+                  "history_archive",
+                  "network_transport"
+                ],
+                "limits": {
+                  "keyset_seconds": 86400,
+                  "business_key_seconds": 691200,
+                  "restart_key_seconds": 604800,
+                  "next_maturity_seconds": 86400,
+                  "overlap_seconds": 360,
+                  "archive_grace_seconds": 360
+                },
+                "transport_scope": [
+                  {
+                    "component": "network",
+                    "identity_id": "synthetic-projector",
+                    "sans": [
+                      "submit.example.com"
+                    ],
+                    "ekus": [
+                      "serverAuth"
+                    ]
+                  }
+                ]
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+              }
+            },
+            "control": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "control_revision": "2",
+                "issued_at": "2026-11-14T00:00:00Z",
+                "allowed_authorities": [
+                  {
+                    "authority_id": "synthetic-authority",
+                    "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                  }
+                ],
+                "revoked_authority_ids": [],
+                "revoked_installation_ids": [],
+                "minimum_generation": "1",
+                "minimum_keyset_version": "1"
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "restart-old-next-86399-next",
+      "expected": "invalid_transition",
+      "input": {
+        "root_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "now": "2026-11-14T00:00:00Z",
+        "latest_control": {
+          "payload": {
+            "schema_version": 2,
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "control_revision": "2",
+            "issued_at": "2026-11-14T00:00:00Z",
+            "allowed_authorities": [
+              {
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+              }
+            ],
+            "revoked_authority_ids": [],
+            "revoked_installation_ids": [],
+            "minimum_generation": "1",
+            "minimum_keyset_version": "1"
+          },
+          "root_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-root",
+            "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+          }
+        },
+        "seen_control_revision": "2",
+        "seen_generation": "1",
+        "seen_version": "9",
+        "seen_digest": "sha256:faf655198cde6f83cc1887f3edef1f136b06f35998f980f26ad4e5cc6769b8b0",
+        "previous_digest": "sha256:67721299f4ffc5bbc79c34384bab3613cc875577d828ce9e0aff7531192704ec",
+        "first_publication_ledger": [
+          {
+            "kid": "synthetic-business-0",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-1",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-2",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-k3-restart-old-next",
+            "committed_version": "8",
+            "committed_at": "2026-11-13T00:00:01Z"
+          }
+        ],
+        "publication": {
+          "keyset": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+              "control_revision": "2",
+              "generation": "1",
+              "keyset_version": "10",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "valid_until": "2026-11-15T00:00:00Z",
+              "mode": "restart_recovery",
+              "keys": [
+                {
+                  "kid": "synthetic-restart-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "active",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-21T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "retired",
+                  "not_before": "2026-11-15T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                },
+                {
+                  "kid": "synthetic-business-0",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "alg": "Ed25519",
+                  "purpose": "protocol_response",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "next",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAA_lVmtutZ16a9gyIMbPn2sDK6QbGwfwL__5ApkJlJLw"
+                }
+              ],
+              "first_publications": [
+                {
+                  "kid": "synthetic-business-0",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-restart-2",
+                  "committed_version": "10",
+                  "committed_at": "2026-11-14T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "committed_version": "8",
+                  "committed_at": "2026-11-13T00:00:01Z"
+                }
+              ],
+              "archive": {
+                "before": "2026-11-11T00:00:00Z",
+                "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            },
+            "runtime_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-runtime",
+              "signature": "beovW6tScO0SEd_BrEw9gPXuEhdW30iCN6zy24ogwIw-PonkTFQuGQqwJrN95hlNV1kJdmMZ7IDb7GrawC8tCw"
+            }
+          },
+          "authority": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_revision": "1",
+              "runtime_kid": "synthetic-runtime",
+              "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+              "not_before": "2026-01-01T00:00:00Z",
+              "expiry_policy": "no_hard_expiry",
+              "review_period_days": 365,
+              "capabilities": [
+                "keyset",
+                "announcement",
+                "business_rotation",
+                "restart_recovery",
+                "history_archive",
+                "network_transport"
+              ],
+              "limits": {
+                "keyset_seconds": 86400,
+                "business_key_seconds": 691200,
+                "restart_key_seconds": 604800,
+                "next_maturity_seconds": 86400,
+                "overlap_seconds": 360,
+                "archive_grace_seconds": 360
+              },
+              "transport_scope": [
+                {
+                  "component": "network",
+                  "identity_id": "synthetic-projector",
+                  "sans": [
+                    "submit.example.com"
+                  ],
+                  "ekus": [
+                    "serverAuth"
+                  ]
+                }
+              ]
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+            }
+          },
+          "control": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "control_revision": "2",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "allowed_authorities": [
+                {
+                  "authority_id": "synthetic-authority",
+                  "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                }
+              ],
+              "revoked_authority_ids": [],
+              "revoked_installation_ids": [],
+              "minimum_generation": "1",
+              "minimum_keyset_version": "1"
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+            }
+          },
+          "predecessor": {
+            "keyset": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+                "control_revision": "2",
+                "generation": "1",
+                "keyset_version": "9",
+                "issued_at": "2026-11-13T00:00:01Z",
+                "valid_until": "2026-11-14T00:00:01Z",
+                "mode": "refresh",
+                "keys": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "alg": "Ed25519",
+                    "purpose": "protocol_response",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "alg": "Ed25519",
+                    "purpose": "management_state",
+                    "state": "active",
+                    "not_before": "2026-11-15T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "next",
+                    "not_before": "2026-11-14T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAA_lVmtutZ16a9gyIMbPn2sDK6QbGwfwL__5ApkJlJLw"
+                  }
+                ],
+                "first_publications": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "committed_version": "8",
+                    "committed_at": "2026-11-13T00:00:01Z"
+                  }
+                ],
+                "archive": {
+                  "before": "2026-11-11T00:00:00Z",
+                  "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                }
+              },
+              "runtime_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-runtime",
+                "signature": "vgrcDRxQjL6Px3i2PfDg8wf0MEG9r8UhiB5pXooDFNfOPfwetTcmy6lyGelZ6tZ2dU4S-4GMpnb3qK0-fp3AAg"
+              }
+            },
+            "keyset_digest": "sha256:67721299f4ffc5bbc79c34384bab3613cc875577d828ce9e0aff7531192704ec",
+            "authority": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_revision": "1",
+                "runtime_kid": "synthetic-runtime",
+                "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+                "not_before": "2026-01-01T00:00:00Z",
+                "expiry_policy": "no_hard_expiry",
+                "review_period_days": 365,
+                "capabilities": [
+                  "keyset",
+                  "announcement",
+                  "business_rotation",
+                  "restart_recovery",
+                  "history_archive",
+                  "network_transport"
+                ],
+                "limits": {
+                  "keyset_seconds": 86400,
+                  "business_key_seconds": 691200,
+                  "restart_key_seconds": 604800,
+                  "next_maturity_seconds": 86400,
+                  "overlap_seconds": 360,
+                  "archive_grace_seconds": 360
+                },
+                "transport_scope": [
+                  {
+                    "component": "network",
+                    "identity_id": "synthetic-projector",
+                    "sans": [
+                      "submit.example.com"
+                    ],
+                    "ekus": [
+                      "serverAuth"
+                    ]
+                  }
+                ]
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+              }
+            },
+            "control": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "control_revision": "2",
+                "issued_at": "2026-11-14T00:00:00Z",
+                "allowed_authorities": [
+                  {
+                    "authority_id": "synthetic-authority",
+                    "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                  }
+                ],
+                "revoked_authority_ids": [],
+                "revoked_installation_ids": [],
+                "minimum_generation": "1",
+                "minimum_keyset_version": "1"
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "restart-old-next-86399-retired",
+      "expected": "accept",
+      "input": {
+        "root_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "now": "2026-11-14T00:00:00Z",
+        "latest_control": {
+          "payload": {
+            "schema_version": 2,
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "control_revision": "2",
+            "issued_at": "2026-11-14T00:00:00Z",
+            "allowed_authorities": [
+              {
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+              }
+            ],
+            "revoked_authority_ids": [],
+            "revoked_installation_ids": [],
+            "minimum_generation": "1",
+            "minimum_keyset_version": "1"
+          },
+          "root_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-root",
+            "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+          }
+        },
+        "seen_control_revision": "2",
+        "seen_generation": "1",
+        "seen_version": "9",
+        "seen_digest": "sha256:faf655198cde6f83cc1887f3edef1f136b06f35998f980f26ad4e5cc6769b8b0",
+        "previous_digest": "sha256:a0ab2f4c30bff0e43ff037ca85ed4fc3566c5076c31b9ced90d169e21ab59f2f",
+        "first_publication_ledger": [
+          {
+            "kid": "synthetic-business-0",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-1",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-2",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-k3-restart-old-next",
+            "committed_version": "8",
+            "committed_at": "2026-11-13T00:00:01Z"
+          }
+        ],
+        "publication": {
+          "keyset": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+              "control_revision": "2",
+              "generation": "1",
+              "keyset_version": "10",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "valid_until": "2026-11-15T00:00:00Z",
+              "mode": "restart_recovery",
+              "keys": [
+                {
+                  "kid": "synthetic-restart-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "active",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-21T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "retired",
+                  "not_before": "2026-11-15T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                },
+                {
+                  "kid": "synthetic-business-0",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "alg": "Ed25519",
+                  "purpose": "protocol_response",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "retired",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAHpckrR5fJNmEz5VqHgH4ddbQBg9OZ-UgJDBEOBS0mek"
+                }
+              ],
+              "first_publications": [
+                {
+                  "kid": "synthetic-business-0",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-restart-2",
+                  "committed_version": "10",
+                  "committed_at": "2026-11-14T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "committed_version": "8",
+                  "committed_at": "2026-11-13T00:00:01Z"
+                }
+              ],
+              "archive": {
+                "before": "2026-11-11T00:00:00Z",
+                "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            },
+            "runtime_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-runtime",
+              "signature": "mDJr_DJVxgbOsVZxNQzdU3siP_5ic4xWENNSy137wByx9aldrSXE0obQx6JDA1cjZzOyMTLCGRUgoK4n4c-hCw"
+            }
+          },
+          "authority": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_revision": "1",
+              "runtime_kid": "synthetic-runtime",
+              "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+              "not_before": "2026-01-01T00:00:00Z",
+              "expiry_policy": "no_hard_expiry",
+              "review_period_days": 365,
+              "capabilities": [
+                "keyset",
+                "announcement",
+                "business_rotation",
+                "restart_recovery",
+                "history_archive",
+                "network_transport"
+              ],
+              "limits": {
+                "keyset_seconds": 86400,
+                "business_key_seconds": 691200,
+                "restart_key_seconds": 604800,
+                "next_maturity_seconds": 86400,
+                "overlap_seconds": 360,
+                "archive_grace_seconds": 360
+              },
+              "transport_scope": [
+                {
+                  "component": "network",
+                  "identity_id": "synthetic-projector",
+                  "sans": [
+                    "submit.example.com"
+                  ],
+                  "ekus": [
+                    "serverAuth"
+                  ]
+                }
+              ]
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+            }
+          },
+          "control": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "control_revision": "2",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "allowed_authorities": [
+                {
+                  "authority_id": "synthetic-authority",
+                  "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                }
+              ],
+              "revoked_authority_ids": [],
+              "revoked_installation_ids": [],
+              "minimum_generation": "1",
+              "minimum_keyset_version": "1"
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+            }
+          },
+          "predecessor": {
+            "keyset": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+                "control_revision": "2",
+                "generation": "1",
+                "keyset_version": "9",
+                "issued_at": "2026-11-13T00:00:01Z",
+                "valid_until": "2026-11-14T00:00:01Z",
+                "mode": "refresh",
+                "keys": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "alg": "Ed25519",
+                    "purpose": "protocol_response",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "alg": "Ed25519",
+                    "purpose": "management_state",
+                    "state": "active",
+                    "not_before": "2026-11-15T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "next",
+                    "not_before": "2026-11-14T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAHpckrR5fJNmEz5VqHgH4ddbQBg9OZ-UgJDBEOBS0mek"
+                  }
+                ],
+                "first_publications": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "committed_version": "8",
+                    "committed_at": "2026-11-13T00:00:01Z"
+                  }
+                ],
+                "archive": {
+                  "before": "2026-11-11T00:00:00Z",
+                  "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                }
+              },
+              "runtime_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-runtime",
+                "signature": "DXhCehrvVvWMSFZWAYKUQgZoYk0-LihYu2SShGVaKvlR7Qa0xpAla27vcDLL2McFV7Yo1AEv61F53kFDvsYaDA"
+              }
+            },
+            "keyset_digest": "sha256:a0ab2f4c30bff0e43ff037ca85ed4fc3566c5076c31b9ced90d169e21ab59f2f",
+            "authority": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_revision": "1",
+                "runtime_kid": "synthetic-runtime",
+                "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+                "not_before": "2026-01-01T00:00:00Z",
+                "expiry_policy": "no_hard_expiry",
+                "review_period_days": 365,
+                "capabilities": [
+                  "keyset",
+                  "announcement",
+                  "business_rotation",
+                  "restart_recovery",
+                  "history_archive",
+                  "network_transport"
+                ],
+                "limits": {
+                  "keyset_seconds": 86400,
+                  "business_key_seconds": 691200,
+                  "restart_key_seconds": 604800,
+                  "next_maturity_seconds": 86400,
+                  "overlap_seconds": 360,
+                  "archive_grace_seconds": 360
+                },
+                "transport_scope": [
+                  {
+                    "component": "network",
+                    "identity_id": "synthetic-projector",
+                    "sans": [
+                      "submit.example.com"
+                    ],
+                    "ekus": [
+                      "serverAuth"
+                    ]
+                  }
+                ]
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+              }
+            },
+            "control": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "control_revision": "2",
+                "issued_at": "2026-11-14T00:00:00Z",
+                "allowed_authorities": [
+                  {
+                    "authority_id": "synthetic-authority",
+                    "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                  }
+                ],
+                "revoked_authority_ids": [],
+                "revoked_installation_ids": [],
+                "minimum_generation": "1",
+                "minimum_keyset_version": "1"
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "restart-old-next-86399-revoked",
+      "expected": "accept",
+      "input": {
+        "root_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "now": "2026-11-14T00:00:00Z",
+        "latest_control": {
+          "payload": {
+            "schema_version": 2,
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "control_revision": "2",
+            "issued_at": "2026-11-14T00:00:00Z",
+            "allowed_authorities": [
+              {
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+              }
+            ],
+            "revoked_authority_ids": [],
+            "revoked_installation_ids": [],
+            "minimum_generation": "1",
+            "minimum_keyset_version": "1"
+          },
+          "root_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-root",
+            "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+          }
+        },
+        "seen_control_revision": "2",
+        "seen_generation": "1",
+        "seen_version": "9",
+        "seen_digest": "sha256:faf655198cde6f83cc1887f3edef1f136b06f35998f980f26ad4e5cc6769b8b0",
+        "previous_digest": "sha256:b0f1b9c33a5333501a2f8ffd6a104a20efbece6e76e22c868143099d9cf18ab7",
+        "first_publication_ledger": [
+          {
+            "kid": "synthetic-business-0",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-1",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-2",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-k3-restart-old-next",
+            "committed_version": "8",
+            "committed_at": "2026-11-13T00:00:01Z"
+          }
+        ],
+        "publication": {
+          "keyset": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+              "control_revision": "2",
+              "generation": "1",
+              "keyset_version": "10",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "valid_until": "2026-11-15T00:00:00Z",
+              "mode": "restart_recovery",
+              "keys": [
+                {
+                  "kid": "synthetic-restart-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "active",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-21T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "retired",
+                  "not_before": "2026-11-15T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                },
+                {
+                  "kid": "synthetic-business-0",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "alg": "Ed25519",
+                  "purpose": "protocol_response",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "revoked",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAMcssEbf85oTUVOXwTBJeO3KcDBwdWBmJH64D76OyO-8"
+                }
+              ],
+              "first_publications": [
+                {
+                  "kid": "synthetic-business-0",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-restart-2",
+                  "committed_version": "10",
+                  "committed_at": "2026-11-14T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "committed_version": "8",
+                  "committed_at": "2026-11-13T00:00:01Z"
+                }
+              ],
+              "archive": {
+                "before": "2026-11-11T00:00:00Z",
+                "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            },
+            "runtime_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-runtime",
+              "signature": "CvjKLaqpH9V8taS18SNT4BCjCIq6jKyBSLkxK_ls-VejpCU6-szTvZ5CQDYPslYJKUUkJx29nixPGpKt85oqDw"
+            }
+          },
+          "authority": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_revision": "1",
+              "runtime_kid": "synthetic-runtime",
+              "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+              "not_before": "2026-01-01T00:00:00Z",
+              "expiry_policy": "no_hard_expiry",
+              "review_period_days": 365,
+              "capabilities": [
+                "keyset",
+                "announcement",
+                "business_rotation",
+                "restart_recovery",
+                "history_archive",
+                "network_transport"
+              ],
+              "limits": {
+                "keyset_seconds": 86400,
+                "business_key_seconds": 691200,
+                "restart_key_seconds": 604800,
+                "next_maturity_seconds": 86400,
+                "overlap_seconds": 360,
+                "archive_grace_seconds": 360
+              },
+              "transport_scope": [
+                {
+                  "component": "network",
+                  "identity_id": "synthetic-projector",
+                  "sans": [
+                    "submit.example.com"
+                  ],
+                  "ekus": [
+                    "serverAuth"
+                  ]
+                }
+              ]
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+            }
+          },
+          "control": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "control_revision": "2",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "allowed_authorities": [
+                {
+                  "authority_id": "synthetic-authority",
+                  "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                }
+              ],
+              "revoked_authority_ids": [],
+              "revoked_installation_ids": [],
+              "minimum_generation": "1",
+              "minimum_keyset_version": "1"
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+            }
+          },
+          "predecessor": {
+            "keyset": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+                "control_revision": "2",
+                "generation": "1",
+                "keyset_version": "9",
+                "issued_at": "2026-11-13T00:00:01Z",
+                "valid_until": "2026-11-14T00:00:01Z",
+                "mode": "refresh",
+                "keys": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "alg": "Ed25519",
+                    "purpose": "protocol_response",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "alg": "Ed25519",
+                    "purpose": "management_state",
+                    "state": "active",
+                    "not_before": "2026-11-15T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "next",
+                    "not_before": "2026-11-14T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAMcssEbf85oTUVOXwTBJeO3KcDBwdWBmJH64D76OyO-8"
+                  }
+                ],
+                "first_publications": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "committed_version": "8",
+                    "committed_at": "2026-11-13T00:00:01Z"
+                  }
+                ],
+                "archive": {
+                  "before": "2026-11-11T00:00:00Z",
+                  "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                }
+              },
+              "runtime_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-runtime",
+                "signature": "N-ohfNJ1qaPWw-qGQon1RRSINOR2i8S5wSP1SbpwP-qcWzt_ryQHHLpLEIlX74yC8QbESsfdtQ7KQchXS__cAw"
+              }
+            },
+            "keyset_digest": "sha256:b0f1b9c33a5333501a2f8ffd6a104a20efbece6e76e22c868143099d9cf18ab7",
+            "authority": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_revision": "1",
+                "runtime_kid": "synthetic-runtime",
+                "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+                "not_before": "2026-01-01T00:00:00Z",
+                "expiry_policy": "no_hard_expiry",
+                "review_period_days": 365,
+                "capabilities": [
+                  "keyset",
+                  "announcement",
+                  "business_rotation",
+                  "restart_recovery",
+                  "history_archive",
+                  "network_transport"
+                ],
+                "limits": {
+                  "keyset_seconds": 86400,
+                  "business_key_seconds": 691200,
+                  "restart_key_seconds": 604800,
+                  "next_maturity_seconds": 86400,
+                  "overlap_seconds": 360,
+                  "archive_grace_seconds": 360
+                },
+                "transport_scope": [
+                  {
+                    "component": "network",
+                    "identity_id": "synthetic-projector",
+                    "sans": [
+                      "submit.example.com"
+                    ],
+                    "ekus": [
+                      "serverAuth"
+                    ]
+                  }
+                ]
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+              }
+            },
+            "control": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "control_revision": "2",
+                "issued_at": "2026-11-14T00:00:00Z",
+                "allowed_authorities": [
+                  {
+                    "authority_id": "synthetic-authority",
+                    "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                  }
+                ],
+                "revoked_authority_ids": [],
+                "revoked_installation_ids": [],
+                "minimum_generation": "1",
+                "minimum_keyset_version": "1"
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "restart-old-next-missing-first-publication",
+      "expected": "invalid_transition",
+      "input": {
+        "root_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "now": "2026-11-14T00:00:00Z",
+        "latest_control": {
+          "payload": {
+            "schema_version": 2,
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "control_revision": "2",
+            "issued_at": "2026-11-14T00:00:00Z",
+            "allowed_authorities": [
+              {
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+              }
+            ],
+            "revoked_authority_ids": [],
+            "revoked_installation_ids": [],
+            "minimum_generation": "1",
+            "minimum_keyset_version": "1"
+          },
+          "root_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-root",
+            "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+          }
+        },
+        "seen_control_revision": "2",
+        "seen_generation": "1",
+        "seen_version": "9",
+        "seen_digest": "sha256:faf655198cde6f83cc1887f3edef1f136b06f35998f980f26ad4e5cc6769b8b0",
+        "previous_digest": "sha256:c41ab1fb58bdf29a91b095b37019addbb2800b9f56f0eb5ac8c9d57a871d4b8b",
+        "first_publication_ledger": [
+          {
+            "kid": "synthetic-business-0",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-1",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          },
+          {
+            "kid": "synthetic-business-2",
+            "committed_version": "1",
+            "committed_at": "2026-11-12T00:00:00Z"
+          }
+        ],
+        "publication": {
+          "keyset": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+              "control_revision": "2",
+              "generation": "1",
+              "keyset_version": "10",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "valid_until": "2026-11-15T00:00:00Z",
+              "mode": "restart_recovery",
+              "keys": [
+                {
+                  "kid": "synthetic-restart-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "active",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-21T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "alg": "Ed25519",
+                  "purpose": "management_state",
+                  "state": "retired",
+                  "not_before": "2026-11-15T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                },
+                {
+                  "kid": "synthetic-business-0",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "alg": "Ed25519",
+                  "purpose": "protocol_response",
+                  "state": "active",
+                  "not_before": "2026-11-12T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                },
+                {
+                  "kid": "synthetic-k3-restart-old-next",
+                  "alg": "Ed25519",
+                  "purpose": "business_delivery",
+                  "state": "next",
+                  "not_before": "2026-11-14T00:00:00Z",
+                  "not_after": "2026-11-20T00:00:00Z",
+                  "public_key_spki": "MCowBQYDK2VwAyEAr7ru0UN1PwxUW4D8U7JNYggZf8lYYB982AH2p_iQSXQ"
+                }
+              ],
+              "first_publications": [
+                {
+                  "kid": "synthetic-business-0",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-1",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-business-2",
+                  "committed_version": "1",
+                  "committed_at": "2026-11-12T00:00:00Z"
+                },
+                {
+                  "kid": "synthetic-restart-2",
+                  "committed_version": "10",
+                  "committed_at": "2026-11-14T00:00:00Z"
+                }
+              ],
+              "archive": {
+                "before": "2026-11-11T00:00:00Z",
+                "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            },
+            "runtime_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-runtime",
+              "signature": "qWX4d0tf_c3fFPvbFFu2kba39n6xsEku1FzmTS0yJphm4BVRrjzjLKQxdRxx9Q50w0ngNdWCrJc8OrPAQwLODQ"
+            }
+          },
+          "authority": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "authority_id": "synthetic-authority",
+              "authority_revision": "1",
+              "runtime_kid": "synthetic-runtime",
+              "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+              "not_before": "2026-01-01T00:00:00Z",
+              "expiry_policy": "no_hard_expiry",
+              "review_period_days": 365,
+              "capabilities": [
+                "keyset",
+                "announcement",
+                "business_rotation",
+                "restart_recovery",
+                "history_archive",
+                "network_transport"
+              ],
+              "limits": {
+                "keyset_seconds": 86400,
+                "business_key_seconds": 691200,
+                "restart_key_seconds": 604800,
+                "next_maturity_seconds": 86400,
+                "overlap_seconds": 360,
+                "archive_grace_seconds": 360
+              },
+              "transport_scope": [
+                {
+                  "component": "network",
+                  "identity_id": "synthetic-projector",
+                  "sans": [
+                    "submit.example.com"
+                  ],
+                  "ekus": [
+                    "serverAuth"
+                  ]
+                }
+              ]
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+            }
+          },
+          "control": {
+            "payload": {
+              "schema_version": 2,
+              "tenant_id": "synthetic-tenant",
+              "realm": "1",
+              "control_revision": "2",
+              "issued_at": "2026-11-14T00:00:00Z",
+              "allowed_authorities": [
+                {
+                  "authority_id": "synthetic-authority",
+                  "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                }
+              ],
+              "revoked_authority_ids": [],
+              "revoked_installation_ids": [],
+              "minimum_generation": "1",
+              "minimum_keyset_version": "1"
+            },
+            "root_auth": {
+              "alg": "Ed25519",
+              "kid": "synthetic-root",
+              "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+            }
+          },
+          "predecessor": {
+            "keyset": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515",
+                "control_revision": "2",
+                "generation": "1",
+                "keyset_version": "9",
+                "issued_at": "2026-11-13T00:00:00Z",
+                "valid_until": "2026-11-14T00:00:00Z",
+                "mode": "refresh",
+                "keys": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "alg": "Ed25519",
+                    "purpose": "protocol_response",
+                    "state": "active",
+                    "not_before": "2026-11-12T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "alg": "Ed25519",
+                    "purpose": "management_state",
+                    "state": "active",
+                    "not_before": "2026-11-15T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag"
+                  },
+                  {
+                    "kid": "synthetic-k3-restart-old-next",
+                    "alg": "Ed25519",
+                    "purpose": "business_delivery",
+                    "state": "next",
+                    "not_before": "2026-11-14T00:00:00Z",
+                    "not_after": "2026-11-20T00:00:00Z",
+                    "public_key_spki": "MCowBQYDK2VwAyEAr7ru0UN1PwxUW4D8U7JNYggZf8lYYB982AH2p_iQSXQ"
+                  }
+                ],
+                "first_publications": [
+                  {
+                    "kid": "synthetic-business-0",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-1",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  },
+                  {
+                    "kid": "synthetic-business-2",
+                    "committed_version": "1",
+                    "committed_at": "2026-11-12T00:00:00Z"
+                  }
+                ],
+                "archive": {
+                  "before": "2026-11-11T00:00:00Z",
+                  "history_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                }
+              },
+              "runtime_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-runtime",
+                "signature": "lWCuWIWsjA-kw08a4FXopPu42I5htTHoXK6usmRh9OWFqQKtqbHR16H24xPXTrqMEN8FLXFPkxi2zwqV2L0cCQ"
+              }
+            },
+            "keyset_digest": "sha256:c41ab1fb58bdf29a91b095b37019addbb2800b9f56f0eb5ac8c9d57a871d4b8b",
+            "authority": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "authority_id": "synthetic-authority",
+                "authority_revision": "1",
+                "runtime_kid": "synthetic-runtime",
+                "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+                "not_before": "2026-01-01T00:00:00Z",
+                "expiry_policy": "no_hard_expiry",
+                "review_period_days": 365,
+                "capabilities": [
+                  "keyset",
+                  "announcement",
+                  "business_rotation",
+                  "restart_recovery",
+                  "history_archive",
+                  "network_transport"
+                ],
+                "limits": {
+                  "keyset_seconds": 86400,
+                  "business_key_seconds": 691200,
+                  "restart_key_seconds": 604800,
+                  "next_maturity_seconds": 86400,
+                  "overlap_seconds": 360,
+                  "archive_grace_seconds": 360
+                },
+                "transport_scope": [
+                  {
+                    "component": "network",
+                    "identity_id": "synthetic-projector",
+                    "sans": [
+                      "submit.example.com"
+                    ],
+                    "ekus": [
+                      "serverAuth"
+                    ]
+                  }
+                ]
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA"
+              }
+            },
+            "control": {
+              "payload": {
+                "schema_version": 2,
+                "tenant_id": "synthetic-tenant",
+                "realm": "1",
+                "control_revision": "2",
+                "issued_at": "2026-11-14T00:00:00Z",
+                "allowed_authorities": [
+                  {
+                    "authority_id": "synthetic-authority",
+                    "authority_digest": "sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515"
+                  }
+                ],
+                "revoked_authority_ids": [],
+                "revoked_installation_ids": [],
+                "minimum_generation": "1",
+                "minimum_keyset_version": "1"
+              },
+              "root_auth": {
+                "alg": "Ed25519",
+                "kid": "synthetic-root",
+                "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw"
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "issuer_cases": [
@@ -87304,6 +89239,187 @@
       }
     },
     {
+      "id": "k3-confirmation-without-network-transport-capability",
+      "operation": "transport_confirmation",
+      "expected": "scope_denied",
+      "input": {
+        "tenant_id": "synthetic-tenant",
+        "realm": "1",
+        "root_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+        "authority": {
+          "payload": {
+            "schema_version": 2,
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "authority_id": "synthetic-authority",
+            "authority_revision": "1",
+            "runtime_kid": "synthetic-runtime",
+            "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+            "not_before": "2026-01-01T00:00:00Z",
+            "expiry_policy": "no_hard_expiry",
+            "review_period_days": 365,
+            "capabilities": [
+              "keyset",
+              "announcement",
+              "business_rotation",
+              "restart_recovery",
+              "history_archive"
+            ],
+            "limits": {
+              "keyset_seconds": 86400,
+              "business_key_seconds": 691200,
+              "restart_key_seconds": 604800,
+              "next_maturity_seconds": 86400,
+              "overlap_seconds": 360,
+              "archive_grace_seconds": 360
+            },
+            "transport_scope": [
+              {
+                "component": "network",
+                "identity_id": "synthetic-projector",
+                "sans": [
+                  "submit.example.com"
+                ],
+                "ekus": [
+                  "serverAuth"
+                ]
+              }
+            ]
+          },
+          "root_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-root",
+            "signature": "g7ouJBewza_UPV4_25tUeb-HtVU3SV_0jZ2ieNrLCshVSMlgc3SwFbEueyh2OuBDAAGVhiPH4bQR1CYTZblnBA"
+          }
+        },
+        "control": {
+          "payload": {
+            "schema_version": 2,
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "control_revision": "2",
+            "issued_at": "2026-11-14T00:00:00Z",
+            "allowed_authorities": [
+              {
+                "authority_id": "synthetic-authority",
+                "authority_digest": "sha256:56dfc9238bb9c8bad3766fed4c18afc009161a49411088ee12215299e1a57046"
+              }
+            ],
+            "revoked_authority_ids": [],
+            "revoked_installation_ids": [],
+            "minimum_generation": "1",
+            "minimum_keyset_version": "1"
+          },
+          "root_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-root",
+            "signature": "qrqMKKYHDUlxJdM8ydDH8iEYdO0clT_tCYuqTMOPrksf1gZToD-22MbV-Rp8bsnt4gQ7wJ5JtVOixf3eBZ0oDQ"
+          }
+        },
+        "bundle": {
+          "payload": {
+            "schema_version": 2,
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "authority_id": "synthetic-authority",
+            "authority_digest": "sha256:56dfc9238bb9c8bad3766fed4c18afc009161a49411088ee12215299e1a57046",
+            "control_revision": "2",
+            "generation": "1",
+            "bundle_version": "3",
+            "issued_at": "2026-11-14T00:00:00Z",
+            "phase": "new_leaves",
+            "cas": [
+              {
+                "ca_id": "synthetic-ca-1",
+                "role": "server",
+                "certificate_der": "MIIBLDCB36ADAgECAgEBMAUGAytlcDAeMRwwGgYDVQQDExNzeW50aGV0aWMtbXNnbmV0LWNhMB4XDTI2MTExMzIzNTUwMFoXDTM2MTExNDAwMDAwMFowHjEcMBoGA1UEAxMTc3ludGhldGljLW1zZ25ldC1jYTAqMAUGAytlcAMhAHH9zYwzKsbkoyorqNrC_efytpcw7uK0exGu4jhImRFho0IwQDAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH_BAUwAwEB_zAdBgNVHQ4EFgQU8TZbq8XCQdBsvKTCEsWFx0-Ru7wwBQYDK2VwA0EAAvNrROrXpDFkRCvuRyuIgWe_Gr8ZWLVqzogjk2BUst6BFjCaAxp7smPRjycJLsdyzwEPpD1yelCMYxtA-1BFCw",
+                "not_before": "2026-11-13T23:55:00Z",
+                "not_after": "2036-11-14T00:00:00Z"
+              },
+              {
+                "ca_id": "synthetic-ca-2",
+                "role": "server",
+                "certificate_der": "MIIBLDCB36ADAgECAgECMAUGAytlcDAeMRwwGgYDVQQDExNzeW50aGV0aWMtbXNnbmV0LWNhMB4XDTI2MTExMzIzNTUwMFoXDTM2MTExNDAwMDAwMFowHjEcMBoGA1UEAxMTc3ludGhldGljLW1zZ25ldC1jYTAqMAUGAytlcAMhAOYQ0XR5FrJyNwHgXb-1hc8O8GvAr6_LvdfJ4HZ6GSE-o0IwQDAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH_BAUwAwEB_zAdBgNVHQ4EFgQUd5GvD890nJiFAaLySOMoDeoMX34wBQYDK2VwA0EA7f8DWM-7HFuFXHvg_hR1vwNMlD5mZl6mSE_F2HDfy-Y9U1OB1DbKsaYhfdTKsQ0spQIxSjl73kRl6t3HNJvHAw",
+                "not_before": "2026-11-13T23:55:00Z",
+                "not_after": "2036-11-14T00:00:00Z"
+              }
+            ],
+            "scope": [
+              {
+                "component": "network",
+                "identity_id": "synthetic-projector",
+                "sans": [
+                  "submit.example.com"
+                ],
+                "ekus": [
+                  "serverAuth"
+                ]
+              }
+            ],
+            "required_reader_ids": [
+              "reader-1"
+            ],
+            "previous_bundle_digest": "sha256:f9da05e8a828dee436daa30733014b2cafb866381e3a3a6e7953187c68477d2e"
+          },
+          "runtime_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-runtime",
+            "signature": "4YDof1ngT3XXB-3H4Juj7XOtHE25QEF9oPQfuanfAW4ii6jjWSX_ENpSyyp6-afrYnf5pgeWRQNpIXVziZy5Cg"
+          }
+        },
+        "evidence": {
+          "payload": {
+            "tenant_id": "synthetic-tenant",
+            "realm": "1",
+            "authority_id": "synthetic-authority",
+            "authority_digest": "sha256:56dfc9238bb9c8bad3766fed4c18afc009161a49411088ee12215299e1a57046",
+            "control_revision": "2",
+            "bundle_version": "3",
+            "bundle_digest": "sha256:826e8a72d5f1717e6f237ae878d13e300760af38c7a2fbd4203f1c6fb15a6de1",
+            "phase": "new_leaves",
+            "required_reader_ids": [
+              "reader-1"
+            ],
+            "readers": [
+              {
+                "reader_id": "reader-1",
+                "identity_id": "synthetic-projector",
+                "selector": {
+                  "tenant_id": "synthetic-tenant",
+                  "realm": "1",
+                  "installation_id": "synthetic-projector",
+                  "component": "network",
+                  "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+                  "generation": "1",
+                  "keyset_version": "10",
+                  "publication_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "bundle_version": "3",
+                  "bundle_digest": "sha256:826e8a72d5f1717e6f237ae878d13e300760af38c7a2fbd4203f1c6fb15a6de1",
+                  "material_revision": "3",
+                  "manifest_digest": "sha256:2eebbbc52325b585a979d6c08668cc264eb1bf0579fe78406d38dd38db343161"
+                },
+                "phase": "handshake_verified",
+                "isolation_enforced": false
+              }
+            ],
+            "challenge": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            "issued_at": "2026-11-14T00:00:00Z"
+          },
+          "runtime_auth": {
+            "alg": "Ed25519",
+            "kid": "synthetic-runtime",
+            "signature": "D5cknaqWbBV__2PTec7fb9dorAjukyEX5y3Fl8OyZeZ2qNnJPWn1jXSVWk5T_MQE_bmw0ogyC-GjmN-li7CnDA"
+          }
+        },
+        "challenge": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "now": "2026-11-14T00:00:00Z",
+        "required_phase": "handshake_verified",
+        "expected_selectors": {
+          "reader-1": "sha256:ae7f6d8d473d99c652867d19b49179cb44de82ee87e2742dc2fa4e3a3c1d876a"
+        }
+      }
+    },
+    {
       "id": "k3-confirmation-age-60",
       "operation": "transport_confirmation",
       "expected": "accept",
@@ -109088,6 +111204,126 @@
     },
     {
       "id": "transport-second-ca-cycle-control",
+      "domain": "Auriga.NetworkRootControl.v2",
+      "canonical": "{\"allowed_authorities\":[{\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\"}],\"control_revision\":\"2\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"minimum_generation\":\"1\",\"minimum_keyset_version\":\"1\",\"realm\":\"1\",\"revoked_authority_ids\":[],\"revoked_installation_ids\":[],\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86400-next-keyset",
+      "domain": "Auriga.NetworkKeyset.v2",
+      "canonical": "{\"archive\":{\"before\":\"2026-11-11T00:00:00Z\",\"history_digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"},\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\",\"control_revision\":\"2\",\"first_publications\":[{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-0\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-1\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-2\"},{\"committed_at\":\"2026-11-14T00:00:00Z\",\"committed_version\":\"10\",\"kid\":\"synthetic-restart-2\"},{\"committed_at\":\"2026-11-13T00:00:00Z\",\"committed_version\":\"8\",\"kid\":\"synthetic-k3-restart-old-next\"}],\"generation\":\"1\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"keys\":[{\"alg\":\"Ed25519\",\"kid\":\"synthetic-restart-2\",\"not_after\":\"2026-11-21T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI\",\"purpose\":\"management_state\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-2\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-15T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag\",\"purpose\":\"management_state\",\"state\":\"retired\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-0\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ\",\"purpose\":\"business_delivery\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-1\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc\",\"purpose\":\"protocol_response\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-k3-restart-old-next\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAr7ru0UN1PwxUW4D8U7JNYggZf8lYYB982AH2p_iQSXQ\",\"purpose\":\"business_delivery\",\"state\":\"next\"}],\"keyset_version\":\"10\",\"mode\":\"restart_recovery\",\"realm\":\"1\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"valid_until\":\"2026-11-15T00:00:00Z\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+      "signature": "CTsWay_OFjNAVnVkK1p5Sm_KEbTmBrIcg27CrhYTcwKKCiiWE9aj6tUZLcX47DFPOE-N4DObUvU1f0QqFdHbAw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86400-next-authority",
+      "domain": "Auriga.NetworkRuntimeAuthority.v2",
+      "canonical": "{\"authority_id\":\"synthetic-authority\",\"authority_revision\":\"1\",\"capabilities\":[\"keyset\",\"announcement\",\"business_rotation\",\"restart_recovery\",\"history_archive\",\"network_transport\"],\"expiry_policy\":\"no_hard_expiry\",\"limits\":{\"archive_grace_seconds\":360,\"business_key_seconds\":691200,\"keyset_seconds\":86400,\"next_maturity_seconds\":86400,\"overlap_seconds\":360,\"restart_key_seconds\":604800},\"not_before\":\"2026-01-01T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI\",\"realm\":\"1\",\"review_period_days\":365,\"runtime_kid\":\"synthetic-runtime\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"transport_scope\":[{\"component\":\"network\",\"ekus\":[\"serverAuth\"],\"identity_id\":\"synthetic-projector\",\"sans\":[\"submit.example.com\"]}]}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86400-next-control",
+      "domain": "Auriga.NetworkRootControl.v2",
+      "canonical": "{\"allowed_authorities\":[{\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\"}],\"control_revision\":\"2\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"minimum_generation\":\"1\",\"minimum_keyset_version\":\"1\",\"realm\":\"1\",\"revoked_authority_ids\":[],\"revoked_installation_ids\":[],\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-next-keyset",
+      "domain": "Auriga.NetworkKeyset.v2",
+      "canonical": "{\"archive\":{\"before\":\"2026-11-11T00:00:00Z\",\"history_digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"},\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\",\"control_revision\":\"2\",\"first_publications\":[{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-0\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-1\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-2\"},{\"committed_at\":\"2026-11-14T00:00:00Z\",\"committed_version\":\"10\",\"kid\":\"synthetic-restart-2\"},{\"committed_at\":\"2026-11-13T00:00:01Z\",\"committed_version\":\"8\",\"kid\":\"synthetic-k3-restart-old-next\"}],\"generation\":\"1\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"keys\":[{\"alg\":\"Ed25519\",\"kid\":\"synthetic-restart-2\",\"not_after\":\"2026-11-21T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI\",\"purpose\":\"management_state\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-2\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-15T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag\",\"purpose\":\"management_state\",\"state\":\"retired\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-0\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ\",\"purpose\":\"business_delivery\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-1\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc\",\"purpose\":\"protocol_response\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-k3-restart-old-next\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAA_lVmtutZ16a9gyIMbPn2sDK6QbGwfwL__5ApkJlJLw\",\"purpose\":\"business_delivery\",\"state\":\"next\"}],\"keyset_version\":\"10\",\"mode\":\"restart_recovery\",\"realm\":\"1\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"valid_until\":\"2026-11-15T00:00:00Z\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+      "signature": "beovW6tScO0SEd_BrEw9gPXuEhdW30iCN6zy24ogwIw-PonkTFQuGQqwJrN95hlNV1kJdmMZ7IDb7GrawC8tCw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-next-authority",
+      "domain": "Auriga.NetworkRuntimeAuthority.v2",
+      "canonical": "{\"authority_id\":\"synthetic-authority\",\"authority_revision\":\"1\",\"capabilities\":[\"keyset\",\"announcement\",\"business_rotation\",\"restart_recovery\",\"history_archive\",\"network_transport\"],\"expiry_policy\":\"no_hard_expiry\",\"limits\":{\"archive_grace_seconds\":360,\"business_key_seconds\":691200,\"keyset_seconds\":86400,\"next_maturity_seconds\":86400,\"overlap_seconds\":360,\"restart_key_seconds\":604800},\"not_before\":\"2026-01-01T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI\",\"realm\":\"1\",\"review_period_days\":365,\"runtime_kid\":\"synthetic-runtime\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"transport_scope\":[{\"component\":\"network\",\"ekus\":[\"serverAuth\"],\"identity_id\":\"synthetic-projector\",\"sans\":[\"submit.example.com\"]}]}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-next-control",
+      "domain": "Auriga.NetworkRootControl.v2",
+      "canonical": "{\"allowed_authorities\":[{\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\"}],\"control_revision\":\"2\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"minimum_generation\":\"1\",\"minimum_keyset_version\":\"1\",\"realm\":\"1\",\"revoked_authority_ids\":[],\"revoked_installation_ids\":[],\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-retired-keyset",
+      "domain": "Auriga.NetworkKeyset.v2",
+      "canonical": "{\"archive\":{\"before\":\"2026-11-11T00:00:00Z\",\"history_digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"},\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\",\"control_revision\":\"2\",\"first_publications\":[{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-0\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-1\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-2\"},{\"committed_at\":\"2026-11-14T00:00:00Z\",\"committed_version\":\"10\",\"kid\":\"synthetic-restart-2\"},{\"committed_at\":\"2026-11-13T00:00:01Z\",\"committed_version\":\"8\",\"kid\":\"synthetic-k3-restart-old-next\"}],\"generation\":\"1\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"keys\":[{\"alg\":\"Ed25519\",\"kid\":\"synthetic-restart-2\",\"not_after\":\"2026-11-21T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI\",\"purpose\":\"management_state\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-2\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-15T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag\",\"purpose\":\"management_state\",\"state\":\"retired\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-0\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ\",\"purpose\":\"business_delivery\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-1\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc\",\"purpose\":\"protocol_response\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-k3-restart-old-next\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAHpckrR5fJNmEz5VqHgH4ddbQBg9OZ-UgJDBEOBS0mek\",\"purpose\":\"business_delivery\",\"state\":\"retired\"}],\"keyset_version\":\"10\",\"mode\":\"restart_recovery\",\"realm\":\"1\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"valid_until\":\"2026-11-15T00:00:00Z\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+      "signature": "mDJr_DJVxgbOsVZxNQzdU3siP_5ic4xWENNSy137wByx9aldrSXE0obQx6JDA1cjZzOyMTLCGRUgoK4n4c-hCw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-retired-authority",
+      "domain": "Auriga.NetworkRuntimeAuthority.v2",
+      "canonical": "{\"authority_id\":\"synthetic-authority\",\"authority_revision\":\"1\",\"capabilities\":[\"keyset\",\"announcement\",\"business_rotation\",\"restart_recovery\",\"history_archive\",\"network_transport\"],\"expiry_policy\":\"no_hard_expiry\",\"limits\":{\"archive_grace_seconds\":360,\"business_key_seconds\":691200,\"keyset_seconds\":86400,\"next_maturity_seconds\":86400,\"overlap_seconds\":360,\"restart_key_seconds\":604800},\"not_before\":\"2026-01-01T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI\",\"realm\":\"1\",\"review_period_days\":365,\"runtime_kid\":\"synthetic-runtime\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"transport_scope\":[{\"component\":\"network\",\"ekus\":[\"serverAuth\"],\"identity_id\":\"synthetic-projector\",\"sans\":[\"submit.example.com\"]}]}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-retired-control",
+      "domain": "Auriga.NetworkRootControl.v2",
+      "canonical": "{\"allowed_authorities\":[{\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\"}],\"control_revision\":\"2\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"minimum_generation\":\"1\",\"minimum_keyset_version\":\"1\",\"realm\":\"1\",\"revoked_authority_ids\":[],\"revoked_installation_ids\":[],\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-revoked-keyset",
+      "domain": "Auriga.NetworkKeyset.v2",
+      "canonical": "{\"archive\":{\"before\":\"2026-11-11T00:00:00Z\",\"history_digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"},\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\",\"control_revision\":\"2\",\"first_publications\":[{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-0\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-1\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-2\"},{\"committed_at\":\"2026-11-14T00:00:00Z\",\"committed_version\":\"10\",\"kid\":\"synthetic-restart-2\"},{\"committed_at\":\"2026-11-13T00:00:01Z\",\"committed_version\":\"8\",\"kid\":\"synthetic-k3-restart-old-next\"}],\"generation\":\"1\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"keys\":[{\"alg\":\"Ed25519\",\"kid\":\"synthetic-restart-2\",\"not_after\":\"2026-11-21T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI\",\"purpose\":\"management_state\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-2\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-15T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag\",\"purpose\":\"management_state\",\"state\":\"retired\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-0\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ\",\"purpose\":\"business_delivery\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-1\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc\",\"purpose\":\"protocol_response\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-k3-restart-old-next\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAMcssEbf85oTUVOXwTBJeO3KcDBwdWBmJH64D76OyO-8\",\"purpose\":\"business_delivery\",\"state\":\"revoked\"}],\"keyset_version\":\"10\",\"mode\":\"restart_recovery\",\"realm\":\"1\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"valid_until\":\"2026-11-15T00:00:00Z\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+      "signature": "CvjKLaqpH9V8taS18SNT4BCjCIq6jKyBSLkxK_ls-VejpCU6-szTvZ5CQDYPslYJKUUkJx29nixPGpKt85oqDw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-revoked-authority",
+      "domain": "Auriga.NetworkRuntimeAuthority.v2",
+      "canonical": "{\"authority_id\":\"synthetic-authority\",\"authority_revision\":\"1\",\"capabilities\":[\"keyset\",\"announcement\",\"business_rotation\",\"restart_recovery\",\"history_archive\",\"network_transport\"],\"expiry_policy\":\"no_hard_expiry\",\"limits\":{\"archive_grace_seconds\":360,\"business_key_seconds\":691200,\"keyset_seconds\":86400,\"next_maturity_seconds\":86400,\"overlap_seconds\":360,\"restart_key_seconds\":604800},\"not_before\":\"2026-01-01T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI\",\"realm\":\"1\",\"review_period_days\":365,\"runtime_kid\":\"synthetic-runtime\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"transport_scope\":[{\"component\":\"network\",\"ekus\":[\"serverAuth\"],\"identity_id\":\"synthetic-projector\",\"sans\":[\"submit.example.com\"]}]}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-86399-revoked-control",
+      "domain": "Auriga.NetworkRootControl.v2",
+      "canonical": "{\"allowed_authorities\":[{\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\"}],\"control_revision\":\"2\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"minimum_generation\":\"1\",\"minimum_keyset_version\":\"1\",\"realm\":\"1\",\"revoked_authority_ids\":[],\"revoked_installation_ids\":[],\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "KeKgnzlFxdfBTzgtgScpCwshaIVBOhQ-V0bViLztHh9RuXg8_h9i5fHqsyO6gpP48LA81VYWkxQSYGucQDomAw",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-missing-first-publication-keyset",
+      "domain": "Auriga.NetworkKeyset.v2",
+      "canonical": "{\"archive\":{\"before\":\"2026-11-11T00:00:00Z\",\"history_digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"},\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\",\"control_revision\":\"2\",\"first_publications\":[{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-0\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-1\"},{\"committed_at\":\"2026-11-12T00:00:00Z\",\"committed_version\":\"1\",\"kid\":\"synthetic-business-2\"},{\"committed_at\":\"2026-11-14T00:00:00Z\",\"committed_version\":\"10\",\"kid\":\"synthetic-restart-2\"}],\"generation\":\"1\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"keys\":[{\"alg\":\"Ed25519\",\"kid\":\"synthetic-restart-2\",\"not_after\":\"2026-11-21T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAXApYBzGtez3zRI_0i9CVuxiLXvIIjK6dOMgcJeof7xI\",\"purpose\":\"management_state\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-2\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-15T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEA-G_oB96VOZnGZQcfu9Xh1GV99qk5ruV9Kg2Jzv3L3ag\",\"purpose\":\"management_state\",\"state\":\"retired\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-0\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAkVTKGFHwFQT3V88ysAkvTps0pwU3kM9dhiLTewjgcLQ\",\"purpose\":\"business_delivery\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-business-1\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-12T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEANSYrBYE5I9dWBP-bC6XxSd9vQR7kG1sEHpzMFaYqqVc\",\"purpose\":\"protocol_response\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"synthetic-k3-restart-old-next\",\"not_after\":\"2026-11-20T00:00:00Z\",\"not_before\":\"2026-11-14T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAr7ru0UN1PwxUW4D8U7JNYggZf8lYYB982AH2p_iQSXQ\",\"purpose\":\"business_delivery\",\"state\":\"next\"}],\"keyset_version\":\"10\",\"mode\":\"restart_recovery\",\"realm\":\"1\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"valid_until\":\"2026-11-15T00:00:00Z\"}",
+      "public_key_spki": "MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI",
+      "signature": "qWX4d0tf_c3fFPvbFFu2kba39n6xsEku1FzmTS0yJphm4BVRrjzjLKQxdRxx9Q50w0ngNdWCrJc8OrPAQwLODQ",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-missing-first-publication-authority",
+      "domain": "Auriga.NetworkRuntimeAuthority.v2",
+      "canonical": "{\"authority_id\":\"synthetic-authority\",\"authority_revision\":\"1\",\"capabilities\":[\"keyset\",\"announcement\",\"business_rotation\",\"restart_recovery\",\"history_archive\",\"network_transport\"],\"expiry_policy\":\"no_hard_expiry\",\"limits\":{\"archive_grace_seconds\":360,\"business_key_seconds\":691200,\"keyset_seconds\":86400,\"next_maturity_seconds\":86400,\"overlap_seconds\":360,\"restart_key_seconds\":604800},\"not_before\":\"2026-01-01T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEApOfPfw_mZXtsvi-dF4IhjR8JS1J7DnzKNPadHUpVrrI\",\"realm\":\"1\",\"review_period_days\":365,\"runtime_kid\":\"synthetic-runtime\",\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\",\"transport_scope\":[{\"component\":\"network\",\"ekus\":[\"serverAuth\"],\"identity_id\":\"synthetic-projector\",\"sans\":[\"submit.example.com\"]}]}",
+      "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",
+      "signature": "JI2OZ6_o9WmuYpo0x8Ib9zIdYq3GB6fk4YKzuAwEfep_J-PaYEMiTKQj6I0U-d1JhBzGNBaasm4iXE9rbwAHCA",
+      "valid": true
+    },
+    {
+      "id": "restart-old-next-missing-first-publication-control",
       "domain": "Auriga.NetworkRootControl.v2",
       "canonical": "{\"allowed_authorities\":[{\"authority_digest\":\"sha256:5a25b9a6018f7f0613d9c9845dc5c6abc27482655d3c6b70470acf2081a35515\",\"authority_id\":\"synthetic-authority\"}],\"control_revision\":\"2\",\"issued_at\":\"2026-11-14T00:00:00Z\",\"minimum_generation\":\"1\",\"minimum_keyset_version\":\"1\",\"realm\":\"1\",\"revoked_authority_ids\":[],\"revoked_installation_ids\":[],\"schema_version\":2,\"tenant_id\":\"synthetic-tenant\"}",
       "public_key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck",

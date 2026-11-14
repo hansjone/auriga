@@ -286,6 +286,7 @@ export function evaluateK3(v) {
           fail('authority_unknown');
         if (c.revoked_authority_ids.includes(a.authority_id))
           fail('authority_revoked');
+        if (!a.capabilities.includes('network_transport')) fail('scope_denied');
         for (const o of [a, b, c]) {
           if (o.tenant_id !== i.tenant_id) fail('scope_denied');
           if (o.realm !== i.realm) fail('scope_denied');

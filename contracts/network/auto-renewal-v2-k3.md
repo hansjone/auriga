@@ -52,4 +52,10 @@ I 先核认证连接 node_id、目标、identity_id/revision 与 pin 全等，�
 
 主动复核补充：长期离线端可能错过首个换授权 bundle。C 必须不可变保存 TransportTransitionProof，通过 GET /transport/transitions/{authority_digest} 读取；其中历史 control 精确锚定 first_bundle，predecessor 验历史签名。先按 transport_transition 完整验证该起点（本地更旧可追平），再独立验当前包签名、安装scope、当前最新控制允许/撤销及控制绑定、generation 与起点一致、bundle_version 不低于起点且不低于本地最高，同版本要求完整摘要相同。当前包不能以历史控制作为允许列表。当前 new_leaves/retire_old 另取其 previous_bundle_digest 对应的历史包与新鲜的前置阶段全局确认；必须分别为 dual_trust/loaded、new_leaves/handshake_verified。当前 dual_trust 只安装双信任，不切新叶子或退休旧CA。历史根锚可在新根控制中不再重复，但历史证明不能豁免最新撤销或降低本地最高代际/版本。以上可直接验证起点和当前两份快照，无需逐日补齐所有中间清单；本地CA墓碑仍拒绝已见旧材料复活。
 
-transport_catchup ???????JSON???????????????????????/?????/?????????new_leaves?retire_old???????????transport_transition?????
+transport_catchup 在同一共享 JSON 中验证从根锚起点追平到当前包。消费方须覆盖后续版本、同版精确重试、最新根控制回退与撤销、起点及本地最高版本的边界，并验证 new_leaves 和 retire_old 所需的前置阶段确认证据。实现线须同时执行 transport_transition 起点与 transport_catchup 追平用例。
+
+## 首审返工的消费方迁移
+
+运行钥用途从三种扩充到四种，增加 SignedTransportConfirmation，固定签名域为 `Auriga.NetworkTransportConfirmation.v2`。C 的签发白名单和 N/I/P 的验证白名单增加此域，并在签发和验证时检查 `network_transport` 能力。已包含该能力的根授权继续适用，缺该能力时返回 scope_denied，扩权通过离线根重签授权。确认证据沿用同一 collab 台账信任边界。
+
+restart_recovery 必须将未成熟的旧 next 保留原身份与期限并置为 retired 或 revoked。少于24小时的旧 next 不能原样保留或激活，恰满授权成熟期的 next 继续按原激活和按用途保留规则处理。C/N/P 采用新增的成熟期等号及少一秒正负向量。

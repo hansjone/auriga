@@ -397,6 +397,8 @@ paths:
           required: true
           schema:
             type: string
+            minLength: 1
+            maxLength: 128
       responses:
         "200":
           description: 精确台账记录
@@ -423,6 +425,8 @@ paths:
           required: true
           schema:
             type: string
+            minLength: 1
+            maxLength: 128
       responses:
         "200":
           description: 精确台账记录
@@ -449,6 +453,9 @@ paths:
           required: true
           schema:
             type: string
+            minLength: 71
+            maxLength: 71
+            pattern: "^sha256:[0-9a-f]{64}$"
       responses:
         "200":
           description: 精确台账记录
@@ -475,6 +482,9 @@ paths:
           required: true
           schema:
             type: string
+            minLength: 71
+            maxLength: 71
+            pattern: "^sha256:[0-9a-f]{64}$"
       responses:
         "200":
           description: 根锚起点证明

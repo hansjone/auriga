@@ -343,3 +343,53 @@ test('migration member binds the actual signed v1 pair and public material', () 
     digest(vector.input.members),
   );
 });
+
+test('read-only query path parameters follow frozen identifier bounds', () => {
+  const api = YAML.parse(
+    readFileSync(
+      new URL('../openapi/network-keys-v2.yaml', import.meta.url),
+      'utf8',
+    ),
+  );
+  let checked = 0;
+  for (const path of Object.values(api.paths)) {
+    for (const parameter of path.get?.parameters ?? []) {
+      const validate = ajv.compile(parameter.schema);
+      if (parameter.name === 'target_id') {
+        assert.equal(
+          parameter.schema.minLength,
+          schema.$defs.ControlPackage.properties.target_id.minLength,
+        );
+        assert.equal(
+          parameter.schema.maxLength,
+          schema.$defs.ControlPackage.properties.target_id.maxLength,
+        );
+        assert.equal(validate('a'.repeat(128)), true);
+        assert.equal(validate(''), false);
+        assert.equal(validate('a'.repeat(129)), false);
+      } else {
+        assert.equal(
+          parameter.schema.pattern,
+          schema.$defs.GenerationTransition.properties.predecessor_digest
+            .pattern,
+        );
+        assert.equal(validate('sha256:' + 'a'.repeat(64)), true);
+        assert.equal(validate('sha256:' + 'a'.repeat(63)), false);
+        assert.equal(validate('sha256:' + 'a'.repeat(65)), false);
+        assert.equal(validate('sha256:' + 'A'.repeat(64)), false);
+      }
+      checked++;
+    }
+  }
+  assert.equal(checked, 4);
+});
+
+test('K3 consumer instructions preserve UTF-8 transport catchup text', () => {
+  const bytes = readFileSync(
+    new URL('../network/auto-renewal-v2-k3.md', import.meta.url),
+  );
+  assert.notEqual(bytes.subarray(0, 3).toString('hex'), 'efbbbf');
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  assert.doesNotMatch(text, /\?{2,}|\uFFFD/);
+  assert.match(text, /^transport_catchup \p{Script=Han}[^\n]+JSON/mu);
+});

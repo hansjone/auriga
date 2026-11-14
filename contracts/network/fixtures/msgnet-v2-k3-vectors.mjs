@@ -427,6 +427,37 @@ export function extendK3({
       );
     });
   ev('confirmation-complete', 'accept');
+  ev(
+    'confirmation-without-network-transport-capability',
+    'scope_denied',
+    (i) => {
+      i.authority.payload.capabilities =
+        i.authority.payload.capabilities.filter(
+          (capability) => capability !== 'network_transport',
+        );
+      i.authority = rootSign(
+        i.authority.payload,
+        'Auriga.NetworkRuntimeAuthority.v2',
+      );
+      const authorityDigest = digest(i.authority);
+      i.control.payload.allowed_authorities = [
+        {
+          authority_id: i.authority.payload.authority_id,
+          authority_digest: authorityDigest,
+        },
+      ];
+      i.control = rootSign(i.control.payload, 'Auriga.NetworkRootControl.v2');
+      i.bundle.payload.authority_digest = authorityDigest;
+      i.bundle = runtimeSign(i.bundle.payload);
+      i.evidence.payload.authority_digest = authorityDigest;
+      i.evidence.payload.bundle_digest = digest(i.bundle);
+      i.evidence.payload.readers[0].selector.bundle_digest = digest(i.bundle);
+      i.expected_selectors['reader-1'] = digest(
+        i.evidence.payload.readers[0].selector,
+      );
+    },
+  );
+
   ev('confirmation-age-60', 'accept', (i) => (i.now = '2026-11-14T00:01:00Z'));
   ev(
     'confirmation-age-61',
@@ -818,4 +849,95 @@ export function extendK3({
     withProof(i);
     i.confirmation.required_phase = 'handshake_verified';
   });
+  // 成熟期恰在24小时与少一秒时，仅变动旧next的终态。
+  for (const [age, state, expected] of [
+    [86400, 'next', 'accept'],
+    [86399, 'next', 'invalid_transition'],
+    [86399, 'retired', 'accept'],
+    [86399, 'revoked', 'accept'],
+  ]) {
+    const vector = clone(
+      cases.find((entry) => entry.id === 'restart-two-valid-one-recovered'),
+    );
+    vector.id = `restart-old-next-${age}-${state}`;
+    vector.expected = expected;
+    const input = vector.input;
+    const previous = input.publication.predecessor.keyset.payload;
+    const current = input.publication.keyset.payload;
+    const committedAt = new Date(Date.parse(current.issued_at) - age * 1000)
+      .toISOString()
+      .replace('.000Z', 'Z');
+    previous.issued_at = committedAt;
+    previous.valid_until = new Date(Date.parse(committedAt) + 86400000)
+      .toISOString()
+      .replace('.000Z', 'Z');
+    const next = {
+      ...previous.keys[0],
+      kid: 'synthetic-k3-restart-old-next',
+      public_key_spki: pub(generateKeyPairSync('ed25519')),
+      state: 'next',
+      not_before: current.issued_at,
+    };
+    const first = {
+      kid: next.kid,
+      committed_version: '8',
+      committed_at: committedAt,
+    };
+    previous.keys.push(next);
+    previous.first_publications.push(first);
+    input.first_publication_ledger.push(clone(first));
+    current.first_publications.push(clone(first));
+    current.keys.push({ ...next, state });
+    input.publication.predecessor.keyset = auth(
+      previous,
+      'Auriga.NetworkKeyset.v2',
+      runtime,
+      'synthetic-runtime',
+    );
+    input.previous_digest = input.publication.predecessor.keyset_digest =
+      digest(input.publication.predecessor.keyset);
+    input.publication.keyset = auth(
+      current,
+      'Auriga.NetworkKeyset.v2',
+      runtime,
+      'synthetic-runtime',
+    );
+    cases.push(vector);
+  }
+  const missingFirst = clone(
+    cases.find((entry) => entry.id === 'restart-old-next-86400-next'),
+  );
+  missingFirst.id = 'restart-old-next-missing-first-publication';
+  missingFirst.expected = 'invalid_transition';
+  const missingInput = missingFirst.input;
+  const missingKid = 'synthetic-k3-restart-old-next';
+  missingInput.publication.predecessor.keyset.payload.first_publications =
+    missingInput.publication.predecessor.keyset.payload.first_publications.filter(
+      (entry) => entry.kid !== missingKid,
+    );
+  missingInput.publication.keyset.payload.first_publications =
+    missingInput.publication.keyset.payload.first_publications.filter(
+      (entry) => entry.kid !== missingKid,
+    );
+  missingInput.first_publication_ledger =
+    missingInput.first_publication_ledger.filter(
+      (entry) => entry.kid !== missingKid,
+    );
+  missingInput.publication.predecessor.keyset = auth(
+    missingInput.publication.predecessor.keyset.payload,
+    'Auriga.NetworkKeyset.v2',
+    runtime,
+    'synthetic-runtime',
+  );
+  missingInput.previous_digest =
+    missingInput.publication.predecessor.keyset_digest = digest(
+      missingInput.publication.predecessor.keyset,
+    );
+  missingInput.publication.keyset = auth(
+    missingInput.publication.keyset.payload,
+    'Auriga.NetworkKeyset.v2',
+    runtime,
+    'synthetic-runtime',
+  );
+  cases.push(missingFirst);
 }
