@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { desktopUpdater, idleFetch } from '../../src/local/desktop.js';
+import {
+  desktopUpdater,
+  idleFetch,
+  desktopStartupFailure,
+} from '../../src/local/desktop.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { TextDecoder } from 'node:util';
 import { createSettingsStore } from '../../src/settings/store.js';
@@ -70,7 +74,7 @@ test('Desktop 仅绑定首次 HTTPS 平台，普通 DSH 不挂更新器', async 
     );
     await writeFile(
       runtime,
-      'export function createUpdater(){return {status:()=>({enabled:true}), start:()=>()=>{}}}',
+      `export { platformUrl } from ${JSON.stringify(new URL('../../../installer/runtime/update.mjs', import.meta.url).href)}; export function createUpdater(){return {status:()=>({enabled:true}), start:()=>()=>{}}}`,
     );
     process.env.AURIGA_DESKTOP_ROOT = root;
     process.env.AURIGA_DESKTOP_RUNTIME = runtime;
@@ -152,6 +156,69 @@ test('设置更新操作保留主人认证和跨源门禁', async () => {
     assert.equal(calls, 1);
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('HTTP adapter accepts confirmed IP, reports missing policy and refuses HTTPS binding mismatch', async () => {
+  const previous = {
+    root: process.env.AURIGA_DESKTOP_ROOT,
+    runtime: process.env.AURIGA_DESKTOP_RUNTIME,
+  };
+  const root = await mkdtemp(join(tmpdir(), 'desktop-http-binding-'));
+  const origin = 'http://127.0.0.1:8080';
+  try {
+    const runtime = join(root, 'versions/v1/auriga/runtime/update.mjs');
+    await mkdir(join(root, 'versions/v1/auriga/runtime'), { recursive: true });
+    await writeFile(
+      join(root, 'install.json'),
+      JSON.stringify({ current: 'v1' }),
+    );
+    await writeFile(
+      runtime,
+      `export { platformUrl } from ${JSON.stringify(new URL('../../../installer/runtime/update.mjs', import.meta.url).href)}; export function createUpdater(options){return {status:()=>({enabled:true,origin:options.origin}),start:()=>()=>{}}}`,
+    );
+    process.env.AURIGA_DESKTOP_ROOT = root;
+    process.env.AURIGA_DESKTOP_RUNTIME = runtime;
+    const missing = await desktopUpdater({ origin }).then(
+      () => null,
+      (error) => error,
+    );
+    assert.equal(missing?.code, 'desktop.origin_confirmation_required');
+    await writeFile(
+      join(root, 'desktop-origin.json'),
+      JSON.stringify({ origin }),
+    );
+    await assert.rejects(desktopUpdater({ origin }), {
+      code: 'desktop.origin_confirmation_required',
+    });
+    const failed = desktopStartupFailure(missing);
+    assert.equal(failed.status().confirmationRequired, true);
+    assert.equal(failed.status().enabled, false);
+    assert.throws(() => failed.check(), {
+      code: 'desktop.origin_confirmation_required',
+    });
+    await writeFile(
+      join(root, 'desktop-origin.json'),
+      JSON.stringify({ origin: 'https://example.com' }),
+    );
+    assert.equal(await desktopUpdater({ origin }), undefined);
+    await writeFile(
+      join(root, 'desktop-origin.json'),
+      JSON.stringify({ origin, accessMode: 'ip', confirmedOrigin: origin }),
+    );
+    const updater = await desktopUpdater({ origin });
+    try {
+      assert.deepEqual(updater.status(), { enabled: true, origin });
+    } finally {
+      updater.close();
+    }
+  } finally {
+    if (previous.root === undefined) delete process.env.AURIGA_DESKTOP_ROOT;
+    else process.env.AURIGA_DESKTOP_ROOT = previous.root;
+    if (previous.runtime === undefined)
+      delete process.env.AURIGA_DESKTOP_RUNTIME;
+    else process.env.AURIGA_DESKTOP_RUNTIME = previous.runtime;
     await rm(root, { recursive: true, force: true });
   }
 });

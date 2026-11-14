@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DeviceAccessService_VerifyDeviceAccess_FullMethodName     = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceAccess"
-	DeviceAccessService_VerifyDeviceAiAccess_FullMethodName   = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceAiAccess"
-	DeviceAccessService_VerifyDeviceCredential_FullMethodName = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceCredential"
+	DeviceAccessService_VerifyDeviceAccess_FullMethodName           = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceAccess"
+	DeviceAccessService_VerifyDeviceAiAccess_FullMethodName         = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceAiAccess"
+	DeviceAccessService_VerifyDeviceCredential_FullMethodName       = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceCredential"
+	DeviceAccessService_VerifyStandardDeviceAiAccess_FullMethodName = "/auriga.iam.v1.DeviceAccessService/VerifyStandardDeviceAiAccess"
 )
 
 // DeviceAccessServiceClient is the client API for DeviceAccessService service.
@@ -48,6 +49,13 @@ type DeviceAccessServiceClient interface {
 	// Only svc:collab. Receiver/lock-time authority check; identity inputs are
 	// compared with stored device ownership, never trusted as proof of ownership.
 	VerifyDeviceCredential(ctx context.Context, in *VerifyDeviceCredentialRequest, opts ...grpc.CallOption) (*VerifyDeviceCredentialResponse, error)
+	// Standard RFC8628 lineage only; additive to the native/model-only RPCs.
+	// Only svc:ai-gateway with delegated non-platform tenant and authenticated
+	// internal transport. Verify at+jwt/ES256, exact AI audience, <=300s lifetime,
+	// requested permission in signed AND current permissions, device/client/member
+	// and authoritative source binding/generation. Never touch idle or use refresh.
+	// Invalid => inactive/empty identity; dependency failure => UNAVAILABLE.
+	VerifyStandardDeviceAiAccess(ctx context.Context, in *VerifyStandardDeviceAiAccessRequest, opts ...grpc.CallOption) (*VerifyStandardDeviceAiAccessResponse, error)
 }
 
 type deviceAccessServiceClient struct {
@@ -88,6 +96,16 @@ func (c *deviceAccessServiceClient) VerifyDeviceCredential(ctx context.Context, 
 	return out, nil
 }
 
+func (c *deviceAccessServiceClient) VerifyStandardDeviceAiAccess(ctx context.Context, in *VerifyStandardDeviceAiAccessRequest, opts ...grpc.CallOption) (*VerifyStandardDeviceAiAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyStandardDeviceAiAccessResponse)
+	err := c.cc.Invoke(ctx, DeviceAccessService_VerifyStandardDeviceAiAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeviceAccessServiceServer is the server API for DeviceAccessService service.
 // All implementations must embed UnimplementedDeviceAccessServiceServer
 // for forward compatibility.
@@ -112,6 +130,13 @@ type DeviceAccessServiceServer interface {
 	// Only svc:collab. Receiver/lock-time authority check; identity inputs are
 	// compared with stored device ownership, never trusted as proof of ownership.
 	VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error)
+	// Standard RFC8628 lineage only; additive to the native/model-only RPCs.
+	// Only svc:ai-gateway with delegated non-platform tenant and authenticated
+	// internal transport. Verify at+jwt/ES256, exact AI audience, <=300s lifetime,
+	// requested permission in signed AND current permissions, device/client/member
+	// and authoritative source binding/generation. Never touch idle or use refresh.
+	// Invalid => inactive/empty identity; dependency failure => UNAVAILABLE.
+	VerifyStandardDeviceAiAccess(context.Context, *VerifyStandardDeviceAiAccessRequest) (*VerifyStandardDeviceAiAccessResponse, error)
 	mustEmbedUnimplementedDeviceAccessServiceServer()
 }
 
@@ -130,6 +155,9 @@ func (UnimplementedDeviceAccessServiceServer) VerifyDeviceAiAccess(context.Conte
 }
 func (UnimplementedDeviceAccessServiceServer) VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceCredential not implemented")
+}
+func (UnimplementedDeviceAccessServiceServer) VerifyStandardDeviceAiAccess(context.Context, *VerifyStandardDeviceAiAccessRequest) (*VerifyStandardDeviceAiAccessResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyStandardDeviceAiAccess not implemented")
 }
 func (UnimplementedDeviceAccessServiceServer) mustEmbedUnimplementedDeviceAccessServiceServer() {}
 func (UnimplementedDeviceAccessServiceServer) testEmbeddedByValue()                             {}
@@ -206,6 +234,24 @@ func _DeviceAccessService_VerifyDeviceCredential_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeviceAccessService_VerifyStandardDeviceAiAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyStandardDeviceAiAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAccessServiceServer).VerifyStandardDeviceAiAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAccessService_VerifyStandardDeviceAiAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAccessServiceServer).VerifyStandardDeviceAiAccess(ctx, req.(*VerifyStandardDeviceAiAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DeviceAccessService_ServiceDesc is the grpc.ServiceDesc for DeviceAccessService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -224,6 +270,10 @@ var DeviceAccessService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VerifyDeviceCredential",
 			Handler:    _DeviceAccessService_VerifyDeviceCredential_Handler,
+		},
+		{
+			MethodName: "VerifyStandardDeviceAiAccess",
+			Handler:    _DeviceAccessService_VerifyStandardDeviceAiAccess_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

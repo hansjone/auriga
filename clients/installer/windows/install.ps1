@@ -4,6 +4,8 @@ param(
   [string]$InstallDir = $(if ($env:AURIGA_INSTALL_DIR) { $env:AURIGA_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\AurigaDesktop' }),
   [string]$DataHome = $(if ($env:AURIGA_DATA_HOME) { $env:AURIGA_DATA_HOME } else { Join-Path $env:LOCALAPPDATA 'AurigaDesktop\home' }),
   [string]$PlatformOrigin = $env:AURIGA_PLATFORM_ORIGIN,
+  [string]$PlatformAccessMode,
+  [string]$ConfirmPlatformOrigin,
   [string]$StartMenuDir = $(if ($env:AURIGA_START_MENU_DIR) { $env:AURIGA_START_MENU_DIR } else { Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs' }),
   [string]$DesktopDir = $(if ($env:AURIGA_DESKTOP_DIR) { $env:AURIGA_DESKTOP_DIR } else { [Environment]::GetFolderPath('Desktop') }),
   [string]$RegistryKey = $(if ($env:AURIGA_REGISTRY_KEY) { $env:AURIGA_REGISTRY_KEY } else { 'AurigaDesktop' }),
@@ -15,6 +17,8 @@ $node = Join-Path $payload 'upstream\node\node.exe'
 $cli = Join-Path $payload 'auriga\runtime\cli.mjs'
 $argList = @($cli, 'install', '--payload', $payload, '--root', $InstallDir, '--data-home', $DataHome)
 if ($PlatformOrigin) { $argList += @('--platform-origin', $PlatformOrigin) }
+if ($PlatformAccessMode) { $argList += @('--platform-access-mode', $PlatformAccessMode) }
+if ($ConfirmPlatformOrigin) { $argList += @('--confirm-platform-origin', $ConfirmPlatformOrigin) }
 & $node @argList
 if ($LASTEXITCODE -ne 0) { throw "install failed ($LASTEXITCODE)" }
 
