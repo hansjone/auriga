@@ -40,9 +40,15 @@ const definitions = new Map();
 for (const file of files) {
   const url = new URL(file + '.schema.json', base),
     schema = JSON.parse(readFileSync(url, 'utf8'));
-  ajv.addSchema(schema, url.href);
+  // Keep schema identities independent of installation paths (including the
+  // RUNNER~1 short paths used by Windows CI and ordinary user installations).
+  const id = new URL(
+    file + '.schema.json',
+    'https://auriga.example.com/contracts/',
+  ).href;
+  ajv.addSchema(schema, id);
   for (const name of Object.keys(schema.$defs))
-    definitions.set(name, `${url.href}#/$defs/${name}`);
+    definitions.set(name, `${id}#/$defs/${name}`);
 }
 export const valid = (name, value) =>
   Boolean(definitions.has(name) && ajv.getSchema(definitions.get(name))(value));

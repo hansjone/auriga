@@ -252,3 +252,49 @@ test(
     assert.deepEqual(JSON.parse(stdout), { version: 1, revoked: true });
   },
 );
+
+test(
+  'eight simultaneous authenticated pipe connections keep the listener and existing peers alive',
+  { skip: process.platform !== 'win32', timeout: 25000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'auriga-pipe-capacity-'));
+    const helper = buildHelper(join(directory, 'helper.exe')),
+      f = fixture();
+    const business = new BusinessProxy(f.broker),
+      ipc = await startIpc({ helper, broker: f.broker, business });
+    let child;
+    t.after(async () => {
+      child?.kill();
+      await ipc.close();
+      business.close();
+      await f.broker.close();
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    });
+    const script = `import{createReadStream}from'node:fs';import{createInterface}from'node:readline';import{once}from'node:events';import{randomUUID}from'node:crypto';import{connectIpc}from ${JSON.stringify(new URL('../ipc.mjs', import.meta.url).href)};const input=createReadStream('',{fd:3}),lines=createInterface({input});const[line]=await once(lines,'line');lines.close();input.destroy();const descriptor=JSON.parse(line),clients=[];const query=()=>({protocolVersion:1,requestId:randomUUID(),shellEpoch:'00000000-0000-0000-0000-000000000000',expectedRevision:0,action:'snapshot'});try{for(let i=0;i<8;i++){const client=connectIpc(descriptor);clients.push(client);if((await client.call(query())).snapshot.state!=='signed_out')throw Error('snapshot failed');}const excess=connectIpc(descriptor);let denied=false;try{await excess.call(query());}catch{denied=true;}finally{excess.close();}for(const client of clients)if((await client.call(query())).snapshot.state!=='signed_out')throw Error('peer lost');console.log(JSON.stringify({connected:clients.length,excessRejected:denied,live:true}));}finally{for(const client of clients)client.close();}`;
+    child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    });
+    let output = '',
+      errors = '';
+    child.stdout.on('data', (b) => {
+      output += b;
+    });
+    child.stderr.on('data', (b) => {
+      errors += b;
+    });
+    const exited = once(child, 'exit');
+    await ipc.attach(child);
+    assert.equal((await exited)[0], 0, errors);
+    assert.deepEqual(JSON.parse(output), {
+      connected: 8,
+      excessRejected: true,
+      live: true,
+    });
+  },
+);

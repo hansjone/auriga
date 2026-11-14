@@ -63,7 +63,8 @@ public static class Helper {
     try {
       var sa = new SA { length = Marshal.SizeOf(typeof(SA)), descriptor = descriptor, inherit = 0 };
       // Reject remote clients; reserve the first instance against name squatting.
-      var handle = CreateNamedPipe(@"\\.\pipe\" + name, 3 | 0x40000000U | (first ? 0x80000U : 0U), 8, 8, 65536, 65536, 0, ref sa);
+      // Eight served connections plus a reserved listener fit in this limit.
+      var handle = CreateNamedPipe(@"\\.\pipe\" + name, 3 | 0x40000000U | (first ? 0x80000U : 0U), 8, 255, 65536, 65536, 0, ref sa);
       if (handle.IsInvalid) throw new IOException("pipe");
       var stream = new NamedPipeServerStream(PipeDirection.InOut, true, false, handle);
       return stream;
@@ -131,7 +132,11 @@ public static class Helper {
       var pipe = listener;
       if (Interlocked.Increment(ref active) > 8) { Interlocked.Decrement(ref active); pipe.Dispose(); }
       else { var thread = new Thread(() => { try { Serve(pipe); } finally { Interlocked.Decrement(ref active); } }); thread.IsBackground = true; thread.Start(); }
-      listener = Pipe(name, false);
+      listener = null;
+      while (!Closing && listener == null) {
+        try { listener = Pipe(name, false); }
+        catch (IOException) { Thread.Sleep(50); } // Transient allocation failure must not drop existing peers.
+      }
     }
   }
   static void VerifyServer(NamedPipeClientStream pipe) {

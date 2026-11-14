@@ -9,6 +9,7 @@ import {
 } from './process-tree.mjs';
 import { Supervisor, packagedTrust } from './supervisor.mjs';
 import { superviseDsh } from './desktop-supervision.mjs';
+import { startShellAuth } from './shell-auth.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -50,7 +51,6 @@ import {
 } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
 import { verifyPackage } from './verify.mjs';
 
 export const PROFILE = 'auriga';
@@ -751,14 +751,7 @@ export async function launch({ root, args = [], env = process.env }) {
     supervisor.trust = packagedTrust(dir);
     if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
       supervisor.shellSnapshot = () => shellAuth?.snapshot();
-      try {
-        const { startDesktopAuth } = await import(
-          pathToFileURL(join(dir, 'auriga/shell-auth/desktop.mjs')).href
-        );
-        shellAuth = await startDesktopAuth({ root, dataHome: state.dataHome });
-      } catch {
-        console.error('Auriga 平台认证暂不可用，继续使用本地 DSH。');
-      }
+      shellAuth = await startShellAuth({ root, dataHome: state.dataHome, dir });
     }
     await supervisor.reconcile(true);
     if (
