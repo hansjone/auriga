@@ -93,6 +93,7 @@ export async function openV2TrustStore(options) {
     seen_digest: publication ? digest(publication.keyset) : '',
     first_publication_ledger: [...first.values()],
     history: [...history.values()],
+    previous_digest: /** @type {string|undefined} */ (undefined),
     has_history: !!publication || !!checkpoint,
     migration_authorized: !!migrationPermit,
   });
@@ -196,6 +197,25 @@ export async function openV2TrustStore(options) {
     return serialize(async () => {
       // Re-read local facts after waiting: never validate against a stale control.
       const c = context();
+      const predecessor = candidate.predecessor;
+      if (
+        publication &&
+        !equal(publication.keyset, candidate.keyset) &&
+        predecessor &&
+        predecessor.keyset.payload.generation ===
+          publication.keyset.payload.generation
+      ) {
+        const priorVersion = BigInt(predecessor.keyset.payload.keyset_version);
+        const localVersion = BigInt(publication.keyset.payload.keyset_version);
+        if (
+          priorVersion < localVersion ||
+          (priorVersion > localVersion &&
+            now() < timeValue(publication.keyset.payload.valid_until))
+        )
+          reject('invalid_transition');
+        if (priorVersion === localVersion)
+          c.previous_digest = digest(publication.keyset);
+      }
       const same = publication && equal(publication.keyset, candidate.keyset);
       if (same && !blocked) return;
       const checked = verifyPublication({

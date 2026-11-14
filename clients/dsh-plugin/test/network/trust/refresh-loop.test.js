@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startTrustRefresh } from '../../../src/network/trust/refresh-loop.js';
+import {
+  startTrustRefresh,
+  trustRefreshDelay,
+} from '../../../src/network/trust/refresh-loop.js';
 
 test(
   'refresh failure cannot extend the original signed deadline',
@@ -55,3 +58,24 @@ test(
     assert.equal(expired, 0);
   },
 );
+
+test('normal refresh uses twelve-hour jitter and failures back off within signed expiry', () => {
+  assert.equal(
+    trustRefreshDelay(86400000, 0, 0, () => 0.5),
+    43200000,
+  );
+  assert.ok(trustRefreshDelay(86400000, 0, 0, () => 0) < 43200000);
+  assert.ok(trustRefreshDelay(86400000, 0, 0, () => 1) > 43200000);
+  assert.equal(
+    trustRefreshDelay(86400000, 0, 1, () => 0.5),
+    30000,
+  );
+  assert.equal(
+    trustRefreshDelay(86400000, 0, 2, () => 0.5),
+    60000,
+  );
+  assert.equal(
+    trustRefreshDelay(1000, 0, 7, () => 0.5),
+    1000,
+  );
+});

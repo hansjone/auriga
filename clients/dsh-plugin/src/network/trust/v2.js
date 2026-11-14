@@ -204,11 +204,7 @@ export function verifyPublication(context) {
     reject('predecessor_required');
   if (k.mode === 'bootstrap' && context.has_history)
     reject('invalid_transition');
-  if (
-    k.mode === 'migration' &&
-    context.has_history &&
-    !context.migration_authorized
-  )
+  if (k.mode === 'migration' && !context.migration_authorized)
     reject('invalid_transition');
   let previous = [];
   const proof = p.predecessor;

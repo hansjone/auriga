@@ -500,3 +500,50 @@ test('public host adapter owns a profile-scoped route and disposal', async () =>
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('control import rejects declared oversize before reading and stops chunked input at the first excess', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-control-limit-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const handler = createSettingsHandler({
+    store: await createSettingsStore(dir),
+    activeOrigin: '',
+    auth: { requestRejection: () => undefined },
+    networkControl: () => ({
+      available: true,
+      importPackage: async () => {
+        throw Error('must not import');
+      },
+    }),
+  });
+  const make = () =>
+    request('network-control', {
+      method: 'POST',
+      origin: 'http://localhost:3000',
+      headers: { 'content-type': 'application/json', 'x-auriga-settings': '1' },
+    });
+  const declared = make();
+  declared.headers['content-length'] = String(64 * 1024 * 1024 + 1);
+  let reads = 0,
+    closed = false;
+  declared[Symbol.asyncIterator] = async function* () {
+    reads++;
+    yield Buffer.from('ignored');
+  };
+  assert.equal((await send(handler, declared)).status, 413);
+  assert.equal(reads, 0);
+  const chunked = make(),
+    chunk = Buffer.alloc(8 * 1024 * 1024);
+  chunked[Symbol.asyncIterator] = async function* () {
+    try {
+      for (let i = 0; i < 100; i++) {
+        reads++;
+        yield chunk;
+      }
+    } finally {
+      closed = true;
+    }
+  };
+  assert.equal((await send(handler, chunked)).status, 413);
+  assert.equal(reads, 9);
+  assert.equal(closed, true);
+});

@@ -189,12 +189,18 @@ export function createSettingsHandler({
           return json(403, { reason: 'forbidden' });
         const control = networkControl?.();
         if (!control?.available) return json(503, { reason: 'unavailable' });
+        const bodyLimit = 64 * 1024 * 1024;
+        const declared = req.headers['content-length'];
+        if (
+          declared &&
+          (!/^\d+$/.test(declared) || Number(declared) > bodyLimit)
+        )
+          return json(413, { reason: 'invalidSettings' });
         const parts = [];
         let size = 0;
         for await (const part of req) {
           size += part.length;
-          if (size > 64 * 1024 * 1024)
-            return json(413, { reason: 'invalidSettings' });
+          if (size > bodyLimit) return json(413, { reason: 'invalidSettings' });
           parts.push(part);
         }
         let input;

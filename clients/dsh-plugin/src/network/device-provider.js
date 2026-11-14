@@ -18,6 +18,19 @@ const v2ControlPaths = Object.freeze({
   control: '/api/collab/v2/network/bootstrap/controls',
   receipts: '/api/collab/v2/network/controls/receipts',
 });
+/** Validate the persisted installation receipt's exact server acknowledgement.
+ * @param {import('../generated/network/auto-renewal-v2.js').InstallationReceipt} receipt @param {any} input */
+export function verifyControlReceiptRecord(receipt, input) {
+  const record = structure('IsolationRecord', detach(input));
+  if (
+    ['tenant_id', 'realm', 'target_id', 'challenge', 'control_digest'].some(
+      (f) => record[f] !== /** @type {any} */ (receipt)[f],
+    ) ||
+    record.minimum_control_revision !== receipt.control_revision
+  )
+    throw new Error('control confirmation binding mismatch');
+  return record;
+}
 /** Transient fetch failure only; validation and persistence errors never use it. */
 export class DeviceControlUnavailable extends Error {}
 /** Only proven credential invalidation may end the native login.
@@ -120,7 +133,8 @@ export function createDeviceProvider({
       /** @param {string} path @param {unknown} body @param {AbortSignal} active */
       async function request(path, body, active) {
         active.throwIfAborted();
-        const current = await getDevice(active);
+        const publicControl = path === v2ControlPaths.control;
+        const current = publicControl ? device : await getDevice(active);
         active.throwIfAborted();
         if (
           ['tid', 'did', 'sub'].some(
@@ -141,7 +155,9 @@ export function createDeviceProvider({
               AbortSignal.timeout(networkTiming.operationMs),
             ]),
             headers: {
-              authorization: 'Bearer ' + current.accessToken,
+              ...(publicControl
+                ? {}
+                : { authorization: 'Bearer ' + current.accessToken }),
               accept: 'application/json',
               ...(body === undefined
                 ? {}
@@ -225,22 +241,12 @@ export function createDeviceProvider({
       }
       /** @param {import('../generated/network/auto-renewal-v2.js').InstallationReceipt} receipt @param {AbortSignal} active */
       async function confirmReceipt(receipt, active) {
-        const record = structure(
-          'IsolationRecord',
-          detach(await request(v2ControlPaths.receipts, receipt, active)),
+        verifyControlReceiptRecord(
+          receipt,
+          await request(v2ControlPaths.receipts, receipt, active),
         );
-        if (
-          [
-            'tenant_id',
-            'realm',
-            'target_id',
-            'challenge',
-            'control_digest',
-          ].some((f) => record[f] !== /** @type {any} */ (receipt)[f]) ||
-          record.minimum_control_revision !== receipt.control_revision
-        )
-          throw new Error('control confirmation binding mismatch');
       }
+
       /** @type {import('./runtime-types.js').DeviceRegistration|undefined} */
       let registered;
       let registering = false;

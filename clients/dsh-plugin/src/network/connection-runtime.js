@@ -463,12 +463,20 @@ export async function openConnectionRuntime(options) {
   const onAbort = () => {
     void close().catch(() => {});
   };
+  let nextTrustRefresh = -Infinity;
   /** @param {Parameters<import('./runtime-types.js').PreparedConnection['refresh']>[0]} value
    * @param {()=>boolean} [current] @returns {Promise<void>} */
   async function refreshTrust(
     value,
     current = () => !closed && !signal.aborted,
+    force = false,
   ) {
+    try {
+      value.assertUsable();
+      if (!force && now() < nextTrustRefresh) return;
+    } catch {
+      /* Fences and expired trust always force a refresh. */
+    }
     try {
       await diagnostics
         .scope('trust_refresh', 0, current)
@@ -481,6 +489,7 @@ export async function openConnectionRuntime(options) {
     diagnostics
       .scope('trust_refresh', 0, current)
       .sync(() => value.assertUsable());
+    nextTrustRefresh = now() + 12 * 3600000 * (0.9 + Math.random() * 0.2);
     clearTimeout(deadline);
     deadline = setTimeout(
       () => {
@@ -495,7 +504,7 @@ export async function openConnectionRuntime(options) {
     if (!trustRefreshStarted) {
       trustRefreshStarted = true;
       stopTrustRefresh = startTrustRefresh({
-        refresh: () => refreshTrust(value),
+        refresh: () => refreshTrust(value, undefined, true),
         expiresAt: () => value.expiresAt,
         now,
         onExpired: () => {
@@ -687,7 +696,7 @@ export async function openConnectionRuntime(options) {
                   retireRegistration();
                   await trust.announce(frame.keyset_announcement);
                   valid();
-                  await refreshTrust(trust);
+                  await refreshTrust(trust, undefined, true);
                   valid();
                   if (
                     message.epoch !== transport.epoch ||
@@ -865,7 +874,7 @@ export async function openConnectionRuntime(options) {
           identity_id: prepared.controlIdentity?.identity_id,
           now,
           refresh: async () => {
-            await refreshTrust(trust);
+            await refreshTrust(trust, undefined, true);
             active();
           },
         }),

@@ -1,32 +1,49 @@
+/** Signed expiry is a hard ceiling, including after a failed refresh.
+ * @param {number} expires @param {number} now @param {number} failures @param {()=>number} [random] */
+export function trustRefreshDelay(
+  expires,
+  now,
+  failures = 0,
+  random = Math.random,
+) {
+  const interval = failures
+    ? Math.min(3600000, 30000 * 2 ** Math.min(failures - 1, 7))
+    : 12 * 3600000;
+  return Math.max(
+    1,
+    Math.min(expires - now, interval * (0.9 + random() * 0.2)),
+  );
+}
 /** Installation-owned refresh port; no URL or timer is selected by a frame.
- * Errors retry without extending the signed deadline. @param {{refresh:()=>Promise<void>,expiresAt:()=>number,now:()=>number,onExpired:()=>void}} options */
+ * @param {{refresh:()=>Promise<void>,expiresAt:()=>number,now:()=>number,onExpired:()=>void}} options */
 export function startTrustRefresh(options) {
-  let stopped = false;
+  let stopped = false,
+    failures = 0;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let timer;
+  const schedule = () => {
+    timer = setTimeout(
+      tick,
+      trustRefreshDelay(options.expiresAt(), options.now(), failures),
+    );
+    timer.unref?.();
+  };
   async function tick() {
     if (stopped) return;
     try {
       await options.refresh();
+      failures = 0;
     } catch {
-      /* Keep the original expiry. */
+      failures++;
     }
     if (stopped) return;
     if (options.now() >= options.expiresAt()) {
       options.onExpired();
       return;
     }
-    timer = setTimeout(
-      tick,
-      Math.max(1, Math.min(60000, options.expiresAt() - options.now())),
-    );
-    timer.unref?.();
+    schedule();
   }
-  timer = setTimeout(
-    tick,
-    Math.max(1, Math.min(60000, options.expiresAt() - options.now())),
-  );
-  timer.unref?.();
+  schedule();
   return () => {
     stopped = true;
     clearTimeout(timer);

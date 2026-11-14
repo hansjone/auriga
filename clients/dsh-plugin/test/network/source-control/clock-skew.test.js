@@ -92,7 +92,9 @@ for (const skew of [-15000, 15000])
     const clientNow = signer.now();
     signer.now = () => clientNow + skew;
     signer.payload.issued_at = iso(signer.now());
-    signer.payload.keys[0].not_before = iso(signer.now() - 1000);
+    signer.payload.keys[0].not_before = iso(
+      Math.min(signer.now(), clientNow) - 1000,
+    );
     const f = await setup(t, {
       signer,
       now: () => clientNow,

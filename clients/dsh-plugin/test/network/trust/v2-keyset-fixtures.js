@@ -47,7 +47,9 @@ export function createV2Signer(root, rootKid) {
           public_key_spki: runtime.publicKey
             .export({ type: 'spki', format: 'der' })
             .toString('base64url'),
-          not_before: payload.issued_at,
+          not_before: new Date(Date.parse(payload.issued_at) - 60000)
+            .toISOString()
+            .replace('.000Z', 'Z'),
         },
         rootOverride.privateKey,
         rootKid,
@@ -62,7 +64,7 @@ export function createV2Signer(root, rootKid) {
         tenant_id: tenant,
         realm: payload.realm,
         control_revision: '2',
-        issued_at: payload.issued_at,
+        issued_at: authority.payload.not_before,
         allowed_authorities: [
           {
             authority_id: authority.payload.authority_id,
@@ -75,7 +77,7 @@ export function createV2Signer(root, rootKid) {
       'Auriga.NetworkRootControl.v2',
       'root_auth',
     );
-    const lineage = scope + ':' + payload.keys[0].public_key_spki;
+    const lineage = scope + ':' + (payload.keys[0]?.public_key_spki ?? 'empty');
     const prior = previous.get(lineage);
     const keys = detach(payload.keys);
     for (const purpose of [
@@ -83,11 +85,20 @@ export function createV2Signer(root, rootKid) {
       'management_state',
       'business_delivery',
     ]) {
-      if (keys.some((k) => k.purpose === purpose)) continue;
+      if (keys.some((k) => k.purpose === purpose && k.state === 'active'))
+        continue;
       const id = lineage + purpose;
       if (!fillers.has(id))
         fillers.set(id, {
-          ...detach(payload.keys[0]),
+          ...detach(
+            payload.keys[0] ?? {
+              alg: 'Ed25519',
+              not_before: new Date(Date.parse(payload.issued_at) - 60000)
+                .toISOString()
+                .replace('.000Z', 'Z'),
+              not_after: payload.valid_until,
+            },
+          ),
           purpose,
           kid: 'filler-' + purpose,
           public_key_spki: generateKeyPairSync('ed25519')
@@ -124,7 +135,7 @@ export function createV2Signer(root, rootKid) {
           authority_digest: digest(authority),
           control_revision: '2',
           generation: '1',
-          mode: advances ? 'refresh' : 'bootstrap',
+          mode: payload.mode ?? (advances ? 'refresh' : 'bootstrap'),
           keys,
           first_publications: firsts,
           archive: {

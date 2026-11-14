@@ -95,6 +95,10 @@ provider 接口：
 
 # v2 本地控制包与安装身份
 
+日常公钥刷新以 12 小时为基准并加入抖动，始终受受签有效期限制；失败指数退避，不延长原截止时间。健康连接续票复用仍可用的信任快照，官方公告、未知钥提示及失效快照仍触发必要刷新。前驱与本地同代际同版本时必须摘要完全一致，落后前驱直接拒绝；跳过中间前驱只允许本地清单已过期的离线恢复。空缓存的 migration 模式同样要求已安装根签许可。
+
+共同向量的验证证据分开记录：174 例调用生产 `verifyPublication`，13 个公告边界调用生产信任库的 `announce/assertUsable`，7 个签名域边界调用生产验签函数；其余 85 例为测试侧签发/投影/配置等策略夹具。测试侧判定和 HPKE 适配不打入插件包，不将全部 279 例表述为实际生产信任库路径验证。
+
 管理员也可在释放该设备信任目录的写锁后，用 `node scripts/network/export-installation.mjs --import-control <manifest.json> [新回执文件.json]` 离线导入。外层 manifest 仅含 `controlManifestFile`（现有 `--control` 导出所用 manifest 的相对路径）及 `networkDirectory`（该 profile 的 `auriga-connect/network` 目录）；内层导出 manifest 仍指定独立安装文件、公有控制包与已核对的 tenant/realm/target。此命令复用下述受保护 pin/钥及正常设备缓存，拒绝绕过存储写锁，输出标准签名回执，不需要消息连接。不要将私钥路径放进控制包或浏览器请求。
 
 0.1.17 使用 K2 生成的 v2 schema。原生 DSH 设置的“消息网络”提供“公有控制包”文件选择、导入和“保存确认回执”。此入口沿用 DSH 主人认证及同源写入限制；不要求平台登录或先建立消息连接，托管模式同样可用。只导入公有 `ControlPackage`，不能从页面上传 pin、私钥、选择服务 URL 或重置历史。

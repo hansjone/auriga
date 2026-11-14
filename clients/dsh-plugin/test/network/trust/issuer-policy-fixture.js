@@ -5,7 +5,7 @@ import {
   createDecipheriv,
   diffieHellman,
 } from 'node:crypto';
-import { schema } from './v2-schema.js';
+import { schema } from '../../../src/network/trust/v2-schema.js';
 import {
   detach,
   digest,
@@ -14,9 +14,7 @@ import {
   reject,
   signature,
   structure,
-  verifyAnnouncement,
-  verifyPublication,
-} from './v2.js';
+} from '../../../src/network/trust/v2.js';
 /** @param {any} clock @param {boolean} writeFirst @param {boolean} clockError @param {boolean} stable */
 export function checkClock(clock, writeFirst, clockError, stable) {
   const deviation = clock.wall_delta - clock.monotonic_delta;
@@ -27,46 +25,6 @@ export function checkClock(clock, writeFirst, clockError, stable) {
     (writeFirst && clockError && !stable)
   )
     reject('clock_error');
-}
-/** @param {any} context @param {any} announcement @param {boolean} persisted */
-export function checkAnnouncementPair(context, announcement, persisted) {
-  const p = verifyPublication(context),
-    k = p.keyset.payload;
-  // Pair-level error precedence follows the shared boundary contract.
-  signature(
-    announcement,
-    'Auriga.NetworkKeysetAnnouncement.v2',
-    p.authority.payload.public_key_spki,
-  );
-  if (
-    !p.authority.payload.capabilities.includes('announcement') ||
-    announcement.payload.authority_digest !== digest(p.authority) ||
-    announcement.payload.realm !== k.realm ||
-    announcement.payload.tenant_id !== k.tenant_id
-  )
-    reject('scope_denied');
-  if (!persisted) reject('projection_pending');
-  const n = announcement.payload;
-  if (
-    BigInt(n.generation) > BigInt(k.generation) ||
-    (n.generation === k.generation &&
-      BigInt(n.keyset_version) > BigInt(k.keyset_version))
-  )
-    reject('projection_pending');
-  if (
-    n.generation !== k.generation ||
-    n.keyset_version !== k.keyset_version ||
-    n.keyset_digest !== digest(p.keyset) ||
-    n.valid_until !== k.valid_until ||
-    n.control_revision !== k.control_revision
-  )
-    reject('invalid_chain');
-  verifyAnnouncement(
-    announcement,
-    p.authority,
-    context.latest_control,
-    context,
-  );
 }
 /** @param {any} input */
 export function checkReceipt(input) {

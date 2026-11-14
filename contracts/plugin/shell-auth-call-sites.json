@@ -267,7 +267,7 @@
         "GET"
       ],
       "operations": [
-        "network_open"
+        "getPublicNetworkControl"
       ],
       "routePattern": "/api/collab/v2/network/bootstrap/controls"
     },
@@ -278,7 +278,7 @@
         "POST"
       ],
       "operations": [
-        "network_open"
+        "confirmNetworkControl"
       ],
       "routePattern": "/api/collab/v2/network/controls/receipts"
     },
