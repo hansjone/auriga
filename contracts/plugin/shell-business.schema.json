@@ -3,42 +3,7 @@
   "title": "ShellAuth 固定业务操作",
   "$defs": {
     "ShellAuthNetworkRegistration": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "tenant": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "device": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "realm": {
-          "type": "string",
-          "pattern": "^[1-9][0-9]{0,19}$"
-        },
-        "node": {
-          "type": "string",
-          "pattern": "^[1-9][0-9]{0,19}$"
-        },
-        "systemAddress": {
-          "type": "string",
-          "pattern": "^aur1:[0-9a-f]+\\.[0-9a-f]+\\.0$",
-          "maxLength": 48
-        },
-        "created": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "tenant",
-        "device",
-        "realm",
-        "node",
-        "systemAddress",
-        "created"
-      ]
+      "$ref": "../network/register-result.schema.json"
     },
     "ShellAuthUploadReference": {
       "type": "object",
@@ -7320,7 +7285,8 @@
           "properties": {
             "memberId": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "description": "Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId)."
             },
             "displayName": {
               "type": "string",

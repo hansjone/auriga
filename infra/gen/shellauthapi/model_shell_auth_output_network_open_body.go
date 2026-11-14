@@ -22,7 +22,7 @@ var _ MappedNullable = &ShellAuthOutputNetworkOpenBody{}
 // ShellAuthOutputNetworkOpenBody struct for ShellAuthOutputNetworkOpenBody
 type ShellAuthOutputNetworkOpenBody struct {
 	StreamId     string                                `json:"streamId"`
-	Registration ShellAuthNetworkRegistration          `json:"registration"`
+	Registration RegisterResultSchema                  `json:"registration"`
 	Binding      ShellAuthOutputNetworkOpenBodyBinding `json:"binding"`
 }
 
@@ -32,7 +32,7 @@ type _ShellAuthOutputNetworkOpenBody ShellAuthOutputNetworkOpenBody
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputNetworkOpenBody(streamId string, registration ShellAuthNetworkRegistration, binding ShellAuthOutputNetworkOpenBodyBinding) *ShellAuthOutputNetworkOpenBody {
+func NewShellAuthOutputNetworkOpenBody(streamId string, registration RegisterResultSchema, binding ShellAuthOutputNetworkOpenBodyBinding) *ShellAuthOutputNetworkOpenBody {
 	this := ShellAuthOutputNetworkOpenBody{}
 	this.StreamId = streamId
 	this.Registration = registration
@@ -73,9 +73,9 @@ func (o *ShellAuthOutputNetworkOpenBody) SetStreamId(v string) {
 }
 
 // GetRegistration returns the Registration field value
-func (o *ShellAuthOutputNetworkOpenBody) GetRegistration() ShellAuthNetworkRegistration {
+func (o *ShellAuthOutputNetworkOpenBody) GetRegistration() RegisterResultSchema {
 	if o == nil {
-		var ret ShellAuthNetworkRegistration
+		var ret RegisterResultSchema
 		return ret
 	}
 
@@ -84,7 +84,7 @@ func (o *ShellAuthOutputNetworkOpenBody) GetRegistration() ShellAuthNetworkRegis
 
 // GetRegistrationOk returns a tuple with the Registration field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputNetworkOpenBody) GetRegistrationOk() (*ShellAuthNetworkRegistration, bool) {
+func (o *ShellAuthOutputNetworkOpenBody) GetRegistrationOk() (*RegisterResultSchema, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -92,7 +92,7 @@ func (o *ShellAuthOutputNetworkOpenBody) GetRegistrationOk() (*ShellAuthNetworkR
 }
 
 // SetRegistration sets field value
-func (o *ShellAuthOutputNetworkOpenBody) SetRegistration(v ShellAuthNetworkRegistration) {
+func (o *ShellAuthOutputNetworkOpenBody) SetRegistration(v RegisterResultSchema) {
 	o.Registration = v
 }
 

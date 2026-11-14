@@ -28,6 +28,7 @@ const envelope = (broker) => ({
 
 test('profile and provider upstream responses project to fixed DTOs; invalid data fails closed', async (t) => {
   const f = fixture();
+  f.claims.sub = randomUUID();
   await login(f);
   let body;
   const proxy = new BusinessProxy(f.broker, async () => Response.json(body));
@@ -42,7 +43,7 @@ test('profile and provider upstream responses project to fixed DTOs; invalid dat
     );
   body = {
     account: {
-      id: f.identity.memberId,
+      id: f.claims.sub,
       tenantId: f.identity.tenantId,
       displayName: 'test',
       email: 'hidden',
@@ -56,7 +57,7 @@ test('profile and provider upstream responses project to fixed DTOs; invalid dat
   for (const account of [
     {},
     { id: randomUUID(), tenantId: f.identity.tenantId, displayName: 'wrong' },
-    { id: f.identity.memberId, tenantId: f.identity.tenantId, displayName: 12 },
+    { id: f.claims.sub, tenantId: f.identity.tenantId, displayName: 12 },
   ]) {
     body = { account };
     assert.ok((await call('profile_read')).error);

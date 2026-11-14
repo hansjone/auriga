@@ -10,14 +10,9 @@ import { createHash } from 'node:crypto';
 import { safePath } from './vault.mjs';
 
 // Consume one producer artifact. Never rebuild a missing or mismatched helper.
-export function copyBrokerArtifact(source, output) {
+export function verifyBrokerArtifact(source) {
   if (!source) throw new Error('broker artifact required');
   source = safePath(source);
-  output = safePath(output);
-  if (resolve(source) === resolve(output))
-    throw new Error('distinct broker paths required');
-  if (existsSync(output) && readdirSync(output).length)
-    throw new Error('empty broker output required');
   const manifestBytes = readFileSync(
     safePath(join(source, 'broker-manifest.json')),
   );
@@ -31,7 +26,7 @@ export function copyBrokerArtifact(source, output) {
   )
     throw new Error('incomplete broker artifact');
   const seen = new Set();
-  const files = manifest.files.map(({ path, sha256 }) => {
+  manifest.files.forEach(({ path, sha256 }) => {
     if (
       typeof path !== 'string' ||
       !/^[a-zA-Z0-9_./-]+$/.test(path) ||
@@ -45,7 +40,6 @@ export function copyBrokerArtifact(source, output) {
     const bytes = readFileSync(safePath(join(source, path)));
     if (createHash('sha256').update(bytes).digest('hex') !== sha256)
       throw new Error('broker artifact digest mismatch');
-    return path;
   });
   // Reject unlisted files too: a package must be exactly this manifest closure.
   const walk = (directory, prefix = '') =>
@@ -62,7 +56,20 @@ export function copyBrokerArtifact(source, output) {
     )
   )
     throw new Error('unlisted broker artifact file');
-  for (const path of [...files, 'broker-manifest.json']) {
+  return manifest;
+}
+
+export function copyBrokerArtifact(source, output) {
+  const manifest = verifyBrokerArtifact(source);
+  output = safePath(output);
+  if (resolve(source) === resolve(output))
+    throw new Error('distinct broker paths required');
+  if (existsSync(output) && readdirSync(output).length)
+    throw new Error('empty broker output required');
+  for (const path of [
+    ...manifest.files.map((file) => file.path),
+    'broker-manifest.json',
+  ]) {
     const target = safePath(join(output, path));
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(join(source, path), target);

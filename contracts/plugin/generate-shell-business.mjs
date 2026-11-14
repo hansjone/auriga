@@ -88,18 +88,9 @@ const wire = (source, maxBytes = 65536) => ({
     source +
     '；保留原始受签字节，不经生成模型重序列化。',
 });
-defs.ShellAuthNetworkRegistration = obj({
-  tenant: uuid,
-  device: uuid,
-  realm: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' },
-  node: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' },
-  systemAddress: {
-    type: 'string',
-    pattern: '^aur1:[0-9a-f]+\\.[0-9a-f]+\\.0$',
-    maxLength: 48,
-  },
-  created: { type: 'boolean' },
-});
+defs.ShellAuthNetworkRegistration = {
+  $ref: '../network/register-result.schema.json',
+};
 const codes = [
   'common.validation_failed',
   'common.unauthenticated',
@@ -378,7 +369,14 @@ for (const [operation, input, output] of [
   [
     'profile_read',
     obj({}),
-    obj({ memberId: uuid, displayName: { type: 'string', maxLength: 256 } }),
+    obj({
+      memberId: {
+        ...uuid,
+        description:
+          'Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId).',
+      },
+      displayName: { type: 'string', maxLength: 256 },
+    }),
   ],
   ['provider_diagnostic', obj({}), obj({ available: { type: 'boolean' } })],
 ]) {

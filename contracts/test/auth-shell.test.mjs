@@ -1882,3 +1882,41 @@ test('AUTH-K3 registration and ticket wire shared vectors freeze strict output b
       assert.equal(output({ statusCode: 200, body }), false);
   }
 });
+
+test('AUTH-K3 profile uses device-session member identity and accountId stays distinct', () => {
+  const definition = JSON.parse(
+    read('plugin/shell-business.schema.json'),
+  ).$defs;
+  assert.match(
+    definition.ShellAuthOutput_profile_read.properties.body.properties.memberId
+      .description,
+    /device-session/,
+  );
+  const profile = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthOutput_profile_read',
+  );
+  const memberId = '11111111-1111-1111-1111-111111111111';
+  assert.ok(
+    profile({ statusCode: 200, body: { memberId, displayName: 'test' } }),
+  );
+  assert.equal(
+    profile({
+      statusCode: 200,
+      body: { memberId, accountId: memberId, displayName: 'test' },
+    }),
+    false,
+  );
+  assert.deepEqual(definition.ShellAuthNetworkRegistration, {
+    $ref: '../network/register-result.schema.json',
+  });
+  const registration = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthNetworkRegistration',
+  );
+  const vector = JSON.parse(read('test/auth-k3-fixtures.json')).registration;
+  assert.equal(
+    registration({ ...vector, systemAddress: 'aur1:02.40.0' }),
+    false,
+  );
+});

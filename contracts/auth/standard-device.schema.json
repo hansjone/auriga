@@ -116,7 +116,8 @@
         "authorizationMode",
         "expiresAt"
       ],
-      "description": "GET /me/device-session由当前设备Bearer在线定位，不能传设备ID；UAC来源必须有IAM权威绑定且与JWT一致，其他来源省略。无需浏览器sid；不能捏造Me.session。"
+      "description": "GET /me/device-session由当前设备Bearer在线定位，不能传设备ID；UAC来源必须有IAM权威绑定且与JWT一致，其他来源省略。无需浏览器sid；不能捏造Me.session。",
+      "$comment": "accountId is the verified device JWT sub. memberId is independently authoritative from device-session and need not equal accountId. profile_read returns this memberId; any /me account.id comparison uses accountId, never memberId. Browser /me session must not be fabricated for a device token."
     },
     "StandardDeviceAiClaims": {
       "type": "object",

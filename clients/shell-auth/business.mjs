@@ -97,8 +97,21 @@ export class BusinessProxy {
         if (operation === 'network_open') {
           this.host.resolve(owner, input.executionContextId, 'session');
           const cached = await previous.result;
-          if (cached.output)
+          if (cached.output) {
             this.streams.get(cached.output.body.streamId, owner);
+            return response({
+              output: {
+                ...cached.output,
+                body: {
+                  ...cached.output.body,
+                  registration: {
+                    ...cached.output.body.registration,
+                    created: false,
+                  },
+                },
+              },
+            });
+          }
         }
       } catch {
         return response({ error: error('common.unauthenticated') });
@@ -349,12 +362,12 @@ export class BusinessProxy {
       if (definition.operation === 'profile_read') {
         if (
           !body?.account ||
-          body.account.id !== context.identity.memberId ||
+          body.account.id !== context.claims.sub ||
           body.account.tenantId !== context.identity.tenantId
         )
           throw new Error('invalid profile identity');
         body = {
-          memberId: body.account.id,
+          memberId: context.identity.memberId,
           displayName: body.account.displayName,
         };
       }

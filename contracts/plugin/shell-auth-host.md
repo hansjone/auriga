@@ -34,3 +34,10 @@ C 用自己持有的当前平台凭据调用既有 `POST /api/iam/v1/me/uac/cred
 成功与 error 互斥。ShellAuthHostError 只返回固定 code/reason/retryable：未认证 unauthenticated，非插件角色/跨 owner forbidden，旧 epoch/revision/身份 conflict，过期/已撤上下文 forbidden，材料未就绪或权威读取故障 unavailable。只有 unavailable/capacity_exceeded 可有界重试，不能在失败时退回旧缓存。所有错误无上游原文、token、Cookie 或身份选择器。
 
 秘密仅经已认证 IPC 进入本人后端 handler 内存；不得落盘、进入访问/调试日志、诊断、stdout/stderr、环境全局变量、页面、模型参数或工具结果。响应不订阅、不广播、不缓存。raw 经既有受控 handler 才交本人 skill 进程即时使用；outbound 只输出业务响应。退出时立即清材料及本地能力，网络撤销排队不能延迟本地停权。
+
+## K3 profile_read 的账号与成员边界
+
+选择以已验证 `/me/device-session` 的 memberId 为成员权威，不假定它与 accountId 相等。
+`profile_read` 读取 `/me` 时，account.id 只与当前已验证设备 JWT 的 sub（accountId）比较，account.tenantId 与当前 tenant 比较；输出 memberId 始终取设备会话，displayName 取账号资料。不能从 account.id 推导 memberId。
+实现事实：当前 main 的 TokenService 对 device context 要求 session=null，因此设备 JWT 不带 sid；IamMeController.me() 仍要求 activeById(principal.sessionId())，不能把浏览器版 `/me` 已支持标准设备 Bearer 当成事实。当前 main 也没有 `/me/device-session` 的生产实现；K2 已冻结其 DTO，A 线须补齐设备在线定位与设备资料访问。C 不伪造 sid/Me.session、不回退浏览器 cookie。上游拒绝时安全返回错误；本次只修正 C 投影和契约，不宣称 IAM A 线及真实设备资料读取已交付。
+契约测试和 C 测试分别校验固定 DTO，以及 accountId 与 memberId 不同的正确投影和跨账号拒绝。

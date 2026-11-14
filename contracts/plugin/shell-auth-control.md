@@ -94,7 +94,7 @@ DSH_TEAM_BASE/DSH_TEAM_TASK_CAPABILITY、已有 DSH_SESSION_ID、DSH_WEB_URL 回
 
 `network_open` 输入仍只有 `executionContextId`，必须是当前已验证插件连接的存活原生 session 句柄。
 成功 body 为 `{streamId,registration,binding}`。registration 冻结为平台确认的
-`{tenant,realm,node,device,systemAddress,created}`；created 保留真实布尔值（含 false），D 不得推断或补默认值。
+`{tenant,realm,node,device,systemAddress,created}`；created 仅触发本次注册的首次 network_open 可消费一次；同连接再次打开或 requestId 重放均返回 false，不能持久化历史 true。结构直接引用 network/register-result.schema.json。
 C 核验 tenant/device 与当前登录、realm 与安装配置、systemAddress 与规范系统地址一致；realm/node 为正 uint64 十进制字符串。
 `binding={executionContextId,shellEpoch,revision}` 来自 C 当前上下文，句柄经 K2 绑定实际 hostSessionId 和 OS peer。
 D 先核对 binding 与当次请求再使用身份；注销、换代、会话撤销/到期、流关闭均须清除此投影。
@@ -106,12 +106,14 @@ D 解码后须严格词法解析，再依原资源契约校验签名封套、主
 C 不替 D 宣称验签通过；错误响应仍走既有安全错误映射。共享向量 `test/auth-k3-fixtures.json` 要求 wire 逐字节保真。
 其余操作没有 wire 通道，D 不得提供任意 URL/header 或注册身份字段。
 
-`profile_read` 从 IAM account.id/displayName 投影，另核 account.tenantId/id 与当前身份一致。
+`profile_read` 的 memberId 取已验证 device-session；account.id 与设备 JWT sub（accountId）比较，account.tenantId 与当前 tenant 比较，displayName 取 account。accountId/memberId 可不同，详见 K2 shell-auth-host.md 的资料边界与 IAM 当前能力限制。
 `provider_diagnostic.available` 表示已启用 providers.items 中存在当前登录的 providerId；空表或仅其他源为 false。
 非法结构拒绝，输出仍是严格固定 DTO，额外 account/session/provider 数据不传给 D。
 
 两个发布入口复用 `.github/workflows/auth-release-artifacts.yml`：每次调用只构建一次 broker/helper，以该目录打包插件，再传 auth-broker 与 auriga-dsh 制品给 Desktop 组装或插件发布。
 Desktop 显式传 `--broker-artifact` 和该次 `--plugin-tgz`；插件打包也必须传 `--broker-artifact`。
 消费者检查 manifest 文件摘要、路径及 helper 必需项；缺失、篡改、未列出文件均拒绝，不回退重新编译。
-Desktop 进一步检查插件内 manifest/helper 与安装 broker 字节相同。不同发布运行不假设 C# 重编结果一致。
+Desktop 按 manifest 校验插件内全部文件，并逐文件比较插件与安装 broker 字节相同。不同发布运行不假设 C# 重编结果一致。
 本地验证：`node --test clients/shell-auth/test/artifact.test.mjs scripts/plugin/package.test.mjs`，检查一次构建的两消费者字节、打包后 manifest/helper 及缺失/篡改拒绝。
+
+迁移说明：以上三个下载票操作原有 DTO 输出已移除，不再双发；D 必须从 wire 解码原始字节、严格词法解析及验签后自行生成业务 DTO。所有消费者应与此契约同步升级，不得将 wire 当旧 DTO 使用。

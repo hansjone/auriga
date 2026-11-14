@@ -5,7 +5,6 @@ import {
   readFileSync,
   writeFileSync,
   existsSync,
-  cpSync,
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,6 +79,7 @@ export function buildBroker(output) {
   files.push(operations);
   mkdirSync(join(output, 'schemas', 'network'), { recursive: true });
   for (const name of [
+    'register-result',
     'address',
     'envelope',
     'source-control',
@@ -97,14 +97,18 @@ export function buildBroker(output) {
   const loader = createRequire(
     new URL('../dsh-plugin/package.json', import.meta.url),
   );
+  // npm pack excludes nested node_modules. Bundle the pinned validator so both
+  // distributed consumers contain the complete manifest closure.
+  esbuild.buildSync({
+    entryPoints: [loader.resolve('ajv/dist/2020.js')],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node22',
+    outfile: join(output, 'vendor-ajv.cjs'),
+  });
+  files.push('vendor-ajv.cjs');
   const dependencyLoader = createRequire(loader.resolve('ajv/package.json'));
-  const walk = (directory, prefix) => {
-    for (const item of readdirSync(directory, { withFileTypes: true })) {
-      const path = prefix + '/' + item.name;
-      if (item.isDirectory()) walk(join(directory, item.name), path);
-      else files.push(path);
-    }
-  };
   for (const name of [
     'ajv',
     'fast-deep-equal',
@@ -117,14 +121,17 @@ export function buildBroker(output) {
         name + '/package.json',
       ),
     );
-    const relative = 'node_modules/' + name;
-    mkdirSync(join(output, 'node_modules'), { recursive: true });
-    cpSync(packageDirectory, join(output, relative), {
-      recursive: true,
-      dereference: true,
-    });
-    walk(join(output, relative), relative);
+    const relative = 'licenses/' + name + '.txt';
+    mkdirSync(join(output, 'licenses'), { recursive: true });
+    const license = readdirSync(packageDirectory).find((file) =>
+      /^licen[sc]e(?:\.txt|\.md)?$/i.test(file),
+    );
+    if (!license)
+      throw new Error('validator dependency license required: ' + name);
+    copyFileSync(join(packageDirectory, license), join(output, relative));
+    files.push(relative);
   }
+
   const manifest = {
     version: 1,
     files: files.sort().map((path) => ({

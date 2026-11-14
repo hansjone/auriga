@@ -3280,14 +3280,19 @@ export interface components {
         available: boolean;
       };
     };
-    ShellAuthNetworkRegistration: {
+    /**
+     * Network register result
+     * @description Authenticated HTTPS registration result, not a signed network frame or authorization token. created describes only this call's final committed transaction; never replay a historical true. See README.md#https-register-initialization for the one-use initialization boundary.
+     */
+    'register-result.schema': {
       /** Format: uuid */
       tenant: string;
-      /** Format: uuid */
-      device: string;
       realm: string;
       node: string;
+      /** Format: uuid */
+      device: string;
       systemAddress: string;
+      /** @description true only if this call actually INSERTed the authenticated device's new node in its final committed transaction. An existing node, idempotent retry or concurrent loser returns false; transaction retries cannot retain true from a rolled-back attempt. Only the current authenticated HTTPS request generation may consume true once, after fully verified signed READY confirms incarnation and the complete ledger is atomically committed. Never persist as reusable initialization permission. */
       created: boolean;
     };
     ShellAuthOutput_network_open: {
@@ -3299,7 +3304,7 @@ export interface components {
       body: {
         /** Format: uuid */
         streamId: string;
-        registration: components['schemas']['ShellAuthNetworkRegistration'];
+        registration: components['schemas']['register-result.schema'];
         binding: {
           /** Format: uuid */
           executionContextId: string;
@@ -3386,7 +3391,10 @@ export interface components {
         'retry-after'?: string;
       };
       body: {
-        /** Format: uuid */
+        /**
+         * Format: uuid
+         * @description Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId).
+         */
         memberId: string;
         displayName: string;
       };

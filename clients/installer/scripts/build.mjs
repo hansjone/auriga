@@ -25,7 +25,10 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
-import { copyBrokerArtifact } from '../../shell-auth/artifact.mjs';
+import {
+  copyBrokerArtifact,
+  verifyBrokerArtifact,
+} from '../../shell-auth/artifact.mjs';
 import { parse as parseVersion } from '../runtime/semver-lite.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
 import {
@@ -238,6 +241,14 @@ export async function build(args) {
     tgz = join(work, name);
   }
   const pluginPkg = readTgzPackageJson(tgz);
+  if (
+    (process.env.GITHUB_REF_NAME?.startsWith('desktop-v') ||
+      process.env.RELEASE_BUILD === 'true') &&
+    pluginPkg.version === '0.0.0-ci'
+  )
+    throw new Error(
+      'CI placeholder plugin version forbidden in Desktop release',
+    );
   if (!satisfiesMin(dshVersion, pluginPkg.engines?.dsh))
     throw new Error(
       `plugin ${pluginPkg.name}@${pluginPkg.version} requires dsh ${pluginPkg.engines?.dsh}, upstream is ${dshVersion}`,
@@ -408,7 +419,11 @@ export async function build(args) {
     join(payload, 'auriga', 'shell-auth'),
   );
   const pluginBroker = join(plugin, 'node_modules', 'auriga-dsh', 'shell-auth');
-  for (const path of ['broker-manifest.json', 'windows/shell-helper.exe']) {
+  verifyBrokerArtifact(pluginBroker);
+  for (const path of [
+    'broker-manifest.json',
+    ...shellAuthManifest.files.map((file) => file.path),
+  ]) {
     if (
       sha256File(join(pluginBroker, path)) !==
       sha256File(join(payload, 'auriga', 'shell-auth', path))

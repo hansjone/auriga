@@ -33,7 +33,9 @@ function schema(file, name, value) {
         import.meta.url,
       ),
     );
-    const Ajv = loader('ajv/dist/2020.js').default,
+    const Ajv = loader(
+        packaged ? './vendor-ajv.cjs' : 'ajv/dist/2020.js',
+      ).default,
       ajv = new Ajv({ strict: false });
     ajv.addFormat('date-time', (s) => Number.isFinite(Date.parse(s)));
     for (const f of [
@@ -101,6 +103,7 @@ export class NetworkProxy {
   async execute(definition, input, context, owner, signal) {
     const core = this.core ?? (await loadCore());
     if (definition.operation === 'network_open') {
+      let registeredHere = false;
       const execution = this.host.resolve(
         owner,
         input.executionContextId,
@@ -126,6 +129,7 @@ export class NetworkProxy {
         };
         this.links.set(owner, record);
         record.opening = this.open(record, signal);
+        registeredHere = true;
       }
       await record.opening;
       signal.throwIfAborted();
@@ -143,6 +147,8 @@ export class NetworkProxy {
           `aur1:${BigInt(registration.realm).toString(16)}.${BigInt(registration.node).toString(16)}.0`
       )
         throw fail();
+      const created = registeredHere && registration.created;
+      if (registeredHere) record.registration = { ...registration, created: false };
       const stream = this.streams.create(context, owner, () => {
         record.streams.delete(stream.id);
         if (!record.streams.size) this.closeLink(record);
@@ -153,7 +159,7 @@ export class NetworkProxy {
         statusCode: 200,
         body: {
           streamId: stream.id,
-          registration: { ...registration },
+          registration: { ...registration, created },
           binding: {
             executionContextId: execution.id,
             shellEpoch: context.epoch,
