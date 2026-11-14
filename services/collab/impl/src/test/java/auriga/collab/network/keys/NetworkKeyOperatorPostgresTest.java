@@ -934,4 +934,37 @@ class NetworkKeyOperatorPostgresTest {
     }
     assertArrayEquals(original, Files.readAllBytes(settings("1").stateFile()));
   }
+
+  @Test
+  void legacyInstallationRefusesTheDurableBarrierBeforeChangingLiveFiles() throws Exception {
+    var payload = m.payload(1, KeyTestMaterial.NOW);
+    var release = initial(payload);
+    var pairs = new HashMap<String, KeyPair>();
+    for (var key : payload.path("keys"))
+      pairs.put(
+          key.path("kid").asString(),
+          switch (key.path("purpose").asString()) {
+            case "business_delivery" -> m.business;
+            case "protocol_response" -> m.protocol;
+            default -> m.management;
+          });
+    var files = secrets(pairs);
+    var settings = settings("1");
+    byte[] before = Files.readAllBytes(settings.stateFile());
+    var jdbc = new JdbcTemplate(source);
+    TenantContext.call(
+        tenant,
+        () ->
+            new TransactionTemplate(new TenantTransactionManager(source))
+                .execute(
+                    status ->
+                        jdbc.update(
+                            "INSERT INTO collab.msgnet_realm (id, tenant_id, realm, root_control, runtime_authority, generation, keyset_version, legacy_disabled) VALUES (?, ?, '2', '{}', '{}', 1, 2, true)",
+                            UUID.randomUUID(),
+                            tenant)));
+    assertThrows(
+        auriga.common.error.AurigaException.class,
+        () -> operator(KeyTestMaterial.NOW).install(release, settings.stateFile(), files));
+    assertArrayEquals(before, Files.readAllBytes(settings.stateFile()));
+  }
 }
