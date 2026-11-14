@@ -185,3 +185,32 @@ test('missing broker leaves owner usable with no platform authority', async (t) 
   assert.equal(shell.current(), undefined);
   assert.throws(() => shell.fence(), { code: 'common.unauthenticated' });
 });
+
+for (const action of ['cancel_login', 'logout']) {
+  test(`${action} reply cannot replace a newer revocation push`, async (t) => {
+    const f = await fixture(t);
+    f.override(async (command) => {
+      f.next('signed_out');
+      f.event();
+      const snapshot = f.shell.current();
+      f.next('revoked');
+      f.event();
+      return { requestId: command.requestId, type: 'snapshot', snapshot };
+    });
+    await assert.rejects(f.shell.command(action), { code: 'common.conflict' });
+    assert.equal(f.shell.current().state, 'revoked');
+  });
+
+  test(`${action} reply cannot restore authority after transport disconnect`, async (t) => {
+    const f = await fixture(t);
+    f.override(async (command) => {
+      f.next('signed_out');
+      f.event();
+      const snapshot = f.shell.current();
+      f.disconnect();
+      return { requestId: command.requestId, type: 'snapshot', snapshot };
+    });
+    await assert.rejects(f.shell.command(action), { code: 'common.conflict' });
+    assert.equal(f.shell.current(), undefined);
+  });
+}

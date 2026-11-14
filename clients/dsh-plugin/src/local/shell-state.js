@@ -97,7 +97,12 @@ export function createShellState(options) {
       throw fail('common.validation_failed');
     if (!discover && epoch && value.shellEpoch !== epoch) return;
     if (!discover && value.revision < Math.max(lastRevision, floor)) return;
-    if (!discover && !snapshot && Date.parse(value.expiresAt) <= lastExpiry)
+    if (
+      !discover &&
+      !snapshot &&
+      value.revision <= lastRevision &&
+      Date.parse(value.expiresAt) <= lastExpiry
+    )
       return;
     if (snapshot && value.shellEpoch !== snapshot.shellEpoch && !discover)
       return;
@@ -186,11 +191,40 @@ export function createShellState(options) {
       action,
     };
   }
+  // C publishes a transition before replying to its command. That push still
+  // fences all old work, but an identical acknowledgment must not fail merely
+  // because the transition has already arrived. Never reapply the reply or
+  // extend a lease from it after a push, disconnect, or superseding transition.
+  function acknowledgesPush(
+    /** @type {any} */ event,
+    /** @type {any} */ command,
+  ) {
+    const active = current(),
+      reply = event?.snapshot;
+    return (
+      !!active &&
+      ['snapshot', 'changed'].includes(event?.type) &&
+      event.requestId === command.requestId &&
+      reply?.shellEpoch === command.shellEpoch &&
+      reply.shellEpoch === active.shellEpoch &&
+      reply.revision === active.revision &&
+      reply.revision > command.expectedRevision &&
+      reply.state === active.state &&
+      identity(reply) === identity(active) &&
+      (reasons.has(reply.reason) ? reply.reason : undefined) ===
+        active.reason &&
+      JSON.stringify(reply.uacLoginInfo) === JSON.stringify(active.uacLoginInfo)
+    );
+  }
   async function receive(/** @type {any} */ command, discover = false) {
-    const g = generation;
+    const g = generation,
+      c = connection;
     const event = await options.transport.send(command);
-    if (closed || (!discover && generation !== g))
+    if (closed || c !== connection) throw fail('common.conflict');
+    if (!discover && generation !== g) {
+      if (acknowledgesPush(event, command)) return event;
       throw fail('common.conflict');
+    }
     if (event?.requestId !== command.requestId)
       throw fail('common.validation_failed');
     if (event.type === 'snapshot' || event.type === 'changed')
@@ -255,10 +289,19 @@ export function createShellState(options) {
         invalidate();
         // Keep the request's original epoch/revision; do not discover another
         // identity while the logout command is in flight.
-        const g = generation;
+        const g = generation,
+          c = connection;
         const event = await options.transport.send(command);
         if (
+          !closed &&
+          c === connection &&
+          g !== generation &&
+          acknowledgesPush(event, command)
+        )
+          return;
+        if (
           closed ||
+          c !== connection ||
           g !== generation ||
           event?.requestId !== command.requestId
         )
