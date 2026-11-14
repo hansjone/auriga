@@ -40,7 +40,7 @@ func verifyLocal(g *Generation) error {
 	return CheckFiles(g.Selector, g.Manifest, g.Files, g.Selector, nil)
 }
 func TestPublishCrashResumeAndReaderHighWater(t *testing.T) {
-	root, control := privateTempDir(t), privateTempDir(t)
+	root, control, state := privateTempDir(t), privateTempDir(t), privateTempDir(t)
 	g := localGeneration(t)
 	defer g.Clear()
 	// A process died after its durable transaction and a partial generation file.
@@ -58,7 +58,7 @@ func TestPublishCrashResumeAndReaderHighWater(t *testing.T) {
 		t.Fatal("exact retry", e)
 	}
 	loaded := 0
-	r, e := NewReader(root, control, func(*Generation) (func() error, error) { return func() error { loaded++; return nil }, nil })
+	r, e := NewReader(root, control, state, func(*Generation) (func() error, error) { return func() error { loaded++; return nil }, nil })
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -72,7 +72,7 @@ func TestPublishCrashResumeAndReaderHighWater(t *testing.T) {
 	if e != nil || phase != "loaded" || loaded != 1 {
 		t.Fatal(phase, e)
 	}
-	restarted, e := NewReader(root, control, func(*Generation) (func() error, error) { return func() error { return nil }, nil })
+	restarted, e := NewReader(root, control, state, func(*Generation) (func() error, error) { return func() error { return nil }, nil })
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -141,7 +141,7 @@ func TestSocketPeerFramingAndStaleRecovery(t *testing.T) {
 	if e := Publish(root, g, verifyLocal); e != nil {
 		t.Fatal(e)
 	}
-	r, e := NewReader(root, control, func(*Generation) (func() error, error) { return func() error { return nil }, nil })
+	r, e := NewReader(root, control, privateTempDir(t), func(*Generation) (func() error, error) { return func() error { return nil }, nil })
 	if e != nil {
 		t.Fatal(e)
 	}

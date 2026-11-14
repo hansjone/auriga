@@ -26,7 +26,7 @@ func LoadSchemas(path string) (*Schemas, error) {
 		return nil, e
 	}
 	s := &Schemas{definitions: map[string]*jsonschema.Schema{}}
-	for _, name := range []string{"Publication", "SignedRootControl", "SignedTransportTrustBundle", "ProtocolMaterial", "ProjectionMaterial", "ProjectionRequest", "SealedMaterial", "LocalProjectionManifest", "LocalProjectionSelector", "InstallationPins", "RenewalConfig", "RenewalStatusOutput", "ControlPackage"} {
+	for _, name := range []string{"Publication", "SignedRootControl", "SignedRuntimeAuthority", "SignedTransportTrustBundle", "SignedTransportConfirmation", "TransportConfirmationQuery", "TransportPredecessor", "TransportTransitionProof", "IsolationRecord", "NodeControlPins", "ProtocolMaterial", "ProjectionMaterial", "ProjectionRequest", "SealedMaterial", "LocalProjectionManifest", "LocalProjectionSelector", "InstallationPins", "RenewalConfig", "RenewalStatusOutput", "ControlPackage"} {
 		schema, e := c.Compile(location + "#/$defs/" + name)
 		if e != nil {
 			return nil, e

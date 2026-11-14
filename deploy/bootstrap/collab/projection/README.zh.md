@@ -1,6 +1,6 @@
 # 消息网络本地投影组件
 
-本目录属于 MSGNET-N。只消费 `contracts/network/auto-renewal-v2.schema.json` 和生成的 `infra/gen/msgnetapi`；没有复制契约类型或引入测试参考判定器。当前有两项跨线契约阻塞，见末节，不能把本组件的单测结果作为整线无人值守已验收。
+本目录属于 MSGNET-N。只消费 `contracts/network/auto-renewal-v2.schema.json` 和生成的 `infra/gen/msgnetapi`；没有复制契约类型或引入测试参考判定器。已按 K3 接入运输转换、全局确认验证和 edge UID 裁决；独立材料台账读取仍缺契约，见末节，不能把单测结果作为整线无人值守已验收。
 
 ## 构建和装配交接
 
@@ -10,11 +10,11 @@
 GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o target/msgnet-projector-linux-amd64 ./collab/cmd/msgnet-projector
 ```
 
-一个二进制提供 `projector`、`broker`、`control-import` 三种固定模式。运行 UID10001；非 Linux 的持久落盘/peer 验证失败关闭。D 应单独打包此二进制、冻结 schema、安装根 SPKI、InstallationPins 和仅本身份可读的安装签名/密封私钥，不打包 KEK 或其他组件的私钥。
+一个二进制提供 `projector`、`broker`、`control-import` 三种固定模式。network/broker 的 UID/GID 为10001，edge 的专属 projector 和 control-import 为65532；组件从已安装 pin 确定，禁止命令行自报 UID。非 Linux 的 peer/材料权限验证失败关闭。D 应单独打包二进制、冻结 schema、安装根 SPKI、InstallationPins 和仅本身份可读的安装签名/密封私钥，不打包 KEK 或其他组件的私钥。
 
 gateway 通过模块依赖引用本目录。D 修改 NAS 镜像构建时，须在构建 ai-gateway **之前**复制 `deploy/bootstrap`；原 Dockerfile 在构建 gateway 之后才复制它，需要调整此顺序。N 不修改 D 的 Dockerfile、Compose 或现场。
 
-network/broker 的材料卷 UID10001，目录0700、文件0600；reader 只读挂载材料卷。独立控制卷由 reader 与其专属 projector 挂载，root0710、组10001、socket0660；reader 必须可以在控制卷写自己的高水位和信任账本。不要让两个组件共享卷，也不要让 projector 与 reader 使用同一个 `trust-ledger.json`：CLI 的 projector 使用 `projector-state/`，broker 使用 `broker-state/`；network 的信任账本位于其控制卷根。
+每组件有独立材料卷与控制卷，均归该组件 UID/GID，目录0700、材料文件和 socket0600。reader 只读材料卷，projector 可写；双方只读写本组件控制卷。reader 的信任账本和 selector 高水位另放 reader 专用耐久状态卷，不挂给 projector。`NewReader(materials, control, state, prepare)` 的第三参数是此独立目录；network 配置 `stateDir`，broker 模式必须提供 `--reader-state`。CLI 的 projector 状态位于控制卷的 `projector-state/`。D 在安装时预建正确 owner，在线进程不 chown，使用 cap_drop ALL/no-new-privileges；不能把多个组件的卷挂给同一 projector。
 
 投影器示例（路径均由 D 的受控配置提供）：
 
@@ -43,7 +43,7 @@ reader 持久高水位与实际已加载句柄分开：持久写入后、内存�
 
 ## network 接线
 
-`network.RuntimeConfig.projection` 提供以下受控配置：materialsDir、controlDir、schemaFile、rootSpki、tenantId、realm、pinsFile、installationId、fenceOrigin、fenceCAFile、serviceTokenFile、controlSnapshotFile。启用后不再从旧静态 protocol 私钥配置建立该签名器。
+`network.RuntimeConfig.projection` 提供以下受控配置：materialsDir、controlDir、stateDir、schemaFile、rootSpki、tenantId、realm、pinsFile、installationId、fenceOrigin、fenceCAFile、serviceTokenFile、fenceClientCertFile、fenceClientKeyFile、controlSnapshotFile。后两项证书字段用于 K3 受保护读取端口的独立服务 mTLS 身份，每次连接重读。启用后不再从旧静态 protocol 私钥配置建立该签名器。
 
 每次 protocol 签名前核独立根控制和 C 当前状态/完整清单摘要，C 不可达、时钟错误、暂停、撤销、落后或同版冲突均拒签。状态使用 RenewalStatusOutput 分支，不伪造首次发布版本。root-control 独立导入文件优先于 C 的旧响应；较低控制不能覆盖已持久高控制。
 
@@ -53,6 +53,8 @@ submit 新握手原子使用新 server 叶子和 client CA；broker-client 原�
 
 `--mode broker` 额外接收受控 `--broker`、`--broker-sha256` 和 `--broker-template`。摘要来自 D 打包的固定二进制清单，还核 `nats-server: v2.12.6`（仓库当前 go.mod 的版本，非测试专用 assembly 的2.15.1）。socket 不能指定可执行文件、参数、路径或 PID。
 
+broker 模式同时需要 `--reader-state`、固定 `--origin`、独立 `--https-ca`（系统根可省略）、`--https-client-cert/key` 和 `--service-token-file`，以读取 K3 历史运输包与全局确认证据。它仍不需要安装签名/密封私钥。
+
 模板是 D 提供的受信 NATS 配置，其中证书路径固定用 `{{MSGNET_CERT}}`、`{{MSGNET_KEY}}`、`{{MSGNET_CA}}` 占位符并放在引号内。监督器只生成自己的运行配置、broker 叶子和公有 CA；先执行固定 `-t -c` 配置检查，再管理自己启动的 `-c` 子进程。采用保守的受控重启路径：SIGTERM，最多5秒后仅终止自己的子进程，再启动新配置。不访问 docker.sock，不驱动外部 PID。
 
 真实 mTLS 握手仍须由连接方/验收方验证，不能把子进程启动当 handshake_verified。broker 监督器仅回 loaded。独立根控制撤销或过期令该子进程退出，材料恢复后 reader 的活动句柄检查会重新启动它。
@@ -61,13 +63,16 @@ submit 新握手原子使用新 server 叶子和 client CA；broker-client 原�
 
 `--mode control-import --control-package <公有ControlPackage文件>` 使用安装根、pin 和独立安装签名私钥，持久更新公有 `root-control.json`，再生成 InstallationReceipt；默认写入组件控制卷，`--control-snapshot` 可以由 D 指定同一受控路径。回执缓存按包摘要保存，重试返回相同签名和时间；标准输出仅为公有回执 JSON，D 将它送 C 的控制确认入口。此命令不解除隔离、不创建身份。network 设置 controlSnapshotFile，broker 配置同一路径，以便独立管理机导入后直接采用更高控制，而非等运行清单更换。
 
-## 测试与尚需冻结的接口
+## K3 验证与跨线接缝
 
-Go 生产判定独立通过共享向量：消费端174、签发时钟12、独立边界93，本地投影24。测试运行时生成私钥；HPKE 使用 Go 标准库 RFC9180 实现。Linux UID10001 的测试还覆盖密封 bootstrap、回执丢失后的原字节重试、权威版本已推进时的事务保留和追平、协议真实签名、TLS 换证、独立控制导入、真实 broker mTLS 与受控子进程重启。独立测试时钟覆盖735天、147次5天换代、444把历史钥落盘后重启及归档 SPKI 复用拒绝，不改变真实宿主时钟。
+Go 生产判定独立通过共享向量：消费端179、签发时钟12、独立边界242（含 K3 运输转换49、全局确认40、追平25、节点绑定8、权限27），本地投影24，共457条。测试运行时生成私钥；HPKE 使用 Go 标准库 RFC9180。Linux UID10001 的测试另覆盖密封 bootstrap、丢回执重试、事务保留追平、真实协议签名/TLS 换证、独立控制导入及真实 broker mTLS/受控重启；UID65532 实测独立 edge 目录、0600 socket 和双向 peer 检查。735天、147次5天换代和444把历史业务钥的虚拟时钟测试仍保留。
 
-以下问题需主控/K/C/I/D 决定；当前失败关闭，未绕过：
+`TransportSource` 读取固定 `/transport/history/{digest}`、`/transport/transitions/{authority_digest}`、`/isolation/{target_id}` 和 POST `/transport/confirmation`。历史链只验证，不替换最高根控制。跨授权先验根锚起点，再验当前快照和本地高水位；运输版本与业务版本独立，更高运输 generation 允许根授权的新版本空间。耐久 CA 历史保留已退休标记，拒绝旧 CA 重现或换 ID 复用证书。restart_recovery 对未成熟 next 保留原身份/期限并置 retired/revoked，成熟期等号按原规则。
 
-1. 共享消费规则要求 readers_persisted / handshakes_verified 来自安装回执台账，不能取运行 bundle 的 phase 声明代替。现有 OpenAPI 只有写回执端口，没有读取绑定 bundle/目标集合/确认事实的接口或证明对象。`Trust.SetTransportConfirmation` 留出接缝；没有可验证全局确认时，新 CA 阶段返回 projection_pending。本地 loaded 或一次 TLS 成功不能证明全体 required_reader_ids 已完成；尤其 broker 没有理由伪造自己的 handshake_verified。未接通这一来源，不能宣称90天/10年无人值守轮换全部通过。
-2. K2 固定 projector UID10001、edge reader UID65532，同时材料目录0700/文件0600归 reader 实际 UID，且 projector cap_drop ALL。普通10001不能在65532私有目录写文件，也不能 chown 新文件为65532；edge 控制卷0710归65532同样不能让10001在卷根创建原子状态文件。需要冻结可落地的每组件 UID/peer 检查或其他明确隔离方案，不能由 N 放宽权限。network/broker 的10001路径已实测，edge 仍交 I/D，未验。
+确认使用第四种运行签名域 `Auriga.NetworkTransportConfirmation.v2` 和 network_transport 能力。随机32字节 challenge、当前控制 revision、精确历史 bundle/阶段/冻结集合、唯一逐端行、selector 摘要、实际隔离和60秒新鲜度都参与验证；new_leaves 查前一 dual_trust/loaded，retire_old 查前一 new_leaves/handshake_verified。同代重试和重启后仍重新查询，已保存的本地 loaded/handshake 状态不代替全局证明。生产默认无独立台账时继续 projection_pending。
 
-真实 C/I/P 联调、正常页面/真实 DSH、NAS部署和长期虚拟时间门禁由主控在解除这些阻塞后继续完成；本目录测试不替代这些证据。
+剩余需 K/C 裁决：K3 明确要求 `expected_selectors` 来自独立材料台账且不能从证据行反填，但当前只读契约没有返回这份映射的模型/端点。SignedTransportConfirmation 只有待核的 readers，TransportPredecessor/TransitionProof 只有公有包；单机 selector 也不覆盖整个冻结集合。`TransportSource.ExpectedSelectors(ctx, previousBundle)` 是明确的耐久材料台账端口，测试以独立预存映射替代 C，CLI/network 不从响应行构造它。需要冻结并实现此只读来源（或明确修改消费者信任裁决），才能接通线上 new_leaves/retire_old。该来源应精确绑定 tenant/realm、bundle完整摘要/版本、当前控制与冻结 reader 集合，并支持离线追平。N 不自行扩展契约或放宽比较。
+
+`ValidateNodeControlPins` / `BindNodeControl` 提供独立节点 Ed25519 pin 的规范性、唯一性及认证连接绑定检查，不扩展 InstallationPins 的组件枚举；I 负责将它接到真实 NodeControl 认证连接和独立登记通路。节点始终不能领取 ProjectionMaterial。
+
+I/D 须同批接 edge65532、独立卷/状态卷与证书令牌自动轮换。真实 C/I/P 联调、跨10年 CA 恢复、正常页面/真实 DSH 和 NAS部署由主控集成后验收；本目录测试不替代这些证据。

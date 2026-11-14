@@ -285,6 +285,26 @@ func VerifyPublication(p api.Publication, f Facts) error {
 			return Fault("invalid_transition")
 		}
 		if k.Mode == "restart_recovery" {
+			// A next which has not completed its original maturity interval must
+			// retain its identity and lifetime as a terminal entry, even when a
+			// different purpose needs restart recovery.
+			for _, x := range prev {
+				if x.Purpose != purpose || x.State != "next" {
+					continue
+				}
+				matureAt := false
+				for _, proof := range p.Predecessor.Keyset.Payload.FirstPublications {
+					if proof.Kid == x.Kid && !stamp(proof.CommittedAt).After(issued.Add(-time.Duration(a.Limits.NextMaturitySeconds)*time.Second)) {
+						matureAt = true
+					}
+				}
+				if !matureAt {
+					next := find(k.Keys, x.Kid)
+					if next == nil || (next.State != "retired" && next.State != "revoked") {
+						return Fault("invalid_transition")
+					}
+				}
+			}
 			if valid(o) {
 				if !same {
 					return Fault("invalid_transition")

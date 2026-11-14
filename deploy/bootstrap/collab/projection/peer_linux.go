@@ -32,12 +32,11 @@ func checkPeer(c net.Conn, want uint32) error {
 	return nil
 }
 func checkListenerUID(want uint32) error {
-	if uint32(os.Geteuid()) != want {
+	if uint32(os.Geteuid()) != want || uint32(os.Getegid()) != want {
 		return errors.New("projection: listener UID rejected")
 	}
 	return nil
 }
-func setSocketGroup(path string) error { return os.Chown(path, -1, 10001) }
 func privateMetadata(path string, dir bool) error {
 	var st unix.Stat_t
 	if e := unix.Lstat(path, &st); e != nil {

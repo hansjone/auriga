@@ -6,11 +6,14 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -56,7 +59,7 @@ func TestBrokerOwnedRestartWithRealMTLS(t *testing.T) {
 	}
 	supervisor := &projection.BrokerSupervisor{Binary: binary, ExpectedSHA256: projection.Digest(raw), Template: template, Control: control, Trust: trust}
 	defer supervisor.Close()
-	reader, e := projection.NewReader(root, control, supervisor.Prepare)
+	reader, e := projection.NewReader(root, control, state, supervisor.Prepare)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -117,7 +120,7 @@ func TestBrokerOwnedRestartWithRealMTLS(t *testing.T) {
 			conn, e := net.DialTimeout("tcp", address, 100*time.Millisecond)
 			if e != nil {
 				if time.Now().After(deadline) {
-					t.Fatal(e)
+					t.Fatalf("broker listener: %v (owned process active=%t)", e, supervisor.Active())
 				}
 				time.Sleep(10 * time.Millisecond)
 				continue
@@ -167,8 +170,10 @@ func TestBrokerOwnedRestartWithRealMTLS(t *testing.T) {
 		t.Fatal("broker did not adopt renewed leaf")
 	}
 	_ = first.SetReadDeadline(time.Now().Add(time.Second))
-	var b [1]byte
-	if _, e = first.Read(b[:]); e == nil {
-		t.Fatal("owned restart left prior connection open")
+	// Shutdown may leave INFO/-ERR bytes in flight. Drain those bytes and
+	// require a terminal close; a timeout is not evidence of disconnection.
+	n, e := io.Copy(io.Discard, io.LimitReader(first, 65537))
+	if n > 65536 || (e != nil && !errors.Is(e, syscall.ECONNRESET)) {
+		t.Fatalf("prior connection did not reach EOF/reset: bytes=%d error=%v", n, e)
 	}
 }

@@ -159,6 +159,39 @@ func TestBoundaryVectors(t *testing.T) {
 				err = VerifyArchive(text("issued_at"), text("before"), numeric("grace_seconds"), removed, reappeared, tombs)
 			case "config":
 				err = CheckConfig(schemas, i["config"])
+			case "transport_transition":
+				proof, facts := transitionInput(t, i)
+				err = VerifyTransportTransition(proof, facts)
+			case "transport_confirmation":
+				err = confirmationInput(t, i)
+			case "transport_catchup":
+				var transition map[string]json.RawMessage
+				decode("transition", &transition)
+				proof, facts := transitionInput(t, transition)
+				var current api.SignedTransportTrustBundle
+				var control api.SignedRootControl
+				decode("current", &current)
+				decode("control", &control)
+				var seen, digest string
+				_ = json.Unmarshal(i["seen_version"], &seen)
+				_ = json.Unmarshal(i["seen_digest"], &digest)
+				err = VerifyTransportCatchup(proof, current, control, facts, seen, digest, func() error {
+					var confirmation map[string]json.RawMessage
+					if json.Unmarshal(i["confirmation"], &confirmation) != nil || confirmationInput(t, confirmation) != nil {
+						return Fault("projection_pending")
+					}
+					var bundle api.SignedTransportTrustBundle
+					var required string
+					_ = json.Unmarshal(confirmation["bundle"], &bundle)
+					_ = json.Unmarshal(confirmation["required_phase"], &required)
+					return CheckTransportPredecessor(current, bundle, required)
+				})
+			case "node_control_binding":
+				var pin api.NodeControlPin
+				decode("pin", &pin)
+				err = BindNodeControl(pin, text("authenticated_node_id"), text("target_id"), text("identity_id"), text("identity_revision"), boolean("compromised"), boolean("requests_private_material"), boolean("independent_enrollment"))
+			case "projection_access":
+				err = CheckProjectionAccess(text("component"), uint32(numeric("projector_uid")), uint32(numeric("reader_uid")), uint32(numeric("peer_uid")), uint32(numeric("owner_uid")), uint32(numeric("directory_mode")), uint32(numeric("file_mode")), boolean("component_private_mount"), boolean("cap_drop_all"))
 			default:
 				t.Fatalf("unknown production boundary %s", v.Operation)
 			}
@@ -167,4 +200,46 @@ func TestBoundaryVectors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func transitionInput(t *testing.T, i map[string]json.RawMessage) (api.TransportTransitionProof, TransportTransitionFacts) {
+	t.Helper()
+	var input struct {
+		Root        string `json:"root_spki"`
+		Tenant      string `json:"tenant_id"`
+		Realm       string
+		Control     api.SignedRootControl `json:"latest_control"`
+		Authority   api.SignedRuntimeAuthority
+		Transport   api.SignedTransportTrustBundle
+		Predecessor api.TransportPredecessor
+		Generation  string `json:"seen_generation"`
+		Version     string `json:"seen_bundle_version"`
+		Digest      string `json:"seen_bundle_digest"`
+		Isolated    bool   `json:"isolation_enforced"`
+	}
+	b, _ := json.Marshal(i)
+	if e := json.Unmarshal(b, &input); e != nil {
+		t.Fatal(e)
+	}
+	return api.TransportTransitionProof{Control: input.Control, Authority: input.Authority, FirstBundle: input.Transport, Predecessor: input.Predecessor}, TransportTransitionFacts{Root: input.Root, Tenant: input.Tenant, Realm: input.Realm, SeenGeneration: input.Generation, SeenVersion: input.Version, SeenDigest: input.Digest, IsolationEnforced: input.Isolated}
+}
+
+func confirmationInput(t *testing.T, i map[string]json.RawMessage) error {
+	t.Helper()
+	var input struct {
+		Root                  string `json:"root_spki"`
+		Tenant                string `json:"tenant_id"`
+		Realm, Challenge, Now string
+		Required              string            `json:"required_phase"`
+		Selectors             map[string]string `json:"expected_selectors"`
+		Evidence              api.SignedTransportConfirmation
+		Bundle                api.SignedTransportTrustBundle
+		Authority             api.SignedRuntimeAuthority
+		Control               api.SignedRootControl
+	}
+	b, _ := json.Marshal(i)
+	if e := json.Unmarshal(b, &input); e != nil {
+		t.Fatal(e)
+	}
+	return VerifyTransportConfirmation(input.Evidence, input.Bundle, input.Authority, input.Control, ConfirmationFacts{Root: input.Root, Tenant: input.Tenant, Realm: input.Realm, Challenge: input.Challenge, Now: stamp(input.Now), RequiredPhase: input.Required, ExpectedSelectors: input.Selectors})
 }

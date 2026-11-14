@@ -2,14 +2,10 @@ package network
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
-	"strings"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +17,7 @@ import (
 type ProjectionConfig struct {
 	MaterialsDir        string `json:"materialsDir"`
 	ControlDir          string `json:"controlDir"`
+	StateDir            string `json:"stateDir"`
 	SchemaFile          string `json:"schemaFile"`
 	RootSPKI            string `json:"rootSpki"`
 	TenantID            string `json:"tenantId"`
@@ -30,6 +27,8 @@ type ProjectionConfig struct {
 	FenceOrigin         string `json:"fenceOrigin"`
 	FenceCAFile         string `json:"fenceCAFile"`
 	ServiceTokenFile    string `json:"serviceTokenFile"`
+	FenceClientCertFile string `json:"fenceClientCertFile,omitempty"`
+	FenceClientKeyFile  string `json:"fenceClientKeyFile,omitempty"`
 	ControlSnapshotFile string `json:"controlSnapshotFile,omitempty"`
 }
 type projectionRuntime struct {
@@ -74,16 +73,25 @@ func startProjection(ctx context.Context, c ProjectionConfig, signer *errorSigne
 	if pin == nil {
 		return nil, errors.New("network: network installation pin required")
 	}
-	trust, e := projection.NewTrust(schemas, c.RootSPKI, c.TenantID, c.Realm, c.ControlDir, *pin)
+	if c.StateDir == "" || filepath.Clean(c.StateDir) == filepath.Clean(c.ControlDir) || filepath.Clean(c.StateDir) == filepath.Clean(c.MaterialsDir) {
+		return nil, errors.New("network: separate reader state required")
+	}
+	trust, e := projection.NewTrust(schemas, c.RootSPKI, c.TenantID, c.Realm, c.StateDir, *pin)
 	if e != nil {
 		return nil, e
 	}
 	r := &projectionRuntime{trust: trust, handshakes: make(chan handshakeObservation, 8), localControlFile: c.ControlSnapshotFile}
+	request, e := projection.NewTransportHTTP(c.FenceOrigin, c.FenceCAFile, c.FenceClientCertFile, c.FenceClientKeyFile, c.ServiceTokenFile)
+	if e != nil {
+		return nil, e
+	}
+	source := &projection.TransportSource{Schemas: schemas, Root: c.RootSPKI, Tenant: c.TenantID, Realm: c.Realm, Target: pin.TargetId, Request: request}
+	source.Bind(ctx, trust)
 	fence, e := publicationFence(ctx, c, schemas, trust, func() *projection.Snapshot { return r.snapshot.Load() })
 	if e != nil {
 		return nil, e
 	}
-	reader, e := projection.NewReader(c.MaterialsDir, c.ControlDir, func(g *projection.Generation) (func() error, error) {
+	reader, e := projection.NewReader(c.MaterialsDir, c.ControlDir, c.StateDir, func(g *projection.Generation) (func() error, error) {
 		snap, e := trust.Load(g)
 		if e != nil {
 			return nil, e
@@ -167,46 +175,11 @@ func publicationFence(parent context.Context, c ProjectionConfig, schemas *proje
 	if e != nil || origin.Scheme != "https" || origin.Host == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
 		return nil, errors.New("network: fixed HTTPS collab origin required")
 	}
-	tc := &tls.Config{MinVersion: tls.VersionTLS12}
-	if c.FenceCAFile != "" {
-		b, e := os.ReadFile(c.FenceCAFile)
-		if e != nil {
-			return nil, e
-		}
-		tc.RootCAs = x509.NewCertPool()
-		if !tc.RootCAs.AppendCertsFromPEM(b) {
-			return nil, errors.New("network: invalid collab CA")
-		}
+	request, e := projection.NewTransportHTTP(c.FenceOrigin, c.FenceCAFile, c.FenceClientCertFile, c.FenceClientKeyFile, c.ServiceTokenFile)
+	if e != nil {
+		return nil, e
 	}
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: tc}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("network: redirects forbidden") }}
-	get := func(ctx context.Context, path string) ([]byte, error) {
-		q, e := http.NewRequestWithContext(ctx, "GET", strings.TrimSuffix(c.FenceOrigin, "/")+path, nil)
-		if e != nil {
-			return nil, e
-		}
-		q.Header.Set("Cache-Control", "no-store")
-		if c.ServiceTokenFile != "" {
-			token, e := os.ReadFile(c.ServiceTokenFile)
-			if e != nil {
-				return nil, e
-			}
-			q.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
-			clear(token)
-		}
-		res, e := client.Do(q)
-		if e != nil {
-			return nil, errors.New("network: publication fence unavailable")
-		}
-		defer func() { _ = res.Body.Close() }()
-		if res.StatusCode != 200 {
-			return nil, errors.New("network: publication fence rejected")
-		}
-		b, e := io.ReadAll(io.LimitReader(res.Body, 1048577))
-		if e != nil || len(b) > 1048576 {
-			return nil, errors.New("network: invalid publication fence")
-		}
-		return b, nil
-	}
+	get := func(ctx context.Context, path string) ([]byte, error) { return request(ctx, "GET", path, nil) }
 	return func() error {
 		snap := current()
 		if snap == nil {

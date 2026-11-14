@@ -47,4 +47,26 @@ func validatePin(pin api.InstallationPin) error {
 	}
 	return nil
 }
-func RequireProjectorUID() error { return checkListenerUID(10001) }
+func RequireProjectorUID(component string) error {
+	if component != "edge" && component != "network" && component != "broker" {
+		return Fault("scope_denied")
+	}
+	return checkListenerUID(readerUID(component))
+}
+
+func ValidateNodeControlPins(pins api.NodeControlPins) error {
+	identities, targets, nodes := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, pin := range pins.Pins {
+		if pin.IdentityId == "" || pin.TargetId == "" || pin.NodeId == "" || identities[pin.IdentityId] || targets[pin.TargetId] || nodes[pin.NodeId] {
+			return Fault("scope_denied")
+		}
+		if _, e := number(pin.IdentityRevision); e != nil || pin.IdentityRevision == "0" {
+			return Fault("invalid_chain")
+		}
+		if _, e := public(pin.SigningSpki); e != nil {
+			return e
+		}
+		identities[pin.IdentityId], targets[pin.TargetId], nodes[pin.NodeId] = true, true, true
+	}
+	return nil
+}

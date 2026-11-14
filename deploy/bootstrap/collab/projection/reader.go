@@ -17,19 +17,19 @@ import (
 // anything before that commit is called. The reader serializes this with reload.
 type Prepare func(*Generation) (commit func() error, err error)
 type Reader struct {
-	mu            sync.Mutex
-	root, control string
-	prepare       Prepare
-	selected      *api.LocalProjectionSelector
-	highest       *api.LocalProjectionSelector
-	phase         string
-	lastFailure   atomic.Int64
-	healthFailure atomic.Int64
-	Health        func() error
-	Active        func() bool
+	mu                   sync.Mutex
+	root, control, state string
+	prepare              Prepare
+	selected             *api.LocalProjectionSelector
+	highest              *api.LocalProjectionSelector
+	phase                string
+	lastFailure          atomic.Int64
+	healthFailure        atomic.Int64
+	Health               func() error
+	Active               func() bool
 }
 
-func NewReader(root, control string, prepare Prepare) (*Reader, error) {
+func NewReader(root, control, state string, prepare Prepare) (*Reader, error) {
 	if prepare == nil {
 		return nil, errors.New("projection: prepare required")
 	}
@@ -39,8 +39,14 @@ func NewReader(root, control string, prepare Prepare) (*Reader, error) {
 	if e := directory(control); e != nil {
 		return nil, e
 	}
-	r := &Reader{root: root, control: control, prepare: prepare}
-	b, e := readPrivateFile(filepath.Join(control, "reader-selector.json"), 16384)
+	if state == "" || filepath.Clean(state) == filepath.Clean(control) || filepath.Clean(state) == filepath.Clean(root) {
+		return nil, Fault("scope_denied")
+	}
+	if e := directory(state); e != nil {
+		return nil, e
+	}
+	r := &Reader{root: root, control: control, state: state, prepare: prepare}
+	b, e := readPrivateFile(filepath.Join(state, "reader-selector.json"), 16384)
 	if e == nil {
 		var s api.LocalProjectionSelector
 		if e = Decode(b, &s, true); e != nil {
@@ -118,7 +124,7 @@ func (r *Reader) Handle(q api.LocalProjectionRequest) api.LocalProjectionRespons
 	if e != nil {
 		return fail(e)
 	}
-	if e = atomicFile(filepath.Join(r.control, "reader-selector.json"), b); e != nil {
+	if e = atomicFile(filepath.Join(r.state, "reader-selector.json"), b); e != nil {
 		return fail(Fault("projection_pending"))
 	}
 	// A crash between the durable high-water mark and commit is safe: restart

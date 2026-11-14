@@ -82,6 +82,9 @@ func (p *Projector) request(ctx context.Context, method, path string, v any) ([]
 		if res.StatusCode == http.StatusConflict {
 			return nil, Fault("version_rollback")
 		}
+		if res.StatusCode == http.StatusNotFound {
+			return nil, responseStatus(res.StatusCode)
+		}
 		return nil, Fault("projection_pending")
 	}
 	raw, e := io.ReadAll(io.LimitReader(res.Body, 16*MaxFile+1))

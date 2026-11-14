@@ -9,7 +9,6 @@ import (
 
 func checkPeer(net.Conn, uint32) error { return errors.New("projection: SO_PEERCRED requires Linux") }
 func checkListenerUID(uint32) error    { return errors.New("projection: SO_PEERCRED requires Linux") }
-func setSocketGroup(string) error      { return errors.New("projection: socket permissions require Linux") }
 func lockListener(string) (func(), error) {
 	return nil, errors.New("projection: listener lock requires Linux")
 }

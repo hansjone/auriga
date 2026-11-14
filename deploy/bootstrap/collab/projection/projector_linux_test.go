@@ -37,7 +37,7 @@ func TestProjectorSealedBootstrapLostAckAndRotation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	reader, e := projection.NewReader(root, control, func(g *projection.Generation) (func() error, error) {
+	reader, e := projection.NewReader(root, control, readerState, func(g *projection.Generation) (func() error, error) {
 		snap, e := readerTrust.Load(g)
 		if e != nil {
 			return nil, e

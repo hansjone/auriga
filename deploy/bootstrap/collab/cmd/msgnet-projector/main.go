@@ -62,6 +62,7 @@ func run() error {
 	identity := flag.String("identity", "", "installed projection identity")
 	materials := flag.String("materials", "", "private component material volume")
 	control := flag.String("control", "", "private component control volume")
+	readerState := flag.String("reader-state", "", "reader-only durable state volume; required in broker mode")
 	origin := flag.String("origin", "", "fixed HTTPS collab origin")
 	signing := flag.String("signing-key", "", "installation signing PKCS8 file")
 	sealing := flag.String("sealing-key", "", "installation sealing PKCS8 file")
@@ -75,9 +76,6 @@ func run() error {
 	flag.Parse()
 	if flag.NArg() != 0 || (*mode != "projector" && *mode != "broker" && *mode != "control-import") {
 		return errors.New("invalid mode")
-	}
-	if e := projection.RequireProjectorUID(); e != nil {
-		return e
 	}
 	schemas, e := projection.LoadSchemas(*schema)
 	if e != nil {
@@ -103,6 +101,9 @@ func run() error {
 	if pin == nil {
 		return errors.New("installation pin missing")
 	}
+	if e = projection.RequireProjectorUID(pin.Component); e != nil {
+		return e
+	}
 	b, e = os.ReadFile(*rootPath)
 	if e != nil {
 		return e
@@ -122,6 +123,12 @@ func run() error {
 		role = "broker"
 	}
 	stateDir := filepath.Join(*control, role+"-state")
+	if *mode == "broker" {
+		if *readerState == "" || filepath.Clean(*readerState) == filepath.Clean(*control) || filepath.Clean(*readerState) == filepath.Clean(*materials) {
+			return errors.New("separate reader state required")
+		}
+		stateDir = *readerState
+	}
 	if e = os.MkdirAll(stateDir, 0700); e != nil {
 		return e
 	}
@@ -131,10 +138,18 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	if *mode != "control-import" {
+		request, err := projection.NewTransportHTTP(*origin, *ca, *clientCert, *clientKey, *serviceToken)
+		if err != nil {
+			return err
+		}
+		source := &projection.TransportSource{Schemas: schemas, Root: root, Tenant: pins.TenantId, Realm: pins.Realm, Target: pin.TargetId, Request: request}
+		source.Bind(ctx, trust)
+	}
 	if *mode == "broker" {
 		supervisor := &projection.BrokerSupervisor{Binary: *broker, ExpectedSHA256: *brokerDigest, Template: *template, Control: *control, Trust: trust}
 		defer supervisor.Close()
-		reader, e := projection.NewReader(*materials, *control, supervisor.Prepare)
+		reader, e := projection.NewReader(*materials, *control, *readerState, supervisor.Prepare)
 		if e != nil {
 			return e
 		}

@@ -38,7 +38,7 @@ func TestProjectionProtocolAndTLSWithoutRestart(t *testing.T) {
 	}
 	var current atomic.Pointer[api.Publication]
 	current.Store(&f.Initial)
-	fence := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+	fence := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		p := current.Load()
 		switch q.URL.Path {
 		case "/api/collab/v2/network/bootstrap/controls":
@@ -46,6 +46,10 @@ func TestProjectionProtocolAndTLSWithoutRestart(t *testing.T) {
 		case "/api/collab/v2/network/bootstrap/keys":
 			_ = json.NewEncoder(w).Encode(p)
 		case "/api/collab/v2/network/keys/status":
+			if len(q.TLS.VerifiedChains) == 0 || q.Header.Get("Authorization") != "Bearer synthetic-network-token" {
+				http.Error(w, "service identity required", http.StatusForbidden)
+				return
+			}
 			now := time.Now().UTC().Truncate(time.Second).Format(time.RFC3339)
 			s := api.RenewalStatus{TenantId: p.Keyset.Payload.TenantId, Realm: "1", State: "ready", AuthorityId: p.Authority.Payload.AuthorityId, ExpiryPolicy: "no_hard_expiry", Generation: p.Keyset.Payload.Generation, KeysetVersion: p.Keyset.Payload.KeysetVersion, ControlRevision: p.Control.Payload.ControlRevision, ReviewDueAt: now, NextRenewalAt: now, LastSuccessAt: now, BusinessValidUntil: now, FailureCode: "none"}
 			_ = json.NewEncoder(w).Encode(s)
@@ -53,6 +57,22 @@ func TestProjectionProtocolAndTLSWithoutRestart(t *testing.T) {
 			http.NotFound(w, q)
 		}
 	}))
+	serviceRoots := x509.NewCertPool()
+	for _, ca := range f.Bundle.Payload.Cas {
+		if ca.Role == "client" {
+			raw, e := base64.RawURLEncoding.DecodeString(ca.CertificateDer)
+			if e != nil {
+				t.Fatal(e)
+			}
+			cert, e := x509.ParseCertificate(raw)
+			if e != nil {
+				t.Fatal(e)
+			}
+			serviceRoots.AddCert(cert)
+		}
+	}
+	fence.TLS = &tls.Config{MinVersion: tls.VersionTLS12, ClientAuth: tls.VerifyClientCertIfGiven, ClientCAs: serviceRoots}
+	fence.StartTLS()
 	defer fence.Close()
 	write := func(name string, b []byte) string {
 		t.Helper()
@@ -63,6 +83,18 @@ func TestProjectionProtocolAndTLSWithoutRestart(t *testing.T) {
 		return path
 	}
 	caFile := write("fence-ca.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: fence.Certificate().Raw}))
+	certDER, e := base64.RawURLEncoding.DecodeString(f.Leaves[1].CertificateDer)
+	if e != nil {
+		t.Fatal(e)
+	}
+	keyDER, e := base64.RawURLEncoding.DecodeString(f.Leaves[1].PrivatePkcs8)
+	if e != nil {
+		t.Fatal(e)
+	}
+	serviceCert := write("fence-client.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
+	serviceKey := write("fence-client.key", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+	clear(keyDER)
+	serviceToken := write("fence.jwt", []byte("synthetic-network-token"))
 	pins, _ := projection.Bytes(api.InstallationPins{SchemaVersion: 2, TenantId: f.Initial.Keyset.Payload.TenantId, Realm: "1", Pins: []api.InstallationPin{f.Pin}})
 	pinsPath := write("pins.json", pins)
 	controlBytes, _ := projection.Bytes(f.Initial.Control)
@@ -97,7 +129,7 @@ func TestProjectionProtocolAndTLSWithoutRestart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	signer := &errorSigner{}
-	runtime, e := startProjection(ctx, ProjectionConfig{MaterialsDir: root, ControlDir: control, SchemaFile: schemaPath, RootSPKI: f.RootSPKI, TenantID: f.Initial.Keyset.Payload.TenantId, Realm: "1", PinsFile: pinsPath, InstallationID: f.Pin.IdentityId, FenceOrigin: fence.URL, FenceCAFile: caFile, ControlSnapshotFile: controlSnapshotPath}, signer)
+	runtime, e := startProjection(ctx, ProjectionConfig{MaterialsDir: root, ControlDir: control, StateDir: testfixture.Dir(t), SchemaFile: schemaPath, RootSPKI: f.RootSPKI, TenantID: f.Initial.Keyset.Payload.TenantId, Realm: "1", PinsFile: pinsPath, InstallationID: f.Pin.IdentityId, FenceOrigin: fence.URL, FenceCAFile: caFile, FenceClientCertFile: serviceCert, FenceClientKeyFile: serviceKey, ServiceTokenFile: serviceToken, ControlSnapshotFile: controlSnapshotPath}, signer)
 	if e != nil {
 		t.Fatal(e)
 	}

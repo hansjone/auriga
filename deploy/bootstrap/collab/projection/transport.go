@@ -58,6 +58,9 @@ func VerifyTransport(t api.SignedTransportTrustBundle, p api.Publication, f Tran
 		if q.Payload.TenantId != t.Payload.TenantId || q.Payload.Realm != t.Payload.Realm || q.Payload.AuthorityId != t.Payload.AuthorityId || q.Payload.AuthorityDigest != t.Payload.AuthorityDigest || q.Payload.Generation != t.Payload.Generation || q.Payload.Phase != "retire_old" || q.Payload.BundleVersion != f.SeenVersion || d != t.Payload.PreviousBundleDigest {
 			return Fault("invalid_transition")
 		}
+		if !Equal(q.Payload.Scope, t.Payload.Scope) || !Equal(q.Payload.RequiredReaderIds, t.Payload.RequiredReaderIds) {
+			return Fault("invalid_transition")
+		}
 		for _, o := range q.Payload.Cas {
 			if !slices.ContainsFunc(t.Payload.Cas, func(n api.TransportCa) bool { return Equal(o, n) }) {
 				return Fault("invalid_transition")

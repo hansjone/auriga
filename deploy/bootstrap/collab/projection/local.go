@@ -59,7 +59,7 @@ func CheckProgress(s api.LocalProjectionSelector, old *api.LocalProjectionSelect
 		return Fault("scope_denied")
 	}
 	less := func(a, b string) bool { x, _ := number(a); y, _ := number(b); return x < y }
-	if less(s.Generation, old.Generation) || (s.Generation == old.Generation && less(s.KeysetVersion, old.KeysetVersion)) || less(s.BundleVersion, old.BundleVersion) || less(s.MaterialRevision, old.MaterialRevision) {
+	if less(s.Generation, old.Generation) || (s.Generation == old.Generation && (less(s.KeysetVersion, old.KeysetVersion) || less(s.BundleVersion, old.BundleVersion))) || less(s.MaterialRevision, old.MaterialRevision) {
 		return Fault("version_rollback")
 	}
 	if s.MaterialRevision == old.MaterialRevision && !Equal(s, *old) {

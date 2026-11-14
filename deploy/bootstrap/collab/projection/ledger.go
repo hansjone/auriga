@@ -18,6 +18,11 @@ type ledger struct {
 	First             map[string]api.FirstPublication
 	ReaderPersisted   bool
 	HandshakeVerified bool
+	TransportCAs      map[string]transportCAHistory
+}
+type transportCAHistory struct {
+	CA      api.TransportCa
+	Retired bool
 }
 type Trust struct {
 	mu                        sync.Mutex
@@ -26,13 +31,13 @@ type Trust struct {
 	pin                       api.InstallationPin
 	state                     ledger
 	now                       func() time.Time
-	confirmTransport          func(api.SignedTransportTrustBundle) (bool, bool, error)
+	confirmTransport          func(api.Publication, api.SignedTransportTrustBundle, api.SignedRootControl, *api.SignedTransportTrustBundle, time.Time) error
 }
 
 // SetTransportConfirmation connects the authoritative C installation-receipt
-// ledger once its read contract is available. Local reader success is not proof
+// ledger. Local reader success is not proof
 // that every required reader persisted the bundle or verified its handshakes.
-func (t *Trust) SetTransportConfirmation(confirm func(api.SignedTransportTrustBundle) (bool, bool, error)) {
+func (t *Trust) SetTransportConfirmation(confirm func(api.Publication, api.SignedTransportTrustBundle, api.SignedRootControl, *api.SignedTransportTrustBundle, time.Time) error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.confirmTransport = confirm
@@ -239,21 +244,47 @@ func (t *Trust) accept(p api.Publication, bundle api.SignedTransportTrustBundle,
 		}
 	}
 	if t.confirmTransport != nil {
-		var e error
-		tf.ReadersPersisted, tf.HandshakesVerified, e = t.confirmTransport(bundle)
-		if e != nil {
+		if e = t.confirmTransport(p, bundle, *t.state.Control, t.state.Bundle, t.now()); e != nil {
+			return e
+		}
+	} else {
+		if t.state.Bundle != nil && (t.state.Bundle.Payload.Generation != bundle.Payload.Generation || t.state.Bundle.Payload.AuthorityDigest != bundle.Payload.AuthorityDigest) {
+			return Fault("control_required")
+		}
+		if e = VerifyTransport(bundle, p, tf); e != nil {
 			return e
 		}
 	}
 	sameBundle := t.state.Bundle != nil && Equal(*t.state.Bundle, bundle)
-	if sameBundle {
-		tf.ReadersPersisted = true
-		tf.HandshakesVerified = true
+	next := ledger{Control: t.state.Control, Publication: &p, Bundle: &bundle, Keys: map[string]api.PublicKey{}, First: map[string]api.FirstPublication{}, TransportCAs: map[string]transportCAHistory{}}
+	for id, entry := range t.state.TransportCAs {
+		next.TransportCAs[id] = entry
 	}
-	if e = VerifyTransport(bundle, p, tf); e != nil {
-		return e
+	// Upgrade the K2 ledger without losing the last accepted CA identities.
+	if t.state.Bundle != nil {
+		for _, ca := range t.state.Bundle.Payload.Cas {
+			if _, ok := next.TransportCAs[ca.CaId]; !ok {
+				next.TransportCAs[ca.CaId] = transportCAHistory{CA: ca}
+			}
+		}
 	}
-	next := ledger{Control: t.state.Control, Publication: &p, Bundle: &bundle, Keys: map[string]api.PublicKey{}, First: map[string]api.FirstPublication{}}
+	for _, ca := range bundle.Payload.Cas {
+		if old, ok := next.TransportCAs[ca.CaId]; ok && (old.Retired || !Equal(old.CA, ca)) {
+			return Fault("invalid_transition")
+		}
+		for id, old := range next.TransportCAs {
+			if id != ca.CaId && old.CA.CertificateDer == ca.CertificateDer {
+				return Fault("invalid_transition")
+			}
+		}
+		next.TransportCAs[ca.CaId] = transportCAHistory{CA: ca}
+	}
+	for id, old := range next.TransportCAs {
+		if !slices.ContainsFunc(bundle.Payload.Cas, func(ca api.TransportCa) bool { return ca.CaId == id }) {
+			old.Retired = true
+			next.TransportCAs[id] = old
+		}
+	}
 	if sameBundle {
 		next.ReaderPersisted = t.state.ReaderPersisted
 		next.HandshakeVerified = t.state.HandshakeVerified

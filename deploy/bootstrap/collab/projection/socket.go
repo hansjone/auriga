@@ -1,6 +1,7 @@
 package projection
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -26,6 +27,10 @@ func readFrame(c net.Conn) ([]byte, error) {
 	b := make([]byte, n)
 	if _, e := io.ReadFull(c, b); e != nil {
 		return nil, e
+	}
+	canonical, e := Canonical(b)
+	if e != nil || !bytes.Equal(canonical, b) {
+		return nil, Fault("invalid_chain")
 	}
 	return b, nil
 }
@@ -145,10 +150,7 @@ func (r *Reader) Serve(ctx context.Context, component string) error {
 		return e
 	}
 	defer func() { _ = l.Close() }()
-	if e = os.Chmod(path, 0660); e != nil {
-		return e
-	}
-	if e = setSocketGroup(path); e != nil {
+	if e = os.Chmod(path, 0600); e != nil {
 		return e
 	}
 	done := make(chan struct{})
@@ -170,7 +172,7 @@ func (r *Reader) Serve(ctx context.Context, component string) error {
 		}
 		func() {
 			defer func() { _ = c.Close() }()
-			if checkPeer(c, 10001) != nil {
+			if checkPeer(c, readerUID(component)) != nil {
 				return
 			}
 			if c.SetDeadline(time.Now().Add(5*time.Second)) != nil {
