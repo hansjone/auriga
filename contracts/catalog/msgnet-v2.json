@@ -1,0 +1,203 @@
+{
+  "schema_version": 2,
+  "permissions": [
+    "collab.msgnet.read",
+    "collab.msgnet.review",
+    "collab.msgnet.control.install",
+    "collab.msgnet.projection.read",
+    "collab.msgnet.projection.ack",
+    "collab.msgnet.isolation.enforce"
+  ],
+  "errors": [
+    {
+      "code": "collab.msgnet_authority_revoked"
+    },
+    {
+      "code": "collab.msgnet_authority_unknown"
+    },
+    {
+      "code": "collab.msgnet_control_rollback"
+    },
+    {
+      "code": "collab.msgnet_control_required"
+    },
+    {
+      "code": "collab.msgnet_version_rollback"
+    },
+    {
+      "code": "collab.msgnet_same_version_conflict"
+    },
+    {
+      "code": "collab.msgnet_scope_denied"
+    },
+    {
+      "code": "collab.msgnet_invalid_chain"
+    },
+    {
+      "code": "collab.msgnet_invalid_transition"
+    },
+    {
+      "code": "collab.msgnet_predecessor_required"
+    },
+    {
+      "code": "collab.msgnet_clock_error"
+    },
+    {
+      "code": "collab.msgnet_projection_pending"
+    },
+    {
+      "code": "collab.msgnet_identity_quarantined"
+    },
+    {
+      "code": "collab.msgnet_migration_expired"
+    },
+    {
+      "code": "collab.msgnet_migration_outside_commitment"
+    }
+  ],
+  "alerts": [
+    {
+      "code": "collab.msgnet_review_30d",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_review_7d",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_review_1d",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_review_due",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_renewal_failed",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_clock_error",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_projection_failed_60s",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_certificate_7d",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_certificate_1d",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_ca_confirmation_pending",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    },
+    {
+      "code": "collab.msgnet_control_confirmation_pending",
+      "producer": "collab",
+      "consumer": "ops",
+      "dedup_fields": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "review_cycle",
+        "threshold",
+        "target_id"
+      ]
+    }
+  ]
+}

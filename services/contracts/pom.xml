@@ -198,6 +198,38 @@
         </configuration>
         <executions>
           <execution>
+            <id>msgnet-v2-java</id>
+            <goals>
+              <goal>generate</goal>
+            </goals>
+            <configuration>
+              <inputSpec>${project.build.directory}/bundled/network-keys-v2.json</inputSpec>
+              <output>${project.build.directory}/generated-sources/openapi/msgnet</output>
+              <apiPackage>auriga.contracts.msgnet.web.api</apiPackage>
+              <modelPackage>auriga.contracts.msgnet.model</modelPackage>
+            </configuration>
+          </execution>
+          <execution>
+            <id>msgnet-v2-go</id>
+            <goals>
+              <goal>generate</goal>
+            </goals>
+            <configuration>
+              <skip>${auriga.skipGoModels}</skip>
+              <generatorName>go</generatorName>
+              <inputSpec>${project.build.directory}/bundled/network-keys-v2.json</inputSpec>
+              <output>${project.basedir}/../../infra/gen/msgnetapi</output>
+              <generateApis>false</generateApis>
+              <generateSupportingFiles>true</generateSupportingFiles>
+              <supportingFilesToGenerate>utils.go</supportingFilesToGenerate>
+              <configOptions>
+                <packageName>msgnetapi</packageName>
+                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                <disallowAdditionalPropertiesIfNotPresent>false</disallowAdditionalPropertiesIfNotPresent>
+              </configOptions>
+            </configuration>
+          </execution>
+          <execution>
             <id>access-java-models</id>
             <goals><goal>generate</goal></goals>
             <configuration>
