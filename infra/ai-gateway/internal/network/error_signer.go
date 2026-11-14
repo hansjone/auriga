@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"sync"
 	"time"
 )
 
@@ -23,9 +24,13 @@ type ProtocolSigningConfig struct {
 }
 
 type errorSigner struct {
-	key        ed25519.PrivateKey
-	cfg        ProtocolSigningConfig
-	begin, end time.Time
+	mu            sync.RWMutex
+	current       *errorSigner
+	fence         func() error
+	tenant, realm string
+	key           ed25519.PrivateKey
+	cfg           ProtocolSigningConfig
+	begin, end    time.Time
 }
 
 func newErrorSigner(cfg ProtocolSigningConfig) (*errorSigner, error) {
@@ -59,6 +64,23 @@ func newErrorSigner(cfg ProtocolSigningConfig) (*errorSigner, error) {
 // contract alphabet, so encoding/json's sorted keys are exactly JCS here. This
 // is deliberately NOT a general canonicalizer for collab's business payloads.
 func (s *errorSigner) encode(b liveBinding, requestID string, ae *AppError) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.current != nil {
+		if s.fence == nil {
+			return nil, errors.New("network: dynamic signer fence unavailable")
+		}
+		if err := s.fence(); err != nil {
+			return nil, err
+		}
+		return s.current.encode(b, requestID, ae)
+	}
+	if len(s.key) != ed25519.PrivateKeySize {
+		return nil, errors.New("network: protocol projection pending")
+	}
+	if (s.tenant != "" && b.Tenant != s.tenant) || (s.realm != "" && b.Realm != s.realm) {
+		return nil, errors.New("network: protocol signing scope mismatch")
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	if now.Before(s.begin) || !now.Before(s.end) || !now.Before(b.NotAfter) {
 		return nil, errors.New("network: protocol signer or connection expired")

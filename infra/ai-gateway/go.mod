@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
+	github.com/hansjone/auriga/deploy/bootstrap v0.0.0
 	github.com/hansjone/auriga/infra/gen v0.0.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/maximhq/bifrost/core v1.14.1
@@ -59,8 +60,11 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	gopkg.in/validator.v2 v2.0.1 // indirect
 )
 
 replace github.com/hansjone/auriga/infra/gen => ../gen
+
+replace github.com/hansjone/auriga/deploy/bootstrap => ../../deploy/bootstrap
 
 replace github.com/maximhq/bifrost/core => ../../third_party/bifrost/core

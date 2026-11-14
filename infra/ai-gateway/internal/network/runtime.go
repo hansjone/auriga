@@ -47,6 +47,7 @@ type RuntimeConfig struct {
 	Collab                 team.RPCConfig        `json:"collab"`
 	Data                   NATSConfig            `json:"data"`
 	ProtocolSigning        ProtocolSigningConfig `json:"protocolSigning"`
+	Projection             *ProjectionConfig     `json:"projection,omitempty"`
 	Auth                   NATSConfig            `json:"auth"`
 	Ops                    NATSConfig            `json:"ops"`
 	RedeemTimeoutMillis    int                   `json:"redeemTimeoutMillis"`
@@ -84,6 +85,7 @@ type Runtime struct {
 	data       *nats.Conn
 	mailbox    *mailboxRouter
 	signer     *errorSigner
+	projection *projectionRuntime
 	issuer     nkeys.KeyPair
 	xkey       nkeys.KeyPair
 	redeemer   *IAMRedeemer
@@ -112,7 +114,12 @@ func (r *Runtime) Close() {
 			_ = r.collab.Close()
 		}
 		if r.signer != nil {
+			r.signer.mu.Lock()
 			clear(r.signer.key)
+			if r.signer.current != nil {
+				clear(r.signer.current.key)
+			}
+			r.signer.mu.Unlock()
 		}
 		if r.auth != nil {
 			r.auth.Close()
@@ -254,12 +261,19 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	}
 	clear(token)
 	r := &Runtime{budget: budget, Errors: make(chan error, 2)}
+	ctx, cancel := context.WithCancel(parent)
+	r.cancel = cancel
 	defer func() {
 		if err != nil {
 			r.Close()
 		}
 	}()
-	if r.signer, err = newErrorSigner(cfg.ProtocolSigning); err != nil {
+	if cfg.Projection != nil {
+		r.signer = &errorSigner{}
+		if r.projection, err = startProjection(ctx, *cfg.Projection, r.signer); err != nil {
+			return nil, err
+		}
+	} else if r.signer, err = newErrorSigner(cfg.ProtocolSigning); err != nil {
 		return nil, err
 	}
 	if r.issuer, err = seedFile(cfg.IssuerSeedFile); err != nil {
@@ -282,13 +296,13 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 		default:
 		}
 	}
-	if r.auth, err = dialNATS(cfg.Auth, closed); err != nil {
+	if r.auth, err = r.dialBroker(cfg.Auth, closed); err != nil {
 		return nil, err
 	}
-	if r.ops, err = dialNATS(cfg.Ops, closed); err != nil {
+	if r.ops, err = r.dialBroker(cfg.Ops, closed); err != nil {
 		return nil, err
 	}
-	if r.data, err = dialNATS(cfg.Data, closed); err != nil {
+	if r.data, err = r.dialBroker(cfg.Data, closed); err != nil {
 		return nil, err
 	}
 	if r.auth.ConnectedServerName() != opts.ServerName || r.ops.ConnectedServerId() != r.auth.ConnectedServerId() || r.data.ConnectedServerId() != r.auth.ConnectedServerId() {
@@ -304,8 +318,15 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(parent)
-	r.cancel = cancel
+	if r.projection != nil {
+		r.redeemer.cfg.CurrentServerID = func() string {
+			id := r.auth.ConnectedServerId()
+			if id == "" || r.auth.ConnectedServerName() != opts.ServerName || r.ops.ConnectedServerId() != id || r.data.ConnectedServerId() != id {
+				return ""
+			}
+			return id
+		}
+	}
 	client, e := NewMailboxClient(r.collab, budget.RPC)
 	if e != nil {
 		return nil, e
@@ -330,6 +351,50 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	}
 	if err = r.startSubmitHTTP(ctx, cfg.SubmitHTTP); err != nil {
 		return nil, err
+	}
+	if r.projection != nil {
+		r.projection.onSwap = func() {
+			for _, nc := range []*nats.Conn{r.auth, r.ops, r.data} {
+				_ = nc.ForceReconnect()
+			}
+		}
+		r.done.Go(func() {
+			if e := r.projection.reader.Serve(ctx, "network"); e != nil {
+				select {
+				case r.Errors <- errors.New("network: projection socket unavailable"):
+				default:
+				}
+			}
+		})
+		r.done.Go(func() { r.projection.reader.Watch(ctx) })
+		r.done.Go(func() {
+			observed := map[string]map[string]bool{}
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case event := <-r.projection.handshakes:
+					snap := r.projection.snapshot.Load()
+					if snap == nil || snap.Selector.ManifestDigest != event.Selector.ManifestDigest {
+						continue
+					}
+					key := event.Selector.ManifestDigest
+					if observed[key] == nil {
+						observed = map[string]map[string]bool{key: {}}
+					}
+					observed[key][event.Role] = true
+					complete := true
+					for role := range snap.TLS.Leaves {
+						if !observed[key][role] {
+							complete = false
+						}
+					}
+					if complete {
+						_ = r.projection.reader.ConfirmHandshake(event.Selector, func() error { return r.projection.trust.RecordLoaded(event.Selector, true) })
+					}
+				}
+			}
+		})
 	}
 	r.done.Go(func() {
 		_ = r.redeemer.Reconcile(ctx, ReconcileConfig{Interval: time.Duration(cfg.ActiveIntervalMillis) * time.Millisecond, RequestTimeout: time.Duration(cfg.RequestTimeoutMillis) * time.Millisecond, MaxKickAttempts: cfg.MaxKickAttempts, FailureGrace: budget.Grace, Snapshot: func(ctx context.Context) (map[uint64]*ConnInfo, error) {
