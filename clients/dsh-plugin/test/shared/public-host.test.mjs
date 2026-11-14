@@ -4,11 +4,15 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { installSharedHost } from './host.js';
+import { installSharedHost } from '../../src/shared/host.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 
 const root = process.env.AURIGA_DSH_PUBLIC_PACKAGE_ROOT;
+if (process.env.CI && !root)
+  throw new Error(
+    'CI requires AURIGA_DSH_PUBLIC_PACKAGE_ROOT and the pinned public-host install',
+  );
 test(
   'public ToolRuntime guard prevents body execution after pre-execute allow',
   { skip: !root },

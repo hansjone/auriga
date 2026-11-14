@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { fail, SHARED_RISK } from './protocol.js';
 import { executionSession, openSharedTask } from './task-context.js';
+import { memberFilePath, memberWorkspace } from './member-files.js';
 
 export const SHARED_PROFILE = Object.freeze({
   shell: false,
@@ -134,7 +135,21 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
         if (Object.hasOwn(args, key) && args[key] !== b.sessionId)
           fail('shared.binding_mismatch');
       }
-      const result = await ports.invoke(action, b, args);
+      let checkedArgs = args;
+      if (
+        [
+          'workspaceFiles/read',
+          'workspaceFiles/readBytes',
+          'workspaceFiles/stat',
+        ].includes(action)
+      ) {
+        checkedArgs = {
+          ...args,
+          path: await memberFilePath(memberWorkspace(b), args.path),
+        };
+        await runtime.authorize(peer, action, sessionId);
+      }
+      const result = await ports.invoke(action, b, checkedArgs);
       await runtime.authorize(peer, action, sessionId);
       return result;
     },

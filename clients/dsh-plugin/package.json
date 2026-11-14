@@ -28,7 +28,7 @@
   "scripts": {
     "lint": "eslint . && prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test \"test/**/*.test.js\" \"src/shared/*.test.mjs\"",
+    "test": "node --test \"test/**/*.test.js\" \"test/shared/*.test.mjs\"",
     "build": "tsc --noEmit -p tsconfig.json",
     "gen:network-keyset": "node scripts/gen-network-keyset.mjs",
     "gen:network-tools": "node scripts/gen-network-tools.mjs",

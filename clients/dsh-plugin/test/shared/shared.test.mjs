@@ -6,14 +6,127 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { canonical, SHARED_RISK, verifyToken } from './protocol.js';
-import { createSharedRuntime } from './runtime.js';
-import { createEnterpriseAdapter } from './enterprise.js';
-import { installSharedHost } from './host.js';
-import { createSharedCarrier } from './carrier.js';
-import { openSharedTask } from './task-context.js';
-import { createSharedDownstream } from './downstream.js';
-import { createEnterpriseOutbound } from './enterprise-transport.js';
+import { mkdtemp, mkdir, writeFile, rm, symlink, link } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
+import {
+  canonical,
+  SHARED_RISK,
+  verifyToken,
+} from '../../src/shared/protocol.js';
+import { createSharedRuntime } from '../../src/shared/runtime.js';
+import { createEnterpriseAdapter } from '../../src/shared/enterprise.js';
+import { installSharedHost } from '../../src/shared/host.js';
+import { createSharedCarrier } from '../../src/shared/carrier.js';
+import { openSharedTask } from '../../src/shared/task-context.js';
+import { createSharedDownstream } from '../../src/shared/downstream.js';
+import { createEnterpriseOutbound } from '../../src/shared/enterprise-transport.js';
+import { memberFilePath } from '../../src/shared/member-files.js';
+
+test('member file entry checks real paths, rejects traversal and symlinks, retains hard-link risk', async () => {
+  const parent = fileURLToPath(
+    new URL('../../../../.dev/shared-member-files/', import.meta.url),
+  );
+  await mkdir(parent, { recursive: true });
+  const directory = await mkdtemp(join(parent, 'case-'));
+  const a = join(directory, 'A'),
+    b = join(directory, 'A-other');
+  try {
+    await mkdir(a);
+    await mkdir(b);
+    await writeFile(join(a, 'own.txt'), 'A');
+    await writeFile(join(b, 'private.txt'), 'B');
+    assert.equal(
+      await memberFilePath(a, 'own.txt'),
+      await memberFilePath(a, join(a, 'own.txt')),
+    );
+    for (const path of [
+      '../A-other/private.txt',
+      join(b, 'private.txt'),
+      'missing.txt',
+    ])
+      await assert.rejects(memberFilePath(a, path));
+    await symlink(
+      b,
+      join(a, 'outside'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    await assert.rejects(memberFilePath(a, 'outside/private.txt'));
+    await link(join(b, 'private.txt'), join(a, 'hardlink.txt'));
+    assert.equal(
+      await memberFilePath(a, 'hardlink.txt'),
+      join(a, 'hardlink.txt'),
+    );
+  } finally {
+    assert.ok(resolve(directory).startsWith(resolve(parent) + sep));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('self-owned file actions reject other member paths before the host port runs', async () => {
+  const f = setup(),
+    peer = await f.peer(0),
+    binding = await f.runtime.create(peer, f.host);
+  let invoked = 0;
+  const ctx = {
+    tools: { guard: () => () => {}, register: () => () => {} },
+    remoteAccess: { registerPolicy: () => () => {} },
+    webServer: { register: () => () => {} },
+  };
+  const host = installSharedHost(ctx, {
+    runtime: f.runtime,
+    enterprise: f.enterprise,
+    ports: {
+      createPeer() {},
+      assertProfile: () => true,
+      invoke: async () => {
+        invoked++;
+        return {};
+      },
+    },
+  });
+  try {
+    for (const action of [
+      'workspaceFiles/read',
+      'workspaceFiles/readBytes',
+      'workspaceFiles/stat',
+    ])
+      await assert.rejects(
+        host.invoke(peer, action, binding.sessionId, {
+          path: '../other/workspace/private.txt',
+        }),
+      );
+    assert.equal(invoked, 0);
+    await host.invoke(peer, 'session/page', binding.sessionId, {});
+    assert.equal(invoked, 1);
+  } finally {
+    host.close();
+  }
+});
+
+test('enterprise handler normalizes methods, caps timeout and discards non-string business header values', async () => {
+  const f = setup(),
+    binding = await f.runtime.create(await f.peer(0), f.host);
+  let observed;
+  f.enterprisePorts.outbound = async (request) => {
+    observed = request;
+    return { statusCode: 200, body: 'ok' };
+  };
+  const call = f.call(binding, f.token(binding));
+  call.body.method = 'patch';
+  call.body.timeoutMs = 120000;
+  call.body.headers = {
+    accept: 42,
+    'x-lang-id': ['en'],
+    'content-type': 'application/json',
+    authorization: 'discard-me',
+  };
+  await f.enterprise.outbound(call);
+  assert.equal(observed.method, 'PATCH');
+  assert.equal(observed.timeoutMs, 60000);
+  assert.deepEqual(observed.headers, { 'content-type': 'application/json' });
+  call.body.headers = { accept: 'application/json\r\nInjected: yes' };
+  await assert.rejects(f.enterprise.outbound(call));
+});
 
 test('enterprise HTTPS transport injects private headers and cancels timed-out requests', async () => {
   const seen = [];
@@ -244,7 +357,9 @@ function setup() {
 test('packaged K schema has no drift', () => {
   assert.deepEqual(
     JSON.parse(
-      readFileSync(new URL('./contract.schema.json', import.meta.url)),
+      readFileSync(
+        new URL('../../src/shared/contract.schema.json', import.meta.url),
+      ),
     ),
     JSON.parse(
       readFileSync(
@@ -694,7 +809,7 @@ test('original Python helper resolve/request runs with task-local variables and 
     await assert.rejects(f.enterprise.outbound(f.call(binding, task.token)));
     const skill = fileURLToPath(
       new URL(
-        './skills/uds-skill-auth/scripts/uds_skill_auth.py',
+        '../../src/shared/skills/uds-skill-auth/scripts/uds_skill_auth.py',
         import.meta.url,
       ),
     );
@@ -702,7 +817,10 @@ test('original Python helper resolve/request runs with task-local variables and 
       readFileSync(skill),
       readFileSync(
         fileURLToPath(
-          new URL('./skill-helpers/python/uds_skill_auth.py', import.meta.url),
+          new URL(
+            '../../src/shared/skill-helpers/python/uds_skill_auth.py',
+            import.meta.url,
+          ),
         ),
       ),
     );

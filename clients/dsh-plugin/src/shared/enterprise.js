@@ -128,19 +128,22 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
       !cfg.outboundAllowedHosts?.includes(url.hostname)
     )
       fail('host_not_allowed');
-    const method = body.method ?? 'POST',
-      timeoutMs = body.timeoutMs ?? 30000;
+    const requestedMethod = body.method ?? 'POST',
+      requestedTimeout = body.timeoutMs ?? 30000;
+    const method =
+      typeof requestedMethod === 'string'
+        ? requestedMethod.toUpperCase()
+        : requestedMethod;
     if (
       !['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(method) ||
-      !Number.isSafeInteger(timeoutMs) ||
-      timeoutMs < 1 ||
-      timeoutMs > 60000
+      !Number.isSafeInteger(requestedTimeout) ||
+      requestedTimeout < 1
     )
       fail('common.validation_failed');
     const headers = {};
     for (const [k, v] of Object.entries(body.headers ?? {})) {
-      if (typeof v !== 'string' || /[\r\n]/.test(v))
-        fail('common.validation_failed');
+      if (typeof v !== 'string') continue;
+      if (/[\r\n]/.test(v)) fail('common.validation_failed');
       if (requestHeaders.has(k.toLowerCase())) headers[k.toLowerCase()] = v;
     }
     // Private IAM adapter injects enterprise headers; browser values cannot override them.
@@ -155,7 +158,7 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
           method,
           headers,
           body: body.body,
-          timeoutMs,
+          timeoutMs: Math.min(requestedTimeout, 60000),
           redirect: 'error',
         },
         material,
@@ -204,10 +207,11 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
     const raw = path.endsWith('/agent-credentials');
     try {
       if (!loopback(req.socket.remoteAddress)) fail('local_only');
-      if (req.method !== 'POST' && !(raw && req.method === 'GET'))
+      const requestMethod = (req.method ?? 'GET').toUpperCase();
+      if (requestMethod !== 'POST' && !(raw && requestMethod === 'GET'))
         fail('common.validation_failed');
       let body = {};
-      if (req.method === 'POST') {
+      if (requestMethod === 'POST') {
         const chunks = [];
         let size = 0;
         for await (const chunk of req) {

@@ -23,6 +23,11 @@ jobs:
       - name: Install
         shell: bash
         run: pnpm install --frozen-lockfile --filter auriga-dsh... --filter . --store-dir "$(pnpm store path)"
+      - name: Install pinned rc.3 public host
+        run: npm ci --ignore-scripts --prefix clients/dsh-plugin/test/public-host
+      - name: Require public host verification
+        shell: bash
+        run: echo "AURIGA_DSH_PUBLIC_PACKAGE_ROOT=$GITHUB_WORKSPACE/clients/dsh-plugin/test/public-host" >> "$GITHUB_ENV"
       - run: pnpm test
         working-directory: clients/dsh-plugin
 

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { randomUUID } from 'node:crypto';
+import { memberWorkspace } from './member-files.js';
 import {
   validate,
   same,
@@ -140,7 +141,7 @@ export function createSharedRuntime({
     }
     const b = immutable({ ...pickSessionOwner(p), sessionId: randomUUID() });
     validate('SessionBinding', b);
-    const cwd = `/var/lib/auriga/pools/${b.physicalInstanceId}/members/${b.tenantId}/${b.memberId}/${b.epoch}/workspace`;
+    const cwd = memberWorkspace(b);
     // prepare is unpublished. No sessions.enter/agent publication before Register ACK.
     const prepared = await host.prepare(b.sessionId, { meta: { cwd } });
     try {

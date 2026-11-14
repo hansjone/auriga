@@ -36,7 +36,11 @@ R 的共享 profile 选择包入口 `auriga-dsh/shared`，不得同时加载默�
 
 `POST /auriga/shared/{session,invoke,resources,status}` 每请求消费 E 签名 Auriga-Identity，精确绑定方法与去部署前缀的规范路径，校验 60 秒、单值、重放及实时分配。未知路径或方法拒绝。session 只收 parentSessionId；invoke 只收 action、sessionId、args，action 明确允许表见 runtime.js。resources 只收本人 sessionId；status 返回完整风险及只读平台设置来源。这里是供联合接线的 JSON 载体，完整非 owner 浏览器页面与 WS 不在本线实现。
 
+自有载体的 workspaceFiles/read、readBytes 和 stat 先检查服务器映射的成员工作区前缀，再解析根与目标的 realpath 并复核范围，向宿主传入已解析路径。缺失文件、目录穿越、其他成员的绝对路径和指向根外的符号链接会被拒绝。这一入口检查仍有同 UID 硬链接和检查后竞态风险，原生 owner 的文件访问风险继续按设计3.1披露。
+
 两条兼容 helper 路由为 `GET/POST /dsh-team/agent-credentials` 与 `POST /dsh-team/outbound`。按真实 socket 限回环；不信转发地址。支持 `X-DSH-Session-Id`、`X-Dsh-Team-Task-Capability`，以及正文 sessionId/dshSessionId、taskCapability/capability；并存不一致拒绝。成功原始材料仍为 `{empNo,token,updatedAt}`，no-store；出站保留上游 statusCode 和 X-Dsh-Team-Outbound-Status。企业能力每次严格核 600 秒、scope、taskId、完整 SessionBinding、材料版本和撤销。raw 只从兼容 handler 返回给受控 helper，不注册为 AI 工具。
+
+出站 method 统一大写，正整数 timeoutMs 超过60000时截到60000。业务请求头保留允许表内的字符串，丢弃非字符串值，并拒绝 CR/LF。身份和任务能力头仍按 K 的单值字符串规则严格检查。
 
 注册有限工具 `auriga_enterprise_request`、`auriga_shared_resources`。执行时核真实 agent/session 对象，从登记表取归属，再取任务能力，不接收模型提交的企业 token。ToolRuntime guard 拒绝其余所有工具；pre-execute 的允许不能覆盖 guard 的单调拒绝。guard 外控制器须由 R 的 profile 实际关闭。
 
@@ -50,8 +54,8 @@ Python helper 从 oclaw `0321a05b0db3797fdb5320aacabe5244436972f6` 的两处 `ud
 
 ## 验证与界限
 
-根目录执行 `node --test clients/dsh-plugin/src/shared/shared.test.mjs`；已纳入插件 test 脚本。测试密钥均运行时生成。schema 快照与 K 原文件逐对象比对，不改 contracts。签名及 schema 只覆盖使用的七种冻结消息，不把轻量校验器当通用 JSON Schema 引擎。
+根目录执行 `node --test clients/dsh-plugin/test/shared/shared.test.mjs`，已纳入插件 test 脚本。测试密钥均运行时生成。schema 快照与 K 原文件逐对象比对。签名及 schema 覆盖使用的七种冻结消息。
 
-公开 ToolRuntime 验证通过 `AURIGA_DSH_PUBLIC_PACKAGE_ROOT` 指向锁定安装了 rc.3 的独立 package 根目录，再执行 `node --test clients/dsh-plugin/src/shared/public-host.test.mjs`。它只组合公开 API，验证 pre-execute 返回 allow 后 guard 仍阻止工具体。未提供该路径时此项跳过。
+公开组件的 rc.3 package.json/package-lock.json 固定在 `clients/dsh-plugin/test/public-host`，来源为 SPIKE 提交7e7ea403。根目录执行 `npm ci --ignore-scripts --prefix clients/dsh-plugin/test/public-host`，将 AURIGA_DSH_PUBLIC_PACKAGE_ROOT 指向该绝对目录，再执行 `node --test clients/dsh-plugin/test/shared/public-host.test.mjs`。Plugin CI 的 Windows/Linux 两个任务均执行安装并设置该路径，CI 缺少路径时测试直接失败。测试组合公开 API，验证 pre-execute 放行后的 guard 拒绝及原生 owner/文件访问反例。本地未设置路径时可单独运行其余单元测试。
 
 双成员归属与企业应用通过替身验收，临时 HTTP 服务使用随机回环端口并在结束时关闭。锁定 rc.3 公开组件实测了原生 Cookie 将 A/B 映射到同一个 owner，以及该 Peer 通过 Gateway 读取 B 会话目录和本人会话跨目录文件。企业调用按 B 身份执行、审计归 B 的反例继续由企业应用替身记录。正常门户页面、完整 Web/WS、Linux 及 NAS 部署转主控串行联合验收，并保留第3.1节全部共享风险披露。
