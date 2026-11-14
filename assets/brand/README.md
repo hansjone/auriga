@@ -9,4 +9,6 @@
 
 门户与管理台的 `public/brand/` 保存浏览器资源副本；共用 Vue 标志是 `web/shared/src/BrandMark.vue`，修改标志时须同步。容器构建会包含 public 资源。
 
-本批 PNG / ICO 由同一 SVG 经 Edge 无头渲染生成，脚本在 `.agents/runs/auriga-PORTAL-HOME/capture.mjs`。脚本同时生成本地页面证据，需仓库锁定依赖及本地 `playwright@1.56.1` 工具；后者不进入项目依赖。
+PNG / ICO 由同一 SVG 经 Edge 无头渲染生成：运行 `node assets/brand/generate.mjs`。需要本机 Edge 及 `playwright@1.56.1` 工具；后者不进入项目运行依赖。若工具安装在仓库外，可将环境变量 `AURIGA_PLAYWRIGHT_MODULE` 设置为其 `index.mjs` 的绝对 file URL。脚本只生成品牌资源并同步两个 public/brand 目录，不启动项目服务。
+
+截图等过程证据存放在主控本地 runs 目录，不进入仓库。

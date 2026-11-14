@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onMounted, shallowRef, ref } from 'vue';
+import { computed, onMounted, onUnmounted, shallowRef, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { BRAND_NAME, isApiError } from '@auriga/shared';
 import { apiClient } from '../api';
 import type { components } from '../../../shared/src/generated/resource';
-const { t } = useI18n({
+const { t, locale } = useI18n({
   useScope: 'local',
   messages: {
     'zh-CN': {
@@ -34,16 +34,49 @@ const { t } = useI18n({
   },
 });
 const release = shallowRef<components['schemas']['DesktopManifest']>();
-const error = ref('');
-const copyStatus = ref('');
+const error = ref<'' | 'empty' | 'failed'>('');
+const copyStatus = ref<'' | 'copied' | 'copyFailed'>('');
 const loading = ref(false);
+const details = ref<globalThis.HTMLDetailsElement>();
+const publishedAt = computed(() => {
+  if (!release.value) return '';
+  const date = new Date(release.value.publishedAt);
+  return Number.isNaN(date.getTime())
+    ? release.value.publishedAt
+    : new Intl.DateTimeFormat(locale.value, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(date);
+});
+function closeDetails(event: globalThis.Event) {
+  const node = details.value;
+  if (!node?.open) return;
+  if (event instanceof globalThis.KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    node.open = false;
+    node.querySelector('summary')?.focus();
+  } else if (
+    event.target instanceof globalThis.Node &&
+    !node.contains(event.target)
+  ) {
+    node.open = false;
+  }
+}
+onMounted(() => {
+  document.addEventListener('keydown', closeDetails);
+  document.addEventListener('click', closeDetails);
+});
+onUnmounted(() => {
+  document.removeEventListener('keydown', closeDetails);
+  document.removeEventListener('click', closeDetails);
+});
 async function copyChecksum() {
   if (!release.value) return;
   try {
     await globalThis.navigator.clipboard.writeText(release.value.sha256);
-    copyStatus.value = t('copied');
+    copyStatus.value = 'copied';
   } catch {
-    copyStatus.value = t('copyFailed');
+    copyStatus.value = 'copyFailed';
   }
 }
 async function load() {
@@ -54,7 +87,7 @@ async function load() {
       credentials: 'omit',
     });
   } catch (e) {
-    error.value = isApiError(e) && e.status === 404 ? t('empty') : t('failed');
+    error.value = isApiError(e) && e.status === 404 ? 'empty' : 'failed';
   } finally {
     loading.value = false;
   }
@@ -63,7 +96,7 @@ onMounted(load);
 </script>
 
 <template>
-  <section class="desktop-download" aria-label="Auriga Desktop">
+  <section class="desktop-download" :aria-label="t('title')">
     <div v-if="release" class="download-controls">
       <a
         class="download-button"
@@ -82,23 +115,40 @@ onMounted(load);
           /></svg
         >{{ t('download') }}</a
       >
-      <details class="release-details">
-        <summary :aria-label="t('details')">⌄</summary>
+      <details ref="details" class="release-details">
+        <summary :aria-label="t('details')">
+          <svg
+            class="chevron"
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="m4 6 4 4 4-4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </summary>
         <div class="release-panel">
           <strong>Windows · {{ release.version }}</strong>
           <p>{{ (release.sizeBytes / 1048576).toFixed(1) }} MiB</p>
-          <time>{{ release.publishedAt }}</time>
+          <time :datetime="release.publishedAt">{{ publishedAt }}</time>
           <p class="checksum">
             SHA-256<code>{{ release.sha256 }}</code>
           </p>
           <button type="button" @click="copyChecksum">{{ t('copy') }}</button>
-          <p v-if="copyStatus" role="status">{{ copyStatus }}</p>
+          <p v-if="copyStatus" role="status">{{ t(copyStatus) }}</p>
         </div>
       </details>
     </div>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
     <div v-if="error" class="download-error">
-      <p role="status">{{ error }}</p>
+      <p role="status">{{ t(error) }}</p>
       <button type="button" @click="load">{{ t('retry') }}</button>
     </div>
   </section>
@@ -127,6 +177,9 @@ onMounted(load);
   border-radius: 9px 0 0 9px;
 }
 .release-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   box-sizing: border-box;
   list-style: none;
   cursor: pointer;
@@ -137,6 +190,9 @@ onMounted(load);
   border-left: 1px solid #8eafc6;
   border-radius: 0 9px 9px 0;
   height: 100%;
+}
+.release-details[open] .chevron {
+  transform: rotate(180deg);
 }
 summary::-webkit-details-marker {
   display: none;

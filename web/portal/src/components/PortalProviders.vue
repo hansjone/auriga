@@ -6,10 +6,15 @@ const props = defineProps<{ providers: LoginProvider[] }>();
 const emit = defineEmits<{ select: [provider: LoginProvider] }>();
 const { locale } = useI18n();
 const team = computed(() =>
-  props.providers.filter((p) => p.connectorType === 'uac'),
+  props.providers
+    .filter((p) => p.connectorType !== 'emergency')
+    .sort(
+      (a, b) =>
+        Number(b.connectorType === 'uac') - Number(a.connectorType === 'uac'),
+    ),
 );
 const emergency = computed(() =>
-  props.providers.filter((p) => p.connectorType !== 'uac'),
+  props.providers.filter((p) => p.connectorType === 'emergency'),
 );
 </script>
 <template>
