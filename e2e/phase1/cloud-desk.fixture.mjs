@@ -137,7 +137,7 @@ export class FixtureState {
     for (const message of messages.filter((m) => m.role === 'user')) {
       const content = text(message);
       const id = content.match(
-        /^\[Auriga external message ([A-Za-z0-9-]+)\]\r?\n/,
+        /^\[Auriga DSH external message ([A-Za-z0-9-]+)\]\r?\n/,
       )?.[1];
       if (!id) continue;
       for (const expected of this.expected.filter(
@@ -162,9 +162,8 @@ export class FixtureState {
           text(m).includes('CLOUD_DESK_' + this.runId + '_'),
       ),
     );
-    const isExternal = /^\[Auriga external message [A-Za-z0-9-]+\]\r?\n/.test(
-      last,
-    );
+    const isExternal =
+      /^\[Auriga DSH external message [A-Za-z0-9-]+\]\r?\n/.test(last);
     const plan = this.plans.find(
       (p) =>
         p.side === side &&

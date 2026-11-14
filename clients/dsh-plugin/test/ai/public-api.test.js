@@ -180,7 +180,7 @@ test(
       registration = registerAurigaAdapter(ctx.llm, options);
       assert.ok(registration.adapter instanceof hostApi.LlmAdapter);
       assert.deepEqual(ctx.llm.listProviders(), [
-        { id: 'auriga', name: 'Auriga' },
+        { id: 'auriga', name: 'Auriga DSH' },
       ]);
       assert.throws(() => registerAurigaAdapter(ctx.llm, options), {
         code: 'NO_ADAPTER',
@@ -570,7 +570,7 @@ for (const mode of ['json', 'sse'])
           kind: 'error',
           failure: {
             code: 'CONTENT_FILTER',
-            message: 'Auriga AI: 内容过滤/拒绝 (content filtered/refused)',
+            message: 'Auriga DSH AI: 内容过滤/拒绝 (content filtered/refused)',
           },
         });
         assert.deepEqual(assembler.usage, {

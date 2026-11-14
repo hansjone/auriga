@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../login/brand.js';
 import { modelDirectory } from './catalog.js';
 
 import { AdapterError, check, integer, text } from './guard.js';
@@ -181,7 +182,7 @@ export function createAurigaAdapter(options) {
     /** @param {string} provider */
     providerInfo(provider) {
       route(provider);
-      return { id: 'auriga', name: 'Auriga' };
+      return { id: 'auriga', name: BRAND_NAME };
     }
     /** @param {string} provider */
     providerRetryPolicy(provider) {
@@ -315,7 +316,7 @@ export function createAurigaAdapter(options) {
           type: 'finish',
           reason: {
             kind: code === 'ABORTED' ? 'aborted' : 'error',
-            failure: { code, message: `Auriga AI: ${code}` },
+            failure: { code, message: `Auriga DSH AI: ${code}` },
           },
         };
       } finally {

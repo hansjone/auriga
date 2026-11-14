@@ -321,7 +321,7 @@ export function createDurableInbox({
           check();
           await host.prompt(n.b.hostSessionId, {
             requestId: id,
-            text: `[Auriga external message ${m.message_id}]\n${m.body.text}`,
+            text: `[Auriga DSH external message ${m.message_id}]\n${m.body.text}`,
             mode: 'queue',
           });
           check();

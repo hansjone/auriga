@@ -2,6 +2,7 @@ import { isWriteMethod, readCsrfCookie } from './csrf';
 import { ApiError, type Problem } from './problem';
 import type { AccessMode } from './access-mode';
 import type { components } from '../generated/iam';
+import { UAC_CORRELATION_HEADER, validCorrelationId } from './correlation';
 
 export type ApiRequestInit = RequestInit & { anonymousLogin?: boolean };
 
@@ -20,6 +21,7 @@ export type ApiClientOptions = {
 };
 
 export type ApiClient = {
+  getCorrelationId?: (value: unknown) => string | undefined;
   invalidatePendingRequests: () => void;
   resetSession: () => void;
   request: <T>(path: string, init?: ApiRequestInit) => Promise<T>;
@@ -60,6 +62,11 @@ function cookieHeader(options: ApiClientOptions): string {
 }
 
 export function createApiClient(options: ApiClientOptions = {}): ApiClient {
+  const correlations = new WeakMap<object, string>();
+  function captureCorrelation(res: Response, value: unknown) {
+    const id = validCorrelationId(res.headers.get(UAC_CORRELATION_HEADER));
+    if (id && value && typeof value === 'object') correlations.set(value, id);
+  }
   const baseUrl = options.baseUrl ?? '';
   let generation = 0;
   let registered: components['schemas']['AdminCsrfToken'] | undefined;
@@ -111,7 +118,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       resetSession();
       options.onUnauthenticated?.();
     }
-    return new ApiError(problem, res.headers.get('Retry-After') ?? undefined);
+    const error = new ApiError(
+      problem,
+      res.headers.get('Retry-After') ?? undefined,
+    );
+    captureCorrelation(res, error);
+    return error;
   }
 
   async function memoryToken(): Promise<string> {
@@ -231,6 +243,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     const admin = !!options.getAdminAccessMode;
     const target = admin ? sameOriginUrl(path) : `${baseUrl}${path}`;
     const headers = new Headers(init.headers);
+    headers.delete(UAC_CORRELATION_HEADER);
     if (admin && headers.has('Authorization'))
       throw new Error(
         '管理请求需要浏览器会话 / Administrative requests require a browser session',
@@ -269,7 +282,9 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       method,
       headers,
       credentials: admin ? 'same-origin' : (init.credentials ?? 'same-origin'),
-      ...(admin ? { redirect: 'error' as const } : {}),
+      ...(admin || path.startsWith('/api/iam/v1/login/uac/')
+        ? { redirect: 'error' as const }
+        : {}),
     });
 
     if (admin && res.redirected)
@@ -289,7 +304,9 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     if (!ct.includes('json')) {
       return undefined as T;
     }
-    return (await res.json()) as T;
+    const value = (await res.json()) as T;
+    captureCorrelation(res, value);
+    return value;
   }
 
   function withBody<T>(
@@ -308,6 +325,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   }
 
   return {
+    getCorrelationId: (value) =>
+      value && typeof value === 'object' ? correlations.get(value) : undefined,
     invalidatePendingRequests,
     resetSession,
     request,

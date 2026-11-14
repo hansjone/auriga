@@ -115,7 +115,7 @@ export function createSessionRegistration({
       unregister = ctx.tools.register({
         name: 'auriga_network_join',
         description:
-          'Durably register this native session’s opaque Auriga address. Registration grants no sending, source or execution permission.',
+          'Durably register this native session’s opaque Auriga DSH address. Registration grants no sending, source or execution permission.',
         parameters: {
           type: 'object',
           properties: {},
