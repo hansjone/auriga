@@ -47,7 +47,9 @@ public class DesktopController {
     }
     return response(
         releases.publish(
-            actor(), parse(bytes, 32768, null, Set.of("signature")), request.getInputStream()),
+            actor(),
+            parse(bytes, 32768, null, Set.of("signature"), Set.of("rollbackFrom")),
+            request.getInputStream()),
         201);
   }
 

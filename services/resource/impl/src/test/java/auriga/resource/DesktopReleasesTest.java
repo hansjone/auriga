@@ -319,4 +319,41 @@ class DesktopReleasesTest {
     var badRollout = sign(stable.deepCopy().put("rolloutPercentage", 4294967296L));
     rejects(() -> releases.verify(badRollout), CommonErrors.VALIDATION_FAILED);
   }
+
+  @Test
+  void httpPublishAcceptsSignedNullableRollbackPolicy() throws Exception {
+    var policy =
+        sign(
+            envelope()
+                .put("schema", 2)
+                .put("channel", "beta")
+                .put("minimumVersion", "2.0.0")
+                .put("rolloutPercentage", 0)
+                .putNull("rollbackFrom"));
+    var mvc =
+        org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+                new DesktopController(releases))
+            .build();
+    org.springframework.security.core.context.SecurityContextHolder.getContext()
+        .setAuthentication(new AurigaAuthentication(actor));
+    try {
+      mvc.perform(
+              org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                      "/api/resource/v1/admin/desktop/releases")
+                  .contentType("application/octet-stream")
+                  .header(
+                      "X-Desktop-Manifest",
+                      Base64.getUrlEncoder()
+                          .withoutPadding()
+                          .encodeToString(ResourceBody.JSON.writeValueAsBytes(policy)))
+                  .content("zip".getBytes(StandardCharsets.UTF_8)))
+          .andExpect(
+              org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                  .isCreated());
+      assertTrue(releases.latest("beta").path("rollbackFrom").isNull());
+      assertEquals(0, releases.latest("beta").path("rolloutPercentage").asInt());
+    } finally {
+      org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+  }
 }
