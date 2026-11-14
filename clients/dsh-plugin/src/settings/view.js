@@ -3,6 +3,8 @@
 const messages = {
   zh: {
     desktop: '桌面更新',
+    desktopConfirmationRequired:
+      '更新地址尚未明确确认。请使用平台地址、IP 模式及地址确认参数重新安装 Desktop。',
     update: '更新',
     checkUpdate: '检查更新',
     autoCheck: '自动检查',
@@ -76,6 +78,8 @@ const messages = {
   },
   en: {
     desktop: 'Desktop updates',
+    desktopConfirmationRequired:
+      'The update address needs confirmation. Reinstall Desktop with the platform address, IP mode and address confirmation parameters.',
     update: 'Update',
     checkUpdate: 'Check for updates',
     autoCheck: 'Check automatically',
@@ -910,13 +914,15 @@ export function createSettingsView(
           'section',
           null,
           h('h3', null, t.desktop),
+          state.desktop.confirmationRequired &&
+            h('p', { role: 'alert' }, t.desktopConfirmationRequired),
           h(
             'label',
             null,
             h('input', {
               type: 'checkbox',
               checked: state.desktop.enabled,
-              disabled: busy,
+              disabled: busy || state.desktop.confirmationRequired,
               onChange: (/** @type {any} */ e) =>
                 run(async () => {
                   await call('auriga/settings/desktop', {
@@ -930,12 +936,13 @@ export function createSettingsView(
           state.desktop.available &&
             h('p', null, state.desktop.available.version),
           h('p', null, t.updateRestart),
-          button(t.checkUpdate, () =>
-            run(async () => {
-              await call('auriga/settings/desktop', { action: 'check' });
-              await readState();
-            }),
-          ),
+          !state.desktop.confirmationRequired &&
+            button(t.checkUpdate, () =>
+              run(async () => {
+                await call('auriga/settings/desktop', { action: 'check' });
+                await readState();
+              }),
+            ),
           state.desktop.available &&
             !state.desktop.restartRequired &&
             button(t.update, () =>

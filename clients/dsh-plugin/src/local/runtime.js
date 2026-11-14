@@ -4,7 +4,7 @@ import { createModelLifecycle } from '../ai/installation.js';
 import { randomBytes, createHash } from 'node:crypto';
 import { readFileSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
-import { desktopUpdater } from './desktop.js';
+import { desktopUpdater, desktopStartupFailure } from './desktop.js';
 import { createVault } from './vault.js';
 import { createBroker } from './broker.js';
 import { connectPackagedBroker } from './broker-package.js';
@@ -134,7 +134,7 @@ export async function createConnectRuntime({
   if (principal) models.login();
   const desktop = config.platformOrigin
     ? await desktopUpdater({ origin: config.platformOrigin }).catch(
-        () => undefined,
+        desktopStartupFailure,
       )
     : undefined;
   const identity = () =>

@@ -1,3 +1,4 @@
+import { normalizePlatformBinding } from '../runtime/platform-origin.mjs';
 /**
  * Build the Windows installer package.
  *
@@ -385,11 +386,16 @@ export async function build(args) {
   );
   writeFileSync(join(payload, 'licenses', 'NOTICE.txt'), NOTICE);
   if (args['platform-origin']) {
-    const origin = new URL(args['platform-origin']).origin;
+    const selected = normalizePlatformBinding(args['platform-origin'], {
+      accessMode: args['platform-access-mode'],
+      confirmedOrigin: args['confirm-platform-origin'],
+    });
+    const { origin, ...platformBinding } = selected;
     mkdirSync(join(payload, 'auriga'), { recursive: true });
     writeFileSync(
       join(payload, 'auriga', 'defaults.json'),
-      JSON.stringify({ platformOrigin: origin }, null, 2) + '\n',
+      JSON.stringify({ platformOrigin: origin, platformBinding }, null, 2) +
+        '\n',
     );
   }
 
