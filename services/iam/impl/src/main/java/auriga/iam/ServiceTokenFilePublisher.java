@@ -373,7 +373,7 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
   }
 
   /** Minimal Win32 handles: no shell invocation and no credentials cross a process boundary. */
-  private static final class WindowsHandle implements AutoCloseable {
+  static final class WindowsHandle implements AutoCloseable {
     private static final Linker LINKER = Linker.nativeLinker();
     private static final SymbolLookup KERNEL =
         SymbolLookup.libraryLookup("kernel32", Arena.global());
