@@ -92,7 +92,7 @@ test('credentials, HTTP paths, aliases and public IPs are rejected before instal
     'http://[2001:db8::1]',
     'http://[fe80::1]',
     'http://192.0.2.10',
-    'http://8.8.8.8',
+    'http://203.0.113.1',
     'http://172.15.0.1', // gitleaks:allow
     'http://172.32.0.1', // gitleaks:allow
     'http://192.169.1.1', // gitleaks:allow
