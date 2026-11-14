@@ -31,6 +31,12 @@ public final class ResourceBody {
 
   public static ObjectNode parse(
       byte[] bytes, int maximum, Set<String> allowed, Set<String> required) {
+    return parse(bytes, maximum, allowed, required, Set.of());
+  }
+
+  /** Explicit nullable fields are local to the calling endpoint; other parsers remain strict. */
+  public static ObjectNode parse(
+      byte[] bytes, int maximum, Set<String> allowed, Set<String> required, Set<String> nullable) {
     try {
       if (bytes.length == 0 || bytes.length > maximum) throw invalid();
       String utf8 =
@@ -43,8 +49,8 @@ public final class ResourceBody {
       var body = JSON.readTree(utf8);
       if (!(body instanceof ObjectNode object)) throw invalid();
       for (String name : object.propertyNames())
-        if ((allowed != null && !allowed.contains(name)) || object.get(name).isNull())
-          throw invalid();
+        if ((allowed != null && !allowed.contains(name))
+            || (object.get(name).isNull() && !nullable.contains(name))) throw invalid();
       for (String name : required) if (!object.has(name)) throw invalid();
       return object;
     } catch (AurigaException e) {

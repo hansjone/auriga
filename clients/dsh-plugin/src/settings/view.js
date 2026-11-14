@@ -3,6 +3,15 @@
 const messages = {
   zh: {
     desktop: '桌面更新',
+    requiredUpdate:
+      '此版本已低于最低可用版本，请完成更新并重启后继续使用平台功能。',
+    downloadProgress: '正在下载',
+    updateFailed: '更新未完成，旧版和用户数据已保留，可重试。',
+    cancelUpdate: '取消下载（保留进度）',
+    updatePaused: '下载已暂停，可继续下载',
+    updateChannel: '更新渠道',
+    stable: '正式',
+    beta: '测试',
     desktopConfirmationRequired:
       '更新地址尚未明确确认。请使用平台地址、IP 模式及地址确认参数重新安装 Desktop。',
     update: '更新',
@@ -81,6 +90,16 @@ const messages = {
   },
   en: {
     desktop: 'Desktop updates',
+    requiredUpdate:
+      'This version is no longer supported. Update and restart to continue using platform features.',
+    downloadProgress: 'Downloading',
+    updateFailed:
+      'Update incomplete. Your previous version and data are preserved. Retry to continue.',
+    cancelUpdate: 'Cancel download (keep progress)',
+    updatePaused: 'Download paused; resume when ready',
+    updateChannel: 'Update channel',
+    stable: 'Stable',
+    beta: 'Beta',
     desktopConfirmationRequired:
       'The update address needs confirmation. Reinstall Desktop with the platform address, IP mode and address confirmation parameters.',
     update: 'Update',
@@ -924,7 +943,10 @@ export function createSettingsView(
             h('input', {
               type: 'checkbox',
               checked: state.desktop.enabled,
-              disabled: busy || state.desktop.confirmationRequired,
+              disabled:
+                busy ||
+                state.desktop.confirmationRequired ||
+                state.desktop.required,
               onChange: (/** @type {any} */ e) =>
                 run(async () => {
                   await call('auriga/settings/desktop', {
@@ -935,8 +957,58 @@ export function createSettingsView(
             }),
             t.autoCheck,
           ),
+          state.desktop.required && h('p', { role: 'alert' }, t.requiredUpdate),
+          h(
+            'label',
+            null,
+            t.updateChannel,
+            h(
+              'select',
+              {
+                value: state.desktop.channel ?? 'stable',
+                disabled:
+                  busy ||
+                  state.desktop.downloading ||
+                  state.desktop.required ||
+                  state.desktop.restartRequired,
+                onChange: (/** @type {any} */ e) =>
+                  run(async () => {
+                    await call('auriga/settings/desktop', {
+                      channel: e.target.value,
+                    });
+                    await call('auriga/settings/desktop', { action: 'check' });
+                    await readState();
+                  }),
+              },
+              h('option', { value: 'stable' }, t.stable),
+              h('option', { value: 'beta' }, t.beta),
+            ),
+          ),
           state.desktop.available &&
-            h('p', null, state.desktop.available.version),
+            h('p', { role: 'status' }, state.desktop.available.version),
+          state.desktop.downloading &&
+            h(
+              'div',
+              { role: 'status' },
+              t.downloadProgress +
+                ' ' +
+                (state.desktop.downloadedBytes / 1048576).toFixed(1) +
+                ' / ' +
+                (state.desktop.totalBytes / 1048576).toFixed(1) +
+                ' MiB',
+              h('progress', {
+                max: state.desktop.totalBytes,
+                value: state.desktop.downloadedBytes,
+              }),
+              button(t.cancelUpdate, () =>
+                run(async () => {
+                  await call('auriga/settings/desktop', { action: 'cancel' });
+                  await readState();
+                }),
+              ),
+            ),
+          state.desktop.phase === 'cancelled' && h('p', null, t.updatePaused),
+          state.desktop.error && h('p', { role: 'alert' }, t.updateFailed),
           h('p', null, t.updateRestart),
           !state.desktop.confirmationRequired &&
             button(t.checkUpdate, () =>
@@ -947,6 +1019,7 @@ export function createSettingsView(
             ),
           state.desktop.available &&
             !state.desktop.restartRequired &&
+            !state.desktop.busy &&
             button(t.update, () =>
               run(async () => {
                 // The runtime bounds transfer idle time. A status-read deadline

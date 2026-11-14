@@ -1,4 +1,4 @@
-# Installs or upgrades Auriga Desktop from this package. Needs no administrator rights.
+﻿# Installs or upgrades Auriga Desktop from this package. Needs no administrator rights.
 # Defaults can also come from AURIGA_* environment variables (used by the single-file installer and tests).
 param(
   [string]$InstallDir = $(if ($env:AURIGA_INSTALL_DIR) { $env:AURIGA_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\AurigaDesktop' }),
@@ -9,6 +9,7 @@ param(
   [string]$StartMenuDir = $(if ($env:AURIGA_START_MENU_DIR) { $env:AURIGA_START_MENU_DIR } else { Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs' }),
   [string]$DesktopDir = $(if ($env:AURIGA_DESKTOP_DIR) { $env:AURIGA_DESKTOP_DIR } else { [Environment]::GetFolderPath('Desktop') }),
   [string]$RegistryKey = $(if ($env:AURIGA_REGISTRY_KEY) { $env:AURIGA_REGISTRY_KEY } else { 'AurigaDesktop' }),
+  [switch]$NoDesktopShortcut,
   [switch]$NoShortcuts
 )
 $ErrorActionPreference = 'Stop'
@@ -30,7 +31,9 @@ try {
   $shell = New-Object -ComObject WScript.Shell
   $links = @()
   if (-not $NoShortcuts) {
-    foreach ($dir in @($StartMenuDir, $DesktopDir)) {
+    $shortcutDirs = @($StartMenuDir)
+    if (-not $NoDesktopShortcut) { $shortcutDirs += $DesktopDir }
+    foreach ($dir in $shortcutDirs) {
       New-Item -ItemType Directory -Force -Path $dir | Out-Null
       $path = Join-Path $dir "$BrandName.lnk"
       $link = $shell.CreateShortcut($path)
@@ -56,6 +59,7 @@ try {
     Publisher = $BrandName
     InstallLocation = $InstallDir
     UninstallString = $uninstall
+    QuietUninstallString = "$uninstall -Quiet"
   }
   foreach ($name in $values.Keys) { New-ItemProperty -Path $key -Name $name -Value $values[$name] -PropertyType String -Force | Out-Null }
   New-ItemProperty -Path $key -Name NoModify -Value 1 -PropertyType DWord -Force | Out-Null

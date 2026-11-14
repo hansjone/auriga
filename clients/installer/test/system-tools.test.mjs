@@ -1,3 +1,4 @@
+import { wrapSetupFixture } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join, delimiter } from 'node:path';
@@ -46,6 +47,7 @@ test(
           .status,
         0,
       );
+      wrapSetupFixture(archive);
       assert.equal(
         extractArchive(archive, join(base, 'expanded')),
         join(base, 'expanded', 'payload'),

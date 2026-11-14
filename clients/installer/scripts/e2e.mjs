@@ -84,7 +84,7 @@ const regQuery = () => run('reg.exe', ['query', registryPath]);
 /** Install (or upgrade) from a package directory or a single-file setup exe. */
 function install(pkg, extra = []) {
   const r = pkg.endsWith('.exe')
-    ? run(pkg, [])
+    ? run(pkg, ['/VERYSILENT', ...extra])
     : run('powershell.exe', [
         '-NoProfile',
         '-ExecutionPolicy',
@@ -222,6 +222,16 @@ try {
     registryKey,
   );
 
+  // Keep a sandbox inside a checkout from inheriting its ancestor pnpm version.
+  writeFileSync(
+    join(sandbox, 'package.json'),
+    JSON.stringify({
+      private: true,
+      packageManager: `pnpm@${manifestOld.pnpm.version}`,
+    }),
+  );
+  writeFileSync(join(sandbox, 'pnpm-workspace.yaml'), 'packages: []\n');
+
   // 3. bundled pnpm on the launch PATH
   const launchEnvironment = launchEnv(versionDir, dataHome, env);
   const pnpm = spawnSync('pnpm', ['--version'], {
@@ -229,6 +239,7 @@ try {
     cwd: sandbox,
     encoding: 'utf8',
     shell: true,
+    timeout: 60000,
   });
   check(
     pnpm.status === 0 && pnpm.stdout.trim() === manifestOld.pnpm.version,
@@ -460,6 +471,7 @@ try {
     'Bypass',
     '-File',
     join(root, 'bin', 'uninstall.ps1'),
+    '-Quiet',
   ]);
   check(
     un.status === 0 && !existsSync(root),

@@ -5424,7 +5424,22 @@
         "description": "Public signed manifest for the latest listed release. It remains visible after notAfter so new users can download; automatic updaters must reject expired manifests until renewed.",
         "x-events": [],
         "x-permission": "resource.packages.read",
-        "x-authorization": "anonymous"
+        "x-authorization": "anonymous",
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "stable",
+                "beta"
+              ],
+              "default": "stable"
+            }
+          }
+        ]
       }
     },
     "/api/resource/v1/desktop/packages/{sequence}": {
@@ -11731,7 +11746,10 @@
         "properties": {
           "schema": {
             "type": "integer",
-            "const": 1
+            "enum": [
+              1,
+              2
+            ]
           },
           "product": {
             "type": "string",
@@ -11746,7 +11764,10 @@
           },
           "channel": {
             "type": "string",
-            "const": "stable"
+            "enum": [
+              "stable",
+              "beta"
+            ]
           },
           "platform": {
             "type": "string",
@@ -11825,8 +11846,57 @@
                 "type": "string"
               }
             }
+          },
+          "rolloutPercentage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "rollbackFrom": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "schema": {
+                  "const": 2
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "rolloutPercentage",
+                "rollbackFrom"
+              ]
+            },
+            "else": {
+              "properties": {
+                "channel": {
+                  "const": "stable"
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "rolloutPercentage"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "rollbackFrom"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
       },
       "DesktopReleaseItem": {
         "type": "object",

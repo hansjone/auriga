@@ -29,5 +29,6 @@ deploy/compose/var/
 *.pem
 *.key
 # Agent work files
+/.agents
 .agent-task.md
 .agent-report.md

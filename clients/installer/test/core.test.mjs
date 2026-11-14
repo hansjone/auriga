@@ -553,6 +553,12 @@ test('uninstall removes only what we own and keeps user data and foreign files',
   writeFileSync(join(f.dataHome, 'keep.txt'), 'x');
   writeFileSync(join(f.root, 'notes.txt'), 'user note in install dir');
   mkdirSync(join(f.root, 'extra'), { recursive: true });
+  mkdirSync(join(f.root, '.desktop-resume'));
+  writeFileSync(join(f.root, '.desktop-resume/desktop.exe'), 'partial update');
+  writeFileSync(
+    join(f.root, 'desktop-update.json.tmp'),
+    'interrupted state write',
+  );
   assert.deepEqual(uninstall({ root: f.root }), {
     dataKept: true,
     dataHome: f.dataHome,

@@ -20,6 +20,20 @@ const zh = {
   desktopWithdrawn: '已下架',
   desktopEmpty: '暂无版本',
   desktopFailed: '操作失败，请检查权限、签名或服务配置',
+  desktopPublished: '发行已发布',
+  desktopPublishedRefreshFailed: '发行已发布，台账刷新失败，请验证身份并刷新。',
+  desktopWithdrawCompleted: '发行已下架',
+  desktopWithdrawCompletedRefreshFailed:
+    '发行已下架，台账刷新失败，请验证身份并刷新。',
+  desktopPolicyInstructions:
+    '发布策略包含在离线签名清单中。调整最低可用版本、渠道或灰度时，使用更高发行序号重新签名发布。服务端不持有私钥。',
+  desktopMandatoryInstructions:
+    '低于最低可用版本的客户端必须更新，不受灰度比例限制。显式回滚需在清单中指定 rollbackFrom 来源版本。',
+  desktopStable: '正式',
+  desktopBeta: '测试',
+  desktopPolicySummary:
+    '渠道：{channel} · 最低可用版本：{minimumVersion} · 灰度：{percentage}%',
+  desktopRollbackSource: '显式回滚来源：{version}',
   ...securityZh,
   ...credentialsZh,
   ...devicesZh,
@@ -152,6 +166,21 @@ const en = {
   desktopEmpty: 'No releases',
   desktopFailed:
     'Operation failed. Check permission, signature or service configuration',
+  desktopPublished: 'Release published',
+  desktopPublishedRefreshFailed:
+    'Release published. The ledger could not be refreshed. Verify your identity and refresh.',
+  desktopWithdrawCompleted: 'Release withdrawn',
+  desktopWithdrawCompletedRefreshFailed:
+    'Release withdrawn. The ledger could not be refreshed. Verify your identity and refresh.',
+  desktopPolicyInstructions:
+    'Release policy is included in the offline signed manifest. To change the minimum version, channel or rollout, sign and publish a manifest with a higher sequence. The server does not hold the private key.',
+  desktopMandatoryInstructions:
+    'Clients below the minimum version must update regardless of rollout percentage. An explicit rollback must specify its source version in rollbackFrom.',
+  desktopStable: 'Stable',
+  desktopBeta: 'Beta',
+  desktopPolicySummary:
+    'Channel: {channel} · Minimum version: {minimumVersion} · Rollout: {percentage}%',
+  desktopRollbackSource: 'Rollback source: {version}',
   ...securityEn,
   ...credentialsEn,
   ...devicesEn,

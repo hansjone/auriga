@@ -11,32 +11,58 @@ const { t } = useAdminI18n();
 const ledger = shallowRef<Ledger>({});
 const allowed = ref(false),
   busy = ref(false),
-  error = ref('');
+  error = ref(''),
+  notice = ref('');
 const manifest = shallowRef<File>(),
   archive = shallowRef<File>();
+const policy = shallowRef<{
+  channel?: string;
+  minimumVersion?: string;
+  rolloutPercentage?: number;
+  rollbackFrom?: string | null;
+}>();
 const base = '/api/resource/v1/admin/desktop/releases';
-function selected(event: Event, kind: 'manifest' | 'archive') {
+async function selected(event: Event, kind: 'manifest' | 'archive') {
   const file = (event.target as HTMLInputElement).files?.[0];
-  if (kind === 'manifest') manifest.value = file;
-  else archive.value = file;
+  if (kind === 'manifest') {
+    manifest.value = file;
+    policy.value = undefined;
+    if (file && file.size <= 32768) {
+      try {
+        policy.value = JSON.parse(await file.text());
+      } catch {
+        error.value = t('desktopFailed');
+      }
+    }
+  } else archive.value = file;
 }
 async function load() {
   ledger.value = await apiClient.get<Ledger>(base);
 }
-async function run(action: () => Promise<unknown>) {
+async function run(action: () => Promise<unknown>, completedMessage = '') {
   busy.value = true;
   error.value = '';
+  notice.value = '';
+  let completed = false;
   try {
     await action();
+    if (completedMessage) {
+      completed = true;
+      notice.value = completedMessage;
+    }
     await load();
   } catch {
-    error.value = t('desktopFailed');
+    if (completed) notice.value = `${completedMessage}RefreshFailed`;
+    else error.value = t('desktopFailed');
   } finally {
     busy.value = false;
   }
 }
 function withdraw(sequence: number) {
-  return run(() => apiClient.delete(`${base}/${sequence}`));
+  return run(
+    () => apiClient.delete(`${base}/${sequence}`),
+    'desktopWithdrawCompleted',
+  );
 }
 async function publish() {
   if (!manifest.value || !archive.value || manifest.value.size > 32768) return;
@@ -46,15 +72,17 @@ async function publish() {
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replace(/=+$/, '');
-  await run(() =>
-    apiClient.request(base, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-Desktop-Manifest': header,
-      },
-      body: archive.value,
-    }),
+  await run(
+    () =>
+      apiClient.request(base, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-Desktop-Manifest': header,
+        },
+        body: archive.value,
+      }),
+    'desktopPublished',
   );
 }
 onMounted(async () => {
@@ -75,9 +103,16 @@ onMounted(async () => {
     <p v-if="!allowed">{{ t('forbidden') }}</p>
     <template v-else>
       <p v-if="error" role="alert">{{ error }}</p>
+      <p v-if="notice" role="status">{{ t(notice) }}</p>
       <button :disabled="busy" @click="run(requestStepUp)">
         {{ t('desktopVerify') }}
       </button>
+      <p>
+        {{ t('desktopPolicyInstructions') }}
+      </p>
+      <p>
+        {{ t('desktopMandatoryInstructions') }}
+      </p>
       <form @submit.prevent="publish">
         <label
           >{{ t('desktopManifest') }}
@@ -91,10 +126,27 @@ onMounted(async () => {
           >{{ t('desktopArchive') }}
           <input
             type="file"
-            accept=".zip"
+            accept=".exe"
             :disabled="busy"
             @change="selected($event, 'archive')"
         /></label>
+        <p v-if="policy" role="status">
+          {{
+            t('desktopPolicySummary', {
+              channel: t(
+                policy.channel === 'beta' ? 'desktopBeta' : 'desktopStable',
+              ),
+              minimumVersion: policy.minimumVersion,
+              percentage: policy.rolloutPercentage ?? 100,
+            })
+          }}
+          <span v-if="policy.rollbackFrom">
+            ·
+            {{
+              t('desktopRollbackSource', { version: policy.rollbackFrom })
+            }}</span
+          >
+        </p>
         <button :disabled="busy || !manifest || !archive">
           {{ t('desktopPublish') }}
         </button>
@@ -107,6 +159,24 @@ onMounted(async () => {
           {{ item.manifest.publishedAt }}
         </p>
         <p>{{ item.manifest.notes }}</p>
+        <p>
+          {{
+            t('desktopPolicySummary', {
+              channel: t(
+                item.manifest.channel === 'beta'
+                  ? 'desktopBeta'
+                  : 'desktopStable',
+              ),
+              minimumVersion: item.manifest.minimumVersion,
+              percentage: item.manifest.rolloutPercentage ?? 100,
+            })
+          }}
+        </p>
+        <p v-if="item.manifest.rollbackFrom">
+          {{
+            t('desktopRollbackSource', { version: item.manifest.rollbackFrom })
+          }}
+        </p>
         <code>{{ item.manifest.sha256 }}</code>
         <p v-if="item.withdrawn">{{ t('desktopWithdrawn') }}</p>
         <button
