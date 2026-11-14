@@ -29,6 +29,10 @@ public static class Helper {
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern SafePipeHandle CreateNamedPipe(string name, uint open, uint mode, uint max, uint outSize, uint inSize, uint timeout, ref SA security);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool ConnectNamedPipe(SafePipeHandle pipe, IntPtr overlapped);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out uint pid);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint pid);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
   [StructLayout(LayoutKind.Sequential)] struct PBI { public IntPtr r1, peb, r2a, r2b, pid, parent; }
   [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process, int kind, ref PBI data, int size, out int returned);
   static string Line(TextReader reader, int max) {
@@ -53,16 +57,16 @@ public static class Helper {
     }
     return false;
   }
-  static NamedPipeServerStream Pipe(string name) {
+  static NamedPipeServerStream Pipe(string name, bool first) {
     IntPtr descriptor; uint size;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptor("D:P(A;;GA;;;" + Sid + ")(A;;GA;;;SY)", 1, out descriptor, out size)) throw new IOException("security");
     try {
       var sa = new SA { length = Marshal.SizeOf(typeof(SA)), descriptor = descriptor, inherit = 0 };
-      // PIPE_REJECT_REMOTE_CLIENTS, synchronous byte stream, current-user DACL.
-      var handle = CreateNamedPipe(@"\\.\pipe\" + name, 3 | 0x40000000, 8, 8, 65536, 65536, 0, ref sa);
+      // Reject remote clients; reserve the first instance against name squatting.
+      var handle = CreateNamedPipe(@"\\.\pipe\" + name, 3 | 0x40000000U | (first ? 0x80000U : 0U), 8, 8, 65536, 65536, 0, ref sa);
       if (handle.IsInvalid) throw new IOException("pipe");
       var stream = new NamedPipeServerStream(PipeDirection.InOut, true, false, handle);
-      stream.WaitForConnection(); return stream;
+      return stream;
     } finally { LocalFree(descriptor); }
   }
   static void Serve(NamedPipeServerStream pipe) {
@@ -119,18 +123,37 @@ public static class Helper {
         }
       } catch {} finally { Closing = true; Environment.Exit(0); }
     }); input.IsBackground = true; input.Start();
+    var listener = Pipe(name, true);
     Emit(new { listening = name, sid = Sid });
     int active = 0;
     while (!Closing) {
-      var pipe = Pipe(name);
-      if (Interlocked.Increment(ref active) > 8) { Interlocked.Decrement(ref active); pipe.Dispose(); continue; }
-      var thread = new Thread(() => { try { Serve(pipe); } finally { Interlocked.Decrement(ref active); } }); thread.IsBackground = true; thread.Start();
+      listener.WaitForConnection();
+      var pipe = listener;
+      if (Interlocked.Increment(ref active) > 8) { Interlocked.Decrement(ref active); pipe.Dispose(); }
+      else { var thread = new Thread(() => { try { Serve(pipe); } finally { Interlocked.Decrement(ref active); } }); thread.IsBackground = true; thread.Start(); }
+      listener = Pipe(name, false);
     }
+  }
+  static void VerifyServer(NamedPipeClientStream pipe) {
+    uint pid;
+    if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out pid)) throw new IOException("server");
+    IntPtr process = OpenProcess(0x1000, false, pid), token = IntPtr.Zero;
+    if (process == IntPtr.Zero) throw new IOException("server");
+    try {
+      if (!OpenProcessToken(process, 8, out token)) throw new IOException("server");
+      using (var identity = new WindowsIdentity(token)) {
+        if (identity.User == null || identity.User.Value != Sid) throw new IOException("server");
+      }
+      using (var server = Process.GetProcessById((int)pid)) {
+        if (!String.Equals(Path.GetFullPath(server.MainModule.FileName), Path.GetFullPath(System.Reflection.Assembly.GetExecutingAssembly().Location), StringComparison.OrdinalIgnoreCase)) throw new IOException("server");
+      }
+    } finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }
   }
   static void Client(string name) {
     var hello = Decode(Line(Input, 4096));
-    using (var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation)) {
+    using (var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification)) {
       pipe.Connect(5000);
+      VerifyServer(pipe); // Authenticate before sending the capability or other bytes.
       var writer = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true };
       var reader = new StreamReader(pipe, new UTF8Encoding(false, true));
       writer.WriteLine(Json.Serialize(hello));

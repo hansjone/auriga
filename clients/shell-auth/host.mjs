@@ -41,6 +41,8 @@ export class HostChannel {
     this.readConfig = readConfig;
     this.now = now;
     this.mono = mono;
+    this.clockUtc = now();
+    this.clockMono = mono();
     this.peers = new Map();
     this.contexts = new Map();
     this.versions = new Map();
@@ -53,6 +55,10 @@ export class HostChannel {
       for (const [id, record] of this.contexts)
         if (record.until <= this.mono() || record.expires <= this.now())
           this.drop(id);
+      for (const peer of this.peers.values())
+        for (const [id, entry] of peer.cache)
+          if (entry.until <= this.mono() || entry.expires <= this.now())
+            peer.cache.delete(id);
     }, 500);
     this.timer.unref();
   }
@@ -69,7 +75,6 @@ export class HostChannel {
       ...evidence,
       id: randomUUID(),
       cache: new Map(),
-      usedRequests: new Map(),
       tombstones: new Set(),
     };
     this.peers.set(peer.id, peer);
@@ -100,24 +105,23 @@ export class HostChannel {
       message.expectedRevision !== this.broker.revision
     )
       throw hostFault('stale_identity');
-    const remaining = Date.parse(message.expiresAt) - this.now();
-    if (remaining <= 0 || remaining > 30000) throw hostFault('expired');
+    const mono = this.mono();
+    // UTC cannot move behind elapsed monotonic time. Expired entries can be
+    // discarded without permitting old requests after a wall-clock rollback.
+    this.clockUtc = Math.max(
+      this.now(),
+      this.clockUtc + Math.max(0, mono - this.clockMono),
+    );
+    this.clockMono = mono;
+    const remaining = Date.parse(message.expiresAt) - this.clockUtc;
     for (const [id, item] of peer.cache)
-      if (item.until <= this.mono()) {
+      if (item.until <= mono || item.expires <= this.clockUtc)
         peer.cache.delete(id);
-        peer.usedRequests.set(id, item.hash);
-      }
+    if (remaining <= 0 || remaining > 30000) throw hostFault('expired');
     const previous = peer.cache.get(message.requestId),
       hash = signature(message);
-    if (peer.usedRequests.has(message.requestId))
-      throw hostFault(
-        peer.usedRequests.get(message.requestId) === hash
-          ? 'expired'
-          : 'stale_identity',
-      );
     if (previous && previous.hash !== hash) throw hostFault('stale_identity');
-    if (previous && previous.until <= this.mono()) throw hostFault('expired');
-    if (!previous && (peer.cache.size >= 512 || peer.usedRequests.size >= 4096))
+    if (!previous && peer.cache.size >= 512)
       throw hostFault('capacity_exceeded');
     const guard = this.broker.guard(
       message.shellEpoch,

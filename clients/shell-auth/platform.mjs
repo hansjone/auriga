@@ -28,7 +28,7 @@ export function trustedConfig(input) {
     issuer.password
   )
     throw new Error('invalid issuer');
-  if (!/^[\w.-]{1,128}$/.test(input.clientId ?? 'auriga-desktop'))
+  if (!/^[\w.-]{1,128}$/.test(input.clientId ?? 'auriga-dsh'))
     throw new Error('invalid client id');
   return Object.freeze({
     platformOrigin: url.origin,

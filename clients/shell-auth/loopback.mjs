@@ -110,11 +110,14 @@ export async function createLoopback({
       }
       const token = req.headers['x-auriga-shell-token'],
         csrf = req.headers['x-auriga-shell-csrf'];
-      if (!validSecret(token) || !validSecret(csrf)) throw denied();
+      const nonce = req.headers['x-auriga-shell-nonce'];
+      if (!validSecret(token) || !validSecret(csrf) || !validSecret(nonce))
+        throw denied();
       const session = sessions.get(digest(token));
       if (
         !session ||
         session.csrf !== digest(csrf) ||
+        session.clientNonce !== nonce ||
         session.until <= now() ||
         session.epoch !== broker.epoch
       )

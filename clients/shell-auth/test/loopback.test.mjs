@@ -194,12 +194,15 @@ test('messages require both memory secrets; cookies grant no access; page comman
   const headers = {
     'X-Auriga-Shell-Token': session.pageToken,
     'X-Auriga-Shell-CSRF': session.csrf,
+    'X-Auriga-Shell-Nonce': session.clientNonce,
   };
   for (const invalid of [
     {},
     { Cookie: 'platform=anything' },
     { 'X-Auriga-Shell-Token': session.pageToken },
     { ...headers, 'X-Auriga-Shell-CSRF': secret() },
+    { ...headers, 'X-Auriga-Shell-Nonce': '' },
+    { ...headers, 'X-Auriga-Shell-Nonce': secret() },
   ]) {
     assert.equal(
       (await http(f.loop.origin, '/loopback/messages', command, invalid))
@@ -232,6 +235,7 @@ test('page sessions expire at 15 minutes and broker restarts invalidate sessions
   const headers = {
     'X-Auriga-Shell-Token': session.pageToken,
     'X-Auriga-Shell-CSRF': session.csrf,
+    'X-Auriga-Shell-Nonce': session.clientNonce,
   };
   f.advance(900000);
   assert.equal(
@@ -249,6 +253,7 @@ test('page sessions expire at 15 minutes and broker restarts invalidate sessions
         {
           'X-Auriga-Shell-Token': next.pageToken,
           'X-Auriga-Shell-CSRF': next.csrf,
+          'X-Auriga-Shell-Nonce': next.clientNonce,
         },
       )
     ).status,
@@ -273,6 +278,7 @@ test('invalid broker projection fails closed without leaking credentials or exce
     {
       'X-Auriga-Shell-Token': session.pageToken,
       'X-Auriga-Shell-CSRF': session.csrf,
+      'X-Auriga-Shell-Nonce': session.clientNonce,
     },
   );
   assert.equal(response.status, 503);

@@ -723,9 +723,7 @@ export async function launch({ root, args = [], env = process.env }) {
   const hasShell = existsSync(
     join(versionDir(root, initial.current), 'auriga/shell-auth/desktop.mjs'),
   );
-  if (hasShell)
-    supervisor.shellSnapshot = () =>
-      shellAuth?.snapshot() ?? { state: 'signed_out' };
+  if (hasShell) supervisor.shellSnapshot = () => shellAuth?.snapshot();
 
   try {
     await supervisor.prepare();
@@ -752,8 +750,7 @@ export async function launch({ root, args = [], env = process.env }) {
     verifyPackage(dir, { trees: false });
     supervisor.trust = packagedTrust(dir);
     if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
-      supervisor.shellSnapshot = () =>
-        shellAuth?.snapshot() ?? { state: 'signed_out' };
+      supervisor.shellSnapshot = () => shellAuth?.snapshot();
       try {
         const { startDesktopAuth } = await import(
           pathToFileURL(join(dir, 'auriga/shell-auth/desktop.mjs')).href

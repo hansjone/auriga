@@ -219,3 +219,65 @@ test('expired host request cannot extend its lease by replay after wall-clock ro
   utc -= 1000;
   assert.equal((await host.command(request, a)).error.reason, 'expired');
 });
+
+test('host replay window expires without exhausting a long-lived connection after 20000 requests', async (t) => {
+  const f = fixture();
+  await login(f);
+  let utc = Date.now(),
+    mono = 0;
+  f.broker.tokenUntil = utc + 86400000;
+  f.broker.sourceUntil = f.broker.tokenUntil;
+  const host = new HostChannel(f.broker, undefined, {
+    now: () => utc,
+    mono: () => mono,
+  });
+  t.after(async () => {
+    host.close();
+    await f.broker.close();
+  });
+  const a = peer(host);
+  let first;
+  for (let batch = 0; batch < 40; batch++) {
+    for (let index = 0; index < 250; index++) {
+      const request = {
+        ...register(f.broker),
+        expiresAt: new Date(utc + 25000).toISOString(),
+      };
+      request.context.expiresAt = new Date(utc + 60000).toISOString();
+      const registered = await host.command(request, a);
+      assert.ok(registered.context, registered.error?.reason);
+      if (!first) first = request;
+      if (index === 0) {
+        assert.deepEqual(await host.command(request, a), registered);
+        const changed = {
+          ...request,
+          context: { ...request.context, hostSessionId: 'changed' },
+        };
+        assert.equal(
+          (await host.command(changed, a)).error.reason,
+          'stale_identity',
+        );
+      }
+      const revoked = await host.command(
+        {
+          ...request,
+          requestId: randomUUID(),
+          action: 'revoke',
+          context: undefined,
+          executionContextId: registered.context.executionContextId,
+        },
+        a,
+      );
+      assert.equal(
+        revoked.revokedExecutionContextId,
+        registered.context.executionContextId,
+        revoked.error?.reason,
+      );
+    }
+    utc += 31000;
+    mono += 31000;
+    assert.equal((await host.command(first, a)).error.reason, 'expired');
+    assert.equal(a.cache.size, 0);
+  }
+  assert.equal(host.contexts.size, 0);
+});

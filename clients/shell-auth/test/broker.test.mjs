@@ -20,6 +20,40 @@ test('device login opens only base HTTPS verification page, stores secrets priva
   assert.equal(f.saved.at(-1).tokens.refresh_token, f.tokens.refresh_token);
   await f.broker.close();
 });
+
+test('device authorization rejects absent or untrusted verification URI and never falls back to the complete URI', async () => {
+  for (const verification_uri of [
+    undefined,
+    'file:///device',
+    'javascript:void(0)',
+    'https://other.example.com/device',
+    'https://example.com/device?code=test',
+    'https://example.com/device#code',
+    'https://user@example.com/device',
+  ]) {
+    const f = fixture();
+    const begin = f.platform.begin;
+    f.platform.begin = async () => ({
+      ...(await begin()),
+      verification_uri,
+      verification_uri_complete: 'https://example.com/device?user_code=test',
+    });
+    await login(f);
+    assert.equal(f.broker.state, 'unreachable');
+    assert.deepEqual(f.opened, []);
+    assert.equal(f.broker.record.tokens, undefined);
+    await f.broker.close();
+  }
+  const f = fixture();
+  const begin = f.platform.begin;
+  f.platform.begin = async () => ({
+    ...(await begin()),
+    verification_uri_complete: 'https://other.example.com/device',
+  });
+  await login(f);
+  assert.deepEqual(f.opened, ['https://example.com/device']);
+  await f.broker.close();
+});
 test('pending and slow_down are bounded, no workspace endpoint is called', async () => {
   let attempts = 0;
   const f = fixture({

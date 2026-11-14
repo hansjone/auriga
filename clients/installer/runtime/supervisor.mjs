@@ -263,9 +263,9 @@ export class Supervisor {
     this.lastState = old;
     if (this.shellSnapshot) {
       const shell = this.shellSnapshot();
-      const identity = shell.identity;
+      const identity = shell?.identity;
       const current =
-        shell.state === 'authenticated' &&
+        shell?.state === 'authenticated' &&
         Date.parse(shell.expiresAt) > this.now();
       const matches =
         current &&
@@ -277,7 +277,11 @@ export class Supervisor {
               entry.ledger.ownerId === identity.memberId &&
               entry.ledger.hostId === identity.deviceId),
         );
-      if (!matches) {
+      this.platformPaused = !current;
+      const stoppedByIdentity =
+        shell?.state === 'revoked' ||
+        (shell?.state === 'signed_out' && shell.reason === 'user_logout');
+      if (stoppedByIdentity || (current && !matches)) {
         let restart = false;
         if (
           old &&
@@ -288,6 +292,12 @@ export class Supervisor {
         }
         this.privateOnly = true;
         return { privateOnly: true, restart };
+      }
+      // Keep independent signed-resource/lease checks for an existing view.
+      // Without an authenticated identity, never activate a new shared view.
+      if (!current && (!old || old.guardian.state === 'private_only')) {
+        this.privateOnly = true;
+        return { privateOnly: true, platformPaused: true };
       }
     }
     if (

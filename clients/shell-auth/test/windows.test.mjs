@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { buildHelper } from '../windows/build.mjs';
 import { Vault } from '../vault.mjs';
@@ -109,6 +109,18 @@ test(
     const listening = once(lines, 'line');
     server.stdin.write(JSON.stringify({ capability }) + '\n');
     await listening;
+    const duplicate = spawnSync(helper, ['server', pipe], {
+      input: JSON.stringify({ capability }) + '\n',
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 5000,
+    });
+    assert.equal(
+      duplicate.status,
+      1,
+      'first pipe instance must reject a second server',
+    );
+    assert.equal(duplicate.stderr.trim(), 'shell helper unavailable');
     let client = connectIpc({ helperPath: helper, pipe, capability });
     await assert.rejects(
       client.call(command(fixture().broker, 'snapshot')),
@@ -128,6 +140,72 @@ test(
       /disconnected/,
     );
     client.close();
+  },
+);
+
+test(
+  'pipe client uses Identification and rejects an untrusted same-user server before sending its capability',
+  { skip: process.platform !== 'win32', timeout: 15000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'auriga-pipe-server-auth-'));
+    let fake, client;
+    t.after(async () => {
+      for (const child of [client, fake])
+        if (child?.exitCode === null) {
+          const ended = once(child, 'exit');
+          child.kill();
+          await ended;
+        }
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    });
+    const helper = buildHelper(join(directory, 'helper.exe')),
+      fakePath = join(directory, 'fake.exe'),
+      source = join(directory, 'fake.cs');
+    // Same real SID, but a different executable. A squatter must not receive the
+    // capability. Querying the real pipe token also proves Identification QoS.
+    writeFileSync(
+      source,
+      `using System;using System.IO;using System.IO.Pipes;using System.Security.Principal;class Fake{static void Main(string[] args){using(var pipe=new NamedPipeServerStream(args[0],PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.None)){Console.WriteLine("listening");pipe.WaitForConnection();string level="none";pipe.RunAsClient(()=>{level=WindowsIdentity.GetCurrent().ImpersonationLevel.ToString();});var line=new StreamReader(pipe).ReadLine();Console.WriteLine(level);Console.WriteLine(line==null?"empty":"received");}}}`,
+    );
+    execFileSync(
+      join(
+        process.env.SystemRoot ?? 'C:\\Windows',
+        'Microsoft.NET/Framework64/v4.0.30319/csc.exe',
+      ),
+      ['/nologo', '/target:exe', '/out:' + fakePath, source],
+      { windowsHide: true, stdio: 'pipe' },
+    );
+    const pipe = 'auriga-fake-' + randomUUID();
+    fake = spawn(fakePath, [pipe], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const lines = createInterface({ input: fake.stdout });
+    t.after(() => lines.close());
+    const [ready] = await once(lines, 'line');
+    assert.equal(ready, 'listening');
+    const output = [];
+    lines.on('line', (line) => output.push(line));
+    const fakeExited = once(fake, 'exit');
+    client = spawn(helper, ['client', pipe], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const clientExited = once(client, 'exit');
+    client.stdout.resume();
+    client.stderr.resume();
+    client.stdin.end(
+      JSON.stringify({ capability: randomBytes(32).toString('base64url') }) +
+        '\n',
+    );
+    assert.equal((await clientExited)[0], 1);
+    assert.equal((await fakeExited)[0], 0);
+    assert.deepEqual(output, ['Identification', 'empty']);
   },
 );
 

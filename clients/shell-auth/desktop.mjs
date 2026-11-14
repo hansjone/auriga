@@ -87,7 +87,8 @@ export async function startDesktopAuth({
     ipc = await startIpc({ helper, broker, business });
     const timer = setInterval(() => broker.check().catch(() => {}), 10000);
     timer.unref();
-    await openBrowser(loopback.issue());
+    if (broker.snapshot().state !== 'authenticated')
+      await openBrowser(loopback.issue());
     return {
       broker,
       snapshot: () => broker.snapshot(),

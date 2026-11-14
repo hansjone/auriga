@@ -11,6 +11,7 @@
         'Content-Type': 'application/json',
         'X-Auriga-Shell-Token': session.pageToken,
         'X-Auriga-Shell-CSRF': session.csrf,
+        'X-Auriga-Shell-Nonce': session.clientNonce,
       },
       body: JSON.stringify({
         protocolVersion: 1,

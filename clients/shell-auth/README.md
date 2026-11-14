@@ -2,15 +2,19 @@
 
 本目录由 C 维护。`build.mjs` 生成同一个自包含制品，含 Windows helper、冻结 schema、锁定 Ajv 闭包、NATS/WSS 与验签代码闭包，以及逐文件 SHA-256 清单。Desktop 放在 `auriga/shell-auth/`，独立插件由 D 负责引用及打包。网络闭包复用仓库现有协议实现，运行时无需插件源码目录；未增加或升级依赖。
 
+**Desktop 目前只出 Windows 版。** Unix 尚无真实对端校验，平台认证继续失败关闭；独立插件在 Unix 上也不能宣称具备该平台通道。
+
 `startDesktopAuth({root,dataHome})` 读取安装级 `desktop-origin.json`，启动本用户 broker、随机端口控制页及 OS IPC。平台未配置或 helper 不可用时保留本地 DSH。设备登录只打开 HTTPS 门户 `/device`，不创建云端实例。控制页同步显示本窗口尝试的用户码、期限和人工核对提示；其他窗口及插件快照不接收该尝试。设备码及平台令牌始终留在 broker。取消、跳过、完成和超时清除用户码；之后可重新登录。退出后仅附加减少自动行为的 `mode=manual`，不自动填码或批准设备。
 
-Windows helper 使用当前 SID 的命名管道 DACL、禁远程标志、真实客户端 SID、受控子进程及其启动时刻和随机能力准入，每条请求和存活检查重核受控进程。能力经 DSH 的继承 fd3 交给插件后端，不写 argv、env、配置或页面。D 从 fd3 读取首行描述符后调用 `connectIpc(descriptor)`，可用 `call`、`subscribe`、`hostContext`、`enterprise`、`streamCommand` 和 `subscribeStream`。IPC 断开或订阅返回 null 时必须立即停用平台能力。真实跨用户账号拒绝尚未验收；Unix 缺少 peer verifier 时明确不可用。
+Windows helper 使用当前 SID 的命名管道 DACL、禁远程标志、真实客户端 SID、受控子进程及其启动时刻和随机能力准入，每条请求和存活检查重核受控进程。客户端以 Identification 级别连接，并在发送能力前核实服务端 PID 的用户 SID 与本 helper 路径；服务端首实例独占管道名。能力经 DSH 的继承 fd3 交给插件后端，不写 argv、env、配置或页面。D 从 fd3 读取首行描述符后调用 `connectIpc(descriptor)`，可用 `call`、`subscribe`、`hostContext`、`enterprise`、`streamCommand` 和 `subscribeStream`。IPC 断开或订阅返回 null 时必须立即停用平台能力。真实跨用户账号拒绝尚未验收。
 
-`hostContext(message)` 接收 K2 的 `ShellAuthHostContextCommand`，返回完整 `ShellAuthHostContextResult`。D 从可信宿主回调先登记 session，再登记携带父句柄的 tool；不能把模型或 skill 输入当宿主来源。owner 为 broker 按真实连接生成的 UUID，句柄不能跨连接使用。上下文最长 600 秒且不超过认证/来源期限；撤销 session 会撤其 tool 并关闭关联流。请求必须带当前 epoch/revision 和最多 30 秒的期限；相同请求不续期，时钟回拨不能恢复已到期请求。每连接保留有界请求墓碑，容量耗尽时重建连接并重新登记。
+`hostContext(message)` 接收 K2 的 `ShellAuthHostContextCommand`，返回完整 `ShellAuthHostContextResult`。D 从可信宿主回调先登记 session，再登记携带父句柄的 tool；不能把模型或 skill 输入当宿主来源。owner 为 broker 按真实连接生成的 UUID，句柄不能跨连接使用。上下文最长 600 秒且不超过认证/来源期限；撤销 session 会撤其 tool 并关闭关联流。请求必须带当前 epoch/revision 和最多 30 秒的期限；相同请求不续期，时钟回拨不能恢复已到期请求。每连接最多保留 512 个未过期请求，到期自动释放，不累计历史请求总数。
 
 `enterprise(message)` 接收 `ShellAuthHostCredentialsRequest`，返回完整 `ShellAuthHostCredentialsResult`，不再支持无上下文读取。D 先核本人任务能力和 raw/outbound scope，再提交当前句柄。C 每次向 IAM 读取权威当前凭据，校验来源绑定及 credentialVersion；相同 requestId 也重读。`allowRawAgentToken` 从受信安装配置实时读取，缺省 true，读取失败关闭 raw；提交前再次检查，outbound 不受该开关影响。凭据不缓存、广播或落盘；D 只将其用于对应本人 handler。版本更新不改变认证来源代次。
 
-`Broker` 负责 epoch/revision、请求 ID 幂等、设备轮询、取消归属、晚结果撤销、立即本地退出、DPAPI 撤销队列和刷新单飞。页面只开放冻结的 snapshot/open_login/cancel_login/skip_login，不能读取凭据。控制页用 30 秒一次性票据和 15 分钟内存双令牌保护；刷新需重新从启动器打开。
+`Broker` 负责 epoch/revision、请求 ID 幂等、设备轮询、取消归属、晚结果撤销、立即本地退出、DPAPI 撤销队列和刷新单飞。页面只开放冻结的 snapshot/open_login/cancel_login/skip_login，不能读取凭据。控制页用 30 秒一次性票据和 15 分钟内存双令牌保护；每次 POST 同时核对 `X-Auriga-Shell-Nonce` 与交换时的 clientNonce，页面仅在内存保存它们；刷新需重新从启动器打开。启动时已认证则不自动弹出控制页。
+
+安装器中，认证尚未就绪或 unreachable 只暂停平台请求，不因这些状态清除现有共享视图或重启 DSH。主动退出、撤销和已认证身份变化仍停用共享视图并要求新 DSH 会话。资源本身的签名、租约及撤销验证独立保留，离线不会绕过这些门禁。
 
 固定 JSON 代理直接读取 AUTH-K 操作清单，校验请求及响应，按 audience 内部取票、按操作白名单转发头，重核身份和期限后才交结果，不自动重放写请求。SSE、流额度控制和上传引用已实现。上传存于本用户私有目录，每块 fsync 后应答，结束核摘要，消费后删除。
 

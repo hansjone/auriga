@@ -186,6 +186,7 @@ test(
             ...headers,
             'X-Auriga-Shell-Token': session.pageToken,
             'X-Auriga-Shell-CSRF': session.csrf,
+            'X-Auriga-Shell-Nonce': session.clientNonce,
           },
           body: JSON.stringify({
             protocolVersion: 1,
@@ -226,6 +227,11 @@ test(
     });
     t.diagnostic('restored broker started');
     assert.equal(desktop.snapshot().state, 'authenticated');
+    assert.equal(
+      opened.length,
+      2,
+      'restored login must not open another control page',
+    );
     assert.notEqual(desktop.broker.epoch, oldEpoch);
     assert.ok(!seen.some((path) => path.includes('/instance/')));
     const logs = readFileSync(
