@@ -343,19 +343,3 @@ test('migration member binds the actual signed v1 pair and public material', () 
     digest(vector.input.members),
   );
 });
-
-test('plugin v2 runtime artifact is byte-for-byte fresh', async () => {
-  const { generatedRenewalFiles } =
-    await import('../../clients/dsh-plugin/scripts/gen-network-keyset.mjs');
-  for (const [name, content] of Object.entries(generatedRenewalFiles))
-    assert.equal(
-      readFileSync(
-        new URL(
-          '../../clients/dsh-plugin/src/generated/network/' + name,
-          import.meta.url,
-        ),
-        'utf8',
-      ),
-      content,
-    );
-});

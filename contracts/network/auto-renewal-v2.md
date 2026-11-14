@@ -115,3 +115,12 @@ C 关于其他交接项的处理如下。初次启动没有成功清单时使用
 公有 /bootstrap/materials 明确 security=[]，通过 x-auriga-installation-auth 声明以请求体 ProjectionRequest 的独立安装签名认证。x-permission 由该 pin 的投影权限执行，不要求已过期的服务 JWT 或内部 mTLS。仍须固定 HTTPS 端点、独立根控制/安装身份撤销检查、签名 nonce 防重放和 HPKE 密封输出，响应不得明文泄露材料。内部明文材料端口仍按既有 mTLS/JWT 限制。
 
 TransportTrustBundle 在一个周期内仍按 dual_trust→new_leaves→retire_old 推进。下一周期允许 retire_old→dual_trust，bundle_version 继续单调递增且不得重置。消费者从持久前驱或完整受签 previous_transport 验证该起点，前驱必须为已见最高 bundle_version 的 retire_old，当前 previous_bundle_digest 必须精确摘要它。前驱由当前仍允许的运行授权验签，tenant/realm/authority/代际与当前包一致，前驱全部 CA 必须逐字保留，当前包至少增加一个全新 ca_id。旧链保留到新一轮持久加载/真实握手回执齐全后才退休。前驱缺失、摘要/版本/阶段/scope 不一致、丢旧CA或未加新CA均拒绝。运行授权换代先在旧授权尚允许时完成该周期，随后按已有授权转换规则切换。共同向量包含第二周期及逐项负例。
+
+
+## 消费方须知（第3轮接口对齐）
+
+C 线须将 NetworkRenewal.status()、服务适配器和 /keys/status 的 HTTP 响应统一到 RenewalStatusOutput。已发布状态使用 RenewalStatus，首次成功前使用 UnpublishedRenewalStatus，按 oneOf 分支输出实际状态。
+
+C 线须按 /bootstrap/materials 的 security=[] 与 x-auriga-installation-auth 接线，请求体 ProjectionRequest.identity_auth 和 InstallationPins 是此端点的独立认证依据。该端点使用固定 HTTPS、安装签名、nonce 防重放、撤销/隔离检查及 HPKE 密封响应。C/I 的 HTTP 安全配置须让此端点进入该安装认证流程，投影权限由 pin 的 scope 决定。内部明文材料端口继续使用既有 mTLS/JWT 认证。
+
+contracts.yml 的契约测试与源 schema 做语义深比较，运行时产物的逐字节新鲜度由 web.yml 执行 pnpm gen:api 后的 generated 目录 diff/status 门禁验证。gen:api 复用插件 --v2 的 generatedRenewalFiles，完整覆盖 auto-renewal-v2-schema.js。
