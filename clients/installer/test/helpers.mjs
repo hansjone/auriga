@@ -126,6 +126,13 @@ export function tempBase(t) {
   const base = realpathSync.native(
     mkdtempSync(join(tmpdir(), 'auriga-installer-')),
   );
-  t.after(() => rmSync(base, { recursive: true, force: true }));
+  t.after(() =>
+    rmSync(base, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    }),
+  );
   return base;
 }

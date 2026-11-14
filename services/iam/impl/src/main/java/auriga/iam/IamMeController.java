@@ -23,7 +23,6 @@ public class IamMeController {
   private final TeamPasskeys passkeys;
   private final ProviderManager providers;
   private final java.time.Clock clock;
-  private final String issuer;
 
   public IamMeController(
       IamStore store,
@@ -39,7 +38,6 @@ public class IamMeController {
     this.passkeys = passkeys;
     this.providers = providers;
     this.clock = clock;
-    this.issuer = tokens.issuer();
   }
 
   @GetMapping("/me")
@@ -451,13 +449,8 @@ public class IamMeController {
   }
 
   private String issuerHost() {
-    try {
-      return java.net.URI.create(issuer).getHost() == null
-          ? "Auriga"
-          : java.net.URI.create(issuer).getHost();
-    } catch (Exception e) {
-      return "Auriga";
-    }
+    // The authenticator display name is independent of the OIDC issuer URL.
+    return "Auriga DSH";
   }
 
   private void revokeOtherCredentialSessions() {
