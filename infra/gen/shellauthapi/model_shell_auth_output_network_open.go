@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,9 +20,10 @@ var _ MappedNullable = &ShellAuthOutputNetworkOpen{}
 
 // ShellAuthOutputNetworkOpen struct for ShellAuthOutputNetworkOpen
 type ShellAuthOutputNetworkOpen struct {
-	StatusCode int32                                      `json:"statusCode"`
-	Headers    *ShellAuthOutputTeamInitializeHeaders      `json:"headers,omitempty"`
-	Body       ShellAuthOutputDownloadResourceContentBody `json:"body"`
+	StatusCode           int32                                 `json:"statusCode"`
+	Headers              *ShellAuthOutputTeamInitializeHeaders `json:"headers,omitempty"`
+	Body                 ShellAuthOutputNetworkOpenBody        `json:"body"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthOutputNetworkOpen ShellAuthOutputNetworkOpen
@@ -32,7 +32,7 @@ type _ShellAuthOutputNetworkOpen ShellAuthOutputNetworkOpen
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputNetworkOpen(statusCode int32, body ShellAuthOutputDownloadResourceContentBody) *ShellAuthOutputNetworkOpen {
+func NewShellAuthOutputNetworkOpen(statusCode int32, body ShellAuthOutputNetworkOpenBody) *ShellAuthOutputNetworkOpen {
 	this := ShellAuthOutputNetworkOpen{}
 	this.StatusCode = statusCode
 	this.Body = body
@@ -104,9 +104,9 @@ func (o *ShellAuthOutputNetworkOpen) SetHeaders(v ShellAuthOutputTeamInitializeH
 }
 
 // GetBody returns the Body field value
-func (o *ShellAuthOutputNetworkOpen) GetBody() ShellAuthOutputDownloadResourceContentBody {
+func (o *ShellAuthOutputNetworkOpen) GetBody() ShellAuthOutputNetworkOpenBody {
 	if o == nil {
-		var ret ShellAuthOutputDownloadResourceContentBody
+		var ret ShellAuthOutputNetworkOpenBody
 		return ret
 	}
 
@@ -115,7 +115,7 @@ func (o *ShellAuthOutputNetworkOpen) GetBody() ShellAuthOutputDownloadResourceCo
 
 // GetBodyOk returns a tuple with the Body field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputNetworkOpen) GetBodyOk() (*ShellAuthOutputDownloadResourceContentBody, bool) {
+func (o *ShellAuthOutputNetworkOpen) GetBodyOk() (*ShellAuthOutputNetworkOpenBody, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -123,7 +123,7 @@ func (o *ShellAuthOutputNetworkOpen) GetBodyOk() (*ShellAuthOutputDownloadResour
 }
 
 // SetBody sets field value
-func (o *ShellAuthOutputNetworkOpen) SetBody(v ShellAuthOutputDownloadResourceContentBody) {
+func (o *ShellAuthOutputNetworkOpen) SetBody(v ShellAuthOutputNetworkOpenBody) {
 	o.Body = v
 }
 
@@ -142,6 +142,11 @@ func (o ShellAuthOutputNetworkOpen) ToMap() (map[string]interface{}, error) {
 		toSerialize["headers"] = o.Headers
 	}
 	toSerialize["body"] = o.Body
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -170,15 +175,22 @@ func (o *ShellAuthOutputNetworkOpen) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthOutputNetworkOpen := _ShellAuthOutputNetworkOpen{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthOutputNetworkOpen)
+	err = json.Unmarshal(data, &varShellAuthOutputNetworkOpen)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutputNetworkOpen(varShellAuthOutputNetworkOpen)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "statusCode")
+		delete(additionalProperties, "headers")
+		delete(additionalProperties, "body")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }
