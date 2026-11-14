@@ -48,6 +48,7 @@ class TeamAccountFlowTest {
   private TeamPasskeys passkeys;
   private QrChallenges qr;
   private LoginManager login;
+  private SessionManager sessions;
   private String providerId;
 
   private String key(String table, String lookup) {
@@ -147,7 +148,7 @@ class TeamAccountFlowTest {
             clock,
             "https://portal.example.com",
             Map.of());
-    var sessions =
+    sessions =
         new SessionManager(
             store, new PostgresSessionKv(store, schemas, clock), tokens, clock, events, audit);
     team = new TeamAccounts(store, secrets, clock, events);
@@ -169,6 +170,11 @@ class TeamAccountFlowTest {
             team,
             sessions,
             new IdentityPolicyHooks() {
+              @Override
+              public Optional<IdentityPolicyHooks.UacMember> uacMember(UUID account) {
+                return Optional.of(new IdentityPolicyHooks.UacMember("Member", "member"));
+              }
+
               @Override
               public boolean validateInvitation(String code, UUID provider) {
                 return "invite-ok".equals(code);
@@ -1554,6 +1560,134 @@ class TeamAccountFlowTest {
           store.save("device", device);
           assertTrue(store.get("device", deviceId, false).path("revoked").asBoolean());
           return null;
+        });
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void uacAdminCanStepUpExpiredAssuranceUsingEnrolledTotpAndCannotReviveRevokedSource(
+      boolean bootstrap) {
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID account = registeredAccount();
+          String uac = UUID.randomUUID().toString();
+          store.insert(
+              "idp_provider",
+              uac,
+              Json.object(
+                  "providerId",
+                  uac,
+                  "connectorType",
+                  "uac",
+                  "enabled",
+                  true,
+                  "admission",
+                  Json.object("mfa", "never")),
+              null);
+          var identity =
+              store.insert(
+                  "identity",
+                  uac + ":employee",
+                  Json.object(
+                      "accountId", account.toString(), "providerId", uac, "subject", "employee"),
+                  null);
+          when(store.matching(eq("identity"), eq("accountId"), eq(account.toString())))
+              .thenAnswer(i -> List.of(identity));
+          var issued =
+              sessions.create(
+                  account,
+                  UUID.fromString(uac),
+                  "admin",
+                  false,
+                  Duration.ofDays(1),
+                  Duration.ofDays(1));
+          var source = issued.session();
+          source.put("uacCredentialId", UUID.randomUUID().toString());
+          source.put("authGeneration", 1);
+          store.save("session", source);
+          // UAC authority substitute: fail closed after source credential invalidation.
+          var valid = new java.util.concurrent.atomic.AtomicBoolean(true);
+          sessions.uacValidator(row -> valid.get());
+          String secret = Totp.generate();
+          if (!bootstrap)
+            team.enrollFirstTotp(
+                account, secret, Totp.code(secret, clock.instant().getEpochSecond() / 30));
+          clock.now = clock.now.plusSeconds(bootstrap ? 31 : 601);
+          var caller =
+              new AurigaPrincipal(
+                  account.toString(),
+                  tenant,
+                  PrincipalType.USER,
+                  TokenContext.ADMIN,
+                  source.path("sessionId").asString(),
+                  null,
+                  "member",
+                  List.of("admin"),
+                  Set.of(),
+                  clock.instant().minusSeconds(601),
+                  null,
+                  "test");
+          RequestContext.start("test", null)
+              .withPrincipal(caller)
+              .run(
+                  () -> {
+                    var begin =
+                        login.begin(
+                            Json.object("providerId", uac, "purpose", "stepup"),
+                            "admin",
+                            "192.0.2.1",
+                            "test",
+                            "https://admin.example.com",
+                            null);
+                    String form = bootstrap ? "first_totp" : "platform_totp";
+                    String totpSecret = bootstrap ? firstTotpSecret(begin) : secret;
+                    assertEquals(form, begin.transaction().path("step").path("formId").asString());
+                    var done =
+                        login.advance(
+                            begin.transaction().path("id").asString(),
+                            begin.bindingCookie(),
+                            Json.object(
+                                "type",
+                                "form",
+                                "formId",
+                                form,
+                                "values",
+                                Json.object(
+                                    "otp",
+                                    Totp.code(totpSecret, clock.instant().getEpochSecond() / 30))),
+                            false);
+                    assertEquals("completed", done.transaction().path("status").asString());
+                    assertNull(done.session());
+                    assertEquals(
+                        clock.instant().toString(),
+                        sessions.activeById(caller.sessionId()).path("stepUpAt").asString());
+                    clock.now = clock.now.plusSeconds(31);
+                    var pending =
+                        login.begin(
+                            Json.object("providerId", uac, "purpose", "stepup"),
+                            "admin",
+                            "192.0.2.1",
+                            "test",
+                            "https://admin.example.com",
+                            null);
+                    valid.set(false);
+                    var denied =
+                        login.advance(
+                            pending.transaction().path("id").asString(),
+                            pending.bindingCookie(),
+                            Json.object(
+                                "type",
+                                "form",
+                                "formId",
+                                "platform_totp",
+                                "values",
+                                Json.object(
+                                    "otp",
+                                    Totp.code(totpSecret, clock.instant().getEpochSecond() / 30))),
+                            false);
+                    assertEquals("failed", denied.transaction().path("status").asString());
+                  });
         });
   }
 }

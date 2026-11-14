@@ -161,6 +161,11 @@ public final class TeamPasskeys {
           store.get("identity", providerId + ":" + username.toLowerCase(Locale.ROOT), false);
       if (identity != null) accountId = UUID.fromString(identity.path("accountId").asString());
     }
+    return beginAssertionForAccount(providerId, accountId, config);
+  }
+
+  /** Account-bound assertion for an already authenticated non-team provider session. */
+  ObjectNode beginAssertionForAccount(String providerId, UUID accountId, JsonNode config) {
     AssertionRequest request =
         relyingParty(config, accountId)
             .startAssertion(

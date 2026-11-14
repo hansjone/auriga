@@ -27,6 +27,12 @@ import tools.jackson.databind.node.ObjectNode;
     "${auriga.services.iam.enabled:true}")
 public class IamRuntimeConfiguration {
   @Bean
+  PlacementAuthorization iamPlacementAuthorization(
+      IamStore store, SessionManager sessions, PermissionResolver permissions, Clock clock) {
+    return new IamPlacementAuthorization(store, sessions, permissions, clock);
+  }
+
+  @Bean
   auriga.common.security.AccessTokenSettings iamLocalTokenSettings(
       auriga.contracts.deploymentconfig.DeploymentAccess access,
       auriga.common.autoconfigure.AurigaProperties properties,
