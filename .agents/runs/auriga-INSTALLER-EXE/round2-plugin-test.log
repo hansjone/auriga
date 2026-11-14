@@ -1,0 +1,982 @@
+TAP version 13
+# Subtest: exact entry gate loss re-enters the same instance once through document navigation
+ok 1 - exact entry gate loss re-enters the same instance once through document navigation
+  ---
+  duration_ms: 142.6985
+  type: 'test'
+  ...
+# Subtest: network/temporary failures allow only three paced availability reads after the three short probes
+ok 2 - network/temporary failures allow only three paced availability reads after the three short probes
+  ---
+  duration_ms: 47.2135
+  type: 'test'
+  ...
+# Subtest: availability eligibility excludes other HTTP failures and stops at the first definitive reply
+ok 3 - availability eligibility excludes other HTTP failures and stops at the first definitive reply
+  ---
+  duration_ms: 71.4827
+  type: 'test'
+  ...
+# Subtest: a locally cancelled short probe cannot qualify two completed failures for availability or add replacement reads
+ok 4 - a locally cancelled short probe cannot qualify two completed failures for availability or add replacement reads
+  ---
+  duration_ms: 27.4168
+  type: 'test'
+  ...
+# Subtest: HTTP 504 in availability ends the cycle instead of reaching the second late probe
+ok 5 - HTTP 504 in availability ends the cycle instead of reaching the second late probe
+  ---
+  duration_ms: 12.4659
+  type: 'test'
+  ...
+# Subtest: an explicitly aborted fetch is not a completed network-unavailable result
+ok 6 - an explicitly aborted fetch is not a completed network-unavailable result
+  ---
+  duration_ms: 11.272
+  type: 'test'
+  ...
+# Subtest: the fifth and sixth reads stop on a definitive response without a seventh read
+    # Subtest: read 5, status 200
+    ok 1 - read 5, status 200
+      ---
+      duration_ms: 52.7573
+      type: 'test'
+      ...
+    # Subtest: read 5, status 401
+    ok 2 - read 5, status 401
+      ---
+      duration_ms: 33.0362
+      type: 'test'
+      ...
+    # Subtest: read 5, status 403
+    ok 3 - read 5, status 403
+      ---
+      duration_ms: 6.7513
+      type: 'test'
+      ...
+    # Subtest: read 5, status 504
+    ok 4 - read 5, status 504
+      ---
+      duration_ms: 7.184
+      type: 'test'
+      ...
+    # Subtest: read 6, status 200
+    ok 5 - read 6, status 200
+      ---
+      duration_ms: 10.9613
+      type: 'test'
+      ...
+    # Subtest: read 6, status 401
+    ok 6 - read 6, status 401
+      ---
+      duration_ms: 72.5535
+      type: 'test'
+      ...
+    # Subtest: read 6, status 403
+    ok 7 - read 6, status 403
+      ---
+      duration_ms: 47.27
+      type: 'test'
+      ...
+    # Subtest: read 6, status 504
+    ok 8 - read 6, status 504
+      ---
+      duration_ms: 7.6396
+      type: 'test'
+      ...
+    1..8
+ok 7 - the fifth and sixth reads stop on a definitive response without a seventh read
+  ---
+  duration_ms: 242.217
+  type: 'test'
+  ...
+# Subtest: cancelling the fifth or sixth read consumes that start and fences its late entry reply
+    # Subtest: hidden during read 5
+    ok 1 - hidden during read 5
+      ---
+      duration_ms: 8.3594
+      type: 'test'
+      ...
+    # Subtest: hidden during read 6
+    ok 2 - hidden during read 6
+      ---
+      duration_ms: 117.2873
+      type: 'test'
+      ...
+    1..2
+ok 8 - cancelling the fifth or sixth read consumes that start and fences its late entry reply
+  ---
+  duration_ms: 126.5575
+  type: 'test'
+  ...
+# Subtest: a local timeout in the fifth or sixth read ends the cycle without replacement
+    # Subtest: timeout during read 5
+    ok 1 - timeout during read 5
+      ---
+      duration_ms: 17.1361
+      type: 'test'
+      ...
+    # Subtest: timeout during read 6
+    ok 2 - timeout during read 6
+      ---
+      duration_ms: 9.4334
+      type: 'test'
+      ...
+    1..2
+ok 9 - a local timeout in the fifth or sixth read ends the cycle without replacement
+  ---
+  duration_ms: 27.3783
+  type: 'test'
+  ...
+# Subtest: availability keeps the original absolute sixty-second deadline across hiding and late replies
+ok 10 - availability keeps the original absolute sixty-second deadline across hiding and late replies
+  ---
+  duration_ms: 41.87
+  type: 'test'
+  ...
+# Subtest: stale cycle and retry callbacks cannot replace the original deadline after hiding
+ok 11 - stale cycle and retry callbacks cannot replace the original deadline after hiding
+  ---
+  duration_ms: 32.5864
+  type: 'test'
+  ...
+# Subtest: entry recovery diagnostics expose only safe events and never response bodies, URLs or thrown messages
+ok 12 - entry recovery diagnostics expose only safe events and never response bodies, URLs or thrown messages
+  ---
+  duration_ms: 13.8175
+  type: 'test'
+  ...
+# Subtest: transient unavailable then precise entry 401 recovers within the bounded cycle
+ok 13 - transient unavailable then precise entry 401 recovers within the bounded cycle
+  ---
+  duration_ms: 40.9169
+  type: 'test'
+  ...
+# Subtest: same loss deadline survives a hidden document beyond the absolute sixty-second window
+ok 14 - same loss deadline survives a hidden document beyond the absolute sixty-second window
+  ---
+  duration_ms: 10.7299
+  type: 'test'
+  ...
+# Subtest: focus and online respect the pending two-second retry instead of consuming all reads immediately
+ok 15 - focus and online respect the pending two-second retry instead of consuming all reads immediately
+  ---
+  duration_ms: 57.8739
+  type: 'test'
+  ...
+# Subtest: hiding an in-flight read cannot make a quick visibility return consume the next probe early
+ok 16 - hiding an in-flight read cannot make a quick visibility return consume the next probe early
+  ---
+  duration_ms: 8.028
+  type: 'test'
+  ...
+# Subtest: loss first observed while hidden still expires without granting a late visible window
+ok 17 - loss first observed while hidden still expires without granting a late visible window
+  ---
+  duration_ms: 7.0877
+  type: 'test'
+  ...
+# Subtest: an exact entry reply after the deadline stays inert even if browser timers have not fired
+ok 18 - an exact entry reply after the deadline stays inert even if browser timers have not fired
+  ---
+  duration_ms: 5.2327
+  type: 'test'
+  ...
+# Subtest: HTTP and JSON completion enforce the read deadline even while timer callbacks are delayed
+    # Subtest: http completed at 5999ms
+    ok 1 - http completed at 5999ms
+      ---
+      duration_ms: 100.5421
+      type: 'test'
+      ...
+    # Subtest: http completed at 6000ms
+    ok 2 - http completed at 6000ms
+      ---
+      duration_ms: 36.8642
+      type: 'test'
+      ...
+    # Subtest: http completed at 6500ms
+    ok 3 - http completed at 6500ms
+      ---
+      duration_ms: 15.023
+      type: 'test'
+      ...
+    # Subtest: json completed at 5999ms
+    ok 4 - json completed at 5999ms
+      ---
+      duration_ms: 30.7031
+      type: 'test'
+      ...
+    # Subtest: json completed at 6000ms
+    ok 5 - json completed at 6000ms
+      ---
+      duration_ms: 34.683
+      type: 'test'
+      ...
+    # Subtest: json completed at 6500ms
+    ok 6 - json completed at 6500ms
+      ---
+      duration_ms: 26.5967
+      type: 'test'
+      ...
+    1..6
+ok 19 - HTTP and JSON completion enforce the read deadline even while timer callbacks are delayed
+  ---
+  duration_ms: 246.5813
+  type: 'test'
+  ...
+# Subtest: late HTTP 503 or network completion cannot qualify or replace a timed-out read
+    # Subtest: http
+    ok 1 - http
+      ---
+      duration_ms: 54.0006
+      type: 'test'
+      ...
+    # Subtest: network
+    ok 2 - network
+      ---
+      duration_ms: 73.7787
+      type: 'test'
+      ...
+    1..2
+ok 20 - late HTTP 503 or network completion cannot qualify or replace a timed-out read
+  ---
+  duration_ms: 128.6356
+  type: 'test'
+  ...
+# Subtest: 200, 403 and unmarked or non-entry 401 stop without navigation or retries
+ok 21 - 200, 403 and unmarked or non-entry 401 stop without navigation or retries
+  ---
+  duration_ms: 93.4396
+  type: 'test'
+  ...
+# Subtest: concurrent events coalesce and fresh generation fences late probe completion
+ok 22 - concurrent events coalesce and fresh generation fences late probe completion
+  ---
+  duration_ms: 19.9961
+  type: 'test'
+  ...
+# Subtest: unload/dispose aborts late reads and clears every retry and subscriber
+ok 23 - unload/dispose aborts late reads and clears every retry and subscriber
+  ---
+  duration_ms: 26.5289
+  type: 'test'
+  ...
+# Subtest: a pending recovery marker blocks another failed document but successful generation clears it
+ok 24 - a pending recovery marker blocks another failed document but successful generation clears it
+  ---
+  duration_ms: 8.5691
+  type: 'test'
+  ...
+# Subtest: an unresolved previous-document marker stays blocked until a new connected generation
+ok 25 - an unresolved previous-document marker stays blocked until a new connected generation
+  ---
+  duration_ms: 5.401
+  type: 'test'
+  ...
+# Subtest: hidden document cancels a late result and bounded probe timeout remains cancellable
+ok 26 - hidden document cancels a late result and bounded probe timeout remains cancellable
+  ---
+  duration_ms: 10.939
+  type: 'test'
+  ...
+# Subtest: slow completed reads and a pending sixth read share the original sixty-second cap
+ok 27 - slow completed reads and a pending sixth read share the original sixty-second cap
+  ---
+  duration_ms: 7.1535
+  type: 'test'
+  ...
+# Subtest: locked public browser Connection installs and drives recovery without transport patching
+ok 28 - locked public browser Connection installs and drives recovery without transport patching # SKIP
+  ---
+  duration_ms: 0.2658
+  type: 'test'
+  ...
+# Subtest: locked Connection plus the default edge recreation interval recovers without a fabricated second state event
+ok 29 - locked Connection plus the default edge recreation interval recovers without a fabricated second state event # SKIP
+  ---
+  duration_ms: 0.1115
+  type: 'test'
+  ...
+# Auriga DSH entry recovery unavailable: Connection observables missing
+# Subtest: no public capability, wrong scope or child frame never guesses a recovery destination
+ok 30 - no public capability, wrong scope or child frame never guesses a recovery destination
+  ---
+  duration_ms: 119.9815
+  type: 'test'
+  ...
+# Subtest: actual rc.3 native admission and local Desk: launch cookie alone never authenticates platform session
+ok 31 - actual rc.3 native admission and local Desk: launch cookie alone never authenticates platform session # SKIP
+  ---
+  duration_ms: 2.7082
+  type: 'test'
+  ...
+# Subtest: committed native identity starts default N1 despite legacy MCP failure
+ok 32 - committed native identity starts default N1 despite legacy MCP failure
+  ---
+  duration_ms: 1245.7841
+  type: 'test'
+  ...
+# Subtest: committed native identity starts default N1 despite missing legacy Team capabilities
+ok 33 - committed native identity starts default N1 despite missing legacy Team capabilities
+  ---
+  duration_ms: 1232.8448
+  type: 'test'
+  ...
+# Subtest: password, TOTP, pending token exchange and uncommitted vault cannot start default N1
+ok 34 - password, TOTP, pending token exchange and uncommitted vault cannot start default N1
+  ---
+  duration_ms: 1249.66
+  type: 'test'
+  ...
+# Subtest: native unknown-exchange never starts default N1
+ok 35 - native unknown-exchange never starts default N1
+  ---
+  duration_ms: 1025.6661
+  type: 'test'
+  ...
+# Subtest: native invalid-token never starts default N1
+ok 36 - native invalid-token never starts default N1
+  ---
+  duration_ms: 1033.3248
+  type: 'test'
+  ...
+# Subtest: native failed-commit never starts default N1
+ok 37 - native failed-commit never starts default N1
+  ---
+  duration_ms: 1026.4153
+  type: 'test'
+  ...
+# Subtest: native owner-conflict never starts default N1
+ok 38 - native owner-conflict never starts default N1
+  ---
+  duration_ms: 1029.9407
+  type: 'test'
+  ...
+# Subtest: logout retires default N1 and late legacy MCP/register responses cannot revive it
+ok 39 - logout retires default N1 and late legacy MCP/register responses cannot revive it
+  ---
+  duration_ms: 1054.6233
+  type: 'test'
+  ...
+# Subtest: reset retires default N1 and late legacy MCP/register responses cannot revive it
+ok 40 - reset retires default N1 and late legacy MCP/register responses cannot revive it
+  ---
+  duration_ms: 1055.6277
+  type: 'test'
+  ...
+# Subtest: close retires default N1 and late legacy MCP/register responses cannot revive it
+ok 41 - close retires default N1 and late legacy MCP/register responses cannot revive it
+  ---
+  duration_ms: 1041.2791
+  type: 'test'
+  ...
+# Subtest: official network HTTP 403 has the correct native login and model scope
+ok 42 - official network HTTP 403 has the correct native login and model scope
+  ---
+  duration_ms: 21.6763
+  type: 'test'
+  ...
+# Subtest: official network HTTP 401 has the correct native login and model scope
+ok 43 - official network HTTP 401 has the correct native login and model scope
+  ---
+  duration_ms: 17.8398
+  type: 'test'
+  ...
+# Subtest: real official provider HTTP 403 at register preserves native session and model login
+ok 44 - real official provider HTTP 403 at register preserves native session and model login
+  ---
+  duration_ms: 67.0398
+  type: 'test'
+  ...
+# Subtest: real official provider HTTP 403 at tickets preserves native session and model login
+ok 45 - real official provider HTTP 403 at tickets preserves native session and model login
+  ---
+  duration_ms: 76.1295
+  type: 'test'
+  ...
+# Subtest: loader network installation selects official device default after login and never leaks to settings/status
+ok 46 - loader network installation selects official device default after login and never leaks to settings/status
+  ---
+  duration_ms: 49.6337
+  type: 'test'
+  ...
+# Subtest: cancelled browser attempt loses its CSRF and cannot be advanced or restarted under the old proof
+ok 47 - cancelled browser attempt loses its CSRF and cannot be advanced or restarted under the old proof
+  ---
+  duration_ms: 8.6053
+  type: 'test'
+  ...
+# Subtest: logout tombstone precedes real failed revocation HTTP; encrypted compensation survives restart without a browser session
+ok 48 - logout tombstone precedes real failed revocation HTTP; encrypted compensation survives restart without a browser session
+  ---
+  duration_ms: 113.7407
+  type: 'test'
+  ...
+# Subtest: real HTTP negatives preserve 401 and Node requests omit browser Origin; redirects are refused
+ok 49 - real HTTP negatives preserve 401 and Node requests omit browser Origin; redirects are refused
+  ---
+  duration_ms: 20.3737
+  type: 'test'
+  ...
+# Subtest: model input cannot select actor/session and missing trusted execution fails before network
+ok 50 - model input cannot select actor/session and missing trusted execution fails before network
+  ---
+  duration_ms: 19.1687
+  type: 'test'
+  ...
+# Subtest: installation config refuses redirects, non-HTTPS, foreign issuer and non-loopback test flag
+ok 51 - installation config refuses redirects, non-HTTPS, foreign issuer and non-loopback test flag
+  ---
+  duration_ms: 1.8921
+  type: 'test'
+  ...
+# Subtest: JWT role/issuer/audience/expiry/algorithm rejected before any network call
+ok 52 - JWT role/issuer/audience/expiry/algorithm rejected before any network call
+  ---
+  duration_ms: 0.6861
+  type: 'test'
+  ...
+# Subtest: login cookie jar is isolated, host-only and clears sensitive material
+ok 53 - login cookie jar is isolated, host-only and clears sensitive material
+  ---
+  duration_ms: 0.879
+  type: 'test'
+  ...
+# Subtest: vault encrypts state, serializes mutations and refuses corrupt ciphertext
+ok 54 - vault encrypts state, serializes mutations and refuses corrupt ciphertext
+  ---
+  duration_ms: 21.7661
+  type: 'test'
+  ...
+# Subtest: real filesystem write failure cannot publish credential/accepted delivery or deletion
+ok 55 - real filesystem write failure cannot publish credential/accepted delivery or deletion
+  ---
+  duration_ms: 14.8037
+  type: 'test'
+  ...
+# Subtest: runtime status/CSRF cannot mint a session and logout cannot restore a previous process bearer
+ok 56 - runtime status/CSRF cannot mint a session and logout cannot restore a previous process bearer
+  ---
+  duration_ms: 7.1293
+  type: 'test'
+  ...
+# Subtest: local packaged routes expose only unconfigured package metadata and fixed same-origin code
+ok 57 - local packaged routes expose only unconfigured package metadata and fixed same-origin code
+  ---
+  duration_ms: 72.7967
+  type: 'test'
+  ...
+# Subtest: local routes preserve native authentication, exact paths and read-only methods
+ok 58 - local routes preserve native authentication, exact paths and read-only methods
+  ---
+  duration_ms: 50.1018
+  type: 'test'
+  ...
+# Subtest: tampered and missing package UI fail closed without private filesystem detail
+ok 59 - tampered and missing package UI fail closed without private filesystem detail
+  ---
+  duration_ms: 514.3004
+  type: 'test'
+  ...
+# (node:56532) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: R2 saved platform does not block local owner while dependencies recover
+ok 60 - R2 saved platform does not block local owner while dependencies recover
+  ---
+  duration_ms: 215.803
+  type: 'test'
+  ...
+# Subtest: R2 local WebSockets survive platform configuration changes
+ok 61 - R2 local WebSockets survive platform configuration changes
+  ---
+  duration_ms: 253.4784
+  type: 'test'
+  ...
+# Subtest: R2 empty profile keeps DSH owner access while tool services are absent
+ok 62 - R2 empty profile keeps DSH owner access while tool services are absent
+  ---
+  duration_ms: 21.7402
+  type: 'test'
+  ...
+# Subtest: R2 corrupt platform settings do not revoke DSH owner access
+ok 63 - R2 corrupt platform settings do not revoke DSH owner access
+  ---
+  duration_ms: 27.7229
+  type: 'test'
+  ...
+# Subtest: R2 late platform settings do not change DSH owner authority
+ok 64 - R2 late platform settings do not change DSH owner authority
+  ---
+  duration_ms: 21.1713
+  type: 'test'
+  ...
+# Subtest: R2 saving a platform while tools are missing preserves owner admission
+ok 65 - R2 saving a platform while tools are missing preserves owner admission
+  ---
+  duration_ms: 24.5243
+  type: 'test'
+  ...
+# Subtest: R2 plugin profile disposal does not destroy DSH local WebSockets
+ok 66 - R2 plugin profile disposal does not destroy DSH local WebSockets
+  ---
+  duration_ms: 12.1411
+  type: 'test'
+  ...
+# Subtest: 下载空闲超时随数据续期，慢速持续传输不受总时长限制
+ok 67 - 下载空闲超时随数据续期，慢速持续传输不受总时长限制
+  ---
+  duration_ms: 772.4125
+  type: 'test'
+  ...
+# Subtest: Desktop 仅绑定首次 HTTPS 平台，普通 DSH 不挂更新器
+ok 68 - Desktop 仅绑定首次 HTTPS 平台，普通 DSH 不挂更新器
+  ---
+  duration_ms: 210.2083
+  type: 'test'
+  ...
+# Subtest: 设置更新操作保留主人认证和跨源门禁
+ok 69 - 设置更新操作保留主人认证和跨源门禁
+  ---
+  duration_ms: 98.8376
+  type: 'test'
+  ...
+# Subtest: HTTP adapter accepts confirmed IP, reports missing policy and refuses HTTPS binding mismatch
+ok 70 - HTTP adapter accepts confirmed IP, reports missing policy and refuses HTTPS binding mismatch
+  ---
+  duration_ms: 132.3179
+  type: 'test'
+  ...
+# Subtest: private skills use native owner admission and same-origin writes offline, including managed mode
+ok 71 - private skills use native owner admission and same-origin writes offline, including managed mode
+  ---
+  duration_ms: 1745.4159
+  type: 'test'
+  ...
+# Subtest: plain HTTP ingress accepts trusted external HTTPS origin, never forwarded headers or invalid CSRF/native auth
+ok 72 - plain HTTP ingress accepts trusted external HTTPS origin, never forwarded headers or invalid CSRF/native auth
+  ---
+  duration_ms: 126.9575
+  type: 'test'
+  ...
+# Subtest: settings route rejects missing native capability, unauthenticated, cross-origin and non-JSON writes
+ok 73 - settings route rejects missing native capability, unauthenticated, cross-origin and non-JSON writes
+  ---
+  duration_ms: 17.8712
+  type: 'test'
+  ...
+# Subtest: public host adapter owns a profile-scoped route and disposal
+ok 74 - public host adapter owns a profile-scoped route and disposal
+  ---
+  duration_ms: 7.5898
+  type: 'test'
+  ...
+# Subtest: formal apply respects HTTP permission provenance: missing
+ok 75 - formal apply respects HTTP permission provenance: missing
+  ---
+  duration_ms: 54.4816
+  type: 'test'
+  ...
+# Subtest: formal apply respects HTTP permission provenance: false
+ok 76 - formal apply respects HTTP permission provenance: false
+  ---
+  duration_ms: 42.3603
+  type: 'test'
+  ...
+# Subtest: formal apply respects HTTP permission provenance: true
+ok 77 - formal apply respects HTTP permission provenance: true
+  ---
+  duration_ms: 32.5976
+  type: 'test'
+  ...
+# Subtest: formal apply respects HTTP permission provenance: saved
+ok 78 - formal apply respects HTTP permission provenance: saved
+  ---
+  duration_ms: 88.2715
+  type: 'test'
+  ...
+# Subtest: private editor uses only native local endpoints and preserves revision on save: zh
+ok 79 - private editor uses only native local endpoints and preserves revision on save: zh
+  ---
+  duration_ms: 80.622
+  type: 'test'
+  ...
+# Subtest: private editor uses only native local endpoints and preserves revision on save: en
+ok 80 - private editor uses only native local endpoints and preserves revision on save: en
+  ---
+  duration_ms: 12.3991
+  type: 'test'
+  ...
+# (node:64740) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Team stays 503 while independent IAM renewal success controls live browser/HTTP/WS access
+ok 81 - Team stays 503 while independent IAM renewal success controls live browser/HTTP/WS access
+  ---
+  duration_ms: 174.3564
+  type: 'test'
+  ...
+# Subtest: Team stays 503 while independent IAM renewal refused controls live browser/HTTP/WS access
+ok 82 - Team stays 503 while independent IAM renewal refused controls live browser/HTTP/WS access
+  ---
+  duration_ms: 84.7122
+  type: 'test'
+  ...
+# Subtest: an authenticated page refresh reconnects Team after recovery without issuing another browser session
+ok 83 - an authenticated page refresh reconnects Team after recovery without issuing another browser session
+  ---
+  duration_ms: 2058.267
+  type: 'test'
+  ...
+# Subtest: fresh native credential commit issues a browser session while Team is unavailable (synthetic IAM fixture only)
+ok 84 - fresh native credential commit issues a browser session while Team is unavailable (synthetic IAM fixture only)
+  ---
+  duration_ms: 122.0047
+  type: 'test'
+  ...
+# Subtest: Team HTTP 401 does not block verified login, refresh or logout
+ok 85 - Team HTTP 401 does not block verified login, refresh or logout
+  ---
+  duration_ms: 63.1416
+  type: 'test'
+  ...
+# Subtest: Team HTTP 403 does not block verified login, refresh or logout
+ok 86 - Team HTTP 403 does not block verified login, refresh or logout
+  ---
+  duration_ms: 62.4161
+  type: 'test'
+  ...
+# Subtest: Team HTTP 503 does not block verified login, refresh or logout
+ok 87 - Team HTTP 503 does not block verified login, refresh or logout
+  ---
+  duration_ms: 259.2598
+  type: 'test'
+  ...
+# Subtest: a pending Team handshake never holds the browser login response
+ok 88 - a pending Team handshake never holds the browser login response
+  ---
+  duration_ms: 47.8878
+  type: 'test'
+  ...
+# Subtest: connection configuration accepts the same explicit private HTTP origins as settings
+ok 89 - connection configuration accepts the same explicit private HTTP origins as settings
+  ---
+  duration_ms: 1.1086
+  type: 'test'
+  ...
+# Subtest: trusted platform switch tombstones credentials and closes old HTTP/WS without stopping tasks
+ok 90 - trusted platform switch tombstones credentials and closes old HTTP/WS without stopping tasks
+  ---
+  duration_ms: 45.0207
+  type: 'test'
+  ...
+# Subtest: saved origin replaces loader binding without carrying foreign provider ids or static network pins
+ok 91 - saved origin replaces loader binding without carrying foreign provider ids or static network pins
+  ---
+  duration_ms: 1.4135
+  type: 'test'
+  ...
+# Subtest: formal plugin entry consumes saved settings, applies changes immediately and reloads them after restart
+ok 92 - formal plugin entry consumes saved settings, applies changes immediately and reloads them after restart
+  ---
+  duration_ms: 98.598
+  type: 'test'
+  ...
+# Subtest: platform changes invalidate credentials before persistence and publish after persistence; failed invalidation preserves saved values
+ok 93 - platform changes invalidate credentials before persistence and publish after persistence; failed invalidation preserves saved values
+  ---
+  duration_ms: 33.3742
+  type: 'test'
+  ...
+# Subtest: settings accepts HTTPS and explicit local HTTP origins only
+ok 94 - settings accepts HTTPS and explicit local HTTP origins only
+  ---
+  duration_ms: 1.3373
+  type: 'test'
+  ...
+# Subtest: connection probe refuses redirects and distinguishes HTTP, transport and invalid platform failures
+ok 95 - connection probe refuses redirects and distinguishes HTTP, transport and invalid platform failures
+  ---
+  duration_ms: 54.2017
+  type: 'test'
+  ...
+# Subtest: settings persist address and deployment across reopen, rejecting invalid writes
+ok 96 - settings persist address and deployment across reopen, rejecting invalid writes
+  ---
+  duration_ms: 288.5685
+  type: 'test'
+  ...
+# (node:54532) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Desktop download survives the status deadline and displays the queued result
+ok 97 - Desktop download survives the status deadline and displays the queued result
+  ---
+  duration_ms: 172.3558
+  type: 'test'
+  ...
+# Subtest: ordinary settings reads still time out when the status service stalls
+ok 98 - ordinary settings reads still time out when the status service stalls
+  ---
+  duration_ms: 3.1698
+  type: 'test'
+  ...
+# Subtest: managed model status directs native manual synchronization without claiming invocation readiness: zh
+ok 99 - managed model status directs native manual synchronization without claiming invocation readiness: zh
+  ---
+  duration_ms: 8.7401
+  type: 'test'
+  ...
+# Subtest: managed model status directs native manual synchronization without claiming invocation readiness: en
+ok 100 - managed model status directs native manual synchronization without claiming invocation readiness: en
+  ---
+  duration_ms: 3.2163
+  type: 'test'
+  ...
+# Subtest: R7 managed identity never falls back to signed out: signed-out
+ok 101 - R7 managed identity never falls back to signed out: signed-out
+  ---
+  duration_ms: 3.0039
+  type: 'test'
+  ...
+# Subtest: R7 managed identity never falls back to signed out: unavailable
+ok 102 - R7 managed identity never falls back to signed out: unavailable
+  ---
+  duration_ms: 2.7836
+  type: 'test'
+  ...
+# Subtest: R7 managed identity never falls back to signed out: pending
+ok 103 - R7 managed identity never falls back to signed out: pending
+  ---
+  duration_ms: 4.7425
+  type: 'test'
+  ...
+# Subtest: R2 settings only mount first-contact controls for an advertised capability: false
+ok 104 - R2 settings only mount first-contact controls for an advertised capability: false
+  ---
+  duration_ms: 3.8438
+  type: 'test'
+  ...
+# Subtest: R2 settings only mount first-contact controls for an advertised capability: true
+ok 105 - R2 settings only mount first-contact controls for an advertised capability: true
+  ---
+  duration_ms: 2.6859
+  type: 'test'
+  ...
+# Subtest: R2 settings only mount first-contact controls for an advertised capability: undefined
+ok 106 - R2 settings only mount first-contact controls for an advertised capability: undefined
+  ---
+  duration_ms: 2.6964
+  type: 'test'
+  ...
+# Subtest: status fix: missing names and optional facts never produce UUID or empty rows: false
+ok 107 - status fix: missing names and optional facts never produce UUID or empty rows: false
+  ---
+  duration_ms: 5.9731
+  type: 'test'
+  ...
+# Subtest: status fix: missing names and optional facts never produce UUID or empty rows: true
+ok 108 - status fix: missing names and optional facts never produce UUID or empty rows: true
+  ---
+  duration_ms: 4.3354
+  type: 'test'
+  ...
+# Subtest: R4 saved device offline is recovering, not signed out: zh
+ok 109 - R4 saved device offline is recovering, not signed out: zh
+  ---
+  duration_ms: 3.5309
+  type: 'test'
+  ...
+# Subtest: R4 saved device offline is recovering, not signed out: en
+ok 110 - R4 saved device offline is recovering, not signed out: en
+  ---
+  duration_ms: 3.3987
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect unconfigured
+ok 111 - R2 settings zh connect unconfigured
+  ---
+  duration_ms: 7.9821
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect signed-out
+ok 112 - R2 settings zh connect signed-out
+  ---
+  duration_ms: 2.3645
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect ready
+ok 113 - R2 settings zh connect ready
+  ---
+  duration_ms: 2.6804
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect offline
+ok 114 - R2 settings zh connect offline
+  ---
+  duration_ms: 3.1447
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect expired
+ok 115 - R2 settings zh connect expired
+  ---
+  duration_ms: 3.2092
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect invalid
+ok 116 - R2 settings zh connect invalid
+  ---
+  duration_ms: 5.0004
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed unconfigured
+ok 117 - R2 settings zh managed unconfigured
+  ---
+  duration_ms: 42.0068
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed signed-out
+ok 118 - R2 settings zh managed signed-out
+  ---
+  duration_ms: 2.622
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed ready
+ok 119 - R2 settings zh managed ready
+  ---
+  duration_ms: 2.5206
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed offline
+ok 120 - R2 settings zh managed offline
+  ---
+  duration_ms: 2.6076
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed expired
+ok 121 - R2 settings zh managed expired
+  ---
+  duration_ms: 2.3231
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed invalid
+ok 122 - R2 settings zh managed invalid
+  ---
+  duration_ms: 3.9423
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect unconfigured
+ok 123 - R2 settings en connect unconfigured
+  ---
+  duration_ms: 1.8499
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect signed-out
+ok 124 - R2 settings en connect signed-out
+  ---
+  duration_ms: 7.6636
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect ready
+ok 125 - R2 settings en connect ready
+  ---
+  duration_ms: 2.7115
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect offline
+ok 126 - R2 settings en connect offline
+  ---
+  duration_ms: 2.0775
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect expired
+ok 127 - R2 settings en connect expired
+  ---
+  duration_ms: 2.0246
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect invalid
+ok 128 - R2 settings en connect invalid
+  ---
+  duration_ms: 1.3383
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed unconfigured
+ok 129 - R2 settings en managed unconfigured
+  ---
+  duration_ms: 1.5517
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed signed-out
+ok 130 - R2 settings en managed signed-out
+  ---
+  duration_ms: 5.9043
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed ready
+ok 131 - R2 settings en managed ready
+  ---
+  duration_ms: 7.3916
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed offline
+ok 132 - R2 settings en managed offline
+  ---
+  duration_ms: 2.3679
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed expired
+ok 133 - R2 settings en managed expired
+  ---
+  duration_ms: 2.6263
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed invalid
+ok 134 - R2 settings en managed invalid
+  ---
+  duration_ms: 1.6626
+  type: 'test'
+  ...
+# Subtest: R2 logout preserves the existing explicit confirmation page
+ok 135 - R2 logout preserves the existing explicit confirmation page
+  ---
+  duration_ms: 2.8482
+  type: 'test'
+  ...
+# Subtest: R2 precise status failure http
+ok 136 - R2 precise status failure http
+  ---
+  duration_ms: 1.9135
+  type: 'test'
+  ...
+# Subtest: R2 precise status failure timeout
+ok 137 - R2 precise status failure timeout
+  ---
+  duration_ms: 1.6915
+  type: 'test'
+  ...
+# Subtest: R2 precise status failure invalid-json
+ok 138 - R2 precise status failure invalid-json
+  ---
+  duration_ms: 2.193
+  type: 'test'
+  ...
+# Subtest: Desktop binding confirmation is visible and update controls stay disabled: zh
+ok 139 - Desktop binding confirmation is visible and update controls stay disabled: zh
+  ---
+  duration_ms: 2.9053
+  type: 'test'
+  ...
+# Subtest: Desktop binding confirmation is visible and update controls stay disabled: en
+ok 140 - Desktop binding confirmation is visible and update controls stay disabled: en
+  ---
+  duration_ms: 6.9723
+  type: 'test'
+  ...
+1..140
+# tests 160
+# suites 0
+# pass 157
+# fail 0
+# cancelled 0
+# skipped 3
+# todo 0
+# duration_ms 12808.9007

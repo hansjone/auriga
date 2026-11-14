@@ -1,0 +1,46 @@
+Scope: all 7 workspace projects
+Recreating D:\project\chatgpt\agent-wt\auriga-INSTALLER-EXE-codex\node_modules
+✓ Lockfile at web/pnpm-lock.yaml passes supply-chain policies (verified 1d ago)
+web                                      | Progress: resolved 1, reused 0, downloaded 0, added 0
+web                                      | +336 ++++++++++++++++++++++++++++++++
+web                                      | Progress: resolved 336, reused 102, downloaded 0, added 0
+web                                      | Progress: resolved 336, reused 332, downloaded 0, added 3
+web                                      | Progress: resolved 336, reused 335, downloaded 0, added 13
+web                                      | Progress: resolved 336, reused 335, downloaded 0, added 73
+web                                      | Progress: resolved 336, reused 335, downloaded 0, added 103
+web                                      | Progress: resolved 336, reused 335, downloaded 0, added 148
+web                                      | Progress: resolved 336, reused 335, downloaded 0, added 186
+web                                      | Progress: resolved 336, reused 335, downloaded 0, added 215
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 225
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 248
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 304
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 327
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 328
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 332
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 333
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 334
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 335
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 336
+web                                      | Progress: resolved 336, reused 336, downloaded 0, added 336, done
+.../esbuild@0.27.7/node_modules/esbuild postinstall$ node install.js
+.../esbuild@0.27.7/node_modules/esbuild postinstall: Done
+
+devDependencies:
++ @eslint/js 9.39.1
++ @types/node 22.19.0
++ @vitejs/plugin-vue 6.0.10
++ @vue/test-utils 2.5.1
++ eslint 9.39.1
++ eslint-config-prettier 10.1.8
++ eslint-plugin-vue 10.11.1
++ jsdom 26.1.0
++ json-schema-to-typescript 16.0.0
++ openapi-typescript 7.13.0
++ prettier 3.9.10
++ typescript 5.9.3
++ typescript-eslint 8.71.2
++ vite 7.3.1
++ vitest 3.2.4
++ vue-tsc 3.3.13
+
+Done in 32.6s using pnpm v11.28.6

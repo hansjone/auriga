@@ -1,0 +1,282 @@
+TAP version 13
+# (node:41348) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Desktop download survives the status deadline and displays the queued result
+ok 1 - Desktop download survives the status deadline and displays the queued result
+  ---
+  duration_ms: 81.063
+  type: 'test'
+  ...
+# Subtest: ordinary settings reads still time out when the status service stalls
+ok 2 - ordinary settings reads still time out when the status service stalls
+  ---
+  duration_ms: 2.4704
+  type: 'test'
+  ...
+# Subtest: managed model status directs native manual synchronization without claiming invocation readiness: zh
+ok 3 - managed model status directs native manual synchronization without claiming invocation readiness: zh
+  ---
+  duration_ms: 4.8837
+  type: 'test'
+  ...
+# Subtest: managed model status directs native manual synchronization without claiming invocation readiness: en
+ok 4 - managed model status directs native manual synchronization without claiming invocation readiness: en
+  ---
+  duration_ms: 2.344
+  type: 'test'
+  ...
+# Subtest: R7 managed identity never falls back to signed out: signed-out
+ok 5 - R7 managed identity never falls back to signed out: signed-out
+  ---
+  duration_ms: 2.7052
+  type: 'test'
+  ...
+# Subtest: R7 managed identity never falls back to signed out: unavailable
+ok 6 - R7 managed identity never falls back to signed out: unavailable
+  ---
+  duration_ms: 1.8632
+  type: 'test'
+  ...
+# Subtest: R7 managed identity never falls back to signed out: pending
+ok 7 - R7 managed identity never falls back to signed out: pending
+  ---
+  duration_ms: 3.3623
+  type: 'test'
+  ...
+# Subtest: R2 settings only mount first-contact controls for an advertised capability: false
+ok 8 - R2 settings only mount first-contact controls for an advertised capability: false
+  ---
+  duration_ms: 2.8805
+  type: 'test'
+  ...
+# Subtest: R2 settings only mount first-contact controls for an advertised capability: true
+ok 9 - R2 settings only mount first-contact controls for an advertised capability: true
+  ---
+  duration_ms: 2.1701
+  type: 'test'
+  ...
+# Subtest: R2 settings only mount first-contact controls for an advertised capability: undefined
+ok 10 - R2 settings only mount first-contact controls for an advertised capability: undefined
+  ---
+  duration_ms: 1.784
+  type: 'test'
+  ...
+# Subtest: status fix: missing names and optional facts never produce UUID or empty rows: false
+ok 11 - status fix: missing names and optional facts never produce UUID or empty rows: false
+  ---
+  duration_ms: 2.5584
+  type: 'test'
+  ...
+# Subtest: status fix: missing names and optional facts never produce UUID or empty rows: true
+ok 12 - status fix: missing names and optional facts never produce UUID or empty rows: true
+  ---
+  duration_ms: 1.3612
+  type: 'test'
+  ...
+# Subtest: R4 saved device offline is recovering, not signed out: zh
+ok 13 - R4 saved device offline is recovering, not signed out: zh
+  ---
+  duration_ms: 2.2734
+  type: 'test'
+  ...
+# Subtest: R4 saved device offline is recovering, not signed out: en
+ok 14 - R4 saved device offline is recovering, not signed out: en
+  ---
+  duration_ms: 1.5634
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect unconfigured
+ok 15 - R2 settings zh connect unconfigured
+  ---
+  duration_ms: 4.6228
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect signed-out
+ok 16 - R2 settings zh connect signed-out
+  ---
+  duration_ms: 1.9528
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect ready
+ok 17 - R2 settings zh connect ready
+  ---
+  duration_ms: 1.4065
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect offline
+ok 18 - R2 settings zh connect offline
+  ---
+  duration_ms: 3.5709
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect expired
+ok 19 - R2 settings zh connect expired
+  ---
+  duration_ms: 2.376
+  type: 'test'
+  ...
+# Subtest: R2 settings zh connect invalid
+ok 20 - R2 settings zh connect invalid
+  ---
+  duration_ms: 2.7694
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed unconfigured
+ok 21 - R2 settings zh managed unconfigured
+  ---
+  duration_ms: 1.7045
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed signed-out
+ok 22 - R2 settings zh managed signed-out
+  ---
+  duration_ms: 1.2614
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed ready
+ok 23 - R2 settings zh managed ready
+  ---
+  duration_ms: 1.8088
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed offline
+ok 24 - R2 settings zh managed offline
+  ---
+  duration_ms: 1.4844
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed expired
+ok 25 - R2 settings zh managed expired
+  ---
+  duration_ms: 1.6085
+  type: 'test'
+  ...
+# Subtest: R2 settings zh managed invalid
+ok 26 - R2 settings zh managed invalid
+  ---
+  duration_ms: 1.5178
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect unconfigured
+ok 27 - R2 settings en connect unconfigured
+  ---
+  duration_ms: 1.0985
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect signed-out
+ok 28 - R2 settings en connect signed-out
+  ---
+  duration_ms: 3.3409
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect ready
+ok 29 - R2 settings en connect ready
+  ---
+  duration_ms: 1.6304
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect offline
+ok 30 - R2 settings en connect offline
+  ---
+  duration_ms: 2.1254
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect expired
+ok 31 - R2 settings en connect expired
+  ---
+  duration_ms: 1.4517
+  type: 'test'
+  ...
+# Subtest: R2 settings en connect invalid
+ok 32 - R2 settings en connect invalid
+  ---
+  duration_ms: 1.9729
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed unconfigured
+ok 33 - R2 settings en managed unconfigured
+  ---
+  duration_ms: 1.2809
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed signed-out
+ok 34 - R2 settings en managed signed-out
+  ---
+  duration_ms: 1.191
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed ready
+ok 35 - R2 settings en managed ready
+  ---
+  duration_ms: 2.0068
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed offline
+ok 36 - R2 settings en managed offline
+  ---
+  duration_ms: 2.1342
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed expired
+ok 37 - R2 settings en managed expired
+  ---
+  duration_ms: 1.4555
+  type: 'test'
+  ...
+# Subtest: R2 settings en managed invalid
+ok 38 - R2 settings en managed invalid
+  ---
+  duration_ms: 1.4166
+  type: 'test'
+  ...
+# Subtest: R2 logout preserves the existing explicit confirmation page
+ok 39 - R2 logout preserves the existing explicit confirmation page
+  ---
+  duration_ms: 2.6004
+  type: 'test'
+  ...
+# Subtest: R2 precise status failure http
+ok 40 - R2 precise status failure http
+  ---
+  duration_ms: 1.6247
+  type: 'test'
+  ...
+# Subtest: R2 precise status failure timeout
+ok 41 - R2 precise status failure timeout
+  ---
+  duration_ms: 0.9898
+  type: 'test'
+  ...
+# Subtest: R2 precise status failure invalid-json
+ok 42 - R2 precise status failure invalid-json
+  ---
+  duration_ms: 1.6542
+  type: 'test'
+  ...
+# Subtest: Desktop binding confirmation is visible and update controls stay disabled: zh
+ok 43 - Desktop binding confirmation is visible and update controls stay disabled: zh
+  ---
+  duration_ms: 1.8016
+  type: 'test'
+  ...
+# Subtest: Desktop binding confirmation is visible and update controls stay disabled: en
+ok 44 - Desktop binding confirmation is visible and update controls stay disabled: en
+  ---
+  duration_ms: 4.1265
+  type: 'test'
+  ...
+# Subtest: 刷新后下载进度可见并可取消，强制更新不能关闭检查和切渠道
+ok 45 - 刷新后下载进度可见并可取消，强制更新不能关闭检查和切渠道
+  ---
+  duration_ms: 3.8909
+  type: 'test'
+  ...
+1..45
+# tests 45
+# suites 0
+# pass 45
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 320.6358

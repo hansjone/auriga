@@ -4,3 +4,8 @@
 /release-tests.log
 /cleanup-first.log
 /uninstall-prompt-*.log
+
+/round2-java*.log
+
+/round2-lint.log
+/round2-nas-preflight.log
