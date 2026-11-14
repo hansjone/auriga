@@ -28,6 +28,8 @@
 | `instance.stopped` | workspace | `instance.schema.json#/$defs/InstanceStopped` | audit、计量、collab |
 | `instance.failed` | workspace | `instance.schema.json#/$defs/InstanceFailed` | audit、collab（通知本人和管理员） |
 | `instance.deleted` | workspace | `instance.schema.json#/$defs/InstanceDeleted` | audit |
+| `placement.switched` | workspace | `placement.schema.json#/$defs/PlacementSwitched` | audit |
+| `placement.switch_failed` | workspace | `placement.schema.json#/$defs/PlacementSwitchFailed` | audit |
 | `audit.recorded` | 所有服务 | `audit.schema.json#/$defs/AuditRecorded` | audit |
 
 M3新增`usage.recorded`、`resource.version_published`、`resource.version_withdrawn`、
@@ -38,6 +40,8 @@ M3新增`usage.recorded`、`resource.version_published`、`resource.version_with
 unknown用量显式null，不伪造0；事件不带prompt、响应正文、secret或bearer下载URL。
 现有common事件生产方白名单实现仍须后续接入此目录，不能因新增schema就声称消费方已支持。
 `knowledge.*`仍留未来里程碑另定。
+
+共享 DSH 分配事件的 source、subject 和发布 ACL 也登记在 `catalog/m3.json`，subject 为 placementId。实现工作线完成生产与消费接线后启用。
 
 ## 统一资源事件
 
