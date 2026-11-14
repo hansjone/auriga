@@ -30,6 +30,28 @@ service DeviceAccessService {
   // Only svc:collab. Receiver/lock-time authority check; identity inputs are
   // compared with stored device ownership, never trusted as proof of ownership.
   rpc VerifyDeviceCredential(VerifyDeviceCredentialRequest) returns (VerifyDeviceCredentialResponse);
+  // Standard RFC8628 lineage only; additive to the native/model-only RPCs.
+  // Only svc:ai-gateway with delegated non-platform tenant and authenticated
+  // internal transport. Verify at+jwt/ES256, exact AI audience, <=300s lifetime,
+  // requested permission in signed AND current permissions, device/client/member
+  // and authoritative source binding/generation. Never touch idle or use refresh.
+  // Invalid => inactive/empty identity; dependency failure => UNAVAILABLE.
+  rpc VerifyStandardDeviceAiAccess(VerifyStandardDeviceAiAccessRequest) returns (VerifyStandardDeviceAiAccessResponse);
+}
+
+message VerifyStandardDeviceAiAccessRequest {
+  // Secret external JWT; never log, persist or echo.
+  string access_token = 1;
+  // Exactly auriga.connect.models.invoke or auriga.connect.collab.use.
+  string permission = 2;
+}
+message VerifyStandardDeviceAiAccessResponse {
+  bool active = 1;
+  string tenant_id = 2;
+  string account_id = 3;
+  string device_id = 4;
+  // Minimum token/source/device deadline, still future at completion.
+  google.protobuf.Timestamp expires_at = 5;
 }
 
 message VerifyDeviceAccessRequest {

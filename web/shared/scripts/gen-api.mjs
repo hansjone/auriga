@@ -5,6 +5,25 @@ import { format } from 'prettier';
 import { compileFromFile } from 'json-schema-to-typescript';
 const output = new URL('../src/generated/', import.meta.url);
 await mkdir(output, { recursive: true });
+// 插件消费同一 v2 schema；生成定义由 K 线拥有。
+await writeFile(
+  new URL(
+    '../../../clients/dsh-plugin/src/generated/network/auto-renewal-v2.d.ts',
+    import.meta.url,
+  ),
+  await format(
+    await compileFromFile(
+      fileURLToPath(
+        new URL(
+          '../../../contracts/network/auto-renewal-v2.schema.json',
+          import.meta.url,
+        ),
+      ),
+      { unreachableDefinitions: true },
+    ),
+    { parser: 'typescript', singleQuote: true },
+  ),
+);
 await writeFile(
   new URL('deployment-access.d.ts', output),
   await format(
@@ -21,6 +40,7 @@ await writeFile(
   ),
 );
 for (const name of [
+  'network-keys-v2',
   'iam',
   'org',
   'workspace',

@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "标准RFC8628设备来源、换票及自撤销补充",
+  "$defs": {
+    "StandardDeviceRefreshRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grant_type": {
+          "type": "string",
+          "const": "refresh_token"
+        },
+        "client_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "refresh_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "resource": {
+          "type": "string",
+          "const": "urn:auriga:ai-gateway"
+        }
+      },
+      "required": [
+        "grant_type",
+        "client_id",
+        "refresh_token"
+      ],
+      "description": "表单解码后的单值结构；解析原始表单先拒绝重复参数。scope只可缩小授权范围，resource省略为平台刷新；AI resource必须使用标准设备lineage及在线来源绑定。"
+    },
+    "StandardDeviceRevokeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "client_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "token_type_hint": {
+          "type": "string",
+          "enum": [
+            "access_token",
+            "refresh_token"
+          ]
+        }
+      },
+      "required": [
+        "client_id",
+        "token"
+      ],
+      "description": "已登记平台公共RFC8628客户端，以本client token作为possession proof，只撤该device及所有refresh代际/派生连接；不能选择did或撤来源会话。未知、过期、重复token均200空对象。"
+    },
+    "StandardDeviceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accountId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "deviceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authorizationMode": {
+          "type": "string",
+          "const": "standard_device"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "uacSessionBinding": {
+          "$ref": "uac-session-binding.schema.json#/$defs/UacSessionBinding"
+        }
+      },
+      "required": [
+        "accountId",
+        "tenantId",
+        "memberId",
+        "deviceId",
+        "providerId",
+        "clientId",
+        "authorizationMode",
+        "expiresAt"
+      ],
+      "description": "GET /me/device-session由当前设备Bearer在线定位，不能传设备ID；UAC来源必须有IAM权威绑定且与JWT一致，其他来源省略。无需浏览器sid；不能捏造Me.session。"
+    },
+    "StandardDeviceAiClaims": {
+      "type": "object",
+      "properties": {
+        "iss": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sub": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tid": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "did": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "jti": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aud": {
+          "type": "string",
+          "const": "auriga.ai-gateway"
+        },
+        "ptyp": {
+          "type": "string",
+          "const": "device"
+        },
+        "ctx": {
+          "type": "string",
+          "const": "device"
+        },
+        "scope": {
+          "type": "string",
+          "pattern": "(?:^| )auriga\\.connect(?: |$)"
+        },
+        "iat": {
+          "type": "integer"
+        },
+        "nbf": {
+          "type": "integer"
+        },
+        "exp": {
+          "type": "integer"
+        },
+        "auth_time": {
+          "type": "integer"
+        },
+        "mtyp": {
+          "type": "string",
+          "enum": [
+            "member",
+            "external"
+          ]
+        },
+        "perms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "auriga.connect.models.invoke",
+              "auriga.connect.collab.use"
+            ]
+          }
+        },
+        "roles": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "sid": false,
+        "instanceId": false,
+        "uacSessionBinding": {
+          "$ref": "uac-session-binding.schema.json#/$defs/UacSessionBinding"
+        }
+      },
+      "required": [
+        "iss",
+        "sub",
+        "tid",
+        "did",
+        "jti",
+        "aud",
+        "ptyp",
+        "ctx",
+        "scope",
+        "iat",
+        "exp",
+        "perms",
+        "mtyp"
+      ],
+      "additionalProperties": false,
+      "description": "标准设备AI票，不改变native_tx模型专票。IAM按当前授权交集签发，至少一种权限；实际验签、<=300秒/来源期限、UAC来源必带绑定及在线检查见standard-device.md；schema不能替代这些运行时检查。"
+    }
+  }
+}

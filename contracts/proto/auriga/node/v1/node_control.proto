@@ -3,6 +3,7 @@ syntax = "proto3";
 package auriga.node.v1;
 
 import "auriga/node/v1/spec.proto";
+import "auriga/node/v1/msgnet_control.proto";
 import "auriga/resource/v1/unified.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -35,6 +36,7 @@ message SessionRequest {
     WakeSchedule wake = 5;
     CommandResult result = 6;
     LogChunk log = 7;
+    MsgnetControlReceipt msgnet_control_receipt = 8;
   }
 }
 
@@ -47,6 +49,8 @@ message SessionResponse {
     Command command = 4;
     PolicyHint policy = 5;
     UpdateAgent update = 6;
+    MsgnetControlPackage msgnet_control_package = 7;
+    MsgnetTransportBundle msgnet_transport_bundle = 8;
   }
 }
 
