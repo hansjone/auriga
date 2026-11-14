@@ -7,7 +7,7 @@ import {
   assertSelectionProgress,
 } from '../../src/resources/selection-state.js';
 import { schemaValid } from '../../src/resources/schema.js';
-import { catalogService } from '../../src/resources/catalog-service.js';
+import { catalogService } from './broker-fixture.js';
 import { catalogFixture } from './catalog-fixture.js';
 const root = new URL('../../../../contracts/resource/', import.meta.url);
 const read = (file) => JSON.parse(readFileSync(new URL(file, root), 'utf8'));

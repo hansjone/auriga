@@ -71,11 +71,25 @@ export async function resourceRequest(runtime, path, options = {}) {
           ? JSON.parse(options.body)
           : options.body;
   }
-  const output = await dispatchResource(
-    runtime.broker,
-    operation.operation,
-    input,
-  );
+  let output;
+  try {
+    output = await dispatchResource(runtime.broker, operation.operation, input);
+  } catch (error) {
+    // Keep the adapters' post-response identity fence and HTTP-category mapping.
+    // Broker errors carry no upstream body or credentials across this boundary.
+    const status = {
+      'common.validation_failed': 400,
+      'common.unauthenticated': 401,
+      'common.forbidden': 403,
+      'common.not_found': 404,
+      'common.conflict': 409,
+      'common.precondition_failed': 412,
+      'common.rate_limited': 429,
+      'common.unavailable': 503,
+    }[/** @type {{code?:string}} */ (error)?.code ?? ''];
+    if (!status) throw error;
+    return Response.json({}, { status });
+  }
   let value = output.body;
   if (value?.streamId) value = await runtime.readStream(value.streamId);
   return new Response(

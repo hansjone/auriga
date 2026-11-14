@@ -1,10 +1,7 @@
 // @ts-nocheck
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  createResourceHandler,
-  resourcePath,
-} from '../../src/resources/channel.js';
+import { createResourceHandler, resourcePath } from './broker-fixture.js';
 
 const path = '/api/resource/v1/packages';
 test('catalogue permits only fixed readers and bounded pagination', () => {
@@ -132,8 +129,9 @@ test('upstream errors expose only HTTP categories and oversized bodies are refus
       ),
       403,
     ],
-    [Response.json({ data: 'x'.repeat(1048577) }), 502],
-    [new Response('not json'), 502],
+    // C rejects malformed/oversized output before any body crosses IPC.
+    [Response.json({ data: 'x'.repeat(1048577) }), 503],
+    [new Response('not json'), 503],
   ]) {
     const handler = createResourceHandler({
       auth: { requestRejection: () => undefined },
@@ -153,8 +151,7 @@ test('upstream errors expose only HTTP categories and oversized bodies are refus
 
 test('resource channel uses native owner admission to bind the request before resolving identity', async () => {
   const { installLocalAdmission } = await import('../../src/local/host.js');
-  const { installResourceChannel } =
-    await import('../../src/resources/channel.js');
+  const { installResourceChannel } = await import('./broker-fixture.js');
   const requests = new WeakSet();
   const identity = {};
   const runtime = {
@@ -265,8 +262,7 @@ test('managed channel binds distribution to the renderer instance and strips bro
   assert.equal(writes, 1);
 });
 test('missing public resource route lifecycle capability stays unavailable without crashing other host features', async () => {
-  const { installResourceChannel } =
-    await import('../../src/resources/channel.js');
+  const { installResourceChannel } = await import('./broker-fixture.js');
   let registrations = 0;
   assert.equal(
     installResourceChannel(

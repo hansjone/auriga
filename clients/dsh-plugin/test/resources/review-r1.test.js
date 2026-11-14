@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { catalogFixture } from './catalog-fixture.js';
-import { catalogService } from '../../src/resources/catalog-service.js';
+import { catalogService } from './broker-fixture.js';
 import { createVault } from '../../src/local/vault.js';
 import { createCatalogIdentityFence } from '../../src/resources/identity-fence.js';
 import { clockBootId } from '../../src/resources/host-lock.js';

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { catalogFixture } from './catalog-fixture.js';
-import { catalogService } from '../../src/resources/catalog-service.js';
+import { catalogService } from './broker-fixture.js';
 test('F1: E clearing a prepared removal is acknowledged even while the prior installation receipt is still present', async (t) => {
   const f = catalogFixture(t),
     s = catalogService({ ...f, privateSkills: {}, host: {} });

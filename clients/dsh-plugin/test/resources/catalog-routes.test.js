@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { catalogRoutes } from '../../src/resources/catalog-routes.js';
-import { createResourceHandler } from '../../src/resources/channel.js';
+import { catalogRoutes } from './broker-fixture.js';
+import { createResourceHandler } from './broker-fixture.js';
 import { catalogFixture } from './catalog-fixture.js';
 function response() {
   return {
