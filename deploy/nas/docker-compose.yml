@@ -131,7 +131,10 @@ services:
     read_only: true
     restart: 'no'
     entrypoint: ['/bin/sh', '-ec']
-    command: ['exec psql -X -q -h postgres -U auriga_bootstrap -d auriga -v ON_ERROR_STOP=1 -f /config/audit.sql']
+    command:
+      [
+        'exec psql -X -q -h postgres -U auriga_bootstrap -d auriga -v ON_ERROR_STOP=1 -f /config/audit.sql',
+      ]
     env_file:
       - path: ${AURIGA_DATA_ROOT}/config/audit-db.env
         required: true
@@ -360,6 +363,8 @@ services:
       - ${AURIGA_DATA_ROOT}/config/materials/uac:/etc/auriga/uac:ro
       - ${AURIGA_DATA_ROOT}/enrollment:/var/auriga
       - ${AURIGA_DATA_ROOT}/ops-runtime:/var/auriga-ops
+      - ${AURIGA_DATA_ROOT}/desktop:/var/lib/auriga/desktop
+      - ${AURIGA_DATA_ROOT}/config/desktop:/etc/auriga/desktop:ro
     networks: [internal, publish, observability]
     expose:
       - '8081'

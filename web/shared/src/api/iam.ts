@@ -37,6 +37,26 @@ export function createIamApi(client: ApiClient) {
     return tx;
   }
   return {
+    getCorrelationId(value: unknown) {
+      return client.getCorrelationId?.(value);
+    },
+    getDeviceRequest(userCode: string) {
+      return client.get<components['schemas']['DeviceRequest']>(
+        `${IAM}/device/${encodeURIComponent(userCode)}`,
+        { cache: 'no-store' },
+      );
+    },
+    approveDeviceRequest(userCode: string) {
+      return client.post<void>(
+        `${IAM}/device/${encodeURIComponent(userCode)}/approve`,
+        {},
+      );
+    },
+    denyDeviceRequest(userCode: string) {
+      return client.post<void>(
+        `${IAM}/device/${encodeURIComponent(userCode)}/deny`,
+      );
+    },
     listLoginProviders(purpose: 'login' | 'link' = 'login') {
       const q = purpose === 'login' ? '' : `?purpose=${purpose}`;
       return client.get<ProvidersResponse>(`${IAM}/login/providers${q}`);
@@ -83,8 +103,45 @@ export function createIamApi(client: ApiClient) {
         anonymousLogin,
       });
     },
+    async loginUacSso(body: components['schemas']['UacSsoLogin']) {
+      const result = await client.post<
+        components['schemas']['UacSsoLoginResult']
+      >(`${IAM}/login/uac/sso`, body, { anonymousLogin: true });
+      if (result.state === 'authenticated') client.resetSession();
+      return result;
+    },
+    createUacChallenge(body: components['schemas']['UacChallengeCreate']) {
+      return client.post<components['schemas']['UacChallenge']>(
+        `${IAM}/login/uac/challenges`,
+        body,
+        { anonymousLogin: body.purpose === 'login' },
+      );
+    },
+    getUacChallenge(id: string) {
+      return client.get<components['schemas']['UacChallengeStatus']>(
+        `${IAM}/login/uac/challenges/${encodeURIComponent(id)}`,
+        { cache: 'no-store' },
+      );
+    },
+    cancelUacChallenge(id: string) {
+      return client.delete<void>(
+        `${IAM}/login/uac/challenges/${encodeURIComponent(id)}`,
+        { anonymousLogin: true },
+      );
+    },
+    async completeUacChallenge(id: string) {
+      const result = await client.post<
+        components['schemas']['UacCompleteResult']
+      >(
+        `${IAM}/login/uac/challenges/${encodeURIComponent(id)}/complete`,
+        undefined,
+        { anonymousLogin: true },
+      );
+      if (result.state === 'authenticated') client.resetSession();
+      return result;
+    },
     getMe() {
-      return client.get<Me>(`${IAM}/me`);
+      return client.get<Me>(`${IAM}/me`, { cache: 'no-store' });
     },
     beginTotpEnrollment() {
       return client.post<components['schemas']['TotpEnrollment']>(

@@ -125,7 +125,7 @@ public class OAuthController {
                       403);
                   StringBuilder form =
                       new StringBuilder(
-                              "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Authorize / 授权</title><h1>Authorize / 授权</h1><p>Client / 客户端: ")
+                              "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Auriga DSH · 授权 / Authorize</title><h1>Authorize / 授权</h1><p>Client / 客户端: ")
                           .append(HtmlUtils.htmlEscape(input.getOrDefault("client_id", "")))
                           .append("</p><p>Scopes / 权限范围: ")
                           .append(HtmlUtils.htmlEscape(input.getOrDefault("scope", "")))

@@ -209,14 +209,14 @@ try {
 
   // 2. shell integration: shortcuts and Apps & features entry (current user)
   check(
-    existsSync(join(startMenu, 'Auriga Desktop.lnk')) &&
-      existsSync(join(desktop, 'Auriga Desktop.lnk')),
+    existsSync(join(startMenu, 'Auriga DSH.lnk')) &&
+      existsSync(join(desktop, 'Auriga DSH.lnk')),
     'start menu and desktop shortcuts created',
   );
   const reg = regQuery();
   check(
     reg.status === 0 &&
-      /DisplayName\s+REG_SZ\s+Auriga Desktop/.test(reg.stdout) &&
+      /DisplayName\s+REG_SZ\s+Auriga DSH/.test(reg.stdout) &&
       /UninstallString\s+REG_SZ\s+.*uninstall\.ps1/.test(reg.stdout),
     'HKCU uninstall entry written',
     registryKey,
@@ -467,8 +467,8 @@ try {
     un.stdout.trim(),
   );
   check(
-    !existsSync(join(startMenu, 'Auriga Desktop.lnk')) &&
-      !existsSync(join(desktop, 'Auriga Desktop.lnk')) &&
+    !existsSync(join(startMenu, 'Auriga DSH.lnk')) &&
+      !existsSync(join(desktop, 'Auriga DSH.lnk')) &&
       regQuery().status !== 0,
     'uninstall removes shortcuts and registry entry',
   );

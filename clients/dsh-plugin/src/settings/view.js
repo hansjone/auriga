@@ -3,11 +3,12 @@
 const messages = {
   zh: {
     desktop: '桌面更新',
+    desktopConfirmationRequired:
+      '更新地址尚未明确确认。请使用平台地址、IP 模式及地址确认参数重新安装 Desktop。',
     update: '更新',
     checkUpdate: '检查更新',
     autoCheck: '自动检查',
-    updateRestart:
-      '下载后请关闭 Auriga Desktop，退出时安装，下次启动使用新版。',
+    updateRestart: '下载后请关闭 Auriga DSH，退出时安装，下次启动使用新版。',
     platform: '平台',
     address: '平台地址',
     save: '保存',
@@ -66,7 +67,7 @@ const messages = {
     invalidSettings: '设置无效',
     invalidOrigin: '请输入纯平台地址',
     httpsRequired: '请使用 HTTPS',
-    invalidPlatform: '此地址不是 Auriga 平台',
+    invalidPlatform: '此地址不是 Auriga DSH 平台',
     http: '平台返回 HTTP ',
     tools: '平台工具',
     notProvided: '未提供',
@@ -75,11 +76,13 @@ const messages = {
   },
   en: {
     desktop: 'Desktop updates',
+    desktopConfirmationRequired:
+      'The update address needs confirmation. Reinstall Desktop with the platform address, IP mode and address confirmation parameters.',
     update: 'Update',
     checkUpdate: 'Check for updates',
     autoCheck: 'Check automatically',
     updateRestart:
-      'After download, close Auriga Desktop to install. Reopen to use the new version.',
+      'After download, close Auriga DSH to install. Reopen to use the new version.',
     platform: 'Platform',
     address: 'Platform address',
     save: 'Save',
@@ -138,7 +141,7 @@ const messages = {
     invalidSettings: 'Invalid settings',
     invalidOrigin: 'Enter a platform origin',
     httpsRequired: 'HTTPS required',
-    invalidPlatform: 'Not an Auriga platform',
+    invalidPlatform: 'Not an Auriga DSH platform',
     http: 'Platform returned HTTP ',
     tools: 'Platform tools',
     notProvided: 'Not supplied',
@@ -885,7 +888,7 @@ export function createSettingsView(
       { className: 'auriga-settings-content' },
       h(
         'section',
-        { className: 'auriga-status-card', 'aria-label': 'Auriga status' },
+        { className: 'auriga-status-card', 'aria-label': 'Auriga DSH status' },
         h('p', { role: 'status' }, summary),
         !managed && (!loggedIn || !ready) && h('p', null, t.local),
         action,
@@ -896,13 +899,15 @@ export function createSettingsView(
           'section',
           null,
           h('h3', null, t.desktop),
+          state.desktop.confirmationRequired &&
+            h('p', { role: 'alert' }, t.desktopConfirmationRequired),
           h(
             'label',
             null,
             h('input', {
               type: 'checkbox',
               checked: state.desktop.enabled,
-              disabled: busy,
+              disabled: busy || state.desktop.confirmationRequired,
               onChange: (/** @type {any} */ e) =>
                 run(async () => {
                   await call('auriga/settings/desktop', {
@@ -916,12 +921,13 @@ export function createSettingsView(
           state.desktop.available &&
             h('p', null, state.desktop.available.version),
           h('p', null, t.updateRestart),
-          button(t.checkUpdate, () =>
-            run(async () => {
-              await call('auriga/settings/desktop', { action: 'check' });
-              await readState();
-            }),
-          ),
+          !state.desktop.confirmationRequired &&
+            button(t.checkUpdate, () =>
+              run(async () => {
+                await call('auriga/settings/desktop', { action: 'check' });
+                await readState();
+              }),
+            ),
           state.desktop.available &&
             !state.desktop.restartRequired &&
             button(t.update, () =>

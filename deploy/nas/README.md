@@ -234,9 +234,9 @@ health、keys 200 或托管实例 READY 均不能代替插件 READY/互发。
 票只由脚本私下读取，不写参数、环境变量或输出。不允许用内部服务票代替成员身份。
 未配置该钩子时消息服务保留运行，恢复返回2并显示 `SERVICES_READY`/公告待验证；不会报完整
 `READY`。钩子拒绝/失败保持降级。修复入口不恢复任何缺失的原设备 ledger；仍须单独授权的恢复流程。
-  `test/announcement-hook-security.sh` 仅在短命私有 mount namespace/16MiB tmpfs 中验证真实属主、
-  权限及 uid65534 替换竞态，Compose/公告为编排替身；不能代替真实授权验收。
-  消息恢复夹具复用该隔离环境；缺 Linux root/namespace/不同 UID 能力时具名 SKIP。
+`test/announcement-hook-security.sh` 仅在短命私有 mount namespace/16MiB tmpfs 中验证真实属主、
+权限及 uid65534 替换竞态，Compose/公告为编排替身；不能代替真实授权验收。
+消息恢复夹具复用该隔离环境；缺 Linux root/namespace/不同 UID 能力时具名 SKIP。
 `deploy/nas/test/collab.sh` 覆盖 domain/ip/proxy 的实际 init/render、权限与篡改负例；
 可选 `AURIGA_NAS_COLLAB_LIVE_IMAGE` 启用 `collab-live.sh`，仅启动单 collab 服务和临时 PG
 验证真实签名发布，不宣称已验证 IAM 入网、插件 READY 或整栈云↔桌。
@@ -397,3 +397,11 @@ prepare 命令并验证可持久写入；结束时仅清理标签匹配的测试
 旧 LiteLLM 安装先运行 `sh scripts/materials-upgrade.sh status` 核对原收据 SHA256，再执行 `stage SHA256`、`render.sh`、上述建库步骤及服务切换；健康和真实调用验收后执行 `commit SHA256`。原封存目录、identity/TLS/runtime根及collab收据不改写，新秘密和版本收据独立追加。commit 前可用 `rollback SHA256` 标记回退并从保留的旧 bundle/stack.env 恢复服务；失败后 stage 复用原批秘密。不能删除旧收据或重建身份绕过校验。完整步骤与限制见 [NAS 开发说明](../../docs/dev/nas.md#已有数据库卷接入中转站)。
 
 安装材料边界：此数据库脚本不迁移已封存的安装收据。旧配方的 bootstrap.receipt 与新配方/文件集合不一致时，render 会拒绝自动轮换。须由主控准备经过审核的材料升级或独立测试部署切换，保留原 IAM/网络身份及现场证据；不能删除收据、重建 CA 或覆盖旧身份材料来绕过。该条件满足前，不应把建库成功视为整套 NAS 升级成功。
+
+### Desktop 发行卷与公钥
+
+先将独立 Ed25519 发行公钥（不是私钥）放入数据根 `config/desktop/release-public.pem`，再在 `stack.env` 配置 `AURIGA_DESKTOP_PUBLISHER_TENANT_ID=<运营发行租户 UUID>`。留空默认关闭 Desktop 接口。render 校验 UUID 和公钥类型，仅在启用时生成三个 `AURIGA_RESOURCE_DESKTOP_*` 环境项。发行公钥必须与安装包内公钥一致。
+
+公开 Compose 将数据根 `desktop/` 持久挂到 `/var/lib/auriga/desktop`（uid 10001 独占写入），将 `config/desktop/` 只读挂到 `/etc/auriga/desktop`。备份 Desktop 目录、resource 数据库、stack.env 与公钥；私钥只保留在离线签名机。
+
+已有部署升级时，在备份后把本版本的 `docker-compose.yml` 和 `scripts/render.sh` 同步到原固定发行配方目录，再按原流程 render/start；不能另起配方目录、临时叠加未核准的 Compose 文件或替换消息 operator JAR。部署前后按消息网络升级门禁核对配方、镜像及全部消息服务；仅换 platform 镜像不能代替配方接线。

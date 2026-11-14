@@ -42,6 +42,8 @@ export function verifyRelease(
     now = Date.now(),
     currentVersion = '0.0.0',
     highestSequence = 0,
+    highestPublishedAt,
+    highestVersion,
     acceptedDigest = null,
   } = {},
 ) {
@@ -128,10 +130,12 @@ export function verifyRelease(
     throw new Error('expired or future release');
   if (
     compare(body.version, currentVersion) < 0 ||
+    (highestVersion && compare(body.version, highestVersion) < 0) ||
     compare(currentVersion, body.minimumVersion) < 0
   )
     throw new Error('release downgrade or minimum version');
   if (
+    (highestPublishedAt && published < Date.parse(highestPublishedAt)) ||
     body.sequence < highestSequence ||
     (body.sequence === highestSequence && body.sha256 !== acceptedDigest)
   )

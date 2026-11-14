@@ -1,3 +1,4 @@
+import { normalizePlatformBinding } from '../runtime/platform-origin.mjs';
 /**
  * Build the Windows installer package.
  *
@@ -24,6 +25,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
+import { buildBroker } from '../../shell-auth/build.mjs';
 import { parse as parseVersion } from '../runtime/semver-lite.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
 import {
@@ -116,11 +118,11 @@ function run(command, args, options = {}) {
 }
 
 const NOTICE = [
-  'Auriga Desktop',
+  'Auriga DSH',
   '',
-  'Auriga Desktop is built on the open-source DSH (@deepseek-ai/dsh, MIT License).',
+  'Auriga DSH is built on the open-source DSH (@deepseek-ai/dsh, MIT License).',
   'The upstream package is installed unmodified; its licence text is kept in',
-  'LICENSE.dsh.txt. Auriga Desktop is not an official DeepSeek product and is not',
+  'LICENSE.dsh.txt. Auriga DSH is not an official DeepSeek product and is not',
   'endorsed by DeepSeek. Node.js is bundled under its own licence (LICENSE.node.txt).',
   '',
 ].join('\r\n');
@@ -385,15 +387,21 @@ export async function build(args) {
   );
   writeFileSync(join(payload, 'licenses', 'NOTICE.txt'), NOTICE);
   if (args['platform-origin']) {
-    const origin = new URL(args['platform-origin']).origin;
+    const selected = normalizePlatformBinding(args['platform-origin'], {
+      accessMode: args['platform-access-mode'],
+      confirmedOrigin: args['confirm-platform-origin'],
+    });
+    const { origin, ...platformBinding } = selected;
     mkdirSync(join(payload, 'auriga'), { recursive: true });
     writeFileSync(
       join(payload, 'auriga', 'defaults.json'),
-      JSON.stringify({ platformOrigin: origin }, null, 2) + '\n',
+      JSON.stringify({ platformOrigin: origin, platformBinding }, null, 2) +
+        '\n',
     );
   }
 
   // 4. Our own runtime and Windows wrappers.
+  const shellAuthManifest = buildBroker(join(payload, 'auriga', 'shell-auth'));
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });
@@ -439,6 +447,12 @@ export async function build(args) {
     id: '',
     bundleVersion: desktopVersion,
     product: 'Auriga Desktop',
+    shellAuth: {
+      version: shellAuthManifest.version,
+      manifestSha256: sha256File(
+        join(payload, 'auriga/shell-auth/broker-manifest.json'),
+      ),
+    },
     target: 'win-x64',
     size: {
       upstreamAndPluginBeforeTrim: sizeBefore,

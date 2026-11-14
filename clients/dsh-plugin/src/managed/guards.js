@@ -94,7 +94,7 @@ export function guardPluginManager(pluginManager) {
   for (const name of NATIVE_PLUGIN_MUTATIONS) {
     if (typeof pluginManager[name] !== 'function') continue;
     pluginManager[name] = async () => {
-      const error = new Error('plugin managed by Auriga');
+      const error = new Error('plugin managed by Auriga DSH');
       error.code = 'common.forbidden';
       throw error;
     };

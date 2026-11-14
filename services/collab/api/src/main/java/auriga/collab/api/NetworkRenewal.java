@@ -8,14 +8,14 @@ import auriga.contracts.msgnet.model.ProjectionReceipt;
 import auriga.contracts.msgnet.model.ProjectionRequest;
 import auriga.contracts.msgnet.model.ProtocolMaterial;
 import auriga.contracts.msgnet.model.Publication;
-import auriga.contracts.msgnet.model.RenewalStatus;
+import auriga.contracts.msgnet.model.RenewalStatusOutput;
 import auriga.contracts.msgnet.model.SealedMaterial;
 
 /** collab 拥有的续期端口；调用者身份由安装认证上下文提供，不能从请求字段自认。 */
 public interface NetworkRenewal {
   Publication currentPublication();
 
-  RenewalStatus status();
+  RenewalStatusOutput status();
 
   ControlPackage createControlPackage(ControlPackage request);
 

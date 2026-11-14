@@ -1,4 +1,4 @@
-# Auriga Desktop installer (Windows test build)
+# Auriga DSH installer (Windows test build)
 
 设计见 `docs/design/dsh-installer.zh.md`。包一层不 fork，上游 `@deepseek-ai/dsh`、自带 Node 与 pnpm 是可替换组件，我们的插件、首启配置与安装核心单独存放。
 
@@ -110,3 +110,19 @@ C 正常持锁或在两次加锁间提交新 revision 时，E 有界退避重试
 第 2 轮决定允许隔离后以 `private_only` 正常重启。启动器显示“共享技能已停用，建议新建会话”，原历史保留，也允许恢复旧会话；已载入旧上下文的影响是已知残余风险。guardian 崩溃至下次启动期间，DSH 可能继续运行。正常配置和预置技能均保留；本提交未经 NAS 部署，Linux 争锁、C 的真实安装联调及完整页面验收由 F 线执行。
 
 本机 Windows 实测：先按 installer 锁在 `target/dsh` 安装隔离的 DSH，再在仓库根执行 `node clients/installer/scripts/guardian-real-dsh.mjs`；它只使用临时 DSH_HOME、随机端口，并在结束时停止自己的进程。缓存摘要目录内应有唯一匹配摘要的原字节文件；签名撤销表也以内容摘要缓存。prepared 内容位于 `staging/<transactionId>/<manifest.name>/`，applied 回执按 K 路径布局。C 只能在 E 许可的身份、代次和完整集合完全一致时切换 current，停用回执须先对账后才能重新申请共享。
+
+## IP 模式 HTTP 更新的信任边界
+
+域名模式仍只允许 HTTPS。HTTP 仅支持明确确认的内网或回环字面 IP：IPv4 为 RFC1918 私有网段和 127.0.0.0/8，IPv6 为 ULA（fc00::/7）和 ::1。公网 IP、域名、localhost、IPv4 映射 IPv6 和十进制等 IP 别名均拒绝，避免安装后无法登录。示例中的私有 IP 仅用于说明：
+
+```powershell
+node payload/auriga/runtime/cli.mjs install --payload payload --root <独立安装目录> --data-home <独立数据目录> --platform-origin http://192.168.2.10:8080 --platform-access-mode ip --confirm-platform-origin http://192.168.2.10:8080 # gitleaks:allow
+```
+
+构建器 build.mjs 也接受这三个参数作为安装配置。HTTPS 地址会规范化主机名、默认端口、末尾斜杠和路径，只保存 origin；拒绝带用户名或口令的地址。HTTP 地址和确认值先分别规范化后比较，允许末尾斜杠和默认端口，但拒绝路径、查询和片段。主机必须是上述私有或回环字面 IP。
+
+首次绑定写入安装目录 desktop-origin.json。带明确确认参数重新安装时，安装器按本次确认结果重写该文件，不保留旧格式或多余字段。已有 HTTP 绑定缺少 ip 模式或确认标记时，必须使用上面的三个参数重新安装；不自动兼容或猜测同意，没有参数的重装会明确报错，客户端设置也会显示需要重新确认的提示。正常升级未带确认参数时保留已验证的绑定。Windows install.ps1 对应参数为 -PlatformOrigin、-PlatformAccessMode 和 -ConfirmPlatformOrigin。
+
+更新的信任根始终是安装包内固定的发行 Ed25519 公钥，绝不从平台下载公钥。签名覆盖版本、序号、签发时间和包 SHA-256；客户端持久化已见最高版本、序号和签发时间，并拒绝版本回退、旧清单和篡改。下载完成先核对签名清单的包 SHA-256，再解包验证文件摘要和包 ID，最后执行安装事务及冒烟回滚。HTTP 仍会泄露下载元数据，也可被阻断；签名不能保证可用性或保密性。
+
+首次下载的安装程序及公钥需要通过受信的独立渠道核验 SHA-256 或人工预置，不能把 HTTP 首次下载本身当作信任来源。门户 HTTP 下载入口可用不代表首次引导已经具备安全认证。

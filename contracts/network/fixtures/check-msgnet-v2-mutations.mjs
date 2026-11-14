@@ -86,6 +86,26 @@ export function discoverPredicates(source) {
     for (const atom of leaves(source, start, end))
       targets.push({ ...atom, replacement: 'true' });
   }
+  // 跳过字符串和注释，逐个翻转比较运算符，包含回调表达式。
+  const tokens =
+    /\/\/[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|===|!==|<=|>=|(?<![=<>])<(?![=<])|(?<![=<>])>(?![=>])/g;
+  const flips = {
+    '===': '!==',
+    '!==': '===',
+    '<': '<=',
+    '<=': '<',
+    '>': '>=',
+    '>=': '>',
+  };
+  for (const match of source.matchAll(tokens)) {
+    if (flips[match[0]])
+      targets.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        comparison: true,
+        replacement: flips[match[0]],
+      });
+  }
   return [
     ...new Map(
       targets.map((t) => [`${t.start}:${t.end}:${t.replacement}`, t]),
@@ -96,7 +116,14 @@ export async function checkMutations() {
   const fixture = JSON.parse(
     readFileSync(new URL('auto-renewal-v2-vectors.json', directory)),
   );
+  fixture.local_cases = JSON.parse(
+    readFileSync(new URL('msgnet-local-projection-vectors.json', directory)),
+  );
   const modules = [
+    [
+      'msgnet-local-projection-oracle.mjs',
+      [['local_cases', 'evaluateLocalProjection']],
+    ],
     ['msgnet-v2-oracle.mjs', [['cases', 'evaluate']]],
     [
       'msgnet-v2-boundary-oracle.mjs',
@@ -155,7 +182,12 @@ export async function checkMutations() {
         file: name,
         line: original.slice(0, target.start).split('\n').length,
         expression: original
-          .slice(target.start, target.end)
+          .slice(
+            target.comparison
+              ? original.lastIndexOf('\n', target.start) + 1
+              : target.start,
+            target.comparison ? original.indexOf('\n', target.end) : target.end,
+          )
           .trim()
           .replace(/\s+/g, ' '),
         replacement: target.replacement,

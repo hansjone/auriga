@@ -79,9 +79,9 @@ node scripts/beta-ui/demo-network-send.mjs status --state $demoB
 
 1. 在两个 DSH 内分别创建一个普通目标会话 A-target/B-target，记录会话 ID 与工作目录。可各开一个不登记/不接收的对照会话；不要把 shell 工具调用或测试 observer 当成真实会话。
 2. 在各自目标会话通过宿主真正的工具执行调用 `auriga_network_join`，参数 `{}`。若通过模型对话触发，必须看到真实工具调用与返回 `status=registered`/地址，模型写出的 JSON 不算。脚本不配模型；若当前宿主没有人工工具执行入口且模型未配置，这一步是明确阻塞，不能改用测试桥替代。
-3. 打开每端 DSH 原生设置中的 Auriga“接收消息”，找到相应 sessionId/地址，显式勾选接收。要求设置确认、无 pending；只复制真实返回的目标地址，不猜 node/local。记录 A-address/B-address。
+3. 打开每端 DSH 原生设置中的 Auriga DSH“接收消息”，找到相应 sessionId/地址，显式勾选接收。要求设置确认、无 pending；只复制真实返回的目标地址，不猜 node/local。记录 A-address/B-address。
 4. 在 A-target 真正调用 `auriga_send_message`，参数示例为 `{"target":"<B-address>","body":{"subtype":"text","text":"beta-A-to-B-<本轮唯一标记>"}}`。只发一次；`request_submitted` 是裁剪的提交结果，不是接收/模型执行回执。
-5. 等 B-target 原生历史出现带 `[Auriga external message <message_id>]` 的该输入并持久可读，核其只有一次。再在 B-target 用同样工具向 A-address 发送另一个唯一标记，核 A-target 同样一次；不要因模型忙或没有回复就另造新幂等键重发。
+5. 等 B-target 原生历史出现带 `[Auriga DSH external message <message_id>]` 的该输入并持久可读，核其只有一次。再在 B-target 用同样工具向 A-address 发送另一个唯一标记，核 A-target 同样一次；不要因模型忙或没有回复就另造新幂等键重发。
 6. 如需关闭接收负例：在 B 设置中关闭并等确认，再由 A 发全新唯一正文；应拒绝且 B 无额外输入，对照会话也无输入。完整四表零新增/准确拒绝仍由主控服务器只读证据核对，不只看 UI。
 
 本流程只证明实际做到的会话收发。没有明确配置并真实观察模型回复，就不能称模型往返；已合 SEND4 也未把模型回复当判据。首次首联、递归子会话、跨租户、HA 等不在此入口验收范围。

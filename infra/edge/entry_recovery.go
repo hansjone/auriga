@@ -45,5 +45,5 @@ func (g *Gateway) instanceEntryRequired(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>恢复实例入口 / Restore instance entry</title></head><body><main><h1>正在恢复实例入口</h1><p>将通过门户重新验证当前会话。如果无法自动恢复，请点击下方入口；实例不会因此自动启动。</p><p lang="en">Revalidating your session through the portal. If recovery stops, use the link below. This does not start the instance.</p><p><a href="` + html.EscapeString(target) + `">重新进入实例 / Re-enter instance</a></p></main><script>` + script + `</script></body></html>`))
+	_, _ = w.Write([]byte(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Auriga DSH · 恢复实例入口 / Restore instance entry</title></head><body><main><h1>正在恢复实例入口</h1><p>将通过门户重新验证当前会话。如果无法自动恢复，请点击下方入口；实例不会因此自动启动。</p><p lang="en">Revalidating your session through the portal. If recovery stops, use the link below. This does not start the instance.</p><p><a href="` + html.EscapeString(target) + `">重新进入实例 / Re-enter instance</a></p></main><script>` + script + `</script></body></html>`))
 }
