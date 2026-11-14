@@ -1,4 +1,4 @@
-import { desktopUpdater } from './desktop.js';
+import { desktopUpdater, desktopStartupFailure } from './desktop.js';
 /* global AbortSignal */
 import { probeEndpoint } from '../network/diagnostic-probe.js';
 import {
@@ -265,7 +265,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     origin: config.platformOrigin,
   });
   const desktop = await desktopUpdater({ origin: config.platformOrigin }).catch(
-    () => undefined,
+    desktopStartupFailure,
   );
   let profileRetryAt = 0;
   async function refreshMemberName() {

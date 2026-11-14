@@ -1,4 +1,17 @@
+import { BRAND_NAME } from './brand.mjs';
+import { updateOrigin, normalizePlatformBinding } from './platform-origin.mjs';
 import { cleanupDownloads } from './update-state.mjs';
+import { createRequire } from 'node:module';
+import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
+import {
+  ProcessTree,
+  assertNTFS,
+  notifyPrivateOnly,
+  notifySharedRestart,
+} from './process-tree.mjs';
+import { Supervisor, packagedTrust } from './supervisor.mjs';
+import { superviseDsh } from './desktop-supervision.mjs';
+import { startShellAuth } from './shell-auth.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -156,20 +169,20 @@ export function assertLayout(root, dataHome) {
     const entries = readdirSync(root);
     if (entries.length > 0 && !entries.includes(INSTALL_MARKER))
       throw new Error(
-        'install directory is not empty and is not an Auriga Desktop installation',
+        `install directory is not empty and is not an ${BRAND_NAME} installation`,
       );
   }
 }
 
 function assertOwned(root) {
   if (!existsSync(join(root, INSTALL_MARKER)))
-    throw new Error(`not an Auriga Desktop installation: ${root}`);
+    throw new Error(`not an ${BRAND_NAME} installation: ${root}`);
 }
 
 // --------------------------------------------------------------- profile --
 
 /** Seed profile manifest and (only when absent) the patch with the platform address. */
-function seedProfile(dataHome, { platformOrigin }) {
+function seedProfile(dataHome, { platformOrigin, target }) {
   const dir = profileDir(dataHome);
   mkdirSync(join(dir, 'node_modules'), { recursive: true });
   writeFileSync(join(dir, DATA_MARKER), 'Auriga Desktop profile\n');
@@ -203,13 +216,42 @@ function seedProfile(dataHome, { platformOrigin }) {
         // The loader row must be complete: with only platformOrigin the plugin
         // rejects the config (issuer/clientId/providerId required) and the
         // login runtime never starts.
-        `  config: ${JSON.stringify({ connect: { platformOrigin: origin, issuer: origin, clientId: CLIENT_ID, providerId: PROVIDER_ID } })}`,
+        `  config: ${JSON.stringify({ connect: { ...(origin.startsWith('http:') ? { allowLocalHttp: true } : {}), platformOrigin: origin, issuer: origin, clientId: CLIENT_ID, providerId: PROVIDER_ID } })}`,
       );
     } else {
       rows.push('  config: {}');
     }
     writeFileSync(patch, rows.join('\n') + '\n');
   }
+  // Use the locked upstream parser, preserving !!js as inert scalar text.
+  // Invalid/conflicting patches keep their original bytes and cannot enable sharing.
+  try {
+    const yaml = createRequire(join(target, 'upstream', 'app', 'package.json'))(
+      'yaml',
+    );
+    upgradeSkillPatch(patch, yamlParser(yaml), dataHome);
+  } catch (error) {
+    console.error(`${BRAND_NAME} 共享技能配置未启用：${error.message}`);
+  }
+}
+
+function assertGuardianCompatible(target, dataHome) {
+  const stateFile = join(dataHome, 'auriga', 'guardian', 'state.json');
+  if (
+    !existsSync(stateFile) ||
+    existsSync(join(target, 'auriga', 'runtime', 'supervisor.mjs'))
+  )
+    return;
+  const state = readJson(stateFile);
+  const current = join(dataHome, 'auriga', 'skills-active', 'current');
+  if (
+    state.guardian?.state !== 'private_only' ||
+    state.pendingIsolation ||
+    (existsSync(current) && readdirSync(current).length)
+  )
+    throw new Error(
+      '目标版本缺少可信 guardian；请先停用并隔离共享技能再回滚。',
+    );
 }
 
 const copyTree = (from, to) =>
@@ -482,12 +524,32 @@ export function install({
   root,
   dataHome,
   platformOrigin,
+  platformBinding = {},
   smoke = defaultSmoke,
   fault = noFault,
 }) {
+  const explicitConfirmation = platformBinding.confirmedOrigin !== undefined;
+  const selectedBinding = platformOrigin
+    ? normalizePlatformBinding(platformOrigin, platformBinding)
+    : undefined;
+  if (explicitConfirmation && !selectedBinding)
+    throw new Error('explicit confirmation requires a platform address');
+  platformOrigin = selectedBinding?.origin;
   root = resolve(root);
   dataHome = resolve(dataHome);
   assertLayout(root, dataHome);
+  const bindingFile = join(root, 'desktop-origin.json');
+  const previousBinding =
+    !explicitConfirmation && existsSync(bindingFile)
+      ? readJson(bindingFile)
+      : null;
+  if (previousBinding) {
+    updateOrigin(previousBinding.origin, previousBinding);
+    if (selectedBinding && previousBinding.origin !== selectedBinding.origin)
+      throw new Error(
+        'platform binding differs; reinstall with explicit address confirmation',
+      );
+  }
   // An existing installation keeps its data directory: moving data is not
   // supported, so a different one is refused before anything changes.
   const existing = existsSync(join(root, 'install.json'))
@@ -500,6 +562,7 @@ export function install({
     );
   // Verify before anything is copied into place or executed.
   const manifest = verifyPackage(payload, { trees: false });
+  assertGuardianCompatible(payload, dataHome);
   mkdirSync(join(root, 'versions'), { recursive: true });
   writeFileSync(
     join(root, INSTALL_MARKER),
@@ -540,15 +603,13 @@ export function install({
     target,
     fault,
     apply() {
-      seedProfile(dataHome, { platformOrigin });
+      seedProfile(dataHome, { platformOrigin, target });
       syncPlugin(target, dataHome);
       smoke(target, dataHome);
     },
   });
-  if (platformOrigin && !existsSync(join(root, 'desktop-origin.json')))
-    writeJsonAtomic(join(root, 'desktop-origin.json'), {
-      origin: new URL(platformOrigin).origin,
-    });
+  if (selectedBinding && (explicitConfirmation || !previousBinding))
+    writeJsonAtomic(bindingFile, selectedBinding);
   return { id, previous, upgraded: Boolean(previous && previous !== id) };
 }
 
@@ -563,6 +624,7 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
   if (!existsSync(dir))
     throw new Error(`previous version missing: ${state.previous}`);
   verifyPackage(dir);
+  assertGuardianCompatible(dir, state.dataHome);
   transition({
     root,
     dataHome: state.dataHome,
@@ -573,7 +635,7 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
     fault,
     apply() {
       if (!restorePluginParts(state.dataHome, state.previous)) {
-        seedProfile(state.dataHome, {});
+        seedProfile(state.dataHome, { target: dir });
         syncPlugin(dir, state.dataHome);
       }
       smoke(dir, state.dataHome);
@@ -652,7 +714,7 @@ export function desktopSession(root) {
           continue;
         }
       }
-      throw new Error('Auriga Desktop 已在运行，请先退出。');
+      throw new Error(`${BRAND_NAME} 已在运行，请先退出。`);
     }
   }
   throw new Error('desktop session busy');
@@ -661,8 +723,36 @@ export function desktopSession(root) {
 export async function launch({ root, args = [], env = process.env }) {
   root = resolve(root);
   assertOwned(root);
-  const session = desktopSession(root);
+  const initial = readState(root);
+  if (!initial) throw new Error('installation state missing');
+  verifyPackage(versionDir(root, initial.current), { trees: false });
+  assertNTFS(initial.dataHome);
+  const tree = new ProcessTree(initial.dataHome);
+  const oldProcesses = [
+    tree.record.launcher,
+    tree.record.root,
+    ...tree.record.children,
+  ].filter(Boolean);
+  const supervisor = new Supervisor(
+    initial.dataHome,
+    tree,
+    packagedTrust(versionDir(root, initial.current)),
+  );
+  const releaseSingleton = tree.singleton();
+  let session, shellAuth;
+  const hasShell = existsSync(
+    join(versionDir(root, initial.current), 'auriga/shell-auth/desktop.mjs'),
+  );
+  if (hasShell) supervisor.shellSnapshot = () => shellAuth?.snapshot();
+
   try {
+    await supervisor.prepare();
+    const sessionFile = join(root, 'desktop-session.json');
+    if (existsSync(sessionFile) && (await tree.isStopped())) {
+      const previous = readJson(sessionFile);
+      if (oldProcesses.some((p) => p.pid === previous.pid)) rmSync(sessionFile);
+    }
+    session = desktopSession(root);
     recover(root);
     cleanupDownloads(root, { stopped: true });
     const { applyPending } = await import('./update.mjs');
@@ -670,34 +760,65 @@ export async function launch({ root, args = [], env = process.env }) {
       try {
         await applyPending(root);
       } catch {
-        console.error('Auriga Desktop 更新失败，已保留旧版。');
+        console.error(`${BRAND_NAME} 更新失败，已保留旧版。`);
       }
     };
     await apply();
     const state = readState(root);
-    if (!state) throw new Error(`no installation state in ${root}`);
     const dir = versionDir(root, state.current);
-    const child = spawn(
-      nodeBin(dir),
-      [dshBin(dir), '--profile', PROFILE, ...args],
-      {
-        stdio: 'inherit',
-        env: launchEnv(dir, state.dataHome, {
-          ...env,
-          AURIGA_DESKTOP_ROOT: root,
-          AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
-        }),
+    // The update transaction may have changed packaged trust or profile bytes.
+    verifyPackage(dir, { trees: false });
+    supervisor.trust = packagedTrust(dir);
+    if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
+      supervisor.shellSnapshot = () => shellAuth?.snapshot();
+      shellAuth = await startShellAuth({ root, dataHome: state.dataHome, dir });
+    }
+    await supervisor.reconcile(true);
+    if (
+      supervisor.privateOnly ||
+      supervisor.guardian.read()?.guardian.state === 'private_only'
+    )
+      notifyPrivateOnly();
+    const status = await superviseDsh({
+      tree,
+      supervisor,
+      session,
+      notify: notifySharedRestart,
+      attach: async (child) => {
+        if (shellAuth) {
+          try {
+            await shellAuth.attach(child);
+          } catch {
+            child.stdio[3]?.destroy();
+            console.error('Auriga 平台通道不可用，本地 DSH 继续运行。');
+          }
+        }
       },
-    );
-    if (child.pid) session.child(child.pid);
-    const status = await new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('exit', (code) => resolve(code ?? 1));
+      start: () =>
+        spawn(nodeBin(dir), [dshBin(dir), '--profile', PROFILE, ...args], {
+          stdio: shellAuth
+            ? ['inherit', 'inherit', 'inherit', 'pipe']
+            : 'inherit',
+          env: launchEnv(dir, state.dataHome, {
+            ...env,
+            AURIGA_DESKTOP_ROOT: root,
+            AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
+          }),
+        }),
     });
     session.child(process.pid);
     await apply();
     return status;
   } finally {
-    session.close();
+    try {
+      try {
+        await shellAuth?.close();
+      } finally {
+        await tree.stopTree();
+      }
+    } finally {
+      session?.close();
+      releaseSingleton();
+    }
   }
 }

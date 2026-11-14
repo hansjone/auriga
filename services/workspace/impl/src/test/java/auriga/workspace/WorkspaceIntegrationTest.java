@@ -9,6 +9,7 @@ import auriga.common.persistence.*;
 import auriga.common.security.*;
 import auriga.contracts.node.v1.*;
 import auriga.contracts.org.v1.*;
+import auriga.contracts.resource.v1.*;
 import auriga.org.web.model.WorkspacePolicy;
 import auriga.testsupport.PostgresExtension;
 import auriga.workspace.api.WorkspaceInputs;
@@ -162,6 +163,650 @@ class WorkspaceIntegrationTest {
   @AfterEach
   void close() {
     sessions.close();
+  }
+
+  @Test
+  void unifiedIncrementalIntentsWaitForGapsAndApplyInOrder() throws Exception {
+    var control = new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    var first = unifiedReviewRef("first", false);
+    var second = unifiedReviewRef("second", false);
+    var third = unifiedReviewRef("third", false);
+    var calls = new ArrayList<Long>();
+    var refs =
+        Map.of(
+            first.getIdentity(), first, second.getIdentity(), second, third.getIdentity(), third);
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              if (!request.getInstanceId().equals(instance.toString()))
+                throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+              assertEquals(tenant, TenantContext.require());
+              calls.add(request.getSelectionRevision());
+              var answer =
+                  ResolveUnifiedResourcesResponse.newBuilder()
+                      .setSelectionRevision(request.getSelectionRevision())
+                      .setRevocations(unifiedReviewRevocations());
+              request
+                  .getSelectionsList()
+                  .forEach(selection -> answer.addResources(refs.get(selection.getIdentity())));
+              return answer.build();
+            })) {
+      var one =
+          UnifiedSelection.newBuilder()
+              .setIdentity(first.getIdentity())
+              .setAction("install")
+              .build();
+      var two = one.toBuilder().setIdentity(second.getIdentity()).build();
+      var three = one.toBuilder().setIdentity(third.getIdentity()).build();
+      resources.record(tenant, instance, owner, 2, List.of(two));
+      resources.reconcile();
+      assertEquals(List.of(), calls, "revision 2 must wait for missing revision 1");
+      assertEquals(0, resources.snapshot(tenant, instance).spec().getResourceSelectionRevision());
+      resources.record(tenant, instance, owner, 1, List.of(one));
+      resources.record(tenant, instance, owner, 1, List.of(one));
+      resources.reconcile();
+      assertEquals(List.of(1L, 2L), calls);
+      assertEquals(
+          Set.of(first, second),
+          new HashSet<>(resources.snapshot(tenant, instance).spec().getUnifiedResourcesList()));
+      resources.apply(tenant, instance, owner, 1, List.of(one));
+      resources.record(tenant, instance, owner, 3, List.of(three));
+      resources.reconcile();
+      resources.reconcile();
+      assertEquals(List.of(1L, 2L, 3L), calls, "duplicates must not resolve again");
+      assertEquals(3, resources.snapshot(tenant, instance).spec().getUnifiedResourcesCount());
+      assertThrows(
+          AurigaException.class, () -> resources.record(tenant, instance, owner, 2, List.of(one)));
+      long applied =
+          TenantContext.call(
+              tenant,
+              () ->
+                  store.tx(
+                      () ->
+                          store.jdbc.queryForObject(
+                              "SELECT count(*) FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND applied",
+                              Long.class,
+                              tenant,
+                              instance)));
+      assertEquals(3, applied);
+    }
+    assertNotNull(control.node);
+  }
+
+  @Test
+  void unifiedOldUncontainedIntentIsDurableAndNeverSilentlyAcknowledged() throws Exception {
+    new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    var present = unifiedReviewRef("present", false);
+    var absent = unifiedReviewRef("absent", false);
+    seedUnifiedReview(instance, 3, List.of(present));
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              fail("old revision cannot be resolved as a new operation");
+              return null;
+            })) {
+      var missing =
+          UnifiedSelection.newBuilder()
+              .setIdentity(absent.getIdentity())
+              .setAction("install")
+              .build();
+      assertThrows(
+          AurigaException.class,
+          () -> resources.apply(tenant, instance, owner, 1, List.of(missing)));
+      boolean applied =
+          TenantContext.call(
+              tenant,
+              () ->
+                  store.tx(
+                      () ->
+                          store.jdbc.queryForObject(
+                              "SELECT applied FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision=1",
+                              Boolean.class,
+                              tenant,
+                              instance)));
+      assertFalse(applied, "unknown old intent must remain pending for reconciliation");
+      var included = missing.toBuilder().setIdentity(present.getIdentity()).build();
+      var before = resources.snapshot(tenant, instance).spec();
+      assertEquals(before, resources.apply(tenant, instance, owner, 2, List.of(included)).spec());
+    }
+  }
+
+  @Test
+  void unifiedRenewalPreservesRemovedAndRenewsHealthyEntriesIndependently() throws Exception {
+    new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    var removed = unifiedReviewRef("removed", true);
+    var healthy = unifiedReviewRef("healthy", false);
+    var unavailable = unifiedReviewRef("unavailable", false);
+    seedUnifiedReview(instance, 1, List.of(removed, healthy, unavailable));
+    var renewed =
+        healthy.toBuilder()
+            .setLease(
+                healthy.getLease().toBuilder()
+                    .setExpiresAt(clock.instant().plusSeconds(10800).toString()))
+            .build();
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              if (!request.getInstanceId().equals(instance.toString()))
+                throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+              calls.incrementAndGet();
+              assertEquals(tenant, TenantContext.require());
+              var actions = new HashMap<String, String>();
+              request
+                  .getSelectionsList()
+                  .forEach(s -> actions.put(s.getIdentity().getPackageId(), s.getAction()));
+              assertEquals("remove", actions.get(removed.getIdentity().getPackageId()));
+              assertEquals("enable", actions.get(healthy.getIdentity().getPackageId()));
+              assertEquals("install", actions.get(unavailable.getIdentity().getPackageId()));
+              return ResolveUnifiedResourcesResponse.newBuilder()
+                  .setSelectionRevision(1)
+                  .addResources(renewed)
+                  .setRevocations(unifiedReviewRevocations())
+                  .build();
+            })) {
+      resources.record(
+          tenant,
+          instance,
+          owner,
+          1,
+          List.of(
+              UnifiedSelection.newBuilder()
+                  .setIdentity(removed.getIdentity())
+                  .setAction("remove")
+                  .build(),
+              UnifiedSelection.newBuilder()
+                  .setIdentity(healthy.getIdentity())
+                  .setAction("enable")
+                  .build(),
+              UnifiedSelection.newBuilder()
+                  .setIdentity(unavailable.getIdentity())
+                  .setAction("install")
+                  .build()));
+      requestUnifiedRefresh(instance);
+      clock.now = clock.now.plusSeconds(2000);
+      resources.reconcile();
+      assertEquals(1, calls.get());
+      var view = resources.snapshot(tenant, instance);
+      var actual = new HashMap<String, UnifiedResourceRef>();
+      view.spec()
+          .getUnifiedResourcesList()
+          .forEach(r -> actual.put(r.getIdentity().getPackageId(), r));
+      assertEquals(
+          removed,
+          actual.get(removed.getIdentity().getPackageId()),
+          "unconfirmed tombstone must remain byte-for-byte REMOVED");
+      assertEquals(renewed, actual.get(healthy.getIdentity().getPackageId()));
+      assertEquals(
+          unavailable,
+          actual.get(unavailable.getIdentity().getPackageId()),
+          "failed entry keeps its old signed expiry");
+      assertEquals(DesiredState.DESIRED_STATE_RUNNING, view.spec().getDesired());
+    }
+  }
+
+  @Test
+  void unifiedRenewalSkipsMissingOriginalIntentAndContinuesOtherInstances() throws Exception {
+    policy.maxConcurrentStarts(2);
+    new RecoveryControl(tenant);
+    UUID missing =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    var missingRef = unifiedReviewRef("missing-original", false);
+    seedUnifiedReview(missing, 1, List.of(missingRef));
+    UUID otherOwner = UuidV7.next();
+    UUID healthy =
+        TenantContext.call(tenant, () -> (UUID) service.open(otherOwner).instance().get("id"));
+    var healthyRef = unifiedReviewRef("healthy-original", false);
+    seedUnifiedReview(healthy, 1, List.of(healthyRef));
+    var renewed =
+        healthyRef.toBuilder()
+            .setLease(
+                healthyRef.getLease().toBuilder()
+                    .setExpiresAt(clock.instant().plusSeconds(10800).toString()))
+            .build();
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              assertNotEquals(
+                  missing.toString(),
+                  request.getInstanceId(),
+                  "missing original must never reach the resolver");
+              if (!request.getInstanceId().equals(healthy.toString()))
+                throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+              calls.incrementAndGet();
+              assertEquals("install", request.getSelections(0).getAction());
+              return ResolveUnifiedResourcesResponse.newBuilder()
+                  .setSelectionRevision(1)
+                  .addResources(renewed)
+                  .setRevocations(unifiedReviewRevocations())
+                  .build();
+            })) {
+      resources.record(
+          tenant,
+          healthy,
+          otherOwner,
+          1,
+          List.of(
+              UnifiedSelection.newBuilder()
+                  .setIdentity(healthyRef.getIdentity())
+                  .setAction("install")
+                  .build()));
+      var before = resources.snapshot(tenant, missing).spec();
+      requestUnifiedRefresh(missing);
+      requestUnifiedRefresh(healthy);
+      clock.now = clock.now.plusSeconds(2000);
+      resources.reconcile();
+      assertEquals(1, calls.get());
+      assertEquals(before, resources.snapshot(tenant, missing).spec());
+      assertEquals(
+          List.of(renewed), resources.snapshot(tenant, healthy).spec().getUnifiedResourcesList());
+    }
+  }
+
+  @Test
+  void unifiedRenewalReplaysRecordedIntentAndAcceptsAuthoritySafetyDisable() throws Exception {
+    new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    var removed = unifiedReviewRef("removed", true);
+    var healthy = unifiedReviewRef("healthy", false);
+    var withdrawn = unifiedReviewRef("withdrawn", false);
+    seedUnifiedReview(instance, 3, List.of(removed, healthy, withdrawn));
+    var original =
+        UnifiedSelection.newBuilder()
+            .setIdentity(healthy.getIdentity())
+            .setAction("install")
+            .build();
+    var renewed =
+        healthy.toBuilder()
+            .setLease(
+                healthy.getLease().toBuilder()
+                    .setExpiresAt(clock.instant().plusSeconds(10800).toString()))
+            .build();
+    var disabled =
+        withdrawn.toBuilder()
+            .setInstallationRevision(2)
+            .setEnabled(false)
+            .setDesiredState(UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_DISABLED)
+            .build();
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              if (!request.getInstanceId().equals(instance.toString()))
+                throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+              calls.incrementAndGet();
+              assertEquals(
+                  List.of(original),
+                  request.getSelectionsList(),
+                  "resolver requires immutable original distribution actions");
+              return ResolveUnifiedResourcesResponse.newBuilder()
+                  .setSelectionRevision(3)
+                  .addAllResources(List.of(removed, renewed, disabled))
+                  .setRevocations(unifiedReviewRevocations())
+                  .build();
+            })) {
+      resources.record(tenant, instance, owner, 3, List.of(original));
+      requestUnifiedRefresh(instance);
+      clock.now = clock.now.plusSeconds(2000);
+      resources.reconcile();
+      assertEquals(1, calls.get());
+      var view = resources.snapshot(tenant, instance);
+      assertEquals(List.of(removed, renewed, disabled), view.spec().getUnifiedResourcesList());
+      assertEquals(DesiredState.DESIRED_STATE_RUNNING, view.spec().getDesired());
+    }
+  }
+
+  void requestUnifiedRefresh(UUID instance) {
+    store.in(
+        tenant,
+        () ->
+            store.jdbc.update(
+                "UPDATE instance SET unified_refresh_pending=true WHERE tenant_id=? AND id=?",
+                tenant,
+                instance));
+  }
+
+  UnifiedResourceRef unifiedReviewRef(String name, boolean removed) {
+    return UnifiedResourceRef.newBuilder()
+        .setIdentity(
+            UnifiedResourceIdentity.newBuilder()
+                .setTenantId(tenant.toString())
+                .setPackageId(UuidV7.next().toString())
+                .setVersionId(UuidV7.next().toString())
+                .setKind("skill")
+                .setVersion("1.0.0")
+                .setManifestDigest("sha256:" + "a".repeat(64)))
+        .setInstallationRevision(removed ? 2 : 1)
+        .setReleaseSequence(1)
+        .setEnabled(!removed)
+        .setDesiredState(
+            removed
+                ? UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_REMOVED
+                : UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_ENABLED)
+        .setEnvelope(
+            UnifiedEnvelope.newBuilder().setStatement(UnifiedStatement.newBuilder().setName(name)))
+        .setLease(
+            UnifiedLease.newBuilder().setExpiresAt(clock.instant().plusSeconds(3600).toString()))
+        .build();
+  }
+
+  ResourceRevocationList unifiedReviewRevocations() {
+    return ResourceRevocationList.newBuilder()
+        .setTenantId(tenant.toString())
+        .setRevision(1)
+        .build();
+  }
+
+  void seedUnifiedReview(UUID instance, long revision, List<UnifiedResourceRef> refs) {
+    TenantContext.run(
+        tenant,
+        () ->
+            store.tx(
+                () -> {
+                  var row = store.instance(instance);
+                  service.saveSpec(
+                      row,
+                      WorkspaceService.spec(row).toBuilder()
+                          .setResourceSelectionRevision(revision)
+                          .addAllUnifiedResources(refs)
+                          .setGeneration(((Number) row.get("generation")).longValue() + 1)
+                          .build());
+                  return null;
+                }));
+  }
+
+  @Test
+  void unifiedIntentsLockExactBytesAndRejectStaleReports() throws Exception {
+    var control = new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    var id =
+        auriga.contracts.resource.v1.UnifiedResourceIdentity.newBuilder()
+            .setTenantId(tenant.toString())
+            .setPackageId(UuidV7.next().toString())
+            .setVersionId(UuidV7.next().toString())
+            .setKind("skill")
+            .setVersion("1.0.0")
+            .setManifestDigest("sha256:" + "a".repeat(64))
+            .build();
+    var ref =
+        auriga.contracts.resource.v1.UnifiedResourceRef.newBuilder()
+            .setInstallationRevision(1)
+            .setDesiredState(
+                auriga.contracts.resource.v1.UnifiedResourceDesiredState
+                    .UNIFIED_RESOURCE_DESIRED_STATE_ENABLED)
+            .setIdentity(id)
+            .setEnabled(true)
+            .setReleaseSequence(1)
+            .setEnvelope(
+                auriga.contracts.resource.v1.UnifiedEnvelope.newBuilder()
+                    .setSignature(
+                        auriga.contracts.resource.v1.ResourceSignature.newBuilder()
+                            .setKid("test")
+                            .setValue("first")))
+            .setLease(
+                auriga.contracts.resource.v1.UnifiedLease.newBuilder()
+                    .setExpiresAt(clock.instant().plusSeconds(3600).toString()))
+            .build();
+    var list =
+        auriga.contracts.resource.v1.ResourceRevocationList.newBuilder()
+            .setTenantId(tenant.toString())
+            .setRevision(1)
+            .build();
+    var choice =
+        auriga.contracts.resource.v1.UnifiedSelection.newBuilder()
+            .setIdentity(id)
+            .setAction("install")
+            .build();
+    var answer =
+        new java.util.concurrent.atomic.AtomicReference<>(
+            auriga.contracts.resource.v1.ResolveUnifiedResourcesResponse.newBuilder()
+                .setSelectionRevision(1)
+                .addResources(ref)
+                .setRevocations(list)
+                .build());
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              assertFalse(
+                  org.springframework.transaction.support.TransactionSynchronizationManager
+                      .isActualTransactionActive());
+              calls.incrementAndGet();
+              return answer.get();
+            })) {
+      var eventData =
+          WorkspaceService.JSON.valueToTree(
+              Map.of(
+                  "instanceId",
+                  instance.toString(),
+                  "ownerId",
+                  owner.toString(),
+                  "selectionRevision",
+                  1,
+                  "selections",
+                  List.of(
+                      Map.of(
+                          "action",
+                          "install",
+                          "identity",
+                          Map.of(
+                              "tenantId",
+                              id.getTenantId(),
+                              "packageId",
+                              id.getPackageId(),
+                              "versionId",
+                              id.getVersionId(),
+                              "kind",
+                              "skill",
+                              "version",
+                              id.getVersion(),
+                              "manifestDigest",
+                              id.getManifestDigest())))));
+      var event =
+          new ReceivedEvent(
+              UuidV7.next(),
+              "resource.catalog_distribution_requested",
+              "auriga/resource",
+              instance.toString(),
+              clock.instant(),
+              tenant,
+              "1",
+              null,
+              eventData);
+      resources.handle(event);
+      resources.handle(event);
+      assertThrows(
+          AurigaException.class,
+          () ->
+              resources.handle(
+                  new ReceivedEvent(
+                      UuidV7.next(),
+                      event.type(),
+                      "auriga/org",
+                      event.subject(),
+                      event.time(),
+                      event.tenantId(),
+                      event.dataVersion(),
+                      null,
+                      eventData)));
+      var installed = resources.apply(tenant, instance, owner, 1, List.of(choice));
+      assertEquals(control.node, installed.node());
+      assertEquals(ref, installed.spec().getUnifiedResources(0));
+      assertEquals(
+          installed.spec(), resources.apply(tenant, instance, owner, 1, List.of(choice)).spec());
+      assertEquals(1, calls.get(), "same revision must not resolve again");
+      assertThrows(
+          AurigaException.class,
+          () ->
+              resources.apply(
+                  tenant,
+                  instance,
+                  owner,
+                  1,
+                  List.of(choice.toBuilder().setAction("disable").build())));
+      assertThrows(AurigaException.class, () -> resources.snapshot(UuidV7.next(), instance));
+      var stale =
+          auriga.contracts.resource.v1.UnifiedInstallationReport.newBuilder()
+              .setClientId(instance.toString())
+              .setIdentity(id)
+              .setInstallationRevision(99)
+              .setGeneration(installed.spec().getGeneration())
+              .setObservedGeneration(installed.spec().getGeneration())
+              .setSelectionRevision(1)
+              .setState("applied")
+              .build();
+      TenantContext.run(
+          tenant,
+          () ->
+              store.tx(
+                  () ->
+                      store.jdbc.update(
+                          "UPDATE instance SET status=? WHERE tenant_id=? AND id=?",
+                          InstanceStatus.newBuilder()
+                              .setObservedGeneration(installed.spec().getGeneration())
+                              .addUnifiedResourceReports(stale)
+                              .build()
+                              .toByteArray(),
+                          tenant,
+                          instance)));
+      assertTrue(resources.snapshot(tenant, instance).reports().isEmpty());
+      var fresh =
+          stale.toBuilder()
+              .setInstallationRevision(1)
+              .setReportSource("member")
+              .setState("failed")
+              .build();
+      TenantContext.run(
+          tenant,
+          () ->
+              store.tx(
+                  () ->
+                      store.jdbc.update(
+                          "UPDATE instance SET status=? WHERE tenant_id=? AND id=?",
+                          InstanceStatus.newBuilder()
+                              .setObservedGeneration(installed.spec().getGeneration())
+                              .addUnifiedResourceReports(fresh)
+                              .build()
+                              .toByteArray(),
+                          tenant,
+                          instance)));
+      assertEquals(
+          "node", resources.snapshot(tenant, instance).reports().getFirst().getReportSource());
+      var revoked =
+          list.toBuilder()
+              .setRevision(2)
+              .addRevokedArtifacts(
+                  auriga.contracts.resource.v1.RevokedArtifact.newBuilder()
+                      .setPackageId(id.getPackageId())
+                      .setVersionId(id.getVersionId())
+                      .setDigest("sha256:" + "b".repeat(64)))
+              .build();
+      resources.revoke(tenant, instance, revoked);
+      var stopped = resources.snapshot(tenant, instance);
+      assertEquals(DesiredState.DESIRED_STATE_RUNNING, stopped.spec().getDesired());
+      assertEquals(
+          ref,
+          stopped.spec().getUnifiedResources(0),
+          "revocation cannot change resource-assigned intent/CAS");
+      resources.revoke(tenant, instance, revoked);
+      assertEquals(
+          stopped.spec().getGeneration(),
+          resources.snapshot(tenant, instance).spec().getGeneration());
+      var tombstone =
+          stopped.spec().getUnifiedResources(0).toBuilder()
+              .setInstallationRevision(2)
+              .setDesiredState(
+                  auriga.contracts.resource.v1.UnifiedResourceDesiredState
+                      .UNIFIED_RESOURCE_DESIRED_STATE_REMOVED)
+              .setEnvelope(
+                  ref.getEnvelope().toBuilder()
+                      .setSignature(
+                          ref.getEnvelope().getSignature().toBuilder().setValue("removed")))
+              .setEnabled(false)
+              .build();
+      var removedResolution =
+          auriga.contracts.resource.v1.ResolveUnifiedResourcesResponse.newBuilder()
+              .setSelectionRevision(2)
+              .addResources(tombstone)
+              .setRevocations(revoked)
+              .build();
+      try (var removals =
+          new WorkspaceUnifiedResources(service, inputs, request -> removedResolution)) {
+        var removing =
+            removals.apply(
+                tenant,
+                instance,
+                owner,
+                2,
+                List.of(choice.toBuilder().setAction("remove").build()));
+        var collectedResolution = removedResolution.toBuilder().clearResources().build();
+        assertEquals(
+            removing.spec(),
+            removals.refresh(tenant, instance, owner, 2, collectedResolution).spec(),
+            "unacknowledged tombstone must remain");
+        var removedReport =
+            fresh.toBuilder()
+                .setInstallationRevision(1)
+                .setGeneration(removing.spec().getGeneration())
+                .setObservedGeneration(removing.spec().getGeneration())
+                .setSelectionRevision(2)
+                .setState("removed")
+                .build();
+        for (long installationRevision : List.of(1L, 2L)) {
+          var report =
+              removedReport.toBuilder().setInstallationRevision(installationRevision).build();
+          TenantContext.run(
+              tenant,
+              () ->
+                  store.tx(
+                      () ->
+                          store.jdbc.update(
+                              "UPDATE instance SET status=? WHERE tenant_id=? AND id=?",
+                              InstanceStatus.newBuilder()
+                                  .setObservedGeneration(removing.spec().getGeneration())
+                                  .addUnifiedResourceReports(report)
+                                  .build()
+                                  .toByteArray(),
+                              tenant,
+                              instance)));
+          if (installationRevision == 1) {
+            assertEquals(
+                removing.spec(),
+                removals.refresh(tenant, instance, owner, 2, collectedResolution).spec(),
+                "stale installation CAS cannot collect tombstone");
+          } else {
+            var collected = removals.refresh(tenant, instance, owner, 2, collectedResolution);
+            assertEquals(0, collected.spec().getUnifiedResourcesCount());
+            assertEquals(removing.spec().getGeneration() + 1, collected.spec().getGeneration());
+          }
+        }
+      }
+      memberStatus = MemberStatus.MEMBER_STATUS_DISABLED;
+      assertThrows(
+          AurigaException.class,
+          () -> resources.record(tenant, instance, owner, 2, List.of(choice)));
+    }
   }
 
   @Test

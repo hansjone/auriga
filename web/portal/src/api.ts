@@ -3,15 +3,23 @@ import type { Router } from 'vue-router';
 
 let loginRedirect: (() => void) | undefined;
 
-export function bindApiRouter(router: Router) {
+export function bindApiRouter(
+  router: Router,
+  navigate: (path: string) => void = (path) => globalThis.location.assign(path),
+) {
+  let navigating = false;
   loginRedirect = () => {
-    if (router.currentRoute.value.path !== '/login') {
-      void router.push({
-        path: '/login',
-        query: { returnTo: router.currentRoute.value.fullPath },
-      });
-    }
+    if (navigating || router.currentRoute.value.path === '/login') return;
+    navigating = true;
+    navigate(
+      `/login?returnTo=${encodeURIComponent(router.currentRoute.value.fullPath)}`,
+    );
   };
+}
+
+/** Reload the document so edge can issue a fresh navigation transaction. */
+export function redirectToLogin() {
+  loginRedirect?.();
 }
 
 export const apiClient = createApiClient({

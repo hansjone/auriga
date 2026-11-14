@@ -6,7 +6,9 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const output = path.join(root, 'services/contracts/target/bundled');
 mkdirSync(output, { recursive: true });
 for (const service of [
+  'network-keys-v2',
   'iam',
+  'shell-auth',
   'org',
   'workspace',
   'ai',

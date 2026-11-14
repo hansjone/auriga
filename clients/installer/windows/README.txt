@@ -1,4 +1,4 @@
-Auriga Desktop installer (test build, unsigned)
+Auriga DSH installer (test build, unsigned)
 
 Single-file: run Auriga-Desktop-Setup-<version>.exe. Zip: unpack, run install.cmd.
 Options (zip): install.cmd [-InstallDir <dir>] [-DataHome <dir>] [-PlatformOrigin <https://...>] [-NoShortcuts]

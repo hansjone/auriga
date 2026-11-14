@@ -198,6 +198,7 @@ func runAgent(args []string, logs io.Writer) error {
 		if mat, loadErr := identity.Load(cfg.AgentDir()); loadErr == nil {
 			prep.SealingPrivate = mat.SealingPrivate
 		}
+		prep.Unified = runtime.NewUnifiedManager(prep.Layout, inner, store, cfg.AgentDir())
 		driver = prep
 	}
 	rec := reconciler.New(store, driver, logger, cfg.MaxConcurrentPrepare)

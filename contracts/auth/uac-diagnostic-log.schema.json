@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UAC 诊断的最小脱敏投影",
+  "description": "诊断导出和 audit 的最小公共字段；详细原始结构须由实现递归脱敏，不能直接写入此投影。",
+  "$defs": {
+    "UacDiagnosticLogProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "correlationId",
+        "purpose",
+        "result",
+        "tokenHashPrefix",
+        "departmentPresent"
+      ],
+      "properties": {
+        "correlationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "login_info",
+            "login_sso",
+            "revalidate"
+          ]
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "success",
+            "failure",
+            "retry_pending",
+            "retry_exhausted"
+          ]
+        },
+        "tokenHashPrefix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{12}$"
+        },
+        "departmentPresent": {
+          "type": "boolean"
+        },
+        "empNo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "failureClass": {
+          "$ref": "uac-control.schema.json#/$defs/UacRevalidationFailureClass"
+        },
+        "faultReason": {
+          "$ref": "uac-control.schema.json#/$defs/UacFaultReason"
+        },
+        "message": {
+          "type": "string",
+          "enum": [
+            "success",
+            "waiting",
+            "rejected",
+            "unavailable",
+            "[REDACTED]"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -20,7 +20,15 @@ await writeFile(
     { parser: 'typescript', singleQuote: true },
   ),
 );
-for (const name of ['iam', 'org', 'workspace', 'ai', 'resource']) {
+for (const name of [
+  'network-keys-v2',
+  'iam',
+  'org',
+  'workspace',
+  'ai',
+  'resource',
+  'shell-auth',
+]) {
   const source = new URL(
     '../../../contracts/openapi/' + name + '.yaml',
     import.meta.url,

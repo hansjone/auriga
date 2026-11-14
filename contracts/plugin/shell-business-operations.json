@@ -1,0 +1,1180 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "operation": "listResourcePackages",
+      "method": "get",
+      "route": "/api/resource/v1/packages",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_listResourcePackages",
+      "output": "ShellAuthOutput_listResourcePackages",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "createResourcePackage",
+      "method": "post",
+      "route": "/api/resource/v1/packages",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.upload",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_createResourcePackage",
+      "output": "ShellAuthOutput_createResourcePackage",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "getResourcePackage",
+      "method": "get",
+      "route": "/api/resource/v1/packages/{packageId}",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_getResourcePackage",
+      "output": "ShellAuthOutput_getResourcePackage",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "patchResourcePackage",
+      "method": "patch",
+      "route": "/api/resource/v1/packages/{packageId}",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.upload",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "if-match",
+        "idempotency-key"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_patchResourcePackage",
+      "output": "ShellAuthOutput_patchResourcePackage",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "listResourceVersions",
+      "method": "get",
+      "route": "/api/resource/v1/packages/{packageId}/versions",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_listResourceVersions",
+      "output": "ShellAuthOutput_listResourceVersions",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "uploadResourceVersion",
+      "method": "post",
+      "route": "/api/resource/v1/packages/{packageId}/versions",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.upload",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_uploadResourceVersion",
+      "output": "ShellAuthOutput_uploadResourceVersion",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "getResourceVersion",
+      "method": "get",
+      "route": "/api/resource/v1/packages/{packageId}/versions/{versionId}",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_getResourceVersion",
+      "output": "ShellAuthOutput_getResourceVersion",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "submitResourceVersion",
+      "method": "post",
+      "route": "/api/resource/v1/packages/{packageId}/versions/{versionId}/submissions",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.versions.submit",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_submitResourceVersion",
+      "output": "ShellAuthOutput_submitResourceVersion",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "requestResourceDistribution",
+      "method": "post",
+      "route": "/api/resource/v1/distributions",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.distributions.manage",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_requestResourceDistribution",
+      "output": "ShellAuthOutput_requestResourceDistribution",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "getResourceDistribution",
+      "method": "get",
+      "route": "/api/resource/v1/distributions/{distributionId}",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.distributions.manage",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_getResourceDistribution",
+      "output": "ShellAuthOutput_getResourceDistribution",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "downloadResourceContent",
+      "method": "get",
+      "route": "/api/resource/v1/packages/{packageId}/versions/{versionId}/content",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": true,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_downloadResourceContent",
+      "output": "ShellAuthOutput_downloadResourceContent",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "getResourceRevocations",
+      "method": "get",
+      "route": "/api/resource/v1/revocations",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_getResourceRevocations",
+      "output": "ShellAuthOutput_getResourceRevocations",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "createMemberResourceDownloadTicket",
+      "method": "post",
+      "route": "/api/resource/v1/member/download-tickets",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_createMemberResourceDownloadTicket",
+      "output": "ShellAuthOutput_createMemberResourceDownloadTicket",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "consumeMemberResourceDownloadTicket",
+      "method": "post",
+      "route": "/api/resource/v1/member/downloads",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": true,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_consumeMemberResourceDownloadTicket",
+      "output": "ShellAuthOutput_consumeMemberResourceDownloadTicket",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "listMemberResourceInstallations",
+      "method": "get",
+      "route": "/api/resource/v1/member/installations",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_listMemberResourceInstallations",
+      "output": "ShellAuthOutput_listMemberResourceInstallations",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "selectMemberResourceInstallation",
+      "method": "post",
+      "route": "/api/resource/v1/member/installations",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_selectMemberResourceInstallation",
+      "output": "ShellAuthOutput_selectMemberResourceInstallation",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "reportMemberResourceInstallation",
+      "method": "post",
+      "route": "/api/resource/v1/member/installation-reports",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_reportMemberResourceInstallation",
+      "output": "ShellAuthOutput_reportMemberResourceInstallation",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedListResourcePackages",
+      "method": "get",
+      "route": "/api/resource/v1/catalog/packages",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_UnifiedListResourcePackages",
+      "output": "ShellAuthOutput_UnifiedListResourcePackages",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedCreateResourcePackage",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/packages",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.upload",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedCreateResourcePackage",
+      "output": "ShellAuthOutput_UnifiedCreateResourcePackage",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedGetResourcePackage",
+      "method": "get",
+      "route": "/api/resource/v1/catalog/packages/{packageId}",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_UnifiedGetResourcePackage",
+      "output": "ShellAuthOutput_UnifiedGetResourcePackage",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedListResourceVersions",
+      "method": "get",
+      "route": "/api/resource/v1/catalog/packages/{packageId}/versions",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_UnifiedListResourceVersions",
+      "output": "ShellAuthOutput_UnifiedListResourceVersions",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedUploadResourceVersion",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/packages/{packageId}/versions",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.upload",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedUploadResourceVersion",
+      "output": "ShellAuthOutput_UnifiedUploadResourceVersion",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedGetResourceVersion",
+      "method": "get",
+      "route": "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_UnifiedGetResourceVersion",
+      "output": "ShellAuthOutput_UnifiedGetResourceVersion",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedSubmitResourceVersion",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/submissions",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.versions.submit",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedSubmitResourceVersion",
+      "output": "ShellAuthOutput_UnifiedSubmitResourceVersion",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedDownloadResourceManifest",
+      "method": "get",
+      "route": "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/manifest",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": true,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_UnifiedDownloadResourceManifest",
+      "output": "ShellAuthOutput_UnifiedDownloadResourceManifest",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedCreateDownloadTicket",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/member/download-tickets",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedCreateDownloadTicket",
+      "output": "ShellAuthOutput_UnifiedCreateDownloadTicket",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedDownloadArtifact",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/member/downloads",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": true,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedDownloadArtifact",
+      "output": "ShellAuthOutput_UnifiedDownloadArtifact",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedListInstallations",
+      "method": "get",
+      "route": "/api/resource/v1/catalog/member/installations",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_UnifiedListInstallations",
+      "output": "ShellAuthOutput_UnifiedListInstallations",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedSelectInstallation",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/member/installations",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedSelectInstallation",
+      "output": "ShellAuthOutput_UnifiedSelectInstallation",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedReportInstallation",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/member/installation-reports",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedReportInstallation",
+      "output": "ShellAuthOutput_UnifiedReportInstallation",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedRenewInstallation",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/member/renewals",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedRenewInstallation",
+      "output": "ShellAuthOutput_UnifiedRenewInstallation",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "UnifiedDownloadVersionArtifact",
+      "method": "get",
+      "route": "/api/resource/v1/catalog/packages/{packageId}/versions/{versionId}/artifacts/{artifactId}",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": true,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_UnifiedDownloadVersionArtifact",
+      "output": "ShellAuthOutput_UnifiedDownloadVersionArtifact",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "listOwnAiUsage",
+      "method": "get",
+      "route": "/api/ai/v1/me/usage",
+      "source": "openapi/ai.yaml",
+      "permission": "ai.usage.read",
+      "audience": "auriga.ai-gateway",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_listOwnAiUsage",
+      "output": "ShellAuthOutput_listOwnAiUsage",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "listAiModels",
+      "method": "get",
+      "route": "/ai/v1/models",
+      "source": "openapi/ai.yaml",
+      "permission": "ai.models.invoke",
+      "audience": "auriga.ai-gateway",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_listAiModels",
+      "output": "ShellAuthOutput_listAiModels",
+      "scope": "auriga.connect",
+      "devicePermission": "auriga.connect.models.invoke"
+    },
+    {
+      "operation": "createAiChatCompletion",
+      "method": "post",
+      "route": "/ai/v1/chat/completions",
+      "source": "openapi/ai.yaml",
+      "permission": "ai.models.invoke",
+      "audience": "auriga.ai-gateway",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_createAiChatCompletion",
+      "output": "ShellAuthOutput_createAiChatCompletion",
+      "scope": "auriga.connect",
+      "devicePermission": "auriga.connect.models.invoke"
+    },
+    {
+      "operation": "listNetworkSystems",
+      "method": "get",
+      "route": "/network/systems",
+      "source": "openapi/iam-network.yaml",
+      "permission": "auriga.connect.collab.use",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "read_only",
+      "input": "ShellAuthInput_listNetworkSystems",
+      "output": "ShellAuthOutput_listNetworkSystems",
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "createAiChatCompletionStream",
+      "method": "post",
+      "route": "/ai/v1/chat/completions",
+      "source": "openapi/ai.yaml",
+      "permission": "ai.models.invoke",
+      "audience": "auriga.ai-gateway",
+      "stream": true,
+      "requestHeaders": [
+        "idempotency-key"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_createAiChatCompletionStream",
+      "output": "ShellAuthOutput_createAiChatCompletionStream",
+      "scope": "auriga.connect",
+      "devicePermission": "auriga.connect.models.invoke"
+    },
+    {
+      "operation": "team_initialize",
+      "input": "ShellAuthInput_team_initialize",
+      "output": "ShellAuthOutput_team_initialize",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": false,
+      "retry": "never",
+      "route": "/ai/mcp",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_list_tools",
+      "input": "ShellAuthInput_team_list_tools",
+      "output": "ShellAuthOutput_team_list_tools",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": false,
+      "retry": "never",
+      "route": "/ai/mcp",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_ping",
+      "input": "ShellAuthInput_team_ping",
+      "output": "ShellAuthOutput_team_ping",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": false,
+      "retry": "never",
+      "route": "/ai/mcp",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "network_open",
+      "input": "ShellAuthInput_network_open",
+      "output": "ShellAuthOutput_network_open",
+      "audience": "auriga",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "never",
+      "route": "broker:nats",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "upload_open",
+      "input": "ShellAuthInput_upload_open",
+      "output": "ShellAuthOutput_upload_open",
+      "audience": "auriga",
+      "permission": "auriga.connect",
+      "stream": true,
+      "retry": "never",
+      "route": "broker:upload",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "upload_finish",
+      "input": "ShellAuthInput_upload_finish",
+      "output": "ShellAuthOutput_upload_finish",
+      "audience": "auriga",
+      "permission": "auriga.connect",
+      "stream": false,
+      "retry": "never",
+      "route": "broker:upload",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "network_send",
+      "input": "ShellAuthInput_network_send",
+      "output": "ShellAuthOutput_network_send",
+      "audience": "auriga",
+      "permission": "auriga.connect.collab.use",
+      "stream": false,
+      "retry": "never",
+      "route": "broker:nats",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "network_submit",
+      "input": "ShellAuthInput_network_submit",
+      "output": "ShellAuthOutput_network_submit",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": false,
+      "retry": "never",
+      "route": "/api/ai/v1/network/submit",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "getNetworkKeys",
+      "input": "ShellAuthInput_getNetworkKeys",
+      "output": "ShellAuthOutput_getNetworkKeys",
+      "audience": "auriga",
+      "permission": "auriga.connect",
+      "stream": false,
+      "retry": "never",
+      "route": "/api/collab/v1/network/keys",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "getNetworkKeyAnnouncement",
+      "input": "ShellAuthInput_getNetworkKeyAnnouncement",
+      "output": "ShellAuthOutput_getNetworkKeyAnnouncement",
+      "audience": "auriga",
+      "permission": "auriga.connect",
+      "stream": false,
+      "retry": "never",
+      "route": "/api/collab/v1/network/keys/announcement",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "profile_read",
+      "input": "ShellAuthInput_profile_read",
+      "output": "ShellAuthOutput_profile_read",
+      "audience": "auriga",
+      "permission": "auriga.connect",
+      "stream": false,
+      "retry": "never",
+      "route": "/api/iam/v1/me",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "provider_diagnostic",
+      "input": "ShellAuthInput_provider_diagnostic",
+      "output": "ShellAuthOutput_provider_diagnostic",
+      "audience": "auriga",
+      "permission": "auriga.connect",
+      "stream": false,
+      "retry": "never",
+      "route": "/api/iam/v1/login/providers",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_list_endpoints",
+      "input": "ShellAuthInput_team_list_endpoints",
+      "output": "ShellAuthOutput_team_list_endpoints",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/mcp",
+      "tool": "auriga_list_endpoints",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_open_thread",
+      "input": "ShellAuthInput_team_open_thread",
+      "output": "ShellAuthOutput_team_open_thread",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/mcp",
+      "tool": "auriga_open_thread",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_reply_thread",
+      "input": "ShellAuthInput_team_reply_thread",
+      "output": "ShellAuthOutput_team_reply_thread",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/mcp",
+      "tool": "auriga_reply_thread",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_read_thread",
+      "input": "ShellAuthInput_team_read_thread",
+      "output": "ShellAuthOutput_team_read_thread",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/mcp",
+      "tool": "auriga_read_thread",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_node_register",
+      "input": "ShellAuthInput_team_node_register",
+      "output": "ShellAuthOutput_team_node_register",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/team/node/register",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_node_bind",
+      "input": "ShellAuthInput_team_node_bind",
+      "output": "ShellAuthOutput_team_node_bind",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/team/node/bind",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_node_pull",
+      "input": "ShellAuthInput_team_node_pull",
+      "output": "ShellAuthOutput_team_node_pull",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/team/node/pull",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_node_ack",
+      "input": "ShellAuthInput_team_node_ack",
+      "output": "ShellAuthOutput_team_node_ack",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/team/node/ack",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    },
+    {
+      "operation": "team_node_revoke",
+      "input": "ShellAuthInput_team_node_revoke",
+      "output": "ShellAuthOutput_team_node_revoke",
+      "audience": "auriga.ai-gateway",
+      "permission": "auriga.connect.collab.use",
+      "stream": true,
+      "retry": "explicit_idempotency_only",
+      "route": "/ai/team/node/revoke",
+      "requestHeaders": [],
+      "responseHeaders": [
+        "content-type",
+        "retry-after"
+      ],
+      "scope": "auriga.connect"
+    }
+  ]
+}

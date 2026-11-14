@@ -520,10 +520,10 @@ test('a non-empty directory without our marker is refused and left untouched', (
         dataHome: f.dataHome,
         smoke: noSmoke,
       }),
-    /not empty and is not an Auriga Desktop installation/,
+    /not empty and is not an Auriga DSH installation/,
   );
   assert.deepEqual(readdirSync(f.root), ['precious.txt']);
-  assert.throws(() => uninstall({ root: f.root }), /not an Auriga Desktop/);
+  assert.throws(() => uninstall({ root: f.root }), /not an Auriga DSH/);
   assert.equal(text(join(f.root, 'precious.txt')), 'user file');
 });
 
@@ -855,4 +855,25 @@ test('an upstream file changed after installation is replaced when the package i
     ).tampered,
     undefined,
   );
+});
+
+test('active shared state prevents rollback into a version without guardian', (t) => {
+  const f = fixture(t);
+  put(f, { name: 'a' });
+  put(f, { name: 'b', pluginVersion: '1.1.0' });
+  const before = readState(f.root);
+  const directory = join(f.dataHome, 'auriga', 'guardian');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, 'state.json'),
+    JSON.stringify({ guardian: { state: 'active' } }),
+  );
+  assert.throws(() => rollback({ root: f.root, smoke: noSmoke }));
+  assert.deepEqual(readState(f.root), before);
+  writeFileSync(
+    join(directory, 'state.json'),
+    JSON.stringify({ guardian: { state: 'private_only' } }),
+  );
+  rollback({ root: f.root, smoke: noSmoke });
+  assert.equal(readState(f.root).current, before.previous);
 });

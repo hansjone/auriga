@@ -368,12 +368,12 @@ for (const locale of ['zh', 'en'])
             sections,
             managed
               ? [
-                  'Auriga status',
+                  'Auriga DSH status',
                   locale === 'zh' ? '账号' : 'Account',
                   locale === 'zh' ? '消息网络' : 'Message network',
                 ]
               : [
-                  'Auriga status',
+                  'Auriga DSH status',
                   locale === 'zh' ? '平台' : 'Platform',
                   locale === 'zh' ? '账号' : 'Account',
                   locale === 'zh' ? '消息网络' : 'Message network',
@@ -436,3 +436,61 @@ for (const failure of ['http', 'timeout', 'invalid-json'])
       fixture.dispose();
     }
   });
+
+for (const locale of ['zh', 'en'])
+  test(
+    'Desktop binding confirmation is visible and update controls stay disabled: ' +
+      locale,
+    async () => {
+      const fixture = harness(
+        async (url) =>
+          Response.json(
+            url.endsWith('/status')
+              ? signedIn
+              : {
+                  ...settings,
+                  desktop: {
+                    enabled: false,
+                    available: null,
+                    restartRequired: false,
+                    confirmationRequired: true,
+                  },
+                },
+          ),
+        locale,
+      );
+      try {
+        fixture.render();
+        await setImmediate();
+        const tree = fixture.render();
+        assert.equal(
+          nodes(tree).filter((n) => n.props.role === 'alert').length,
+          1,
+        );
+        assert.match(
+          text(tree),
+          locale === 'en' ? /Reinstall Desktop/ : /Desktop/,
+        );
+        assert.equal(
+          button(
+            tree,
+            locale === 'en'
+              ? 'Check for updates'
+              : String.fromCodePoint(0x68c0, 0x67e5, 0x66f4, 0x65b0),
+          ),
+          undefined,
+        );
+        assert.equal(
+          nodes(tree).find(
+            (n) =>
+              n.type === 'input' &&
+              n.props.type === 'checkbox' &&
+              n.props.disabled === true,
+          )?.props.disabled,
+          true,
+        );
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );

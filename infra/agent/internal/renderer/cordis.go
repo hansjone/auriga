@@ -35,11 +35,13 @@ var (
 // Rows the renderer owns: a spec patch must not widen the Host/Origin fence or
 // move the listener. `connection` takes its trustedHosts from `web-runtime`.
 var reservedRows = map[string]struct{}{
-	"webserver":   {},
-	"web-runtime": {},
-	"connection":  {},
-	"llm-pi-ai":   {},
-	"credentials": {},
+	"auriga-node-resource-observer": {},
+	sharedSkillRow:                  {},
+	"webserver":                     {},
+	"web-runtime":                   {},
+	"connection":                    {},
+	"llm-pi-ai":                     {},
+	"credentials":                   {},
 }
 
 // Plugin config keys the renderer owns.
@@ -131,6 +133,9 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options, model *managedMode
 		"inject": []string{"webServer", "connection"},
 		"config": pluginCfg,
 	}}
+	if opt.ResourceObserver {
+		inserts = append(inserts, map[string]any{"id": "auriga-node-resource-observer", "name": "file://" + ContainerResourceObserver, "config": map[string]any{"tokenFile": ContainerInstanceToken, "policyFile": ContainerResourcePolicy}})
+	}
 	for _, name := range sortedKeysMap(prof.GetMcpServers()) {
 		if !mcpNameRe.MatchString(name) {
 			return nil, fmt.Errorf("renderer: invalid mcp server name")
@@ -201,7 +206,7 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options, model *managedMode
 	if err := enc.Close(); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return MergeSharedSkills(buf.Bytes())
 }
 
 func tokenFileFor(ref nodev1.TokenRef) (string, error) {

@@ -1,3 +1,4 @@
+import { normalizePlatformBinding } from '../runtime/platform-origin.mjs';
 /**
  * Build the Windows installer package.
  *
@@ -24,6 +25,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
+import { buildBroker } from '../../shell-auth/build.mjs';
 import { parse as parseVersion } from '../runtime/semver-lite.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
 import {
@@ -37,6 +39,40 @@ import { sha256File, assertNoSecrets, listFiles } from './lib/files.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const installerDir = resolve(here, '..');
 const pluginDir = resolve(installerDir, '..', 'dsh-plugin');
+export function validateResourceRoots(trust) {
+  if (Object.keys(trust).sort().join() !== 'downgrade,release,revocation')
+    throw new Error('invalid resource trust roles');
+  const fixtureKeys = Object.values(
+    JSON.parse(
+      readFileSync(
+        join(installerDir, '../../contracts/resource/unified-vectors.json'),
+        'utf8',
+      ),
+    ).trust,
+  ).map((k) => k.publicKeySpkiBase64);
+  const canonicalKeys = [];
+  for (const role of ['release', 'revocation', 'downgrade']) {
+    const root = trust[role];
+    if (!root || !/^[A-Za-z0-9._-]{1,128}$/.test(root.kid))
+      throw new Error('invalid resource trust root');
+    const key = createPublicKey({
+      key: Buffer.from(root.publicKeySpkiBase64, 'base64'),
+      type: 'spki',
+      format: 'der',
+    });
+    if (key.asymmetricKeyType !== 'ed25519')
+      throw new Error('resource trust must be Ed25519');
+    const canonical = key
+      .export({ type: 'spki', format: 'der' })
+      .toString('base64');
+    if (fixtureKeys.includes(canonical))
+      throw new Error('public test resource key cannot be deployed');
+    canonicalKeys.push(canonical);
+  }
+  if (new Set(canonicalKeys).size !== 3)
+    throw new Error('resource trust roles require independent keys');
+  return trust;
+}
 const isWin = process.platform === 'win32';
 const NPM_FLAGS = [
   '--omit=dev',
@@ -82,11 +118,11 @@ function run(command, args, options = {}) {
 }
 
 const NOTICE = [
-  'Auriga Desktop',
+  'Auriga DSH',
   '',
-  'Auriga Desktop is built on the open-source DSH (@deepseek-ai/dsh, MIT License).',
+  'Auriga DSH is built on the open-source DSH (@deepseek-ai/dsh, MIT License).',
   'The upstream package is installed unmodified; its licence text is kept in',
-  'LICENSE.dsh.txt. Auriga Desktop is not an official DeepSeek product and is not',
+  'LICENSE.dsh.txt. Auriga DSH is not an official DeepSeek product and is not',
   'endorsed by DeepSeek. Node.js is bundled under its own licence (LICENSE.node.txt).',
   '',
 ].join('\r\n');
@@ -351,18 +387,42 @@ export async function build(args) {
   );
   writeFileSync(join(payload, 'licenses', 'NOTICE.txt'), NOTICE);
   if (args['platform-origin']) {
-    const origin = new URL(args['platform-origin']).origin;
+    const selected = normalizePlatformBinding(args['platform-origin'], {
+      accessMode: args['platform-access-mode'],
+      confirmedOrigin: args['confirm-platform-origin'],
+    });
+    const { origin, ...platformBinding } = selected;
     mkdirSync(join(payload, 'auriga'), { recursive: true });
     writeFileSync(
       join(payload, 'auriga', 'defaults.json'),
-      JSON.stringify({ platformOrigin: origin }, null, 2) + '\n',
+      JSON.stringify({ platformOrigin: origin, platformBinding }, null, 2) +
+        '\n',
     );
   }
 
   // 4. Our own runtime and Windows wrappers.
+  const shellAuthManifest = buildBroker(join(payload, 'auriga', 'shell-auth'));
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });
+  mkdirSync(join(payload, 'auriga', 'runtime', 'schemas'), { recursive: true });
+  for (const name of ['package', 'signatures', 'unified'])
+    cpSync(
+      join(installerDir, '../../contracts/resource', name + '.schema.json'),
+      join(payload, 'auriga', 'runtime', 'schemas', name + '.schema.json'),
+    );
+  cpSync(
+    join(installerDir, '../../contracts/resource/guardian-transitions.json'),
+    join(payload, 'auriga/runtime/schemas/guardian-transitions.json'),
+  );
+  if (args['resource-trust-json']) {
+    const trust = JSON.parse(readFileSync(args['resource-trust-json'], 'utf8'));
+    validateResourceRoots(trust);
+    writeFileSync(
+      join(payload, 'auriga', 'runtime', 'resource-roots.json'),
+      JSON.stringify(trust),
+    );
+  }
   if (args['release-public-key']) {
     const key = createPublicKey(readFileSync(args['release-public-key']));
     if (key.asymmetricKeyType !== 'ed25519')
@@ -387,6 +447,12 @@ export async function build(args) {
     id: '',
     bundleVersion: desktopVersion,
     product: 'Auriga Desktop',
+    shellAuth: {
+      version: shellAuthManifest.version,
+      manifestSha256: sha256File(
+        join(payload, 'auriga/shell-auth/broker-manifest.json'),
+      ),
+    },
     target: 'win-x64',
     size: {
       upstreamAndPluginBeforeTrim: sizeBefore,

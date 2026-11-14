@@ -1,0 +1,995 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/msgnet-v2-vectors.schema.json",
+  "title": "MSGNET v2 合成契约向量输入",
+  "type": "object",
+  "properties": {
+    "synthetic": {
+      "const": true
+    },
+    "producer": {
+      "type": "string"
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ConsumerCase"
+      }
+    },
+    "issuer_cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/IssuerCase"
+      }
+    },
+    "boundary_cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BoundaryCase"
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "canonical": {
+            "type": "string"
+          },
+          "public_key_spki": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "domain",
+          "canonical",
+          "public_key_spki",
+          "signature",
+          "valid"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "certificates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ca_id": {
+            "type": "string"
+          },
+          "ca_der": {
+            "type": "string"
+          },
+          "leaf_der": {
+            "type": "string"
+          }
+        },
+        "required": ["ca_id", "ca_der", "leaf_der"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "synthetic",
+    "producer",
+    "cases",
+    "issuer_cases",
+    "boundary_cases",
+    "signatures",
+    "certificates"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Clock": {
+      "type": "object",
+      "properties": {
+        "pg_skew": {
+          "type": "number"
+        },
+        "wall_delta": {
+          "type": "number"
+        },
+        "monotonic_delta": {
+          "type": "number"
+        }
+      },
+      "required": ["pg_skew", "wall_delta", "monotonic_delta"],
+      "additionalProperties": false
+    },
+    "ConsumerInput": {
+      "type": "object",
+      "properties": {
+        "root_spki": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "now": {
+          "type": "string"
+        },
+        "latest_control": {
+          "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRootControl"
+        },
+        "seen_control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "seen_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "seen_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "seen_digest": {
+          "type": "string"
+        },
+        "previous_digest": {
+          "type": "string"
+        },
+        "first_publication_ledger": {
+          "type": "array",
+          "items": {
+            "$ref": "auto-renewal-v2.schema.json#/$defs/FirstPublication"
+          }
+        },
+        "publication": {
+          "$ref": "auto-renewal-v2.schema.json#/$defs/Publication"
+        },
+        "transport": {
+          "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle"
+        },
+        "seen_bundle_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "previous_transport": {
+          "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle"
+        },
+        "previous_transport_phase": {
+          "enum": ["dual_trust", "new_leaves", "retire_old"]
+        },
+        "readers_persisted": {
+          "type": "boolean"
+        },
+        "handshakes_verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "root_spki",
+        "tenant_id",
+        "realm",
+        "now",
+        "latest_control",
+        "seen_control_revision",
+        "seen_generation",
+        "seen_version",
+        "seen_digest",
+        "previous_digest",
+        "first_publication_ledger",
+        "publication"
+      ],
+      "additionalProperties": false
+    },
+    "IssuerInput": {
+      "type": "object",
+      "properties": {
+        "clock": {
+          "$ref": "#/$defs/Clock"
+        },
+        "write_first_publication": {
+          "type": "boolean"
+        },
+        "clock_error_persisted": {
+          "type": "boolean"
+        },
+        "stable_samples": {
+          "type": "boolean"
+        }
+      },
+      "required": ["clock", "write_first_publication"],
+      "additionalProperties": false
+    },
+    "ConsumerCase": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "expected": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "authority_revoked",
+            "authority_unknown",
+            "control_rollback",
+            "control_required",
+            "version_rollback",
+            "same_version_conflict",
+            "scope_denied",
+            "invalid_chain",
+            "invalid_transition",
+            "predecessor_required",
+            "clock_error",
+            "projection_pending",
+            "identity_quarantined",
+            "migration_expired",
+            "migration_outside_commitment"
+          ]
+        },
+        "input": {
+          "$ref": "#/$defs/ConsumerInput"
+        }
+      },
+      "required": ["id", "expected", "input"],
+      "additionalProperties": false
+    },
+    "IssuerCase": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "expected": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "authority_revoked",
+            "authority_unknown",
+            "control_rollback",
+            "control_required",
+            "version_rollback",
+            "same_version_conflict",
+            "scope_denied",
+            "invalid_chain",
+            "invalid_transition",
+            "predecessor_required",
+            "clock_error",
+            "projection_pending",
+            "identity_quarantined",
+            "migration_expired",
+            "migration_outside_commitment"
+          ]
+        },
+        "input": {
+          "$ref": "#/$defs/IssuerInput"
+        }
+      },
+      "required": ["id", "expected", "input"],
+      "additionalProperties": false
+    },
+    "BoundaryCase": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "signature_domain"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "signed": {
+                  "type": "object",
+                  "properties": {
+                    "payload": {
+                      "type": "object"
+                    },
+                    "runtime_auth": {
+                      "$ref": "auto-renewal-v2.schema.json#/$defs/Signature"
+                    }
+                  },
+                  "required": ["payload", "runtime_auth"],
+                  "additionalProperties": false
+                },
+                "verification_domain": {
+                  "type": "string"
+                },
+                "verification_spki": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "signed",
+                "verification_domain",
+                "verification_spki"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "announcement"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/ConsumerInput"
+                },
+                "announcement": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2"
+                },
+                "persisted": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["context", "announcement", "persisted"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "control_receipt"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "request": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/ControlPackage"
+                },
+                "receipt": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/InstallationReceipt"
+                },
+                "identity_spki": {
+                  "type": "string"
+                },
+                "identity_id": {
+                  "type": "string"
+                },
+                "persisted": {
+                  "type": "boolean"
+                },
+                "new_chain_ready": {
+                  "type": "boolean"
+                },
+                "identity_compromised": {
+                  "type": "boolean"
+                },
+                "used_challenge": {
+                  "type": "boolean"
+                },
+                "exact_replay": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "request",
+                "receipt",
+                "identity_spki",
+                "identity_id",
+                "persisted",
+                "new_chain_ready",
+                "identity_compromised",
+                "used_challenge",
+                "exact_replay"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "projection"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "request": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/ProjectionRequest"
+                },
+                "response": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/ProjectionMaterial"
+                },
+                "identity_spki": {
+                  "type": "string"
+                },
+                "used_nonce": {
+                  "type": "boolean"
+                },
+                "exported_purposes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "request",
+                "response",
+                "identity_spki",
+                "used_nonce",
+                "exported_purposes"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "hpke"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "sealed": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SealedMaterial"
+                },
+                "expected_plaintext": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/ProjectionMaterial"
+                }
+              },
+              "required": ["sealed", "expected_plaintext"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "migration"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "permit": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedMigrationPermit"
+                },
+                "root_spki": {
+                  "type": "string"
+                },
+                "members": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "type": "string",
+                        "pattern": "^[1-9][0-9]{0,19}$"
+                      },
+                      "pair_digest": {
+                        "type": "string"
+                      },
+                      "material_digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["version", "pair_digest", "material_digest"],
+                    "additionalProperties": false
+                  }
+                },
+                "current_version": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,19}$"
+                },
+                "current_digest": {
+                  "type": "string"
+                },
+                "frozen_elapsed_seconds": {
+                  "type": "number"
+                },
+                "remaining_seconds": {
+                  "type": "number"
+                },
+                "first_v2_version": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,19}$"
+                },
+                "barrier_committed": {
+                  "type": "boolean"
+                },
+                "legacy_disabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "permit",
+                "root_spki",
+                "members",
+                "current_version",
+                "current_digest",
+                "frozen_elapsed_seconds",
+                "remaining_seconds",
+                "first_v2_version",
+                "barrier_committed",
+                "legacy_disabled"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "archive"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "issued_at": {
+                  "type": "string"
+                },
+                "before": {
+                  "type": "string"
+                },
+                "grace_seconds": {
+                  "type": "number"
+                },
+                "removed": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kid": {
+                        "type": "string"
+                      },
+                      "identity_digest": {
+                        "type": "string"
+                      },
+                      "not_before": {
+                        "type": "string"
+                      },
+                      "not_after": {
+                        "type": "string"
+                      },
+                      "terminal_state": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kid",
+                      "identity_digest",
+                      "not_before",
+                      "not_after",
+                      "terminal_state"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "tombstones": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "auto-renewal-v2.schema.json#/$defs/Tombstone"
+                  }
+                },
+                "reappeared": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kid": {
+                        "type": "string"
+                      },
+                      "identity_digest": {
+                        "type": "string"
+                      },
+                      "not_before": {
+                        "type": "string"
+                      },
+                      "not_after": {
+                        "type": "string"
+                      },
+                      "terminal_state": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kid",
+                      "identity_digest",
+                      "not_before",
+                      "not_after",
+                      "terminal_state"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "issued_at",
+                "before",
+                "grace_seconds",
+                "removed",
+                "tombstones",
+                "reappeared"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "config"
+            },
+            "expected": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "authority_revoked",
+                "authority_unknown",
+                "control_rollback",
+                "control_required",
+                "version_rollback",
+                "same_version_conflict",
+                "scope_denied",
+                "invalid_chain",
+                "invalid_transition",
+                "predecessor_required",
+                "clock_error",
+                "projection_pending",
+                "identity_quarantined",
+                "migration_expired",
+                "migration_outside_commitment"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "kek_secret_file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "kek_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "authority_source": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "control_source": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "keyset_seconds": {
+                      "type": "number"
+                    },
+                    "refresh_seconds": {
+                      "type": "number"
+                    },
+                    "check_seconds": {
+                      "type": "number"
+                    },
+                    "business_key_seconds": {
+                      "type": "number"
+                    },
+                    "rotation_seconds": {
+                      "type": "number"
+                    },
+                    "preannounce_seconds": {
+                      "type": "number"
+                    },
+                    "maturity_seconds": {
+                      "type": "number"
+                    },
+                    "overlap_seconds": {
+                      "type": "number"
+                    },
+                    "allowed_skew_seconds": {
+                      "type": "number"
+                    },
+                    "review_period_days": {
+                      "type": "integer"
+                    },
+                    "review_reminder_days": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 3,
+                      "uniqueItems": true
+                    },
+                    "projector_identity_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "projection_directory": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "reload_seconds": {
+                      "type": "number"
+                    },
+                    "leaf_days": {
+                      "type": "number"
+                    },
+                    "leaf_renew_before_days": {
+                      "type": "number"
+                    },
+                    "ca_years": {
+                      "type": "number"
+                    },
+                    "ca_renew_before_years": {
+                      "type": "number"
+                    },
+                    "forward_jump_seconds": {
+                      "type": "number"
+                    },
+                    "backward_jump_seconds": {
+                      "type": "number"
+                    },
+                    "clock_retry_seconds": {
+                      "type": "number"
+                    },
+                    "migration_margin_seconds": {
+                      "type": "number"
+                    },
+                    "freeze_seconds": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "kek_secret_file",
+                    "kek_id",
+                    "authority_source",
+                    "control_source",
+                    "keyset_seconds",
+                    "refresh_seconds",
+                    "check_seconds",
+                    "business_key_seconds",
+                    "rotation_seconds",
+                    "preannounce_seconds",
+                    "maturity_seconds",
+                    "overlap_seconds",
+                    "allowed_skew_seconds",
+                    "review_period_days",
+                    "review_reminder_days",
+                    "projector_identity_id",
+                    "projection_directory",
+                    "reload_seconds",
+                    "leaf_days",
+                    "leaf_renew_before_days",
+                    "ca_years",
+                    "ca_renew_before_years",
+                    "forward_jump_seconds",
+                    "backward_jump_seconds",
+                    "clock_retry_seconds",
+                    "migration_margin_seconds",
+                    "freeze_seconds"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["config"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

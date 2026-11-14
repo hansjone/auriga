@@ -1,0 +1,50 @@
+[
+  {
+    "file": "msgnet-v2-oracle.mjs",
+    "expression": "auth.alg !== 'Ed25519'",
+    "replacement": "false",
+    "reason": "生产Signature schema的alg为Ed25519常量，结构校验通过的输入使该原子恒为假，实际签名仍由Ed25519验签器验证。"
+  },
+  {
+    "file": "msgnet-v2-oracle.mjs",
+    "expression": "a.expiry_policy !== 'no_hard_expiry'",
+    "replacement": "false",
+    "reason": "RuntimeAuthority schema将expiry_policy固定为no_hard_expiry，合法输入中该原子恒为假。"
+  },
+  {
+    "file": "msgnet-v2-oracle.mjs",
+    "expression": "'not_after' in a",
+    "replacement": "false",
+    "reason": "RuntimeAuthority未定义not_after且additionalProperties为false，结构合法的运行授权不能包含该字段。"
+  },
+  {
+    "file": "msgnet-v2-oracle.mjs",
+    "expression": "'delegate' in a",
+    "replacement": "false",
+    "reason": "RuntimeAuthority未定义delegate且additionalProperties为false，结构合法的运行授权不能包含该字段。"
+  },
+  {
+    "file": "msgnet-v2-oracle.mjs",
+    "expression": "!newActiveKids",
+    "replacement": "false",
+    "reason": "前驱active和next均须revoked，同清单kid唯一阻止它们再次充当active，前驱retired和revoked另受终态不可复活检查约束。四种历史状态均已覆盖，因此新active复用任何历史kid都会被其余门禁拒绝。"
+  },
+  {
+    "file": "msgnet-v2-oracle.mjs",
+    "expression": "BigInt(proof.committed_version) <= BigInt(p.predecessor.keyset.payload.keyset_version)",
+    "replacement": "true",
+    "reason": "到达成熟判定前，逐快照首发校验已对前驱每条证明强制committed_version不大于该快照版本。该处比较重复同一上界，首发上界已有独立负例。"
+  },
+  {
+    "file": "msgnet-v2-boundary-oracle.mjs",
+    "expression": "k.terminal_state === 'active'",
+    "replacement": "false",
+    "reason": "持久Tombstone终态只允许retired或revoked，重新出现项为active时必然与墓碑不相等，保留的!eq(t,k)检查始终拒绝该输入。"
+  },
+  {
+    "file": "msgnet-local-projection-oracle.mjs",
+    "expression": "jcs(names) !== jcs([...new Set(names)].sort())",
+    "replacement": "false",
+    "reason": "保留的 Object.keys(files).sort() 与 names 精确相等检查已要求 names 排序且唯一，Object.keys 自身无重复，该检查重复同一约束。"
+  }
+]

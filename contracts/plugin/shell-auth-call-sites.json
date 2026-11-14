@@ -1,0 +1,1055 @@
+{
+  "base": "36475f2f737e90bd1c52eea4c5fa7202e00e4807",
+  "calls": [
+    {
+      "file": "ai/index.js",
+      "evidence": "(response.url && response.url !== `${origin}/ai/v1/${path}`) ||",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listAiModels",
+        "createAiChatCompletion",
+        "createAiChatCompletionStream"
+      ],
+      "routePattern": "/ai/v1/${path}"
+    },
+    {
+      "file": "ai/index.js",
+      "evidence": "const pending = controlledFetch(`${origin}/ai/v1/${path}`, {",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listAiModels",
+        "createAiChatCompletion",
+        "createAiChatCompletionStream"
+      ],
+      "routePattern": "/ai/v1/${path}"
+    },
+    {
+      "file": "ai/index.js",
+      "evidence": "const trace = { trace_id: parent.slice(3, 35), path: `/ai/v1/${path}` };",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listAiModels",
+        "createAiChatCompletion",
+        "createAiChatCompletionStream"
+      ],
+      "routePattern": "/ai/v1/${path}"
+    },
+    {
+      "file": "ai/managed-status.js",
+      "evidence": "base.pathname !== '/ai/v1' ||",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listAiModels",
+        "createAiChatCompletion",
+        "createAiChatCompletionStream"
+      ],
+      "routePattern": "/ai/v1"
+    },
+    {
+      "file": "ai/refresh-broker.js",
+      "evidence": "tokens = await platform.request('/oauth2/token', {",
+      "methods": [
+        "POST"
+      ],
+      "operations": [],
+      "control": "broker_token_refresh",
+      "routePattern": "/oauth2/token"
+    },
+    {
+      "file": "local/member-profile.js",
+      "evidence": "'/api/iam/v1/network/systems?limit=200' +",
+      "methods": [
+        "GET"
+      ],
+      "operations": [
+        "listNetworkSystems"
+      ],
+      "routePattern": "/api/iam/v1/network/systems?limit=200"
+    },
+    {
+      "file": "local/member-profile.js",
+      "evidence": "const me = await platform.request('/api/iam/v1/me', { jar, signal });",
+      "methods": [
+        "GET"
+      ],
+      "operations": [
+        "profile_read"
+      ],
+      "routePattern": "/api/iam/v1/me"
+    },
+    {
+      "file": "local/platform.js",
+      "evidence": "const jwks = await request(issuerPath + '/oauth2/jwks');",
+      "methods": [
+        "GET"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/oauth2/jwks"
+    },
+    {
+      "file": "local/platform.js",
+      "evidence": "new URL(config.issuer).pathname.replace(/\\/$/, '') + '/oauth2/jwks',",
+      "methods": [
+        "GET"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/oauth2/jwks"
+    },
+    {
+      "file": "local/runtime.js",
+      "evidence": ": '/api/iam/v1/login/transactions/' +",
+      "methods": [
+        "DELETE"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/api/iam/v1/login/transactions/"
+    },
+    {
+      "file": "local/runtime.js",
+      "evidence": "? '/api/iam/v1/logout'",
+      "methods": [
+        "POST"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/api/iam/v1/logout"
+    },
+    {
+      "file": "local/runtime.js",
+      "evidence": "'/api/iam/v1/login/providers',",
+      "methods": [
+        "GET"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/api/iam/v1/login/providers"
+    },
+    {
+      "file": "local/runtime.js",
+      "evidence": "'/api/iam/v1/login/transactions',",
+      "methods": [
+        "POST"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/api/iam/v1/login/transactions"
+    },
+    {
+      "file": "local/runtime.js",
+      "evidence": "'/api/iam/v1/login/transactions/' +",
+      "methods": [
+        "POST"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/api/iam/v1/login/transactions/"
+    },
+    {
+      "file": "local/runtime.js",
+      "evidence": "await platform.request('/oauth2/revoke', {",
+      "methods": [
+        "POST"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/oauth2/revoke"
+    },
+    {
+      "file": "local/runtime.js",
+      "evidence": "tokens = await platform.request('/oauth2/token', {",
+      "methods": [
+        "POST"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/oauth2/token"
+    },
+    {
+      "file": "local/team.js",
+      "evidence": "await transport('/ai/mcp', {",
+      "methods": [
+        "POST"
+      ],
+      "operations": [
+        "team_initialize",
+        "team_list_tools",
+        "team_ping",
+        "team_list_endpoints",
+        "team_open_thread",
+        "team_reply_thread",
+        "team_read_thread"
+      ],
+      "routePattern": "/ai/mcp"
+    },
+    {
+      "file": "local/team.js",
+      "evidence": "const result = await transport('/ai/mcp', {",
+      "methods": [
+        "POST"
+      ],
+      "operations": [
+        "team_initialize",
+        "team_list_tools",
+        "team_ping",
+        "team_list_endpoints",
+        "team_open_thread",
+        "team_reply_thread",
+        "team_read_thread"
+      ],
+      "routePattern": "/ai/mcp"
+    },
+    {
+      "file": "local/team.js",
+      "evidence": "const result = await transport('/ai/team/node/' + method, {",
+      "methods": [
+        "POST"
+      ],
+      "operations": [
+        "team_node_register",
+        "team_node_bind",
+        "team_node_pull",
+        "team_node_ack",
+        "team_node_revoke"
+      ],
+      "routePattern": "/ai/team/node/"
+    },
+    {
+      "file": "managed/heartbeat.js",
+      "evidence": "'/api/workspace/v1/instance/heartbeat',",
+      "methods": [
+        "POST"
+      ],
+      "operations": [],
+      "control": "managed_instance_heartbeat",
+      "routePattern": "/api/workspace/v1/instance/heartbeat"
+    },
+    {
+      "file": "managed/models.js",
+      "evidence": ": platform.request('/ai/v1/models', {",
+      "methods": [
+        "GET"
+      ],
+      "operations": [
+        "listAiModels"
+      ],
+      "routePattern": "/ai/v1/models"
+    },
+    {
+      "file": "network/base-tools.js",
+      "evidence": "export const DIAGNOSTIC_PATH = '/api/iam/v1/login/providers';",
+      "methods": [
+        "GET"
+      ],
+      "operations": [
+        "provider_diagnostic"
+      ],
+      "routePattern": "/api/iam/v1/login/providers"
+    },
+    {
+      "file": "network/device-provider.js",
+      "evidence": "'/api/collab/v1/network/keys/announcement',",
+      "methods": [
+        "GET"
+      ],
+      "operations": [
+        "getNetworkKeyAnnouncement"
+      ],
+      "routePattern": "/api/collab/v1/network/keys/announcement"
+    },
+    {
+      "file": "network/device-provider.js",
+      "evidence": "'/api/iam/v1/network/tickets',",
+      "methods": [
+        "POST"
+      ],
+      "operations": [
+        "network_open"
+      ],
+      "routePattern": "/api/iam/v1/network/tickets"
+    },
+    {
+      "file": "network/device-provider.js",
+      "evidence": "() => request('/api/collab/v1/network/keys', undefined, active),",
+      "methods": [
+        "GET"
+      ],
+      "operations": [
+        "getNetworkKeys"
+      ],
+      "routePattern": "/api/collab/v1/network/keys"
+    },
+    {
+      "file": "network/device-provider.js",
+      "evidence": "() => request('/api/iam/v1/network/register', {}, active),",
+      "methods": [
+        "POST"
+      ],
+      "operations": [
+        "network_open"
+      ],
+      "routePattern": "/api/iam/v1/network/register"
+    },
+    {
+      "file": "network/device-provider.js",
+      "evidence": "path === '/api/iam/v1/network/register'",
+      "methods": [
+        "POST"
+      ],
+      "operations": [
+        "network_open"
+      ],
+      "routePattern": "/api/iam/v1/network/register"
+    },
+    {
+      "file": "network/device-provider.js",
+      "evidence": "return request('/api/ai/v1/network/submit', body, active);",
+      "methods": [
+        "POST"
+      ],
+      "operations": [
+        "network_submit"
+      ],
+      "routePattern": "/api/ai/v1/network/submit"
+    },
+    {
+      "file": "network/managed-device.js",
+      "evidence": ".request('/oauth2/token', {",
+      "methods": [
+        "POST"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/oauth2/token"
+    },
+    {
+      "file": "resources/catalog-api.js",
+      "evidence": "!path.startsWith('/api/resource/v1/') ||",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/"
+    },
+    {
+      "file": "resources/catalog-api.js",
+      "evidence": "const base = '/api/resource/v1/catalog';",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/catalog"
+    },
+    {
+      "file": "resources/catalog-routes.js",
+      "evidence": "'/api/resource/v1/catalog/' +",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/catalog/"
+    },
+    {
+      "file": "resources/catalog-service.js",
+      "evidence": "'/api/resource/v1/catalog/packages?' +",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/catalog/packages?"
+    },
+    {
+      "file": "resources/catalog-service.js",
+      "evidence": "'/api/resource/v1/catalog/packages/' +",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/catalog/packages/"
+    },
+    {
+      "file": "resources/catalog-service.js",
+      "evidence": "'/api/resource/v1/catalog/packages/' +",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/catalog/packages/"
+    },
+    {
+      "file": "resources/catalog-service.js",
+      "evidence": "'/api/resource/v1/catalog/packages/' + input.packageId,",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/catalog/packages/"
+    },
+    {
+      "file": "resources/catalog-service.js",
+      "evidence": "'/api/resource/v1/catalog/packages/' + pack.value.id + '/versions',",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/catalog/packages/"
+    },
+    {
+      "file": "resources/catalog-service.js",
+      "evidence": "pack = await api.request('/api/resource/v1/catalog/packages', {",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "UnifiedListResourcePackages",
+        "UnifiedCreateResourcePackage",
+        "UnifiedGetResourcePackage",
+        "UnifiedListResourceVersions",
+        "UnifiedUploadResourceVersion",
+        "UnifiedGetResourceVersion",
+        "UnifiedSubmitResourceVersion",
+        "UnifiedDownloadResourceManifest",
+        "UnifiedCreateDownloadTicket",
+        "UnifiedDownloadArtifact",
+        "UnifiedListInstallations",
+        "UnifiedSelectInstallation",
+        "UnifiedReportInstallation",
+        "UnifiedRenewInstallation",
+        "UnifiedDownloadVersionArtifact"
+      ],
+      "routePattern": "/api/resource/v1/catalog/packages"
+    },
+    {
+      "file": "resources/channel.js",
+      "evidence": "`^(?:/api/resource/v1/packages(?:/${uuid}(?:/versions(?:/${uuid})?)?)?|/api/resource/v1/distributions/${uuid})$`,",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listResourcePackages",
+        "createResourcePackage",
+        "getResourcePackage",
+        "patchResourcePackage",
+        "listResourceVersions",
+        "uploadResourceVersion",
+        "getResourceVersion",
+        "submitResourceVersion",
+        "requestResourceDistribution",
+        "getResourceDistribution",
+        "downloadResourceContent",
+        "getResourceRevocations",
+        "createMemberResourceDownloadTicket",
+        "consumeMemberResourceDownloadTicket",
+        "listMemberResourceInstallations",
+        "selectMemberResourceInstallation",
+        "reportMemberResourceInstallation"
+      ],
+      "routePattern": "/api/resource/v1/packages(?:/${uuid}(?:/versions(?:/${uuid}"
+    },
+    {
+      "file": "resources/channel.js",
+      "evidence": "if (write && path !== '/api/resource/v1/distributions') return send(405);",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listResourcePackages",
+        "createResourcePackage",
+        "getResourcePackage",
+        "patchResourcePackage",
+        "listResourceVersions",
+        "uploadResourceVersion",
+        "getResourceVersion",
+        "submitResourceVersion",
+        "requestResourceDistribution",
+        "getResourceDistribution",
+        "downloadResourceContent",
+        "getResourceRevocations",
+        "createMemberResourceDownloadTicket",
+        "consumeMemberResourceDownloadTicket",
+        "listMemberResourceInstallations",
+        "selectMemberResourceInstallation",
+        "reportMemberResourceInstallation"
+      ],
+      "routePattern": "/api/resource/v1/distributions"
+    },
+    {
+      "file": "resources/channel.js",
+      "evidence": "write && raw === '/api/resource/v1/distributions'",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listResourcePackages",
+        "createResourcePackage",
+        "getResourcePackage",
+        "patchResourcePackage",
+        "listResourceVersions",
+        "uploadResourceVersion",
+        "getResourceVersion",
+        "submitResourceVersion",
+        "requestResourceDistribution",
+        "getResourceDistribution",
+        "downloadResourceContent",
+        "getResourceRevocations",
+        "createMemberResourceDownloadTicket",
+        "consumeMemberResourceDownloadTicket",
+        "listMemberResourceInstallations",
+        "selectMemberResourceInstallation",
+        "reportMemberResourceInstallation"
+      ],
+      "routePattern": "/api/resource/v1/distributions"
+    },
+    {
+      "file": "resources/member-api.js",
+      "evidence": "`/api/resource/v1/packages/${packageId}/versions/${versionId}`,",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listResourcePackages",
+        "createResourcePackage",
+        "getResourcePackage",
+        "patchResourcePackage",
+        "listResourceVersions",
+        "uploadResourceVersion",
+        "getResourceVersion",
+        "submitResourceVersion",
+        "requestResourceDistribution",
+        "getResourceDistribution",
+        "downloadResourceContent",
+        "getResourceRevocations",
+        "createMemberResourceDownloadTicket",
+        "consumeMemberResourceDownloadTicket",
+        "listMemberResourceInstallations",
+        "selectMemberResourceInstallation",
+        "reportMemberResourceInstallation"
+      ],
+      "routePattern": "/api/resource/v1/packages/${packageId}/versions/${versionId}"
+    },
+    {
+      "file": "resources/member-api.js",
+      "evidence": "const base = '/api/resource/v1/member';",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listResourcePackages",
+        "createResourcePackage",
+        "getResourcePackage",
+        "patchResourcePackage",
+        "listResourceVersions",
+        "uploadResourceVersion",
+        "getResourceVersion",
+        "submitResourceVersion",
+        "requestResourceDistribution",
+        "getResourceDistribution",
+        "downloadResourceContent",
+        "getResourceRevocations",
+        "createMemberResourceDownloadTicket",
+        "consumeMemberResourceDownloadTicket",
+        "listMemberResourceInstallations",
+        "selectMemberResourceInstallation",
+        "reportMemberResourceInstallation"
+      ],
+      "routePattern": "/api/resource/v1/member"
+    },
+    {
+      "file": "resources/member-api.js",
+      "evidence": "const pack = await request(`/api/resource/v1/packages/${packageId}`);",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listResourcePackages",
+        "createResourcePackage",
+        "getResourcePackage",
+        "patchResourcePackage",
+        "listResourceVersions",
+        "uploadResourceVersion",
+        "getResourceVersion",
+        "submitResourceVersion",
+        "requestResourceDistribution",
+        "getResourceDistribution",
+        "downloadResourceContent",
+        "getResourceRevocations",
+        "createMemberResourceDownloadTicket",
+        "consumeMemberResourceDownloadTicket",
+        "listMemberResourceInstallations",
+        "selectMemberResourceInstallation",
+        "reportMemberResourceInstallation"
+      ],
+      "routePattern": "/api/resource/v1/packages/${packageId}"
+    },
+    {
+      "file": "resources/member-api.js",
+      "evidence": "revocations: () => request('/api/resource/v1/revocations'),",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "operations": [
+        "listResourcePackages",
+        "createResourcePackage",
+        "getResourcePackage",
+        "patchResourcePackage",
+        "listResourceVersions",
+        "uploadResourceVersion",
+        "getResourceVersion",
+        "submitResourceVersion",
+        "requestResourceDistribution",
+        "getResourceDistribution",
+        "downloadResourceContent",
+        "getResourceRevocations",
+        "createMemberResourceDownloadTicket",
+        "consumeMemberResourceDownloadTicket",
+        "listMemberResourceInstallations",
+        "selectMemberResourceInstallation",
+        "reportMemberResourceInstallation"
+      ],
+      "routePattern": "/api/resource/v1/revocations"
+    },
+    {
+      "file": "settings/store.js",
+      "evidence": "const response = await fetcher(platform + '/oauth2/jwks', {",
+      "methods": [
+        "GET"
+      ],
+      "operations": [],
+      "control": "shell_authentication_lifecycle",
+      "routePattern": "/oauth2/jwks"
+    }
+  ],
+  "sources": [
+    {
+      "file": "ai/index.js",
+      "sha256": "961e7ec12eaaf51e7bfefa7984b39161eabd47cc86e73f6651bc26be618e9c8b"
+    },
+    {
+      "file": "ai/managed-status.js",
+      "sha256": "316e937a31d59900ed537b57dbded7e1bf8eee5a39b49e175252047cbef1de30"
+    },
+    {
+      "file": "ai/refresh-broker.js",
+      "sha256": "71e745f9a615cb9051c80abccf4b024b91cee39250107308e86afb5f1818145e"
+    },
+    {
+      "file": "local/member-profile.js",
+      "sha256": "c821b8f06e74ceb4fed51ba9b454a782a2a176c3cbd9dd5f57871ed7a82c3a49"
+    },
+    {
+      "file": "local/platform.js",
+      "sha256": "003e867c53673ac61b5d8a9f50e5cafb93e18e9986ffabc6129c56793577171a"
+    },
+    {
+      "file": "local/runtime.js",
+      "sha256": "61837e911300e0b9a7c1983a2e5eac381f9b0248a7cbd16422c36954467e5c2e"
+    },
+    {
+      "file": "local/team.js",
+      "sha256": "a0964fcc8489fffd108c5c5e60c8646eca1a94f4621a72af70156d659ed1050a"
+    },
+    {
+      "file": "managed/heartbeat.js",
+      "sha256": "ba95419674cf4cca99863bcdd4941b2d76fa9b3896dc6bbde2dcfc4607b5f449"
+    },
+    {
+      "file": "managed/models.js",
+      "sha256": "ae26f7ac493ac434e4fa5c8736dc49c48896bb96341505f48ed35abb9ed1a30e"
+    },
+    {
+      "file": "network/base-tools.js",
+      "sha256": "2bdf9d4c591b374551703bec7c0ba7865f3b66301247254fe12915c396833327"
+    },
+    {
+      "file": "network/device-provider.js",
+      "sha256": "3a1e87f17d4bdff56e4d6f86f3f9d5dc589afd3670cce7359838cdf4e1a69995"
+    },
+    {
+      "file": "network/managed-device.js",
+      "sha256": "f6a211e026b56ef4e8cd1d45c36f1c26cfed8e1f80b4fa19515f01757458614a"
+    },
+    {
+      "file": "resources/catalog-api.js",
+      "sha256": "1b33d164baf6e450ade94cee058592a8e0b77ce8d6de85945ca9c581ce3330f4"
+    },
+    {
+      "file": "resources/catalog-routes.js",
+      "sha256": "340818f0251a9ee82c2dc52627ace6e99d671ab0a4258390f0bdeacc63adc53e"
+    },
+    {
+      "file": "resources/catalog-service.js",
+      "sha256": "f801fc9c23f4c5be6328afb75e7d425112631587a6250e2cc27a84e57d24a53c"
+    },
+    {
+      "file": "resources/channel.js",
+      "sha256": "90d2921db2f7846d8b200ef27078a853c69b91017a8dc975b01817bd17f3ee93"
+    },
+    {
+      "file": "resources/member-api.js",
+      "sha256": "48f0d5d5a735813ba0f38d39748b498b5d8e807517ca77eceb1200dd23325f58"
+    },
+    {
+      "file": "settings/store.js",
+      "sha256": "cb57fdc5a4a8689aa9664891058a5953b29acfddb95f0d0056f8ec3836d7de7e"
+    }
+  ],
+  "migrationState": "legacy",
+  "checkPolicy": "legacy按文件+规范化字面路由特征比较，允许删除与格式变化；不证明动态拼接/同路径新方法已迁移。broker只放行retainedChannels中精确文件的指定传输与路由；broker固定接缝命名及静态扫描局限见shell-auth-migration.md。D迁移完成后清空calls并切broker，保留通道变更须独审。",
+  "retainedChannels": [
+    {
+      "file": "client.js",
+      "channel": "local-browser-bridge",
+      "transports": [
+        "call:fetch"
+      ],
+      "routePatterns": [],
+      "reason": "生成的页面只访问同源DSH受准入桥接和健康/资源接口，平台身份留在后端；仍须原完整Origin与localURL边界。",
+      "design": "docs/design/auth-shell.zh.md §3.3、§4.2"
+    },
+    {
+      "file": "settings/view.js",
+      "channel": "local-settings-view",
+      "transports": [
+        "call:fetcher"
+      ],
+      "routePatterns": [],
+      "reason": "个人设置和平台状态动作通过当前宿主localURL桥接，不直连平台成员API。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "local/host.js",
+      "channel": "local-dsh-host",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留DSH本地Host/Origin准入及宿主端口，不为平台认证另开生命周期。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "local/routes.js",
+      "channel": "local-dsh-routes",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留本地owner路由与DSH桥接；平台分支仍须迁broker，类型注释不是网络请求。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "local-ui.js",
+      "channel": "local-dsh-static",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "本地DSH静态页面与HTTP请求类型，不持有平台访问票。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "settings/host.js",
+      "channel": "local-settings-host",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留本机设置路由及精确Host/Origin保护。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "identity/core.js",
+      "channel": "standalone-owner",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留本地owner身份源、应急和离线准入；平台认证分支仍须拆出。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "identity/registry.js",
+      "channel": "standalone-owner-registry",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "本地owner身份源注册，不新增平台令牌通道。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "identity/oidc.js",
+      "channel": "standalone-owner-oidc",
+      "transports": [],
+      "routePatterns": [
+        "^/oauth2/(?:authorize|token|userinfo|jwks|revoke)$"
+      ],
+      "reason": "仅standalone owner的受信身份源OIDC，不得用于Auriga平台设备认证。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "identity/oidc-http.js",
+      "channel": "standalone-owner-oidc-http",
+      "transports": [
+        "import:node:net",
+        "import:undici",
+        "call:customFetch",
+        "call:undiciFetch"
+      ],
+      "routePatterns": [
+        "^/oauth2/(?:authorize|token|userinfo|jwks|revoke)$"
+      ],
+      "reason": "owner OIDC请求继续经过原issuer/DNS/无重定向守卫；node:net仅用于地址校验。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "managed/heartbeat.js",
+      "channel": "managed-instance-heartbeat",
+      "transports": [
+        "call:traceFetch"
+      ],
+      "routePatterns": [
+        "^/api/workspace/v1/instance/heartbeat$"
+      ],
+      "reason": "托管实例以既有instance凭据向固定心跳端点报活动，不替代成员平台代理。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "managed/host-auth.js",
+      "channel": "managed-edge-admission",
+      "transports": [
+        "import:node:net"
+      ],
+      "routePatterns": [],
+      "reason": "保留edge身份头、来源及Host核验；node:net仅isIP，无网络请求授权。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "managed/keys.js",
+      "channel": "managed-local-keys",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留受保护本地identity keys文件读取与验签，禁止远程取key。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "managed/door.js",
+      "channel": "managed-door",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留托管HTTP/WS准入，不是插件直连平台的WS客户端。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "managed/guards.js",
+      "channel": "managed-native-guards",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留本地原生设置/插件操作守卫。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "managed/session.js",
+      "channel": "managed-browser-session",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留已准入浏览器连接的撤销和清理，不持平台设备票。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "managed/panel.js",
+      "channel": "managed-signed-panel",
+      "transports": [
+        "call:traceFetch"
+      ],
+      "routePatterns": [
+        "^/panel/(?:manifest\\.json|[^?#]+)$"
+      ],
+      "reason": "保留同源签名面板manifest/静态加载与完整性校验，不能借此直连成员API。",
+      "design": "docs/design/auth-shell.zh.md §3.3"
+    },
+    {
+      "file": "local/desktop.js",
+      "channel": "desktop-signed-update",
+      "transports": [
+        "call:fetch"
+      ],
+      "routePatterns": [],
+      "reason": "保留安装器选定的同源制品下载和更新边界，不得携平台成员凭据或选择成员API。",
+      "design": "docs/design/auth-shell.zh.md §3.2.1、§3.3"
+    },
+    {
+      "file": "observability/index.js",
+      "channel": "retained-channel-tracing",
+      "transports": [
+        "call:tracedFetch",
+        "call:traceFetch",
+        "call:fetcher"
+      ],
+      "routePatterns": [],
+      "reason": "仅给保留通道包装日志/追踪，调用方仍须单独白名单；不能增加平台路由或持有平台令牌。",
+      "design": "docs/design/auth-shell.zh.md §3.3、§9"
+    },
+    {
+      "file": "ai/transport.js",
+      "channel": "personal-model-stream",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留个人模型通用流处理，平台模型直连必须迁broker。",
+      "design": "docs/design/auth-shell.zh.md §3.3、§4.2"
+    },
+    {
+      "file": "ai/installation.js",
+      "channel": "personal-model-host-adapter",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "保留原生个人模型挂接；平台取票/传输分支仍由D迁broker，白名单不放行直接fetch。",
+      "design": "docs/design/auth-shell.zh.md §3.3、§4.2"
+    }
+  ]
+}

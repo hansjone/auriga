@@ -99,6 +99,7 @@ func (r *Reconciler) cancelHealthLocked(id string) {
 // Desired writes and cancellation epochs use the same mutex as this commit.
 // Publishing a stale observation can therefore never overwrite a newer command.
 func (r *Reconciler) persistHealth(ctx context.Context, epoch uint64, spec *nodev1.InstanceSpec, st *nodev1.InstanceStatus, attempts uint32) bool {
+	r.enrichResources(ctx, st)
 	r.mu.Lock()
 	latest, err := r.Store.GetDesired(st.InstanceId)
 	if err != nil || r.closed || ctx.Err() != nil || epoch != r.healthEpochs[st.InstanceId] || !proto.Equal(spec, latest) {
@@ -173,6 +174,10 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 	if !current() {
 		return
 	}
+	if errors.Is(checkErr, runtime.ErrUnifiedPrivateOnly) {
+		r.applySpec(ctx, id, spec, true)
+		return
+	}
 	if checkErr == nil && actual.Generation != rec.Status.ObservedGeneration {
 		checkErr = errors.New("runtime health execution generation mismatch")
 	}
@@ -180,7 +185,8 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 		r.mu.Lock()
 		delete(r.healthRetries, id)
 		r.mu.Unlock()
-		if !rec.Status.Ready || rec.Status.Error != nil {
+		_, resourceObservation := r.Driver.(resourceObserver)
+		if !rec.Status.Ready || rec.Status.Error != nil || resourceObservation {
 			st := cloneStatus(rec.Status)
 			st.Ready, st.Error, st.UpdatedAt = true, nil, timestamppb.Now()
 			if st.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
@@ -189,7 +195,7 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 					st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART
 				}
 			}
-			if r.persistHealth(ctx, epoch, spec, st, 0) {
+			if r.persistHealth(ctx, epoch, spec, st, 0) && st.Ready {
 				telemetry.Stage(ctx, "ready")
 			}
 		}
@@ -227,7 +233,7 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 					st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART
 				}
 			}
-			if r.persistHealth(ctx, epoch, spec, st, 0) {
+			if r.persistHealth(ctx, epoch, spec, st, 0) && st.Ready {
 				telemetry.Stage(ctx, "ready")
 			}
 			r.mu.Lock()

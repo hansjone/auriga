@@ -15,6 +15,9 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   Copy-Item (Join-Path $ver 'upstream\node\node.exe') $tmp
   Copy-Item (Join-Path $ver 'auriga\runtime\*.mjs') $tmp
+  # The isolated runtime also needs the frozen state-machine/schema assets.
+  $schemas = Join-Path $ver 'auriga\runtime\schemas'
+  if (Test-Path -LiteralPath $schemas) { Copy-Item -LiteralPath $schemas -Destination (Join-Path $tmp 'schemas') -Recurse }
   $argList = @((Join-Path $tmp 'cli.mjs'), 'uninstall', '--root', $root)
   if ($PurgeData) { $argList += '--purge-data' }
   & (Join-Path $tmp 'node.exe') @argList

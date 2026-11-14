@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package auriga.node.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.node.v1";
+
+// 只运输公有签名包；JSON 字节必须按 network/auto-renewal-v2.schema.json 验证。
+// 不能用 protojson 重编码后验签，不能在此消息中传私钥或未密封材料。
+message MsgnetControlPackage {
+  bytes canonical_json = 1;
+}
+
+// 节点身份对持久安装结果的签名回执，不代表服务器已解除隔离。
+message MsgnetControlReceipt {
+  bytes canonical_json = 1;
+}
+
+// 公有双 CA 信任声明，必须验证安装根链及最新控制快照。
+message MsgnetTransportBundle {
+  bytes canonical_json = 1;
+}

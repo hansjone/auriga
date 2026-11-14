@@ -277,6 +277,11 @@ func (d *Docker) verifyContainer(ctx context.Context, r *state.ExecutionRecord) 
 	if insp == nil || insp["Id"] != r.ContainerID || insp["Image"] != r.EngineImageID || labels[labelManaged] != "true" || labels[labelInstance] != r.InstanceID || labels[labelGeneration] != fmt.Sprint(r.Generation) {
 		return nil, fmt.Errorf("docker actual container identity mismatch")
 	}
+	if labels["auriga.shared-skills"] == "read-only" {
+		if err := d.verifyUnifiedMount(insp, r.InstanceID); err != nil {
+			return nil, err
+		}
+	}
 	return insp, nil
 }
 

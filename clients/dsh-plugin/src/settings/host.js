@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { createSettingsStore, probe } from './store.js';
 import { validateBrowserOrigin } from '../managed/host-auth.js';
+import { createPrivateSkills } from '../resources/private-skills.js';
 
 /** Only installation/renderer configuration may supply this value, never a request
  * header or saved platform preference. Reject normalization and non-origin URLs.
@@ -66,6 +68,9 @@ export function installSettings(
             store,
             desktop,
             mode,
+            privateSkills: createPrivateSkills({
+              home: process.env.DSH_HOME || join(homedir(), '.dsh'),
+            }),
             auth: nativeAuth ?? scoped.connection,
             uiOrigin: expectedOrigin,
             activeOrigin:
@@ -81,7 +86,7 @@ export function installSettings(
   return { getStore };
 }
 
-/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,uiOrigin?:string,mode?:string}} options */
+/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,uiOrigin?:string,mode?:string,privateSkills?:ReturnType<typeof createPrivateSkills>}} options */
 export function createSettingsHandler({
   store,
   desktop,
@@ -90,6 +95,7 @@ export function createSettingsHandler({
   deviceName = null,
   uiOrigin,
   mode = 'connect',
+  privateSkills,
 }) {
   const expectedOrigin = trustedOrigin(uiOrigin);
   const snapshot = () => ({
@@ -168,6 +174,71 @@ export function createSettingsHandler({
       }
       if (req.method === 'GET' && path === '/auriga/settings/state')
         return json(200, snapshot());
+      if (req.method === 'GET' && path === '/auriga/settings/skills')
+        return privateSkills
+          ? json(200, {
+              items: await privateSkills.list(),
+              ...((await privateSkills.writeLock?.())
+                ? { writeLock: await privateSkills.writeLock() }
+                : {}),
+            })
+          : json(503, { reason: 'unavailable' });
+      if (write && path === '/auriga/settings/skills') {
+        if (!privateSkills) return json(503, { reason: 'unavailable' });
+        if (
+          req.headers['content-type']?.split(';')[0].trim() !==
+            'application/json' ||
+          req.headers['x-auriga-settings'] !== '1'
+        )
+          return json(403, { reason: 'forbidden' });
+        const chunks = [];
+        let length = 0;
+        for await (const chunk of req) {
+          length += chunk.length;
+          if (length > 1048576) return json(413, { reason: 'invalidSettings' });
+          chunks.push(chunk);
+        }
+        let input;
+        try {
+          input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        } catch {
+          return json(400, { reason: 'invalidSettings' });
+        }
+        if (!input || typeof input !== 'object' || Array.isArray(input))
+          return json(400, { reason: 'invalidSettings' });
+        const keys = Object.keys(input).sort().join(',');
+        try {
+          if (input.action === 'create' && keys === 'action,source')
+            return json(200, await privateSkills.create(input.source));
+          if (input.action === 'preview' && keys === 'action,snapshotId')
+            return json(200, await privateSkills.frozen(input.snapshotId));
+          if (
+            input.action === 'read' &&
+            keys === 'action,enabled,name' &&
+            typeof input.enabled === 'boolean'
+          )
+            return json(
+              200,
+              await privateSkills.read(input.name, input.enabled),
+            );
+          if (
+            (input.action === 'edit' &&
+              keys === 'action,enabled,name,revision,source') ||
+            (['enable', 'disable', 'remove', 'freeze'].includes(input.action) &&
+              keys === 'action,enabled,name,revision')
+          )
+            return json(200, await privateSkills.change(input));
+          return json(400, { reason: 'invalidSettings' });
+        } catch (error) {
+          return json(
+            /** @type {any} */ (error).code === 'common.conflict' ||
+              /** @type {any} */ (error).code === 'EEXIST'
+              ? 409
+              : 422,
+            { reason: 'invalidSettings' },
+          );
+        }
+      }
       if (mode === 'managed') return json(403, { reason: 'managed' });
       if (
         !write ||

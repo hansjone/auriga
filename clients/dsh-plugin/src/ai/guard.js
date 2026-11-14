@@ -2,7 +2,7 @@
 export class AdapterError extends Error {
   /** @param {string} code */
   constructor(code) {
-    super(`Auriga AI: ${code}`);
+    super(`Auriga DSH AI: ${code}`);
     this.code = code;
   }
 }

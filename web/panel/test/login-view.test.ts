@@ -7,6 +7,27 @@ import type {
 } from '../../../clients/dsh-plugin/src/generated/steps';
 
 const disposals: (() => void)[] = [];
+
+it.each(['zh-CN', 'en'])(
+  'embedded login preserves the instance page title across rendering in %s',
+  (locale) => {
+    const previousTitle = document.title;
+    const title = 'Auriga DSH · 实例登录 / Instance sign in';
+    document.title = title;
+    try {
+      const { view } = mount({ locale });
+      expect(document.title).toBe(title);
+      view.setStep(passwordStep);
+      view.setLocale(locale === 'en' ? 'zh-CN' : 'en');
+      expect(document.title).toBe(title);
+      view.dispose();
+      expect(document.title).toBe(title);
+    } finally {
+      document.title = previousTitle;
+    }
+  },
+);
+
 afterEach(() => {
   disposals.splice(0).forEach((dispose) => dispose());
   document.body.replaceChildren();

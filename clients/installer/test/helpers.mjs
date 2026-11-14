@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -120,7 +121,11 @@ export function buildPayload(base, options = {}) {
 }
 
 export function tempBase(t) {
-  const base = mkdtempSync(join(tmpdir(), 'auriga-installer-'));
+  // Windows CI TEMP can use an 8.3 name (RUNNER~1). Feed the same canonical
+  // absolute path to every contender; the production alias gate stays strict.
+  const base = realpathSync.native(
+    mkdtempSync(join(tmpdir(), 'auriga-installer-')),
+  );
   t.after(() => rmSync(base, { recursive: true, force: true }));
   return base;
 }

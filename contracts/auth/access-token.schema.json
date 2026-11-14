@@ -4,6 +4,10 @@
   "description": "iam 签发的 JWT（RFC 9068：JOSE 头 `typ` 必须是 `at+jwt`，ES256，带 kid），有效期 5 分钟。业务服务用 iam 的 JWKS 自行校验，必须检查 typ、iss、aud（含 `auriga`）、exp。ID token 的 typ 不同，不能当访问令牌用。签给第三方 OIDC 客户端的令牌 aud 只有客户端 id、不含 `auriga`，平台服务一律拒绝。权限在签发时从 org 取（GetEffectivePermissions），最长 5 分钟有效；收到 user.permissions_changed 后 iam 让 edge 尽快换新令牌。",
   "type": "object",
   "properties": {
+    "uacSessionBinding": {
+      "$ref": "uac-session-binding.schema.json#/$defs/UacSessionBinding",
+      "description": "仅设备UAC来源，IAM签发，服务端刷新校验权威来源会话及authGeneration，浏览器输入不能指定"
+    },
     "iss": { "description": "平台的 issuer URL，等于 OIDC 发现文档里的 issuer。", "type": "string", "format": "uri" },
     "sub": { "description": "主体 id：账号 id、服务账号 id。", "type": "string" },
     "aud": { "description": "平台自己用的令牌含 `auriga`；发给 ai-gateway（MCP、模型）的令牌是 `auriga.ai-gateway`；服务间内部令牌只有 `auriga.internal`（不含 `auriga`，外部 client credentials 永远拿不到它）。", "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
