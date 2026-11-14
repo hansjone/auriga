@@ -52,6 +52,11 @@
         "expiresAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "pageOwner": {
+          "type": "string",
+          "format": "uuid",
+          "description": "broker为票据交换生成的页面归属ID，设备尝试只回送同一owner；不作为令牌且不接受命令自报。"
         }
       },
       "required": [
@@ -310,6 +315,687 @@
       },
       "additionalProperties": false,
       "description": "端口绑定控制页命令子集。skip_login只在未认证/认证中取消尝试并返回本地DSH，不调用logout，不撤销已有有效身份；已认证时拒绝冲突。"
+    },
+    "ShellAuthHostError": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "common.validation_failed",
+            "common.unauthenticated",
+            "common.forbidden",
+            "common.conflict",
+            "common.not_found",
+            "common.rate_limited",
+            "common.unavailable"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "invalid_message",
+            "peer_not_allowed",
+            "owner_mismatch",
+            "stale_identity",
+            "expired",
+            "context_revoked",
+            "raw_token_disabled",
+            "credentials_unavailable",
+            "capacity_exceeded",
+            "not_authenticated"
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "reason",
+        "retryable"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "invalid_message"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.validation_failed"
+              },
+              "retryable": {
+                "not": {
+                  "const": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "not_authenticated"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.unauthenticated"
+              },
+              "retryable": {
+                "not": {
+                  "const": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "peer_not_allowed",
+                  "owner_mismatch",
+                  "expired",
+                  "context_revoked",
+                  "raw_token_disabled"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.forbidden"
+              },
+              "retryable": {
+                "not": {
+                  "const": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "stale_identity"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.conflict"
+              },
+              "retryable": {
+                "not": {
+                  "const": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "capacity_exceeded"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.rate_limited"
+              },
+              "retryable": {
+                "not": {
+                  "const": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "enum": [
+                  "credentials_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "common.unavailable"
+              },
+              "retryable": {
+                "not": {
+                  "const": false
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ShellAuthHostContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "session",
+            "tool"
+          ]
+        },
+        "hostSessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "toolCallId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "rootCallId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "parentExecutionContextId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "kind",
+        "hostSessionId",
+        "expiresAt"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "tool"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "toolCallId",
+              "rootCallId",
+              "parentExecutionContextId"
+            ],
+            "properties": {
+              "toolCallId": {},
+              "rootCallId": {},
+              "parentExecutionContextId": {}
+            }
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "toolCallId"
+                  ],
+                  "properties": {
+                    "toolCallId": {}
+                  }
+                },
+                {
+                  "required": [
+                    "rootCallId"
+                  ],
+                  "properties": {
+                    "rootCallId": {}
+                  }
+                },
+                {
+                  "required": [
+                    "parentExecutionContextId"
+                  ],
+                  "properties": {
+                    "parentExecutionContextId": {}
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "description": "由已认证插件后端从宿主可信会话/工具执行回调采集；页面和模型参数不得构造。session先登记，tool引用同owner同宿主会话的有效session句柄。"
+    },
+    "ShellAuthHostContextCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "register",
+            "revoke"
+          ]
+        },
+        "context": {
+          "$ref": "#/$defs/ShellAuthHostContext"
+        },
+        "executionContextId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "shellEpoch",
+        "expectedRevision",
+        "expiresAt",
+        "action"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "action": {
+              "const": "register"
+            },
+            "executionContextId": false,
+            "context": {}
+          },
+          "required": [
+            "context"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "revoke"
+            },
+            "context": false,
+            "executionContextId": {}
+          },
+          "required": [
+            "executionContextId"
+          ]
+        }
+      ]
+    },
+    "ShellAuthHostContextHandle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "executionContextId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "hostSessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "session",
+            "tool"
+          ]
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "executionContextId",
+        "ownerId",
+        "hostSessionId",
+        "kind",
+        "expiresAt"
+      ],
+      "description": "broker生成ID和ownerId；仅交还原IPC peer内存，不是OS认证凭据，禁止交模型、浏览器或跨owner转让。epoch/revision沿结果信封。"
+    },
+    "ShellAuthHostContextResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "register",
+            "revoke"
+          ]
+        },
+        "context": {
+          "$ref": "#/$defs/ShellAuthHostContextHandle"
+        },
+        "revokedExecutionContextId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "error": {
+          "$ref": "#/$defs/ShellAuthHostError"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "shellEpoch",
+        "revision",
+        "action"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "action": {
+              "const": "register"
+            },
+            "revokedExecutionContextId": false,
+            "error": false,
+            "context": {}
+          },
+          "required": [
+            "context"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "revoke"
+            },
+            "context": false,
+            "error": false,
+            "revokedExecutionContextId": {}
+          },
+          "required": [
+            "revokedExecutionContextId"
+          ]
+        },
+        {
+          "properties": {
+            "context": false,
+            "revokedExecutionContextId": false,
+            "error": {}
+          },
+          "required": [
+            "error"
+          ]
+        }
+      ]
+    },
+    "ShellAuthHostCredentialsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "executionContextId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "raw",
+            "outbound"
+          ]
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "shellEpoch",
+        "expectedRevision",
+        "expiresAt",
+        "executionContextId",
+        "purpose"
+      ],
+      "description": "仅已认证本机插件后端，读取当前身份材料；无账号/工号/tenant/session选择器。raw遵守allowRawAgentToken，outbound仅供受信handler代发。"
+    },
+    "ShellAuthHostCredentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "../auth/uac-control.schema.json#/$defs/UacCredentialBinding"
+        },
+        "credentialVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "empNo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cookies": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 16384
+          }
+        }
+      },
+      "required": [
+        "binding",
+        "credentialVersion",
+        "empNo",
+        "token",
+        "updatedAt"
+      ],
+      "description": "当前权威企业凭据，仅后端内存；credentialVersion只作换新/CAS元数据，不作为身份准入代次。binding由IAM产生且必须与broker当前身份一致。禁止平台access/refresh token。"
+    },
+    "ShellAuthHostCredentialsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "format": "int64"
+        },
+        "executionContextId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "raw",
+            "outbound"
+          ]
+        },
+        "credentials": {
+          "$ref": "#/$defs/ShellAuthHostCredentials"
+        },
+        "error": {
+          "$ref": "#/$defs/ShellAuthHostError"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "shellEpoch",
+        "revision",
+        "executionContextId",
+        "purpose"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "credentials"
+          ],
+          "properties": {
+            "error": false,
+            "credentials": {}
+          }
+        },
+        {
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "credentials": false,
+            "error": {}
+          }
+        }
+      ]
     }
   }
 }

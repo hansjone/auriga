@@ -29,6 +29,8 @@ type ShellAuthPageSession struct {
 	Port        int32     `json:"port"`
 	ClientNonce string    `json:"clientNonce" validate:"regexp=^[A-Za-z0-9_-]{43}$"`
 	ExpiresAt   time.Time `json:"expiresAt"`
+	// broker为票据交换生成的页面归属ID，设备尝试只回送同一owner；不作为令牌且不接受命令自报。
+	PageOwner *string `json:"pageOwner,omitempty"`
 }
 
 type _ShellAuthPageSession ShellAuthPageSession
@@ -225,6 +227,38 @@ func (o *ShellAuthPageSession) SetExpiresAt(v time.Time) {
 	o.ExpiresAt = v
 }
 
+// GetPageOwner returns the PageOwner field value if set, zero value otherwise.
+func (o *ShellAuthPageSession) GetPageOwner() string {
+	if o == nil || IsNil(o.PageOwner) {
+		var ret string
+		return ret
+	}
+	return *o.PageOwner
+}
+
+// GetPageOwnerOk returns a tuple with the PageOwner field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthPageSession) GetPageOwnerOk() (*string, bool) {
+	if o == nil || IsNil(o.PageOwner) {
+		return nil, false
+	}
+	return o.PageOwner, true
+}
+
+// HasPageOwner returns a boolean if a field has been set.
+func (o *ShellAuthPageSession) HasPageOwner() bool {
+	if o != nil && !IsNil(o.PageOwner) {
+		return true
+	}
+
+	return false
+}
+
+// SetPageOwner gets a reference to the given string and assigns it to the PageOwner field.
+func (o *ShellAuthPageSession) SetPageOwner(v string) {
+	o.PageOwner = &v
+}
+
 func (o ShellAuthPageSession) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -242,6 +276,9 @@ func (o ShellAuthPageSession) ToMap() (map[string]interface{}, error) {
 	toSerialize["port"] = o.Port
 	toSerialize["clientNonce"] = o.ClientNonce
 	toSerialize["expiresAt"] = o.ExpiresAt
+	if !IsNil(o.PageOwner) {
+		toSerialize["pageOwner"] = o.PageOwner
+	}
 	return toSerialize, nil
 }
 
