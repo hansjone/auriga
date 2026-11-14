@@ -15,7 +15,20 @@ import (
 	"time"
 )
 
+const uacCorrelationHeader = "X-Auriga-Correlation-Id"
+
+var uacUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var uacProof = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+var uacDevicePage = regexp.MustCompile(`(?i)^/device/([BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4})$`)
 var uacChallengePath = regexp.MustCompile(`^/api/iam/v1/login/uac/challenges/[0-9a-fA-F-]{36}(/complete)?$`)
+
+func ensureUacCorrelation(w http.ResponseWriter) {
+	if !uacUUID.MatchString(w.Header().Get(uacCorrelationHeader)) {
+		if id, err := navigationRequestID(); err == nil {
+			w.Header().Set(uacCorrelationHeader, id)
+		}
+	}
+}
 
 func uacLoginOperation(r *http.Request) bool {
 	switch r.URL.Path {
@@ -31,57 +44,102 @@ func uacLoginOperation(r *http.Request) bool {
 	return r.Method == http.MethodGet || r.Method == http.MethodDelete
 }
 
-// This is a server-side HTML hook, never an endpoint available to scripts.
-// IAM is authoritative for provider validity, navigation eligibility and CAS.
+type uacNavigationContext struct {
+	NavigationProof string    `json:"navigationProof"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+	TransactionID   string    `json:"transactionId"`
+	Purpose         string    `json:"purpose"`
+	AutoEligible    bool      `json:"autoEligible"`
+	AutoSuppressed  bool      `json:"autoSuppressed"`
+}
+
+// Only an actual portal document GET can issue a navigation transaction.
 func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) bool {
-	if g.Cfg.UacProviderID == "" || !g.Cfg.Access.Valid() || r.Method != http.MethodGet || (r.URL.Path != "/login" && r.URL.Path != "/instance-login.html") {
+	device := uacDevicePage.FindStringSubmatch(r.URL.Path)
+	if g.Cfg.UacProviderID == "" || !g.Cfg.Access.Valid() || r.Method != http.MethodGet || (r.URL.Path != "/login" && r.URL.Path != "/instance-login.html" && device == nil) {
 		return false
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	ensureUacCorrelation(w)
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	fail := func() {
-		writeProblem(w, problem(503, "common.unavailable", "Service Unavailable", "sign-in temporarily unavailable", requestID(r)))
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+	fail := func(status int) {
+		writeProblem(w, problem(status, map[int]string{400: "common.validation_failed", 403: "common.forbidden", 404: "common.not_found", 503: "common.unavailable"}[status], http.StatusText(status), "sign-in request unavailable", requestID(r)))
+	}
+	metadata := map[string]string{}
+	for key, header := range map[string]string{"dest": "Sec-Fetch-Dest", "mode": "Sec-Fetch-Mode", "site": "Sec-Fetch-Site", "user": "Sec-Fetch-User"} {
+		if len(r.Header.Values(header)) > 1 {
+			fail(403)
+			return true
+		}
+		if value := r.Header.Get(header); value != "" {
+			metadata[key] = value
+		}
+	}
+	if metadata["dest"] != "" && metadata["dest"] != "document" || metadata["mode"] != "" && metadata["mode"] != "navigate" || metadata["site"] == "cross-site" || strings.Contains(strings.ToLower(r.Header.Get("Sec-Purpose")+" "+r.Header.Get("Purpose")), "prefetch") || len(r.Header.Values("Origin")) > 1 || r.Header.Get("Origin") != "" && r.Header.Get("Origin") != g.Cfg.Access.PortalURL() {
+		fail(403)
+		return true
 	}
 	if g.IAMTransport == nil {
-		fail()
+		fail(503)
+		return true
+	}
+	if !uacUUID.MatchString(g.Cfg.UacProviderID) {
+		fail(503)
 		return true
 	}
 	token, err := readIAMServiceToken(g.Cfg.IAMRPC.ServiceTokenFile)
 	if err != nil {
-		fail()
+		fail(503)
 		return true
 	}
-	txName := cookieName(g.requestSecureCookies(r), "auriga_portal_login_tx")
-	old, _ := singleCookie(r, txName)
-	suppression, _ := singleCookie(r, cookieName(g.requestSecureCookies(r), "auriga_portal_sso_suppression"))
+	secure := g.requestSecureCookies(r)
+	names := []string{cookieName(secure, "auriga_portal_login_tx"), cookieName(secure, "auriga_portal_sso_suppression"), cookieName(secure, csrfCookieBase())}
+	values := make([]string, len(names))
+	for i, name := range names {
+		count := 0
+		for _, c := range r.Cookies() {
+			if c.Name == name {
+				count++
+				values[i] = c.Value
+			}
+		}
+		if count > 1 {
+			fail(400)
+			return true
+		}
+	}
 	requestID, err := navigationRequestID()
 	if err != nil {
-		fail()
+		fail(503)
 		return true
 	}
-	payload := map[string]any{
-		"requestId":  requestID,
-		"providerId": g.Cfg.UacProviderID, "origin": g.Cfg.Access.PortalURL(), "continuation": "portal",
-		"fetchMetadata": map[string]string{"dest": r.Header.Get("Sec-Fetch-Dest"), "mode": r.Header.Get("Sec-Fetch-Mode"), "site": r.Header.Get("Sec-Fetch-Site"), "user": r.Header.Get("Sec-Fetch-User")},
+	purpose, endpoint := "portal", "/api/iam/v1/internal/uac/navigation-proofs"
+	if device != nil {
+		purpose, endpoint = "device", "/api/iam/v1/internal/uac/device-navigation-proofs"
 	}
-	if suppression != "" {
-		payload["suppressionCookie"] = suppression
+	payload := map[string]any{"requestId": requestID, "providerId": g.Cfg.UacProviderID, "origin": g.Cfg.Access.PortalURL(), "continuation": purpose, "fetchMetadata": metadata}
+	if device != nil {
+		payload["userCode"] = strings.ToUpper(device[1])
 	}
-	if old != "" {
-		payload["transactionCookie"] = old
+	for i, key := range []string{"transactionCookie", "suppressionCookie", "csrfCookie"} {
+		if values[i] != "" {
+			payload[key] = values[i]
+		}
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		fail()
+		fail(503)
 		return true
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	target := *g.iamURL
-	target.Path = "/api/iam/v1/internal/uac/navigation-proofs"
+	target.Path = endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(raw))
 	if err != nil {
-		fail()
+		fail(503)
 		return true
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -90,35 +148,52 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 	client := &http.Client{Transport: g.IAMTransport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
-		fail()
+		fail(503)
 		return true
 	}
 	defer func() { _ = resp.Body.Close() }()
+	correlation := resp.Header.Get(uacCorrelationHeader)
+	if len(resp.Header.Values(uacCorrelationHeader)) != 1 || !uacUUID.MatchString(correlation) {
+		fail(503)
+		return true
+	}
+	w.Header().Set(uacCorrelationHeader, correlation)
+	if resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode == 404 && device != nil {
+			fail(404)
+		} else {
+			fail(503)
+		}
+		return true
+	}
 	var issued struct {
-		Context           json.RawMessage `json:"context"`
-		TransactionCookie string          `json:"transactionCookie"`
-		TTL               int             `json:"ttlSeconds"`
+		Context           uacNavigationContext `json:"context"`
+		TransactionCookie string               `json:"transactionCookie"`
+		CSRFCookie        string               `json:"csrfCookie"`
+		TTL               int                  `json:"ttlSeconds"`
 	}
 	raw, err = io.ReadAll(io.LimitReader(resp.Body, 32769))
-	if err != nil || len(raw) > 32768 || resp.StatusCode != http.StatusCreated || json.Unmarshal(raw, &issued) != nil || issued.TTL != 120 || len(issued.TransactionCookie) < 43 {
-		fail()
+	if err != nil || len(raw) > 32768 || json.Unmarshal(raw, &issued) != nil || issued.TTL != 120 || len(issued.TransactionCookie) < 43 || len(issued.TransactionCookie) > 16384 {
+		fail(503)
 		return true
 	}
-	var contextValue struct {
-		NavigationProof string    `json:"navigationProof"`
-		ExpiresAt       time.Time `json:"expiresAt"`
-		TransactionID   string    `json:"transactionId"`
-		Purpose         string    `json:"purpose"`
-		AutoEligible    bool      `json:"autoEligible"`
-		AutoSuppressed  bool      `json:"autoSuppressed"`
-	}
-	if json.Unmarshal(issued.Context, &contextValue) != nil || contextValue.Purpose != "portal" || !regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`).MatchString(contextValue.NavigationProof) || !contextValue.ExpiresAt.After(g.Now()) {
-		fail()
+	nav := issued.Context
+	if nav.Purpose != purpose || !uacProof.MatchString(nav.NavigationProof) || !uacUUID.MatchString(nav.TransactionID) || !nav.ExpiresAt.After(g.Now()) || nav.ExpiresAt.After(g.Now().Add(121*time.Second)) || purpose == "device" && nav.AutoEligible {
+		fail(503)
 		return true
 	}
-	safe, err := json.Marshal(contextValue)
+	// IAM validates/reuses an existing CSRF; new values are internal-hop only.
+	csrf := issued.CSRFCookie
+	if csrf == "" {
+		csrf = values[2]
+	}
+	if !uacProof.MatchString(csrf) {
+		fail(503)
+		return true
+	}
+	safe, err := json.Marshal(nav)
 	if err != nil {
-		fail()
+		fail(503)
 		return true
 	}
 	file := "index.html"
@@ -126,23 +201,39 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 		file = "instance-login.html"
 	}
 	html, err := os.ReadFile(filepath.Join(g.Cfg.Static.PortalRoot, file))
-	if err != nil {
-		fail()
+	if err != nil || !bytes.Contains(html, []byte("</head>")) {
+		fail(503)
 		return true
 	}
-	cookie := &http.Cookie{Name: txName, Value: issued.TransactionCookie, Path: "/", Secure: g.requestSecureCookies(r), HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 120}
-	if cookie.Valid() != nil {
-		fail()
+	if file == "index.html" {
+		html, err = injectAccessMode(html, g.Cfg.Access.Mode())
+		if err != nil {
+			fail(503)
+			return true
+		}
+	}
+	txCookie := &http.Cookie{Name: names[0], Value: issued.TransactionCookie, Path: "/", Secure: secure, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 120}
+	csrfCookie := &http.Cookie{Name: names[2], Value: csrf, Path: "/", Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: 120}
+	if txCookie.Valid() != nil || csrfCookie.Valid() != nil {
+		fail(503)
 		return true
 	}
-	http.SetCookie(w, cookie)
+	http.SetCookie(w, txCookie)
+	if csrf != values[2] {
+		http.SetCookie(w, csrfCookie)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	html = bytes.Replace(html, []byte("</head>"), append(append([]byte(`<script type="application/json" id="auriga-uac-navigation">`), safe...), []byte("</script></head>")...), 1)
+	addition := []byte("<meta name=\"auriga-uac-provider\" content=\"" + g.Cfg.UacProviderID + "\"><meta name=\"auriga-uac-correlation\" content=\"" + correlation + "\"><script type=\"application/json\" id=\"auriga-uac-navigation\">")
+	addition = append(addition, safe...)
+	addition = append(addition, []byte("</script></head>")...)
+	html = bytes.Replace(html, []byte("</head>"), addition, 1)
+	if g.Log != nil {
+		g.Log.InfoContext(r.Context(), "UAC navigation issued", "correlationId", correlation, "purpose", purpose, "requestId", requestID)
+	}
 	_, _ = w.Write(html)
 	return true
 }
-
 func navigationRequestID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

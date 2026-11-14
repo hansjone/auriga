@@ -8,6 +8,11 @@ import {
 } from '../../../shared/src/native-login/login-info';
 import type { components } from '../../../shared/src/generated/iam';
 import {
+  navigationCorrelationId,
+  navigationProviderId,
+  takeNavigationContext,
+} from '../../../shared/src/api/correlation';
+import {
   createLoginView,
   type LoginView,
 } from '../../../shared/src/native-login/index.js';
@@ -94,7 +99,7 @@ class ExpiredLogin extends Error {}
 export interface InstanceLoginOptions {
   fetch?: typeof fetch;
   navigate?: (path: string) => void;
-  uacObservability?: Pick<UacLoginOptions, 'onEvent' | 'resolveCorrelationId'>;
+  uacObservability?: Pick<UacLoginOptions, 'onEvent'>;
 }
 
 /** Mount the cloud-only entry. Credentials and transactions stay in memory/cookies. */
@@ -472,23 +477,15 @@ export function mountInstanceLogin(
     providerId = id;
     if (providers.find((p) => p.id === id)?.connectorType === 'uac') {
       const version = epoch;
-      let navigation: components['schemas']['UacNavigationContext'] | undefined;
-      const context = doc.getElementById('auriga-uac-navigation');
-      if (context) {
-        try {
-          navigation = JSON.parse(context.textContent ?? '');
-        } catch {
-          /* Missing proof falls back to QR. */
-        }
-        context.remove();
-      }
+      const navigation = takeNavigationContext(doc, id);
       uacView = createUacLoginView(loginRoot, {
         api: iam,
         providerId: id,
+        targetName: providers.find((p) => p.id === id)?.displayName,
         locale,
         navigation,
+        initialCorrelationId: navigationCorrelationId(doc),
         onEvent: options.uacObservability?.onEvent,
-        resolveCorrelationId: options.uacObservability?.resolveCorrelationId,
         onBusyChange: (busy) => {
           if (current(version)) {
             authBusy = busy;
@@ -554,7 +551,9 @@ export function mountInstanceLogin(
       throw new Error('Invalid login providers');
     providers = result.items;
     show(providers.length ? 'providers' : 'empty');
-    const preferred = providers.find((p) => p.connectorType === 'uac');
+    const preferred = providers.find(
+      (p) => p.connectorType === 'uac' && p.id === navigationProviderId(doc),
+    );
     if (preferred && doc.getElementById('auriga-uac-navigation'))
       void selectProvider(preferred.id);
   }

@@ -37,6 +37,26 @@ export function createIamApi(client: ApiClient) {
     return tx;
   }
   return {
+    getCorrelationId(value: unknown) {
+      return client.getCorrelationId?.(value);
+    },
+    getDeviceRequest(userCode: string) {
+      return client.get<components['schemas']['DeviceRequest']>(
+        `${IAM}/device/${encodeURIComponent(userCode)}`,
+        { cache: 'no-store' },
+      );
+    },
+    approveDeviceRequest(userCode: string) {
+      return client.post<void>(
+        `${IAM}/device/${encodeURIComponent(userCode)}/approve`,
+        {},
+      );
+    },
+    denyDeviceRequest(userCode: string) {
+      return client.post<void>(
+        `${IAM}/device/${encodeURIComponent(userCode)}/deny`,
+      );
+    },
     listLoginProviders(purpose: 'login' | 'link' = 'login') {
       const q = purpose === 'login' ? '' : `?purpose=${purpose}`;
       return client.get<ProvidersResponse>(`${IAM}/login/providers${q}`);

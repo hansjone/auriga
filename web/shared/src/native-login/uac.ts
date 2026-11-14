@@ -2,6 +2,7 @@ import type { components } from '../generated/iam';
 import type { IamApi } from '../api/iam';
 import { isApiError } from '../api/problem';
 import { qrcodegen } from './qr/qrcodegen';
+import { validCorrelationId } from '../api/correlation';
 
 type Navigation = components['schemas']['UacNavigationContext'];
 type Challenge = components['schemas']['UacChallenge'];
@@ -66,7 +67,7 @@ type State = Exclude<
 >;
 type Stage = 'sso' | 'challenge' | 'status' | 'complete' | 'cancel';
 
-/** Local observer port only. K2 will specify how responses supply correlationId. */
+/** Local observer projection; IDs come exclusively from the K2 response header. */
 export interface UacPageEvent {
   stage: Stage;
   phase: 'start' | 'end';
@@ -74,6 +75,8 @@ export interface UacPageEvent {
   correlationId: string | null;
 }
 export interface UacLoginOptions {
+  targetName?: components['schemas']['LocalizedText'];
+  initialCorrelationId?: string;
   api: IamApi;
   providerId: string;
   locale?: string;
@@ -82,7 +85,6 @@ export interface UacLoginOptions {
   onComplete(result: Result): void;
   onBusyChange?(busy: boolean): void;
   onEvent?(event: UacPageEvent): void;
-  resolveCorrelationId?(response: unknown): string | undefined;
 }
 
 export function createUacLoginView(
@@ -103,7 +105,7 @@ export function createUacLoginView(
     expiry: ReturnType<typeof setTimeout> | undefined;
   let flight: Promise<unknown> | undefined,
     mutating: Stage | undefined,
-    correlationId: string | undefined;
+    correlationId = validCorrelationId(options.initialCorrelationId);
   let operation: Promise<void> | undefined;
   let cleaning = 0;
   let retryAt = 0;
@@ -114,6 +116,8 @@ export function createUacLoginView(
     render();
   }
   const status = doc.createElement('p');
+  const target = doc.createElement('h2');
+  target.dataset.testid = 'uac-target';
   status.setAttribute('role', 'status');
   const reference = doc.createElement('p');
   reference.dataset.testid = 'uac-reference';
@@ -125,6 +129,7 @@ export function createUacLoginView(
     reload = doc.createElement('button');
   for (const button of [retry, cancel, proceed, reload]) button.type = 'button';
   root.replaceChildren(
+    target,
     status,
     reference,
     qr,
@@ -138,6 +143,10 @@ export function createUacLoginView(
   function render() {
     if (disposed) return;
     const words = messages[locale];
+    target.textContent =
+      options.targetName?.[locale] ??
+      options.targetName?.en ??
+      (locale === 'en' ? 'Company sign-in' : '企业登录');
     root.dataset.uacState = state;
     status.textContent = words[state];
     reference.textContent = correlationId
@@ -185,19 +194,18 @@ export function createUacLoginView(
     phase: UacPageEvent['phase'],
     result: string,
     response?: unknown,
+    updateReference = true,
   ) {
     try {
-      const candidate =
-        response === undefined
-          ? undefined
-          : options.resolveCorrelationId?.(response);
-      if (candidate && /^[A-Za-z0-9_-]{1,128}$/.test(candidate))
-        correlationId = candidate;
+      const candidate = validCorrelationId(
+        options.api.getCorrelationId(response),
+      );
+      if (candidate && updateReference) correlationId = candidate;
       options.onEvent?.({
         stage,
         phase,
         result,
-        correlationId: correlationId ?? null,
+        correlationId: candidate ?? correlationId ?? null,
       });
     } catch {
       /* Observability cannot change authentication. */
@@ -241,10 +249,11 @@ export function createUacLoginView(
             ? result
             : 'success';
         event(stage, 'end', outcome, response);
-      }
+      } else event(stage, 'end', 'cancelled', response, false);
       return response;
     } catch (error) {
-      if (current(version)) event(stage, 'end', 'failure');
+      if (current(version)) event(stage, 'end', 'failure', error);
+      else event(stage, 'end', 'cancelled', error, false);
       throw error;
     } finally {
       if (flight === pending) flight = undefined;

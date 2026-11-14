@@ -240,6 +240,9 @@ func (g *Gateway) Handler() http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, r = ensureRequestID(r)
+		if strings.HasPrefix(r.URL.Path, "/api/iam/v1/login/uac/") || strings.HasPrefix(r.URL.Path, "/api/iam/v1/internal/uac/") {
+			ensureUacCorrelation(w)
+		}
 		externalTrace := len(r.Header.Values(headerTraceparent)) == 1 && validTraceparent(r.Header.Get(headerTraceparent))
 		parent := ensureTraceparent(r)
 		r.Header.Set(headerTraceparent, parent)
@@ -434,6 +437,12 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if audience == "admin" {
 		g.adminStatic.ServeHTTP(w, r)
 		return
+	}
+	if path == "/login" || path == "/instance-login.html" || path == "/device" || strings.HasPrefix(path, "/device/") {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
 	}
 	if g.serveUacNavigation(w, r) {
 		return

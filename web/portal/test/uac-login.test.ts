@@ -9,7 +9,7 @@ const id = '11111111-1111-4111-8111-111111111111';
 const provider = {
   id,
   connectorType: 'uac',
-  displayName: { en: 'Company', 'zh-CN': '企业登录' },
+  displayName: { en: 'Company', 'zh-CN': '示例企业系统' },
   order: 0,
   primaryStep: 'qr',
 };
@@ -41,6 +41,10 @@ async function render() {
   });
 }
 function context() {
+  document.head.insertAdjacentHTML(
+    'beforeend',
+    `<meta name="auriga-uac-provider" content="${id}">`,
+  );
   const node = document.createElement('script');
   node.type = 'application/json';
   node.id = 'auriga-uac-navigation';
@@ -55,6 +59,7 @@ function context() {
   document.body.append(node);
 }
 afterEach(() => {
+  document.querySelector('meta[name=auriga-uac-provider]')?.remove();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   document.body.replaceChildren();
@@ -90,7 +95,13 @@ describe('portal UAC normal entry', () => {
       vi.fn<typeof fetch>(async (input, init) => {
         const path = String(input);
         calls.push(path);
-        if (path.endsWith('/providers')) return json({ items: [provider] });
+        if (path.endsWith('/providers'))
+          return json({
+            items: [
+              { ...provider, id: globalThis.crypto.randomUUID() },
+              provider,
+            ],
+          });
         if (path.endsWith('/sso'))
           return json({ state: 'scan_required', transactionId: id });
         if (init?.method === 'DELETE')
@@ -106,12 +117,17 @@ describe('portal UAC normal entry', () => {
       'waiting',
     );
     expect(wrapper.find('svg').exists()).toBe(true);
+    expect(wrapper.get('[data-testid=uac-target]').text()).toBe('示例企业系统');
     expect(document.getElementById('auriga-uac-navigation')).toBeNull();
     expect(calls.slice(0, 3)).toEqual([
       '/api/iam/v1/login/providers',
       '/api/iam/v1/login/uac/sso',
       '/api/iam/v1/login/uac/challenges',
     ]);
+    expect(
+      JSON.parse(String(vi.mocked(globalThis.fetch).mock.calls[1]?.[1]?.body))
+        .providerId,
+    ).toBe(id);
     expect(wrapper.emitted('authEvent')?.length).toBeGreaterThan(0);
     await wrapper.get('button.auriga-login-back').trigger('click');
     await flushPromises();

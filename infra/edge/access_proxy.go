@@ -337,7 +337,7 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap bool) (st
 			names = append(names, csrfCookieBase())
 		}
 	}
-	if e.role == "portal" && (r.URL.Path == "/api/iam/v1/login/uac/sso" || r.URL.Path == "/api/iam/v1/logout") {
+	if e.role == "portal" && (uacLoginOperation(r) || r.URL.Path == "/api/iam/v1/logout") {
 		names = append(names, "auriga_portal_sso_suppression")
 	}
 	var selected []string
@@ -358,6 +358,15 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap bool) (st
 		for _, name := range g.Cfg.UacSSOCookieNames {
 			if strings.Contains(strings.ToLower(name), "auriga_") {
 				return "", errString("invalid SSO cookie name")
+			}
+			count := 0
+			for _, cookie := range r.Cookies() {
+				if cookie.Name == name {
+					count++
+				}
+			}
+			if count > 1 {
+				return "", errString("ambiguous SSO cookie")
 			}
 			value, ok := singleCookie(r, name)
 			if ok {

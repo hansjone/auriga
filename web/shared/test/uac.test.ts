@@ -13,7 +13,7 @@ const challenge = {
 const tick = async () => {
   for (let n = 0; n < 20; n++) await Promise.resolve();
 };
-function setup() {
+function setup(correlation?: string) {
   const calls: string[] = [];
   const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     void _init;
@@ -25,7 +25,10 @@ function setup() {
         ? { ...challenge, state: 'waiting' }
         : challenge;
     return new Response(JSON.stringify(body), {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(correlation ? { 'X-Auriga-Correlation-Id': correlation } : {}),
+      },
     });
   });
   const root = document.createElement('div');
@@ -217,7 +220,8 @@ describe('SSO and terminal page states', () => {
     },
   );
   it('falls back from SSO to QR and emits only allowlisted page events', async () => {
-    const ctx = setup(),
+    const correlation = globalThis.crypto.randomUUID();
+    const ctx = setup(correlation),
       events = vi.fn();
     ctx.fetch.mockImplementationOnce(
       async () =>
@@ -226,7 +230,12 @@ describe('SSO and terminal page states', () => {
             state: 'scan_required',
             transactionId: challenge.transactionId,
           }),
-          { headers: { 'Content-Type': 'application/json' } },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Auriga-Correlation-Id': correlation,
+            },
+          },
         ),
     );
     const view = createUacLoginView(ctx.root, {
@@ -234,18 +243,17 @@ describe('SSO and terminal page states', () => {
       providerId: 'provider',
       navigation,
       onEvent: events,
-      resolveCorrelationId: () => 'synthetic-correlation',
     });
     await vi.waitFor(() => expect(ctx.root.dataset.uacState).toBe('waiting'));
     expect(ctx.fetch.mock.calls[0]?.[0]).toBe('/api/iam/v1/login/uac/sso');
     expect(
       ctx.root.querySelector('[data-testid=uac-reference]')?.textContent,
-    ).toContain('synthetic-correlation');
+    ).toContain(correlation);
     expect(events).toHaveBeenCalledWith({
       stage: 'sso',
       phase: 'end',
       result: 'scan_required',
-      correlationId: 'synthetic-correlation',
+      correlationId: correlation,
     });
     const serialized = JSON.stringify(events.mock.calls);
     expect(serialized).not.toContain(navigation.navigationProof);

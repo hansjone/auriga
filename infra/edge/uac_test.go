@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 	"net/http"
@@ -21,7 +23,7 @@ func TestInternalUACNeverProxied(t *testing.T) {
 	g := newTestGateway(t, cfg, sessions, routes, tickets, signer)
 	for _, host := range []string{cfg.PortalHost, cfg.AdminHost, "192.0.2.10"} {
 		for _, method := range []string{"GET", "POST", "PUT", "OPTIONS", "DELETE"} {
-			for _, path := range []string{"/api/iam/v1/internal/uac/navigation-proofs", "/api/iam/v1/internal/uac/navigation-proofs/", "/api/iam/v1/%69nternal/uac/navigation-proofs"} {
+			for _, path := range []string{"/api/iam/v1/internal/uac/navigation-proofs", "/api/iam/v1/internal/uac/device-navigation-proofs", "/api/iam/v1/internal/uac/navigation-proofs/", "/api/iam/v1/%69nternal/uac/navigation-proofs", "/api/iam/v1/%69nternal/uac/device-navigation-proofs"} {
 				req := httptest.NewRequest(method, "https://"+host+path, nil)
 				req.Header.Set("Authorization", "Bearer forged-service-token")
 				req.Header.Set("auriga-tenant-id", "forged-tenant")
@@ -81,16 +83,19 @@ func TestUACNavigationHTML(t *testing.T) {
 	for _, fixture := range []string{"ip-http.json", "domain-proxy.json"} {
 		t.Run(fixture, func(t *testing.T) {
 			var received map[string]any
+			correlation, _ := navigationRequestID()
+			serviceSecret, txSecret, csrfSecret, proof := testUACSecret(t), testUACSecret(t), testUACSecret(t), testUACSecret(t)
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/api/iam/v1/internal/uac/navigation-proofs" || r.Header.Get("Authorization") != "Bearer synthetic-service" || r.Header.Get("auriga-tenant-id") == "" {
+				if r.URL.Path != "/api/iam/v1/internal/uac/navigation-proofs" || r.Header.Get("Authorization") != "Bearer "+serviceSecret || r.Header.Get("auriga-tenant-id") == "" {
 					t.Error("missing trusted authentication")
 				}
 				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
 					t.Error(err)
 				}
 				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set(uacCorrelationHeader, correlation)
 				w.WriteHeader(201)
-				_ = json.NewEncoder(w).Encode(map[string]any{"ttlSeconds": 120, "transactionCookie": strings.Repeat("c", 43), "context": map[string]any{"navigationProof": strings.Repeat("p", 43), "expiresAt": time.Now().Add(120 * time.Second), "transactionId": "11111111-1111-4111-8111-111111111111", "purpose": "portal", "autoEligible": true, "autoSuppressed": false, "unexpectedSecret": "MUST-NOT-ENTER-HTML"}})
+				_ = json.NewEncoder(w).Encode(map[string]any{"ttlSeconds": 120, "transactionCookie": txSecret, "csrfCookie": csrfSecret, "context": map[string]any{"navigationProof": proof, "expiresAt": time.Now().Add(120 * time.Second), "transactionId": "11111111-1111-4111-8111-111111111111", "purpose": "portal", "autoEligible": true, "autoSuppressed": false, "unexpectedSecret": "MUST-NOT-ENTER-HTML"}})
 			}))
 			defer upstream.Close()
 			cfg, sessions, routes, tickets, signer, _ := testEnv(t)
@@ -103,10 +108,11 @@ func TestUACNavigationHTML(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.Upstreams["iam"] = upstream.URL
+			cfg.SecureCookies = cfg.Access.PortalOrigin().Scheme == "https"
 			cfg.IAMHop.AllowLoopbackHTTP = true
 			cfg.UacProviderID = "11111111-1111-4111-8111-111111111111"
 			cfg.IAMRPC.ServiceTokenFile = filepath.Join(t.TempDir(), "service-token")
-			if err := os.WriteFile(cfg.IAMRPC.ServiceTokenFile, []byte("synthetic-service"), 0600); err != nil {
+			if err := os.WriteFile(cfg.IAMRPC.ServiceTokenFile, []byte(serviceSecret), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(cfg.Static.PortalRoot, "index.html"), []byte("<html><head></head><body>portal</body></html>"), 0600); err != nil {
@@ -123,16 +129,28 @@ func TestUACNavigationHTML(t *testing.T) {
 			if !g.serveUacNavigation(rec, r) || rec.Code != 200 {
 				t.Fatalf("navigation failed: %s", rec.Body.String())
 			}
-			if rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), "auriga-uac-navigation") || strings.Contains(rec.Body.String(), strings.Repeat("c", 43)) || strings.Contains(rec.Body.String(), "MUST-NOT-ENTER-HTML") {
+			if rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), "auriga-uac-navigation") || strings.Contains(rec.Body.String(), txSecret) || strings.Contains(rec.Body.String(), csrfSecret) || strings.Contains(rec.Body.String(), "MUST-NOT-ENTER-HTML") {
 				t.Fatal("unsafe HTML")
 			}
 			cookies := rec.Result().Cookies()
-			if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].Path != "/" || cookies[0].SameSite != http.SameSiteLaxMode {
+			if len(cookies) != 2 || !cookies[0].HttpOnly || cookies[0].Path != "/" || cookies[0].SameSite != http.SameSiteLaxMode {
 				t.Fatal("unsafe transaction cookie")
+			}
+			if cookies[1].HttpOnly || cookies[1].Domain != "" || cookies[1].Secure != cfg.SecureCookies || cookies[1].MaxAge != 120 || cookies[0].Secure != cfg.SecureCookies {
+				t.Fatal("unsafe CSRF/HTTPS policy")
 			}
 			if received["origin"] != cfg.Access.PortalURL() || received["continuation"] != "portal" {
 				t.Fatal("incorrect trusted binding")
 			}
 		})
 	}
+}
+
+func testUACSecret(t *testing.T) string {
+	t.Helper()
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(value)
 }

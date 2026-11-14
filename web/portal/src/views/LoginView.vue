@@ -4,7 +4,6 @@ import {
   createUacLoginView,
   type UacPageEvent,
 } from '../../../shared/src/native-login/uac';
-import type { IAMComponents } from '@auriga/shared';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -17,11 +16,19 @@ import {
   type StepInput,
   isApiError,
 } from '@auriga/shared';
-import { iamApi } from '../api';
+import { iamApi as portalIamApi } from '../api';
+import type { IamApi } from '@auriga/shared';
+import {
+  navigationCorrelationId,
+  navigationProviderId,
+  takeNavigationContext,
+} from '../../../shared/src/api/correlation';
 import DesktopDownload from '../components/DesktopDownload.vue';
 
 const { t, locale } = useI18n();
-const emit = defineEmits<{ authEvent: [event: UacPageEvent] }>();
+const props = defineProps<{ deviceContinuation?: boolean; authApi?: IamApi }>();
+const iamApi = props.authApi ?? portalIamApi;
+const emit = defineEmits<{ authEvent: [event: UacPageEvent]; signedIn: [] }>();
 const route = useRoute(),
   router = useRouter();
 const providers = ref<LoginProvider[]>([]),
@@ -56,19 +63,34 @@ async function cancelTx(value: LoginTransaction | null) {
   if (value?.purpose === 'login' && value.status === 'pending')
     await iamApi.cancelLoginTransaction(value.id);
 }
-onUnmounted(() => {
+function leaveDocument() {
+  if (!alive) return;
   alive = false;
   generation++;
   void uacView?.dispose();
   void cancelTx(tx.value).catch(() => {});
+}
+function restoreDocument(event: globalThis.PageTransitionEvent) {
+  if (event.persisted && !props.deviceContinuation)
+    globalThis.location.reload();
+}
+onUnmounted(() => {
+  leaveDocument();
+  globalThis.removeEventListener('pagehide', leaveDocument);
+  globalThis.removeEventListener('pageshow', restoreDocument);
 });
 onMounted(async () => {
+  globalThis.addEventListener('pagehide', leaveDocument);
+  globalThis.addEventListener('pageshow', restoreDocument);
   const version = generation;
   try {
     const res = await iamApi.listLoginProviders();
     if (!current(version)) return;
     providers.value = res.items;
-    const preferred = res.items.find((p) => p.connectorType === 'uac');
+    const preferred = res.items.find(
+      (p) =>
+        p.connectorType === 'uac' && p.id === navigationProviderId(document),
+    );
     if (preferred && document.getElementById('auriga-uac-navigation'))
       await selectProvider(preferred);
   } catch (e) {
@@ -98,21 +120,13 @@ async function selectProvider(provider: LoginProvider) {
     if (provider.connectorType === 'uac' && uacRoot.value) {
       uacContinuation = true;
       uacActive.value = true;
-      let navigation:
-        IAMComponents['schemas']['UacNavigationContext'] | undefined;
-      const context = document.getElementById('auriga-uac-navigation');
-      if (context) {
-        try {
-          navigation = JSON.parse(context.textContent ?? '');
-        } catch {
-          /* No proof: QR fallback. */
-        }
-        context.remove();
-      }
+      const navigation = takeNavigationContext(document, provider.id);
       uacView = createUacLoginView(uacRoot.value, {
         api: iamApi,
         providerId: provider.id,
+        targetName: provider.displayName,
         navigation,
+        initialCorrelationId: navigationCorrelationId(document),
         locale: locale.value,
         onEvent: (event) => emit('authEvent', event),
         invitationCode:
@@ -121,8 +135,7 @@ async function selectProvider(provider: LoginProvider) {
             : undefined,
         onComplete: (result) => {
           if (!current(version)) return;
-          if (result.state === 'authenticated')
-            globalThis.location.assign('/instance-login.html');
+          if (result.state === 'authenticated') finishLogin();
           else if (result.state === 'additional_step_required') {
             busy.value = true;
             void iamApi
@@ -149,8 +162,11 @@ async function selectProvider(provider: LoginProvider) {
     const value = await iamApi.createLoginTransaction({
       providerId: provider.id,
       purpose: 'login',
-      returnTo:
-        typeof route.query.returnTo === 'string' ? route.query.returnTo : '/',
+      returnTo: props.deviceContinuation
+        ? route.fullPath
+        : typeof route.query.returnTo === 'string'
+          ? route.query.returnTo
+          : '/',
       invitationCode:
         typeof route.query.invitation === 'string'
           ? route.query.invitation
@@ -191,6 +207,10 @@ async function onRetry() {
   if (provider) await selectProvider(provider);
 }
 function onComplete(redirectTo: string) {
+  if (alive && props.deviceContinuation) {
+    emit('signedIn');
+    return;
+  }
   if (alive && uacContinuation) {
     globalThis.location.assign('/instance-login.html');
     return;
@@ -202,6 +222,10 @@ function onComplete(redirectTo: string) {
     !redirectTo.includes('\\')
   )
     void router.replace(redirectTo || '/');
+}
+function finishLogin() {
+  if (props.deviceContinuation) emit('signedIn');
+  else globalThis.location.assign('/instance-login.html');
 }
 async function backToProviders() {
   if (!alive || busy.value) return;

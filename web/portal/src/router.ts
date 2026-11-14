@@ -5,11 +5,17 @@ import QrConfirmView from './views/QrConfirmView.vue';
 import HomeView from './views/HomeView.vue';
 import AccountSecurityLayout from './views/account/AccountSecurityLayout.vue';
 import SecurityView from './views/account/SecurityView.vue';
+import DeviceView from './views/DeviceView.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: LoginView, meta: { public: true } },
+    {
+      path: '/device/:userCode?',
+      component: DeviceView,
+      meta: { public: true },
+    },
     {
       path: '/invite/:code',
       component: InviteView,
