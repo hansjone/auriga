@@ -908,7 +908,7 @@ export async function openNetworkRuntime(options) {
         ctx.tools.register({
           name: 'auriga_send_message',
           description:
-            'Send an Auriga network message from the current authorized native session.',
+            'Send an Auriga DSH network message from the current authorized native session.',
           parameters,
           output: {
             schema: { type: 'object', additionalProperties: true },

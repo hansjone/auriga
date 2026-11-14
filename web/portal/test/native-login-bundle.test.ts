@@ -46,7 +46,7 @@ describe('native entry delivery', () => {
       moduleIds.some((id) =>
         id
           .replaceAll('\\', '/')
-          .endsWith('/clients/dsh-plugin/src/login/index.js'),
+          .endsWith('/web/shared/src/native-login/index.js'),
       ),
     ).toBe(true);
     expect(

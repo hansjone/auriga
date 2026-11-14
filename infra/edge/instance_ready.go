@@ -47,7 +47,7 @@ func instanceNotRunning(w http.ResponseWriter, r *http.Request, state, rid strin
 			w.Header().Set("Referrer-Policy", "no-referrer")
 			_, _ = w.Write([]byte(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="1"><title>实例准备中 / Preparing your instance</title></head>
+<meta http-equiv="refresh" content="1"><title>Auriga DSH · 实例准备中 / Preparing your instance</title></head>
 <body><main><h1>实例准备中</h1><p role="status">正在等待实例入口就绪，页面会自动重试。</p>
 <p lang="en">Preparing your instance. This page will retry automatically.</p>
 <p><a href="">立即重试 / Retry now</a></p></main></body></html>`))

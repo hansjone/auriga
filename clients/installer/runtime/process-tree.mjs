@@ -1,3 +1,4 @@
+import { BRAND_NAME } from './brand.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
@@ -76,7 +77,7 @@ function notifyDesktop(message) {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        `$w=New-Object -ComObject WScript.Shell; $null=$w.Popup('${message.replaceAll("'", "''")}',8,'Auriga Desktop',64)`,
+        `$w=New-Object -ComObject WScript.Shell; $null=$w.Popup('${message.replaceAll("'", "''")}',8,'${BRAND_NAME}',64)`,
       ],
       { windowsHide: true, timeout: 10000, stdio: 'ignore' },
     );
