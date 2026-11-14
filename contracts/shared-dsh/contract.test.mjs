@@ -11,7 +11,9 @@ import {
   signClaims,
   verifyClaims,
   admitResourceView,
+  exchangeTicket,
 } from './ports.mjs';
+import { parse } from '../../services/contracts/node_modules/yaml/dist/index.js';
 const id = () => randomUUID();
 const binding = {
   tenantId: id(),
@@ -342,26 +344,32 @@ test('K: 平台统一资源不取权限并集、到期拒绝', () => {
     admitResourceView({ ...view, source: 'private' }, binding, digest, 1000),
   );
 });
-test('K: 原有契约只增保护（针对固定设计基线）', async () => {
-  const { execFileSync } = await import('node:child_process');
-  const { parse } =
-    await import('../../services/contracts/node_modules/yaml/dist/index.js');
-  const base = '9a2f328c';
-  const original = parse(
-    execFileSync('git', ['show', base + ':contracts/openapi/shared-dsh.yaml'], {
-      encoding: 'utf8',
-    }),
-  );
+test('K: 公开open路径及生成响应存在，无需git历史', () => {
   const current = parse(
     readFileSync(
       new URL('../openapi/shared-dsh.yaml', import.meta.url),
       'utf8',
     ),
   );
-  for (const [key, value] of Object.entries(original.paths))
-    assert.deepEqual(current.paths[key], value);
-  for (const [key, value] of Object.entries(original.components.schemas))
-    assert.deepEqual(current.components.schemas[key], value);
+  const open = current.paths['/me/placement/open'].post;
+  assert.equal(open.operationId, 'openMyDshPlacement');
+  assert.equal(
+    open.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/DshPlacementOpen',
+  );
+  assert.deepEqual(current.components.schemas.DshPlacementOpen.required, [
+    'placement',
+    'ticket',
+    'exchangeUrl',
+    'expiresAt',
+  ]);
+  const workspace = parse(
+    readFileSync(new URL('../openapi/workspace.yaml', import.meta.url), 'utf8'),
+  );
+  assert.equal(
+    workspace.paths['/me/placement/open'].$ref,
+    'shared-dsh.yaml#/paths/~1me~1placement~1open',
+  );
 });
 test('K: 新事件生产映射与错误目录固定', () => {
   const catalog = JSON.parse(
@@ -371,13 +379,13 @@ test('K: 新事件生产映射与错误目录固定', () => {
     ['placement.revoked', 'workspace', 'placementId', 'Revocation'],
     [
       'placement.resource_reported',
-      'node',
+      'workspace',
       'binding.placementId',
       'ResourceReport',
     ],
     [
       'placement.guardian_impact',
-      'node',
+      'workspace',
       'physicalInstanceId',
       'GuardianImpact',
     ],
@@ -390,6 +398,12 @@ test('K: 新事件生产映射与错误目录固定', () => {
       '../shared-dsh/shared-dsh.schema.json#/$defs/' + definition,
     );
     assert.equal(entry.publish, 'auriga.evt.' + name);
+    assert.deepEqual(
+      entry.consumers,
+      name === 'placement.revoked'
+        ? ['edge', 'ai-gateway', 'audit']
+        : ['audit'],
+    );
   }
   for (const code of [
     'binding_mismatch',
@@ -399,4 +413,149 @@ test('K: 新事件生产映射与错误目录固定', () => {
     'stop_unconfirmed',
   ])
     assert(catalog.errors['shared.' + code].message['zh-CN'].length > 0);
+});
+test('K: proto数值常量为int64，mode复用已有枚举', () => {
+  const proto = readFileSync(
+    new URL(
+      '../proto/auriga/node/v1/shared_dsh_contract.proto',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const versions = [...proto.matchAll(/\b(\w+) schema_version = 1;/g)];
+  assert.equal(versions.length, 9);
+  for (const [, type] of versions) assert.equal(type, 'int64');
+  assert.match(proto, /int64 cancel_wait_seconds = 5;/);
+  assert.match(proto, /int64 archive_retention_seconds = 6;/);
+  const modes = [...proto.matchAll(/\b(\w+) mode = 5;/g)];
+  assert.equal(modes.length, 2);
+  for (const [, type] of modes) assert.equal(type, 'DshInstanceMode');
+  for (const value of [1.5, '1'])
+    assert.throws(() =>
+      validate('OpenTicket', { ...ticket, schemaVersion: value }),
+    );
+});
+test('K: edge票据交换可生成接口、严格body与302响应', () => {
+  const api = parse(
+    readFileSync(
+      new URL('../openapi/shared-dsh-edge.yaml', import.meta.url),
+      'utf8',
+    ),
+  );
+  const operation = api.paths['/_auriga/placement-ticket'].post;
+  assert.equal(operation.operationId, 'exchangeDshPlacementTicket');
+  assert.deepEqual(
+    api.servers.map((s) => s.url),
+    ['/', '/i/{physicalInstanceId}'],
+  );
+  assert.equal(operation.requestBody.required, true);
+  assert.equal(
+    api.components.schemas.DshPlacementTicketExchangeRequest.$ref,
+    '../shared-dsh/shared-dsh.schema.json#/$defs/TicketExchangeRequest',
+  );
+  const schemas = JSON.parse(
+    readFileSync(new URL('shared-dsh.schema.json', import.meta.url), 'utf8'),
+  );
+  assert.deepEqual(schemas.$defs.TicketExchangeRequest.required, ['ticket']);
+  assert.equal(schemas.$defs.TicketExchangeRequest.additionalProperties, false);
+  for (const body of [
+    {},
+    { ticket: '' },
+    { ticket: 'a.b' },
+    { ticket: ['a.b.c'] },
+    { ticket: 'a.b.c', returnUrl: 'https://example.invalid/' },
+    { ticket: 'a.b.c\n' },
+    { ticket: 'a'.repeat(16385) + '.b.c' },
+  ])
+    assert.throws(() => validate('TicketExchangeRequest', body));
+  const success = operation.responses['302'];
+  assert.equal(success.content, undefined);
+  for (const header of ['Location', 'Set-Cookie', 'Cache-Control'])
+    assert.equal(success.headers[header].required, true);
+  const location = new RegExp(success.headers.Location.schema.pattern);
+  for (const path of ['/', '/i/' + binding.physicalInstanceId + '/'])
+    assert(location.test(path));
+  for (const path of [
+    '//example.invalid/',
+    'https://example.invalid/',
+    '/i/../',
+    '/?ticket=a',
+  ])
+    assert.equal(location.test(path), false);
+  for (const status of ['400', '401', '403', '409', '503'])
+    assert.equal(
+      operation.responses[status].content['application/problem+json'].schema
+        .$ref,
+      'common.yaml#/components/schemas/Problem',
+    );
+});
+test('K: edge兑换验证真实签名/用途/有效期/绑定，重放及撤销拒绝', () => {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const header = {
+    alg: 'EdDSA',
+    kid: 'runtime-ticket',
+    typ: 'auriga-shared-ticket+jwt',
+  };
+  const keys = new Map([[header.kid, publicKey]]);
+  const body = { ticket: signClaims(header, ticket, privateKey) };
+  const context = {
+    now: 1059,
+    physicalInstanceId: binding.physicalInstanceId,
+    ready: true,
+    ipMode: false,
+  };
+  const fresh = () => new EntryDouble(binding, session.platformSessionId);
+  const entry = fresh();
+  assert.deepEqual(exchangeTicket(body, entry, keys, context), {
+    status: 302,
+    location: '/',
+    cacheControl: 'no-store',
+  });
+  assert.throws(
+    () => exchangeTicket(body, entry, keys, context),
+    /common.conflict/,
+  );
+  assert.equal(
+    exchangeTicket(body, fresh(), keys, { ...context, ipMode: true }).location,
+    '/i/' + binding.physicalInstanceId + '/',
+  );
+  for (const patch of [
+    { now: 1060 },
+    { physicalInstanceId: id() },
+    { ready: false },
+  ])
+    assert.throws(() =>
+      exchangeTicket(body, fresh(), keys, { ...context, ...patch }),
+    );
+  const revoked = fresh();
+  revoked.active = false;
+  assert.throws(() => exchangeTicket(body, revoked, keys, context));
+  for (const patch of [
+    { audience: 'other' },
+    { binding: { ...binding, epoch: 1 } },
+    { platformSessionId: id() },
+  ])
+    assert.throws(() =>
+      exchangeTicket(
+        { ticket: signClaims(header, { ...ticket, ...patch }, privateKey) },
+        fresh(),
+        keys,
+        context,
+      ),
+    );
+  assert.throws(() =>
+    exchangeTicket(
+      {
+        ticket: signClaims(
+          { ...header, typ: 'auriga-shared-identity+jwt' },
+          ticket,
+          privateKey,
+        ),
+      },
+      fresh(),
+      keys,
+      context,
+    ),
+  );
+  assert.throws(() => exchangeTicket(body, fresh(), new Map(), context));
 });

@@ -3,6 +3,22 @@
   "$id": "https://auriga.dev/contracts/shared-dsh/v1",
   "title": "Shared DSH v1 control and data plane",
   "$defs": {
+    "TicketExchangeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ticket"],
+      "properties": {
+        "ticket": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        }
+      }
+    },
     "SignedHeader": {
       "type": "object",
       "additionalProperties": false,
@@ -148,7 +164,7 @@
       "properties": {
         "schemaVersion": {
           "const": 1,
-          "type": "number"
+          "type": "integer"
         },
         "binding": {
           "$ref": "#/$defs/Binding"
@@ -195,7 +211,7 @@
       "properties": {
         "schemaVersion": {
           "const": 2,
-          "type": "number"
+          "type": "integer"
         },
         "issuer": {
           "const": "auriga.edge",
@@ -254,7 +270,7 @@
       "properties": {
         "schemaVersion": {
           "const": 1,
-          "type": "number"
+          "type": "integer"
         },
         "binding": {
           "$ref": "#/$defs/SessionBinding"
@@ -324,7 +340,7 @@
       "properties": {
         "schemaVersion": {
           "const": 1,
-          "type": "number"
+          "type": "integer"
         },
         "tenantId": {
           "type": "string",
@@ -402,7 +418,7 @@
       "properties": {
         "schemaVersion": {
           "const": 1,
-          "type": "number"
+          "type": "integer"
         },
         "binding": {
           "$ref": "#/$defs/Binding"
@@ -441,7 +457,7 @@
       "properties": {
         "schemaVersion": {
           "const": 1,
-          "type": "number"
+          "type": "integer"
         },
         "binding": {
           "$ref": "#/$defs/Binding"
@@ -487,7 +503,7 @@
       "properties": {
         "schemaVersion": {
           "const": 1,
-          "type": "number"
+          "type": "integer"
         },
         "operationId": {
           "type": "string",
@@ -508,11 +524,11 @@
         },
         "cancelWaitSeconds": {
           "const": 30,
-          "type": "number"
+          "type": "integer"
         },
         "archiveRetentionSeconds": {
           "const": 2592000,
-          "type": "number"
+          "type": "integer"
         },
         "workspacePolicy": {
           "const": "empty",
@@ -542,7 +558,7 @@
       "properties": {
         "schemaVersion": {
           "const": 1,
-          "type": "number"
+          "type": "integer"
         },
         "operationId": {
           "type": "string",
@@ -611,7 +627,7 @@
       "properties": {
         "schemaVersion": {
           "const": 1,
-          "type": "number"
+          "type": "integer"
         },
         "tenantId": {
           "type": "string",

@@ -7,6 +7,7 @@ const output = path.join(root, 'services/contracts/target/bundled');
 mkdirSync(output, { recursive: true });
 for (const service of [
   'network-keys-v2',
+  'shared-dsh-edge',
   'iam',
   'shell-auth',
   'org',

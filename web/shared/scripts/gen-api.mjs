@@ -37,6 +37,7 @@ await writeFile(
 );
 for (const name of [
   'network-keys-v2',
+  'shared-dsh-edge',
   'iam',
   'org',
   'workspace',

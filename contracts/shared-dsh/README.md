@@ -4,6 +4,8 @@
 
 protobuf仅用于内部传输；签名及schema JSON须显式映射，不能直接签protojson（int64字符串/缺省字段与本协议不同）。适配器将有界int64转为JSON整数、输出全部必填字段，再按schema和语义检查；未知字符串枚举及空缺省值拒绝。Capability 的 credentialVersion 是对应 audience 授权材料的当前版本，企业场景对应 IAM 企业材料版本；模型/消息由各自权威适配维护，不含任何上游密钥。
 
+proto的schema_version/cancel_wait_seconds/archive_retention_seconds均为int64，mode复用已有DshInstanceMode：DSH_INSTANCE_MODE_SHARED映射shared、DSH_INSTANCE_MODE_DEDICATED映射dedicated；UNSPECIFIED和未知数值均拒绝，不能透传为字符串模式。
+
 本契约只约束自研路径。首期互信团队接受原生 owner 旁路、互读文件、全池故障，以及 A 驱动 B 会话后以 B 企业身份操作、审计归 B 的风险；签名和能力验证通过不代表这些风险消失。
 
 ## 权威与端口
@@ -27,6 +29,10 @@ protobuf仅用于内部传输；签名及schema JSON须显式映射，不能直�
 
 ## 替身与验证
 
+票据交换的机器契约为 `openapi/shared-dsh-edge.yaml`，端点 `POST /_auriga/placement-ticket`，IP模式使用server前缀 `/i/{physicalInstanceId}`。严格body引用本目录TicketExchangeRequest，成功302的Location/Set-Cookie/Cache-Control与400/401/403/409/503均有定义。E使用 `exchangeTicket` 替身检验签名用途、期限、入口实例绑定、撤销和一次性消费，替身不签实际浏览器cookie；真实HTTP/WS和cookie验收仍由E线完成。TS为`shared-dsh-edge.ts`，Java为target中的sharededge接口和模型，Go为SharedDshTicketExchangeRequest消息。
+
+`node contracts/shared-dsh/build-contract.mjs --check`只读检查schema/proto漂移，已由 `services/contracts/scripts/check-schemas.mjs` 接入现有Contracts CI；prettier使用services/contracts锁定工具依赖，无需安装根pnpm依赖。生成时不带--check，后续再走Java/Go/TS生成链。
+
 `ports.mjs` 是契约oracle，不是生产授权实现。W/E可用 EntryDouble 模拟完整绑定、60秒、重放及撤销；P/N用 authorizeCapability 模拟600秒/归属/任务/凭据版本/raw开关；W/R用 confirmReceipt 模拟各操作确认与blocked；U以OpenAPI响应替身验证。签名测试运行时生成密钥。后续线均钉住本批精确git HEAD（见工位报告），不可手写/修改生成类型。Java生成在 services/contracts/target，Go在 infra/gen/auriga，TS在 web/shared/src/generated/{workspace.ts,shared-dsh.d.ts}。测试双只在内存不监听端口，不占真实PG/DSH槽；接线后须补真实端口和正常页面验收。
 
-错误：schema/未知方法 common.validation_failed；跨租户 common.not_found；错绑定 shared.binding_mismatch(403)；过期 shared.expired(401)；撤销 shared.revoked(403)；签名 shared.signature_invalid(401)；无法确认停止 shared.stop_unconfirmed(409)；授权不可核 common.unavailable(503)。结果事件沿原placement.switched/placement.switch_failed；新增撤销、资源回报、guardian事件目录分别由workspace、node生产，消费者不能把事件推送当实时授权真源。
+错误：schema/未知方法 common.validation_failed；跨租户 common.not_found；错绑定 shared.binding_mismatch(403)；过期 shared.expired(401)；撤销 shared.revoked(403)；签名 shared.signature_invalid(401)；无法确认停止 shared.stop_unconfirmed(409)；授权不可核 common.unavailable(503)。结果事件沿原placement.switched/placement.switch_failed；新增撤销、资源回报、guardian事件均由workspace发布，后两项源数据由受信节点上报，消费者不能把事件推送当实时授权真源。节点撤销走NodeControl，不订阅NATS；节点事件只发audit，不列workspace自消费。

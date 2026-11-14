@@ -3,9 +3,16 @@ syntax = "proto3";
 
 package auriga.node.v1;
 
+import "auriga/node/v1/shared_dsh.proto";
+
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
 option java_multiple_files = true;
 option java_package = "auriga.contracts.node.v1";
+
+// Wire validation and semantic constraints: contracts/shared-dsh/README.md.
+message SharedDshTicketExchangeRequest {
+  string ticket = 1;
+}
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshSignedHeader {
@@ -20,7 +27,7 @@ message SharedDshBinding {
   string member_id = 2;
   string placement_id = 3;
   string physical_instance_id = 4;
-  string mode = 5;
+  DshInstanceMode mode = 5;
   int64 epoch = 6;
   int64 revision = 7;
 }
@@ -31,7 +38,7 @@ message SharedDshSessionBinding {
   string member_id = 2;
   string placement_id = 3;
   string physical_instance_id = 4;
-  string mode = 5;
+  DshInstanceMode mode = 5;
   int64 epoch = 6;
   int64 revision = 7;
   string session_id = 8;
@@ -41,7 +48,7 @@ message SharedDshSessionBinding {
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshOpenTicket {
-  string schema_version = 1;
+  int64 schema_version = 1;
   SharedDshBinding binding = 2;
   string platform_session_id = 3;
   string audience = 4;
@@ -52,7 +59,7 @@ message SharedDshOpenTicket {
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshIdentity {
-  string schema_version = 1;
+  int64 schema_version = 1;
   string issuer = 2;
   string audience = 3;
   SharedDshBinding binding = 4;
@@ -66,7 +73,7 @@ message SharedDshIdentity {
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshCapability {
-  string schema_version = 1;
+  int64 schema_version = 1;
   SharedDshSessionBinding binding = 2;
   string task_id = 3;
   string audience = 4;
@@ -79,7 +86,7 @@ message SharedDshCapability {
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshRevocation {
-  string schema_version = 1;
+  int64 schema_version = 1;
   string tenant_id = 2;
   string member_id = 3;
   string placement_id = 4;
@@ -100,7 +107,7 @@ message SharedDshResource {
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshResourceView {
-  string schema_version = 1;
+  int64 schema_version = 1;
   SharedDshBinding binding = 2;
   string view_id = 3;
   string authorization_set_digest = 4;
@@ -110,7 +117,7 @@ message SharedDshResourceView {
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshResourceReport {
-  string schema_version = 1;
+  int64 schema_version = 1;
   SharedDshBinding binding = 2;
   string view_id = 3;
   string status = 4;
@@ -120,19 +127,19 @@ message SharedDshResourceReport {
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshRuntimeIntent {
-  string schema_version = 1;
+  int64 schema_version = 1;
   string operation_id = 2;
   SharedDshBinding binding = 3;
   string action = 4;
-  string cancel_wait_seconds = 5;
-  string archive_retention_seconds = 6;
+  int64 cancel_wait_seconds = 5;
+  int64 archive_retention_seconds = 6;
   string workspace_policy = 7;
   string session_policy = 8;
 }
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshRuntimeReceipt {
-  string schema_version = 1;
+  int64 schema_version = 1;
   string operation_id = 2;
   SharedDshBinding binding = 3;
   string receipt_id = 4;
@@ -148,7 +155,7 @@ message SharedDshRuntimeReceipt {
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshGuardianImpact {
-  string schema_version = 1;
+  int64 schema_version = 1;
   string tenant_id = 2;
   string physical_instance_id = 3;
   string operation_id = 4;

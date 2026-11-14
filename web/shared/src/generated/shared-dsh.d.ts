@@ -10,6 +10,13 @@ export interface SharedDSHV1ControlAndDataPlane {
 }
 /**
  * This interface was referenced by `SharedDSHV1ControlAndDataPlane`'s JSON-Schema
+ * via the `definition` "TicketExchangeRequest".
+ */
+export interface TicketExchangeRequest {
+  ticket: string;
+}
+/**
+ * This interface was referenced by `SharedDSHV1ControlAndDataPlane`'s JSON-Schema
  * via the `definition` "SignedHeader".
  */
 export interface SignedHeader {

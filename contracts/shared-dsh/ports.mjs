@@ -141,6 +141,25 @@ export class EntryDouble {
     this.used.add(claims.jti);
   }
 }
+export function exchangeTicket(request, entry, keys, context) {
+  validate('TicketExchangeRequest', request);
+  const claims = verifyClaims(
+    request.ticket,
+    'OpenTicket',
+    'auriga-shared-ticket+jwt',
+    keys,
+  );
+  if (claims.binding.physicalInstanceId !== context.physicalInstanceId)
+    throw new Error('shared.binding_mismatch');
+  if (!context.ready) throw new Error('common.conflict');
+  if (entry.used.has(claims.jti)) throw new Error('common.conflict');
+  entry.accept(claims, 'OpenTicket', context);
+  return {
+    status: 302,
+    location: context.ipMode ? '/i/' + context.physicalInstanceId + '/' : '/',
+    cacheControl: 'no-store',
+  };
+}
 export function stepUp({ ctx, permission, stepupTime, active }, now) {
   if (ctx !== 'admin' || permission !== 'workspace.placements.write' || !active)
     throw new Error('common.forbidden');

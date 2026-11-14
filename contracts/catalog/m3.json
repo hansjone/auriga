@@ -660,27 +660,24 @@
       "consumers": [
         "edge",
         "ai-gateway",
-        "node",
         "audit"
       ],
       "publish": "auriga.evt.placement.revoked"
     },
     "placement.resource_reported": {
-      "source": "auriga/node",
+      "source": "auriga/workspace",
       "subject": "binding.placementId",
       "schema": "../shared-dsh/shared-dsh.schema.json#/$defs/ResourceReport",
       "consumers": [
-        "workspace",
         "audit"
       ],
       "publish": "auriga.evt.placement.resource_reported"
     },
     "placement.guardian_impact": {
-      "source": "auriga/node",
+      "source": "auriga/workspace",
       "subject": "physicalInstanceId",
       "schema": "../shared-dsh/shared-dsh.schema.json#/$defs/GuardianImpact",
       "consumers": [
-        "workspace",
         "audit"
       ],
       "publish": "auriga.evt.placement.guardian_impact"
