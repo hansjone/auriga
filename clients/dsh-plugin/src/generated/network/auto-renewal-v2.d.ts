@@ -7,13 +7,13 @@
 
 export type LocalProjectionResponse =
   | {
-      phase?: 'loaded' | 'handshake_verified';
-      failure_code?: 'none';
+      phase: 'loaded' | 'handshake_verified';
+      failure_code: 'none';
       [k: string]: unknown;
     }
   | {
-      phase?: 'failed';
-      failure_code?:
+      phase: 'failed';
+      failure_code:
         | 'version_rollback'
         | 'same_version_conflict'
         | 'invalid_chain'

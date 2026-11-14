@@ -12,6 +12,7 @@ package msgnetapi
 
 import (
 	"encoding/json"
+	"fmt"
 )
 
 // checks if the LocalProjectionResponseOneOf type satisfies the MappedNullable interface at compile time
@@ -19,8 +20,8 @@ var _ MappedNullable = &LocalProjectionResponseOneOf{}
 
 // LocalProjectionResponseOneOf struct for LocalProjectionResponseOneOf
 type LocalProjectionResponseOneOf struct {
-	Phase                *string     `json:"phase,omitempty"`
-	FailureCode          interface{} `json:"failure_code,omitempty"`
+	Phase                string      `json:"phase"`
+	FailureCode          interface{} `json:"failure_code"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -30,8 +31,10 @@ type _LocalProjectionResponseOneOf LocalProjectionResponseOneOf
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewLocalProjectionResponseOneOf() *LocalProjectionResponseOneOf {
+func NewLocalProjectionResponseOneOf(phase string, failureCode interface{}) *LocalProjectionResponseOneOf {
 	this := LocalProjectionResponseOneOf{}
+	this.Phase = phase
+	this.FailureCode = failureCode
 	return &this
 }
 
@@ -43,48 +46,42 @@ func NewLocalProjectionResponseOneOfWithDefaults() *LocalProjectionResponseOneOf
 	return &this
 }
 
-// GetPhase returns the Phase field value if set, zero value otherwise.
+// GetPhase returns the Phase field value
 func (o *LocalProjectionResponseOneOf) GetPhase() string {
-	if o == nil || IsNil(o.Phase) {
+	if o == nil {
 		var ret string
 		return ret
 	}
-	return *o.Phase
+
+	return o.Phase
 }
 
-// GetPhaseOk returns a tuple with the Phase field value if set, nil otherwise
+// GetPhaseOk returns a tuple with the Phase field value
 // and a boolean to check if the value has been set.
 func (o *LocalProjectionResponseOneOf) GetPhaseOk() (*string, bool) {
-	if o == nil || IsNil(o.Phase) {
+	if o == nil {
 		return nil, false
 	}
-	return o.Phase, true
+	return &o.Phase, true
 }
 
-// HasPhase returns a boolean if a field has been set.
-func (o *LocalProjectionResponseOneOf) HasPhase() bool {
-	if o != nil && !IsNil(o.Phase) {
-		return true
-	}
-
-	return false
-}
-
-// SetPhase gets a reference to the given string and assigns it to the Phase field.
+// SetPhase sets field value
 func (o *LocalProjectionResponseOneOf) SetPhase(v string) {
-	o.Phase = &v
+	o.Phase = v
 }
 
-// GetFailureCode returns the FailureCode field value if set, zero value otherwise (both if not set or set to explicit null).
+// GetFailureCode returns the FailureCode field value
+// If the value is explicit nil, the zero value for interface{} will be returned
 func (o *LocalProjectionResponseOneOf) GetFailureCode() interface{} {
 	if o == nil {
 		var ret interface{}
 		return ret
 	}
+
 	return o.FailureCode
 }
 
-// GetFailureCodeOk returns a tuple with the FailureCode field value if set, nil otherwise
+// GetFailureCodeOk returns a tuple with the FailureCode field value
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
 func (o *LocalProjectionResponseOneOf) GetFailureCodeOk() (*interface{}, bool) {
@@ -94,16 +91,7 @@ func (o *LocalProjectionResponseOneOf) GetFailureCodeOk() (*interface{}, bool) {
 	return &o.FailureCode, true
 }
 
-// HasFailureCode returns a boolean if a field has been set.
-func (o *LocalProjectionResponseOneOf) HasFailureCode() bool {
-	if o != nil && !IsNil(o.FailureCode) {
-		return true
-	}
-
-	return false
-}
-
-// SetFailureCode gets a reference to the given interface{} and assigns it to the FailureCode field.
+// SetFailureCode sets field value
 func (o *LocalProjectionResponseOneOf) SetFailureCode(v interface{}) {
 	o.FailureCode = v
 }
@@ -118,9 +106,7 @@ func (o LocalProjectionResponseOneOf) MarshalJSON() ([]byte, error) {
 
 func (o LocalProjectionResponseOneOf) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Phase) {
-		toSerialize["phase"] = o.Phase
-	}
+	toSerialize["phase"] = o.Phase
 	if o.FailureCode != nil {
 		toSerialize["failure_code"] = o.FailureCode
 	}
@@ -133,6 +119,28 @@ func (o LocalProjectionResponseOneOf) ToMap() (map[string]interface{}, error) {
 }
 
 func (o *LocalProjectionResponseOneOf) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"phase",
+		"failure_code",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err
+	}
+
+	for _, requiredProperty := range requiredProperties {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
 	varLocalProjectionResponseOneOf := _LocalProjectionResponseOneOf{}
 
 	err = json.Unmarshal(data, &varLocalProjectionResponseOneOf)

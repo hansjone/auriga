@@ -2098,6 +2098,7 @@ export const schema = {
               const: 'none',
             },
           },
+          required: ['phase', 'failure_code'],
         },
         {
           properties: {
@@ -2113,6 +2114,7 @@ export const schema = {
               ],
             },
           },
+          required: ['phase', 'failure_code'],
         },
       ],
     },

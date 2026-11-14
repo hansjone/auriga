@@ -791,15 +791,15 @@ export interface components {
     } & (
       | {
           /** @enum {unknown} */
-          phase?: 'loaded' | 'handshake_verified';
+          phase: 'loaded' | 'handshake_verified';
           /** @constant */
-          failure_code?: 'none';
+          failure_code: 'none';
         }
       | {
           /** @constant */
-          phase?: 'failed';
+          phase: 'failed';
           /** @enum {unknown} */
-          failure_code?:
+          failure_code:
             | 'version_rollback'
             | 'same_version_conflict'
             | 'invalid_chain'

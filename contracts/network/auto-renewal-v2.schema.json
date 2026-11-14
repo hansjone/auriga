@@ -2270,7 +2270,11 @@
             "failure_code": {
               "const": "none"
             }
-          }
+          },
+          "required": [
+            "phase",
+            "failure_code"
+          ]
         },
         {
           "properties": {
@@ -2285,7 +2289,11 @@
                 "projection_pending"
               ]
             }
-          }
+          },
+          "required": [
+            "phase",
+            "failure_code"
+          ]
         }
       ]
     },
