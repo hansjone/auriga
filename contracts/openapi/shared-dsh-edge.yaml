@@ -1,0 +1,94 @@
+openapi: 3.1.0
+info:
+  title: Auriga shared DSH edge ticket exchange
+  version: 1.0.0
+  description: 共享票据交换入口；由edge实现，沿部署入口单源映射，不属于workspace API。
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: /
+    description: domain模式使用可信实例Origin。
+  - url: /i/{physicalInstanceId}
+    description: IP模式使用可信物理实例前缀；必须与签名Binding一致。
+    variables:
+      physicalInstanceId:
+        default: '019319fa-0000-7000-8000-000000000001'
+        description: 服务器分配的实例UUID；不得接受任意跳转路径。
+security: []
+tags:
+  - name: placement-entry
+    description: 一次性共享票据入口。
+paths:
+  /_auriga/placement-ticket:
+    post:
+      operationId: exchangeDshPlacementTicket
+      tags: [placement-entry]
+      summary: 原子兑换共享票据并建立实例cookie
+      description: |
+        只接受JSON body，不从query/cookie/外部身份头取票。票据本身是唯一认证材料。
+        验证签名、用途、60秒期限、当前成员及平台会话有效性、完整Binding和epoch。
+        domain实例Origin或IP实例路径必须与签名physicalInstanceId及可信部署映射匹配。
+        验证成功后原子消费jti；仅一个并发请求成功，后续重放返回409，不复发cookie。
+        按部署契约下发HttpOnly实例cookie，服务端绑定完整Binding/platformSessionId。
+        Location只可为domain的/或IP的/i/<physicalInstanceId>/，不接收returnUrl。
+        响应Cache-Control=no-store，所有成功/错误均不得回显票据；日志脱敏。
+        本端点不调用业务写操作，票据授权只用于建立实例会话，不代替后续Origin/CSRF检查。
+      x-error-codes:
+        - common.validation_failed
+        - shared.signature_invalid
+        - shared.expired
+        - shared.revoked
+        - shared.binding_mismatch
+        - common.conflict
+        - common.unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DshPlacementTicketExchangeRequest' }
+      responses:
+        '302':
+          description: 票据已消费；cookie设置成功，跳至正常实例页面，无响应body。
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+                pattern: '^/(i/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/)?$'
+            Set-Cookie:
+              required: true
+              description: 沿deployment/access契约，domain与IP模式的名称/Path/Secure规则保持一致。
+              schema: { type: string, minLength: 1 }
+            Cache-Control:
+              required: true
+              schema: { type: string, const: no-store }
+        '400':
+          description: body缺失、额外字段、非法票据形状或不支持的输入，common.validation_failed。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+        '401':
+          description: 签名/用途无效或已过期；不签cookie。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+        '403':
+          description: 成员/会话已撤销或Binding与入口不匹配；不签cookie。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+        '409':
+          description: 票据已被消费、分配未ready或切换中，common.conflict；不复发cookie。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+        '503':
+          description: 权威状态或原子消费存储不可用，common.unavailable；失败关闭。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+components:
+  schemas:
+    DshPlacementTicketExchangeRequest:
+      $ref: '../shared-dsh/shared-dsh.schema.json#/$defs/TicketExchangeRequest'

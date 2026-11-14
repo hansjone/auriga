@@ -513,6 +513,46 @@
         "zh-CN": "资源对象存储暂时不可用",
         "en": "The resource object store is unavailable"
       }
+    },
+    "shared.binding_mismatch": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "共享归属不匹配",
+        "en": "Shared binding mismatch"
+      }
+    },
+    "shared.expired": {
+      "http": 401,
+      "grpc": "UNAUTHENTICATED",
+      "message": {
+        "zh-CN": "共享授权已过期",
+        "en": "Shared authorization expired"
+      }
+    },
+    "shared.revoked": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "共享授权已撤销",
+        "en": "Shared authorization revoked"
+      }
+    },
+    "shared.signature_invalid": {
+      "http": 401,
+      "grpc": "UNAUTHENTICATED",
+      "message": {
+        "zh-CN": "共享签名无效",
+        "en": "Invalid shared signature"
+      }
+    },
+    "shared.stop_unconfirmed": {
+      "http": 409,
+      "grpc": "FAILED_PRECONDITION",
+      "message": {
+        "zh-CN": "尚未确认执行树停止",
+        "en": "Execution tree stop unconfirmed"
+      }
     }
   },
   "events": {
@@ -612,6 +652,35 @@
         "audit"
       ],
       "publish": "auriga.evt.resource.catalog_distribution_requested"
+    },
+    "placement.revoked": {
+      "source": "auriga/workspace",
+      "subject": "placementId",
+      "schema": "../shared-dsh/shared-dsh.schema.json#/$defs/Revocation",
+      "consumers": [
+        "edge",
+        "ai-gateway",
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.revoked"
+    },
+    "placement.resource_reported": {
+      "source": "auriga/workspace",
+      "subject": "binding.placementId",
+      "schema": "../shared-dsh/shared-dsh.schema.json#/$defs/ResourceReport",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.resource_reported"
+    },
+    "placement.guardian_impact": {
+      "source": "auriga/workspace",
+      "subject": "physicalInstanceId",
+      "schema": "../shared-dsh/shared-dsh.schema.json#/$defs/GuardianImpact",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.guardian_impact"
     }
   },
   "deviceMappings": {
