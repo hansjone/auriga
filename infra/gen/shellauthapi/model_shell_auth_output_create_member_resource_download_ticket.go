@@ -20,9 +20,9 @@ var _ MappedNullable = &ShellAuthOutputCreateMemberResourceDownloadTicket{}
 
 // ShellAuthOutputCreateMemberResourceDownloadTicket struct for ShellAuthOutputCreateMemberResourceDownloadTicket
 type ShellAuthOutputCreateMemberResourceDownloadTicket struct {
-	StatusCode           int32                                                             `json:"statusCode"`
-	Headers              *ShellAuthOutputListResourcePackagesHeaders                       `json:"headers,omitempty"`
-	Body                 ShellAuthopenapiResourceYamlComponentsSchemasMemberDownloadTicket `json:"body"`
+	StatusCode           int32                                                 `json:"statusCode"`
+	Headers              *ShellAuthOutputListResourcePackagesHeaders           `json:"headers,omitempty"`
+	Body                 ShellAuthOutputCreateMemberResourceDownloadTicketBody `json:"body"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -32,7 +32,7 @@ type _ShellAuthOutputCreateMemberResourceDownloadTicket ShellAuthOutputCreateMem
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputCreateMemberResourceDownloadTicket(statusCode int32, body ShellAuthopenapiResourceYamlComponentsSchemasMemberDownloadTicket) *ShellAuthOutputCreateMemberResourceDownloadTicket {
+func NewShellAuthOutputCreateMemberResourceDownloadTicket(statusCode int32, body ShellAuthOutputCreateMemberResourceDownloadTicketBody) *ShellAuthOutputCreateMemberResourceDownloadTicket {
 	this := ShellAuthOutputCreateMemberResourceDownloadTicket{}
 	this.StatusCode = statusCode
 	this.Body = body
@@ -104,9 +104,9 @@ func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) SetHeaders(v ShellAu
 }
 
 // GetBody returns the Body field value
-func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) GetBody() ShellAuthopenapiResourceYamlComponentsSchemasMemberDownloadTicket {
+func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) GetBody() ShellAuthOutputCreateMemberResourceDownloadTicketBody {
 	if o == nil {
-		var ret ShellAuthopenapiResourceYamlComponentsSchemasMemberDownloadTicket
+		var ret ShellAuthOutputCreateMemberResourceDownloadTicketBody
 		return ret
 	}
 
@@ -115,7 +115,7 @@ func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) GetBody() ShellAutho
 
 // GetBodyOk returns a tuple with the Body field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) GetBodyOk() (*ShellAuthopenapiResourceYamlComponentsSchemasMemberDownloadTicket, bool) {
+func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) GetBodyOk() (*ShellAuthOutputCreateMemberResourceDownloadTicketBody, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -123,7 +123,7 @@ func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) GetBodyOk() (*ShellA
 }
 
 // SetBody sets field value
-func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) SetBody(v ShellAuthopenapiResourceYamlComponentsSchemasMemberDownloadTicket) {
+func (o *ShellAuthOutputCreateMemberResourceDownloadTicket) SetBody(v ShellAuthOutputCreateMemberResourceDownloadTicketBody) {
 	o.Body = v
 }
 

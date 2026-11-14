@@ -25,7 +25,10 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeExe } from './make-exe.mjs';
-import { buildBroker } from '../../shell-auth/build.mjs';
+import {
+  copyBrokerArtifact,
+  verifyBrokerArtifact,
+} from '../../shell-auth/artifact.mjs';
 import { parse as parseVersion } from '../runtime/semver-lite.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
 import {
@@ -213,6 +216,8 @@ function readTgzPackageJson(tgz) {
 }
 
 export async function build(args) {
+  if (typeof args['broker-artifact'] !== 'string')
+    throw new Error('--broker-artifact is required');
   const config = JSON.parse(
     readFileSync(join(installerDir, 'upstream.json'), 'utf8'),
   );
@@ -236,6 +241,14 @@ export async function build(args) {
     tgz = join(work, name);
   }
   const pluginPkg = readTgzPackageJson(tgz);
+  if (
+    (process.env.GITHUB_REF_NAME?.startsWith('desktop-v') ||
+      process.env.RELEASE_BUILD === 'true') &&
+    pluginPkg.version === '0.0.0-ci'
+  )
+    throw new Error(
+      'CI placeholder plugin version forbidden in Desktop release',
+    );
   if (!satisfiesMin(dshVersion, pluginPkg.engines?.dsh))
     throw new Error(
       `plugin ${pluginPkg.name}@${pluginPkg.version} requires dsh ${pluginPkg.engines?.dsh}, upstream is ${dshVersion}`,
@@ -401,7 +414,22 @@ export async function build(args) {
   }
 
   // 4. Our own runtime and Windows wrappers.
-  const shellAuthManifest = buildBroker(join(payload, 'auriga', 'shell-auth'));
+  const shellAuthManifest = copyBrokerArtifact(
+    args['broker-artifact'],
+    join(payload, 'auriga', 'shell-auth'),
+  );
+  const pluginBroker = join(plugin, 'node_modules', 'auriga-dsh', 'shell-auth');
+  verifyBrokerArtifact(pluginBroker);
+  for (const path of [
+    'broker-manifest.json',
+    ...shellAuthManifest.files.map((file) => file.path),
+  ]) {
+    if (
+      sha256File(join(pluginBroker, path)) !==
+      sha256File(join(payload, 'auriga', 'shell-auth', path))
+    )
+      throw new Error('Desktop and plugin broker artifacts differ');
+  }
   cpSync(join(installerDir, 'runtime'), join(payload, 'auriga', 'runtime'), {
     recursive: true,
   });

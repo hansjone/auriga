@@ -1044,7 +1044,7 @@
       "permission": "auriga.connect",
       "stream": false,
       "retry": "never",
-      "route": "/api/iam/v1/me",
+      "route": "/api/iam/v1/me/device-profile",
       "requestHeaders": [],
       "responseHeaders": [
         "content-type",
