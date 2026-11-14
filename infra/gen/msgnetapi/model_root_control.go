@@ -32,6 +32,7 @@ type RootControl struct {
 	MinimumGeneration      string                `json:"minimum_generation" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
 	MinimumKeysetVersion   string                `json:"minimum_keyset_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
 	GenerationTransition   *GenerationTransition `json:"generation_transition,omitempty"`
+	TransportTransition    *TransportTransition  `json:"transport_transition,omitempty"`
 }
 
 type _RootControl RootControl
@@ -337,6 +338,38 @@ func (o *RootControl) SetGenerationTransition(v GenerationTransition) {
 	o.GenerationTransition = &v
 }
 
+// GetTransportTransition returns the TransportTransition field value if set, zero value otherwise.
+func (o *RootControl) GetTransportTransition() TransportTransition {
+	if o == nil || IsNil(o.TransportTransition) {
+		var ret TransportTransition
+		return ret
+	}
+	return *o.TransportTransition
+}
+
+// GetTransportTransitionOk returns a tuple with the TransportTransition field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RootControl) GetTransportTransitionOk() (*TransportTransition, bool) {
+	if o == nil || IsNil(o.TransportTransition) {
+		return nil, false
+	}
+	return o.TransportTransition, true
+}
+
+// HasTransportTransition returns a boolean if a field has been set.
+func (o *RootControl) HasTransportTransition() bool {
+	if o != nil && !IsNil(o.TransportTransition) {
+		return true
+	}
+
+	return false
+}
+
+// SetTransportTransition gets a reference to the given TransportTransition and assigns it to the TransportTransition field.
+func (o *RootControl) SetTransportTransition(v TransportTransition) {
+	o.TransportTransition = &v
+}
+
 func (o RootControl) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -361,6 +394,9 @@ func (o RootControl) ToMap() (map[string]interface{}, error) {
 	toSerialize["minimum_keyset_version"] = o.MinimumKeysetVersion
 	if !IsNil(o.GenerationTransition) {
 		toSerialize["generation_transition"] = o.GenerationTransition
+	}
+	if !IsNil(o.TransportTransition) {
+		toSerialize["transport_transition"] = o.TransportTransition
 	}
 	return toSerialize, nil
 }

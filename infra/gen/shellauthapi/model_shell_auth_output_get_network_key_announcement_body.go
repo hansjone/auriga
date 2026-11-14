@@ -21,7 +21,7 @@ var _ MappedNullable = &ShellAuthOutputGetNetworkKeyAnnouncementBody{}
 
 // ShellAuthOutputGetNetworkKeyAnnouncementBody struct for ShellAuthOutputGetNetworkKeyAnnouncementBody
 type ShellAuthOutputGetNetworkKeyAnnouncementBody struct {
-	// 解码后最多65536字节，必须严格验证 network/protocol.schema.json#/$defs/KeysetAnnouncement；保留原始受签字节，不经生成模型重序列化。
+	// 解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2；保留原始受签字节，不经生成模型重序列化。
 	Wire string `json:"wire" validate:"regexp=^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"`
 }
 

@@ -2,6 +2,30 @@
   "schemaVersion": 1,
   "description": "M3权限、域错误和新增事件来源的单一定义；OpenAPI x-permission/x-error-codes/x-events 仅为引用。现有common.*与iam.step_up_required复用既有契约和common映射，不在此重定义。",
   "permissions": {
+    "workspace.placements.read": {
+      "description": {
+        "zh-CN": "查看本租户成员的 DSH 分配切换结果",
+        "en": "Read tenant member DSH placement switch results"
+      },
+      "adminOnly": true,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "workspace.placements.write": {
+      "description": {
+        "zh-CN": "切换本租户成员的共享或独立 DSH 分配",
+        "en": "Switch tenant members between shared and dedicated DSH placements"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
     "iam.network.manage": {
       "description": {
         "en": "Manage registered devices",
@@ -492,6 +516,24 @@
     }
   },
   "events": {
+    "placement.switched": {
+      "source": "auriga/workspace",
+      "subject": "placementId",
+      "schema": "../events/placement.schema.json#/$defs/PlacementSwitched",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.switched"
+    },
+    "placement.switch_failed": {
+      "source": "auriga/workspace",
+      "subject": "placementId",
+      "schema": "../events/placement.schema.json#/$defs/PlacementSwitchFailed",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.switch_failed"
+    },
     "usage.recorded": {
       "source": "auriga/ai-gateway",
       "subject": "requestId",

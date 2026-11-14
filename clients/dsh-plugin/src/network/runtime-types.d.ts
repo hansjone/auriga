@@ -2,11 +2,24 @@ import type { LedgerIdentity } from './host/ledger.js';
 import type { HostPort, NetworkPort } from './host/adapter.js';
 import type { Options as ConsentOptions } from './consent/types.js';
 import type { TransportOptions } from './transport/nats-transport.js';
+import type { PublicKey } from '../generated/network/keyset-types.js';
 import type {
-  SignedKeyset,
-  PublicKey,
-} from '../generated/network/keyset-types.js';
+  AurigaV2,
+  SignedKeysetAnnouncementV2,
+  SignedMigrationPermit,
+} from '../generated/network/auto-renewal-v2.js';
 import type { ConnectNetwork } from '../generated/connect-config.js';
+import type {
+  InstallationReceipt,
+  Signature,
+} from '../generated/network/auto-renewal-v2.js';
+
+/** Installation-owned identity signer supplied by the identity adapter. */
+export interface ControlIdentity {
+  target_id: string;
+  identity_id: string;
+  sign(bytes: Uint8Array): Promise<Signature>;
+}
 
 /** Validated, detached installation pins; never a browser/SDK preference. */
 export type NetworkInstallation = Readonly<Omit<ConnectNetwork, 'roots'>> & {
@@ -26,6 +39,16 @@ export interface FullNetworkProvider {
 /** Installation-owned ports, never accepted from HTTP bodies, model parameters or downlink hints.
  * The complete Cordis aurigaNetwork provider supplies these business/host ports. */
 export interface NetworkPorts {
+  refreshTrust(
+    trust: Awaited<
+      ReturnType<typeof import('./trust/v2-store.js').openV2TrustStore>
+    >,
+    signal: AbortSignal,
+  ): Promise<void>;
+  confirmControlReceipt?(
+    receipt: InstallationReceipt,
+    signal: AbortSignal,
+  ): Promise<void>;
   host: HostPort;
   network: NetworkPort;
   prepareTicket(input: {
@@ -41,10 +64,6 @@ export interface NetworkPorts {
     ticket: string;
     expiresAtMs: number;
   }>;
-  refreshKeys?(
-    hint: { realm: string; minimumVersion: string; kid: string },
-    signal: AbortSignal,
-  ): Promise<SignedKeyset>;
   resolveSource: ConsentOptions['resolveSource'];
   organization: ConsentOptions['organization'];
   organizationPolicy(): Promise<import('../consent-ui/adapter.js').Policy>;
@@ -76,10 +95,13 @@ export interface ConsentPublication {
   recipientIds: string[];
 }
 export interface PreparedNetwork {
+  migrationPermit?: SignedMigrationPermit;
+  controlIdentity?: ControlIdentity;
   identity: LedgerIdentity;
   url: string;
   roots: Pick<PublicKey, 'kid' | 'public_key_spki'>[];
-  keyset: SignedKeyset;
+  keyset: AurigaV2;
+  announcement: SignedKeysetAnnouncementV2;
   /** Only an authoritative first-install registration may initialize a missing ledger. */
   initialize?: boolean;
   tls?: { ca?: string | Buffer | Array<string | Buffer> };
@@ -119,6 +141,12 @@ export interface DeviceRegistration {
   created: boolean;
 }
 export interface PreparedConnection {
+  migrationPermit?: SignedMigrationPermit;
+  controlIdentity?: ControlIdentity;
+  confirmControlReceipt?(
+    receipt: InstallationReceipt,
+    signal: AbortSignal,
+  ): Promise<void>;
   kind: 'device-connection';
   /** Local namespace derived only from the already verified device identity. */
   storageKey?: string;
@@ -135,7 +163,7 @@ export interface PreparedConnection {
   ): Promise<import('./transport/nats-transport.js').Ticket>;
   refresh(
     trust: Awaited<
-      ReturnType<typeof import('./trust/store.js').openTrustStore>
+      ReturnType<typeof import('./trust/v2-store.js').openV2TrustStore>
     >,
     signal: AbortSignal,
   ): Promise<void>;

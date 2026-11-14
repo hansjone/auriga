@@ -285,6 +285,9 @@
         },
         "generation_transition": {
           "$ref": "#/$defs/GenerationTransition"
+        },
+        "transport_transition": {
+          "$ref": "#/$defs/TransportTransition"
         }
       },
       "required": [
@@ -2559,6 +2562,339 @@
         "version",
         "pair_digest",
         "material_digest"
+      ],
+      "additionalProperties": false
+    },
+    "TransportTransition": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "authority_transition",
+            "emergency_recovery"
+          ]
+        },
+        "predecessor_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "from_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "to_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "first_bundle_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        }
+      },
+      "required": [
+        "mode",
+        "predecessor_digest",
+        "from_generation",
+        "to_generation",
+        "authority_id",
+        "authority_digest",
+        "first_bundle_version"
+      ],
+      "additionalProperties": false
+    },
+    "TransportPredecessor": {
+      "type": "object",
+      "properties": {
+        "bundle": {
+          "$ref": "#/$defs/SignedTransportTrustBundle"
+        },
+        "authority": {
+          "$ref": "#/$defs/SignedRuntimeAuthority"
+        },
+        "control": {
+          "$ref": "#/$defs/SignedRootControl"
+        }
+      },
+      "required": [
+        "bundle",
+        "authority",
+        "control"
+      ],
+      "additionalProperties": false
+    },
+    "TransportReaderEvidence": {
+      "type": "object",
+      "properties": {
+        "reader_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "identity_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "selector": {
+          "$ref": "#/$defs/LocalProjectionSelector"
+        },
+        "phase": {
+          "enum": [
+            "loaded",
+            "handshake_verified",
+            "isolated"
+          ]
+        },
+        "isolation_enforced": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reader_id",
+        "identity_id",
+        "selector",
+        "phase",
+        "isolation_enforced"
+      ],
+      "additionalProperties": false
+    },
+    "TransportConfirmation": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "authority_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authority_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "control_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "dual_trust",
+            "new_leaves",
+            "retire_old"
+          ]
+        },
+        "required_reader_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "uniqueItems": true,
+          "maxItems": 65536
+        },
+        "readers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TransportReaderEvidence"
+          },
+          "maxItems": 65536
+        },
+        "challenge": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+          "minLength": 43,
+          "maxLength": 43
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "$comment": "auriga-preserve-signature-text"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "authority_id",
+        "authority_digest",
+        "control_revision",
+        "bundle_version",
+        "bundle_digest",
+        "phase",
+        "required_reader_ids",
+        "readers",
+        "challenge",
+        "issued_at"
+      ],
+      "additionalProperties": false
+    },
+    "SignedTransportConfirmation": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/TransportConfirmation"
+        },
+        "runtime_auth": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "payload",
+        "runtime_auth"
+      ],
+      "additionalProperties": false
+    },
+    "TransportConfirmationQuery": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "challenge": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+          "minLength": 43,
+          "maxLength": 43
+        }
+      },
+      "required": [
+        "tenant_id",
+        "realm",
+        "bundle_version",
+        "bundle_digest",
+        "challenge"
+      ],
+      "additionalProperties": false
+    },
+    "NodeControlPin": {
+      "type": "object",
+      "properties": {
+        "target_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "node_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "identity_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "signing_spki": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "maxLength": 128
+        },
+        "identity_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        }
+      },
+      "required": [
+        "target_id",
+        "node_id",
+        "identity_id",
+        "signing_spki",
+        "identity_revision"
+      ],
+      "additionalProperties": false
+    },
+    "NodeControlPins": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "realm": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "pins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NodeControlPin"
+          },
+          "maxItems": 65536
+        }
+      },
+      "required": [
+        "schema_version",
+        "tenant_id",
+        "realm",
+        "pins"
+      ],
+      "additionalProperties": false
+    },
+    "TransportTransitionProof": {
+      "type": "object",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/SignedRootControl"
+        },
+        "predecessor": {
+          "$ref": "#/$defs/TransportPredecessor"
+        },
+        "first_bundle": {
+          "$ref": "#/$defs/SignedTransportTrustBundle"
+        },
+        "authority": {
+          "$ref": "#/$defs/SignedRuntimeAuthority"
+        }
+      },
+      "required": [
+        "control",
+        "predecessor",
+        "first_bundle",
+        "authority"
       ],
       "additionalProperties": false
     }

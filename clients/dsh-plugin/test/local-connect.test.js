@@ -29,8 +29,8 @@ import { createDeviceProvider } from '../src/network/device-provider.js';
 import {
   publicationFixture,
   testRoots,
-  signedKeyset,
-  signedAnnouncement,
+  signedV2Keyset as signedKeyset,
+  signedV2Announcement as signedAnnouncement,
 } from './network/trust/keyset-fixtures.js';
 
 const config = {
@@ -458,9 +458,15 @@ for (const point of ['register', 'tickets'])
             created: true,
           });
         if (path.endsWith('/keys/announcement'))
-          return Response.json(signedAnnouncement(payload));
+          return Response.json(
+            signedAnnouncement(payload, {}, credential.claims.tid),
+          );
+        if (path.endsWith('/bootstrap/controls'))
+          return Response.json(
+            signedKeyset(payload, credential.claims.tid).control,
+          );
         if (path.endsWith('/network/keys'))
-          return Response.json(signedKeyset(payload));
+          return Response.json(signedKeyset(payload, credential.claims.tid));
         return originalFetch(url, init);
       };
       const before = runtime.modelStatus;

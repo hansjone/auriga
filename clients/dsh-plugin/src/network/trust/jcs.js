@@ -17,13 +17,15 @@ function wellFormed(value) {
 
 /** RFC 8785 over the protocol's safe-integer JSON subset. Unknown keys remain.
  * @param {any} value
+ * @param {{maxBytes?:number,maxArray?:number,maxNodes?:number,maxDepth?:number}} [limits]
  * @returns {string}
  */
-export function canonicalize(value) {
+export function canonicalize(value, limits = {}) {
   let count = 0;
   /** @param {any} v @param {number} depth @returns {string} */
   function visit(v, depth) {
-    if (depth > 16 || ++count > 8192) bad('JSON complexity');
+    if (depth > (limits.maxDepth ?? 16) || ++count > (limits.maxNodes ?? 8192))
+      bad('JSON complexity');
     if (v === null || typeof v === 'boolean') return JSON.stringify(v);
     if (typeof v === 'number') {
       if (!Number.isSafeInteger(v)) bad('unsafe number');
@@ -34,7 +36,7 @@ export function canonicalize(value) {
       return JSON.stringify(v);
     }
     if (Array.isArray(v)) {
-      if (v.length > 256) bad('array size');
+      if (v.length > (limits.maxArray ?? 256)) bad('array size');
       return '[' + Array.from(v, (x) => visit(x, depth + 1)).join(',') + ']';
     }
     if (
@@ -58,16 +60,22 @@ export function canonicalize(value) {
     );
   }
   const result = visit(value, 1);
-  if (Buffer.byteLength(result) > 65536) bad('payload size');
+  if (Buffer.byteLength(result) > (limits.maxBytes ?? 65536))
+    bad('payload size');
   return result;
 }
 
 /** Reject ambiguous wire JSON before its original representation is lost.
  * @param {Uint8Array} bytes
+ * @param {{maxBytes?:number,maxArray?:number,maxNodes?:number,maxDepth?:number}} [limits]
  * @returns {any}
  */
-export function parseStrictJson(bytes) {
-  if (!bytes || !bytes.byteLength || bytes.byteLength > 65536)
+export function parseStrictJson(bytes, limits = {}) {
+  if (
+    !bytes ||
+    !bytes.byteLength ||
+    bytes.byteLength > (limits.maxBytes ?? 65536)
+  )
     bad('payload size');
   let text = '';
   try {
@@ -106,7 +114,8 @@ export function parseStrictJson(bytes) {
   }
   /** @param {number} depth @returns {any} */
   function val(depth) {
-    if (depth > 16 || ++count > 8192) bad('JSON complexity');
+    if (depth > (limits.maxDepth ?? 16) || ++count > (limits.maxNodes ?? 8192))
+      bad('JSON complexity');
     ws();
     const c = text[i];
     if (c === '"') return str();
@@ -146,7 +155,7 @@ export function parseStrictJson(bytes) {
       }
       for (;;) {
         out.push(val(depth + 1));
-        if (out.length > 256) bad('array size');
+        if (out.length > (limits.maxArray ?? 256)) bad('array size');
         ws();
         if (text[i] === ',') {
           i++;

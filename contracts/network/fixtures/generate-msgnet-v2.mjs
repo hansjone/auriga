@@ -1,3 +1,4 @@
+import { extendK3 } from './msgnet-v2-k3-vectors.mjs';
 // 合成向量：密钥每次运行在内存中生成，输出仅含公钥/签名，无私钥。
 import {
   createHash,
@@ -512,6 +513,16 @@ extendEndpoints({
   root,
   runtime,
   digest,
+});
+extendK3({
+  cases,
+  boundary_cases,
+  root,
+  runtime,
+  auth,
+  pub,
+  digest,
+  generateKeyPairSync,
 });
 for (const v of cases)
   for (const [field, domain] of [
