@@ -14,6 +14,35 @@ tags:
   - name: placements
     description: 成员的逻辑 DSH 分配及模式切换。
 paths:
+  /me/placement/open:
+    post:
+      tags: [placements]
+      operationId: openMyDshPlacement
+      summary: 创建或打开本人权威分配
+      description: |
+        仅 portal 会话；租户和成员来自认证上下文，验证 Origin/CSRF。
+        首次创建默认 shared；维护窗口旧成员先批量重建，不隐式删除旧数据。
+        同成员串行分配，容量及统一资源授权不匹配拒绝；非ready不发票。
+        ready 返回60秒一次性签名票据，交换前再次核权威 epoch。
+        URL 由可信部署入口映射产生；具体交换见 shared-dsh/README.md。
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        '200':
+          description: 本人分配已就绪，票据不得持久化或写日志。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DshPlacementOpen' }
+        '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '409':
+          description: 分配未就绪、容量或资源授权冲突。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
   /me/placement:
     get:
       tags: [placements]
@@ -124,6 +153,15 @@ components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   schemas:
+    DshPlacementOpen:
+      type: object
+      additionalProperties: false
+      required: [placement, ticket, exchangeUrl, expiresAt]
+      properties:
+        placement: { $ref: '#/components/schemas/DshPlacement' }
+        ticket: { type: string, minLength: 1, maxLength: 16384 }
+        exchangeUrl: { type: string, format: uri-reference }
+        expiresAt: { type: integer, format: int64, minimum: 0 }
     DshInstanceMode:
       type: string
       enum: [shared, dedicated]

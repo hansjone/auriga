@@ -6,6 +6,21 @@ import { compileFromFile } from 'json-schema-to-typescript';
 const output = new URL('../src/generated/', import.meta.url);
 await mkdir(output, { recursive: true });
 await writeFile(
+  new URL('shared-dsh.d.ts', output),
+  await format(
+    await compileFromFile(
+      fileURLToPath(
+        new URL(
+          '../../../contracts/shared-dsh/shared-dsh.schema.json',
+          import.meta.url,
+        ),
+      ),
+      { unreachableDefinitions: true },
+    ),
+    { parser: 'typescript', singleQuote: true },
+  ),
+);
+await writeFile(
   new URL('deployment-access.d.ts', output),
   await format(
     await compileFromFile(

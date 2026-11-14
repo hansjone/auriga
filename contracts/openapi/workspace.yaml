@@ -24,6 +24,8 @@ tags:
   - name: instance-api
   - name: connect
 paths:
+  /me/placement/open:
+    $ref: 'shared-dsh.yaml#/paths/~1me~1placement~1open'
   /me/placement:
     $ref: 'shared-dsh.yaml#/paths/~1me~1placement'
   /admin/members/{memberId}/placement-switches:

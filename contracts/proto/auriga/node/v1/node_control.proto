@@ -4,6 +4,7 @@ package auriga.node.v1;
 
 import "auriga/node/v1/spec.proto";
 import "auriga/node/v1/msgnet_control.proto";
+import "auriga/node/v1/shared_dsh_contract.proto";
 import "auriga/resource/v1/unified.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -37,6 +38,9 @@ message SessionRequest {
     CommandResult result = 6;
     LogChunk log = 7;
     MsgnetControlReceipt msgnet_control_receipt = 8;
+    SharedDshRuntimeReceipt shared_dsh_runtime_receipt = 9;
+    SharedDshResourceReport shared_dsh_resource_report = 10;
+    SharedDshGuardianImpact shared_dsh_guardian_impact = 11;
   }
 }
 
@@ -51,6 +55,9 @@ message SessionResponse {
     UpdateAgent update = 6;
     MsgnetControlPackage msgnet_control_package = 7;
     MsgnetTransportBundle msgnet_transport_bundle = 8;
+    SharedDshRuntimeIntent shared_dsh_runtime_intent = 9;
+    SharedDshResourceView shared_dsh_resource_view = 10;
+    SharedDshRevocation shared_dsh_revocation = 11;
   }
 }
 
