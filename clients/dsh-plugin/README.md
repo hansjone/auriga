@@ -1,8 +1,8 @@
-# auriga-dsh
+# Auriga DSH
 
 MIT-licensed DSH plugin for Node.js 22+. Package name: **auriga-dsh** (not published by default).
 
-Installing the published plugin in DSH needs no platform environment variables. Its native main page and independent Auriga settings section load from the packaged UI and show an unconfigured connection. DSH's existing authentication still protects these local routes. Installing does not connect an Auriga account or grant resource access.
+Installing the published plugin in DSH needs no platform environment variables. Its native main page and independent Auriga DSH settings section load from the packaged UI and show an unconfigured connection. DSH's existing authentication still protects these local routes. Installing does not connect an Auriga DSH account or grant resource access.
 
 Set `AURIGA_MODE` when explicitly selecting a runtime:
 

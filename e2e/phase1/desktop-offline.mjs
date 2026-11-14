@@ -288,7 +288,7 @@ async function assertLocal(page, label, fixtureProvider) {
       'desktop startup must stay on main page',
     );
     await page
-      .getByRole('button', { name: 'Auriga', exact: true })
+      .getByRole('button', { name: 'Auriga DSH', exact: true })
       .waitFor({ timeout: 30000 });
   }
   const client = nativeClient((path, body) => request(page, path, body));
@@ -394,7 +394,7 @@ async function captureSettings(page, label) {
     }
     stage = 'select-auriga';
     await page
-      .getByText('Auriga', { exact: true })
+      .getByText('Auriga DSH', { exact: true })
       .last()
       .click({ timeout: 8000 });
     stage = 'content';

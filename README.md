@@ -1,8 +1,8 @@
-# Auriga
+# Auriga DSH
 
 > *Auriga* — Latin for "the charioteer".
 
-Auriga is a self-hosted platform that gives every member of a team their own
+Auriga DSH is a self-hosted platform that gives every member of a team their own
 [DeepSeek Harness (DSH)](https://www.npmjs.com/package/@deepseek-ai/dsh) workspace,
 and manages those workspaces for them: install, configure, start, stop, upgrade and reclaim.
 On top of that it provides team identity (pluggable identity sources), roles and quotas,
@@ -14,7 +14,7 @@ revocation and agent restart recovery; general self-hosted deployment remains in
 See the [roadmap](docs/plan/roadmap.zh.md), [progress](docs/plan/progress.md),
 [M2 validation guide](docs/dev/m2.md) and [container deployment guide](docs/dev/nas.md).
 
-Auriga targets general open-source self-hosting; NAS is one real deployment
+Auriga DSH targets general open-source self-hosting; NAS is one real deployment
 environment used to validate that process. Domain access and LAN access by IP
 alone are both first-class requirements. Full login and instance WebSocket access
 without a domain have not yet passed acceptance.

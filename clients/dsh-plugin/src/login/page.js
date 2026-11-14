@@ -1,4 +1,5 @@
 import { createLoginView } from './index.js';
+import { BRAND_NAME } from './brand.js';
 import { createLogoutView } from './logout.js';
 import {
   createLocalLoginController,
@@ -9,6 +10,7 @@ import {
  * @param {HTMLElement} root
  * @param {{locale?:string,logout?:boolean,fetch?:typeof fetch,navigate:(path:string)=>void}} options */
 export function mountLocalLoginPage(root, options) {
+  root.ownerDocument.title = `${BRAND_NAME} · ${options.logout ? '退出登录 / Sign out' : '登录 / Sign in'}`;
   const scope = new AbortController();
   const notice = root.ownerDocument.createElement('p');
   notice.setAttribute('role', 'status');

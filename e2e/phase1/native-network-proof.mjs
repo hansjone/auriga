@@ -75,7 +75,7 @@ export function nativeNetworkReceipt(events, marker, witness) {
     if (event.type !== 'user/message') continue;
     const content = text(event.data);
     const match = content.match(
-      /^\[Auriga external message ([A-Za-z0-9-]{1,128})\]\r?\n/,
+      /^\[Auriga DSH external message ([A-Za-z0-9-]{1,128})\]\r?\n/,
     );
     const witnessed =
       match &&

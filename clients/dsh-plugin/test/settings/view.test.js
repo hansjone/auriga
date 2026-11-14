@@ -368,12 +368,12 @@ for (const locale of ['zh', 'en'])
             sections,
             managed
               ? [
-                  'Auriga status',
+                  'Auriga DSH status',
                   locale === 'zh' ? '账号' : 'Account',
                   locale === 'zh' ? '消息网络' : 'Message network',
                 ]
               : [
-                  'Auriga status',
+                  'Auriga DSH status',
                   locale === 'zh' ? '平台' : 'Platform',
                   locale === 'zh' ? '账号' : 'Account',
                   locale === 'zh' ? '消息网络' : 'Message network',

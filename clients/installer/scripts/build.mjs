@@ -117,11 +117,11 @@ function run(command, args, options = {}) {
 }
 
 const NOTICE = [
-  'Auriga Desktop',
+  'Auriga DSH',
   '',
-  'Auriga Desktop is built on the open-source DSH (@deepseek-ai/dsh, MIT License).',
+  'Auriga DSH is built on the open-source DSH (@deepseek-ai/dsh, MIT License).',
   'The upstream package is installed unmodified; its licence text is kept in',
-  'LICENSE.dsh.txt. Auriga Desktop is not an official DeepSeek product and is not',
+  'LICENSE.dsh.txt. Auriga DSH is not an official DeepSeek product and is not',
   'endorsed by DeepSeek. Node.js is bundled under its own licence (LICENSE.node.txt).',
   '',
 ].join('\r\n');

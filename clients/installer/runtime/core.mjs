@@ -1,3 +1,4 @@
+import { BRAND_NAME } from './brand.mjs';
 import { updateOrigin, normalizePlatformBinding } from './platform-origin.mjs';
 import { cleanupDownloads } from './update-state.mjs';
 import { createRequire } from 'node:module';
@@ -167,14 +168,14 @@ export function assertLayout(root, dataHome) {
     const entries = readdirSync(root);
     if (entries.length > 0 && !entries.includes(INSTALL_MARKER))
       throw new Error(
-        'install directory is not empty and is not an Auriga Desktop installation',
+        `install directory is not empty and is not an ${BRAND_NAME} installation`,
       );
   }
 }
 
 function assertOwned(root) {
   if (!existsSync(join(root, INSTALL_MARKER)))
-    throw new Error(`not an Auriga Desktop installation: ${root}`);
+    throw new Error(`not an ${BRAND_NAME} installation: ${root}`);
 }
 
 // --------------------------------------------------------------- profile --
@@ -229,7 +230,7 @@ function seedProfile(dataHome, { platformOrigin, target }) {
     );
     upgradeSkillPatch(patch, yamlParser(yaml), dataHome);
   } catch (error) {
-    console.error(`Auriga 共享技能配置未启用：${error.message}`);
+    console.error(`${BRAND_NAME} 共享技能配置未启用：${error.message}`);
   }
 }
 
@@ -712,7 +713,7 @@ export function desktopSession(root) {
           continue;
         }
       }
-      throw new Error('Auriga Desktop 已在运行，请先退出。');
+      throw new Error(`${BRAND_NAME} 已在运行，请先退出。`);
     }
   }
   throw new Error('desktop session busy');
@@ -754,7 +755,7 @@ export async function launch({ root, args = [], env = process.env }) {
       try {
         await applyPending(root);
       } catch {
-        console.error('Auriga Desktop 更新失败，已保留旧版。');
+        console.error(`${BRAND_NAME} 更新失败，已保留旧版。`);
       }
     };
     await apply();
