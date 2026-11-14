@@ -29,9 +29,11 @@ type PoolSessions interface {
 }
 type poolOperation struct {
 	Fingerprint string
+	Binding     *nodev1.SharedDshBinding
 	Action      string
 	Receipt     *nodev1.SharedDshRuntimeReceipt
 	Expires     int64
+	Pending     bool
 }
 type poolState struct {
 	Tenant       string
@@ -40,9 +42,14 @@ type poolState struct {
 	Active       map[string]string
 	Impacts      map[string]*nodev1.SharedDshGuardianImpact
 	Contaminated bool
+	Fence        uint64
+	Quiesced     map[string]*nodev1.SharedDshBinding
+	Released     map[string]*nodev1.SharedDshRevocation
+	Retiring     map[string]*nodev1.SharedDshBinding
 }
 
-// SharedPools is a serialized, durable node executor. One instance must own a
+// SharedPools durably serializes state, with member execution outside the lock.
+// One instance must own a
 // PoolLayout (the agent's existing exclusive node data lock is required).
 // NodeControl dispatch/outbound delivery is deliberately owned by the W wiring.
 type SharedPools struct {
@@ -51,6 +58,8 @@ type SharedPools struct {
 	Sessions   PoolSessions
 	Now        func() time.Time
 	mu         sync.Mutex
+	inflight   map[string]bool
+	stopping   map[string]int
 }
 
 func (m *SharedPools) now() int64 {
@@ -81,6 +90,12 @@ func (m *SharedPools) load(pool string) (*poolState, string, error) {
 	if s.Bindings == nil || s.Operations == nil {
 		return nil, "", fmt.Errorf("corrupt pool state")
 	}
+	if s.Quiesced == nil {
+		s.Quiesced = map[string]*nodev1.SharedDshBinding{}
+	}
+	if s.Released == nil {
+		s.Released = map[string]*nodev1.SharedDshRevocation{}
+	}
 	if s.Active == nil {
 		s.Active = map[string]string{}
 	}
@@ -101,7 +116,7 @@ func savePool(p string, s *poolState) error {
 	if e != nil {
 		return e
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if e = f.Chmod(0600); e == nil {
 		_, e = f.Write(raw)
 	}
@@ -115,7 +130,7 @@ func savePool(p string, s *poolState) error {
 	if ce != nil {
 		return ce
 	}
-	return unifiedReplace(f.Name(), p)
+	return poolReplace(f.Name(), p)
 }
 
 var poolUUID = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -142,20 +157,11 @@ func (m *SharedPools) stop(ctx context.Context, pool string) bool {
 func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeIntent) (*nodev1.SharedDshRuntimeReceipt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.Layout == nil {
-		return nil, fmt.Errorf("pool layout missing")
-	}
-	if in == nil || len(in.ProtoReflect().GetUnknown()) != 0 || !poolUUID.MatchString(in.OperationId) || in.SchemaVersion != 1 || !validPoolBinding(in.Binding) || in.CancelWaitSeconds != 30 || in.ArchiveRetentionSeconds != 2592000 || in.WorkspacePolicy != "empty" || in.SessionPolicy != "discard" {
+	if m.Layout == nil || in == nil || len(in.ProtoReflect().GetUnknown()) != 0 || !poolUUID.MatchString(in.OperationId) || in.SchemaVersion != 1 || !validPoolBinding(in.Binding) || in.CancelWaitSeconds != 30 || in.ArchiveRetentionSeconds != 2592000 || in.WorkspacePolicy != "empty" || in.SessionPolicy != "discard" {
 		return nil, fmt.Errorf("common.validation_failed")
 	}
 	in = proto.Clone(in).(*nodev1.SharedDshRuntimeIntent)
 	b := in.Binding
-	if _, e := m.Layout.Path(b.PhysicalInstanceId, "control", in.OperationId); e != nil {
-		return nil, e
-	}
-	if _, e := m.Layout.Workspace(b.PhysicalInstanceId, b.TenantId, b.MemberId, b.Epoch); e != nil {
-		return nil, e
-	}
 	switch in.Action {
 	case "prepare-empty", "archive-reset", "stop-pool", "discard-sessions", "cooperative-cancel":
 	default:
@@ -167,6 +173,13 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 	}
 	if s.Tenant != "" && s.Tenant != b.TenantId {
 		return nil, fmt.Errorf("shared.binding_mismatch")
+	}
+	if rev := s.Released[b.MemberId]; rev != nil && (b.Epoch < rev.Epoch || b.Revision < rev.Revision) {
+		return nil, fmt.Errorf("released binding")
+	}
+	key := b.PhysicalInstanceId + "/" + b.MemberId
+	if m.inflight[key] {
+		return nil, fmt.Errorf("member operation in progress")
 	}
 	wire, _ := proto.MarshalOptions{Deterministic: true}.Marshal(in)
 	sum := sha256.Sum256(wire)
@@ -180,30 +193,80 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 		}
 	}
 	prior := s.Bindings[b.MemberId]
+	quiet := s.Active[b.MemberId] == "" || proto.Equal(s.Quiesced[b.MemberId], prior)
 	if prior != nil && !proto.Equal(prior, b) {
-		if prior.PlacementId != b.PlacementId || prior.Epoch > b.Epoch || prior.Revision >= b.Revision || !m.stopped(ctx, b.PhysicalInstanceId) {
+		if prior.PlacementId != b.PlacementId || prior.Epoch > b.Epoch || prior.Revision >= b.Revision || !quiet {
 			return nil, fmt.Errorf("stale or conflicting binding")
 		}
+		delete(s.Quiesced, b.MemberId)
 	}
 	if prior == nil && len(s.Bindings) >= 20 {
 		return nil, fmt.Errorf("pool registration capacity")
+	}
+	if (in.Action == "discard-sessions" || in.Action == "archive-reset") && !quiet {
+		return nil, fmt.Errorf("member cancellation unconfirmed")
 	}
 	s.Tenant = b.TenantId
 	s.Bindings[b.MemberId] = proto.Clone(b).(*nodev1.SharedDshBinding)
 	op := s.Operations[in.OperationId]
 	if op == nil {
-		op = &poolOperation{Fingerprint: fingerprint, Action: in.Action}
+		op = &poolOperation{Fingerprint: fingerprint, Action: in.Action, Binding: b}
 		s.Operations[in.OperationId] = op
 	}
-	s.Contaminated = true
-	// Persist before any side effect; a crash leaves an unconfirmed operation.
+	op.Pending = true
+	if in.Action == "archive-reset" && op.Expires == 0 {
+		op.Expires = m.now() + 2592000
+	}
+	if in.Action == "stop-pool" {
+		s.Contaminated = true
+		s.Fence++
+	}
+	fence, expires := s.Fence, op.Expires
 	if e = savePool(p, s); e != nil {
 		return nil, e
 	}
+	if m.inflight == nil {
+		m.inflight = map[string]bool{}
+	}
+	m.inflight[key] = true
+	// Host calls, quota commands, the 30-second wait and Engine Stop never hold
+	// the state mutex. Guardian Trip can preempt them; Fence rejects late ACKs.
+	m.mu.Unlock()
+	r := m.executeIntent(ctx, in, expires)
+	m.mu.Lock()
+	delete(m.inflight, key)
+	s, p, e = m.load(b.PhysicalInstanceId)
+	if e != nil {
+		return nil, e
+	}
+	op = s.Operations[in.OperationId]
+	if op == nil || op.Fingerprint != fingerprint {
+		return nil, fmt.Errorf("operation superseded")
+	}
+	current := proto.Equal(s.Bindings[b.MemberId], b) && s.Fence == fence
+	if !current {
+		r.Outcome = "unconfirmed"
+	}
+	if current && r.Outcome == "confirmed" && in.Action == "cooperative-cancel" {
+		if s.Quiesced == nil {
+			s.Quiesced = map[string]*nodev1.SharedDshBinding{}
+		}
+		s.Quiesced[b.MemberId] = b
+		delete(s.Active, b.MemberId)
+	}
+	op.Pending = false
+	op.Receipt = r
+	if e = savePool(p, s); e != nil {
+		return nil, e
+	}
+	return proto.Clone(r).(*nodev1.SharedDshRuntimeReceipt), nil
+}
+
+func (m *SharedPools) executeIntent(ctx context.Context, in *nodev1.SharedDshRuntimeIntent, expires int64) *nodev1.SharedDshRuntimeReceipt {
+	b := in.Binding
 	r := &nodev1.SharedDshRuntimeReceipt{SchemaVersion: 1, OperationId: in.OperationId, Binding: b, ReceiptId: in.OperationId, Action: in.Action, Outcome: "unconfirmed", ObservedAt: m.now()}
 	switch in.Action {
 	case "stop-pool":
-		s.Contaminated = true
 		r.ExecutionTreeStopped = m.stop(ctx, b.PhysicalInstanceId)
 		if r.ExecutionTreeStopped {
 			r.Outcome = "confirmed"
@@ -213,67 +276,40 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 			wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 			result := make(chan error, 1)
 			go func() { result <- m.Sessions.Cancel(wait, proto.Clone(b).(*nodev1.SharedDshBinding)) }()
+			var err error
 			select {
-			case e = <-result:
+			case err = <-result:
 			case <-wait.Done():
-				e = wait.Err()
+				err = wait.Err()
 			}
 			cancel()
-			if e == nil {
+			if err == nil {
 				r.Outcome = "confirmed"
 			} else {
-				s.Contaminated = true
-				if s.Impacts == nil {
-					s.Impacts = map[string]*nodev1.SharedDshGuardianImpact{}
-				}
-				impact := poolImpact(s, b.PhysicalInstanceId, in.OperationId, "cancel-timeout", m.now())
-				s.Impacts[in.OperationId] = impact
-				if e = savePool(p, s); e != nil {
-					return nil, e
-				}
-				r.ExecutionTreeStopped = m.stop(ctx, b.PhysicalInstanceId)
-				impact.State = "blocked"
-				if r.ExecutionTreeStopped {
-					impact.State = "stopped"
-				}
+				impact, err := m.Trip(ctx, b.PhysicalInstanceId, in.OperationId, "cancel-timeout")
+				r.ExecutionTreeStopped = err == nil && impact.State == "stopped"
 			}
 		}
 	case "discard-sessions":
-		if m.stopped(ctx, b.PhysicalInstanceId) && m.Sessions != nil && m.Sessions.Discard(ctx, b) == nil {
+		if m.Sessions != nil && m.Sessions.Discard(ctx, b) == nil {
 			r.SessionsDiscarded = true
 			r.Outcome = "confirmed"
 		}
 	case "prepare-empty":
-		if m.stopped(ctx, b.PhysicalInstanceId) {
-			_, e = m.Layout.Prepare(ctx, b.PhysicalInstanceId, b.TenantId, b.MemberId, b.Epoch)
-			if e == nil {
-				r.WorkspaceEmpty = true
-				r.Outcome = "confirmed"
-			}
+		if _, err := m.Layout.Prepare(ctx, b.PhysicalInstanceId, b.TenantId, b.MemberId, b.Epoch); err == nil {
+			r.WorkspaceEmpty = true
+			r.Outcome = "confirmed"
 		}
 	case "archive-reset":
-		if m.stopped(ctx, b.PhysicalInstanceId) {
-			if op.Expires == 0 {
-				op.Expires = m.now() + 2592000
-				if e = savePool(p, s); e != nil {
-					return nil, e
-				}
-			}
-			_, e = m.Layout.ArchiveReset(ctx, b.PhysicalInstanceId, b.TenantId, b.MemberId, b.Epoch, in.OperationId)
-			if e == nil {
-				r.WorkspaceEmpty = true
-				r.ArchiveId = in.OperationId
-				r.ArchiveExpiresAt = op.Expires
-				r.ObservedAt = op.Expires - 2592000
-				r.Outcome = "confirmed"
-			}
+		if _, err := m.Layout.ArchiveReset(ctx, b.PhysicalInstanceId, b.TenantId, b.MemberId, b.Epoch, in.OperationId); err == nil {
+			r.WorkspaceEmpty = true
+			r.ArchiveId = in.OperationId
+			r.ArchiveExpiresAt = expires
+			r.ObservedAt = expires - 2592000
+			r.Outcome = "confirmed"
 		}
 	}
-	op.Receipt = r
-	if e = savePool(p, s); e != nil {
-		return nil, e
-	}
-	return proto.Clone(r).(*nodev1.SharedDshRuntimeReceipt), nil
+	return r
 }
 
 // Trip must be called by the out-of-process resource/health observer. Persisting
@@ -299,14 +335,40 @@ func (m *SharedPools) Trip(ctx context.Context, pool, operation, reason string) 
 	if len(s.Bindings) == 0 {
 		return nil, fmt.Errorf("unknown pool")
 	}
+	key := pool + "/guardian/" + operation
+	if m.inflight[key] {
+		return proto.Clone(s.Impacts[operation]).(*nodev1.SharedDshGuardianImpact), nil
+	}
 	s.Contaminated = true
+	s.Fence++
 	r := poolImpact(s, pool, operation, reason, m.now())
 	s.Impacts[operation] = r
 	if e = savePool(p, s); e != nil {
 		return nil, e
 	}
+	if m.inflight == nil {
+		m.inflight = map[string]bool{}
+	}
+	m.inflight[key] = true
+	if m.stopping == nil {
+		m.stopping = map[string]int{}
+	}
+	m.stopping[pool]++
+	m.mu.Unlock()
+	stopped := m.stop(ctx, pool)
+	m.mu.Lock()
+	delete(m.inflight, key)
+	m.stopping[pool]--
+	s, p, e = m.load(pool)
+	if e != nil {
+		return nil, e
+	}
+	r = s.Impacts[operation]
+	if r == nil {
+		return nil, fmt.Errorf("guardian impact missing")
+	}
 	r.State = "blocked"
-	if m.stop(ctx, pool) {
+	if stopped {
 		r.State = "stopped"
 	}
 	if e = savePool(p, s); e != nil {
@@ -348,7 +410,7 @@ func (m *SharedPools) SweepArchives(ctx context.Context, pool string) error {
 	}
 	for id, op := range s.Operations {
 		if op.Expires > 0 && m.now() >= op.Expires {
-			if e = m.Layout.DeleteArchive(pool, id); e != nil {
+			if e = m.Layout.DeleteArchive(ctx, pool, id); e != nil {
 				return e
 			}
 			op.Expires = 0

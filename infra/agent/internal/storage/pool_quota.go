@@ -11,16 +11,18 @@ import (
 	"strings"
 )
 
-// XFSProjectQuota uses installation-owned, unique project assignments. No shell
-// is invoked. Paths/IDs are never accepted from a placement request. Mount must
-// be a dedicated XFS filesystem with project accounting and enforcement enabled.
-// Each active workspace AND retained archive requires a distinct project ID.
+// XFSProjectQuota allocates unique IDs from a private installation ledger.
+// Kernel quotas are installed/read back before a workspace is published.
 type XFSProjectQuota struct {
 	Binary, Mount string
-	Projects      map[string]uint32
+	IDs           *ProjectIDs
+	run           func(context.Context, string) (string, error) // command-boundary test double
 }
 
 func (q *XFSProjectQuota) command(ctx context.Context, command string) (string, error) {
+	if q.run != nil {
+		return q.run(ctx, command)
+	}
 	if !filepath.IsAbs(q.Binary) || !filepath.IsAbs(q.Mount) {
 		return "", fmt.Errorf("absolute trusted XFS configuration required")
 	}
@@ -33,21 +35,18 @@ func (q *XFSProjectQuota) command(ctx context.Context, command string) (string, 
 	return string(raw), nil
 }
 func (q *XFSProjectQuota) Ensure(ctx context.Context, path string, bytes, inodes int64) error {
-	id := q.Projects[path]
-	if id == 0 || bytes != MemberBytes || inodes != MemberInodes {
-		return fmt.Errorf("missing trusted quota assignment")
+	if q.IDs == nil || bytes != MemberBytes || inodes != MemberInodes {
+		return fmt.Errorf("reserved project ledger required")
 	}
-	for p, v := range q.Projects {
-		if p != path && v == id {
-			return fmt.Errorf("duplicate project assignment")
-		}
-	}
+	return q.IDs.Use(path, func(id uint32) error { return q.ensure(ctx, path, id, bytes, inodes) })
+}
+func (q *XFSProjectQuota) ensure(ctx context.Context, path string, id uint32, bytes, inodes int64) error {
 	if e := AssertUnderRoot(q.Mount, path); e != nil {
 		return e
 	}
 	// xfs_quota has its own command parser: reject whitespace and metacharacters.
 	for _, r := range path {
-		if !(r == '/' || r == '-' || r == '_' || r == '.' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z') {
+		if r != '/' && r != '-' && r != '_' && r != '.' && (r < '0' || r > '9') && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
 			return fmt.Errorf("invalid XFS path")
 		}
 	}
@@ -106,6 +105,59 @@ func checkXFSProject(out, path string, id uint32) error {
 	summary := regexp.MustCompile(fmt.Sprintf(`^Processed 1 \(.+\) paths for project %d with recursion depth infinite \(-1\)\.$`, id))
 	if len(lines) != 2 || strings.TrimSpace(lines[0]) != fmt.Sprintf("Checking project %d (path %s)...", id, path) || !summary.MatchString(strings.TrimSpace(lines[1])) {
 		return fmt.Errorf("project tree assignment not confirmed")
+	}
+	return nil
+}
+
+func (q *XFSProjectQuota) Release(ctx context.Context, path string) error {
+	if q.IDs == nil {
+		return fmt.Errorf("reserved project ledger required")
+	}
+	return q.IDs.Release(path, func(id uint32) error {
+		out, err := q.command(ctx, fmt.Sprintf("limit -p bsoft=0 bhard=0 isoft=0 ihard=0 %d", id))
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(out) != "" {
+			return fmt.Errorf("quota reset diagnostic")
+		}
+		for _, kind := range []string{"b", "i"} {
+			out, err = q.command(ctx, "report -p -"+kind+" -N -n")
+			if err != nil {
+				return err
+			}
+			if err = idleXFSProject(out, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func idleXFSProject(out string, id uint32) error {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			return fmt.Errorf("invalid quota cleanup report")
+		}
+		parsed, err := strconv.ParseUint(strings.TrimPrefix(fields[0], "#"), 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid quota cleanup report")
+		}
+		if uint32(parsed) != id {
+			continue
+		}
+		// Open, unlinked files still consume quota: keep the reservation until the
+		// kernel confirms both usage and limits are zero for blocks and inodes.
+		for _, value := range fields[1:4] {
+			n, err := strconv.ParseUint(value, 10, 64)
+			if err != nil || n != 0 {
+				return fmt.Errorf("quota project cleanup unconfirmed")
+			}
+		}
 	}
 	return nil
 }

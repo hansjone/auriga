@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
+
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,8 +43,10 @@ func (s *poolSupervisorDouble) ResourceProcessStopped(context.Context, string) (
 }
 
 type poolSessionDouble struct {
-	fail     bool
-	discards int
+	fail      bool
+	discards  int
+	histories int
+	discarded []string
 }
 
 func (s *poolSessionDouble) Cancel(context.Context, *nodev1.SharedDshBinding) error {
@@ -53,8 +55,14 @@ func (s *poolSessionDouble) Cancel(context.Context, *nodev1.SharedDshBinding) er
 	}
 	return nil
 }
-func (s *poolSessionDouble) Discard(context.Context, *nodev1.SharedDshBinding) error {
+func (s *poolSessionDouble) Discard(_ context.Context, b *nodev1.SharedDshBinding) error {
 	s.discards++
+	s.discarded = append(s.discarded, b.MemberId)
+	return nil
+}
+
+func (s *poolSessionDouble) MakeHistoryReadOnly(context.Context, string, []*nodev1.SharedDshBinding) error {
+	s.histories++
 	return nil
 }
 
@@ -193,8 +201,11 @@ func TestSharedPoolRejectsCrossTenantEpochAndQuota(t *testing.T) {
 		t.Fatal(r)
 	}
 	s.stopped = false
-	if r := applyPool(t, m, poolIntent("archive-reset", "archive", "alice")); r.Outcome != "unconfirmed" {
-		t.Fatal(r)
+	if e := m.AdmitTask(context.Background(), in.Binding, poolID("active"), 1, 100); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := m.Apply(context.Background(), poolIntent("archive-reset", "archive", "alice")); e == nil {
+		t.Fatal("active member archived without cancellation")
 	}
 }
 func poolView(b *nodev1.SharedDshBinding) *nodev1.SharedDshResourceView {
@@ -237,7 +248,7 @@ func TestSharedPoolGuardianAffectsAllAndBlocksRecovery(t *testing.T) {
 	if e = m.RecoverPool(ctx, poolID("pool"), poolViewDouble{}); e != nil {
 		t.Fatal(e)
 	}
-	if m.Sessions.(*poolSessionDouble).discards != 4 {
+	if m.Sessions.(*poolSessionDouble).discards != 0 || m.Sessions.(*poolSessionDouble).histories != 1 {
 		t.Fatal("sessions restored")
 	}
 	if e = m.AuthorizePoolStart(ctx, poolID("pool"), views, poolViewDouble{}); e != nil {
@@ -270,10 +281,25 @@ func TestSharedPoolResourceSelectionMismatch(t *testing.T) {
 	}
 }
 
-func TestSharedPoolKReceiptOracle(t *testing.T) {
+func TestSharedPoolReceiptGoldens(t *testing.T) {
 	m, _, _ := newPoolTest(t)
 	ctx := context.Background()
-	for _, action := range []string{"prepare-empty", "stop-pool", "discard-sessions", "archive-reset", "cooperative-cancel"} {
+	raw, err := os.ReadFile("testdata/shared-pool-receipts-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden struct {
+		ContractHead string                                     `json:"contractHead"`
+		Cases        []struct{ Intent, Receipt map[string]any } `json:"cases"`
+	}
+	if err = json.Unmarshal(raw, &golden); err != nil {
+		t.Fatal(err)
+	}
+	if golden.ContractHead != "f6001a02" || len(golden.Cases) != 5 {
+		t.Fatal("invalid golden contract provenance")
+	}
+	for _, c := range golden.Cases {
+		action := c.Intent["action"].(string)
 		in := poolIntent(action, action, "alice")
 		r, e := m.Apply(ctx, in)
 		if e != nil {
@@ -286,11 +312,10 @@ func TestSharedPoolKReceiptOracle(t *testing.T) {
 			receipt["archiveId"] = r.ArchiveId
 			receipt["archiveExpiresAt"] = r.ArchiveExpiresAt
 		}
-		raw, _ := json.Marshal(map[string]any{"intent": intent, "receipt": receipt})
-		cmd := exec.Command("node", "--input-type=module", "-e", `import {confirmReceipt} from '../../../../contracts/shared-dsh/ports.mjs';import{readFileSync}from'node:fs';const x=JSON.parse(readFileSync(0,'utf8'));if(confirmReceipt(x.intent,x.receipt)!=='confirmed')process.exit(2);`)
-		cmd.Stdin = bytes.NewReader(raw)
-		if out, e := cmd.CombinedOutput(); e != nil {
-			t.Fatalf("K oracle %s: %v: %s", action, e, out)
+		actual, _ := json.Marshal(map[string]any{"intent": intent, "receipt": receipt})
+		expected, _ := json.Marshal(map[string]any{"intent": c.Intent, "receipt": c.Receipt})
+		if !bytes.Equal(actual, expected) {
+			t.Fatalf("receipt %s differs from K-v1 golden:\n%s\n%s", action, actual, expected)
 		}
 	}
 }

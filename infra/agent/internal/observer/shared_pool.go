@@ -2,11 +2,18 @@ package observer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 )
+
+// These typed results distinguish a running resource invalidation from a
+// rejected candidate/snapshot. Adapters must not label transport errors revoked.
+var ErrPoolResourceExpired = errors.New("pool resource expired")
+var ErrPoolResourceRevoked = errors.New("pool resource revoked")
+var ErrPoolSnapshotRejected = errors.New("pool snapshot rejected")
 
 // PoolWatch is called by the node observer, never by the hosted plugin. The
 // caller supplies fresh authoritative views and delivers the returned reports on
@@ -27,28 +34,26 @@ func (w *PoolWatch) Check(ctx context.Context, operation string, bindings []*nod
 	}
 	pool := bindings[0].GetPhysicalInstanceId()
 	reason := "verified"
-	trip := "resource-revoked"
 	e := w.Validate(bindings, views, now.Unix())
-	if e == nil {
-		if w.Verifier == nil {
-			e = fmt.Errorf("verifier unavailable")
-		} else {
-			e = w.Verifier.Verify(ctx, pool, views)
-		}
-	}
 	if e != nil {
+		reason = "authorization-mismatch"
+	} else if w.Verifier == nil {
+		e = fmt.Errorf("verifier unavailable")
+		reason = "cleanup-unconfirmed"
+	} else if e = w.Verifier.Verify(ctx, pool, views); e != nil {
+		reason = "cleanup-unconfirmed"
+	}
+	trip := ""
+	if errors.Is(e, ErrPoolResourceExpired) {
+		reason = "expired"
+		trip = "resource-expired"
+	}
+	if errors.Is(e, ErrPoolResourceRevoked) {
 		reason = "revoked"
-		for _, v := range views {
-			for _, r := range v.GetResources() {
-				if r.GetExpiresAt() <= now.Unix() {
-					reason = "expired"
-					trip = "resource-expired"
-				}
-			}
-		}
+		trip = "resource-revoked"
 	}
 	var impact *nodev1.SharedDshGuardianImpact
-	if e != nil {
+	if trip != "" {
 		var err error
 		impact, err = w.Pools.Trip(ctx, pool, operation, trip)
 		if err != nil {
@@ -63,9 +68,9 @@ func (w *PoolWatch) Check(ctx context.Context, operation string, bindings []*nod
 		status := "ready"
 		if e != nil {
 			status = "rejected"
-			if impact.State == "stopped" {
+			if impact != nil && impact.State == "stopped" {
 				status = "stopped"
-			} else {
+			} else if impact != nil {
 				reason = "cleanup-unconfirmed"
 			}
 		}

@@ -1,35 +1,50 @@
 # 共享池节点执行端（R）
 
-基线：K / main `f6001a02`。使用生成的 `nodev1.SharedDsh*` 消息，不修改公共契约。
-这是供联合接线使用的节点执行端；当前 app/reconciler/NodeControl 尚未启用这些入口，不能据此宣布共享模式可用。
+契约来源：K/main `f6001a02`；返工合并 main `edcdb32b`。只使用已有 `nodev1.SharedDsh*` 消息，不修改公共契约。当前 app/reconciler/NodeControl 尚未启用这些端口，真实页面未验收，不代表共享模式已交付。
 
-## 端口与调用顺序
+## 成员操作与恢复
 
-1. 安装配置提供 `storage.PoolLayout{Root: /var/lib/auriga/pools, Quota: ...}`。Root、host、control、members 的父目录必须由节点独占；只把最终 workspace 赋予运行用户写权限。不得把 control 或封存根挂进容器。
-2. 一个节点只能有一个 `SharedPools` 实例，复用节点数据独占锁；`Supervisor` 接进程外 Docker（现有 `Docker.Stop` / `ResourceProcessStopped` 已满足接口）。所有动作按 physicalInstanceId 指向同一个池容器，不能按 member 启动容器。Engine 自动重启必须保持关闭。
-3. W 的受信 NodeControl 消费方调用 `Apply`，回传 RuntimeReceipt。相同 operationId 的不同 action/binding 拒绝；动作前先落盘，缺停止证明、配额或目录处置证明均 unconfirmed。W 仍须执行 CAS/epoch、超时/晚 ACK 判定及正常页面探测。
-4. P 提供 `PoolSessions.Cancel/Discard`：仅操作完整 binding 的公开宿主 API；Cancel 必须合作等待结束才返回，不能以“已发送取消”确认。节点在 30 秒 deadline 外等待结果，宿主阻塞不阻塞超时判定；超时停止整个池。旧调用迟到结果不再改变收据。Discard 返回 nil 必须已经删除相应会话，不能恢复污染任务。
-5. 停止后先 `RecoverPool`：确认树停止、清理资源视图并丢弃全池已登记会话，然后才能解除污染。目录动作也会标污染，准备完后执行此步骤。目录动作未确认仍禁止启动。W 对未确认收据继续显示 blocked，恢复不伪造原操作成功。
-6. 资源适配方实现 `PoolResourceVerifier`，复用统一资源的签名/撤销/租约校验和只读挂载；每次启动必须以最新 W 快照调用 `AuthorizePoolStart`。`CheckPoolViews` 检查全池完整绑定、相同授权摘要和相同有序资源集合，source 只能 platform，期限边界即拒绝。此函数自身不验签，不能用它代替 `Verifier`。
-7. 节点 observer 配置 `PoolWatch{Pools, Verifier, Validate: runtime.CheckPoolViews}` 并周期调用 `Check`，回传 ResourceReport/GuardianImpact。故障监测调用 `Trip(...,"crash")`；资源到期/撤销调用 Trip。全池影响持久化，可用 `GuardianImpacts` 重发，消费方按 pool+operationId 处理状态更新。`stopping` 表示中断期间没有最终停止证据，必须重试 Trip，不能视为 stopped。
-8. 每次可信任务登记调用 `AdmitTask`，结束调用 `CompleteTask`。本地门禁为 4 活跃/每成员 1，节点内存达到 80% 拒绝新任务；20 登记在 Apply 检查。W 负责权威成员状态、扩池及注销编排，不能仅凭本地预算当授权。
+- W 通过受信 NodeControl 调用 `Apply` 并消费 RuntimeReceipt；相同 operationId 的完整意图指纹幂等。节点只接受服务器映射的目录，不能传 cwd。
+- `prepare-empty` 可在池运行时为新成员建目录，不污染或停止全池。`archive-reset`、`discard-sessions` 仅要求目标成员没有活跃任务，或其完整 binding 已合作取消确认。它们只处理目标成员，其他成员会话和任务继续运行。
+- `PoolSessions.Cancel` 必须等合作取消完成后才返回成功；30 秒等待、宿主调用和 Engine Stop 都在状态锁外进行。资源 guardian 可抢占，持久化 Fence 使其之前的迟到 ACK 不能推进操作或清除污染。同一成员并发操作拒绝重入，不同成员可独立处理。
+- 取消超时或失败通过 `Trip(cancel-timeout)` 保守停全池；资源真正到期、撤销和崩溃也使用 Trip。显式 `stop-pool` 仅用于 W 已授权的池级编排，不是成员目录操作的前置条件。外部 `Stop` 加 `ResourceProcessStopped` 必须证明整个执行树停止，否则 unconfirmed/blocked。
+- `RecoverPool` 确认树停止、清理资源视图，再由 `PoolHistoryFence.MakeHistoryReadOnly` 禁止旧会话继续执行，保留按归属只读历史。恢复不调用全员 Discard。缺此适配、清理失败或恢复期间再次 Trip 都不能解除污染。目标成员的模式切换仍可显式调用 `discard-sessions` 丢弃本人会话。
+- `AdmitTask` 是节点附加预算门禁：20 登记、4 活跃、每成员 1 活跃，内存达到 80% 拒绝准入；W 仍是成员、代次、扩池的权威。成员取消后旧 binding 不再接受新任务，直到 W 给出新代次。任务槽持久化，迟到完成不能释放新任务槽。
 
-## 配额、封存和 profile
+## 成员释放与权威来源
 
-`XFSProjectQuota` 要求独立、启用 project accounting/enforcement 的 XFS 文件系统。安装配置预留唯一 project ID，逐 workspace 和 archive 分配，拒绝缺失/重复 ID；执行 `project -s`、设置 5GiB 和 100000 inode 硬限，再读回内核配额报告。没有软配额回退。重命名封存后先切换 archive project，再创建原位置空 workspace，避免封存占用新目录预算。此实现尚需 Linux 真盘写满验证；宿主非 XFS 不应启用共享。
+K 当前没有完整成员列表或快照版本端口，不能把部分 ResourceView 响应当成全量名单。R 使用已有 `SharedDshRevocation`（reason=switch/member-disabled）实现 `RevokeMember`，由 W 在目标成员取消、本人会话和文件处置完成后调用。若初始撤销提前送达而成员仍活跃，则返回未静止错误，W 在处置完成后重试。logout/credential-invalid 不当作移出池。
 
-`archive-reset` 使用 operationId 作为节点私有封存标识，支持重命名后崩溃重试；到期为原观测时间加 2592000 秒。observer 定期调用 `SweepArchives`，失败必须上报告警并重试。新会话只取得 Workspace 映射，永不取得封存路径。归档动作应以旧目录的 binding 执行，再准备新 epoch；不能传入客户端 cwd。
+释放持久化撤销水位，裁剪当前 Binding、活跃和静止记录，释放登记容量；停池影响和启动资源视图只包含当前成员。低于撤销水位的旧绑定不能复活成员；新代次可重新登记；重复旧撤销不会删除新代次。旧的空 workspace 随释放移除并回收配额，未封存的非空目录拒绝释放，不递归删除用户数据。目录或内核清理失败保留待清理绑定与 project reservation，重复撤销可续做。
 
-`renderer.ValidatePoolProfile` 校验完整展开的安装方 profile（不接受基于 dsh-base/web-app 的叠加 patch）。明确允许表之外全部拒绝，包含 shell/pwsh/terminal/jobs/subagent、MCP、动态插件/设置/目录修改控制器和 bundles；固定 skill 扫描根 `/run/auriga/skills-active/current`，关闭默认根，拒绝可执行配置/别名/合并和多文档。该视图必须节点只读挂载。P 仍需提供可启动的完整公开宿主 profile、工具 guard 和真实注册证据；允许表通过不证明依赖注入没有间接启动其他控制器。
+需转 K/K2：未来若改用权威全量成员集合，须定义完整性、快照修订和运输语义。当前不自造新的 RuntimeIntent action 或 wire 字段；由主控安排已有撤销消息在 W 编排完成阶段的节点适配。
 
-现有 `resource_supervisor.mjs` 在宿主进程之外运行，使用租约与单调时间约束，并在到期/时钟回退停止子进程。共享启动时应写入全池最早资源到期时间、继承已有只读 policy 挂载和 PID1 容器规则。父进程观察加 Engine 树停止确认共同构成证明；插件 ACK 或端口消失不够。
+## 配额与封存
 
-## 验证边界
+安装配置提供 `PoolLayout.Root=/var/lib/auriga/pools`；Root/control/父目录归节点独占，只把最终 workspace 赋予运行用户写权限，不把控制账本或封存挂入 DSH。一个节点同一 Root 只运行一个 SharedPools，复用节点独占锁，每 physicalInstanceId 仅一个容器或主进程，无自动重启。
 
-Go 测试覆盖目录映射、硬配额缺失拒绝、封存及重启幂等、跨租户/旧代次、全池影响与恢复门禁、资源期限和授权不一致、本地任务预算；五种 RuntimeReceipt 通过 K `ports.mjs confirmReceipt`。测试用替身无监听端口、不占真实 PG/DSH 槽。
+`XFSProjectQuota{Binary,Mount,IDs:&ProjectIDs{File,First,Last}}` 要求专用、启用 project accounting/enforcement 的 XFS 文件系统和安装预留 ID 区间。无需预配 tenant/member/epoch 路径。ProjectIDs 使用节点私有 bbolt 账本和文件锁，先同步提交 path→ID reservation，再执行内核分配；多对象和进程串行变更，不重复分配。失败或进程崩溃保留 reservation，重启重试复用原 ID，区间耗尽或变更拒绝。
 
-XFS 命令依据：[xfs_quota 手册](https://man7.org/linux/man-pages/man8/xfs_quota.8.html)；树检查依据：[上游 project.c](https://kernel.googlesource.com/pub/scm/linux/kernel/git/djwong/xfsprogs-dev/+/refs/tags/health-monitoring_2025-09-05/quota/project.c)。特别处理 `project -c` 输出错误但退出码仍为零的情形，要求只有预期检查头与单路径摘要，拒绝额外诊断。
+每成员 5368709120 字节/100000 inode，设置后整树与内核限额读回，不能降级软配额。archive 使用独立 ID，避免占用新空目录预算。封存到期由 `SweepArchives` 删除后回收 project；仍有路径、清理失败或内核仍记录用量时不回收，告警和重试由 observer 调用方负责。archive-reset 用旧 binding，随后准备新 epoch；封存标识为 operationId，保留 2592000 秒，不自动挂到新会话。
 
-真实 NodeControl 接线、完整宿主 profile、XFS 写满、Linux 执行树/阻塞/崩溃、真实门户 Web/WS 和压力测试由主控按 W→IAM→E→R→N→P→U→V 顺序收证。工人不改 NAS。
+## 资源与 profile 接线
 
-首期仍接受原生 owner 旁路、跨成员文件/会话读取、驱动他人会话造成企业身份冒用及审计错归、单进程故障停全池。上述实现和单元测试不能被表述为已隔离或已保证。
+`PoolResourceVerifier` 必须接已有统一资源的签名、租约、撤销和只读挂载。`CheckPoolViews` 只做结构、绑定、共同授权摘要、有序资源集合和期限验证，不能代替验签。启动以最新 W 数据调用 `AuthorizePoolStart`。observer 使用 `PoolWatch{Pools,Verifier,Validate:runtime.CheckPoolViews}` 周期核验：不完整快照、错绑定或授权集合、不可用 verifier 只拒绝候选准入，分别回报 authorization-mismatch/cleanup-unconfirmed，不假报撤销并停全池。实际到期或撤销须返回 `observer.ErrPoolResourceExpired/Revoked`（可包装），触发全池 Trip；传输错误不得标 revoked。
+
+guardian 影响在 Stop 前写为 stopping，最终停止状态持久化，可用 GuardianImpacts 重传。消费方按 pool+operationId 处理状态更新；stopping 不是停止证据，需重试。容器 PID1 复用 resource_supervisor.mjs，policy 使用全池最早到期时间；它与 Engine 执行树确认共同工作。
+
+`renderer.ValidatePoolProfile` 接收 P 提供的完整展开安装方 profile，不是叠加在 dsh-base/web-app 上的 patch。显式允许表拒绝执行工具、MCP、动态安装和控制器、bundle、可执行配置与别名；平台 skill 根固定 `/run/auriga/skills-active/current` 且关闭默认根。P 仍须证明真实宿主依赖注册没有间接激活禁止能力。
+
+## 验证与已知边界
+
+Go 使用本线 testdata/shared-pool-receipts-v1.json 五种收据金样，无 Node/npm 或跨模块依赖，来源注明 K f6001a02。可另行执行 `node infra/agent/internal/runtime/testdata/validate-shared-pool-receipts.mjs` 用 K oracle 复核金样（需 contracts 锁定依赖），Go workflow 保持原样。
+
+测试覆盖不影响其他成员的加入和切换、只读历史恢复、成员释放和重登水位、释放后的启动和容量、取消等待被 guardian 抢占和晚 ACK、ID 分配、耗尽、回收、失败重试及真实子进程崩溃持久化。
+
+Windows 状态替换对短暂的文件共享冲突做有限重试，包括 MoveFileEx 在目标文件缺少 FILE_SHARE_DELETE 时返回的 ACCESS_DENIED。持续冲突仍返回错误并保留旧状态，不修改 ACL 或所有权；真实持锁文件测试覆盖释放后替换与持续占用失败两种情况。
+
+XFS 命令依据：[xfs_quota 手册](https://man7.org/linux/man-pages/man8/xfs_quota.8.html)；树检查依据：[上游 project.c](https://kernel.googlesource.com/pub/scm/linux/kernel/git/djwong/xfsprogs-dev/+/refs/tags/health-monitoring_2025-09-05/quota/project.c)。project -c 的非空诊断即使退出码为零也拒绝。
+
+W→IAM→E→R→N→P→U→V 的真实 NodeControl、宿主 profile 和历史只读门禁、Linux XFS 写满与执行树、正常页面 Web/WS 和压测仍需主控串行接线收证；工人不改 NAS。
+
+首期接受的原生 owner 旁路、跨成员文件和会话读取、驱动他人会话导致企业身份冒用与审计错归、单进程故障停全池仍存在。上述实现和测试不能表述为已隔离或已保证。

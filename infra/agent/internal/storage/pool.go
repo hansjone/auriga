@@ -66,7 +66,7 @@ func (l *PoolLayout) Prepare(ctx context.Context, pool, tenant, member string, e
 }
 
 // ArchiveReset is retriable after either rename or quota failure. archive is
-// node-private, never an input to a new session. Caller first confirms pool stop.
+// node-private, never an input to a new session. Caller first confirms only this member is quiescent.
 func (l *PoolLayout) ArchiveReset(ctx context.Context, pool, tenant, member string, epoch int64, operation string) (string, error) {
 	p, err := l.Workspace(pool, tenant, member, epoch)
 	if err != nil {
@@ -98,10 +98,44 @@ func (l *PoolLayout) ArchiveReset(ctx context.Context, pool, tenant, member stri
 }
 
 // DeleteArchive accepts identifiers, never caller-supplied absolute paths.
-func (l *PoolLayout) DeleteArchive(pool, operation string) error {
+func (l *PoolLayout) DeleteArchive(ctx context.Context, pool, operation string) error {
 	p, err := l.Path(pool, "control", "archives", operation)
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll(p)
+	if err = os.RemoveAll(p); err != nil {
+		return err
+	}
+	if quota, ok := l.Quota.(interface {
+		Release(context.Context, string) error
+	}); ok {
+		return quota.Release(ctx, p)
+	}
+	return nil
+}
+
+// RetireWorkspace never recursively deletes member data: W must first archive
+// and quiesce this member. A missing/empty old root can then release its quota.
+func (l *PoolLayout) RetireWorkspace(ctx context.Context, pool, tenant, member string, epoch int64) error {
+	p, err := l.Workspace(pool, tenant, member, epoch)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(p)
+	if err == nil {
+		if len(entries) != 0 {
+			return fmt.Errorf("member workspace not archived")
+		}
+		if err = os.Remove(p); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if quota, ok := l.Quota.(interface {
+		Release(context.Context, string) error
+	}); ok {
+		return quota.Release(ctx, p)
+	}
+	return nil
 }
