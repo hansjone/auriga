@@ -262,14 +262,36 @@
     },
     {
       "file": "network/device-provider.js",
-      "evidence": "'/api/collab/v1/network/keys/announcement',",
+      "evidence": "'/api/collab/v2/network/bootstrap/controls'",
+      "methods": [
+        "GET"
+      ],
+      "operations": [
+        "getPublicNetworkControl"
+      ],
+      "routePattern": "/api/collab/v2/network/bootstrap/controls"
+    },
+    {
+      "file": "network/device-provider.js",
+      "evidence": "'/api/collab/v2/network/controls/receipts'",
+      "methods": [
+        "POST"
+      ],
+      "operations": [
+        "confirmNetworkControl"
+      ],
+      "routePattern": "/api/collab/v2/network/controls/receipts"
+    },
+    {
+      "file": "network/device-provider.js",
+      "evidence": "'/api/collab/v2/network/keys/announcement'",
       "methods": [
         "GET"
       ],
       "operations": [
         "getNetworkKeyAnnouncement"
       ],
-      "routePattern": "/api/collab/v1/network/keys/announcement"
+      "routePattern": "/api/collab/v2/network/keys/announcement"
     },
     {
       "file": "network/device-provider.js",
@@ -284,14 +306,14 @@
     },
     {
       "file": "network/device-provider.js",
-      "evidence": "() => request('/api/collab/v1/network/keys', undefined, active),",
+      "evidence": "'/api/collab/v2/network/keys'",
       "methods": [
         "GET"
       ],
       "operations": [
         "getNetworkKeys"
       ],
-      "routePattern": "/api/collab/v1/network/keys"
+      "routePattern": "/api/collab/v2/network/keys"
     },
     {
       "file": "network/device-provider.js",

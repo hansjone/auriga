@@ -89,3 +89,11 @@ url 必须 HTTPS、无 userinfo，hostname 精确匹配部署 outboundAllowedHos
 仅本地错误沿原型 `{error,message,sessionId?}`（sessionId兼容null），用error字段与出站结果区分：raw关闭403、认证或归属失败401、非本机403、非法400、未就绪503、请求运输失败502 upstream_failed、host_not_allowed403；不是Problem。上游HTTP500本身不是本地upstream_failed。message只给本地安全映射，不拼接可能带凭据的异常原文。这里是loopback HTTP加任务能力认证，业务代理端口才是受认证OS IPC。
 
 DSH_TEAM_BASE/DSH_TEAM_TASK_CAPABILITY、已有 DSH_SESSION_ID、DSH_WEB_URL 回退与 DSH_TEAM_HELPERS 保持；uds-skill-auth/scripts/uds_skill_auth.py 的 request()/resolve(apply_env_aliases=False) 不变。默认任务 outbound+credentials，关闭 raw 后仅 outbound；执行结束/撤销/jobs结束清能力。平台 token 不进全局环境，读取/代发前与结果提交时核认证代次，换发后下次读新值，退出后拒绝。凭据副本仅进本人 skill 进程内存，工具结果只交业务数据。
+
+## MSGNET v2 固定控制操作
+
+`getNetworkKeys` / `getNetworkKeyAnnouncement` 分别读取 `/api/collab/v2/network/keys` 和 `/api/collab/v2/network/keys/announcement`，消费 `Publication` / `SignedKeysetAnnouncementV2`，权限 `collab.msgnet.read`。受签原文以 base64 wire 返回，解码上限 32MiB；协议帧和信封仍沿用 64KiB 上限。
+
+`getPublicNetworkControl` 独立 GET `/api/collab/v2/network/bootstrap/controls`，平台请求不带 Authorization，不依赖消息连接或 `network_open` 权限。`confirmNetworkControl` 独立 POST `/api/collab/v2/network/controls/receipts`，权限 `collab.msgnet.control.install`，仅发送本地已持久化的安装签名回执；响应 `IsolationRecord` 的 scope、revision、digest、challenge 完全匹配后才清除待报标记。它们与调用点清单一一对应，均不接受 URL、header、pin 或私钥路径参数。本地 broker 的主人/epoch/revision 门禁仍适用。
+
+桌面 broker 使用同一生产 v2 信任库，tenant/realm 和安装身份从可信设备及安装配置派生，根控制隔离立即关闭现存连接；公有控制与回执操作可在没有 NATS 连接时执行。安装器通过受保护 pin/私钥文件提供独立身份，与插件安装说明一致。

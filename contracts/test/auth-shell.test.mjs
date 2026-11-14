@@ -108,7 +108,13 @@ test('AUTH-K fixed operation projection stays current and covers all platform fa
   for (const op of operations) {
     assert.ok(op.input.startsWith('ShellAuth'));
     assert.ok(op.output.startsWith('ShellAuth'));
-    assert.ok(op.permission && op.audience && op.retry);
+    if (op.operation === 'getPublicNetworkControl') {
+      assert.equal(op.permission, null);
+      assert.equal(op.authentication, 'none');
+      assert.equal(op.method, 'get');
+      assert.equal(op.route, '/api/collab/v2/network/bootstrap/controls');
+    } else assert.ok(op.permission);
+    assert.ok(op.audience && op.retry);
     assert.doesNotMatch(
       op.route,
       /\/internal\/|\/admin\/|\/oauth2\/|\/network\/tickets/,
@@ -1838,4 +1844,27 @@ test('K2 standard devices have a fixed AI resource, token-possession revocation 
   );
   const proto = read('proto/auriga/iam/v1/iam.proto');
   assert.match(proto, /rpc VerifyStandardDeviceAiAccess\(/);
+});
+
+test('MSGNET control operations have independent route, method and authentication bindings', () => {
+  const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
+  for (const call of inventory.calls.filter(
+    (c) =>
+      c.file === 'network/device-provider.js' &&
+      c.routePattern.startsWith('/api/collab/v2/network/'),
+  )) {
+    assert.equal(call.operations.length, 1);
+    const op = operations.find((o) => o.operation === call.operations[0]);
+    assert.equal(op.route, call.routePattern);
+    assert.deepEqual(call.methods, [op.method.toUpperCase()]);
+    assert.equal(
+      op.authentication,
+      op.operation === 'getPublicNetworkControl' ? 'none' : 'bearer',
+    );
+  }
+  const receipt = operations.find(
+    (o) => o.operation === 'confirmNetworkControl',
+  );
+  assert.equal(receipt.permission, 'collab.msgnet.control.install');
+  assert.equal(receipt.method, 'post');
 });

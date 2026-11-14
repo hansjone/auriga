@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "placement.switched / placement.switch_failed 草案事件，由 workspace 发布",
+  "$defs": {
+    "PlacementSwitchResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operationId": { "type": "string", "format": "uuid" },
+        "memberId": { "type": "string", "format": "uuid" },
+        "placementId": { "type": "string", "format": "uuid" },
+        "fromMode": { "enum": ["shared", "dedicated"] },
+        "targetMode": { "enum": ["shared", "dedicated"] },
+        "epoch": { "type": "integer", "minimum": 1 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "sessionsDiscarded": { "type": "boolean" },
+        "actorId": { "type": "string", "format": "uuid" },
+        "failureCode": {
+          "enum": [
+            "capacity",
+            "stop-unconfirmed",
+            "prepare-failed",
+            "revoked",
+            "recovery-required"
+          ]
+        }
+      },
+      "required": [
+        "operationId",
+        "memberId",
+        "placementId",
+        "fromMode",
+        "targetMode",
+        "epoch",
+        "revision",
+        "sessionsDiscarded",
+        "actorId"
+      ]
+    },
+    "PlacementSwitched": {
+      "description": "placement.switched 在新模式正常入口已探测成功后发布。",
+      "allOf": [
+        { "$ref": "#/$defs/PlacementSwitchResult" },
+        {
+          "type": "object",
+          "properties": {
+            "sessionsDiscarded": { "const": true },
+            "failureCode": false
+          }
+        }
+      ]
+    },
+    "PlacementSwitchFailed": {
+      "description": "placement.switch_failed 记录切换失败及实际会话处置结果。",
+      "allOf": [
+        { "$ref": "#/$defs/PlacementSwitchResult" },
+        {
+          "type": "object",
+          "properties": { "failureCode": { "type": "string" } },
+          "required": ["failureCode"]
+        }
+      ]
+    }
+  }
+}

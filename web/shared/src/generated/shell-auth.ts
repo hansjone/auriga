@@ -617,6 +617,16 @@ export interface components {
           }
         | {
             /** @constant */
+            operation: 'getPublicNetworkControl';
+            input: components['schemas']['ShellAuthInput_getPublicNetworkControl'];
+          }
+        | {
+            /** @constant */
+            operation: 'confirmNetworkControl';
+            input: components['schemas']['ShellAuthInput_confirmNetworkControl'];
+          }
+        | {
+            /** @constant */
             operation: 'profile_read';
             input: components['schemas']['ShellAuthInput_profile_read'];
           }
@@ -1005,6 +1015,20 @@ export interface components {
           /** Format: uuid */
           requestId: string;
           /** @constant */
+          operation: 'getPublicNetworkControl';
+          output: components['schemas']['ShellAuthOutput_getPublicNetworkControl'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'confirmNetworkControl';
+          output: components['schemas']['ShellAuthOutput_confirmNetworkControl'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
           operation: 'profile_read';
           output: components['schemas']['ShellAuthOutput_profile_read'];
         }
@@ -1130,6 +1154,8 @@ export interface components {
             | 'network_submit'
             | 'getNetworkKeys'
             | 'getNetworkKeyAnnouncement'
+            | 'getPublicNetworkControl'
+            | 'confirmNetworkControl'
             | 'profile_read'
             | 'provider_diagnostic'
             | 'team_list_endpoints'
@@ -1997,6 +2023,11 @@ export interface components {
     };
     ShellAuthInput_getNetworkKeys: Record<string, never>;
     ShellAuthInput_getNetworkKeyAnnouncement: Record<string, never>;
+    ShellAuthInput_getPublicNetworkControl: Record<string, never>;
+    ShellAuthInput_confirmNetworkControl: {
+      /** @description 解码后最多65536字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/InstallationReceipt；保留原始受签字节，不经生成模型重序列化。 */
+      receiptWire: string;
+    };
     ShellAuthInput_profile_read: Record<string, never>;
     ShellAuthInput_provider_diagnostic: Record<string, never>;
     ShellAuthplugin_team_mcp_schema_json__defs_Limit: number;
@@ -3353,7 +3384,7 @@ export interface components {
         'retry-after'?: string;
       };
       body: {
-        /** @description 解码后最多65536字节，必须严格验证 network/keyset.schema.json#/$defs/SignedKeyset；保留原始受签字节，不经生成模型重序列化。 */
+        /** @description 解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/Publication；保留原始受签字节，不经生成模型重序列化。 */
         wire: string;
       };
     };
@@ -3364,7 +3395,29 @@ export interface components {
         'retry-after'?: string;
       };
       body: {
-        /** @description 解码后最多65536字节，必须严格验证 network/protocol.schema.json#/$defs/KeysetAnnouncement；保留原始受签字节，不经生成模型重序列化。 */
+        /** @description 解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string;
+      };
+    };
+    ShellAuthOutput_getPublicNetworkControl: {
+      statusCode: number;
+      headers?: {
+        'content-type'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        /** @description 解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/SignedRootControl；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string;
+      };
+    };
+    ShellAuthOutput_confirmNetworkControl: {
+      statusCode: number;
+      headers?: {
+        'content-type'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        /** @description 解码后最多65536字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/IsolationRecord；保留原始受签字节，不经生成模型重序列化。 */
         wire: string;
       };
     };

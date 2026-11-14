@@ -31,6 +31,11 @@ const messages = {
     managedVerifying: '正在验证实例会话',
     memberLoading: '正在读取成员资料',
     networkTitle: '消息网络',
+    controlFile: '公有控制包',
+    controlImport: '导入控制包',
+    controlSaved: '控制已保存；联网后自动提交确认。',
+    controlReceipt: '保存确认回执',
+    controlMissing: '安装身份未配置，请联系管理员。',
     networkReady: '就绪',
     networkPending: '未就绪',
     network: '总部不可达',
@@ -105,6 +110,12 @@ const messages = {
     managedVerifying: 'Verifying instance session',
     memberLoading: 'Loading member profile',
     networkTitle: 'Message network',
+    controlFile: 'Public control package',
+    controlImport: 'Import control package',
+    controlSaved: 'Control saved. Confirmation will be sent when online.',
+    controlReceipt: 'Save installation receipt',
+    controlMissing:
+      'Installation identity is not configured. Contact your administrator.',
     networkReady: 'Ready',
     networkPending: 'Not ready',
     network: 'Platform unreachable',
@@ -698,6 +709,8 @@ export function createSettingsView(
     const [address, setAddress] = React.useState(''),
       [notice, setNotice] = React.useState(''),
       [statusError, setStatusError] = React.useState('');
+    const [controlText, setControlText] = React.useState('');
+    const [controlReceipt, setControlReceipt] = React.useState(null);
     const [busy, setBusy] = React.useState(false);
     const [revision, reload] = React.useReducer(
       (/** @type {number} */ n) => n + 1,
@@ -1045,6 +1058,50 @@ export function createSettingsView(
         'section',
         { 'aria-label': t.networkTitle },
         h('h3', null, t.networkTitle),
+        h(
+          'label',
+          null,
+          t.controlFile,
+          h('input', {
+            type: 'file',
+            accept: '.json,application/json',
+            disabled: busy || !state?.networkControl?.available,
+            onChange: (/** @type {any} */ event) =>
+              run(async () => {
+                const file = event.target.files?.[0];
+                setControlReceipt(null);
+                setControlText('');
+                if (!file) return;
+                if (file.size > 32 * 1024 * 1024)
+                  throw new Error('invalidSettings');
+                setControlText(await file.text());
+              }),
+          }),
+        ),
+        button(
+          t.controlImport,
+          () =>
+            run(async () => {
+              const result = await call('auriga/settings/network-control', {
+                packageJson: controlText,
+              });
+              setControlReceipt(result.receipt);
+              setNotice(t.controlSaved);
+            }),
+          !controlText || !state?.networkControl?.available,
+        ),
+        !state?.networkControl?.available && h('p', null, t.controlMissing),
+        controlReceipt &&
+          h(
+            'a',
+            {
+              download: 'auriga-control-receipt.json',
+              href:
+                'data:application/json;charset=utf-8,' +
+                encodeURIComponent(JSON.stringify(controlReceipt)),
+            },
+            t.controlReceipt,
+          ),
         row(t.networkTitle, statusError || networkText),
         (network?.address ?? account?.connection?.endpointId) &&
           row(t.endpoint, network?.address ?? account?.connection?.endpointId),

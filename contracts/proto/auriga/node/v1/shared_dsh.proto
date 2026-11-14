@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package auriga.node.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.node.v1";
+
+// 只增草案；尚未接入 NodeControl，不能据此启动共享容器。
+enum DshInstanceMode {
+  DSH_INSTANCE_MODE_UNSPECIFIED = 0;
+  DSH_INSTANCE_MODE_SHARED = 1;
+  DSH_INSTANCE_MODE_DEDICATED = 2;
+}
+
+// 节点上的可信分配围栏。路径由节点从标识解析，禁止浏览器提供。
+// 空字段、零 epoch 或未知 mode 必须拒绝；新代次不能回退。
+message DshPlacementBinding {
+  string tenant_id = 1;
+  string member_id = 2;
+  string placement_id = 3;
+  string physical_instance_id = 4;
+  DshInstanceMode mode = 5;
+  int64 epoch = 6;
+  int64 revision = 7;
+}
