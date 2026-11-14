@@ -1,5 +1,6 @@
 /* global Headers, FormData */
 import { dispatchResource } from './broker-dispatch.js';
+import { parseStrictJson } from './json.js';
 
 /** Resource adapters retain their existing signed-wire validation. This private
  * route selector resolves only frozen operation metadata; it never performs HTTP
@@ -52,8 +53,15 @@ export async function resourceRequest(runtime, path, options = {}) {
     if (options.body instanceof FormData) {
       const body = /** @type {Record<string,any>} */ ({});
       for (const [key, value] of options.body.entries()) {
-        if (typeof value === 'string')
-          body[key] = key === 'metadata' ? JSON.parse(value) : value;
+        if (key === 'metadata') {
+          if (typeof value !== 'string' && value.size > 1048576) fail();
+          const bytes =
+            typeof value === 'string'
+              ? Buffer.from(value)
+              : Buffer.from(await value.arrayBuffer());
+          if (bytes.length > 1048576) fail();
+          body.metadata = parseStrictJson(bytes, true);
+        } else if (typeof value === 'string') body[key] = value;
         else {
           const ref = await runtime.upload(
             Buffer.from(await value.arrayBuffer()),

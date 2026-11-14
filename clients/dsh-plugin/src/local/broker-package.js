@@ -102,6 +102,53 @@ function inheritedDescriptor() {
   }
 }
 
+/** Preserve installation-owned raw-credential policy across plugin restarts.
+ * Invalid or linked prior configuration fails closed rather than resetting a
+ * previously disabled policy to its permissive default.
+ * @param {string} root @param {any} config */
+export async function writeBrokerInstallation(root, config) {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  if ((await lstat(root)).isSymbolicLink())
+    throw new Error('broker linked installation rejected');
+  const file = join(root, 'desktop-origin.json'),
+    temp = join(root, randomUUID() + '.tmp');
+  let previous;
+  try {
+    const stat = await lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 65536)
+      throw new Error('broker installation invalid');
+    previous = JSON.parse(await readFile(file, 'utf8'));
+    if (
+      !previous ||
+      typeof previous !== 'object' ||
+      Array.isArray(previous) ||
+      (Object.hasOwn(previous, 'allowRawAgentToken') &&
+        typeof previous.allowRawAgentToken !== 'boolean')
+    )
+      throw new Error('broker installation invalid');
+  } catch (error) {
+    if (/** @type {any} */ (error).code !== 'ENOENT') throw error;
+  }
+  try {
+    await writeFile(
+      temp,
+      JSON.stringify({
+        origin: config.platformOrigin,
+        issuer: config.issuer ?? config.platformOrigin,
+        clientId: config.clientId ?? 'auriga-dsh',
+        ...(config.network ? { network: config.network } : {}),
+        ...(previous?.allowRawAgentToken !== undefined
+          ? { allowRawAgentToken: previous.allowRawAgentToken }
+          : {}),
+      }),
+      { flag: 'wx', mode: 0o600 },
+    );
+    await rename(temp, file);
+  } finally {
+    await rm(temp, { force: true });
+  }
+}
+
 /** @param {{directory?:string,config?:any,dataHome?:string}} [options] */
 export async function connectPackagedBroker(options = {}) {
   let descriptor = inheritedDescriptor();
@@ -128,28 +175,7 @@ export async function connectPackagedBroker(options = {}) {
           fileURLToPath(new URL('../../shell-auth/', import.meta.url)),
       );
       const root = join(options.dataHome, 'broker-installation');
-      await mkdir(root, { recursive: true, mode: 0o700 });
-      if ((await lstat(root)).isSymbolicLink())
-        throw new Error('broker linked installation rejected');
-      const file = join(root, 'desktop-origin.json'),
-        temp = join(root, randomUUID() + '.tmp');
-      try {
-        await writeFile(
-          temp,
-          JSON.stringify({
-            origin: options.config.platformOrigin,
-            issuer: options.config.issuer ?? options.config.platformOrigin,
-            clientId: options.config.clientId ?? 'auriga-dsh',
-            ...(options.config.network
-              ? { network: options.config.network }
-              : {}),
-          }),
-          { flag: 'wx', mode: 0o600 },
-        );
-        await rename(temp, file);
-      } finally {
-        await rm(temp, { force: true });
-      }
+      await writeBrokerInstallation(root, options.config);
       // Spawn only our packaged entry, with public storage paths on argv. The
       // descriptor arrives exclusively on the inherited Node IPC pipe.
       child = spawn(

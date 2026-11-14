@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { verifyBrokerPackage } from '../src/local/broker-package.js';
+import {
+  verifyBrokerPackage,
+  writeBrokerInstallation,
+} from '../src/local/broker-package.js';
 import { packageBroker } from '../scripts/package-broker.mjs';
 
 async function artifact(t) {
@@ -56,4 +59,38 @@ test('unlisted executable and conflicting artifact versions are refused', async 
   await packageBroker(source, destination);
   await writeFile(join(destination, 'extra.mjs'), 'extra');
   await assert.rejects(verifyBrokerPackage(destination), /unlisted/);
+});
+test('independent restart preserves an installation-level raw-token opt-out', async (t) => {
+  const { root } = await artifact(t),
+    installation = join(root, 'installation');
+  const config = { platformOrigin: 'https://platform.example.com' };
+  await writeBrokerInstallation(installation, config);
+  const file = join(installation, 'desktop-origin.json');
+  await writeFile(
+    file,
+    JSON.stringify({
+      origin: config.platformOrigin,
+      allowRawAgentToken: false,
+    }),
+  );
+  await writeBrokerInstallation(installation, config);
+  assert.equal(
+    JSON.parse(await readFile(file, 'utf8')).allowRawAgentToken,
+    false,
+  );
+});
+test('invalid stored raw-token policy is not replaced with an enabled default', async (t) => {
+  const { root } = await artifact(t),
+    installation = join(root, 'installation');
+  await mkdir(installation);
+  const file = join(installation, 'desktop-origin.json'),
+    prior = JSON.stringify({ allowRawAgentToken: 'false' });
+  await writeFile(file, prior);
+  await assert.rejects(
+    writeBrokerInstallation(installation, {
+      platformOrigin: 'https://platform.example.com',
+    }),
+    /installation invalid/,
+  );
+  assert.equal(await readFile(file, 'utf8'), prior);
 });

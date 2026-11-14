@@ -17,6 +17,7 @@ function fixture() {
   const broker = {
     state: {
       current: () => ({
+        state: 'authenticated',
         expiresAt: new Date(Date.now() + 29000).toISOString(),
       }),
       fence: () => () => {
