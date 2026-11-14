@@ -15,8 +15,17 @@ test('v2 runtime schema generation preserves the complete frozen contract', asyn
     ),
   );
   assert.deepEqual(Object.keys(generatedRenewalFiles), [
+    'auto-renewal-v2.d.ts',
     'auto-renewal-v2-schema.js',
   ]);
+  for (const [name, content] of Object.entries(generatedRenewalFiles))
+    assert.equal(
+      await readFile(
+        new URL('../../../src/generated/network/' + name, import.meta.url),
+        'utf8',
+      ),
+      content,
+    );
   const output = generatedRenewalFiles['auto-renewal-v2-schema.js'];
   // Execute the exact generated module in memory; do not modify K-owned files.
   const { schema } = await import(

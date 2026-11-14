@@ -8,6 +8,7 @@ import { parseStrictJson } from './trust/jcs.js';
 import { positiveVersion } from './trust/keyset.js';
 import { diagnosticReason } from './diagnostics.js';
 import { jsonLimits } from './trust/v2-schema.js';
+import { detach, structure } from './trust/v2.js';
 
 const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
 /** Transient fetch failure only; validation and persistence errors never use it. */
@@ -50,7 +51,7 @@ const uuid = (value) =>
   /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 /** Fixed native device control only; no UI/model identity, service/AI token or
  * frame-provided URL is accepted. Raw bytes reach strict JSON/JCS validation.
- * @param {{config:any,getDevice:(signal:AbortSignal)=>Promise<{accessToken:string,claims:{tid:string,did:string,sub:string}}>,now?:()=>number,controlIdentity?:import('./runtime-types.js').ControlIdentity,migrationPermit?:import('../generated/network/auto-renewal-v2.js').SignedMigrationPermit}} options
+ * @param {{config:any,getDevice:(signal:AbortSignal)=>Promise<{accessToken:string,claims:{tid:string,did:string,sub:string}}>,now?:()=>number,controlIdentity?:import('./runtime-types.js').ControlIdentity,migrationPermit?:import('../generated/network/auto-renewal-v2.js').SignedMigrationPermit,loadInstallation?:(scope:{tenant_id:string,realm:string,target_id:string})=>Promise<any>}} options
  * @returns {import('./runtime-types.js').DeviceNetworkProvider} */
 export function createDeviceProvider({
   config: input,
@@ -58,6 +59,7 @@ export function createDeviceProvider({
   now = Date.now,
   controlIdentity,
   migrationPermit,
+  loadInstallation,
 }) {
   const config = platformConfig(input),
     installation = config.network;
@@ -97,6 +99,12 @@ export function createDeviceProvider({
       const device = await getDevice(signal);
       signal.throwIfAborted();
       const expected = { ...device.claims };
+      const installed = await loadInstallation?.({
+        tenant_id: expected.tid,
+        realm: installation.realm,
+        target_id: expected.did,
+      });
+      signal.throwIfAborted();
       /** @template T @param {string} phase @param {()=>Promise<T>|T} operation @param {number} [budget] */
       const run = (phase, operation, budget = 0) =>
         diagnostics
@@ -208,6 +216,30 @@ export function createDeviceProvider({
         active.throwIfAborted();
         return Buffer.concat(parts);
       }
+      /** @param {import('../generated/network/auto-renewal-v2.js').InstallationReceipt} receipt @param {AbortSignal} active */
+      async function confirmReceipt(receipt, active) {
+        const record = structure(
+          'IsolationRecord',
+          detach(
+            await request(
+              '/api/collab/v2/network/controls/receipts',
+              receipt,
+              active,
+            ),
+          ),
+        );
+        if (
+          [
+            'tenant_id',
+            'realm',
+            'target_id',
+            'challenge',
+            'control_digest',
+          ].some((f) => record[f] !== /** @type {any} */ (receipt)[f]) ||
+          record.minimum_control_revision !== receipt.control_revision
+        )
+          throw new Error('control confirmation binding mismatch');
+      }
       /** @type {import('./runtime-types.js').DeviceRegistration|undefined} */
       let registered;
       let registering = false;
@@ -238,15 +270,9 @@ export function createDeviceProvider({
         url: installation.wssUrl,
         origin: config.platformOrigin,
         roots: installation.roots,
-        controlIdentity,
-        migrationPermit,
-        async confirmControlReceipt(receipt, active) {
-          await request(
-            '/api/collab/v2/network/controls/receipts',
-            receipt,
-            active,
-          );
-        },
+        controlIdentity: installed?.controlIdentity ?? controlIdentity,
+        migrationPermit: installed?.migrationPermit ?? migrationPermit,
+        confirmControlReceipt: confirmReceipt,
         async refresh(trust, active) {
           // Public control sync precedes every reconnect/refresh and does not
           // depend on a message ticket or the possibly revoked message chain.
@@ -257,12 +283,13 @@ export function createDeviceProvider({
           );
           await trust.installControl(control);
           for (const receipt of trust.pendingControlReceipts()) {
-            await request(
-              '/api/collab/v2/network/controls/receipts',
-              receipt,
-              active,
-            );
-            await trust.acknowledgeControlReceipt(receipt.package_id);
+            try {
+              await confirmReceipt(receipt, active);
+              await trust.acknowledgeControlReceipt(receipt.package_id);
+            } catch (error) {
+              if (isDeviceRevocationError(error)) throw error;
+              active.throwIfAborted(); /* Keep durable pending receipts; a stale one must not starve newer confirmations or public key refresh. */
+            }
           }
           active.throwIfAborted();
           const keys = await run(

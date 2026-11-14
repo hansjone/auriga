@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync, verify } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,7 +12,7 @@ import {
   exportControlPackage,
   exportInstallation,
 } from './export-installation.mjs';
-import { digest } from '../../clients/dsh-plugin/src/network/trust/v2.js';
+import { digest, jcs } from '../../clients/dsh-plugin/src/network/trust/v2.js';
 
 const script = fileURLToPath(
   new URL('./export-installation.mjs', import.meta.url),
@@ -369,6 +369,68 @@ test('public control export pins installation roots, scope, target, digest and c
   });
   assert.equal(call.status, 0, call.stderr);
   assert.deepEqual(JSON.parse(call.stdout), pack);
+  const identity = generateKeyPairSync('ed25519'),
+    sealing = generateKeyPairSync('x25519');
+  await writeFile(
+    path.join(f.directory, 'receipt-key.der'),
+    identity.privateKey.export({ type: 'pkcs8', format: 'der' }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    path.join(f.directory, 'pins.json'),
+    JSON.stringify({
+      schema_version: 2,
+      tenant_id: f.registration.tenant,
+      realm: f.registration.realm,
+      pins: [
+        {
+          target_id: f.registration.device,
+          identity_id: 'receipt-identity',
+          signing_spki: der(identity).toString('base64url'),
+          component: 'network',
+          gateway_id: 'test-gateway',
+          sealing_spki: der(sealing).toString('base64url'),
+          subject: 'CN=receipt-identity',
+        },
+      ],
+    }),
+    { mode: 0o600 },
+  );
+  await f.put('import.json', {
+    controlManifestFile: 'control-manifest.json',
+    networkDirectory: 'network',
+  });
+  const imported = spawnSync(
+    process.execPath,
+    [script, '--import-control', path.join(f.directory, 'import.json')],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        AURIGA_NETWORK_INSTALLATION_PINS_FILE: path.join(
+          f.directory,
+          'pins.json',
+        ),
+        AURIGA_NETWORK_INSTALLATION_KEY_FILE: path.join(
+          f.directory,
+          'receipt-key.der',
+        ),
+        AURIGA_NETWORK_INSTALLATION_TARGET_ID: f.registration.device,
+        AURIGA_NETWORK_MIGRATION_PERMIT_FILE: '',
+      },
+    },
+  );
+  assert.equal(imported.status, 0, imported.stderr);
+  const { identity_auth, ...receipt } = JSON.parse(imported.stdout);
+  assert.equal(receipt.package_id, pack.package_id);
+  assert.ok(
+    verify(
+      null,
+      Buffer.from('Auriga.NetworkControlReceipt.v2\0' + jcs(receipt)),
+      identity.publicKey,
+      Buffer.from(identity_auth.signature, 'base64url'),
+    ),
+  );
   for (const mutation of [
     { realm: '2' },
     { target_id: 'wrong-device' },

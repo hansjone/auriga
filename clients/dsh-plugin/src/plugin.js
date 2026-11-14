@@ -44,10 +44,14 @@ export async function apply(ctx, config) {
     ctx,
     config,
     mode === 'managed'
-      ? { mode: 'managed' }
+      ? {
+          mode: 'managed',
+          networkControl: () => managedRuntime?.networkControl,
+        }
       : {
           activeOrigin: () => binding?.runtime.config.platformOrigin ?? '',
           desktop: () => binding?.runtime.desktop,
+          networkControl: () => binding?.runtime.networkControl,
           nativeAuth: {
             requestRejection: (req) =>
               admission

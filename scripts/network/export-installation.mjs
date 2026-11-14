@@ -17,9 +17,10 @@ import {
   verifyControl,
 } from '../../clients/dsh-plugin/src/network/trust/v2.js';
 import { jsonLimits } from '../../clients/dsh-plugin/src/network/trust/v2-schema.js';
+import { createControlInstallation } from '../../clients/dsh-plugin/src/network/trust/installation-control.js';
 
 const usage =
-  '用法：node scripts/network/export-installation.mjs [--control] <manifest.json> [新输出文件.json]';
+  '用法：node scripts/network/export-installation.mjs [--control|--import-control] <manifest.json> [新输出文件.json]';
 const fail = (message) => {
   throw new Error(message);
 };
@@ -254,13 +255,49 @@ export async function exportControlPackage(manifestFile) {
   return pack;
 }
 
+/** Offline owner command: explicit local manifests, same pin/key loader and
+ * single-writer trust cache as the settings flow. No messaging connection. */
+export async function importControlPackage(manifestFile) {
+  const manifest = detach(await readLocal(manifestFile, 65536));
+  if (
+    !exact(manifest, ['controlManifestFile', 'networkDirectory']) ||
+    typeof manifest.controlManifestFile !== 'string' ||
+    !manifest.controlManifestFile.trim() ||
+    typeof manifest.networkDirectory !== 'string' ||
+    !manifest.networkDirectory.trim()
+  )
+    fail('控制导入 manifest 字段无效');
+  const local = (file) =>
+    path.resolve(path.dirname(path.resolve(manifestFile)), file);
+  const controlFile = local(manifest.controlManifestFile);
+  const pack = await exportControlPackage(controlFile);
+  const controlManifest = detach(await readLocal(controlFile, 65536));
+  const installationFile = path.resolve(
+    path.dirname(controlFile),
+    controlManifest.installationFile,
+  );
+  const installation = detach(await readLocal(installationFile, 65536));
+  const config = platformConfig(installation.connect);
+  const identity = controlManifest.expectedIdentity;
+  return createControlInstallation({
+    config,
+    directory: local(manifest.networkDirectory),
+    getScope: () => ({
+      tenant_id: identity.tenant,
+      realm: identity.realm,
+      target_id: identity.target,
+    }),
+  }).importPackage(pack);
+}
+
 async function main(args) {
   if (args.length === 1 && args[0] === '--help') {
     process.stdout.write(usage + '\n');
     return;
   }
   const controlOnly = args[0] === '--control';
-  if (controlOnly) args = args.slice(1);
+  const importing = args[0] === '--import-control';
+  if (controlOnly || importing) args = args.slice(1);
   if (
     args.length < 1 ||
     args.length > 2 ||
@@ -269,9 +306,11 @@ async function main(args) {
     fail(usage);
   const result =
     JSON.stringify(
-      await (controlOnly
-        ? exportControlPackage(args[0])
-        : exportInstallation(args[0])),
+      await (importing
+        ? importControlPackage(args[0])
+        : controlOnly
+          ? exportControlPackage(args[0])
+          : exportInstallation(args[0])),
       null,
       2,
     ) + '\n';
@@ -286,7 +325,7 @@ if (
   main(process.argv.slice(2)).catch(() => {
     // Never echo input JSON, tokens, key bytes, paths or native parser errors.
     process.stderr.write(
-      '导出失败：请核对本地公开材料、可信来源、有效期与新输出文件路径；可用 --help 查看用法。\n',
+      '操作失败：请核对公开材料、独立安装身份、有效期与新输出文件路径；可用 --help 查看用法。\n',
     );
     process.exitCode = 1;
   });

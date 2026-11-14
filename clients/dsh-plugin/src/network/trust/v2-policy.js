@@ -176,7 +176,7 @@ export function checkRenewalConfig(config) {
   structure('RenewalConfig', config, 'invalid_transition');
   // Preserve all ranges in the source schema; enforce cross-field windows here.
   for (const [field, rule] of Object.entries(
-    schema.$defs.RenewalConfig.properties,
+    /** @type {Record<string, any>} */ (schema.$defs.RenewalConfig.properties),
   )) {
     if (
       rule.type === 'integer' &&

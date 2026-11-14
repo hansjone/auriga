@@ -21,7 +21,7 @@ function trustedOrigin(value) {
 /** Public host service adapter. Business preferences do not modify loader config
  * or reuse credentials when an origin changes.
  * @param {any} ctx @param {any} config
- * @param {{uiOrigin?:string,activeOrigin?:()=>string,desktop?:()=>any,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
+ * @param {{uiOrigin?:string,activeOrigin?:()=>string,desktop?:()=>any,networkControl?:()=>any,mode?:string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
 export function installSettings(
   ctx,
   config,
@@ -29,6 +29,7 @@ export function installSettings(
     uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN,
     activeOrigin,
     desktop,
+    networkControl,
     nativeAuth,
     mode = 'connect',
   } = {},
@@ -67,6 +68,7 @@ export function installSettings(
           handler: createSettingsHandler({
             store,
             desktop,
+            networkControl,
             mode,
             privateSkills: createPrivateSkills({
               home: process.env.DSH_HOME || join(homedir(), '.dsh'),
@@ -86,7 +88,7 @@ export function installSettings(
   return { getStore };
 }
 
-/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,uiOrigin?:string,mode?:string,privateSkills?:ReturnType<typeof createPrivateSkills>}} options */
+/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,desktop?:()=>any,networkControl?:()=>any,uiOrigin?:string,mode?:string,privateSkills?:ReturnType<typeof createPrivateSkills>}} options */
 export function createSettingsHandler({
   store,
   desktop,
@@ -96,6 +98,7 @@ export function createSettingsHandler({
   uiOrigin,
   mode = 'connect',
   privateSkills,
+  networkControl,
 }) {
   const expectedOrigin = trustedOrigin(uiOrigin);
   const snapshot = () => ({
@@ -105,6 +108,9 @@ export function createSettingsHandler({
     activeOrigin:
       typeof activeOrigin === 'function' ? activeOrigin() : activeOrigin,
     deviceName,
+    ...(networkControl
+      ? { networkControl: { available: networkControl()?.available === true } }
+      : {}),
   });
   return async (
     /** @type {import('node:http').IncomingMessage} */ req,
@@ -174,6 +180,44 @@ export function createSettingsHandler({
       }
       if (req.method === 'GET' && path === '/auriga/settings/state')
         return json(200, snapshot());
+      if (write && path === '/auriga/settings/network-control') {
+        if (
+          req.headers['content-type']?.split(';')[0].trim() !==
+            'application/json' ||
+          req.headers['x-auriga-settings'] !== '1'
+        )
+          return json(403, { reason: 'forbidden' });
+        const control = networkControl?.();
+        if (!control?.available) return json(503, { reason: 'unavailable' });
+        const parts = [];
+        let size = 0;
+        for await (const part of req) {
+          size += part.length;
+          if (size > 64 * 1024 * 1024)
+            return json(413, { reason: 'invalidSettings' });
+          parts.push(part);
+        }
+        let input;
+        try {
+          input = JSON.parse(Buffer.concat(parts).toString('utf8'));
+        } catch {
+          return json(400, { reason: 'invalidSettings' });
+        }
+        if (
+          !input ||
+          Object.keys(input).join(',') !== 'packageJson' ||
+          typeof input.packageJson !== 'string' ||
+          Buffer.byteLength(input.packageJson) > 32 * 1024 * 1024
+        )
+          return json(400, { reason: 'invalidSettings' });
+        try {
+          return json(200, {
+            receipt: await control.importPackage(input.packageJson),
+          });
+        } catch {
+          return json(422, { reason: 'invalidSettings' });
+        }
+      }
       if (req.method === 'GET' && path === '/auriga/settings/skills')
         return privateSkills
           ? json(200, {

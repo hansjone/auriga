@@ -190,6 +190,16 @@ async function checkRoutes(ctx, base) {
   });
   assert.equal(bootstrap.status, 200);
   assert.equal((await bootstrap.json()).status, 'unconfigured');
+  const settings = await fetch(base + '/auriga/settings/state', {
+    headers: { cookie },
+  });
+  assert.equal(settings.status, 200);
+  assert.equal((await settings.json()).networkControl.available, false);
+  const settingsView = await fetch(base + '/auriga/settings/view.js', {
+    headers: { cookie },
+  });
+  assert.equal(settingsView.status, 200);
+  assert.match(await settingsView.text(), /auriga\/settings\/network-control/);
   const ui = await fetch(base + '/auriga/local-panel.js', {
     headers: { cookie },
   });

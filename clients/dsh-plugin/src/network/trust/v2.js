@@ -454,8 +454,11 @@ export function verifyPublication(context) {
         if (old.kid !== current.kid) reject('invalid_transition');
       } else {
         recovered = true;
+        if (mature) {
+          if (current.kid !== mature.kid) reject('invalid_transition');
+          continue;
+        }
         if (
-          mature ||
           previous.some((/** @type {any} */ x) => x.kid === current.kid) ||
           seconds(current.not_before) !== issued ||
           seconds(current.not_after) - issued > a.limits.restart_key_seconds
@@ -488,8 +491,47 @@ export function verifyTransport(bundle, publication, context) {
   if (BigInt(t.bundle_version) <= BigInt(context.seen_bundle_version))
     reject('version_rollback');
   const phases = ['dual_trust', 'new_leaves', 'retire_old'];
+  const cycle =
+    context.previous_transport_phase === 'retire_old' &&
+    t.phase === 'dual_trust';
+  if (cycle) {
+    const previous = context.previous_transport;
+    if (!previous) reject('invalid_transition');
+    structure('SignedTransportTrustBundle', previous);
+    signature(
+      previous,
+      'Auriga.NetworkTransportTrustBundle.v2',
+      a.public_key_spki,
+    );
+    if (
+      [
+        'tenant_id',
+        'realm',
+        'authority_id',
+        'authority_digest',
+        'generation',
+      ].some((f) => previous.payload[f] !== t[f]) ||
+      previous.payload.phase !== 'retire_old' ||
+      previous.payload.bundle_version !== context.seen_bundle_version ||
+      digest(previous) !== t.previous_bundle_digest
+    )
+      reject('invalid_transition');
+    if (
+      !previous.payload.cas.every((/** @type {any} */ old) =>
+        t.cas.some((/** @type {any} */ ca) => equal(ca, old)),
+      ) ||
+      !t.cas.some(
+        (/** @type {any} */ ca) =>
+          !previous.payload.cas.some(
+            (/** @type {any} */ old) => old.ca_id === ca.ca_id,
+          ),
+      )
+    )
+      reject('invalid_transition');
+  }
   if (
     context.previous_transport_phase &&
+    !cycle &&
     phases.indexOf(t.phase) !==
       phases.indexOf(context.previous_transport_phase) + 1
   )

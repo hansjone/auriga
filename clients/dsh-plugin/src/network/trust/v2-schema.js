@@ -1,39 +1,10 @@
-import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
 import { canonicalize, parseStrictJson } from './jcs.js';
 import { positiveVersion, timeValue } from './keyset.js';
 
-// Temporary source fallback authorized by MSGNET-P round 2. Release packaging
-// must include K's generated schema; an installed plugin never needs the repo.
-let contract;
-try {
-  const generated = new URL(
-    '../../generated/network/auto-renewal-v2-schema.js',
-    import.meta.url,
-  );
-  contract = (await import(generated.href)).schema;
-} catch (error) {
-  if (/** @type {any} */ (error).code !== 'ERR_MODULE_NOT_FOUND') throw error;
-  const installed = new URL(
-    '../../../ui/network-auto-renewal-v2.schema.json',
-    import.meta.url,
-  );
-  try {
-    contract = JSON.parse(await readFile(installed, 'utf8'));
-  } catch (readError) {
-    if (/** @type {any} */ (readError).code !== 'ENOENT') throw readError;
-    contract = JSON.parse(
-      await readFile(
-        new URL(
-          '../../../../../contracts/network/auto-renewal-v2.schema.json',
-          import.meta.url,
-        ),
-        'utf8',
-      ),
-    );
-  }
-}
-export const schema = contract;
+import { schema } from '../../generated/network/auto-renewal-v2-schema.js';
+export { schema };
+const definitions = /** @type {Record<string, any>} */ (schema.$defs);
 export const jsonLimits = Object.freeze({
   maxBytes: 32 * 1024 * 1024,
   maxArray: 65536,
@@ -81,6 +52,7 @@ const keywords = new Set([
   'maxLength',
   'items',
   'allOf',
+  'oneOf',
   'not',
 ]);
 /** @param {any} node */
@@ -90,6 +62,7 @@ function audit(node) {
   for (const child of Object.values(node.properties ?? {})) audit(child);
   for (const child of Object.values(node.$defs ?? {})) audit(child);
   for (const child of node.allOf ?? []) audit(child);
+  for (const child of node.oneOf ?? []) audit(child);
   if (node.items) audit(node.items);
   if (node.not) audit(node.not);
 }
@@ -97,8 +70,14 @@ audit(schema);
 /** Strict evaluation of the frozen schema's finite keyword set.
  * @param {any} value @param {any} rule @returns {boolean} */
 function matches(value, rule) {
+  if (
+    rule.oneOf &&
+    rule.oneOf.filter((/** @type {any} */ branch) => matches(value, branch))
+      .length !== 1
+  )
+    return false;
   if (rule.$ref)
-    return matches(value, schema.$defs[rule.$ref.split('/').at(-1)]);
+    return matches(value, definitions[rule.$ref.split('/').at(-1)]);
   if (
     rule.allOf &&
     !rule.allOf.every((/** @type {any} */ r) => matches(value, r))
@@ -154,6 +133,6 @@ function matches(value, rule) {
 }
 /** @param {string} type @param {any} value @param {string} [code] */
 export function structure(type, value, code = 'invalid_chain') {
-  if (!schema.$defs[type] || !matches(value, schema.$defs[type])) reject(code);
+  if (!definitions[type] || !matches(value, definitions[type])) reject(code);
   return value;
 }
