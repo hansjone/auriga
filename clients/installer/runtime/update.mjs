@@ -62,37 +62,6 @@ export function extractArchive(archive, directory) {
   return join(directory, 'payload');
 }
 
-const watermarkFields = [
-  'highestSequence',
-  'highestPublishedAt',
-  'highestVersion',
-  'acceptedDigest',
-  'acceptedEnvelope',
-];
-
-function releaseWatermarks(state) {
-  if (state.channelWatermarks) return state.channelWatermarks;
-  // Legacy global values have no channel provenance unless their accepted
-  // envelope is still present. The installed version remains a downgrade floor.
-  const envelope = state.available ?? state.requiredRelease;
-  if (!envelope) return {};
-  const { signature, ...body } = envelope;
-  if (
-    !signature ||
-    !['stable', 'beta'].includes(body.channel) ||
-    body.sequence !== state.highestSequence ||
-    body.version !== state.highestVersion ||
-    body.sha256 !== state.acceptedDigest ||
-    releaseDigest(body) !== state.acceptedEnvelope
-  )
-    return {};
-  return {
-    [body.channel]: Object.fromEntries(
-      watermarkFields.map((field) => [field, state[field]]),
-    ),
-  };
-}
-
 export function createUpdater({
   root,
   origin,
@@ -117,7 +86,7 @@ export function createUpdater({
   const load = () =>
     existsSync(stateFile)
       ? JSON.parse(readFileSync(stateFile, 'utf8'))
-      : { enabled: true, highestSequence: 0 };
+      : { enabled: true, channelWatermarks: {} };
   const save = (value) => {
     writeFileSync(stateFile + '.tmp', JSON.stringify(value) + '\n', {
       mode: 0o600,
@@ -142,13 +111,20 @@ export function createUpdater({
     controller;
   const initial = load();
   if (!initial.channelWatermarks || !initial.clientId) {
-    const migrated = {
+    const initialized = {
       ...initial,
-      channelWatermarks: releaseWatermarks(initial),
+      channelWatermarks: initial.channelWatermarks ?? {},
       clientId: initial.clientId ?? randomUUID(),
     };
-    for (const field of watermarkFields) delete migrated[field];
-    save(migrated);
+    for (const field of [
+      'highestSequence',
+      'highestPublishedAt',
+      'highestVersion',
+      'acceptedDigest',
+      'acceptedEnvelope',
+    ])
+      delete initialized[field];
+    save(initialized);
   }
   if (initial.phase === 'downloading') save({ ...load(), phase: 'cancelled' });
   const resume = join(root, '.desktop-resume');
@@ -159,7 +135,7 @@ export function createUpdater({
       publicKey,
       now: now(),
       currentVersion: current().version,
-      ...releaseWatermarks(state)[state.channel ?? 'stable'],
+      ...state.channelWatermarks?.[state.channel ?? 'stable'],
       channel: state.channel ?? 'stable',
     });
   };
@@ -254,7 +230,7 @@ export function createUpdater({
             ? envelope
             : null;
         const state = load();
-        const channelWatermarks = releaseWatermarks(state);
+        const channelWatermarks = state.channelWatermarks ?? {};
         if (pending || compare(body.version, current().version) === 0) {
           channelWatermarks[channel] = {
             highestSequence: body.sequence,
@@ -540,7 +516,7 @@ export async function applyPending(
       publicKey,
       now,
       currentVersion: old.bundleVersion,
-      ...releaseWatermarks(saved)[saved.channel ?? 'stable'],
+      ...saved.channelWatermarks?.[saved.channel ?? 'stable'],
       channel: saved.channel ?? 'stable',
     });
     const binding = JSON.parse(

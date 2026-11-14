@@ -771,47 +771,6 @@ test('已接受的 beta 水位独立保留，关闭可选更新时未接受的�
   await assert.rejects(updater.check(), /replay/);
 });
 
-test('旧全局水位仅随可证明的接受清单迁移，不把 beta 遗留水位绑定到 stable', async (t) => {
-  for (const accepted of [false, true]) {
-    const f = fixture(t);
-    const envelope = signed({
-      schema: 2,
-      channel: 'beta',
-      version: '3.0.0',
-      sequence: 9,
-      rolloutPercentage: 100,
-      rollbackFrom: null,
-    });
-    const { signature, ...body } = envelope;
-    assert.ok(signature);
-    writeFileSync(
-      join(f.root, 'desktop-update.json'),
-      JSON.stringify({
-        channel: 'stable',
-        highestSequence: 9,
-        highestVersion: '3.0.0',
-        highestPublishedAt: body.publishedAt,
-        acceptedDigest: body.sha256,
-        acceptedEnvelope: releaseDigest(body),
-        available: accepted ? envelope : null,
-      }),
-    );
-    const updater = resumedUpdater(
-      f,
-      async () =>
-        new Response(JSON.stringify(signed({ packageId: f.next.id }))),
-    );
-    await updater.check();
-    assert.equal(updater.status().available.version, '2.0.0');
-    const state = JSON.parse(readFileSync(join(f.root, 'desktop-update.json')));
-    assert.equal(state.highestVersion, undefined);
-    assert.equal(
-      state.channelWatermarks.beta?.highestSequence,
-      accepted ? 9 : undefined,
-    );
-  }
-});
-
 for (const failure of ['network', 'unavailable']) {
   test(`下载后在线复核 ${failure} 保留完整缓存，下次不重下`, async (t) => {
     const f = fixture(t);
