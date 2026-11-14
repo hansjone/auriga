@@ -131,7 +131,7 @@ NAS新增固定`msgnet-projector` Compose服务，UID/GID10001、只读根文件
 
 ### 4.6 消息网络内部TLS无人值守（F3）
 
-现有`deploy/bootstrap/network/materials.go`生成的server/client CA及submit、edge、broker、broker-client、edge-presence叶子均为一年，且CA私钥未作为可续签材料保存；本设计必须替换这条一次性材料链。新建collab内部PKI签发组件，CA私钥与叶子私钥分别密文存PG、仅collab解密。根授权增列受限`network_transport`能力：运行钥只签内部TransportTrustBundle/轮换声明，X.509由独立CA钥签，不把业务消息三用途钥当TLS CA；SAN/EKU限制在安装绑定的内部消息组件，不签公网/NodeControl/发行证书。
+现有`deploy/bootstrap/network/materials.go`生成的server/client CA及submit、edge、broker、broker-client、edge-presence叶子均为一年，且CA私钥未作为可续签材料保存；本设计必须替换这条一次性材料链。新建collab内部PKI签发组件，CA私钥与叶子私钥分别密文存PG、仅collab解密。根授权增列受限`network_transport`能力：运行钥签内部TransportTrustBundle/轮换声明及全局CA确认证据SignedTransportConfirmation，二者均检查根授权的network_transport能力，X.509由独立CA钥签，不把业务消息三用途钥当TLS CA；SAN/EKU限制在安装绑定的内部消息组件，不签公网/NodeControl/发行证书。
 
 新server/client CA寿命10年，每8年启动下一代（提前2年），叶子寿命90天、剩余30天自动续签，每分钟reconcile；证书NotBefore允许经校验的当前UTC回溯5分钟，所有NotAfter受所属CA截止约束。CA更新先以根授权运行钥签的递增TransportTrustBundle分发旧新双信任，收集各reader持久回执，再签新CA叶子、逐组件加载并验证实际mTLS/WSS，最后移出旧CA；新CA不能仅因来自TLS响应就被信任。控制快照撤销优先于bundle版本；失联端按第3.4节隔离，不阻塞所有在线端完成CA换代。新端按最新受信bundle引导，不依赖已到期CA。迁移时生成新CA而非复用现场丢弃的旧CA私钥，先加入双信任，旧叶子仍可用时自动切换。
 
@@ -319,3 +319,7 @@ D同时依赖I，负责第4.5/4.6节实际UID/目录卷/安装身份、10002读�
 ## K2 审查补充的按用途混合恢复
 
 restart_recovery 的转换单位为用途。同一已提交快照可以同时保留仍有效 active、将不可用 active 对应的成熟有效 next 激活、对无有效 active 且无成熟 next 的用途生成受限全新 active。成熟 next 保持原 kid/材料/期限和首发证明，旧 active 进入 retired，不能生成替代钥绕过成熟证明。全新恢复仍限制 not_before=issued_at、最长7天且新kid不可复用，其他有效用途 active 必须保留。至少一个用途确需恢复才可使用该模式。全部用途不可用时，也按各自是否有成熟 next 决定激活或全新恢复，无需等待 next 过期。C/N/P 使用同一混合正负向量，Java/Go参考适配器同读。socket 的监听/连接/私卷隔离与安装 pin 的权威字段见 auto-renewal-v2 契约第2轮补充。
+
+## K3 确认证据用途扩充
+
+运行钥的固定对象清单增加全局 CA 确认证据，连同 v2 清单、公告和内部运输信任包共四种。SignedTransportConfirmation 使用 `Auriga.NetworkTransportConfirmation.v2` 域，要求根授权包含 `network_transport` 能力。C、N、I、P 同步签发/验证白名单和能力检查，现有已授权该能力的安装可直接采用，缺能力的授权经离线根重签后启用。用途扩充和迁移规则记录于 ADR 0023 及 K3 消费方须知。

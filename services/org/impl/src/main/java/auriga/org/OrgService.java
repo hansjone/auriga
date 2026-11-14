@@ -1671,6 +1671,7 @@ public final class OrgService {
                   OrgError.require(!rows.isEmpty(), "not_found", 404);
                   var inv = rows.getFirst();
                   UUID invitationId = (UUID) inv.get("id");
+                  UacOrgPolicy.requireRedemption(store, invitationId, providerId, accountId);
                   Integer existing =
                       store
                           .jdbc()

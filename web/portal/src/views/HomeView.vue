@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRouter } from 'vue-router';
 import {
   ElButton,
   ElDropdown,
@@ -9,36 +8,58 @@ import {
   ElDropdownMenu,
 } from 'element-plus';
 import { isApiError, type Me } from '@auriga/shared';
-import { iamApi } from '../api';
+import { iamApi, redirectToLogin } from '../api';
+import {
+  loginInfoText,
+  watchLoginInfo,
+} from '../../../shared/src/native-login/login-info';
 import InstanceCard from '../components/InstanceCard.vue';
 import DesktopDownload from '../components/DesktopDownload.vue';
 
 const { t, locale } = useI18n();
-const router = useRouter();
 const me = ref<Me | null>(null);
+const loginInfo = ref<Me['uacLoginInfo']>();
+const department = computed(() => loginInfoText(loginInfo.value, locale.value));
+let infoMonitor: ReturnType<typeof watchLoginInfo> | undefined;
 const light = ref(document.documentElement.dataset.theme === 'light');
 const loadError = ref(false);
 const loading = ref(false);
 let active = true;
 onBeforeUnmount(() => {
   active = false;
+  infoMonitor?.dispose();
 });
 
 async function loadMe() {
   if (loading.value) return;
   loading.value = true;
+  infoMonitor?.dispose();
+  loginInfo.value = undefined;
   loadError.value = false;
   try {
     const value = await iamApi.getMe();
-    if (active) me.value = value;
+    if (active) {
+      me.value = value;
+      infoMonitor = watchLoginInfo(value, () => iamApi.getMe(), {
+        onInfo: (info) => {
+          loginInfo.value = info;
+        },
+        onIdentityChanged: () => {
+          me.value = null;
+          redirectToLogin();
+        },
+        onExpired: () => {
+          me.value = null;
+          redirectToLogin();
+        },
+      });
+    }
   } catch (error) {
     if (!active) return;
-    if (isApiError(error) && error.status === 401)
-      void router.replace({
-        path: '/login',
-        query: { returnTo: '/' },
-      });
-    else loadError.value = true;
+    if (isApiError(error) && error.status === 401) {
+      me.value = null;
+      redirectToLogin();
+    } else loadError.value = true;
   } finally {
     if (active) loading.value = false;
   }
@@ -57,8 +78,10 @@ function theme() {
 
 async function logout() {
   await iamApi.logout();
+  infoMonitor?.dispose();
+  loginInfo.value = undefined;
   me.value = null;
-  void router.replace('/login');
+  redirectToLogin();
 }
 </script>
 
@@ -83,6 +106,9 @@ async function logout() {
     </header>
     <main class="content auriga-glass">
       <h1>{{ t('home.title') }}</h1>
+      <p v-if="me && department" data-testid="uac-department">
+        {{ department }}
+      </p>
       <InstanceCard v-if="me" />
       <DesktopDownload v-if="me" />
       <p v-if="loadError" role="alert">{{ t('errors.unknown') }}</p>

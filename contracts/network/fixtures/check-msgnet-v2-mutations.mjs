@@ -119,7 +119,17 @@ export async function checkMutations() {
   fixture.local_cases = JSON.parse(
     readFileSync(new URL('msgnet-local-projection-vectors.json', directory)),
   );
+  fixture.k3_cases = fixture.boundary_cases.filter((v) =>
+    [
+      'transport_catchup',
+      'transport_transition',
+      'transport_confirmation',
+      'node_control_binding',
+      'projection_access',
+    ].includes(v.operation),
+  );
   const modules = [
+    ['msgnet-v2-k3-oracle.mjs', [['k3_cases', 'evaluateK3']]],
     [
       'msgnet-local-projection-oracle.mjs',
       [['local_cases', 'evaluateLocalProjection']],

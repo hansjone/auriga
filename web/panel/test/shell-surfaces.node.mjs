@@ -5,6 +5,24 @@ import { surfaceHost, flush, boot, response } from './shell-host.mjs';
 const button = (root, label) =>
   [...root.querySelectorAll('button')].find((el) => el.textContent === label);
 
+test('plugin loading and panel mounting preserve the native host title', async () => {
+  const title = 'DSH · Existing session';
+  const host = surfaceHost(async () => response(), { title });
+  try {
+    assert.equal(host.document.title, title);
+    const main = host.mount('main');
+    const settings = host.mount('settings.section');
+    await flush();
+    assert.equal(host.document.title, title);
+    main.close();
+    settings.close();
+    assert.equal(host.document.title, title);
+  } finally {
+    host.dispose();
+    host.close();
+  }
+});
+
 test('sidebar label uses the native SlotLabel getter contract across host locale changes', () => {
   const host = surfaceHost(async () => response());
   try {
@@ -16,11 +34,11 @@ test('sidebar label uses the native SlotLabel getter contract across host locale
     // Native resolveSlotLabel reads a string verbatim or invokes its getter;
     // the registration's locale namespace never translates a string label.
     const read = () => (typeof label === 'function' ? label() : label);
-    assert.equal(read(), 'Auriga');
+    assert.equal(read(), 'Auriga DSH');
     host.locale('en');
-    assert.equal(read(), 'Auriga');
+    assert.equal(read(), 'Auriga DSH');
     host.locale('zh-CN');
-    assert.equal(read(), 'Auriga');
+    assert.equal(read(), 'Auriga DSH');
     for (const [size, active] of [
       [16, false],
       [18, true],
@@ -833,7 +851,7 @@ test('public inventory Remote failures are rejected without exposing host errors
       await assert.rejects(
         () => panel.context.listInstalled(),
         (error) =>
-          error.message === 'Auriga surface unavailable' &&
+          error.message === 'Auriga DSH surface unavailable' &&
           error.reason === 'unavailable',
       );
       main.close();

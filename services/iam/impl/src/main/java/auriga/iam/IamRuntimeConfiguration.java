@@ -18,6 +18,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Explicit issuer + encryption key required; an unconfigured skeleton exposes no IAM endpoints. */
 @Configuration(proxyBeanMethods = false)
@@ -99,6 +100,184 @@ public class IamRuntimeConfiguration {
   @Bean
   ContractSchemas iamSchemas() {
     return new ContractSchemas();
+  }
+
+  @Bean
+  UacRevalidationConfiguration iamUacRevalidationConfiguration(Environment env) {
+    return new UacRevalidationConfiguration(env);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean(auriga.iam.api.UacEnterpriseAdapter.class)
+  auriga.iam.api.UacEnterpriseAdapter iamUacAdapter(Environment env) {
+    tools.jackson.databind.JsonNode settings = Json.object();
+    String file = env.getProperty("auriga.iam.uac.adapter-config-file");
+    if (file != null) {
+      try (var input = java.nio.file.Files.newInputStream(Path.of(file))) {
+        byte[] bytes = input.readNBytes(UacTokenVerification.MAX_BODY + 1);
+        if (bytes.length > UacTokenVerification.MAX_BODY) throw new IllegalArgumentException();
+        settings = Json.MAPPER.readTree(bytes);
+        if (!settings.isObject()) throw new IllegalArgumentException();
+      } catch (java.io.IOException | RuntimeException error) {
+        throw new IllegalArgumentException("Invalid private UAC adapter configuration");
+      }
+    }
+    return new UacConfiguredAdapter(settings, false);
+  }
+
+  @Bean
+  UacProviderService iamUacProviders(
+      IamStore store,
+      ProviderManager providers,
+      auriga.iam.api.UacEnterpriseAdapter adapter,
+      SessionManager sessions,
+      AuditLogger audit,
+      Clock clock) {
+    return new UacProviderService(store, providers, adapter, sessions, audit, clock);
+  }
+
+  @Bean
+  UacCredentialCipher iamUacCredentialCipher(ContractSchemas schemas, Environment env) {
+    Map<String, String> keys =
+        Binder.get(env)
+            .bind("auriga.iam.uac.encryption.keys", Bindable.mapOf(String.class, String.class))
+            .orElse(Map.of());
+    String active = env.getProperty("auriga.iam.uac.encryption.active-key-id", "initial");
+    if (keys.isEmpty()) keys = Map.of(active, env.getRequiredProperty("auriga.iam.encryption-key"));
+    ObjectNode ring =
+        Json.object(
+            "activeKeyId",
+            active,
+            "decryptKeyIds",
+            keys.keySet().stream().sorted().toList(),
+            "revision",
+            env.getProperty("auriga.iam.uac.encryption.revision", Long.class, 0L));
+    return new UacCredentialCipher(schemas, ring, keys);
+  }
+
+  @Bean
+  UacDiagnosticSettings iamUacDiagnosticSettings(
+      IamStore store, UacProviderService providers, AuditLogger audit, Clock clock) {
+    return new UacDiagnosticSettings(store, providers, audit, clock);
+  }
+
+  @Bean
+  UacLokiSource iamUacLokiSource(Environment env) {
+    return new UacLokiSource(env.getProperty("auriga.iam.uac.diagnostics.loki-origin"));
+  }
+
+  @Bean
+  UacDiagnosticBundles iamUacDiagnosticBundles(
+      IamStore store,
+      UacProviderService providers,
+      UacSessions uac,
+      UacDiagnosticSettings settings,
+      UacLokiSource loki,
+      Clock clock,
+      Environment env,
+      org.springframework.beans.factory.ObjectProvider<auriga.audit.api.UacAuditEvents> audit,
+      org.springframework.beans.factory.ObjectProvider<auriga.ops.api.UacOpsAlerts> ops,
+      @org.springframework.beans.factory.annotation.Qualifier("iamEventPublisher")
+          org.springframework.beans.factory.ObjectProvider<EventPublisher> iamEvents,
+      org.springframework.beans.factory.ObjectProvider<EventPublisher> events) {
+    return new UacDiagnosticBundles(
+        store,
+        providers,
+        uac,
+        settings,
+        audit.getIfAvailable(),
+        ops.getIfAvailable(),
+        loki,
+        iamEvents.getIfAvailable(events::getObject),
+        clock,
+        env.getProperty("auriga.iam.uac.sso-cookie.enabled", Boolean.class, true),
+        java.nio.file.Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize());
+  }
+
+  @Bean
+  UacTelemetry iamUacTelemetry(
+      IamStore store,
+      UacDiagnosticSettings settings,
+      AuditLogger audit,
+      Clock clock,
+      UacSessions uac,
+      org.springframework.beans.factory.ObjectProvider<auriga.ops.api.OpsSignals> ops) {
+    var telemetry = new UacTelemetry(store, settings, audit, clock);
+    uac.installTelemetry(telemetry);
+    telemetry.signals = new UacSignals(store, ops.getIfAvailable(), clock);
+    org.springframework.boot.logging.LoggingSystem.get(
+            Thread.currentThread().getContextClassLoader())
+        .setLogLevel("auriga.iam.uac.detail", org.springframework.boot.logging.LogLevel.DEBUG);
+    return telemetry;
+  }
+
+  @Bean
+  UacSessions iamUacSessions(
+      IamStore store,
+      UacCredentialCipher cipher,
+      auriga.iam.api.UacEnterpriseAdapter adapter,
+      ProviderManager providers,
+      SessionManager sessions,
+      Clock clock,
+      UacRevalidationConfiguration policy) {
+    return new UacSessions(store, cipher, adapter, providers, sessions, clock, policy);
+  }
+
+  @Bean
+  UacFlow iamUacFlow(
+      IamStore store,
+      UacProviderService providers,
+      ProviderManager generic,
+      auriga.iam.api.UacEnterpriseAdapter adapter,
+      UacSessions uac,
+      LoginManager login,
+      SessionManager sessions,
+      Clock clock) {
+    return new UacFlow(store, providers, generic, adapter, uac, login, sessions, clock);
+  }
+
+  @Bean
+  UacNavigation iamUacNavigation(
+      IamStore store,
+      UacFlow flow,
+      UacSessions uac,
+      UacProviderService providers,
+      LoginManager login,
+      Clock clock,
+      Environment env) {
+    return new UacNavigation(
+        store,
+        flow,
+        uac,
+        providers,
+        login,
+        clock,
+        env.getProperty("auriga.iam.uac.sso-cookie.enabled", "true"));
+  }
+
+  @Bean
+  org.springframework.boot.web.servlet.FilterRegistrationBean<UacCorrelation>
+      iamUacCorrelationFilter() {
+    var bean =
+        new org.springframework.boot.web.servlet.FilterRegistrationBean<>(new UacCorrelation());
+    bean.setOrder(org.springframework.core.Ordered.HIGHEST_PRECEDENCE + 10);
+    return bean;
+  }
+
+  @Bean(destroyMethod = "destroy")
+  @ConditionalOnProperty(
+      prefix = "auriga.iam.uac.worker",
+      name = "enabled",
+      havingValue = "true",
+      matchIfMissing = true)
+  UacWorker iamUacWorker(UacSessions uac, AuditLogger audit, UacTelemetry telemetry) {
+    return new UacWorker(uac, audit);
+  }
+
+  @Bean
+  org.springframework.boot.ApplicationRunner iamUacKeyGuard(
+      IamStore store, UacCredentialCipher cipher) {
+    return args -> new UacKeyRotation(store, cipher).verifyKeys();
   }
 
   @Bean
@@ -264,6 +443,11 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  StandardDevices iamStandardDevices(OAuthProvider oauth) {
+    return oauth.standardDevices();
+  }
+
+  @Bean
   IamNetworkSourceAuthority iamNetworkSourceAuthority(
       IamStore store,
       IamNetworkAuthority network,
@@ -271,11 +455,12 @@ public class IamRuntimeConfiguration {
       TokenService tokens,
       Clock clock,
       Environment env,
-      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization,
+      StandardDevices standard) {
     return new IamNetworkSourceAuthority(
         store,
         network,
-        new DeviceAccessAuthority(store, sessions, tokens),
+        new DeviceAccessAuthority(store, sessions, tokens).standardDevices(standard),
         authorization.getIfAvailable(
             () ->
                 request -> {
@@ -294,9 +479,16 @@ public class IamRuntimeConfiguration {
 
   @Bean
   NetworkDirectory iamNetworkDirectory(
-      IamStore store, SessionManager sessions, TokenService tokens, Clock clock) {
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      StandardDevices standard) {
     return new IamNetworkDirectory(
-        store, sessions, new DeviceAccessAuthority(store, sessions, tokens), clock);
+        store,
+        sessions,
+        new DeviceAccessAuthority(store, sessions, tokens).standardDevices(standard),
+        clock);
   }
 
   @Bean
@@ -318,11 +510,12 @@ public class IamRuntimeConfiguration {
       AuditLogger audit,
       Clock clock,
       Environment env,
+      StandardDevices standard,
       org.springframework.beans.factory.ObjectProvider<auriga.iam.api.MessageNetworkAdmission>
           admission) {
     return new IamNetworkAuthority(
         store,
-        new DeviceAccessAuthority(store, sessions, tokens),
+        new DeviceAccessAuthority(store, sessions, tokens).standardDevices(standard),
         audit,
         clock,
         Set.copyOf(
@@ -531,7 +724,8 @@ public class IamRuntimeConfiguration {
       AuditLogger audit,
       Clock clock,
       TokenService tokens,
-      OAuthProvider nativeDevices) {
+      OAuthProvider nativeDevices,
+      UacSessions uac) {
     var manager =
         new LoginManager(
             store,
@@ -547,6 +741,7 @@ public class IamRuntimeConfiguration {
             clock,
             tokens.issuer());
     manager.nativeDevices(nativeDevices);
+    manager.uacEstablished(uac::established);
     return manager;
   }
 
@@ -606,7 +801,7 @@ public class IamRuntimeConfiguration {
 
   @Bean
   RequestIdentity iamRequestIdentity(
-      Environment env, auriga.contracts.deploymentconfig.DeploymentAccess access) {
+      Environment env, auriga.contracts.deploymentconfig.DeploymentAccess access, IamStore store) {
     boolean loopbackHttp =
         env.getProperty("auriga.iam.edge-hop.allow-loopback-http", Boolean.class, false);
     if (!"none".equalsIgnoreCase(env.getProperty("server.forward-headers-strategy", "none")))
@@ -627,10 +822,13 @@ public class IamRuntimeConfiguration {
         && peers.stream().anyMatch(p -> !Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(p)))
       throw new IllegalStateException(
           "IAM insecure development hop must have only numeric loopback peers");
-    return new RequestIdentity(
-        access,
-        new RequestIdentity.Hop(
-            peers, env.getProperty("auriga.iam.edge-hop.dns-san"), loopbackHttp));
+    RequestIdentity identity =
+        new RequestIdentity(
+            access,
+            new RequestIdentity.Hop(
+                peers, env.getProperty("auriga.iam.edge-hop.dns-san"), loopbackHttp));
+    identity.uacStore(store);
+    return identity;
   }
 
   @Bean
@@ -647,6 +845,24 @@ public class IamRuntimeConfiguration {
                 s.sessionCreationPolicy(
                     org.springframework.security.config.http.SessionCreationPolicy.STATELESS));
     return http.build();
+  }
+
+  @Bean
+  @Order(0)
+  @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+  SecurityFilterChain iamUacInternalChain(
+      HttpSecurity http,
+      auriga.common.security.AccessTokenSettings settings,
+      com.nimbusds.jose.jwk.source.JWKSource<com.nimbusds.jose.proc.SecurityContext> source,
+      auriga.common.security.ProblemSecurityHandlers handlers)
+      throws Exception {
+    http.securityMatcher("/api/iam/v1/internal/uac/**");
+    return auriga.common.security.AurigaWebSecurity.build(
+        http,
+        auriga.common.security.AccessTokenDecoders.createInternal(settings, source),
+        handlers,
+        List.of(),
+        null);
   }
 
   @Bean

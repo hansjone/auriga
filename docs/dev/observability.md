@@ -162,7 +162,7 @@ INFO、任意业务字段和完整异常栈仅写本机文件，不写 stderr。
    标准 Docker API 为只读采集。socket 的只读挂载不等于 Docker API 权限隔离，
    应只在受控测试主机启用此 profile。它不修改业务容器或数据。
 
-4. 本机打开 `http://127.0.0.1:13000`，进入预置 **Auriga trace logs** 面板，
+4. 本机打开 `http://127.0.0.1:13000`，进入预置 **Auriga DSH · Trace logs** 面板，
    选择时间窗，粘贴 32 位 `trace_id`，服务可多选。Grafana 仅绑定主机回环；NAS 使用
    已有 SSH 通道 `ssh -L 13000:127.0.0.1:13000 <user>@<nas-host>` 访问，不改路由/DNS/信任。
    Loki/Alloy 不发布主机端口，只连隔离的 observability 网络。

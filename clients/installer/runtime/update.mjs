@@ -1,3 +1,4 @@
+import { BRAND_NAME } from './brand.mjs';
 /* global setInterval, clearInterval */
 /** Anonymous transport is bound to the configured platform origin. */
 import {
@@ -220,7 +221,7 @@ export function createUpdater({
         pending = null;
         return {
           restartRequired: true,
-          message: '更新完成。请关闭并重新打开 Auriga Desktop。',
+          message: `更新完成。请关闭并重新打开 ${BRAND_NAME}。`,
         };
       } finally {
         if (temporary) rmSync(temporary, { recursive: true, force: true });

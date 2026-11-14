@@ -259,6 +259,106 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/collab/v2/network/transport/confirmation': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 读取精确运输阶段的全局确认台账
+     * @description 只读查询，不写回执或解除隔离；内部 HTTPS/mTLS 与 JWT 双重认证，tenant/realm 从身份绑定。不存在返回404，尚未收齐仍返回完整逐目标证据。Cache-Control no-store。签名域 Auriga.NetworkTransportConfirmation.v2。
+     */
+    post: operations['getTransportConfirmation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/collab/v2/network/isolation/{target_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * getNetworkIsolation
+     * @description 只读逐目标耐久隔离状态；故障或不存在保持隔离，不得写状态。 内部HTTPS/mTLS与JWT，scope和target从可信安装记录核对，Cache-Control no-store。
+     */
+    get: operations['getNetworkIsolation'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/collab/v2/network/controls/pending/{target_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * getPendingNetworkControl
+     * @description 只读该目标待确认的精确公有包；只返回最早未确认控制，精确回执后查询下一包。 内部HTTPS/mTLS与JWT，scope和target从可信安装记录核对，Cache-Control no-store。
+     */
+    get: operations['getPendingNetworkControl'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/collab/v2/network/transport/history/{digest}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * getTransportPredecessor
+     * @description 只读完整历史运输证明；历史根控制只作验真，不覆盖最新控制。 内部HTTPS/mTLS与JWT，scope和target从可信安装记录核对，Cache-Control no-store。
+     */
+    get: operations['getTransportPredecessor'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/collab/v2/network/transport/transitions/{authority_digest}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 读取跨授权的不可变根锚起点证明
+     * @description 内部HTTPS/mTLS和JWT，安装域绑定，no-store。返回该授权最新代际起点的历史根签控制及完整前驱，不以历史控制覆盖最新控制。
+     */
+    get: operations['getTransportTransitionProof'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -336,6 +436,7 @@ export interface components {
       minimum_generation: string;
       minimum_keyset_version: string;
       generation_transition?: components['schemas']['GenerationTransition'];
+      transport_transition?: components['schemas']['TransportTransition'];
     };
     SignedRuntimeAuthority: {
       payload: components['schemas']['RuntimeAuthority'];
@@ -885,6 +986,76 @@ export interface components {
       version: string;
       pair_digest: string;
       material_digest: string;
+    };
+    TransportTransition: {
+      /** @enum {unknown} */
+      mode: 'authority_transition' | 'emergency_recovery';
+      predecessor_digest: string;
+      from_generation: string;
+      to_generation: string;
+      authority_id: string;
+      authority_digest: string;
+      first_bundle_version: string;
+    };
+    TransportPredecessor: {
+      bundle: components['schemas']['SignedTransportTrustBundle'];
+      authority: components['schemas']['SignedRuntimeAuthority'];
+      control: components['schemas']['SignedRootControl'];
+    };
+    TransportReaderEvidence: {
+      reader_id: string;
+      identity_id: string;
+      selector: components['schemas']['LocalProjectionSelector'];
+      /** @enum {unknown} */
+      phase: 'loaded' | 'handshake_verified' | 'isolated';
+      isolation_enforced: boolean;
+    };
+    TransportConfirmation: {
+      tenant_id: string;
+      realm: string;
+      authority_id: string;
+      authority_digest: string;
+      control_revision: string;
+      bundle_version: string;
+      bundle_digest: string;
+      /** @enum {string} */
+      phase: 'dual_trust' | 'new_leaves' | 'retire_old';
+      required_reader_ids: string[];
+      readers: components['schemas']['TransportReaderEvidence'][];
+      challenge: string;
+      /** Format: date-time */
+      issued_at: string;
+    };
+    SignedTransportConfirmation: {
+      payload: components['schemas']['TransportConfirmation'];
+      runtime_auth: components['schemas']['Signature'];
+    };
+    TransportConfirmationQuery: {
+      tenant_id: string;
+      realm: string;
+      bundle_version: string;
+      bundle_digest: string;
+      challenge: string;
+    };
+    NodeControlPin: {
+      target_id: string;
+      node_id: string;
+      identity_id: string;
+      signing_spki: string;
+      identity_revision: string;
+    };
+    NodeControlPins: {
+      /** @constant */
+      schema_version: 2;
+      tenant_id: string;
+      realm: string;
+      pins: components['schemas']['NodeControlPin'][];
+    };
+    TransportTransitionProof: {
+      control: components['schemas']['SignedRootControl'];
+      predecessor: components['schemas']['TransportPredecessor'];
+      first_bundle: components['schemas']['SignedTransportTrustBundle'];
+      authority: components['schemas']['SignedRuntimeAuthority'];
     };
   };
   responses: never;
@@ -1539,6 +1710,230 @@ export interface operations {
         content?: never;
       };
       /** @description 材料不可用或clock_error */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getTransportConfirmation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TransportConfirmationQuery'];
+      };
+    };
+    responses: {
+      /** @description 一个一致性台账快照，签名回显随机挑战 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SignedTransportConfirmation'];
+        };
+      };
+      /** @description 身份或scope拒绝 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 精确bundle不存在 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 同版本摘要冲突 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 台账或当前运行签发者不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getNetworkIsolation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        target_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 精确台账记录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IsolationRecord'];
+        };
+      };
+      /** @description 身份或scope拒绝 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 无记录；不表示目标READY */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 权威台账不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getPendingNetworkControl: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        target_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 精确台账记录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ControlPackage'];
+        };
+      };
+      /** @description 身份或scope拒绝 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 无记录；不表示目标READY */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 权威台账不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getTransportPredecessor: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        digest: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 精确台账记录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TransportPredecessor'];
+        };
+      };
+      /** @description 身份或scope拒绝 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 无记录；不表示目标READY */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 权威台账不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getTransportTransitionProof: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        authority_digest: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 根锚起点证明 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TransportTransitionProof'];
+        };
+      };
+      /** @description 身份或scope拒绝 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 无根锚证明 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description 台账不可用 */
       503: {
         headers: {
           [name: string]: unknown;

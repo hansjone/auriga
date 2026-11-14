@@ -57,6 +57,9 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	if err := cfg.validateUacCookieNames(); err != nil {
+		return nil, err
+	}
 	if err := cfg.DevicePresence.validate(); err != nil {
 		return nil, err
 	}
@@ -240,6 +243,9 @@ func (g *Gateway) Handler() http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, r = ensureRequestID(r)
+		if strings.HasPrefix(r.URL.Path, "/api/iam/v1/login/uac/") || strings.HasPrefix(r.URL.Path, "/api/iam/v1/internal/uac/") {
+			ensureUacCorrelation(w)
+		}
 		externalTrace := len(r.Header.Values(headerTraceparent)) == 1 && validTraceparent(r.Header.Get(headerTraceparent))
 		parent := ensureTraceparent(r)
 		r.Header.Set(headerTraceparent, parent)
@@ -260,6 +266,11 @@ func (g *Gateway) Handler() http.Handler {
 
 func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	rid, r := ensureRequestID(r)
+	// Internal IAM control endpoints never enter the public proxy.
+	if r.URL.Path == "/api/iam/v1/internal" || strings.HasPrefix(r.URL.Path, "/api/iam/v1/internal/") {
+		writeProblem(w, problem(http.StatusNotFound, "common.not_found", "Not Found", "", rid))
+		return
+	}
 	clientIP := ResolveClientIP(r, g.Trusted)
 	r = r.WithContext(context.WithValue(r.Context(), ctxKeyClientIP, clientIP))
 	host := requestHost(r)
@@ -431,6 +442,15 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	// SPA static by audience
 	if audience == "admin" {
 		g.adminStatic.ServeHTTP(w, r)
+		return
+	}
+	if path == "/login" || path == "/instance-login.html" || path == "/device" || strings.HasPrefix(path, "/device/") {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+	}
+	if g.serveUacNavigation(w, r) {
 		return
 	}
 	g.portalStatic.ServeHTTP(w, r)

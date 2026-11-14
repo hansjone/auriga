@@ -160,8 +160,9 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
                       Set.of(),
                       Set.of("auriga.connect"),
                       Set.of(OAuthProvider.DEVICE, "refresh_token"),
-                      true)));
-      var devices = new DeviceAccessAuthority(store, sessions, tokens);
+                      true)),
+              permissions);
+      var devices = oauth.deviceAuthority();
       network =
           new IamNetworkAuthority(
               store,
@@ -412,7 +413,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
                   account.toString(),
                   Json.object("status", "active", "memberType", memberType),
                   null);
-              store.insert("idp_provider", provider.toString(), Json.object(), null);
+              store.insert("idp_provider", provider.toString(), Json.object("enabled", true), null);
               return sessions
                   .create(
                       account, provider, "portal", true, Duration.ofHours(1), Duration.ofHours(1))

@@ -60,6 +60,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
   static JdbcTemplate jdbc;
   static TenantTransactionManager manager;
   static PostgresExtension.ServiceRoles iamRoles, collabRoles;
+  static com.zaxxer.hikari.HikariDataSource iamPool, collabPool;
   static Harness legacy;
   static ObjectNode legacyFrame;
   Harness h;
@@ -73,6 +74,14 @@ class NetworkLocalSourceHistoryIntegrationTest {
             .locations("classpath:db/" + schema);
     if (target != null) config.target(target);
     CommonMigrations.serviceFlyway(config.load()).migrate();
+  }
+
+  static com.zaxxer.hikari.HikariDataSource runtimePool(javax.sql.DataSource restricted) {
+    var config = new com.zaxxer.hikari.HikariConfig();
+    config.setDataSource(restricted);
+    config.setMaximumPoolSize(8);
+    config.setMinimumIdle(1);
+    return new com.zaxxer.hikari.HikariDataSource(config);
   }
 
   @BeforeAll
@@ -93,12 +102,13 @@ class NetworkLocalSourceHistoryIntegrationTest {
     migrate(iamRoles, "iam", null);
     CommonMigrations.migrate(collabRoles.owner().dataSource(), "collab");
     migrate(collabRoles, "collab", "14");
-    store =
-        new IamStore(
-            new JdbcTemplate(iamRoles.runtime().dataSource()),
-            new TenantTransactionManager(iamRoles.runtime().dataSource()));
-    jdbc = new JdbcTemplate(collabRoles.runtime().dataSource());
-    manager = new TenantTransactionManager(collabRoles.runtime().dataSource());
+    // Match the deployed bounded pools while retaining the same restricted runtime roles. Opening
+    // a fresh physical connection per read must not consume the five-second race's RPC budget.
+    iamPool = runtimePool(iamRoles.runtime().dataSource());
+    collabPool = runtimePool(collabRoles.runtime().dataSource());
+    store = new IamStore(new JdbcTemplate(iamPool), new TenantTransactionManager(iamPool));
+    jdbc = new JdbcTemplate(collabPool);
+    manager = new TenantTransactionManager(collabPool);
     legacy = new Harness();
     // Other tests run the real global ingress sweep at +3601s. Keep this independent legacy
     // fixture's injected clock ahead so its same-live-C1 assertion cannot depend on test order.
@@ -129,6 +139,9 @@ class NetworkLocalSourceHistoryIntegrationTest {
                   legacy.boot,
                   NetworkJson.canonical(result)));
       migrate(collabRoles, "collab", null);
+      // The legacy fixture prepared SELECT * against v14. Runtime starts after migrations;
+      // reopen pooled connections so server-prepared result shapes match the current schema.
+      collabPool.getHikariPoolMXBean().softEvictConnections();
     } catch (Exception | Error failure) {
       legacy.close();
       throw failure;
@@ -153,7 +166,16 @@ class NetworkLocalSourceHistoryIntegrationTest {
 
   @AfterAll
   static void stopLegacy() throws Exception {
-    if (legacy != null) legacy.close();
+    assertAll(
+        () -> {
+          if (legacy != null) legacy.close();
+        },
+        () -> {
+          if (collabPool != null) collabPool.close();
+        },
+        () -> {
+          if (iamPool != null) iamPool.close();
+        });
   }
 
   static final class Time extends Clock {
@@ -282,8 +304,16 @@ class NetworkLocalSourceHistoryIntegrationTest {
                       Set.of(),
                       Set.of("auriga.connect"),
                       Set.of(OAuthProvider.DEVICE, "refresh_token"),
-                      true)));
-      var devices = new DeviceAccessAuthority(store, sessions, tokens);
+                      true)),
+              request -> {
+                store.requireTransactionReleased();
+                return auriga.contracts.org.v1.GetEffectivePermissionsResponse.newBuilder()
+                    .setMemberTypeValue(1)
+                    .setStatusValue(1)
+                    .addPermissions("auriga.connect.collab.use")
+                    .build();
+              });
+      var devices = oauth.deviceAuthority();
       network =
           new IamNetworkAuthority(
               store,
@@ -450,7 +480,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
       return tx(
           () -> {
             UUID provider = UuidV7.next();
-            store.insert("idp_provider", provider.toString(), Json.object(), null);
+            store.insert("idp_provider", provider.toString(), Json.object("enabled", true), null);
             return sessions
                 .create(account, provider, "portal", true, Duration.ofHours(4), Duration.ofHours(4))
                 .session()
@@ -2066,6 +2096,11 @@ class NetworkLocalSourceHistoryIntegrationTest {
       if (change.equals("sessionOwner")) h.mutate("session", h.sid, "accountId", other.toString());
       h.sid = h.session(h.owner);
       h.mutate("device", h.did, "sessionId", h.sid);
+      h.mutate(
+          "device",
+          h.did,
+          "providerId",
+          h.tx(() -> store.byId("session", h.sid, false)).path("providerId").asString());
     } else {
       if (change.equals("deviceOwner")) h.mutate("device", h.did, "accountId", other.toString());
       var credential =
@@ -2090,18 +2125,26 @@ class NetworkLocalSourceHistoryIntegrationTest {
     // Explicit trusted issuer entry after administrative rebinding; every claim points at a real
     // OAuth-created device and SessionManager-created session. Prepare/redeem independently verify
     // it.
+    var session = h.tx(() -> store.byId("session", h.sid, false));
     String token =
-        h.tokens.access(
+        TenantContext.call(
             h.tenant,
-            h.owner.toString(),
-            "auriga",
-            "device",
-            "device",
-            null,
-            UUID.fromString(h.did),
-            h.clock.instant(),
-            h.clock.instant(),
-            "auriga.connect");
+            () ->
+                h.tokens.withSigningKey(
+                    () ->
+                        h.tokens
+                            .standardDevice(
+                                new DeviceAccessAuthority.Identity(
+                                    h.tenant.toString(),
+                                    h.owner.toString(),
+                                    h.did,
+                                    Instant.parse(session.path("expiresAt").asString())),
+                                session,
+                                "auriga",
+                                "auriga.connect",
+                                Set.of("auriga.connect.collab.use"),
+                                "member")
+                            .accessToken()));
     h.c = h.redeem(node, token, h.did);
     h.reference(h.c);
     h.ready(!change.equals("node"));

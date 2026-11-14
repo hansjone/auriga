@@ -30,6 +30,25 @@ public final class LoginManager {
   private final Clock clock;
   private final String issuer;
   private OAuthProvider nativeDevices;
+  private java.util.function.BiConsumer<ObjectNode, SessionManager.Issued> uacEstablished =
+      (tx, issued) -> {
+        if (tx.has("uacCredential"))
+          throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+      };
+
+  void uacEstablished(java.util.function.BiConsumer<ObjectNode, SessionManager.Issued> callback) {
+    this.uacEstablished = callback;
+  }
+
+  Result finishUac(String transactionId, JsonNode profile) {
+    ObjectNode tx = store.get("login_tx", transactionId, true);
+    IamError.validate(
+        tx != null
+            && tx.path("uacVerified").asBoolean()
+            && "pending".equals(tx.path("status").asString()));
+    tx.remove("uacPending");
+    return finish(tx, provider(tx.path("providerId").asString()), profile, false);
+  }
 
   public void nativeDevices(OAuthProvider devices) {
     this.nativeDevices = devices;
@@ -197,7 +216,8 @@ public final class LoginManager {
         () -> {
           if (previousBinding != null) {
             store.lock("login-binding:" + audience + ":" + Secrets.hash(previousBinding));
-            for (ObjectNode old : store.all("login_tx"))
+            for (ObjectNode old :
+                store.matching("login_tx", "bindingHash", Secrets.hash(previousBinding)))
               if (old.path("audience").asString().equals(audience)
                   && old.path("origin").asString().equals(origin)
                   && Secrets.same(
@@ -216,6 +236,7 @@ public final class LoginManager {
           charge("login-ip:" + ip, 30);
           String pid = request.path("providerId").asString();
           ObjectNode provider = provider(pid);
+          IamError.validate(!"uac".equals(provider.path("connectorType").asString()));
           if (request.has("nativeConnect"))
             IamError.require(
                 nativeDevices != null
@@ -347,6 +368,8 @@ public final class LoginManager {
     return store.tx(
         () -> {
           ObjectNode tx = transaction(id, binding);
+          if (tx.path("uacPending").asBoolean() && "pending".equals(tx.path("status").asString()))
+            throw new AurigaException(auriga.common.error.CommonErrors.CONFLICT);
           if (tx.path("status").asString().equals("pending") && expired(tx))
             fail(tx, provider(tx.path("providerId").asString()), "iam.login_tx_expired", "expired");
           return new Result(view(tx, provider(tx.path("providerId").asString())), null, null);
@@ -583,7 +606,7 @@ public final class LoginManager {
   private ObjectNode callbackTransaction(String providerId, Map<String, String> params) {
     String state = params.getOrDefault("state", params.getOrDefault("RelayState", ""));
     IamError.require(!state.isEmpty(), "not_found", 404);
-    return store.all("login_tx").stream()
+    return store.matching("login_tx", "providerId", providerId).stream()
         .filter(
             t ->
                 t.path("providerId").asString().equals(providerId)
@@ -593,12 +616,36 @@ public final class LoginManager {
   }
 
   private Result finish(ObjectNode tx, ObjectNode provider, JsonNode profile, boolean coreMfa) {
+    boolean uac = "uac".equals(provider.path("connectorType").asString());
     String pid = provider.path("providerId").asString(),
-        subject = profile.path("subject").asString();
+        subject =
+            uac
+                ? auriga.iam.api.UacEmployee.canonical(profile.path("subject").asString())
+                : profile.path("subject").asString();
     store.lock("identity:" + pid + ":" + subject);
     ObjectNode identity = store.get("identity", pid + ":" + subject, true),
         policy = (ObjectNode) provider.path("admission");
     String purpose = tx.path("purpose").asString();
+    if (uac) {
+      IamError.validate(tx.path("uacVerified").asBoolean() && tx.has("uacCredential"));
+      if (!purpose.equals("login")) {
+        ObjectNode source = sessions.activeById(tx.path("sessionId").asString());
+        IamError.require(
+            source != null
+                && source.path("accountId").equals(tx.path("accountId"))
+                && source.path("authTime").equals(tx.path("uacLinkAuthTime"))
+                && source.path("authGeneration").asLong() == tx.path("uacLinkGeneration").asLong(),
+            "unauthenticated",
+            401);
+        Instant now = clock.instant(), auth = Instant.parse(source.path("authTime").asString());
+        boolean fresh = !auth.isBefore(now.minusSeconds(600)) && !auth.isAfter(now.plusSeconds(30));
+        if (source.has("stepUpAt")) {
+          Instant step = Instant.parse(source.path("stepUpAt").asString());
+          fresh |= !step.isBefore(now.minusSeconds(600)) && !step.isAfter(now.plusSeconds(30));
+        }
+        IamError.require(fresh, "step_up_required", 403);
+      }
+    }
     String accountId =
         identity == null
             ? tx.path("pendingAccount").asString("")
@@ -609,18 +656,36 @@ public final class LoginManager {
           "identity_already_linked",
           409);
       accountId = tx.path("accountId").asString();
+      if (uac)
+        for (ObjectNode other : store.matching("identity", "accountId", accountId))
+          IamError.require(
+              !pid.equals(other.path("providerId").asString())
+                  || !accountId.equals(other.path("accountId").asString())
+                  || subject.equals(other.path("subject").asString()),
+              "identity_already_linked",
+              409);
+    }
+    if (accountId.isEmpty()) {
+      if (uac && purpose.equals("login"))
+        accountId =
+            hooks.resolveUacEmployee(UUID.fromString(pid), subject).map(UUID::toString).orElse("");
+      if (uac && !accountId.isEmpty()) tx.put("uacResolved", true);
     }
     if (accountId.isEmpty()) {
       boolean admit =
-          policy.path("mode").asString().equals("auto_provision") && autoProvision(policy, profile)
+          !uac
+                  && policy.path("mode").asString().equals("auto_provision")
+                  && autoProvision(policy, profile)
               || policy.path("mode").asString().equals("invite_only")
                   && !tx.path("invitationCode").asString("").isBlank();
       IamError.require(admit, "admission_denied", 403);
-      accountId = UuidV7.next().toString();
+      accountId = uac ? tx.path("uacPendingAccountId").asString() : UuidV7.next().toString();
+      IamError.require(!accountId.isBlank(), "admission_denied", 403);
       tx.put("pendingAccount", accountId);
       tx.put("newAccount", true);
     }
     ObjectNode account = store.get("account", accountId, true);
+    if (uac && account == null && tx.path("uacResolved").asBoolean()) tx.put("newAccount", true);
     if (account == null && tx.path("newAccount").asBoolean()) {
       account =
           Json.object(
@@ -679,13 +744,20 @@ public final class LoginManager {
     }
     if (identity == null) {
       if (tx.path("newAccount").asBoolean() && store.get("account", accountId, false) == null) {
-        if (policy.path("mode").asString().equals("invite_only")) {
+        if (policy.path("mode").asString().equals("invite_only")
+            && !tx.path("uacResolved").asBoolean()) {
           ObjectNode inviteProfile =
               profile.isObject() ? ((ObjectNode) profile).deepCopy() : Json.object();
           inviteProfile.put("accountId", accountId);
           boolean redeemed =
-              hooks.consumeInvitation(
-                  tx.path("invitationCode").asString(), UUID.fromString(pid), inviteProfile);
+              uac
+                  ? hooks.consumeUacInvitation(
+                      tx.path("invitationCode").asString(),
+                      UUID.fromString(pid),
+                      subject,
+                      UUID.fromString(accountId))
+                  : hooks.consumeInvitation(
+                      tx.path("invitationCode").asString(), UUID.fromString(pid), inviteProfile);
           if (!redeemed) {
             if (team) teamAccounts.abandonRegistration(pid, subject);
             throw IamError.error("admission_denied", 403);
@@ -726,6 +798,16 @@ public final class LoginManager {
               "linked"),
           null);
     }
+    if (uac) {
+      var member =
+          hooks
+              .uacMember(UUID.fromString(accountId))
+              .orElseThrow(() -> IamError.error("account_disabled", 403));
+      IamError.require(
+          Set.of("member", "external").contains(member.memberType()), "admission_denied", 403);
+      account.put("displayName", member.displayName());
+      account.put("memberType", member.memberType());
+    }
     identity.set("profile", profile);
     identity.put("lastLoginAt", clock.instant().toString());
     account.put("lastLoginAt", clock.instant().toString());
@@ -735,10 +817,11 @@ public final class LoginManager {
         profile.path("displayName").asString(account.path("displayName").asString("")));
     if (profile.path("emailVerified").asBoolean())
       account.put("email", profile.path("email").asString());
-    hooks.synchronize(UUID.fromString(accountId), profile, policy.path("attributeMapping"));
+    if (!uac)
+      hooks.synchronize(UUID.fromString(accountId), profile, policy.path("attributeMapping"));
     store.save("account", account);
     SessionManager.Issued issued = null;
-    if (purpose.equals("login"))
+    if (purpose.equals("login")) {
       issued =
           sessions.create(
               UUID.fromString(accountId),
@@ -747,7 +830,8 @@ public final class LoginManager {
               mfa,
               Duration.ofSeconds(policy.path("sessionTtlSeconds").asLong(604800)),
               Duration.ofSeconds(policy.path("idleTimeoutSeconds").asLong(86400)));
-    else {
+      if (uac) uacEstablished.accept(tx, issued);
+    } else {
       ObjectNode active = sessions.activeById(tx.path("sessionId").asString());
       IamError.require(active != null, "unauthenticated", 401);
       if (purpose.equals("stepup")) {
@@ -797,6 +881,7 @@ public final class LoginManager {
     tx.remove("pendingProfile");
     tx.remove("firstTotpSecret");
     tx.remove("state");
+    tx.remove("uacCredential");
     tx.set("step", Json.object("type", "complete", "redirectTo", tx.path("returnTo").asString()));
     store.save("login_tx", tx);
     return new Result(view(tx, provider), null, issued);

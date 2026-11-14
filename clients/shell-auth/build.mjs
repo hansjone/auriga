@@ -1,0 +1,147 @@
+import {
+  mkdirSync,
+  readdirSync,
+  copyFileSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  cpSync,
+} from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { safePath } from './vault.mjs';
+import { buildHelper } from './windows/build.mjs';
+const source = dirname(fileURLToPath(import.meta.url));
+export function buildBroker(output) {
+  output = resolve(output);
+  safePath(output);
+  if (output === source || (existsSync(output) && readdirSync(output).length))
+    throw new Error('empty broker output directory required');
+  mkdirSync(output, { recursive: true });
+  const files = readdirSync(source).filter(
+    (f) =>
+      f.endsWith('.mjs') &&
+      !['build.mjs', 'eslint.config.mjs', 'network-core.mjs'].includes(f),
+  );
+  for (const part of ['public', 'windows']) {
+    mkdirSync(join(output, part), { recursive: true });
+    for (const file of readdirSync(join(source, part)))
+      if (part === 'public') files.push(part + '/' + file);
+  }
+  for (const file of files)
+    copyFileSync(join(source, file), join(output, file));
+  const helper = 'windows/shell-helper.exe';
+  buildHelper(join(output, helper));
+  files.push(helper);
+  const rootLoader = createRequire(
+    new URL('../../package.json', import.meta.url),
+  );
+  const esbuild = createRequire(rootLoader.resolve('vite/package.json'))(
+    'esbuild',
+  );
+  esbuild.buildSync({
+    entryPoints: [join(source, 'network-core.mjs')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    outfile: join(output, 'network-core.bundle.mjs'),
+    banner: {
+      js: "import {createRequire as networkRequire} from 'node:module'; const require=networkRequire(import.meta.url);",
+    },
+    external: ['bufferutil', 'utf-8-validate'],
+  });
+  files.push('network-core.bundle.mjs');
+  for (const part of ['auth', 'plugin']) {
+    mkdirSync(join(output, 'schemas', part), { recursive: true });
+    for (const name of part === 'auth'
+      ? [
+          'uac-login-info',
+          'uac-session-binding',
+          'uac-control',
+          'standard-device',
+        ]
+      : ['shell-auth', 'shell-auth-control', 'shell-business']) {
+      const file = `schemas/${part}/${name}.schema.json`;
+      copyFileSync(
+        join(source, '../../contracts', part, name + '.schema.json'),
+        join(output, file),
+      );
+      files.push(file);
+    }
+  }
+  const operations = 'schemas/plugin/shell-business-operations.json';
+  copyFileSync(
+    join(source, '../../contracts/plugin/shell-business-operations.json'),
+    join(output, operations),
+  );
+  files.push(operations);
+  mkdirSync(join(output, 'schemas', 'network'), { recursive: true });
+  for (const name of [
+    'address',
+    'envelope',
+    'source-control',
+    'protocol',
+    'keyset',
+    'send',
+  ]) {
+    const file = 'schemas/network/' + name + '.schema.json';
+    copyFileSync(
+      join(source, '../../contracts/network', name + '.schema.json'),
+      join(output, file),
+    );
+    files.push(file);
+  }
+  const loader = createRequire(
+    new URL('../dsh-plugin/package.json', import.meta.url),
+  );
+  const dependencyLoader = createRequire(loader.resolve('ajv/package.json'));
+  const walk = (directory, prefix) => {
+    for (const item of readdirSync(directory, { withFileTypes: true })) {
+      const path = prefix + '/' + item.name;
+      if (item.isDirectory()) walk(join(directory, item.name), path);
+      else files.push(path);
+    }
+  };
+  for (const name of [
+    'ajv',
+    'fast-deep-equal',
+    'fast-uri',
+    'json-schema-traverse',
+    'require-from-string',
+  ]) {
+    const packageDirectory = dirname(
+      (name === 'ajv' ? loader : dependencyLoader).resolve(
+        name + '/package.json',
+      ),
+    );
+    const relative = 'node_modules/' + name;
+    mkdirSync(join(output, 'node_modules'), { recursive: true });
+    cpSync(packageDirectory, join(output, relative), {
+      recursive: true,
+      dereference: true,
+    });
+    walk(join(output, relative), relative);
+  }
+  const manifest = {
+    version: 1,
+    files: files.sort().map((path) => ({
+      path,
+      sha256: createHash('sha256')
+        .update(readFileSync(join(output, path)))
+        .digest('hex'),
+    })),
+  };
+  writeFileSync(
+    join(output, 'broker-manifest.json'),
+    JSON.stringify(manifest, null, 2),
+  );
+  return manifest;
+}
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  buildBroker(process.argv[2]);

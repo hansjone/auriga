@@ -2,7 +2,7 @@ import { setImmediate } from 'node:timers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountInstanceLogin } from '../src/native-login/page';
 import type { LoginTransaction } from '../../shared/src/api/iam';
-import type { ClientStep } from '../../../clients/dsh-plugin/src/generated/steps';
+import type { ClientStep } from '../../shared/src/generated/steps';
 import type { Instance } from '../src/workspace';
 
 const txId = '01900000-0000-7000-8000-000000000001';
@@ -160,6 +160,63 @@ afterEach(() => {
 });
 
 describe('native cloud sign-in', () => {
+  it('opens the workspace without waiting for department information and updates the identity area later', async () => {
+    let reads = 0;
+    fetcher.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === '/api/iam/v1/me') {
+        reads++;
+        return json({
+          ...me,
+          uacLoginInfo:
+            reads === 1
+              ? { purpose: 'login_info', status: 'pending' }
+              : {
+                  purpose: 'login_info',
+                  status: 'available',
+                  department: 'Synthetic department',
+                  updatedAt: '2026-11-14T01:00:00Z',
+                },
+        });
+      }
+      if (path.endsWith('/open')) return json({ instance: starting });
+      return json(starting);
+    });
+    render();
+    await flush();
+    expect(fetcher.mock.calls.map(([path]) => path)).toContain(
+      '/api/workspace/v1/me/instance/open',
+    );
+    expect(
+      root.querySelector('[data-testid=uac-department]')?.textContent,
+    ).toBe('部门信息暂不可用');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(
+      root.querySelector('[data-testid=uac-department]')?.textContent,
+    ).toContain('所属部门：Synthetic department');
+    expect(
+      fetcher.mock.calls.filter(([, init]) => init?.method === 'POST'),
+    ).toHaveLength(1);
+  });
+  it('continues entering a ready workspace when department information is unavailable', async () => {
+    fetcher
+      .mockResolvedValueOnce(
+        json({
+          ...me,
+          uacLoginInfo: { purpose: 'login_info', status: 'unavailable' },
+        }),
+      )
+      .mockResolvedValueOnce(json({ instance: ready }));
+    render();
+    await flush();
+    expect(
+      root.querySelector('[data-testid=uac-department]')?.textContent,
+    ).toBe('部门信息暂不可用');
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      '/open/instance%2Fone%3Fx',
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
   it('offers a real logout anchor only after portal identity confirmation, including preparation failure', async () => {
     const late = deferred<Response>();
     fetcher
@@ -218,7 +275,7 @@ describe('native cloud sign-in', () => {
     expect(logout.hidden).toBe(false);
     await vi.advanceTimersByTimeAsync(2000);
     expect(logout.hidden).toBe(true);
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith('/instance-login.html');
   });
 
   it('uses real IAM form/TOTP shapes, verifies the session, opens and waits for ready before entering', async () => {
@@ -543,7 +600,7 @@ describe('native cloud sign-in', () => {
     expect(root.textContent).toContain('已失效');
     await vi.advanceTimersByTimeAsync(120_000);
     expect(fetcher).toHaveBeenCalledTimes(3);
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith('/instance-login.html');
   });
 
   it.each(['me', 'open', 'poll'])(

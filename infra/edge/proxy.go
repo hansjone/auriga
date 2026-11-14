@@ -38,6 +38,12 @@ func (p *traceReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy := *p.ReverseProxy // callbacks and response headers are request-local
 	modify, onError := proxy.ModifyResponse, proxy.ErrorHandler
 	proxy.ModifyResponse = func(response *http.Response) error {
+		ids := response.Header.Values(uacCorrelationHeader)
+		if len(ids) == 1 && uacUUID.MatchString(ids[0]) {
+			w.Header().Del(uacCorrelationHeader)
+		} else {
+			response.Header.Del(uacCorrelationHeader)
+		}
 		if modify != nil {
 			if err := modify(response); err != nil {
 				return err
@@ -89,6 +95,7 @@ func newReverseProxy(target *url.URL, tr http.RoundTripper, keepHost bool) *trac
 }
 
 func rewriteOutboundAPI(req *http.Request, clientIP, bearer, requestID, traceparent string) {
+	req.Header.Del(uacCorrelationHeader)
 	// Strip browser session cookies; keep non-auriga cookies only if any remain.
 	if c := req.Header.Get("Cookie"); c != "" {
 		stripped := stripAurigaCookies(c, true)

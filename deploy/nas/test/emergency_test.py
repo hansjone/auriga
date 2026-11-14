@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest import mock
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('emergency', ROOT / 'scripts/emergency.py')
@@ -45,8 +45,13 @@ class DisplayTests(unittest.TestCase):
                     self.assertIn(value, text)
                 uri = next(line for line in text.splitlines() if line.startswith('otpauth://'))
                 self.assertEqual(urlsplit(uri).scheme, 'otpauth')
+                self.assertEqual(unquote(urlsplit(uri).path),
+                                 '/Auriga DSH:' + self.credentials['username'])
+                self.assertIn('Auriga%20DSH%3A', urlsplit(uri).path)
+                self.assertIn('issuer=Auriga%20DSH', urlsplit(uri).query)
+                self.assertNotIn('+', uri)
                 self.assertEqual(parse_qs(urlsplit(uri).query), {
-                    'secret': [self.credentials['totpSecret']], 'issuer': ['Auriga'],
+                    'secret': [self.credentials['totpSecret']], 'issuer': ['Auriga DSH'],
                     'algorithm': ['SHA1'], 'digits': ['6'], 'period': ['30'],
                 })
                 self.assertIn('成员 → 邀请', text)
