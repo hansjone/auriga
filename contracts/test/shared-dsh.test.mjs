@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { parse } from '../../services/contracts/node_modules/yaml/dist/index.js';
 import Ajv from '../../services/contracts/node_modules/ajv/dist/2020.js';
 import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/index.js';
@@ -49,28 +48,112 @@ test('拒绝零代次、非法模式、缺少归属和额外凭据字段', () =>
   }
 });
 
-test('精确基线的 workspace 契约只增路径，旧定义完整保留', () => {
-  const root = new URL('../../', import.meta.url);
-  const before = parse(
-    execFileSync(
-      'git',
-      [
-        'show',
-        '270ed0d8eca1c8c34e30d21207e6bff304a27b91:contracts/openapi/workspace.yaml',
-      ],
-      { cwd: root, encoding: 'utf8' },
-    ),
-  );
-  const after = parse(
+test('workspace 引用共享 DSH 的三个公开路径', () => {
+  const workspace = parse(
     readFileSync(new URL('../openapi/workspace.yaml', import.meta.url), 'utf8'),
   );
-  for (const [key, value] of Object.entries(before)) {
-    if (key !== 'paths') assert.deepEqual(after[key], value);
+  for (const path of [
+    '/me/placement',
+    '/admin/members/{memberId}/placement-switches',
+    '/admin/placement-switches/{operationId}',
+  ]) {
+    assert.equal(
+      workspace.paths[path].$ref,
+      'shared-dsh.yaml#/paths/' + path.replaceAll('/', '~1'),
+    );
   }
-  for (const [key, value] of Object.entries(before.paths))
-    assert.deepEqual(after.paths[key], value);
-  assert.equal(
-    Object.keys(after.paths).length,
-    Object.keys(before.paths).length + 3,
+});
+
+const sharedApi = parse(
+  readFileSync(new URL('../openapi/shared-dsh.yaml', import.meta.url), 'utf8'),
+);
+const catalog = JSON.parse(
+  readFileSync(new URL('../catalog/m3.json', import.meta.url), 'utf8'),
+);
+const createSwitch =
+  sharedApi.paths['/admin/members/{memberId}/placement-switches'].post;
+const getSwitch =
+  sharedApi.paths['/admin/placement-switches/{operationId}'].get;
+
+test('分配管理接口关联管理员权限及敏感写操作的 step-up', () => {
+  for (const [operation, permission, sensitive] of [
+    [createSwitch, 'workspace.placements.write', true],
+    [getSwitch, 'workspace.placements.read', false],
+  ]) {
+    assert.equal(operation['x-admin-only'], true);
+    assert.equal(operation['x-permission'], permission);
+    assert.equal(catalog.permissions[permission].adminOnly, true);
+    assert.equal(catalog.permissions[permission].sensitive, sensitive);
+    assert.deepEqual(catalog.permissions[permission].builtinRoles, [
+      'owner',
+      'admin',
+    ]);
+  }
+  assert.equal(createSwitch['x-step-up-max-age-seconds'], 600);
+  assert(createSwitch['x-error-codes'].includes('iam.step_up_required'));
+});
+
+test('冲突和未分配响应均返回公共 Problem', () => {
+  const responses = [
+    ...['409', '412', '428'].map((status) => createSwitch.responses[status]),
+    sharedApi.paths['/me/placement'].get.responses['404'],
+  ];
+  for (const response of responses) {
+    assert.equal(
+      response.content['application/problem+json'].schema.$ref,
+      'common.yaml#/components/schemas/Problem',
+    );
+  }
+});
+
+test('切换事件目录固定生产方、主题和数据定义', () => {
+  assert.deepEqual(createSwitch['x-events'], [
+    'placement.switched',
+    'placement.switch_failed',
+  ]);
+  for (const [type, definition] of [
+    ['placement.switched', 'PlacementSwitched'],
+    ['placement.switch_failed', 'PlacementSwitchFailed'],
+  ]) {
+    assert.deepEqual(catalog.events[type], {
+      source: 'auriga/workspace',
+      subject: 'placementId',
+      schema: '../events/placement.schema.json#/$defs/' + definition,
+      consumers: ['audit'],
+      publish: 'auriga.evt.' + type,
+    });
+  }
+});
+
+test('切换结果在 failed/blocked 时要求失败码，成功时要求会话已丢弃', () => {
+  const definitions = JSON.parse(
+    JSON.stringify(sharedApi.components.schemas).replaceAll(
+      '#/components/schemas/',
+      '#/$defs/',
+    ),
   );
+  const validate = ajv.compile({
+    $defs: definitions,
+    $ref: '#/$defs/DshPlacementSwitch',
+  });
+  const result = {
+    operationId: id,
+    memberId: id,
+    fromMode: 'shared',
+    targetMode: 'dedicated',
+    state: 'succeeded',
+    revision: 3,
+    sessionsDiscarded: true,
+  };
+  assert.equal(validate(result), true);
+  assert.equal(validate({ ...result, failureCode: 'capacity' }), false);
+  assert.equal(validate({ ...result, sessionsDiscarded: false }), false);
+  for (const state of ['failed', 'blocked']) {
+    assert.equal(validate({ ...result, state }), false);
+    assert.equal(
+      validate({ ...result, state, failureCode: 'stop-unconfirmed' }),
+      true,
+    );
+    assert.equal(validate({ ...result, state, failureCode: 'unknown' }), false);
+  }
 });

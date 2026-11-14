@@ -27,7 +27,7 @@ export interface paths {
     put?: never;
     /**
      * 提权到独立或降权回共享
-     * @description ctx=admin，workspace.placements.write，近期 step-up，Origin/CSRF。
+     * @description ctx=admin，workspace.placements.write，600秒内 step-up，Origin/CSRF。
      *     tenant 来自可信上下文，memberId 必须属于该租户。UAC 与邀请成员规则一致。
      *     If-Match 必须匹配当前分配修订；每成员最多一个在途操作。
      *     Idempotency-Key 按租户、操作者、成员及请求指纹绑定；同键异请求返回409。
@@ -893,7 +893,7 @@ export interface components {
         | 'prepare-failed'
         | 'revoked'
         | 'recovery-required';
-    };
+    } & (unknown & unknown);
     OpsUpgradeInventory: {
       /** Format: date-time */
       reportedAt: string;
@@ -1189,6 +1189,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthenticated'];
+      /** @description 尚未创建本人分配（包括首次登录尚未 open），返回 common.not_found。 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
     };
   };
   createDshPlacementSwitch: {
@@ -1226,21 +1235,27 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
       };
       /** @description 分配修订已变化。 */
       412: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
       };
-      /** @description 缺少 If-Match。 */
+      /** @description 缺少 If-Match，返回 common.validation_failed。 */
       428: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
       };
     };
   };
@@ -1265,6 +1280,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };

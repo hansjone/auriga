@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "workspace.placement_* 草案事件，由 workspace 发布",
+  "title": "placement.switched / placement.switch_failed 草案事件，由 workspace 发布",
   "$defs": {
     "PlacementSwitchResult": {
       "type": "object",
@@ -38,7 +38,7 @@
       ]
     },
     "PlacementSwitched": {
-      "description": "workspace.placement_switched；新模式正常入口已探测成功后发布。",
+      "description": "placement.switched 在新模式正常入口已探测成功后发布。",
       "allOf": [
         { "$ref": "#/$defs/PlacementSwitchResult" },
         {
@@ -51,7 +51,7 @@
       ]
     },
     "PlacementSwitchFailed": {
-      "description": "workspace.placement_switch_failed；不代表旧会话恢复。",
+      "description": "placement.switch_failed 记录切换失败及实际会话处置结果。",
       "allOf": [
         { "$ref": "#/$defs/PlacementSwitchResult" },
         {

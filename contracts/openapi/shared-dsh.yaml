@@ -28,13 +28,30 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DshPlacement' }
         '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+        '404':
+          description: 尚未创建本人分配（包括首次登录尚未 open），返回 common.not_found。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
   /admin/members/{memberId}/placement-switches:
     post:
       tags: [placements]
       operationId: createDshPlacementSwitch
+      x-admin-only: true
+      x-permission: workspace.placements.write
+      x-step-up-max-age-seconds: 600
+      x-error-codes:
+        - iam.step_up_required
+        - common.unauthenticated
+        - common.forbidden
+        - common.not_found
+        - common.conflict
+        - common.precondition_failed
+        - common.validation_failed
+      x-events: [placement.switched, placement.switch_failed]
       summary: 提权到独立或降权回共享
       description: |
-        ctx=admin，workspace.placements.write，近期 step-up，Origin/CSRF。
+        ctx=admin，workspace.placements.write，600秒内 step-up，Origin/CSRF。
         tenant 来自可信上下文，memberId 必须属于该租户。UAC 与邀请成员规则一致。
         If-Match 必须匹配当前分配修订；每成员最多一个在途操作。
         Idempotency-Key 按租户、操作者、成员及请求指纹绑定；同键异请求返回409。
@@ -69,14 +86,25 @@ paths:
         '404': { $ref: 'common.yaml#/components/responses/NotFound' }
         '409':
           description: 在途、相同模式、幂等冲突或容量不足。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
         '412':
           description: 分配修订已变化。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
         '428':
-          description: 缺少 If-Match。
+          description: 缺少 If-Match，返回 common.validation_failed。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
   /admin/placement-switches/{operationId}:
     get:
       tags: [placements]
       operationId: getDshPlacementSwitch
+      x-admin-only: true
+      x-permission: workspace.placements.read
       summary: 读取模式切换结果
       parameters:
         - name: operationId
@@ -90,6 +118,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DshPlacementSwitch' }
         '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
         '404': { $ref: 'common.yaml#/components/responses/NotFound' }
 components:
   securitySchemes:
@@ -169,3 +198,20 @@ components:
               ],
           }
       description: succeeded 不带 failureCode；failed/blocked 必须带；fromMode 与 targetMode 必须不同，服务端校验。
+      allOf:
+        - if:
+            properties:
+              state: { enum: [failed, blocked] }
+            required: [state]
+          then:
+            properties:
+              failureCode: { type: string }
+            required: [failureCode]
+        - if:
+            properties:
+              state: { const: succeeded }
+            required: [state]
+          then:
+            properties:
+              failureCode: false
+              sessionsDiscarded: { const: true }
