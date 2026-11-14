@@ -140,7 +140,7 @@ func stripUntrustedEntryHeaders(h http.Header) {
 	for name := range h {
 		n := strings.ToLower(name)
 		if n == "forwarded" || strings.HasPrefix(n, "x-forwarded-") || strings.HasPrefix(n, "x-auriga-") && n != "x-auriga-csrf" && n != "x-auriga-csrf-bootstrap" || n == "auriga-identity" || n == "x-real-ip" || n == "auriga-tenant-id" || n == "x-tenant-id" || n == "x-audience" {
-			h.Del(name)
+			delete(h, name)
 		}
 	}
 }
@@ -222,7 +222,7 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 		}
 		// A browser write carrying any Auriga session cookie must never escape
 		// Origin validation through an additional Bearer or Fetch Metadata header.
-		cookieWrite := isWriteMethod(r.Method) && hasAurigaCookie(r)
+		cookieWrite := isWriteMethod(r.Method) && hasAurigaCookie(r) && !g.sharedTicketRequest(r)
 		loginWrite := isWriteMethod(r.Method) && strings.HasPrefix(r.URL.Path, "/api/iam/v1/login/")
 		// A registered provider's form callback is authenticated by IAM's
 		// protocol state/signature and only creates a short-lived resume.

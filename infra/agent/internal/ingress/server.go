@@ -29,6 +29,7 @@ type Config struct {
 	Registry     Registry
 	Tickets      *TicketVerifier
 	IdentityKeys IdentityKeys
+	Shared       *SharedIngress
 	Executor     IdentityExecutor
 	Logger       *slog.Logger
 	Now          func() time.Time
@@ -100,6 +101,15 @@ func (s *Server) withEdgeGate(next http.Handler) http.Handler {
 
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+	if strings.HasPrefix(path, "/files/") || strings.HasPrefix(path, "/logs/") {
+		parts := strings.SplitN(path, "/", 4)
+		if len(parts) > 2 {
+			if inst, ok := s.cfg.Registry.Lookup(parts[2]); ok && inst.Shared {
+				writeProblem(w, 403, CodeUnauthorized, "Forbidden", "shared file/log routes disabled")
+				return
+			}
+		}
+	}
 	switch {
 	case strings.HasPrefix(path, "/i/"):
 		id, rest := splitID(strings.TrimPrefix(path, "/i/"))
