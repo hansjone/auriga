@@ -31,6 +31,8 @@ public final class WorkspaceAdmin {
         () -> {
           store.lock();
           var row = store.instance(id);
+          if (Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
+            throw new AurigaException(CommonErrors.CONFLICT);
           var previous = WorkspaceService.spec(row);
           if (ifMatch != null && !ifMatch.equals("\"" + previous.getGeneration() + "\""))
             throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
@@ -131,6 +133,8 @@ public final class WorkspaceAdmin {
         () -> {
           store.lock();
           var row = store.instance(id);
+          if (Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
+            throw new AurigaException(CommonErrors.CONFLICT);
           var previous = WorkspaceService.spec(row);
           service.saveSpec(
               row,
