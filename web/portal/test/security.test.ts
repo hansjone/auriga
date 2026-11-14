@@ -64,7 +64,8 @@ describe('account security', () => {
           { path: '/login', component: { template: '<div />' } },
         ],
       });
-      bindApiRouter(router);
+      const navigate = vi.fn();
+      bindApiRouter(router, navigate);
       await router.push('/account/security');
       const wrapper = mount(SecurityView, {
         global: { plugins: [router, createAurigaI18n('zh-CN')] },
@@ -78,9 +79,13 @@ describe('account security', () => {
         .setValue('new-password');
       await wrapper.get('form').trigger('submit');
       await flushPromises();
-      expect(router.currentRoute.value.path).toBe(
-        code === 'iam.invalid_credentials' ? '/account/security' : '/login',
-      );
+      expect(router.currentRoute.value.path).toBe('/account/security');
+      if (code === 'iam.invalid_credentials')
+        expect(navigate).not.toHaveBeenCalled();
+      else
+        expect(navigate).toHaveBeenCalledExactlyOnceWith(
+          '/login?returnTo=%2Faccount%2Fsecurity',
+        );
       expect(wrapper.find('[role="alert"]').exists()).toBe(true);
       if (code === 'iam.invalid_credentials') {
         expect(wrapper.text()).toContain('用户名或口令不正确');
