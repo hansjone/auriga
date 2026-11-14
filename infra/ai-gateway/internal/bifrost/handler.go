@@ -145,7 +145,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Accept OpenAI chat parameters only; provider URLs, credentials, hooks
 		// and Bifrost-specific routing controls belong to the administrator.
 		allowed := map[string]bool{}
-		for _, name := range []string{"model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "temperature", "top_p", "tools", "tool_choice", "response_format", "seed", "stop", "n", "presence_penalty", "frequency_penalty", "logit_bias", "logprobs", "top_logprobs", "parallel_tool_calls", "reasoning_effort", "service_tier", "user", "metadata"} {
+		for _, name := range strings.Fields(chatParameters) {
 			allowed[name] = true
 		}
 		// store:false/null is a standard client opt-out and is dropped here; the

@@ -483,6 +483,11 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		rejectOutputTokenLimit(w, "/max_tokens", 0)
 		return
 	}
+	sharedBinding, originErr := sharedOrigin(fields["metadata"], tenant, key, r.Header.Get("Idempotency-Key"))
+	if originErr != nil {
+		reject(w, originErr)
+		return
+	}
 	delete(fields, "metadata")
 	fields["user"], _ = json.Marshal(b.pseudonym(tenant, key.Id))
 	if stream {
@@ -509,6 +514,9 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	}
 	outputEstimate = protocolOutputEstimate(routes, outputEstimate)
 	admission := &ai.BudgetAdmission{TenantId: tenant, AccountId: key.Id, ModelId: pool.Id, ProviderId: routes[0].ID, CredentialId: routes[0].ID, Currency: "USD", PriceVersion: pool.Price.Version, InputTokenUpperBound: inputEstimate, MaxOutputTokens: outputEstimate, MonthlyBudgetMicros: &key.MonthlyBudgetMicros, Origin: &ai.BudgetAdmission_DeviceId{DeviceId: device}, TokenExpiresAt: timestamppb.New(expiry)}
+	if sharedBinding != nil {
+		admission.Origin = &ai.BudgetAdmission_InstanceId{InstanceId: sharedBinding.PhysicalInstanceID}
+	}
 	if key.Source == "member" && key.GetMeteringOnly() {
 		admission.MeteringOnly = true
 		admission.MonthlyBudgetMicros = nil
