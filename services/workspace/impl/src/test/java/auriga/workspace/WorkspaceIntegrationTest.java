@@ -166,6 +166,86 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void sharedMaintenanceHoldBlocksLegacyOpenRestartDispatchCredentialsAndAdminDeletion() {
+    UUID id = TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    String oldToken =
+        store.in(
+            tenant,
+            () ->
+                new String(
+                    managedCrypto.decrypt(
+                        (byte[]) store.instance(id).get("token_encrypted"), tenant + "/" + id),
+                    java.nio.charset.StandardCharsets.UTF_8));
+    var port =
+        new auriga.workspace.api.SharedDshAuthority.Inputs() {
+          public void requireMember(UUID t, UUID m) {}
+
+          public void requireSession(UUID t, UUID m, UUID session) {}
+
+          public String authorizationSetDigest(UUID t, UUID m) {
+            return "sha256:" + "a".repeat(64);
+          }
+
+          public SharedDshResourceView resourceView(SharedDshBinding binding) {
+            throw new UnsupportedOperationException();
+          }
+
+          public void requirePlacementWrite(UUID t, UUID actor, UUID session, long now) {}
+        };
+    var placements = new SharedDshPlacements(store, port, b -> true, clock);
+    var maintenance = new SharedDshMaintenance(store, placements, port, clock);
+    UUID batch = UUID.randomUUID(), session = UUID.randomUUID();
+    TenantContext.run(
+        tenant,
+        () ->
+            maintenance.plan(
+                owner,
+                session,
+                batch,
+                clock.instant().getEpochSecond(),
+                List.of(new SharedDshMaintenance.Choice(owner, id, false))));
+    TenantContext.call(tenant, () -> maintenance.start(owner, session, batch));
+    assertThrows(
+        AurigaException.class, () -> TenantContext.call(tenant, () -> service.open(owner)));
+    assertThrows(
+        AurigaException.class,
+        () -> TenantContext.call(tenant, () -> service.operate(id, actor(), "restart")));
+    assertThrows(
+        AurigaException.class,
+        () -> TenantContext.call(tenant, () -> service.authenticateInstance(oldToken)));
+    var admin = new WorkspaceAdmin(service, inputs);
+    assertThrows(
+        AurigaException.class,
+        () -> TenantContext.run(tenant, () -> admin.delete(id, true, owner)));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            TenantContext.call(
+                tenant, () -> admin.patch(id, WorkspaceService.JSON.createObjectNode(), null)));
+    long generation =
+        store.in(tenant, () -> ((Number) store.instance(id).get("generation")).longValue());
+    TenantContext.run(tenant, () -> service.tickTenant());
+    assertEquals(
+        generation,
+        store.in(tenant, () -> ((Number) store.instance(id).get("generation")).longValue()));
+    assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(id))));
+    assertEquals(
+        DesiredState.DESIRED_STATE_STOPPED,
+        store.in(tenant, () -> WorkspaceService.spec(store.instance(id)).getDesired()));
+    var authority = new WorkspaceManagedBindings(store, inputs);
+    assertFalse(
+        TenantContext.call(
+                tenant,
+                () ->
+                    authority.get(
+                        auriga.contracts.workspace.v1.GetManagedInstanceBindingRequest.newBuilder()
+                            .setTenantId(tenant.toString())
+                            .setInstanceId(id.toString())
+                            .build()))
+            .getActive());
+  }
+
+  @Test
   void unifiedIncrementalIntentsWaitForGapsAndApplyInOrder() throws Exception {
     var control = new RecoveryControl(tenant);
     UUID instance =

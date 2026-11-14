@@ -189,7 +189,11 @@ public final class SharedDshPlacements implements SharedDshAuthority {
                   "SELECT * FROM shared_dsh_pool WHERE tenant_id=? AND id=?",
                   tenant(),
                   row.get("pool_id"));
-          conflict(!pool.get("state").equals("blocked"));
+          conflict(
+              !pool.get("state").equals("blocked")
+                  && pool.get("authorization_digest")
+                      .equals(
+                          inputs.authorizationSetDigest(tenant(), (UUID) row.get("member_id"))));
           store.jdbc.update(
               "UPDATE shared_dsh_pool SET state='ready' WHERE tenant_id=? AND id=?",
               tenant(),
@@ -376,30 +380,58 @@ public final class SharedDshPlacements implements SharedDshAuthority {
           if (number(row, "revision") != revision)
             throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
           conflict(row.get("state").equals("ready") && !row.get("mode").equals(target));
-          UUID pool = reserve(member, target), id = UuidV7.next();
-          var source = binding(row);
-          fence(row);
-          store.jdbc.update(
-              "UPDATE shared_dsh_placement SET state='switching' WHERE tenant_id=? AND id=?",
-              tenant(),
-              row.get("id"));
-          var command = intent(id.toString(), source, "cooperative-cancel");
-          store.jdbc.update(
-              "INSERT INTO shared_dsh_operation(id,tenant_id,placement_id,actor_id,idempotency_key,fingerprint,source_binding,target_pool,target_mode,action_started_at,intent) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-              id,
-              tenant(),
-              row.get("id"),
-              actor,
-              key,
-              fingerprint,
-              source.toByteArray(),
-              pool,
-              target,
-              now(),
-              command.toByteArray());
-          emit("runtime", command);
-          return id;
+          return enqueue(row, actor, target, key, fingerprint, "switch");
         });
+  }
+
+  // Both migration and mode changes use one fenced, recoverable receipt pipeline.
+  UUID rebuild(UUID member, UUID actor, String target, UUID batch) {
+    return locked(
+        () -> {
+          var row = member(member);
+          conflict(row.get("state").equals("ready"));
+          return enqueue(
+              row,
+              actor,
+              target,
+              "maintenance:" + batch + ":" + member,
+              batch + ":" + member + ":" + target,
+              "maintenance");
+        });
+  }
+
+  private UUID enqueue(
+      Map<String, Object> row,
+      UUID actor,
+      String target,
+      String key,
+      String fingerprint,
+      String purpose) {
+    UUID member = (UUID) row.get("member_id");
+    UUID pool = reserve(member, target), id = UuidV7.next();
+    var source = binding(row);
+    fence(row);
+    store.jdbc.update(
+        "UPDATE shared_dsh_placement SET state='switching' WHERE tenant_id=? AND id=?",
+        tenant(),
+        row.get("id"));
+    var command = intent(id.toString(), source, "cooperative-cancel");
+    store.jdbc.update(
+        "INSERT INTO shared_dsh_operation(id,tenant_id,placement_id,actor_id,idempotency_key,fingerprint,source_binding,target_pool,target_mode,action_started_at,intent,purpose) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        id,
+        tenant(),
+        row.get("id"),
+        actor,
+        key,
+        fingerprint,
+        source.toByteArray(),
+        pool,
+        target,
+        now(),
+        command.toByteArray(),
+        purpose);
+    emit("runtime", command);
+    return id;
   }
 
   /** Recoverable timer; call after process restart as well. No ACK never means success. */
@@ -605,6 +637,17 @@ public final class SharedDshPlacements implements SharedDshAuthority {
               "UPDATE shared_dsh_operation SET state='succeeded',failure_code=NULL WHERE tenant_id=? AND id=?",
               tenant(),
               id);
+          if (op.get("purpose").equals("maintenance")) {
+            store.jdbc.update(
+                "UPDATE instance SET deleted=true,ready=false,purge_data=false,deletion_event_sent=true WHERE tenant_id=? AND id IN (SELECT legacy_instance_id FROM shared_dsh_maintenance WHERE tenant_id=? AND operation_id=?)",
+                tenant(),
+                tenant(),
+                id);
+            store.jdbc.update(
+                "UPDATE shared_dsh_maintenance SET state='succeeded' WHERE tenant_id=? AND operation_id=?",
+                tenant(),
+                id);
+          }
           emit("placement.switched", target(op, row));
           return true;
         });
@@ -814,6 +857,8 @@ public final class SharedDshPlacements implements SharedDshAuthority {
     return store.tx(
         () -> {
           var op = operation(id);
+          if (!op.get("purpose").equals("switch"))
+            throw new AurigaException(CommonErrors.NOT_FOUND);
           var original = source(op);
           var view =
               new auriga.workspace.web.model.DshPlacementSwitch(
