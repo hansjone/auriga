@@ -4,7 +4,6 @@ window.__ModuleLoader__.load({
   id: 'auriga-dsh/client',
   factory(require) {
     const BRAND_NAME = 'Auriga DSH';
-    document.title = BRAND_NAME;
     const React = require('react');
     const {
       IconUsersOutlineRegular,

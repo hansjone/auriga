@@ -5,6 +5,24 @@ import { surfaceHost, flush, boot, response } from './shell-host.mjs';
 const button = (root, label) =>
   [...root.querySelectorAll('button')].find((el) => el.textContent === label);
 
+test('plugin loading and panel mounting preserve the native host title', async () => {
+  const title = 'DSH · Existing session';
+  const host = surfaceHost(async () => response(), { title });
+  try {
+    assert.equal(host.document.title, title);
+    const main = host.mount('main');
+    const settings = host.mount('settings.section');
+    await flush();
+    assert.equal(host.document.title, title);
+    main.close();
+    settings.close();
+    assert.equal(host.document.title, title);
+  } finally {
+    host.dispose();
+    host.close();
+  }
+});
+
 test('sidebar label uses the native SlotLabel getter contract across host locale changes', () => {
   const host = surfaceHost(async () => response());
   try {

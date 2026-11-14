@@ -81,7 +81,6 @@ const messages = {
  */
 export function createLoginView(root, options) {
   const doc = root.ownerDocument;
-  doc.title = `${BRAND_NAME} · 登录 / Sign in`;
   if (!doc.defaultView)
     throw new Error('Login view requires a browser document');
   const InputElement = doc.defaultView.HTMLInputElement;

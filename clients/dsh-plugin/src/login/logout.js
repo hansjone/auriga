@@ -1,4 +1,3 @@
-import { BRAND_NAME } from './brand.js';
 import { loginStyles } from './styles.js';
 
 /** Explicit confirmation of local device logout; the host retains ownership of tasks.
@@ -6,7 +5,6 @@ import { loginStyles } from './styles.js';
  * @param {{locale?:string,onConfirm:(context:{signal:AbortSignal})=>Promise<{loggedIn:boolean,remoteRevocation?:string}>,onReturn:()=>void,onSignedOut:()=>void}} options */
 export function createLogoutView(root, options) {
   const doc = root.ownerDocument;
-  doc.title = `${BRAND_NAME} · 退出登录 / Sign out`;
   const zh = (options.locale ?? 'zh-CN').toLowerCase().startsWith('zh');
   const text = zh
     ? {
