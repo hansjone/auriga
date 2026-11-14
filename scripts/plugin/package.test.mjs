@@ -27,7 +27,7 @@ test('package contains standalone runtime, version and matching digest; rebuild 
   const root = await mkdtemp(join(tmpdir(), 'auriga-dist-'));
   try {
     const plugin = join(root, 'clients/dsh-plugin');
-    for (const dir of ['src', 'ui', 'test', 'scripts'])
+    for (const dir of ['src', 'ui', 'test', 'scripts', 'skills'])
       await mkdir(join(plugin, dir), { recursive: true });
     const manifest = JSON.parse(
       await readFile(
@@ -43,6 +43,7 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       'cordis.patch.yml',
       'ui/auriga-team-panel.js',
       'ui/metadata.json',
+      'skills/agent-auth.js',
       'test/private.js',
       'scripts/private.js',
     ])
@@ -123,6 +124,7 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       'cordis.patch.yml',
       'ui/auriga-team-panel.js',
       'ui/metadata.json',
+      'skills/agent-auth.js',
     ])
       assert.ok(receipt.files.includes(file), file);
     assert.ok(

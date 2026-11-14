@@ -108,9 +108,15 @@ export async function packagePlugin({
     await mkdir(stage);
     for (const entry of pkg.files.filter((entry) => entry !== 'shell-auth')) {
       if (
-        !['src', 'ui', 'skills', 'network-trust', 'LICENSE', 'README.md', 'cordis.patch.yml'].includes(
-          entry,
-        )
+        ![
+          'src',
+          'ui',
+          'skills',
+          'network-trust',
+          'LICENSE',
+          'README.md',
+          'cordis.patch.yml',
+        ].includes(entry)
       )
         throw new Error(
           `Review new package file entry before releasing: ${entry}`,
@@ -128,7 +134,11 @@ export async function packagePlugin({
     await writeFile(
       join(stage, 'package.json'),
       JSON.stringify(
-        { ...runtime, version, files: [...new Set([...runtime.files, 'shell-auth'])] },
+        {
+          ...runtime,
+          version,
+          files: [...new Set([...runtime.files, 'shell-auth'])],
+        },
         null,
         2,
       ) + '\n',
@@ -189,7 +199,7 @@ if (
     });
     if (values.help) {
       console.log(
-        'node scripts/plugin/package.mjs --version <SemVer> [--out <directory>]',
+        'node scripts/plugin/package.mjs --version <SemVer> --broker-artifact <directory> [--out <directory>]',
       );
     } else {
       console.log(

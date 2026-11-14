@@ -66,7 +66,7 @@ const host = surfaceHost(
   async (url, init) => {
     const path = new URL(url).pathname;
     if (path.endsWith('/auriga/bootstrap')) return response();
-    if (path.endsWith('/auriga/local-login/status'))
+    if (path.endsWith('/auriga/shell/status'))
       return Response.json({
         loggedIn: true,
         connected: true,
