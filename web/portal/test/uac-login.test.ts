@@ -136,8 +136,8 @@ describe('portal UAC normal entry', () => {
     await wrapper.get('button.auriga-login-back').trigger('click');
     await flushPromises();
     expect(calls.at(-1)).toBe('/api/iam/v1/login/uac/challenges/' + id);
-    expect(wrapper.find('[data-testid=provider-select]').exists()).toBe(true);
-    expect(wrapper.find('.qr-heading').exists()).toBe(false);
+    expect(wrapper.find('[data-testid=login-methods]').exists()).toBe(true);
+    expect(wrapper.get('.restart').text()).toBe('继续登录');
     expect(wrapper.get('.home-link').attributes('href')).toBe('/');
     wrapper.unmount();
   });
