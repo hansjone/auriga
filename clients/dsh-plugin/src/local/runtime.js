@@ -22,7 +22,7 @@ const refuse = (code = 'common.unavailable') => {
  * The encrypted legacy vault is used only for local state; old platform material
  * cannot be replayed. No import operation exists, so migration safely requires
  * a fresh shell login and removes only old authentication fields.
- * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any,expectedIdentity?:{tenantId:string,ownerId:string}}} options */
+ * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any,expectedIdentity?:{tenantId:string,ownerId:string},signal?:AbortSignal}} options */
 export async function createConnectRuntime({
   config,
   directory,
@@ -30,6 +30,7 @@ export async function createConnectRuntime({
   connection,
   enterpriseConfig,
   expectedIdentity,
+  signal,
 }) {
   const vault = await createVault(directory);
   const savedAuthentication = vault.snapshot();
@@ -58,6 +59,16 @@ export async function createConnectRuntime({
   /** @type {ReturnType<typeof createTeam>|undefined} */ let startingTeam;
   /** @type {Awaited<ReturnType<typeof createVault>>|undefined} */ let startingVault;
   /** @type {Promise<any>|undefined} */ let closing;
+  /** @type {Set<Promise<void>>} */ const storageDrains = new Set();
+  function closeStorage(
+    /** @type {Awaited<ReturnType<typeof createVault>>|undefined} */ saved,
+  ) {
+    if (!saved) return;
+    const drain = saved.close();
+    storageDrains.add(drain);
+    void drain.finally(() => storageDrains.delete(drain));
+    return drain;
+  }
   let teamGeneration = 0,
     communication = 'idle';
   /** @type {Promise<void>|undefined} */ let teamStarting;
@@ -74,6 +85,7 @@ export async function createConnectRuntime({
       () => undefined,
     ));
   const broker = await createBroker({
+    signal,
     ipc: installed?.ipc,
     validate: installed?.validate ?? (() => refuse()),
     onInvalidate() {
@@ -85,10 +97,10 @@ export async function createConnectRuntime({
       contexts?.invalidate();
       teamGeneration++;
       startingTeam?.close();
-      void startingVault?.close();
+      void closeStorage(startingVault);
       team?.close();
       team = undefined;
-      teamVault?.close();
+      void closeStorage(teamVault);
       teamVault = undefined;
       communication = 'idle';
       enterprise?.revokeAll();
@@ -216,13 +228,20 @@ export async function createConnectRuntime({
         )
         .digest('hex');
       openingTeamVault = createVault(join(directory, 'team', partition));
-      const saved = await openingTeamVault;
-      openingTeamVault = undefined;
+      let saved;
+      try {
+        saved = await openingTeamVault;
+      } catch {
+        if (expected === teamGeneration) communication = 'unavailable';
+        return;
+      } finally {
+        openingTeamVault = undefined;
+      }
       startingVault = saved;
       let candidate;
       try {
         if (closed || expected !== teamGeneration || !identity()) {
-          saved.close();
+          void closeStorage(saved);
           return;
         }
         const check = broker.state.fence();
@@ -246,7 +265,7 @@ export async function createConnectRuntime({
         check();
         if (closed || expected !== teamGeneration) {
           candidate.close();
-          saved.close();
+          void closeStorage(saved);
           return;
         }
         team = candidate;
@@ -254,7 +273,7 @@ export async function createConnectRuntime({
         communication = candidate.connected ? 'ready' : 'idle';
       } catch {
         candidate?.close();
-        saved.close();
+        void closeStorage(saved);
         if (expected === teamGeneration) communication = 'unavailable';
       } finally {
         if (startingTeam === candidate) startingTeam = undefined;
@@ -636,10 +655,11 @@ export async function createConnectRuntime({
       startingTeam?.close();
       team?.close();
       const storage = [
-        teamVault?.close(),
-        startingVault?.close(),
-        openingTeamVault?.then((saved) => saved.close()),
-        vault.close(),
+        closeStorage(teamVault),
+        closeStorage(startingVault),
+        openingTeamVault?.then(closeStorage),
+        closeStorage(vault),
+        ...storageDrains,
       ];
       environment?.dispose();
       enterprise?.close();

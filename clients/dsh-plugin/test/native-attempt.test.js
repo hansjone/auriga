@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { readFile, rename, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setImmediate as nextTurn } from 'node:timers/promises';
@@ -146,4 +146,35 @@ test('closing during Team initialization drains local storage and late IPC canno
   await nextTurn();
   assert.equal(f.tools.size, 0);
   assert.equal(f.runtime.resolve(f.request), undefined);
+});
+
+test('corrupt private Team state cannot crash the runtime or acquire a platform identity of its own', async (t) => {
+  const f = await teamRuntimePeer(t, {
+    async setup(directory, connection) {
+      const who = connection.identity;
+      const partition = createHash('sha256')
+        .update(
+          JSON.stringify([
+            who.tenantId,
+            who.memberId,
+            who.deviceId,
+            who.providerId,
+          ]),
+        )
+        .digest('hex');
+      const path = join(directory, 'team', partition),
+        vault = await createVault(path);
+      await vault.update(() => {});
+      await vault.close();
+      await writeFile(join(path, 'connect.json'), '"invalid"');
+    },
+  });
+  await f.settled();
+  assert.equal(f.runtime.status(f.request).communication, 'unavailable');
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+  assert.equal(f.tools.size, 0);
+  assert.equal(
+    f.connection.calls.some((c) => c.call?.operation === 'team_initialize'),
+    false,
+  );
 });

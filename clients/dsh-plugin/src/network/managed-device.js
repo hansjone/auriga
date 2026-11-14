@@ -8,6 +8,7 @@ export function createManagedNetwork(options) {
   /** @type {Awaited<ReturnType<typeof createConnectRuntime>>|undefined} */ let runtime;
   /** @type {Promise<void>|undefined} */ let opening;
   let closed = false;
+  const lifetime = new AbortController();
   const valid = () => {
     const who = runtime?.identity();
     return (
@@ -26,6 +27,7 @@ export function createManagedNetwork(options) {
           config: { platformOrigin: options.platformOrigin ?? '' },
           ctx: options.ctx,
           connection: options.connection,
+          signal: lifetime.signal,
           expectedIdentity: {
             tenantId: options.tenantId,
             ownerId: options.ownerId,
@@ -86,6 +88,7 @@ export function createManagedNetwork(options) {
     },
     async close() {
       closed = true;
+      lifetime.abort();
       const closing = runtime?.close();
       await opening?.catch(() => {});
       await closing;

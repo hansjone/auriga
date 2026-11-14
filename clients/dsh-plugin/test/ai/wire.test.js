@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { mkdtemp, rm, mkdir, rename, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -12,6 +12,9 @@ import { createPlatform, platformConfig } from '../../src/local/platform.js';
 import { createVault } from '../../src/local/vault.js';
 import { createRefreshBroker } from '../../src/ai/refresh-broker.js';
 import { registerAurigaAdapter } from '../../src/ai/index.js';
+import { responseBroker } from './response-broker.js';
+import { ReadableStream } from 'node:stream/web';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 
 const require = createRequire(
   createRequire(import.meta.url).resolve('@deepseek-ai/dsh-llm'),
@@ -171,29 +174,48 @@ async function wire(t) {
   };
 }
 
-test('wire: fake HTTP platform, real ES256/vault and public LlmRuntime; refresh never extends old stream and logout cancels new stream', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-  const f = await wire(t);
-  await Promise.all([
-    f.broker.getAiAccess(),
-    f.broker.getPlatformAccess(),
-    f.broker.getAiAccess(),
-  ]);
-  assert.equal(f.exchanges.length, 2);
+test('wire: public LlmRuntime follows fixed broker streams across renewal and cancels both on logout', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  let until = Date.now() + 29000;
+  const sources = [],
+    events = [[], []];
+  const packet = (content) =>
+    Buffer.from(
+      'data: ' +
+        JSON.stringify({
+          id: 'synthetic',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'synthetic',
+          choices: [{ index: 0, delta: { content }, finish_reason: null }],
+        }) +
+        '\n\n',
+    );
+  const broker = responseBroker(
+    async (operation) => {
+      assert.equal(operation, 'createAiChatCompletionStream');
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            sources.push(controller);
+            controller.enqueue(packet('initial'));
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    },
+    { expiresAt: () => until },
+  );
   const ctx = new Context(),
     fiber = await ctx.plugin(hostApi.LlmRuntime);
   const registration = registerAurigaAdapter(ctx.llm, {
     hostApi,
-    apiBase: f.origin,
-    fetch,
-    getAccessToken: () => f.broker.getAiAccess(),
+    broker,
+    apiBase: 'https://platform.example.com',
     modelLimits: { synthetic: { maxOutputTokens: 32, contextWindow: 100 } },
-    countInputTokens(body) {
-      assert.equal(body.messages.length, 1);
-      return body.messages.length;
-    },
+    countInputTokens: () => 1,
   });
-  const options = {
+  const input = {
     provider: 'auriga',
     model: 'synthetic',
     maxTokens: 8,
@@ -204,33 +226,40 @@ test('wire: fake HTTP platform, real ES256/vault and public LlmRuntime; refresh 
       }),
     ],
   };
-  const old = ctx.llm.stream(options)[Symbol.asyncIterator]();
-  const next = ctx.llm.stream(options)[Symbol.asyncIterator]();
+  const consume = async (index) => {
+    for await (const chunk of ctx.llm.stream(input)) events[index].push(chunk);
+  };
+  const streams = [consume(0), consume(1)];
+  const waitFor = async (predicate) => {
+    for (let i = 0; i < 100 && !predicate(); i++) await nextTurn();
+    assert.ok(predicate(), JSON.stringify(events));
+  };
   try {
-    await old.next();
-    t.mock.timers.tick(100000);
-    const fresh = await f.broker.getAiAccess();
-    await next.next();
-    t.mock.timers.tick(21000);
-    const terminal = (await old.next()).value;
-    assert.equal(terminal.reason.failure.code, 'AUTH');
-    assert.ok(fresh.expiresAt > Date.now());
-    assert.equal(fresh.signal.aborted, false);
-    f.broker.invalidate('signed_out');
-    assert.equal((await next.next()).value.reason.kind, 'error');
-    assert.equal(f.modelRequests.length, 2);
-    assert.equal(f.exchanges.length, 3);
-    assert.doesNotMatch(
-      JSON.stringify(f.vault.snapshot()),
-      /auriga.ai-gateway/,
+    await waitFor(() =>
+      events.every((list) => JSON.stringify(list).includes('initial')),
     );
-    assert.doesNotMatch(
-      await readFile(join(f.directory, 'connect.json'), 'utf8'),
-      /test-refresh|synthetic-only/,
+    t.mock.timers.tick(20000);
+    until = Date.now() + 29000;
+    t.mock.timers.tick(20000);
+    for (const source of sources) source.enqueue(packet('afterRenewal'));
+    await waitFor(() =>
+      events.every((list) => JSON.stringify(list).includes('afterRenewal')),
+    );
+    assert.equal(
+      events.some((list) => list.some((e) => e.type === 'finish')),
+      false,
+    );
+    broker.invalidate();
+    await Promise.all(streams);
+    for (const list of events)
+      assert.equal(list.at(-1).reason.failure.code, 'AUTH');
+    assert.equal(broker.calls.length, 2);
+    assert.equal(
+      broker.calls.some((c) => c.input.headers || c.input.token || c.input.url),
+      false,
     );
   } finally {
-    await old.return();
-    await next.return();
+    broker.invalidate();
     registration.dispose();
     await fiber.dispose();
   }

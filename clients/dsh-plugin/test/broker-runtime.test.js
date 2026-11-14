@@ -152,12 +152,12 @@ test('an IPC business call that never settles rejects immediately when the shell
   connection.logout();
   await denied;
 });
-test('revocation before the IPC microtask prevents a queued platform call from starting', async (t) => {
+test('a pre-invalidated shell cannot start a platform call', async (t) => {
   const { runtime, connection } = await fixture(t);
   const before = connection.calls.length;
-  const pending = runtime.broker.call('listAiModels', {});
-  const denied = assert.rejects(pending, { code: 'common.unauthenticated' });
   connection.logout();
-  await denied;
+  await assert.rejects(runtime.broker.call('listAiModels', {}), {
+    code: 'common.unauthenticated',
+  });
   assert.equal(connection.calls.length, before);
 });

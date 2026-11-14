@@ -77,6 +77,7 @@ async function resolveInstanceToken(env, inline) {
  *   watchKeys?: boolean,
  *   startHeartbeat?: boolean,
  *   config?: import('../generated/managed-config.js').ManagedConfig,
+ *   connection?: any,
  * }} [options]
  */
 export async function createManaged(options = {}) {
@@ -366,6 +367,7 @@ export async function createManaged(options = {}) {
                 ownerId,
                 instanceId,
                 ctx: networkCtx,
+                connection: options.connection,
                 authorizeLocal: async (req) =>
                   door.isAuthenticated(req) &&
                   browserFenceOk(req, browserOrigin),
