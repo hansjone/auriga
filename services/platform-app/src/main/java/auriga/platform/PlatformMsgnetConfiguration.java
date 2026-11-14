@@ -19,6 +19,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
     "${auriga.platform.combined:false} && ${auriga.services.collab.enabled:false} && ${auriga.collab.network.auto-renew.enabled:false}")
 public class PlatformMsgnetConfiguration {
   @Bean
+  @ConditionalOnExpression("${auriga.services.workspace.enabled:false}")
+  auriga.workspace.api.MsgnetNodeControl msgnetNodeControl(
+      auriga.collab.api.NetworkRenewal renewal) {
+    return new PlatformMsgnetNodeControl(renewal);
+  }
+
+  @Bean
   NetworkMailboxService networkMailboxService(
       @Qualifier("collabDataSource") DataSource source,
       @Qualifier("collabTransactionManager") TenantTransactionManager manager,
