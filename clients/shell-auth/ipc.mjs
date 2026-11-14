@@ -207,7 +207,8 @@ export function connectIpc(descriptor) {
     pending = new Map();
   let readyResolve,
     readyReject,
-    closed = false;
+    closed = false,
+    disposed = false;
   const ready = new Promise((resolve, reject) => {
     readyResolve = resolve;
     readyReject = reject;
@@ -299,7 +300,8 @@ export function connectIpc(descriptor) {
       child.stdin.write(JSON.stringify(command) + '\n');
     },
     close() {
-      if (closed) return;
+      if (disposed) return;
+      disposed = true;
       disconnect(new Error('shell IPC disconnected'));
       child.stdin.end();
       child.kill();
