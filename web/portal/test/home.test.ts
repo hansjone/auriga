@@ -53,7 +53,7 @@ describe('HomeView', () => {
     const wrapper = mount(HomeView, {
       global: {
         plugins: [router, createAurigaI18n('zh-CN')],
-        stubs: { InstanceCard: true, DesktopDownload: true },
+        stubs: { PlacementEntry: true, DesktopDownload: true },
       },
     });
     await flushPromises();
@@ -84,14 +84,14 @@ describe('HomeView', () => {
     const wrapper = mount(HomeView, {
       global: {
         plugins: [router, createAurigaI18n('zh-CN')],
-        stubs: { InstanceCard: true, DesktopDownload: true },
+        stubs: { PlacementEntry: true, DesktopDownload: true },
       },
     });
     await flushPromises();
     expect(wrapper.get('[data-testid=uac-department]').text()).toBe(
       '部门信息暂不可用',
     );
-    expect(wrapper.find('instance-card-stub').exists()).toBe(true);
+    expect(wrapper.find('placement-entry-stub').exists()).toBe(true);
     wrapper.unmount();
   });
   it.each([401, 403, 503])(

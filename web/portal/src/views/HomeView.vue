@@ -13,7 +13,7 @@ import {
   loginInfoText,
   watchLoginInfo,
 } from '../../../shared/src/native-login/login-info';
-import InstanceCard from '../components/InstanceCard.vue';
+import PlacementEntry from './PlacementEntry.vue';
 import DesktopDownload from '../components/DesktopDownload.vue';
 import { portalMessages } from '../portal-messages';
 
@@ -116,7 +116,7 @@ async function logout() {
       <p v-if="me && department" data-testid="uac-department">
         {{ department }}
       </p>
-      <InstanceCard v-if="me" />
+      <PlacementEntry v-if="me" />
       <DesktopDownload v-if="me" />
       <p v-if="loadError" role="alert">{{ t('errors.unknown') }}</p>
       <ElButton v-if="loadError" @click="loadMe">{{
