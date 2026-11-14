@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
 import { systemTool } from '../runtime/system-tools.mjs';
+import { unsignedRelease } from '../scripts/sign-release.mjs';
 import { makeRelease } from '../scripts/make-release.mjs';
 import { verifyRelease } from '../runtime/release.mjs';
 import { tempBase, buildPayload } from './helpers.mjs';
@@ -120,5 +121,28 @@ test('CI 制品记录与离线审阅确认绑定，变更后必须重新审阅',
       publicKey: key.publicKey,
     }).version,
     '1.0.0',
+  );
+});
+
+test('过渡包可生成严格schema1清单，不能夹带渠道灰度回滚策略', (t) => {
+  const base = tempBase(t),
+    payload = buildPayload(base),
+    archive = join(base, 'setup.exe');
+  writeFileSync(archive, 'setup');
+  const options = {
+    payload: payload.dir,
+    archive,
+    sequence: 1,
+    minimumVersion: '0.0.0',
+    notAfter: '2026-12-01T00:00:00Z',
+    schema: '1',
+  };
+  const bridge = unsignedRelease(options);
+  assert.equal(bridge.schema, 1);
+  assert.equal('rolloutPercentage' in bridge, false);
+  assert.equal('rollbackFrom' in bridge, false);
+  assert.throws(
+    () => unsignedRelease({ ...options, channel: 'beta' }),
+    /schema policy/,
   );
 });

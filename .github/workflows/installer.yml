@@ -23,8 +23,23 @@ on:
         description: 'Monotonic release sequence (default workflow run number)'
         required: false
       minimum_version:
-        description: 'Minimum installed Desktop version'
+        description: 'Minimum usable Desktop version (older clients must update)'
         default: '0.0.0'
+      release_schema:
+        description: 'Use 1 for the bridge release before enabling schema 2 policies'
+        type: choice
+        options: ['2', '1']
+        default: '2'
+      channel:
+        type: choice
+        options: ['stable', 'beta']
+        default: 'stable'
+      rollout_percentage:
+        description: 'Optional update rollout percentage (0-100)'
+        default: '100'
+      rollback_from:
+        description: 'Explicit rollback source Desktop version (empty for normal release)'
+        required: false
 
 permissions:
   contents: read
@@ -85,9 +100,13 @@ jobs:
         env:
           RELEASE_SEQUENCE: ${{ inputs.sequence || github.run_number }}
           MINIMUM_VERSION: ${{ inputs.minimum_version || '0.0.0' }}
+          RELEASE_SCHEMA: ${{ inputs.release_schema || '2' }}
+          RELEASE_CHANNEL: ${{ inputs.channel || 'stable' }}
+          ROLLOUT: ${{ inputs.rollout_percentage || '100' }}
+          ROLLBACK_FROM: ${{ inputs.rollback_from }}
         run: |
           expiry=$(node -e 'console.log(new Date(Date.now()+30*86400000).toISOString())')
-          node scripts/make-release.mjs "payload=$INSTALLER_STAGE/payload" "archive=$INSTALLER_EXE" "exe=$INSTALLER_EXE" "output=$RUNNER_TEMP/installer" "sequence=$RELEASE_SEQUENCE" "minimumVersion=$MINIMUM_VERSION" "notAfter=$expiry" "workflowRun=$GITHUB_RUN_ID"
+          node scripts/make-release.mjs "payload=$INSTALLER_STAGE/payload" "archive=$INSTALLER_EXE" "exe=$INSTALLER_EXE" "output=$RUNNER_TEMP/installer" "sequence=$RELEASE_SEQUENCE" "minimumVersion=$MINIMUM_VERSION" "notAfter=$expiry" "workflowRun=$GITHUB_RUN_ID" "schema=$RELEASE_SCHEMA" "channel=$RELEASE_CHANNEL" "rolloutPercentage=$ROLLOUT" "rollbackFrom=$ROLLBACK_FROM"
       - name: Package checks (manifest, checksums, version lock, licences, pnpm, no secrets)
         run: pnpm --filter @auriga/installer test
       - name: Isolated install from the setup exe, launch, uninstall

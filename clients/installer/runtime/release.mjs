@@ -141,12 +141,17 @@ export function verifyRelease(
     throw new Error('expired or future release');
   const rollback = body.schema === 2 && body.rollbackFrom !== null;
   if (rollback) compare(body.rollbackFrom, body.rollbackFrom);
-  // A rollback is a new signed release, scoped to the exact affected installed version.
-  const authorizedRollback = rollback && body.rollbackFrom === currentVersion;
+  // A signed rollback may lower the installed version only for its exact source.
+  // A client that merely saw that source (grey rollout or failed smoke) may also
+  // accept its replacement, provided its own installed version is not lowered.
+  const installedRollback = rollback && body.rollbackFrom === currentVersion;
+  const seenRollback = rollback && body.rollbackFrom === highestVersion;
   if (
-    (!authorizedRollback &&
-      (compare(body.version, currentVersion) < 0 ||
-        (highestVersion && compare(body.version, highestVersion) < 0))) ||
+    (compare(body.version, currentVersion) < 0 && !installedRollback) ||
+    (highestVersion &&
+      compare(body.version, highestVersion) < 0 &&
+      !installedRollback &&
+      !seenRollback) ||
     compare(body.minimumVersion, body.version) > 0
   )
     throw new Error('release downgrade or minimum version');

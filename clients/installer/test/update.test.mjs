@@ -597,3 +597,29 @@ test('启动检查并在4至8小时内带抖动重排，关闭取消定时器', 
   stop();
   assert.equal(cleared, timer);
 });
+
+test('仅见过失败或灰度版本的客户端可接受更高序号的签名回滚替代版，但不能借此降低已装版本', () => {
+  const policy = signed({
+    schema: 2,
+    rolloutPercentage: 100,
+    rollbackFrom: '3.0.0',
+    sequence: 5,
+  });
+  assert.equal(
+    verify(policy, { highestVersion: '3.0.0', highestSequence: 4 }).version,
+    '2.0.0',
+  );
+  assert.throws(
+    () =>
+      verify(policy, {
+        currentVersion: '2.5.0',
+        highestVersion: '3.0.0',
+        highestSequence: 4,
+      }),
+    /downgrade/,
+  );
+  assert.throws(
+    () => verify(policy, { highestVersion: '4.0.0', highestSequence: 4 }),
+    /downgrade/,
+  );
+});

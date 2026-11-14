@@ -1758,7 +1758,13 @@ window.__ModuleLoader__.load({
               h('summary', null, t('inbox')),
               h(ConsentSection),
             ),
-            !desktop?.required && h(ELEMENT, { ref, style: { flex: 1 } }),
+            h(ELEMENT, {
+              ref,
+              style: {
+                flex: 1,
+                display: desktop?.required ? 'none' : undefined,
+              },
+            }),
           );
         }
         effect(

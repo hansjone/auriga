@@ -31,12 +31,24 @@ export function unsignedRelease({
   channel = 'stable',
   rolloutPercentage = 100,
   rollbackFrom = null,
+  schema = 2,
 }) {
   const manifest = verifyPackage(payload);
+  schema = Number(schema);
+  rollbackFrom ||= null;
+  if (
+    ![1, 2].includes(schema) ||
+    (schema === 1 &&
+      (channel !== 'stable' ||
+        Number(rolloutPercentage) !== 100 ||
+        rollbackFrom))
+  )
+    throw new Error('invalid release schema policy');
   return {
-    schema: 2,
-    rolloutPercentage: Number(rolloutPercentage),
-    rollbackFrom,
+    schema,
+    ...(schema === 2
+      ? { rolloutPercentage: Number(rolloutPercentage), rollbackFrom }
+      : {}),
     product: 'Auriga Desktop',
     version: manifest.bundleVersion,
     packageId: manifest.id,
