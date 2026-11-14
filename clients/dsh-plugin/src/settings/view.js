@@ -271,13 +271,17 @@ export function createSettingsView(
   async function call(
     /** @type {string} */ path,
     /** @type {any} */ body = undefined,
+    /** @type {{ timeoutMs?: number | null }} */ options = {},
   ) {
     const response = await fetcher(localURL(path), {
       method: body === undefined ? 'GET' : 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
       redirect: 'error',
-      signal: AbortSignal.timeout(15000),
+      signal:
+        options.timeoutMs === null
+          ? undefined
+          : AbortSignal.timeout(options.timeoutMs ?? 15000),
       headers:
         body === undefined
           ? {}
@@ -945,7 +949,13 @@ export function createSettingsView(
             !state.desktop.restartRequired &&
             button(t.update, () =>
               run(async () => {
-                await call('auriga/settings/desktop', { action: 'update' });
+                // The runtime bounds transfer idle time. A status-read deadline
+                // must not cancel a healthy package download before it queues.
+                await call(
+                  'auriga/settings/desktop',
+                  { action: 'update' },
+                  { timeoutMs: null },
+                );
                 await readState();
               }),
             ),
