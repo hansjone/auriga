@@ -11,6 +11,7 @@
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "gen:api": "pnpm --filter @auriga/shared gen:api",
+    "gen:plugin-network": "pnpm --filter auriga-dsh gen:network-keyset --v2",
     "gen:steps": "pnpm --filter @auriga/shared gen:steps && pnpm --filter auriga-dsh gen:steps",
     "format": "prettier --write web clients *.json *.yaml *.mjs"
   },

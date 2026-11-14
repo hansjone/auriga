@@ -308,3 +308,84 @@ test('同版本同包更高序号续期不会重复更新，周期检查不重�
     3,
   );
 });
+
+test('HTTP requires confirmed literal IP binding; domain HTTP stays forbidden', () => {
+  const origin = 'http://192.168.2.10:8080'; // gitleaks:allow
+  const binding = { accessMode: 'ip', confirmedOrigin: origin };
+  assert.equal(
+    platformUrl(origin, 'latest', binding),
+    origin + '/api/resource/v1/desktop/latest',
+  );
+  for (const policy of [
+    {},
+    { ...binding, accessMode: 'domain' },
+    { ...binding, confirmedOrigin: 'http://192.168.2.11:8080' }, // gitleaks:allow
+  ])
+    assert.throws(() => platformUrl(origin, 'latest', policy));
+  assert.throws(() =>
+    platformUrl('http://example.com', 'latest', {
+      accessMode: 'ip',
+      confirmedOrigin: 'http://example.com',
+    }),
+  );
+  assert.throws(
+    () => verify({ ...signed(), publishedAt: '2026-11-10T00:00:00Z' }),
+    /signature/,
+  );
+  assert.throws(
+    () =>
+      verify(signed({ sequence: 5 }), {
+        highestPublishedAt: '2026-11-11T01:00:00Z',
+      }),
+    /replay/,
+  );
+});
+
+test('HTTP install confirmation persists once and updater uses it', async (t) => {
+  const base = tempBase(t),
+    root = join(base, 'install'),
+    dataHome = join(base, 'home');
+  const payload = buildPayload(base);
+  const origin = 'http://192.168.2.10:8080'; // gitleaks:allow
+  assert.throws(() =>
+    install({
+      root,
+      dataHome,
+      payload: payload.dir,
+      platformOrigin: origin,
+      smoke: () => {},
+    }),
+  );
+  assert.equal(existsSync(root), false);
+  install({
+    root,
+    dataHome,
+    payload: payload.dir,
+    platformOrigin: origin,
+    platformBinding: { accessMode: 'ip', confirmedOrigin: origin },
+    smoke: () => {},
+  });
+  const updater = createUpdater({
+    root,
+    origin,
+    now: () => now,
+    publicKey: keys.publicKey,
+    request: async (url) => {
+      assert.equal(url, origin + '/api/resource/v1/desktop/latest');
+      return new Response(JSON.stringify(signed()));
+    },
+  });
+  await updater.check();
+  assert.equal(updater.status().available.version, '2.0.0');
+  assert.throws(
+    () => createUpdater({ root, origin: 'http://192.168.2.11:8080' }), // gitleaks:allow
+    /binding/,
+  );
+});
+
+test('a higher sequence cannot roll back a previously seen version', () => {
+  assert.throws(
+    () => verify(signed({ sequence: 5 }), { highestVersion: '3.0.0' }),
+    /downgrade/,
+  );
+});

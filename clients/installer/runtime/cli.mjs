@@ -40,6 +40,13 @@ try {
       payload,
       root: values.root,
       dataHome: values['data-home'],
+      platformBinding:
+        typeof values['platform-origin'] === 'string'
+          ? {
+              accessMode: values['platform-access-mode'],
+              confirmedOrigin: values['confirm-platform-origin'],
+            }
+          : defaults.platformBinding,
       platformOrigin:
         typeof values['platform-origin'] === 'string'
           ? values['platform-origin']

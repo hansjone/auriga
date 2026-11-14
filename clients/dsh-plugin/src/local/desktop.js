@@ -2,6 +2,37 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { normalizeOrigin } from '../settings/store.js';
+
+function confirmationError() {
+  return Object.assign(
+    new Error('Reinstall Desktop with explicit IP address confirmation'),
+    {
+      code: 'desktop.origin_confirmation_required',
+    },
+  );
+}
+
+/** Keep a binding failure visible without blocking the rest of the client.
+ * @param {any} error */
+export function desktopStartupFailure(error) {
+  if (error?.code !== 'desktop.origin_confirmation_required') return undefined;
+  const reject = () => {
+    throw confirmationError();
+  };
+  return {
+    status: () => ({
+      enabled: false,
+      available: null,
+      restartRequired: false,
+      confirmationRequired: true,
+    }),
+    configure: reject,
+    check: reject,
+    update: reject,
+    close() {},
+  };
+}
 
 /** Each received chunk renews the idle deadline, regardless of total transfer time.
  * @param {string} url
@@ -72,7 +103,21 @@ export async function desktopUpdater({ origin }) {
   const root = process.env.AURIGA_DESKTOP_ROOT;
   if (!root || !process.env.AURIGA_DESKTOP_RUNTIME) return undefined;
   const state = JSON.parse(await readFile(join(root, 'install.json'), 'utf8'));
-  if (!origin.startsWith('https:')) return undefined;
+
+  if (!origin.startsWith('https:')) {
+    try {
+      normalizeOrigin(origin);
+    } catch {
+      return undefined;
+    }
+    try {
+      await readFile(join(root, 'desktop-origin.json'));
+    } catch (error) {
+      if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT')
+        throw confirmationError();
+      throw error;
+    }
+  }
   try {
     await writeFile(
       join(root, 'desktop-origin.json'),
@@ -86,7 +131,12 @@ export async function desktopUpdater({ origin }) {
   const bound = JSON.parse(
     await readFile(join(root, 'desktop-origin.json'), 'utf8'),
   );
-  if (bound.origin !== origin || !origin.startsWith('https:')) return undefined;
+  if (bound.origin !== origin) return undefined;
+  if (
+    origin.startsWith('http:') &&
+    (bound.accessMode !== 'ip' || bound.confirmedOrigin !== origin)
+  )
+    throw confirmationError();
   const modulePath = resolve(
     root,
     'versions',
@@ -96,6 +146,7 @@ export async function desktopUpdater({ origin }) {
   if (modulePath !== resolve(process.env.AURIGA_DESKTOP_RUNTIME))
     return undefined;
   const module = await import(pathToFileURL(modulePath).href);
+  module.platformUrl(origin, 'latest', bound);
   const lifetime = new AbortController();
   const updater = module.createUpdater({
     root,

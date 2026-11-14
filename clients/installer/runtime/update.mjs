@@ -22,16 +22,10 @@ import { install, readState, versionDir } from './core.mjs';
 import { downloadLock } from './update-state.mjs';
 import { systemTool } from './system-tools.mjs';
 import { compare } from './semver-lite.mjs';
+import { updateOrigin } from './platform-origin.mjs';
 
-export function platformUrl(origin, path) {
-  const url = new URL(origin);
-  if (
-    url.protocol !== 'https:' ||
-    url.origin !== origin ||
-    url.username ||
-    url.password
-  )
-    throw new Error('updates require configured HTTPS platform origin');
+export function platformUrl(origin, path, binding) {
+  updateOrigin(origin, binding);
   return new URL('/api/resource/v1/desktop/' + path, origin).href;
 }
 
@@ -77,6 +71,13 @@ export function createUpdater({
   now = () => Date.now(),
   defer = true,
 }) {
+  const bindingFile = join(root, 'desktop-origin.json');
+  const binding = existsSync(bindingFile)
+    ? JSON.parse(readFileSync(bindingFile, 'utf8'))
+    : {};
+  if (binding.origin && binding.origin !== origin)
+    throw new Error('platform binding differs');
+  updateOrigin(origin, binding);
   const stateFile = join(root, 'desktop-update.json');
   const load = () =>
     existsSync(stateFile)
@@ -110,6 +111,8 @@ export function createUpdater({
       now: now(),
       currentVersion: current().version,
       highestSequence: state.highestSequence,
+      highestPublishedAt: state.highestPublishedAt,
+      highestVersion: state.highestVersion,
       acceptedDigest: state.acceptedDigest,
     });
   };
@@ -130,7 +133,7 @@ export function createUpdater({
       if (!api.status().enabled || busy) return api.status();
       busy = true;
       try {
-        const response = await request(platformUrl(origin, 'latest'), {
+        const response = await request(platformUrl(origin, 'latest', binding), {
           redirect: 'error',
         });
         if (response.status === 404) {
@@ -144,6 +147,8 @@ export function createUpdater({
         save({
           ...load(),
           highestSequence: body.sequence,
+          highestPublishedAt: body.publishedAt,
+          highestVersion: body.version,
           acceptedDigest: body.sha256,
         });
         pending =
@@ -184,7 +189,7 @@ export function createUpdater({
         const archive = join(temporary, 'desktop.zip');
         await downloadPackage(
           request,
-          platformUrl(origin, `packages/${body.sequence}`),
+          platformUrl(origin, `packages/${body.sequence}`, binding),
           archive,
           body.sizeBytes,
         );
@@ -320,6 +325,8 @@ export async function applyPending(
       now,
       currentVersion: old.bundleVersion,
       highestSequence: saved.highestSequence,
+      highestPublishedAt: saved.highestPublishedAt,
+      highestVersion: saved.highestVersion,
       acceptedDigest: saved.acceptedDigest,
     });
     const archive = join(queued, 'desktop.zip');

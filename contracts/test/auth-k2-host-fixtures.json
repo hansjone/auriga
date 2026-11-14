@@ -1,0 +1,618 @@
+{
+  "now": "2026-11-14T00:00:00Z",
+  "description": "受信参考上下文的数据式准入向量；只校验契约，不替代真实OS peer/来源/撤销运行时测试。",
+  "acceptanceSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "peerRole": {
+        "const": "plugin-backend"
+      },
+      "ownerId": {
+        "const": "00000000-0000-4000-8000-000000000001"
+      },
+      "shellEpoch": {
+        "const": "00000000-0000-4000-8000-000000000002"
+      },
+      "hostSessionId": {
+        "const": "synthetic-host-session"
+      },
+      "tenantId": {
+        "const": "00000000-0000-4000-8000-000000000003"
+      },
+      "memberId": {
+        "const": "00000000-0000-4000-8000-000000000004"
+      },
+      "deviceId": {
+        "const": "00000000-0000-4000-8000-000000000005"
+      },
+      "providerId": {
+        "const": "00000000-0000-4000-8000-000000000006"
+      },
+      "sourceSessionId": {
+        "const": "00000000-0000-4000-8000-000000000007"
+      },
+      "revision": {
+        "const": 7
+      },
+      "authGeneration": {
+        "const": 3
+      },
+      "state": {
+        "const": "authenticated"
+      },
+      "sourceActive": {
+        "const": true
+      },
+      "contextActive": {
+        "const": true
+      },
+      "expiresAt": {
+        "type": "string",
+        "format": "date-time",
+        "formatExclusiveMinimum": "2026-11-14T00:00:00Z"
+      },
+      "purpose": {
+        "type": "string",
+        "enum": [
+          "raw",
+          "outbound"
+        ]
+      },
+      "rawEnabled": {
+        "type": "boolean"
+      },
+      "credentialVersion": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "required": [
+      "peerRole",
+      "ownerId",
+      "shellEpoch",
+      "hostSessionId",
+      "tenantId",
+      "memberId",
+      "deviceId",
+      "providerId",
+      "sourceSessionId",
+      "revision",
+      "authGeneration",
+      "state",
+      "sourceActive",
+      "contextActive",
+      "expiresAt",
+      "purpose",
+      "rawEnabled",
+      "credentialVersion"
+    ],
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "purpose": {
+              "const": "raw"
+            }
+          },
+          "required": [
+            "purpose"
+          ]
+        },
+        "then": {
+          "properties": {
+            "rawEnabled": {
+              "const": true
+            }
+          }
+        }
+      }
+    ]
+  },
+  "vectors": [
+    {
+      "name": "current",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": true
+    },
+    {
+      "name": "normal-token-rotation",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 2
+      },
+      "accepted": true
+    },
+    {
+      "name": "raw-disabled-outbound-remains",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "outbound",
+        "rawEnabled": false,
+        "credentialVersion": 1
+      },
+      "accepted": true
+    },
+    {
+      "name": "wrong-owner",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000009",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "cross-host-session",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "other-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "cross-tenant",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000009",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "cross-member",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000009",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "cross-device",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000009",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "cross-provider",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000009",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "cross-source",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000009",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "old-epoch",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000009",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "old-revision",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 6,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "old-generation",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 2,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "logged-out",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "signed_out",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "source-revoked",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": false,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "context-revoked",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": false,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "expired",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:00:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "page",
+      "input": {
+        "peerRole": "page",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "model",
+      "input": {
+        "peerRole": "model",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "skill",
+      "input": {
+        "peerRole": "skill",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": true,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "raw-disabled",
+      "input": {
+        "peerRole": "plugin-backend",
+        "ownerId": "00000000-0000-4000-8000-000000000001",
+        "shellEpoch": "00000000-0000-4000-8000-000000000002",
+        "hostSessionId": "synthetic-host-session",
+        "tenantId": "00000000-0000-4000-8000-000000000003",
+        "memberId": "00000000-0000-4000-8000-000000000004",
+        "deviceId": "00000000-0000-4000-8000-000000000005",
+        "providerId": "00000000-0000-4000-8000-000000000006",
+        "sourceSessionId": "00000000-0000-4000-8000-000000000007",
+        "revision": 7,
+        "authGeneration": 3,
+        "state": "authenticated",
+        "sourceActive": true,
+        "contextActive": true,
+        "expiresAt": "2026-11-14T00:05:00Z",
+        "purpose": "raw",
+        "rawEnabled": false,
+        "credentialVersion": 1
+      },
+      "accepted": false
+    }
+  ]
+}
