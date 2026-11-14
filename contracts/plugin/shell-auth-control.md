@@ -2,6 +2,8 @@
 
 本契约与 `docs/design/auth-shell.zh.md` 第8节共同约束 A/B/C/D/E。现有 UacChallenge、UacLoginInfo、ShellAuthCommand/Event/Snapshot 及 UacSessionBinding 保留；新增均使用 Uac/ShellAuth 前缀。此处只定义端口，尚无运行时实现。
 
+AUTH-K2 增补优先见 [导航与 Cookie](../auth/navigation-cookie-policy.md)、[插件后端宿主 IPC](shell-auth-host.md) 和 [标准设备来源/刷新/撤销](../auth/standard-device.md)。下面的首轮全文摘要规则不再作为门禁；迁移状态按 navigation-cookie-policy 执行。设备用户码入口使用新增 device-navigation-proofs，浏览器不提供 grant ID。
+
 ## 固定业务代理
 
 `shell-business-operations.json` 是固定操作、路由、输入/输出定义、audience、权限和重试规则的清单；`shell-business.schema.json` 是对应生产方校验契约。运行 `node contracts/plugin/generate-shell-business.mjs` 生成，`--check` 检查漂移。资源和 AI 请求/结果从已有 OpenAPI 引用投影，不另造业务字段。跨版本消费响应允许额外字段；请求操作名和输入始终严格校验。清单中权限是最低要求，不赋予调用者权限，远端现有每项权限检查照常执行。
@@ -42,7 +44,7 @@
 
 ## SSO 导航与退出抑制（A/B）
 
-B 在渲染门户登录页时调用内部 `POST /api/iam/v1/internal/uac/navigation-proofs`，传 requestId/providerId/精确origin/固定continuation、实际 Fetch Metadata 头证据及当前事务/抑制cookie。device 续接必须携带 deviceGrantId，portal不能携带；不转发外部body来填这些字段。B以svc:edge内部服务JWT（aud=auriga.internal、ptyp=internal_service、ctx=service）及已认证内部传输调用A；必填auriga-tenant-id头沿已有内部租户委派语义，从受信入口配置取值并剥离浏览器同名头，A须核svc:edge委派白名单，不能用内部JWT的平台tid替代目标tenant。这不是浏览器接口，也不复用用户bearer或DSH的mTLS信道。公开edge禁止转发该内部路径。A核受信入口、tenant/provider/device事务，自己计算auto资格；缺失导航证据时auto=false。B不得指定autoEligible或proofHash。
+B 渲染门户登录页时调用内部 `POST /api/iam/v1/internal/uac/navigation-proofs`，仅传 continuation=portal。设备续接只能调用 `/internal/uac/device-navigation-proofs` 并传 userCode，两个请求都拒绝 deviceGrantId；IAM 自行解析权威设备事务。共同字段是 requestId/providerId/精确origin、实际 Fetch Metadata 证据及当前事务/抑制/CSRF cookie；不从外部body捏造。B以svc:edge内部服务JWT（aud=auriga.internal、ptyp=internal_service、ctx=service）及受认证内部传输调用A；必填auriga-tenant-id头从受信入口配置取值并剥离浏览器同名头，A核委派白名单，不能用服务JWT平台tid替代目标tenant。公开edge禁止转发两个内部路径。A核受信入口、tenant/provider及设备事务，自己计算auto资格，设备恒false，缺导航证据也false。B不得指定autoEligible或proofHash。
 
 A原子签发并持久化 UacNavigationProofBinding，只存32字节 proof 的 SHA-256，TTL120秒，绑定完整 Origin、tenant/provider、portal audience、login 用途、浏览器事务及 portal/device 续接。响应 UacNavigationIssued 含context、transactionCookie和ttlSeconds=120；B设置事务HttpOnly cookie，将context放入no-store登录HTML。GET仅签发导航证明，不建立登录会话、不调企业验证。requestId重用冲突；丢失签发响应重新渲染时作废旧证明。外部不可提交autoEligible/continuation或绑定记录，SSO消费仍由既有POST /login/uac/sso检查并CAS一次消费；过期/重复消费拒绝，不因重试续期。
 
@@ -76,7 +78,7 @@ GET/PUT `/api/iam/v1/admin/providers/{providerId}/uac/diagnostics` 使用独立 
 
 正常/详细/导出均只允许固定安全字段；token 只留 UTF-8 SHA256 小写前12位，Cookie/Authorization/proof/verifier/能力/二维码/密钥/完整 query 一律省略。工号允许，其余姓名/部门原值/邮箱/电话/未知值屏蔽。udsMessage 仅固定安全字面映射，未知为[REDACTED]。详细结构只在有效开关下递归清洗后 DEBUG，不可解析 body 只记类型/大小/原因；上限2MiB输入、64KiB事件。日志、采集、导出各自脱敏，不先落原始临时文件。
 
-`auth/uac-diagnostic-log.schema.json` 定义最小导出投影的生产方白名单；它不替代 A/C 的递归脱敏器。`test/auth-k-fixtures.json` 提供固定权威上下文下的输入/expected向量及数据式acceptanceSchema，不在测试中自写绑定比较器；包括token轮换后仍有效正例。`shell-auth-call-sites.json` 是独立维护的file/evidence（含实际路由模板）/routePattern/methods→operations或control映射，测试只读扫描真实插件源码并比对，生成器不会自动更新它。清单包括安全路由守卫等保守引用；sources记录相关helper全文的换行归一化SHA256，helper内动态base拼接/方法变化也要求人工重新核对映射，不能在同一根路径下悄悄新增调用。`test/auth-k-transport-fixtures.json` 可供实现线复用错误映射、skill头丢弃/超时截断和HTTP状态向量；此处校验输入输出结构，不声称执行了归一化handler。两个IAM副本、真实IPC对端、上游替身及采集链的运行时验收归A/C/D/E，不以schema测试冒充实现通过。
+`auth/uac-diagnostic-log.schema.json` 定义最小导出投影的生产方白名单，不替代 A/C 的递归脱敏器。`test/auth-k-fixtures.json` 提供固定权威上下文输入/expected及数据式acceptanceSchema，包括正常token轮换仍有效正例。调用点清单和保留通道由独立维护的 `shell-auth-call-sites.json` 描述；sources摘要仅历史记录，不再锁源码。当前legacy/broker规则及限制以 [迁移门禁](shell-auth-migration.md) 为准，D迁移提交更新状态，白名单变更交独审。`test/auth-k-transport-fixtures.json` 供实现线复用错误映射、skill头丢弃/超时截断和HTTP状态向量；这里仅校验契约，不声称执行归一化handler。两个IAM副本、真实IPC对端、上游替身及采集链的运行时验收归A/C/D/E。
 
 ## 企业 skill 兼容（A/C/D）
 
