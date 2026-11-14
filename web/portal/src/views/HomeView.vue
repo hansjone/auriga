@@ -7,7 +7,7 @@ import {
   ElDropdownItem,
   ElDropdownMenu,
 } from 'element-plus';
-import { isApiError, type Me } from '@auriga/shared';
+import { BrandMark, isApiError, type Me } from '@auriga/shared';
 import { iamApi, redirectToLogin } from '../api';
 import {
   loginInfoText,
@@ -88,7 +88,7 @@ async function logout() {
 <template>
   <div class="shell">
     <header class="topbar">
-      <strong class="brand">{{ t('brand') }}</strong>
+      <strong class="brand"><BrandMark :size="28" />{{ t('brand') }}</strong>
       <nav class="actions">
         <ElButton text @click="language">{{ t('language') }}</ElButton>
         <ElButton text @click="theme">{{ t('theme') }}</ElButton>
@@ -135,7 +135,10 @@ async function logout() {
   backdrop-filter: blur(16px);
 }
 .brand {
-  letter-spacing: 0.12em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: -0.02em;
 }
 .actions {
   display: flex;

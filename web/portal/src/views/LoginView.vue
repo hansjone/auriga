@@ -8,7 +8,6 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
   BrandMark,
-  ProviderSelect,
   StepContainer,
   type ClientStep,
   type LoginProvider,
@@ -23,7 +22,7 @@ import {
   navigationProviderId,
   takeNavigationContext,
 } from '../../../shared/src/api/correlation';
-import DesktopDownload from '../components/DesktopDownload.vue';
+import PortalProviders from '../components/PortalProviders.vue';
 import { loginReturnTo } from '../login-return';
 
 const { t, locale } = useI18n();
@@ -281,7 +280,7 @@ const step = (): ClientStep | null =>
     >
       {{ t('login.back') }}
     </button>
-    <ProviderSelect
+    <PortalProviders
       v-if="!loading && !tx && !uacActive"
       :providers="providers"
       @select="selectProvider"
@@ -305,11 +304,21 @@ const step = (): ClientStep | null =>
         {{ t('login.back') }}
       </button>
     </template>
-    <DesktopDownload />
+    <a v-if="!deviceContinuation" class="home-link" href="/">{{
+      locale === 'en' ? 'Back to home' : '返回首页'
+    }}</a>
   </section>
 </template>
 
 <style scoped>
+.home-link {
+  display: block;
+  text-align: center;
+  margin-top: 2rem;
+  color: var(--auriga-muted);
+  font-size: 13px;
+  text-decoration: none;
+}
 .auriga-login-step {
   border: 0;
   padding: 0;

@@ -1,0 +1,27 @@
+{
+  "note": "本地 Vite 开发服务，API 使用合成匿名会话、登录提供者和发行信息；不是 NAS 部署证据。",
+  "evidence": [
+    {
+      "page": "home",
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "page": "login",
+      "width": 1440,
+      "overflow": false,
+      "downloadCards": 0
+    },
+    {
+      "page": "home",
+      "width": 390,
+      "overflow": false
+    },
+    {
+      "page": "login",
+      "width": 390,
+      "overflow": false,
+      "downloadCards": 0
+    }
+  ]
+}

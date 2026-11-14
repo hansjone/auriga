@@ -3,7 +3,8 @@
 </template>
 
 <style scoped>
-.stage:has(.shell) {
+.stage:has(.shell),
+.stage:has(.landing) {
   display: block;
   min-height: 100vh;
   padding: 0;
