@@ -52,12 +52,17 @@ export function createShellState(options) {
     lastExpiry = 0,
     connection = 0;
   /** @type {string|undefined} */ let subscription;
+  /** @type {Set<()=>void>} */ const invalidations = new Set();
+  const notifyInvalidation = () => {
+    for (const callback of invalidations) callback();
+    options.onInvalidate?.();
+  };
   function invalidate() {
     generation++;
     clearTimeout(timer);
     snapshot = undefined;
     until = deadline = 0;
-    options.onInvalidate?.();
+    notifyInvalidation();
   }
   function current() {
     if (snapshot && (now() >= until || mono() >= deadline)) invalidate();
@@ -116,7 +121,7 @@ export function createShellState(options) {
       identity(snapshot) !== identity(value);
     if (changed) {
       generation++;
-      options.onInvalidate?.();
+      notifyInvalidation();
     }
     // Projection intentionally drops unknown fields, including accidentally
     // supplied credentials; consumers permit future response extensions.
@@ -195,6 +200,12 @@ export function createShellState(options) {
   }
   return {
     current,
+    subscribeInvalidation(/** @type {()=>void} */ callback) {
+      invalidations.add(callback);
+      return () => {
+        invalidations.delete(callback);
+      };
+    },
     async connect() {
       const c = ++connection;
       unsubscribe?.();

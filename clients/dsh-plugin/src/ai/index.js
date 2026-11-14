@@ -52,6 +52,10 @@ export function createAurigaAdapter(options) {
   /** @type {{ids: string[], expiresAt: number, signal: AbortSignal} | undefined} */
   let catalog;
   let catalogEpoch = 0;
+  const unsubscribe = broker.state.subscribeInvalidation?.(() => {
+    catalog = undefined;
+    lifetime.abort();
+  });
   /** Capacity and tokenizer are installation-owned ports, never directory facts.
    * @param {string} model */
   const generationReady = (model) => {
@@ -73,6 +77,7 @@ export function createAurigaAdapter(options) {
   const begin = (caller) => {
     check(!disposed, 'NO_ADAPTER');
     const op = operation(caller);
+    op.watch(lifetime.signal, 'AUTH');
     active.add(op);
     return op;
   };
@@ -82,24 +87,56 @@ export function createAurigaAdapter(options) {
     const fence = broker.state.fence();
     const snapshot = broker.state.current();
     const expiresAt = Date.parse(snapshot.expiresAt);
-    op.expire(expiresAt);
+    check(snapshot.state === 'authenticated' && expiresAt > Date.now(), 'AUTH');
+    // Snapshot expiry is a renewable freshness lease, not a fixed request TTL.
+    // Its invalidation subscription interrupts active calls/streams; an ordinary
+    // same-generation refresh must not truncate a longer generation at 30s.
+    const receive = async (/** @type {Promise<any>} */ pending) => {
+      const value = await pending;
+      if (op.signal.aborted && value.body?.streamId)
+        void broker
+          .streamCommand({ streamId: value.body.streamId, action: 'cancel' })
+          .catch(() => {});
+      return value;
+    };
     let output;
-    if (path === 'models')
-      output = await op.wait(broker.call('listAiModels', {}));
-    else if (mode === 'json')
-      output = await op.wait(
-        broker.call('createAiChatCompletion', {
-          body: JSON.parse(body ?? '{}'),
-        }),
-      );
-    else
-      output = await op.wait(
-        broker.call('createAiChatCompletionStream', {
-          body: JSON.parse(body ?? '{}'),
-        }),
-      );
-    fence();
-    op.assert();
+    try {
+      if (path === 'models')
+        output = await op.wait(receive(broker.call('listAiModels', {})));
+      else if (mode === 'json')
+        output = await op.wait(
+          receive(
+            broker.call('createAiChatCompletion', {
+              body: JSON.parse(body ?? '{}'),
+            }),
+          ),
+        );
+      else
+        output = await op.wait(
+          receive(
+            broker.call('createAiChatCompletionStream', {
+              body: JSON.parse(body ?? '{}'),
+            }),
+          ),
+        );
+      fence();
+      op.assert();
+    } catch (error) {
+      if (output?.body?.streamId)
+        void broker
+          .streamCommand({ streamId: output.body.streamId, action: 'cancel' })
+          .catch(() => {});
+      if (error instanceof AdapterError) throw error;
+      const value = /** @type {{code?:string,status?:number}} */ (error);
+      if (
+        ['common.unauthenticated', 'common.forbidden'].includes(
+          value.code ?? '',
+        ) ||
+        [401, 403].includes(value.status ?? 0)
+      )
+        throw new AdapterError('AUTH');
+      throw error;
+    }
     const response = new Response(
       output.body?.streamId
         ? broker.openStream(output.body.streamId, op.signal)
@@ -115,6 +152,14 @@ export function createAurigaAdapter(options) {
       },
     );
     op.adopt(response);
+    check(
+      response.ok,
+      [401, 403].includes(response.status)
+        ? 'AUTH'
+        : response.status === 429
+          ? 'RATE_LIMIT'
+          : 'SERVER',
+    );
     return { response, lease: { expiresAt, signal: lifetime.signal } };
   };
 
@@ -282,10 +327,11 @@ export function createAurigaAdapter(options) {
     }
     dispose() {
       disposed = true;
-      lifetime.abort();
+      unsubscribe?.();
       catalog = undefined;
       for (const op of active) op.close();
       active.clear();
+      lifetime.abort();
     }
   }
   return new AurigaAdapter();

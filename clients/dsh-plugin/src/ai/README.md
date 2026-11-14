@@ -10,26 +10,20 @@
 当前生产调用方未提供这些端口，仍报告 `model_metadata_unavailable`，不宣称生成已接通。
 假上游测试的明确计量规则不能用于生产。
 
-`status.directoryAvailable` 表示最近一次目录请求成功且所用 AI 短票仍有效；
+`status.directoryAvailable` 表示最近一次目录请求成功且相应外壳快照仍有效；
 `authorized` 表示这次目录有可见模型；`available` 还要求其中至少一个模型具备完整的
 可信生成端口。目录为空、刷新失败、票据到期/撤销、退出或卸载均不能沿用旧状态。
 并发目录请求只接受最新一轮结果，迟到的旧权限响应被拒绝。该状态不是调用授权缓存，
 每次生成仍由网关在线核设备、成员、模型 ACL、额度及计量策略；目录可见不等于预算充足。
 
-`refresh-broker.js` 统一平台与 AI 的分资源缓存/单飞及跨资源串行队列；每个交换任务
-执行时读取 vault 最新 refresh，先原子写 `refreshPending`，成功验票后原子保存新
-refresh，最后才发布 access。AI access 只留内存，不覆盖有效平台 access/claims。
-进程中断、未知 HTTP 结果、验票或最终保存失败保留防重放标记并要求重新认证；
-即使重启也不能用旧 refresh 恢复。交换前标记保存失败则零交换。
-已明确的 AI OAuth 权限拒绝恢复未消费 refresh，取消 AI 流，不改变 Team 登录。
-新的完整原生认证可恢复同一主人，旧设备仍入既有撤销补偿队列，不放宽所有权。
+平台模型只调用固定 broker 操作 `listAiModels`、`createAiChatCompletion` 和
+`createAiChatCompletionStream`，SSE 通过受控的 broker 流读取。平台令牌、刷新和换票
+由 C 的随包制品保管，适配层不接收平台凭据或通用 HTTP 传输。
 
-`installation.js` 管注册/注销及缺能力诊断，退出/吊销/身份切换/卸载清缓存并取消流；
-每条流保留固定到期时刻，新票不延长旧流。仅使用当前安装可信 origin 和同源
-`/ai/v1`，新保存的平台设置不迁移旧凭据。managed 使用 renderer 安装的原生
-`auriga-managed` provider；`managed-status.js` 读取绑定当前租户/主人/实例的私有模型文件，
-同时核对原生 provider 和携该专用模型凭据在线读取的目录，交集非空才报可用。
-文件缺失、权限不安全、provider 缺失、目录拒绝或不可达均失败关闭，不以 device 或实例令牌替代。
+`installation.js` 管注册/注销及缺能力诊断，退出、吊销、身份切换、快照失效和卸载
+清缓存并取消流。同代快照正常续发不会把长生成截断在初始快照的 30 秒期限。
+托管装配同样继承 broker，缺少 OS 对端校验或当前租户/主人绑定时失败关闭。
+旧的 refresh-broker、managed-status 及对应旧测试尚待整线清理，不属于新装配路径。
 
 组合层从 **`@deepseek-ai/dsh-llm` 公开包根**加载模块，将其作为 `hostApi`
 注入，再将公开服务 `ctx.llm` 传给注册入口。工厂继承实际 `LlmAdapter`，
@@ -42,11 +36,8 @@ refresh，最后才发布 access。AI access 只留内存，不覆盖有效平�
 
 - `apiBase`：受信部署 origin，支持 HTTP/HTTPS；不得含路径、查询、片段或用户信息。
   模块仅构造同源 `/ai/v1/models` 与 `/ai/v1/chat/completions`。
-- `fetch`：受控实现，必须遵守 `signal`、`redirect: error`、`credentials: omit`；
-  无全局 fetch 回退，无 Cookie、动态 URL、自动重放或刷新凭据持久化。
-- `getAccessToken(signal)`：异步内存 broker，返回 `{ token, expiresAt, signal }` 或 null；
-  `expiresAt` 是 Unix 毫秒绝对时刻，返回的 signal 用于撤销/登出失效。
-  每次 GET/POST 仅获取一次令牌，到期或撤销关闭在途 body；轮换只作用于新请求。
+- `broker`：已通过 OS 私有通道认证的固定操作接缝，包含状态围栏、失效订阅及流读取。
+  不支持 `fetch` 或 `getAccessToken` 传输选项；没有全局 fetch 回退、动态 URL 或自动重放。
 - `modelLimits`：受信的精确 model id → 已知容量/能力，创建时复制快照。
   `maxOutputTokens` 必须已知；每次必须有正整数 maxTokens 或受信 defaultMaxTokens。
   tools/temperature/stop 只有显式 true 才发送，未知能力失败关闭。
@@ -55,7 +46,7 @@ refresh，最后才发布 access。AI access 只留内存，不覆盖有效平�
 - `responseMode`：固定 `sse`（默认）或 `json`，每次 stream 调用只发一次 POST。
 
 `listModels('auriga')` 每次从受鉴权模型目录获取 id，不缓存权限；
-`resolveModel` 仅返回已知元数据，并不代表在线授权已成功。真正请求仍须取得令牌，
+`resolveModel` 仅返回已知元数据，并不代表在线授权已成功。真正请求仍须经 broker 授权，
 最终 ACL/预算由网关在线验证。注册路由固定为 `auriga`，无可选 URL/供应商透传。
 宿主重试策略明确为 normal/maxRetries=0。
 
@@ -90,7 +81,7 @@ node --test "test/ai/*.test.js"
 ```
 
 本机源码树构建入口的通过结果不证明系统安装包、完整 GUI 或生产装配兼容；
-已接入原生 refresh broker；不调用付费模型，不依赖上游内部运行文件。
+测试不调用付费模型，不依赖上游内部运行文件。真实 DSH 正常入口验收单独记录。
 
 `content_filter` 是正式合法终态。公开 npm rc.2 没有内建过滤 finish，
 因此本适配层在完整响应和工具参数通过校验后，先交付已有可信 usage，

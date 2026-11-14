@@ -179,6 +179,9 @@ export function brokerFixture() {
       token = randomBytes(32).toString('base64url');
       version++;
     },
+    refresh() {
+      changed(event(sub));
+    },
     logout() {
       state = 'signed_out';
       revision++;
