@@ -17,6 +17,22 @@ public final class OAuthProvider {
   private final Clock clock;
   private final Map<String, OAuthClient> clients;
   private final DeviceAiResource deviceAi;
+  private final StandardDevices standardDevices;
+  private final DeviceAccessAuthority deviceAuthority;
+
+  StandardDevices standardDevices() {
+    return standardDevices;
+  }
+
+  DeviceAccessAuthority deviceAuthority() {
+    return deviceAuthority;
+  }
+
+  boolean standardToken(Map<String, String> input) {
+    return StandardDevices.client(client(input.get("client_id")))
+        && Set.of(DEVICE, "refresh_token").contains(input.getOrDefault("grant_type", ""));
+  }
+
   private IamManagedDevices managedDevices;
 
   public void managedDevices(IamManagedDevices managed) {
@@ -52,14 +68,16 @@ public final class OAuthProvider {
     this.sessions = sessions;
     this.tokens = tokens;
     this.clock = clock;
-    this.deviceAi =
-        new DeviceAiResource(
-            new DeviceAccessAuthority(store, sessions, tokens), tokens, authorization);
+    this.deviceAuthority = new DeviceAccessAuthority(store, sessions, tokens);
+    this.deviceAi = new DeviceAiResource(deviceAuthority, tokens, authorization);
     Map<String, OAuthClient> registered = new HashMap<>();
     for (var client : clients)
       if (registered.putIfAbsent(client.id(), client) != null)
         throw new IllegalArgumentException("Duplicate OAuth client");
     this.clients = Map.copyOf(registered);
+    this.standardDevices =
+        new StandardDevices(store, sessions, tokens, clock, this.clients, authorization);
+    deviceAuthority.standardDevices(standardDevices);
   }
 
   public ObjectNode metadata() {
@@ -300,6 +318,13 @@ public final class OAuthProvider {
         return error("invalid_client");
       return managedDevices.exchange(input);
     }
+    OAuthClient registered = client(input.get("client_id"));
+    if (StandardDevices.client(registered)
+        && Set.of(DEVICE, "refresh_token").contains(input.getOrDefault("grant_type", ""))) {
+      if (input.containsKey("client_secret")) return error("invalid_client");
+      if (input.containsKey("audience")) return error("invalid_target");
+      return standardDevices.token(registered, input);
+    }
     return store.tx(
         () -> {
           OAuthClient c = client(input.get("client_id"));
@@ -375,6 +400,8 @@ public final class OAuthProvider {
     boolean ai = input.containsKey("resource");
     ObjectNode grant =
         store.get("oauth_grant", Secrets.hash(input.getOrDefault("refresh_token", "")), true);
+    if (grant != null && StandardDevices.MODE.equals(grant.path("authorizationMode").asString()))
+      return error("invalid_grant");
     if (ai && (grant == null || !grant.path("authorizationMode").asString().equals("native_tx")))
       return error("invalid_grant");
     if (grant != null && grant.path("authorizationMode").asString().equals("native_tx")) {
@@ -531,7 +558,9 @@ public final class OAuthProvider {
           String scope = input.getOrDefault("scope", "auriga.connect");
           IamError.require(
               c.scopes().containsAll(scopes(scope))
-                  && scopes(scope).equals(Set.of("auriga.connect")),
+                  && (StandardDevices.client(c)
+                      ? scopes(scope).contains("auriga.connect")
+                      : scopes(scope).equals(Set.of("auriga.connect"))),
               "invalid_scope",
               400);
           store.limit("device-client:" + c.id(), clock.instant(), 10);
@@ -546,6 +575,8 @@ public final class OAuthProvider {
               Json.object(
                   "kind",
                   "device",
+                  "authorizationMode",
+                  StandardDevices.client(c) ? StandardDevices.MODE : "manual",
                   "clientId",
                   c.id(),
                   "userCode",
@@ -597,13 +628,28 @@ public final class OAuthProvider {
                                   .equals(userCode.replace("-", "")))
                   .findFirst()
                   .orElseThrow(() -> IamError.error("not_found", 404));
+          ObjectNode session = sessions.activeById(sessionId);
+          IamError.require(session != null, "unauthenticated", 401);
+          grant = store.byId("oauth_grant", grant.path("id").asString(), true);
           IamError.require(
               grant.path("status").asString().equals("pending")
+                  && !grant.path("used").asBoolean()
+                  && !grant.path("revoked").asBoolean()
                   && clock.instant().isBefore(Instant.parse(grant.path("expiresAt").asString())),
               "device_expired",
               409);
-          ObjectNode session = sessions.activeById(sessionId);
-          IamError.require(session != null, "unauthenticated", 401);
+          if (StandardDevices.MODE.equals(grant.path("authorizationMode").asString())) {
+            IamError.require(
+                "portal".equals(session.path("audience").asString())
+                    && (!grant.has("uacNavigationProviderId")
+                        || grant
+                            .path("uacNavigationProviderId")
+                            .equals(session.path("providerId"))),
+                "invalid_grant",
+                400);
+            grant.set("accountId", session.path("accountId"));
+            grant.set("providerId", session.path("providerId"));
+          }
           grant.put("status", approved ? "approved" : "denied");
           grant.put("sessionId", sessionId);
           if (approved && session.has("uacSessionBinding"))
@@ -616,6 +662,9 @@ public final class OAuthProvider {
   private ObjectNode exchangeDevice(OAuthClient c, Map<String, String> input) {
     String lookup = Secrets.hash(input.getOrDefault("device_code", ""));
     ObjectNode preflight = store.get("oauth_grant", lookup, false);
+    if (preflight != null
+        && StandardDevices.MODE.equals(preflight.path("authorizationMode").asString()))
+      return error("invalid_grant");
     ObjectNode tx = null;
     if (preflight != null && preflight.path("authorizationMode").asString().equals("native_tx")) {
       // Native finish/cancel/replacement always lock login_tx before its grant.
@@ -723,6 +772,7 @@ public final class OAuthProvider {
   /** RFC7009-style possession proof; native public clients may revoke only their own device. */
   public ObjectNode revoke(Map<String, String> input) {
     OAuthClient c = client(input.get("client_id"));
+    if (StandardDevices.client(c)) return standardDevices.revoke(c, input);
     if (!c.nativeConnect() || !authenticated(c, input.get("client_secret")))
       return error("invalid_client");
     if (!Set.of("client_id", "client_secret", "token", "token_type_hint")

@@ -324,7 +324,7 @@ services:
       AURIGA_IAM_UAC_DIAGNOSTICS_LOKI_ORIGIN: http://loki:3100
       AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:-3600}
       AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:-60}
-      # Public PKCE/device client only: no secret, redirect, or browser OAuth grant.
+      # Public RFC8628 device client: no secret, redirect, or browser OAuth grant.
       AURIGA_IAM_CLIENTS_0_ID: auriga-dsh
       AURIGA_IAM_CLIENTS_0_TENANT: ${AURIGA_NAS_NATIVE_CLIENT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
       AURIGA_IAM_CLIENTS_0_SECRETHASH: ''
@@ -332,7 +332,7 @@ services:
       AURIGA_IAM_CLIENTS_0_SCOPES: auriga.connect
       AURIGA_IAM_CLIENTS_0_GRANTS: urn:ietf:params:oauth:grant-type:device_code,refresh_token
       AURIGA_IAM_CLIENTS_0_PLATFORM: 'true'
-      AURIGA_IAM_CLIENTS_0_NATIVECONNECT: 'true'
+      AURIGA_IAM_CLIENTS_0_NATIVECONNECT: 'false'
       AURIGA_GRPC_PORT: '9091'
       AURIGA_GRPC_SERVER_HOST: 0.0.0.0
       AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt

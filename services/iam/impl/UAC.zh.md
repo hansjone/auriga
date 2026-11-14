@@ -70,8 +70,22 @@ SSO 退出抑制使用 host-only 会话 Cookie；HTTPS 带 `__Host-`、Secure、
 
 两份观测配置均先走 `loki.process.uac_safe`，普通 JSON 与 Docker 外包装中的转义 JSON 各按实际 RE2 捕获组脱敏，再写 Loki。高基数身份仅为 JSON 字段。固定查询只访问部署受信 Loki origin，并限定 tenant/provider/correlation/time；无内部 token 或追踪头。NAS 的平台加入内部 observability 网络；Compose host-network 平台只访问 Loki 的 loopback 13100 端口。既有 `observability` profile 仍由部署方启用，未启用时下载明确 partial/Loki 缺源，不能声称已采集到 Loki。NAS 镜像继续遵守既有摘要固定流程。
 
+## 标准设备客户端（AUTH-K2）
+
+Compose 与 NAS 的 `auriga-dsh` 登记为 platform 公共设备客户端：`native-connect=false`，grant 为 `urn:ietf:params:oauth:grant-type:device_code,refresh_token`，scope 默认 `auriga.connect`。tenant 从部署登记取得；插件不能自报身份。`openid`、`offline_access` 只有部署登记允许时才能请求。旧 Beta 的 `native_tx` 分支保留原围栏，不能以客户端配置变化把标准 lineage 转入旧分支。
+
+设备导航只走 `POST /internal/uac/device-navigation-proofs`，以 `userCode` 在线解析并绑定，返回 201；旧 `/internal/uac/navigation-proofs` 只接受 portal。设备确认仍须人工核码与原有 step-up，auto 不出站。所有浏览器关联号只读 `X-Auriga-Correlation-Id` 响应头。
+
+批准从当前权威门户 session 保存设备、provider、账号与 UAC 来源绑定。标准平台票只有字符串 `aud=auriga`、`ptyp=ctx=device`、`did`，没有浏览器 `sid` 或实例身份。C 用 Bearer 访问 `GET /api/iam/v1/me/device-session` 取得冻结的 `StandardDeviceIdentity`，逐项比较 JWT 与来源绑定；此入口不接受身份选择参数、不返回凭据、不延长来源 idle。本人 UAC 凭据读取也在线验证标准设备来源，原始凭据仍只允许受信后端消费。
+
+普通 refresh 与 `resource=urn:auriga:ai-gateway` 换票共用同一 refresh 家族，C 必须使用单一串行 broker，每次先原子保存后继 refresh。AI 票只含当前模型/协作权限交集，字符串 `aud=auriga.ai-gateway`，寿命不超过 300 秒及来源/设备截止。所有刷新、身份读取和准入核验检查来源、成员、provider、客户端与 UAC 认证代次；不延长来源期限。参数非法、Org 不可用或签发失败均不消费旧 refresh；合法重放仅撤本设备家族。
+
+网关须使用新 `VerifyStandardDeviceAiAccess` RPC，内部身份限定 `svc:ai-gateway`，委派业务 tenant，传原始 AI JWT 和完整的 `auriga.connect.models.invoke` 或 `auriga.connect.collab.use` 权限键。旧 `VerifyDeviceAiAccess` 拒绝标准设备，继续承接 native/managed 专票；旧平台核验不接受 AI audience。目前网关消费者仍调用旧 RPC，需其所属工作线接入后才能声称标准设备模型请求已贯通。
+
+`/oauth2/revoke` 用本客户端 access（平台或 AI）或 refresh 证明撤销本设备，不接收 did/source 选择器；其它设备与来源门户保持有效。IAM 的网络 active/batch/check 在通知丢失时仍查询当前标准设备权限与来源并拒绝旧连接继续使用；现有网关 reconcile 消费批量停权结果并 KICK 已建立的 NATS 连接，明确 inactive 不走故障宽限。真实 PG 下的标准设备停权与网关真实 NATS/IAM 替身踢线分别有测试，完整跨线部署仍由主控验收。现有 `identity.session_revoked` 的空 `sessionIds` 表示账号全部会话，不能用它发送设备单独撤销，本实现未新增该通知。未批准设备取消由 C 停轮询，服务端 grant 等 TTL；迟到令牌按契约加入安全撤销队列。
+
 ## 主控集成验收
 
-本线不部署真实环境；合并与部署由主控串行执行。先合入 AUTH-K2 契约，再由 B/E 对接正常门户导航、设备 userCode 导航证明和管理台下载按钮。内部导航证明仅允许 edge 专用 audience 与明确安装 tenant；`csrfCookie` 只由 edge 设置，不能进 HTML。浏览器 correlationId 以服务端响应头为准。
+本线不部署真实环境；合并与部署由主控串行执行。AUTH-K2 契约已合入本线，由 B/C/D/E 对接正常门户导航、设备 userCode 导航证明、标准设备串行刷新与身份投影、IPC DTO 和管理台下载按钮。内部导航证明仅允许 edge 专用 audience 与明确安装 tenant；`csrfCookie` 只由 edge 设置，不能进 HTML。浏览器 correlationId 以服务端响应头为准。
 
 主控部署后从正常门户入口验证：SSO 成功/拒绝回扫码、扫码并发 complete、MFA、信息失败仍登录、退出后刷新抑制及明确继续、设备明确继续与核码；管理台验证唯一配置入口和 ETag、停用关闭既有会话、诊断开关到期及 ZIP 缺源提示。对两种复验策略用替身/可控时钟检查调用、撤销、刷新拒绝和日志关联。域名及纯 IP/HTTP 正常页面均须验收；容器健康和本工位后端测试不替代页面证据。所有受保护路径变更须【待审查】，交全新非作者 A 级完整独审及精确 HEAD CI。

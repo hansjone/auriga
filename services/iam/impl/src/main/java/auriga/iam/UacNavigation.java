@@ -44,6 +44,11 @@ final class UacNavigation {
 
   ObjectNode issue(JsonNode input, boolean userCode) {
     IamError.validate(input.isObject());
+    new ContractSchemas()
+        .validate(
+            "auth/uac-control.schema.json#/$defs/"
+                + (userCode ? "UacDeviceNavigationIssueRequest" : "UacNavigationIssueRequest"),
+            input);
     return store.tx(
         () -> {
           ObjectNode normalized = ((ObjectNode) input).deepCopy();
@@ -59,9 +64,6 @@ final class UacNavigation {
             normalized.remove("userCode");
             normalized.put("deviceGrantId", grant.path("id").asString());
           }
-          new ContractSchemas()
-              .validate(
-                  "auth/uac-control.schema.json#/$defs/UacNavigationIssueRequest", normalized);
           String request = normalized.path("requestId").asString(),
               provider = normalized.path("providerId").asString(),
               origin = normalized.path("origin").asString();

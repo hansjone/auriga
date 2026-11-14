@@ -20,6 +20,7 @@ public class UacLoginController {
   private final RequestIdentity requests;
   private final SessionManager sessions;
   private final IamStore store;
+  private final OAuthProvider oauth;
 
   UacLoginController(
       UacFlow flow,
@@ -27,13 +28,15 @@ public class UacLoginController {
       LoginManager login,
       RequestIdentity requests,
       SessionManager sessions,
-      IamStore store) {
+      IamStore store,
+      OAuthProvider oauth) {
     this.flow = flow;
     this.uac = uac;
     this.login = login;
     this.requests = requests;
     this.sessions = sessions;
     this.store = store;
+    this.oauth = oauth;
   }
 
   private void noStore(HttpServletResponse response) {
@@ -192,9 +195,15 @@ public class UacLoginController {
 
   @PostMapping("/me/uac/credentials")
   @AuthenticatedOnly
-  public ObjectNode credentials(@RequestBody JsonNode body, HttpServletResponse response) {
+  public ObjectNode credentials(
+      @RequestBody JsonNode body, HttpServletRequest request, HttpServletResponse response) {
     IamError.validate(body.isObject() && body.isEmpty());
     noStore(response);
+    var principal = AuthorizationRules.currentPrincipal().orElse(null);
+    if (principal != null
+        && principal.type() == PrincipalType.DEVICE
+        && oauth.deviceAuthority().standard(principal.deviceId()))
+      oauth.standardDevices().identity(StandardDeviceController.bearer(request));
     return store.tx(() -> uac.credentials(AuthorizationRules.currentPrincipal().orElse(null)));
   }
 }

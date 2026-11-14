@@ -99,14 +99,11 @@ class NetworkAuthorityRpcPostgresTest {
                     Set.of(),
                     Set.of("auriga.connect"),
                     Set.of(OAuthProvider.DEVICE, "refresh_token"),
-                    true)));
+                    true)),
+            StandardDevicePostgresTest.networkAuthorization());
     authority =
         new IamNetworkAuthority(
-            store,
-            new DeviceAccessAuthority(store, sessions, tokens),
-            mock(AuditLogger.class),
-            clock,
-            Set.of("server-a"));
+            store, oauth.deviceAuthority(), mock(AuditLogger.class), clock, Set.of("server-a"));
     rpc = new IamGrpcNetworkAuthority(authority, clock, mock(IamNetworkSourceAuthority.class));
     TenantContext.run(
         tenant,
@@ -117,7 +114,8 @@ class NetworkAuthorityRpcPostgresTest {
                     var provider = UUID.randomUUID();
                     store.insert(
                         "account", account.toString(), Json.object("status", "active"), null);
-                    store.insert("idp_provider", provider.toString(), Json.object(), null);
+                    store.insert(
+                        "idp_provider", provider.toString(), Json.object("enabled", true), null);
                     return sessions.create(
                         account,
                         provider,

@@ -66,10 +66,18 @@ public class OAuthController {
     String[] resources = request.getParameterValues("resource");
     if (resources != null && resources.length != 1)
       return response(OAuthProvider.error("invalid_target"));
+    if (request.getParameterMap().values().stream().anyMatch(values -> values.length != 1))
+      return response(OAuthProvider.error("invalid_request"));
     return standard(
         () ->
             requests.call(
-                request, () -> sessions.response(() -> oauth.token(credentials(input, request)))));
+                request,
+                () -> {
+                  var parameters = credentials(input, request);
+                  return oauth.standardToken(parameters)
+                      ? oauth.token(parameters)
+                      : sessions.response(() -> oauth.token(parameters));
+                }));
   }
 
   @PostMapping(
@@ -78,6 +86,8 @@ public class OAuthController {
   @PublicEndpoint
   public ResponseEntity<ObjectNode> device(
       @RequestParam Map<String, String> input, HttpServletRequest request) {
+    if (request.getParameterMap().values().stream().anyMatch(values -> values.length != 1))
+      return response(OAuthProvider.error("invalid_request"));
     return standard(
         () -> requests.call(request, () -> oauth.deviceAuthorization(credentials(input, request))));
   }
@@ -86,6 +96,8 @@ public class OAuthController {
   @PublicEndpoint
   public ResponseEntity<ObjectNode> revoke(
       @RequestParam Map<String, String> input, HttpServletRequest request) {
+    if (request.getParameterMap().values().stream().anyMatch(values -> values.length != 1))
+      return response(OAuthProvider.error("invalid_request"));
     return standard(() -> requests.call(request, () -> oauth.revoke(credentials(input, request))));
   }
 
@@ -224,6 +236,7 @@ public class OAuthController {
     try {
       return response(work.get());
     } catch (auriga.common.error.AurigaException error) {
+      if (error.errorCode().httpStatus() >= 500) throw error;
       String code = error.errorCode().code().replace("iam.", "");
       if (!Set.of(
               "invalid_client", "invalid_scope", "unauthorized_client", "unsupported_grant_type")

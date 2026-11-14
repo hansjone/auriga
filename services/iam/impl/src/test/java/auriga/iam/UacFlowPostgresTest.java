@@ -1805,6 +1805,10 @@ class UacFlowPostgresTest {
                   }));
       var input = navigationInput(f, "device");
       input.put("userCode", "BCDF-GHJK");
+      assertThrows(AurigaException.class, () -> f.call(() -> nav.issue(input, false)));
+      var legacy = navigationInput(f, "device");
+      legacy.put("deviceGrantId", id);
+      assertThrows(AurigaException.class, () -> f.call(() -> nav.issue(legacy, false)));
       var issued = f.call(() -> nav.issue(input, true));
       assertFalse(issued.toString().contains("deviceGrantId"));
       assertFalse(issued.path("context").path("autoEligible").asBoolean());

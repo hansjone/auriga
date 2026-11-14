@@ -306,7 +306,7 @@ final class UacSessions {
       ObjectNode device = store.get("device", principal.deviceId(), true);
       if (device == null
           || device.path("revoked").asBoolean()
-          || !"auriga.connect".equals(device.path("scope").asString())
+          || !StandardDevices.scopes(device.path("scope").asString()).contains("auriga.connect")
           || session == null
           || !"portal".equals(session.path("audience").asString())
           || !device.path("uacSessionBinding").equals(session.path("uacSessionBinding"))

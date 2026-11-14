@@ -91,6 +91,7 @@ public class UacNavigationController {
   }
 
   @PostMapping("/internal/uac/navigation-proofs")
+  @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   @AuthenticatedOnly
   public ObjectNode issuePortal(
       @RequestBody JsonNode input, HttpServletRequest request, HttpServletResponse response) {
@@ -98,6 +99,7 @@ public class UacNavigationController {
   }
 
   @PostMapping("/internal/uac/device-navigation-proofs")
+  @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   @AuthenticatedOnly
   public ObjectNode issueDevice(
       @RequestBody JsonNode input, HttpServletRequest request, HttpServletResponse response) {

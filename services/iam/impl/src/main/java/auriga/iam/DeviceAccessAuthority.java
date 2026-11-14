@@ -14,6 +14,22 @@ public final class DeviceAccessAuthority {
   private final IamStore store;
   private final SessionManager sessions;
   private final TokenService tokens;
+  private StandardDevices standardDevices;
+
+  DeviceAccessAuthority standardDevices(StandardDevices value) {
+    standardDevices = value;
+    return this;
+  }
+
+  boolean standard(String device) {
+    if (device == null || !uuid(device)) return false;
+    return store.tx(
+        () -> {
+          var row = store.get("device", device, false);
+          return row != null
+              && StandardDevices.MODE.equals(row.path("authorizationMode").asString());
+        });
+  }
 
   public DeviceAccessAuthority(IamStore store, SessionManager sessions, TokenService tokens) {
     this.store = store;
@@ -36,11 +52,17 @@ public final class DeviceAccessAuthority {
     if (!platformAudience(claims)
         || !claims.path("ptyp").asString().equals("device")
         || !claims.path("ctx").asString().equals("device")
-        || !claims.path("scope").asString().equals("auriga.connect")) return null;
+        || !StandardDevices.scopes(claims.path("scope").asString()).contains("auriga.connect"))
+      return null;
     boolean team = false;
     for (var permission : claims.path("perms"))
       if (permission.asString().equals("auriga.connect.collab.use")) team = true;
     if (!team) return null;
+    if (standard(claims.path("did").asString()))
+      return standardDevices == null
+          ? null
+          : standardDevices.access(raw, "auriga", "auriga.connect.collab.use");
+    if (!claims.path("scope").asString().equals("auriga.connect")) return null;
     Identity identity =
         credential(
             claims.path("tid").asString(),
@@ -59,6 +81,10 @@ public final class DeviceAccessAuthority {
     if (!TenantContext.require().toString().equals(tenant))
       throw new AurigaException(CommonErrors.FORBIDDEN);
     if (!uuid(account) || !uuid(device)) return null;
+    if (standard(device))
+      return standardDevices == null
+          ? null
+          : standardDevices.credentialState(tenant, account, device);
     return store.tx(
         () -> {
           ObjectNode initial = store.get("device", device, false);
@@ -84,6 +110,13 @@ public final class DeviceAccessAuthority {
   }
 
   record CredentialSnapshot(Identity identity, String session) {}
+
+  /** Network entry points call this before taking their local policy/identity locks. */
+  boolean standardOnline(String tenant, String account, String device) {
+    if (!standard(device)) return true;
+    return standardDevices != null
+        && standardDevices.credential(tenant, account, device, "auriga.connect.collab.use") != null;
+  }
 
   /** Same canonical checks and lock order as credential; no activity or token mutation. */
   CredentialSnapshot credentialSnapshot(String tenant, String account, String device) {

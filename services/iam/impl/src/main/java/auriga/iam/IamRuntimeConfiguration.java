@@ -443,6 +443,11 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  StandardDevices iamStandardDevices(OAuthProvider oauth) {
+    return oauth.standardDevices();
+  }
+
+  @Bean
   IamNetworkSourceAuthority iamNetworkSourceAuthority(
       IamStore store,
       IamNetworkAuthority network,
@@ -450,11 +455,12 @@ public class IamRuntimeConfiguration {
       TokenService tokens,
       Clock clock,
       Environment env,
-      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization,
+      StandardDevices standard) {
     return new IamNetworkSourceAuthority(
         store,
         network,
-        new DeviceAccessAuthority(store, sessions, tokens),
+        new DeviceAccessAuthority(store, sessions, tokens).standardDevices(standard),
         authorization.getIfAvailable(
             () ->
                 request -> {
@@ -473,9 +479,16 @@ public class IamRuntimeConfiguration {
 
   @Bean
   NetworkDirectory iamNetworkDirectory(
-      IamStore store, SessionManager sessions, TokenService tokens, Clock clock) {
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      StandardDevices standard) {
     return new IamNetworkDirectory(
-        store, sessions, new DeviceAccessAuthority(store, sessions, tokens), clock);
+        store,
+        sessions,
+        new DeviceAccessAuthority(store, sessions, tokens).standardDevices(standard),
+        clock);
   }
 
   @Bean
@@ -496,10 +509,11 @@ public class IamRuntimeConfiguration {
       TokenService tokens,
       AuditLogger audit,
       Clock clock,
-      Environment env) {
+      Environment env,
+      StandardDevices standard) {
     return new IamNetworkAuthority(
         store,
-        new DeviceAccessAuthority(store, sessions, tokens),
+        new DeviceAccessAuthority(store, sessions, tokens).standardDevices(standard),
         audit,
         clock,
         Set.copyOf(

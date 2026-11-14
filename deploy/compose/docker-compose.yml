@@ -247,6 +247,14 @@ services:
       AURIGA_IAM_ENCRYPTION_KEY: ${AURIGA_IAM_ENCRYPTION_KEY}
       AURIGA_IAM_UAC_SSO_COOKIE_ENABLED: ${AURIGA_IAM_UAC_SSO_COOKIE_ENABLED:-true}
       AURIGA_IAM_UAC_DIAGNOSTICS_LOKI_ORIGIN: http://127.0.0.1:13100
+      AURIGA_IAM_CLIENTS_0_ID: auriga-dsh
+      AURIGA_IAM_CLIENTS_0_TENANT: ${AURIGA_NATIVE_CLIENT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
+      AURIGA_IAM_CLIENTS_0_SECRETHASH: ''
+      AURIGA_IAM_CLIENTS_0_REDIRECTURIS: ''
+      AURIGA_IAM_CLIENTS_0_SCOPES: auriga.connect
+      AURIGA_IAM_CLIENTS_0_GRANTS: urn:ietf:params:oauth:grant-type:device_code,refresh_token
+      AURIGA_IAM_CLIENTS_0_PLATFORM: 'true'
+      AURIGA_IAM_CLIENTS_0_NATIVECONNECT: 'false'
       AURIGA_WORKSPACE_ENCRYPTION_KEY: ${AURIGA_WORKSPACE_ENCRYPTION_KEY}
       # Test enrollment requires password + TOTP through the bridged edge.
       # Docker NAT changes loopback clients to bridge IPs. This dev-only stack
