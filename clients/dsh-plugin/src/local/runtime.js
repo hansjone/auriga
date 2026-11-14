@@ -29,7 +29,11 @@ export async function createConnectRuntime({
   enterpriseConfig,
 }) {
   const vault = await createVault(directory);
-  const legacy = !!vault.snapshot().credential;
+  const savedAuthentication = vault.snapshot();
+  const legacy =
+    !!savedAuthentication.credential ||
+    !!savedAuthentication.endpoint ||
+    (savedAuthentication.revocations?.length ?? 0) > 0;
   if (legacy)
     await vault.update((s) => {
       s.credential = null;

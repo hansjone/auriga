@@ -16,7 +16,9 @@ async function fixture(t, legacy = false) {
   if (legacy) {
     const vault = await createVault(directory);
     await vault.update((s) => {
-      s.credential = { accessToken: randomUUID(), claims: {} };
+      if (legacy === 'revocation')
+        s.revocations = [{ refreshToken: randomUUID() }];
+      else s.credential = { accessToken: randomUUID(), claims: {} };
     });
     vault.close();
   }
@@ -73,6 +75,19 @@ test('logout push invalidates the same admitted native owner immediately', async
 test('legacy credential removal preserves private files and requires shell authority', async (t) => {
   const { runtime, directory } = await fixture(t, true);
   assert.equal(runtime.vault.snapshot().credential, undefined);
+  assert.equal(
+    await readFile(join(directory, 'private-content.txt'), 'utf8'),
+    'private content',
+  );
+});
+test('migration also removes queued legacy revocation credentials after local logout', async (t) => {
+  const { runtime, directory } = await fixture(t, 'revocation');
+  runtime.close();
+  const stored = await createVault(directory);
+  t.after(() => stored.close());
+  assert.equal(stored.snapshot().credential, null);
+  assert.deepEqual(stored.snapshot().revocations, []);
+  assert.equal(stored.snapshot().endpoint, null);
   assert.equal(
     await readFile(join(directory, 'private-content.txt'), 'utf8'),
     'private content',
