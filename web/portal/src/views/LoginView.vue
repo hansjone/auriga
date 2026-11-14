@@ -257,8 +257,12 @@ const step = (): ClientStep | null =>
 </script>
 
 <template>
-  <section class="auriga-login">
-    <header class="auriga-login-head">
+  <section class="auriga-login" :class="{ 'auriga-qr-login': uacActive }">
+    <header v-if="uacActive" class="qr-heading">
+      <BrandMark :size="24" />
+      <h1>{{ locale === 'en' ? 'Scan to sign in' : '扫码登录' }}</h1>
+    </header>
+    <header v-else class="auriga-login-head">
       <BrandMark :size="40" />
       <div>
         <p class="auriga-login-name">
@@ -267,7 +271,7 @@ const step = (): ClientStep | null =>
       </div>
     </header>
     <p v-if="error" class="auriga-login-error" role="alert">{{ error }}</p>
-    <p v-if="loading" class="auriga-login-status" role="status">
+    <p v-if="loading && !uacActive" class="auriga-login-status" role="status">
       {{ t('login.loading') }}
     </p>
     <div v-show="uacActive" ref="uacRoot" />
@@ -278,7 +282,7 @@ const step = (): ClientStep | null =>
       :disabled="busy"
       @click="backToProviders"
     >
-      {{ t('login.back') }}
+      {{ locale === 'en' ? 'Cancel' : '取消' }}
     </button>
     <PortalProviders
       v-if="!loading && !tx && !uacActive"
@@ -304,13 +308,60 @@ const step = (): ClientStep | null =>
         {{ t('login.back') }}
       </button>
     </template>
-    <a v-if="!deviceContinuation" class="home-link" href="/">{{
+    <a v-if="!deviceContinuation && !uacActive" class="home-link" href="/">{{
       locale === 'en' ? 'Back to home' : '返回首页'
     }}</a>
   </section>
 </template>
 
 <style scoped>
+.auriga-qr-login {
+  width: min(352px, 100%);
+  padding: 32px;
+  height: 480px;
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.qr-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 32px;
+  flex-shrink: 0;
+}
+.qr-heading h1 {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  margin: 0;
+  color: var(--auriga-text);
+}
+.auriga-qr-login :deep([data-testid='uac-target']),
+.auriga-qr-login :deep(.uac-cancel) {
+  display: none;
+}
+.auriga-qr-login
+  :deep(.uac-actions:has(button:not([hidden]):not(.uac-cancel))) {
+  margin-bottom: 8px;
+}
+.auriga-qr-login > .auriga-login-back {
+  margin: auto 0 0;
+  font-size: 12px;
+  line-height: 16px;
+  padding: 8px;
+}
+.auriga-qr-login > .auriga-login-back:focus-visible {
+  outline: 2px solid var(--auriga-accent-line);
+  outline-offset: 2px;
+}
+@media (max-width: 390px) {
+  .auriga-qr-login {
+    padding-inline: 24px;
+  }
+}
 .home-link {
   display: block;
   text-align: center;

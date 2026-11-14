@@ -143,16 +143,23 @@ export function createUacLoginView(
     symbol = doc.createElement('span');
   frame.className = 'uac-frame';
   overlay.className = 'uac-overlay';
+  const overlayCaption = doc.createElement('p');
+  overlayCaption.className = 'uac-overlay-caption';
+  overlayCaption.setAttribute('aria-hidden', 'true');
   symbol.className = 'uac-symbol';
   symbol.setAttribute('aria-hidden', 'true');
-  overlay.append(symbol);
+  overlay.append(symbol, overlayCaption);
   frame.append(qr, overlay);
   const countdown = doc.createElement('div'),
     remaining = doc.createElement('span'),
     progress = doc.createElement('progress');
   countdown.className = 'uac-countdown';
   remaining.dataset.testid = 'uac-countdown';
-  countdown.append(remaining, progress);
+  countdown.append(remaining);
+  frame.append(progress);
+  const statusRow = doc.createElement('div');
+  statusRow.className = 'uac-status-row';
+  statusRow.append(status, countdown);
   const actions = doc.createElement('div');
   actions.className = 'uac-actions';
   status.className = 'uac-caption';
@@ -163,20 +170,14 @@ export function createUacLoginView(
   const proceed = doc.createElement('button'),
     reload = doc.createElement('button');
   for (const button of [retry, cancel, proceed, reload]) button.type = 'button';
+  cancel.className = 'uac-cancel';
   actions.append(proceed, retry, cancel, reload);
-  root.replaceChildren(
-    target,
-    frame,
-    countdown,
-    status,
-    warning,
-    actions,
-    reference,
-  );
+  root.replaceChildren(target, frame, statusRow, warning, actions, reference);
   const current = (version: number) => !disposed && epoch === version;
   function updateCountdown() {
     const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     countdown.hidden = !deadline || !['waiting', 'scanned'].includes(state);
+    progress.hidden = countdown.hidden;
     remaining.textContent =
       Math.floor(seconds / 60)
         .toString()
@@ -206,24 +207,17 @@ export function createUacLoginView(
       options.targetName?.en ??
       (locale === 'en' ? 'Company sign-in' : '企业登录');
     root.dataset.uacState = state;
-    const refreshInFrame = [
-      'expired',
-      'denied',
-      'failed',
-      'unavailable',
-    ].includes(state);
-    frame.hidden =
-      state === 'continue_required' ||
-      state === 'invalid_request' ||
-      state === 'uncertain' ||
-      state === 'additional_step_required';
+    const refreshInFrame = state === 'expired';
     overlay.hidden = state === 'waiting';
     symbol.hidden = refreshInFrame;
     symbol.textContent = ['scanned', 'authenticated'].includes(state)
       ? '✓'
       : ['preparing', 'sso', 'completing'].includes(state)
         ? '···'
-        : '—';
+        : ['denied', 'failed'].includes(state)
+          ? '×'
+          : '!';
+    overlayCaption.textContent = words[state];
     retry.classList.toggle('uac-refresh', refreshInFrame);
     if (refreshInFrame) overlay.append(retry);
     else actions.prepend(retry);
@@ -233,13 +227,19 @@ export function createUacLoginView(
       : '';
     reference.hidden = !correlationId;
     warning.textContent = words.warning;
+    frame.title = [words.warning, reference.textContent]
+      .filter(Boolean)
+      .join('\n');
     retry.textContent = words.retry;
     retry.setAttribute('aria-label', words.retry);
     cancel.textContent = words.cancel;
     proceed.textContent = words.proceed;
     reload.textContent = words.reload;
     const needsReload = state === 'uncertain' || state === 'invalid_request';
-    retry.hidden = completed || needsReload;
+    retry.hidden =
+      completed ||
+      needsReload ||
+      !['expired', 'continue_required'].includes(state);
     retry.disabled = busy() || Date.now() < retryAt;
     cancel.hidden =
       completed ||

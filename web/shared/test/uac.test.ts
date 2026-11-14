@@ -250,6 +250,17 @@ describe('SSO and terminal page states', () => {
       await tick();
       await vi.waitFor(() => expect(ctx.root.dataset.uacState).toBe(state));
       expect(ctx.root.textContent).not.toContain('SECRET-UPSTREAM');
+      const refresh = action(ctx.root, '重新获取二维码');
+      expect(refresh.hidden).toBe(state !== 'expired');
+      expect(refresh.parentElement?.classList.contains('uac-overlay')).toBe(
+        state === 'expired',
+      );
+      expect((ctx.root.querySelector('.uac-frame') as HTMLElement).hidden).toBe(
+        false,
+      );
+      expect(ctx.root.querySelector('.uac-overlay-caption')?.textContent).toBe(
+        ctx.root.querySelector('.uac-caption')?.textContent,
+      );
       if (state !== 'scanned') expect(ctx.root.querySelector('svg')).toBeNull();
       await view.dispose();
     },

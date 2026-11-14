@@ -11,18 +11,20 @@
   --uq-accent: var(--auriga-accent-line, var(--al-accent, #8fb9d6));
   display: grid;
   justify-items: center;
-  gap: 14px;
+  gap: 0;
   color: var(--uq-text);
   text-align: center;
   min-width: 0;
+  width: 100%;
 }
 .auriga-uac [hidden] {
   display: none !important;
 }
 .auriga-uac h2 {
   font-size: 18px;
+  line-height: 24px;
   font-weight: 500;
-  margin: 0 0 6px;
+  margin: 0 0 24px;
 }
 .auriga-uac p {
   margin: 0;
@@ -30,14 +32,21 @@
 }
 .auriga-uac .uac-frame {
   position: relative;
-  width: 220px;
-  height: 220px;
+  width: 240px;
+  height: 240px;
   max-width: 100%;
   aspect-ratio: 1;
   box-sizing: border-box;
-  background: #fff;
-  border: 1px solid var(--uq-line);
-  border-radius: 18px;
+  padding: 12px;
+  background: #102334;
+  border: 1px solid #2c4355;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.auriga-uac .uac-code {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
   overflow: hidden;
 }
 .auriga-uac .uac-code svg {
@@ -45,40 +54,76 @@
   height: 100%;
   display: block;
 }
-.auriga-uac .uac-code {
-  width: 100%;
-  height: 100%;
+.auriga-uac .uac-code svg rect {
+  fill: #dfe8ee;
 }
 .auriga-uac .uac-overlay {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
-  background: #10283bf2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  box-sizing: border-box;
+  background: #102334ed;
   color: #e8f0f7;
 }
 .auriga-uac .uac-symbol {
-  width: 60px;
-  height: 60px;
-  border: 1px solid #779cba;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #627e94;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font-size: 32px;
+  font-size: 24px;
+  font-weight: 400;
   line-height: 1;
 }
-.auriga-uac .uac-countdown {
-  display: grid;
-  gap: 8px;
-  justify-items: center;
+.auriga-uac .uac-overlay-caption {
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+  color: #b7c8d5;
+  max-width: 192px;
+}
+.auriga-uac .uac-status-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  font-size: 12px;
+  line-height: 16px;
   color: var(--uq-muted);
+}
+.auriga-uac .uac-countdown {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.auriga-uac:not([data-uac-state='waiting']) .uac-countdown {
+  visibility: hidden;
+}
+.auriga-uac:not([data-uac-state='waiting']) .uac-caption,
+.auriga-uac .uac-warning,
+.auriga-uac .uac-reference {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .auriga-uac progress {
   appearance: none;
-  width: 120px;
-  height: 2px;
+  position: absolute;
+  bottom: 0;
+  left: 12px;
+  width: calc(100% - 24px);
+  height: 1px;
   border: 0;
   background: var(--uq-line);
 }
@@ -91,31 +136,22 @@
 .auriga-uac progress::-moz-progress-bar {
   background: var(--uq-accent);
 }
-.auriga-uac .uac-caption {
-  font-size: 14px;
-  line-height: 1.6;
-}
-.auriga-uac .uac-warning,
-.auriga-uac .uac-reference {
-  color: var(--uq-muted);
-  font-size: 11px;
-  line-height: 1.6;
-  max-width: 280px;
-}
 .auriga-uac .uac-actions {
   display: flex;
   justify-content: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: 8px;
 }
 .auriga-uac button {
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
-  color: var(--uq-text);
-  border: 1px solid var(--uq-line);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--uq-muted);
+  border: 0;
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px;
   background: transparent;
   width: auto;
   margin: 0;
@@ -130,31 +166,33 @@
 }
 .auriga-uac .uac-refresh {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid #627e94;
   border-radius: 50%;
-  border-color: #779cba;
   font-size: 0;
   color: #e8f0f7;
+  order: -1;
 }
 .auriga-uac .uac-refresh::before {
   content: '';
   position: absolute;
-  width: 20px;
-  height: 20px;
-  border: 2px solid currentColor;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid currentColor;
   border-right-color: transparent;
   border-radius: 50%;
-  top: 15px;
-  left: 15px;
+  top: 10px;
+  left: 10px;
 }
 .auriga-uac .uac-refresh::after {
   content: '';
   position: absolute;
-  top: 14px;
-  right: 15px;
-  width: 7px;
-  height: 7px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
+  top: 9px;
+  right: 10px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
 }
