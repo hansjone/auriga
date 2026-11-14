@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -12,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, parse } from 'node:path';
 import {
   CrashError,
+  defaultSmoke,
   install,
   launchEnv,
   nodeBin,
@@ -24,6 +26,24 @@ import {
 import { buildPayload, tempBase } from './helpers.mjs';
 
 const noSmoke = () => {};
+
+test('default smoke distinguishes command and missing-plugin failures with a safe reason code', (t) => {
+  const base = tempBase(t);
+  const executable = nodeBin(base);
+  mkdirSync(dirname(executable), { recursive: true });
+  copyFileSync(process.execPath, executable);
+  const dsh = join(base, 'upstream/app/node_modules/@deepseek-ai/dsh');
+  mkdirSync(dsh, { recursive: true });
+  writeFileSync(join(dsh, 'package.json'), JSON.stringify({ bin: 'cli.cjs' }));
+  for (const source of ['process.exit(1)', 'console.log("unrelated-plugin")']) {
+    writeFileSync(join(dsh, 'cli.cjs'), source);
+    assert.throws(() => defaultSmoke(base, join(base, 'home')), {
+      code: 'desktop.smoke_failed',
+    });
+  }
+  writeFileSync(join(dsh, 'cli.cjs'), 'console.log("auriga-dsh")');
+  assert.doesNotThrow(() => defaultSmoke(base, join(base, 'home')));
+});
 
 function fixture(t) {
   const base = tempBase(t);

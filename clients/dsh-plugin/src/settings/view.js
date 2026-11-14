@@ -262,20 +262,23 @@ export function createSettingsView(
   async function call(
     /** @type {string} */ path,
     /** @type {any} */ body = undefined,
-    /** @type {string|undefined} */ csrf = undefined,
+    /** @type {{ timeoutMs?: number | null, csrf?: string }} */ options = {},
   ) {
     const response = await fetcher(localURL(path), {
       method: body === undefined ? 'GET' : 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
       redirect: 'error',
-      signal: AbortSignal.timeout(15000),
+      signal:
+        options.timeoutMs === null
+          ? undefined
+          : AbortSignal.timeout(options.timeoutMs ?? 15000),
       headers:
         body === undefined
           ? {}
           : {
               'content-type': 'application/json',
-              ...(csrf ? { 'x-auriga-csrf': csrf } : {}),
+              ...(options.csrf ? { 'x-auriga-csrf': options.csrf } : {}),
               ...(path.startsWith('auriga/resources/catalog/')
                 ? { 'x-auriga-catalog': '1' }
                 : { 'X-Auriga-Settings': '1' }),
@@ -868,7 +871,7 @@ export function createSettingsView(
         label,
       );
     const shellCommand = async (/** @type {string} */ action) => {
-      await call('auriga/shell/command', { action }, account?.csrf);
+      await call('auriga/shell/command', { action }, { csrf: account?.csrf });
       await reload();
     };
     const enter = () => {
@@ -946,7 +949,13 @@ export function createSettingsView(
             !state.desktop.restartRequired &&
             button(t.update, () =>
               run(async () => {
-                await call('auriga/settings/desktop', { action: 'update' });
+                // The runtime bounds transfer idle time. A status-read deadline
+                // must not cancel a healthy package download before it queues.
+                await call(
+                  'auriga/settings/desktop',
+                  { action: 'update' },
+                  { timeoutMs: null },
+                );
                 await readState();
               }),
             ),
