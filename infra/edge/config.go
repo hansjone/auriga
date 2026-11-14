@@ -50,6 +50,7 @@ type Config struct {
 	NetworkWSS             NetworkWSSConfig              `json:"networkWss"`
 	DevicePresence         DevicePresenceConfig          `json:"devicePresence"`
 	ManagedIngress         ManagedIngressConfig          `json:"managedIngress"`
+	MsgnetProjection       *MsgnetProjectionConfig       `json:"msgnetProjection,omitempty"`
 }
 
 type StaticConfig struct {

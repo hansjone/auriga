@@ -30,7 +30,7 @@ func projectorPeer(c *net.UnixConn) error {
 	if socketErr != nil {
 		return socketErr
 	}
-	if credentials == nil || credentials.Uid != 10001 {
+	if credentials == nil || credentials.Uid != 65532 || credentials.Gid != 65532 {
 		return fmt.Errorf("projector peer denied")
 	}
 	return nil
@@ -40,18 +40,38 @@ func projectorPeer(c *net.UnixConn) error {
 // writable-to-others volume or symlink. A per-reader lock serializes crash
 // recovery of a stale socket. It grants no filesystem operations to peers.
 func (r *Reader) Listen(ctx context.Context) error {
-	if r.Scope.Component != "edge" || os.Geteuid() != 65532 {
+	if r.Scope.Component != "edge" || os.Geteuid() != 65532 || os.Getegid() != 65532 {
 		return fmt.Errorf("edge reader requires UID 65532")
 	}
-	info, e := os.Lstat(r.Control)
-	if e != nil || !info.IsDir() || info.Mode().Perm() != 0710 {
-		return fmt.Errorf("invalid private control directory")
+	noNewPrivileges, e := unix.PrctlRetInt(unix.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
+	if e != nil || noNewPrivileges != 1 {
+		return fmt.Errorf("edge reader requires no-new-privileges")
 	}
+	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	var capabilities [2]unix.CapUserData
+	if e = unix.Capget(&header, &capabilities[0]); e != nil {
+		return e
+	}
+	for _, set := range capabilities {
+		if set.Effective != 0 || set.Permitted != 0 || set.Inheritable != 0 {
+			return fmt.Errorf("edge reader requires cap_drop ALL")
+		}
+	}
+	var info os.FileInfo
 	var st unix.Stat_t
-	if e = unix.Lstat(r.Control, &st); e != nil || st.Uid != 65532 || st.Gid != 10001 {
-		return fmt.Errorf("invalid control volume owner")
+	for _, path := range []string{r.Root, r.Control, r.State} {
+		info, e = os.Lstat(path)
+		if e != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+			return fmt.Errorf("invalid private reader volume")
+		}
+		if e = unix.Lstat(path, &st); e != nil || st.Uid != 65532 || st.Gid != 65532 {
+			return fmt.Errorf("invalid reader volume owner")
+		}
 	}
-	fd, e := unix.Open(filepath.Join(r.Control, "reader.lock"), unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+	if !independentRoots(r.State, r.Control, r.Root) {
+		return fmt.Errorf("reader state volume must be private")
+	}
+	fd, e := unix.Open(filepath.Join(r.State, "reader.lock"), unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
 	if e != nil {
 		return e
 	}
@@ -65,7 +85,7 @@ func (r *Reader) Listen(ctx context.Context) error {
 		if info.Mode()&os.ModeSocket == 0 {
 			return fmt.Errorf("invalid control endpoint")
 		}
-		if e = unix.Lstat(path, &st); e != nil || st.Uid != 65532 || st.Gid != 10001 {
+		if e = unix.Lstat(path, &st); e != nil || st.Uid != 65532 || st.Gid != 65532 {
 			return fmt.Errorf("invalid socket owner")
 		}
 		connection, dialErr := net.DialTimeout("unix", path, time.Second)
@@ -87,10 +107,7 @@ func (r *Reader) Listen(ctx context.Context) error {
 		return e
 	}
 	defer func() { _ = listener.Close() }()
-	if e = os.Chown(path, 65532, 10001); e != nil {
-		return e
-	}
-	if e = os.Chmod(path, 0660); e != nil {
+	if e = os.Chmod(path, 0600); e != nil {
 		return e
 	}
 	done := make(chan struct{})

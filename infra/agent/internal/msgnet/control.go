@@ -4,7 +4,6 @@ package msgnet
 import (
 	"bytes"
 	"context"
-	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"
@@ -29,19 +28,21 @@ type Backend interface {
 	ApplyTransport(context.Context, api.SignedTransportTrustBundle) error
 }
 type Options struct {
-	Directory, Tenant, Realm, RootKid string
-	RootKey                           ed25519.PublicKey
-	Pin                               api.InstallationPin
-	SigningKey                        ed25519.PrivateKey
-	Backend                           Backend
-	ResolveAuthority                  func(context.Context, string, string) (api.SignedRuntimeAuthority, error)
-	Now                               func() time.Time
+	Directory, Tenant, Realm, RootKid, NodeId string
+	RootKey                                   ed25519.PublicKey
+	Pin                                       api.NodeControlPin
+	SigningKey                                ed25519.PrivateKey
+	Backend                                   Backend
+	ResolveAuthority                          func(context.Context, string, string) (api.SignedRuntimeAuthority, error)
+	Now                                       func() time.Time
 }
 type state struct {
-	IdentityId string                          `json:"identity_id"`
-	Package    api.ControlPackage              `json:"package"`
-	Receipt    *api.InstallationReceipt        `json:"receipt,omitempty"`
-	Bundle     *api.SignedTransportTrustBundle `json:"bundle,omitempty"`
+	IdentityId       string                          `json:"identity_id"`
+	IdentityRevision string                          `json:"identity_revision"`
+	NodeId           string                          `json:"node_id"`
+	Package          api.ControlPackage              `json:"package"`
+	Receipt          *api.InstallationReceipt        `json:"receipt,omitempty"`
+	Bundle           *api.SignedTransportTrustBundle `json:"bundle,omitempty"`
 }
 type Installer struct {
 	options     Options
@@ -70,21 +71,14 @@ func New(o Options) (*Installer, error) {
 	if !bytes.Equal(canonical, raw) || base64.RawURLEncoding.EncodeToString(raw) != o.Pin.SigningSpki {
 		return nil, fmt.Errorf("noncanonical pin key")
 	}
-	if o.Pin.IdentityId == "" || len(o.Pin.IdentityId) > 128 || o.Pin.TargetId == "" || len(o.Pin.TargetId) > 128 || o.Pin.GatewayId == "" || len(o.Pin.GatewayId) > 128 || o.Pin.Subject == "" || len(o.Pin.Subject) > 1024 || !slices.Contains([]string{"network", "edge", "broker"}, o.Pin.Component) {
-		return nil, fmt.Errorf("missing pin identity")
+	if o.NodeId == "" || o.Pin.NodeId != o.NodeId || o.Pin.IdentityId == "" || o.Pin.TargetId == "" || len(o.Pin.IdentityId) > 128 || len(o.Pin.TargetId) > 128 || len(o.NodeId) > 128 || len(o.Pin.AdditionalProperties) != 0 {
+		return nil, fmt.Errorf("node control pin does not match authenticated node")
 	}
-	sealingDER, e := base64.RawURLEncoding.Strict().DecodeString(o.Pin.SealingSpki)
-	if e != nil || base64.RawURLEncoding.EncodeToString(sealingDER) != o.Pin.SealingSpki {
-		return nil, fmt.Errorf("invalid sealing pin")
+	if _, e = number(o.Pin.IdentityRevision); e != nil {
+		return nil, e
 	}
-	sealing, e := x509.ParsePKIXPublicKey(sealingDER)
-	x, xOK := sealing.(*ecdh.PublicKey)
-	if e != nil || !xOK || x.Curve() != ecdh.X25519() {
-		return nil, fmt.Errorf("invalid sealing key algorithm")
-	}
-	canonical, e = x509.MarshalPKIXPublicKey(x)
-	if e != nil || !bytes.Equal(canonical, sealingDER) || bytes.Equal(o.RootKey, ed) {
-		return nil, fmt.Errorf("installation key role reuse")
+	if bytes.Equal(o.RootKey, ed) {
+		return nil, fmt.Errorf("node confirmation key reuses root role")
 	}
 	for p := o.Directory; ; p = filepath.Dir(p) {
 		if info, e := os.Lstat(p); e == nil && info.Mode()&os.ModeSymlink != 0 {
@@ -117,8 +111,13 @@ func New(o Options) (*Installer, error) {
 		if e = installer.control(saved.Package); e != nil {
 			return nil, e
 		}
-		if saved.IdentityId == "" {
+		if saved.IdentityId == "" || saved.NodeId != o.NodeId {
 			return nil, fmt.Errorf("missing journal identity")
+		}
+		oldRevision, e := number(saved.IdentityRevision)
+		newRevision, _ := number(o.Pin.IdentityRevision)
+		if e != nil || newRevision < oldRevision || saved.IdentityId != o.Pin.IdentityId && newRevision <= oldRevision || saved.IdentityId == o.Pin.IdentityId && newRevision != oldRevision {
+			return nil, fmt.Errorf("node identity revision rollback or reuse")
 		}
 		if saved.Receipt != nil && saved.Receipt.IdentityId != saved.IdentityId {
 			return nil, fmt.Errorf("receipt identity does not match journal")
@@ -287,7 +286,7 @@ func (i *Installer) InstallControl(ctx context.Context, raw []byte) ([]byte, err
 		}
 		return Bytes(i.state.Receipt)
 	}
-	next := &state{Package: p, IdentityId: i.options.Pin.IdentityId}
+	next := &state{Package: p, IdentityId: i.options.Pin.IdentityId, IdentityRevision: i.options.Pin.IdentityRevision, NodeId: i.options.NodeId}
 	if i.state != nil {
 		next.Bundle = i.state.Bundle
 	}

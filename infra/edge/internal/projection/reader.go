@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 
 	api "github.com/hansjone/auriga/infra/gen/msgnetapi"
@@ -17,13 +18,16 @@ import (
 // Verify checks root control, publication and TLS scope before Activate can see
 // private bytes. It must never fetch trust from the material being verified.
 type Reader struct {
-	Root, Control      string
-	Scope              api.LocalProjectionSelector
-	Verify             func(api.LocalProjectionSelector, map[string][]byte) error
-	Activate           func(api.LocalProjectionSelector, map[string][]byte) error
-	mu                 sync.Mutex
-	committed, pending *api.LocalProjectionSelector
-	loaded             bool
+	Root, Control, State string
+	Scope                api.LocalProjectionSelector
+	Verify               func(api.LocalProjectionSelector, map[string][]byte) error
+	Activate             func(api.LocalProjectionSelector, map[string][]byte) error
+	Prepare              func(api.LocalProjectionSelector, api.LocalProjectionManifest, map[string][]byte) (func() error, error)
+	Current              func(api.LocalProjectionSelector) error
+	mu                   sync.Mutex
+	committed, pending   *api.LocalProjectionSelector
+	loaded               bool
+	handshake            bool
 }
 
 type journal struct {
@@ -34,7 +38,7 @@ type journal struct {
 func (r *Reader) Restore() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	root, e := openFixedRoot(r.Control)
+	root, e := r.stateRoot()
 	if e != nil {
 		return e
 	}
@@ -70,13 +74,37 @@ func (r *Reader) Restore() error {
 	return nil
 }
 
+func (r *Reader) stateRoot() (*os.Root, error) {
+	if !independentRoots(r.State, r.Control, r.Root) {
+		return nil, fmt.Errorf("reader requires an independent durable state volume")
+	}
+	return openFixedRoot(r.State)
+}
+
+func independentRoots(paths ...string) bool {
+	for i, p := range paths {
+		if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+			return false
+		}
+		for _, other := range paths[:i] {
+			for _, pair := range [][2]string{{p, other}, {other, p}} {
+				rel, err := filepath.Rel(pair[0], pair[1])
+				if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 func openFixedRoot(path string) (*os.Root, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return nil, fmt.Errorf("projection root must be absolute")
 	}
 	for current := path; ; current = filepath.Dir(current) {
 		info, e := os.Lstat(current)
-		if e != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		if e != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || current == path && privateInfo(info, true) != nil {
 			return nil, fmt.Errorf("linked or invalid projection root")
 		}
 		if filepath.Dir(current) == current {
@@ -92,7 +120,7 @@ func (r *Reader) scope(s api.LocalProjectionSelector) bool {
 
 func readRegular(root *os.Root, name string, max int64) ([]byte, error) {
 	info, e := root.Lstat(name)
-	if e != nil || !info.Mode().IsRegular() || info.Size() > max {
+	if e != nil || !info.Mode().IsRegular() || info.Size() > max || privateInfo(info, false) != nil {
 		return nil, fmt.Errorf("invalid projection file")
 	}
 	f, e := root.Open(name)
@@ -174,7 +202,7 @@ func (r *Reader) disk() (api.LocalProjectionSelector, api.LocalProjectionManifes
 	}
 	for _, dir := range []string{"generations", "generations/" + s.ManifestDigest[7:]} {
 		info, e := root.Lstat(dir)
-		if e != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		if e != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || privateInfo(info, true) != nil {
 			return s, m, nil, fmt.Errorf("invalid generation directory")
 		}
 	}
@@ -228,7 +256,12 @@ func (r *Reader) persist(committed, pending *api.LocalProjectionSelector) error 
 	if e != nil {
 		return e
 	}
-	f, e := os.CreateTemp(r.Control, ".reader-state-")
+	root, e := r.stateRoot()
+	if e != nil {
+		return e
+	}
+	_ = root.Close()
+	f, e := os.CreateTemp(r.State, ".reader-state-")
 	if e != nil {
 		return e
 	}
@@ -247,10 +280,10 @@ func (r *Reader) persist(committed, pending *api.LocalProjectionSelector) error 
 	if e != nil {
 		return e
 	}
-	if e = os.Rename(name, filepath.Join(r.Control, "reader-state.json")); e != nil {
+	if e = os.Rename(name, filepath.Join(r.State, "reader-state.json")); e != nil {
 		return e
 	}
-	return syncDirectory(r.Control)
+	return syncDirectory(r.State)
 }
 
 // Handle never accepts path/exec arguments and echoes exactly the requested
@@ -267,6 +300,11 @@ func (r *Reader) Handle(request api.LocalProjectionRequest) (api.LocalProjection
 	if e != nil {
 		return fail("invalid_chain")
 	}
+	defer func() {
+		for _, raw := range files {
+			clear(raw)
+		}
+	}()
 	previous := r.committed
 	if r.pending != nil {
 		previous = r.pending
@@ -275,23 +313,44 @@ func (r *Reader) Handle(request api.LocalProjectionRequest) (api.LocalProjection
 	if result != "accept" {
 		return fail(result)
 	}
-	if r.Verify == nil {
-		return fail("projection_pending")
-	}
-	if e = r.Verify(s, files); e != nil {
+	if r.Verify != nil && r.Verify(s, files) != nil {
 		return fail("invalid_chain")
 	}
-	if request.Operation == "confirm" {
+	if r.loaded && r.committed != nil && Equal(s, *r.committed) && (r.Current == nil || r.Current(s) == nil) {
+		if r.handshake {
+			return s, "handshake_verified", "none"
+		}
 		return s, "loaded", "none"
 	}
-	if r.Activate == nil {
-		return fail("projection_pending")
+	if request.Operation == "confirm" {
+		if r.Current != nil && r.Current(s) != nil {
+			return fail("projection_pending")
+		}
+		if r.handshake {
+			return s, "handshake_verified", "none"
+		}
+		return s, "loaded", "none"
+	}
+	var commit func() error
+	if r.Prepare != nil {
+		commit, e = r.Prepare(s, m, files)
+		if e != nil || commit == nil {
+			return fail("invalid_chain")
+		}
+	} else {
+		if r.Verify == nil || r.Activate == nil {
+			return fail("projection_pending")
+		}
+		if e = r.Verify(s, files); e != nil {
+			return fail("invalid_chain")
+		}
+		commit = func() error { return r.Activate(s, files) }
 	}
 	if e = r.persist(r.committed, &s); e != nil {
 		return fail("projection_pending")
 	}
 	r.pending = &s
-	if e = r.Activate(s, files); e != nil {
+	if e = commit(); e != nil {
 		return fail("projection_pending")
 	}
 	if e = r.persist(&s, nil); e != nil {
@@ -300,5 +359,86 @@ func (r *Reader) Handle(request api.LocalProjectionRequest) (api.LocalProjection
 	r.committed = &s
 	r.pending = nil
 	r.loaded = true
+	r.handshake = false
 	return s, "loaded", "none"
+}
+
+// ConfirmHandshake is called only after the actual TLS connection succeeded.
+// A concurrent selector switch cannot acknowledge the newly loaded material.
+func (r *Reader) ConfirmHandshake(s api.LocalProjectionSelector) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.loaded && r.committed != nil && Equal(s, *r.committed) {
+		r.handshake = true
+	}
+}
+
+// Reload discovers the fixed selector; it never accepts paths from a peer.
+func (r *Reader) Reload() error {
+	root, e := openFixedRoot(r.Root)
+	if e != nil {
+		return e
+	}
+	defer func() { _ = root.Close() }()
+	raw, e := readRegular(root, "selector.json", 16384)
+	if e != nil {
+		return e
+	}
+	var s api.LocalProjectionSelector
+	if e = strictModel(raw, &s); e != nil {
+		return e
+	}
+	_, phase, code := r.Handle(api.LocalProjectionRequest{Operation: "reload", Selector: s})
+	if phase != "loaded" && phase != "handshake_verified" {
+		return fmt.Errorf("projection reload: %s", code)
+	}
+	return nil
+}
+
+// ReadState/WriteState are confined to the reader's independent private volume.
+func (r *Reader) ReadState(name string, max int64) ([]byte, error) {
+	if name != "trust-ledger.json" {
+		return nil, fmt.Errorf("invalid reader state name")
+	}
+	root, e := r.stateRoot()
+	if e != nil {
+		return nil, e
+	}
+	defer func() { _ = root.Close() }()
+	if _, e = root.Lstat(name); e != nil {
+		return nil, e
+	}
+	return readRegular(root, name, max)
+}
+func (r *Reader) WriteState(name string, raw []byte) error {
+	if name != "trust-ledger.json" {
+		return fmt.Errorf("invalid reader state name")
+	}
+	root, e := r.stateRoot()
+	if e != nil {
+		return e
+	}
+	_ = root.Close()
+	f, e := os.CreateTemp(r.State, ".trust-ledger-")
+	if e != nil {
+		return e
+	}
+	defer func() { _ = os.Remove(f.Name()) }()
+	if e = f.Chmod(0600); e == nil {
+		_, e = f.Write(raw)
+	}
+	if e == nil {
+		e = f.Sync()
+	}
+	closeErr := f.Close()
+	if e != nil {
+		return e
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if e = os.Rename(f.Name(), filepath.Join(r.State, name)); e != nil {
+		return e
+	}
+	return syncDirectory(r.State)
 }

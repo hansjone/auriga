@@ -87,7 +87,12 @@ func fixtureComponent(t *testing.T, component string) (*Reader, api.LocalProject
 		v.Input.Request.Selector.Component = component
 		v.Input.Manifest.Component = component
 	}
-	root, control := t.TempDir(), t.TempDir()
+	root, control, state := t.TempDir(), t.TempDir(), t.TempDir()
+	for _, path := range []string{root, control, state} {
+		if e := os.Chmod(path, 0700); e != nil {
+			t.Fatal(e)
+		}
+	}
 	s := v.Input.Request.Selector
 	manifest, e := Bytes(v.Input.Manifest)
 	if e != nil {
@@ -113,7 +118,28 @@ func fixtureComponent(t *testing.T, component string) (*Reader, api.LocalProject
 			t.Fatal(e)
 		}
 	}
-	return &Reader{Root: root, Control: control, Scope: s, Verify: func(api.LocalProjectionSelector, map[string][]byte) error { return nil }, Activate: func(api.LocalProjectionSelector, map[string][]byte) error { return nil }}, v.Input.Request
+	return &Reader{Root: root, Control: control, State: state, Scope: s, Verify: func(api.LocalProjectionSelector, map[string][]byte) error { return nil }, Activate: func(api.LocalProjectionSelector, map[string][]byte) error { return nil }}, v.Input.Request
+}
+
+func TestReaderStateCannotOverlapProjectorVolumes(t *testing.T) {
+	for _, kind := range []string{"material", "control", "child", "ancestor"} {
+		t.Run(kind, func(t *testing.T) {
+			r, _ := fixture(t)
+			switch kind {
+			case "material":
+				r.State = r.Root
+			case "control":
+				r.State = r.Control
+			case "child":
+				r.State = filepath.Join(r.Root, "state")
+			case "ancestor":
+				r.State = filepath.Dir(r.Root)
+			}
+			if e := r.Restore(); e == nil {
+				t.Fatal("reader state shared with projector")
+			}
+		})
+	}
 }
 
 func TestReaderExactRestartAndConfirm(t *testing.T) {
@@ -125,7 +151,7 @@ func TestReaderExactRestartAndConfirm(t *testing.T) {
 	if _, phase, _ := r.Handle(request); phase != "loaded" {
 		t.Fatal(phase)
 	}
-	restarted := &Reader{Root: r.Root, Control: r.Control, Scope: r.Scope, Verify: r.Verify, Activate: r.Activate}
+	restarted := &Reader{Root: r.Root, Control: r.Control, State: r.State, Scope: r.Scope, Verify: r.Verify, Activate: r.Activate}
 	if e := restarted.Restore(); e != nil {
 		t.Fatal(e)
 	}
@@ -184,7 +210,7 @@ func TestReaderRejectsDiskTamperingAndMissingVerifier(t *testing.T) {
 			if phase != "failed" {
 				t.Fatal("tamper accepted")
 			}
-			if _, e := os.Stat(filepath.Join(r.Control, "reader-state.json")); !os.IsNotExist(e) {
+			if _, e := os.Stat(filepath.Join(r.State, "reader-state.json")); !os.IsNotExist(e) {
 				t.Fatal("failed load changed durable state")
 			}
 		})

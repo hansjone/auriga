@@ -3,7 +3,6 @@ package msgnet
 import (
 	"bytes"
 	"context"
-	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -66,12 +65,8 @@ func fixture(t *testing.T) (Options, ed25519.PrivateKey, *backend) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	sealing, e := ecdh.X25519().GenerateKey(rand.Reader)
-	if e != nil {
-		t.Fatal(e)
-	}
 	b := &backend{}
-	return Options{Directory: t.TempDir(), Tenant: "tenant", Realm: "1", RootKid: "root", RootKey: root, SigningKey: key, Pin: api.InstallationPin{TargetId: "target", IdentityId: "node-installation", SigningSpki: encoded(t, pub), SealingSpki: encoded(t, sealing.PublicKey()), Component: "network", GatewayId: "gateway", Subject: "CN=node"}, Backend: b, Now: func() time.Time { return time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC) }}, rootPrivate, b
+	return Options{Directory: t.TempDir(), Tenant: "tenant", Realm: "1", RootKid: "root", NodeId: "node", RootKey: root, SigningKey: key, Pin: api.NodeControlPin{TargetId: "target", NodeId: "node", IdentityId: "node-installation", IdentityRevision: "1", SigningSpki: encoded(t, pub)}, Backend: b, Now: func() time.Time { return time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC) }}, rootPrivate, b
 }
 func control(t *testing.T, o Options, root ed25519.PrivateKey, revision string, revoked []string) api.ControlPackage {
 	t.Helper()
@@ -362,6 +357,7 @@ func TestReplacementIdentityRequiresNewerRootControl(t *testing.T) {
 		t.Fatal(e)
 	}
 	o.Pin.IdentityId = "replacement-node"
+	o.Pin.IdentityRevision = "2"
 	o.Pin.SigningSpki, o.SigningKey = encoded(t, pub), private
 	replacement, e := New(o)
 	if e != nil {

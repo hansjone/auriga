@@ -38,7 +38,7 @@ func TestLinuxKernelProjectorPeer(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 	select {
 	case e := <-result:
-		if (e == nil) != (os.Geteuid() == 10001) {
+		if (e == nil) != (os.Geteuid() == 65532) {
 			t.Fatalf("kernel uid %d, result %v", os.Geteuid(), e)
 		}
 	case <-time.After(time.Second):
@@ -46,17 +46,27 @@ func TestLinuxKernelProjectorPeer(t *testing.T) {
 	}
 }
 
+func TestLinuxProjectionFilesArePrivate(t *testing.T) {
+	r, request := fixture(t)
+	if e := os.Chmod(filepath.Join(r.Root, "selector.json"), 0644); e != nil {
+		t.Fatal(e)
+	}
+	if _, phase, _ := r.Handle(request); phase != "failed" {
+		t.Fatal("publicly readable material accepted")
+	}
+}
+
 // Opt-in two-process check: the temporary container runs the reader as 65532
-// and docker exec runs this same binary as projector UID 10001. No setuid or
+// and docker exec runs this same binary as projector UID 65532. No setuid or
 // capabilities are granted to either process; the fixtures contain no secrets.
-func TestLinuxCrossUIDWire(t *testing.T) {
+func TestLinuxPrivateWire(t *testing.T) {
 	role := os.Getenv("AURIGA_MSGNET_I_WIRE_TEST")
 	if role == "" {
-		t.Skip("requires the isolated two-UID test container")
+		t.Skip("requires the isolated same-UID test container")
 	}
 	const base = "/tmp/msgnet-i-wire"
 	if role == "reader" {
-		if os.Geteuid() != 65532 || os.Getegid() != 10001 {
+		if os.Geteuid() != 65532 || os.Getegid() != 65532 {
 			t.Fatal("wrong reader test identity")
 		}
 		r, request := fixtureComponent(t, "edge")
@@ -64,7 +74,7 @@ func TestLinuxCrossUIDWire(t *testing.T) {
 			t.Fatal(e)
 		}
 		r.Control = filepath.Join(base, "control")
-		if e := os.Mkdir(r.Control, 0710); e != nil {
+		if e := os.Mkdir(r.Control, 0700); e != nil {
 			t.Fatal(e)
 		}
 		wire, e := Bytes(request)
@@ -82,11 +92,11 @@ func TestLinuxCrossUIDWire(t *testing.T) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		if !r.loaded || r.committed == nil || !Equal(*r.committed, request.Selector) {
-			t.Fatal("cross-UID request never loaded")
+			t.Fatal("private-volume request never loaded")
 		}
 		return
 	}
-	if role != "projector" || os.Geteuid() != 10001 {
+	if role != "projector" || os.Geteuid() != 65532 {
 		t.Fatal("wrong projector test identity")
 	}
 	raw, e := os.ReadFile(filepath.Join(base, "request.json"))
@@ -137,18 +147,18 @@ func mustBytes(t *testing.T, value any) []byte {
 	return raw
 }
 
-func TestLinuxReaderListenerUIDAndDeniedPeer(t *testing.T) {
+func TestLinuxReaderListenerPrivateModeAndMalformedPeer(t *testing.T) {
 	r, _ := fixture(t)
 	r.Scope.Component = "edge"
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if os.Geteuid() != 65532 {
+	if os.Geteuid() != 65532 || os.Getegid() != 65532 {
 		if e := r.Listen(ctx); e == nil {
 			t.Fatal("wrong reader UID accepted")
 		}
 		return
 	}
-	if e := os.Chmod(r.Control, 0710); e != nil {
+	if e := os.Chmod(r.Control, 0700); e != nil {
 		t.Fatal(e)
 	}
 	done := make(chan error, 1)
@@ -175,9 +185,10 @@ func TestLinuxReaderListenerUIDAndDeniedPeer(t *testing.T) {
 		t.Fatal(e)
 	}
 	_ = conn.SetDeadline(time.Now().Add(time.Second))
+	_ = conn.CloseWrite()
 	var b [1]byte
 	if _, e = conn.Read(b[:]); e == nil {
-		t.Fatal("edge UID was accepted as projector")
+		t.Fatal("malformed request accepted")
 	}
 	_ = conn.Close()
 	cancel()
@@ -189,7 +200,7 @@ func TestLinuxReaderListenerUIDAndDeniedPeer(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("listener did not stop")
 	}
-	if _, e := os.Stat(filepath.Join(r.Control, "reader-state.json")); !os.IsNotExist(e) {
+	if _, e := os.Stat(filepath.Join(r.State, "reader-state.json")); !os.IsNotExist(e) {
 		t.Fatal("denied peer modified reader state")
 	}
 }

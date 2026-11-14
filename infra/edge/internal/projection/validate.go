@@ -149,7 +149,7 @@ func Validate(r api.LocalProjectionRequest, m api.LocalProjectionManifest, files
 		ob, _ := number(previous.BundleVersion)
 		v, _ := number(s.MaterialRevision)
 		ov, _ := number(previous.MaterialRevision)
-		if g < og || (g == og && k < ok) || b < ob || v < ov {
+		if g < og || (g == og && (k < ok || b < ob)) || v < ov {
 			return "version_rollback"
 		}
 		if v == ov && !Equal(s, *previous) {

@@ -102,7 +102,19 @@ func run(args []string, out, logs io.Writer) error {
 
 	srv := &Server{Cfg: cfg, Handler: gw.Handler(), Log: logger}
 	logger.Info("edge starting", "version", version, "listen", cfg.Listen, "tls", cfg.TLS.Mode)
-	return srv.Run(ctx)
+	msgnetErr := make(chan error, 1)
+	if gw.msgnet != nil {
+		go func() { e := gw.msgnet.Run(ctx); msgnetErr <- e; stop() }()
+	}
+	err = srv.Run(ctx)
+	select {
+	case e := <-msgnetErr:
+		if e != nil {
+			return e
+		}
+	default:
+	}
+	return err
 }
 
 func openInstanceRoutes(cfg Config, mode string) (RouteStore, func(), error) {
