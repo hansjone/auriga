@@ -29,6 +29,13 @@ it('公共产品首页显示公开版本与下载入口', async () => {
   await flushPromises();
   expect(view.text()).toContain('0.1.0');
   expect(view.text()).toContain('下载 Windows 版');
+  expect(view.get('h1').text()).toBe('团队的工作，在此汇合。');
+  expect(
+    view
+      .find('figure, article, footer, .capabilities, .product-preview')
+      .exists(),
+  ).toBe(false);
+  expect(view.get('.sign-in').attributes('href')).toBe('/login');
   expect(view.get('.download-button').attributes('href')).toBe(
     '/api/resource/v1/desktop/packages/4',
   );
