@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
-import { BrandMark, type Me } from '@auriga/shared';
+import { BRAND_NAME, BrandMark, type Me } from '@auriga/shared';
 import { apiClient, iamApi } from '../api';
 import StepUpDialog from '../admin/StepUpDialog.vue';
 import { useAdminI18n } from '../admin/messages';
@@ -85,7 +85,8 @@ async function logout() {
       <RouterLink class="admin-brand" to="/overview"
         ><BrandMark :size="30" />
         <div>
-          <strong>Auriga</strong><small>{{ adminT('navConsole') }}</small>
+          <strong>{{ BRAND_NAME }}</strong
+          ><small>{{ adminT('navConsole') }}</small>
         </div></RouterLink
       >
       <nav :aria-label="adminT('navConsole')">

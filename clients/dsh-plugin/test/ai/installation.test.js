@@ -31,7 +31,7 @@ test('production model lifecycle: public module resolution, registration, capabi
     assert.deepEqual(ctx.llm.listProviders(), []);
     models.login();
     assert.deepEqual(ctx.llm.listProviders(), [
-      { id: 'auriga', name: 'Auriga' },
+      { id: 'auriga', name: 'Auriga DSH' },
     ]);
     assert.equal(models.status.registered, true);
     assert.equal(models.status.state, 'model_metadata_unavailable');

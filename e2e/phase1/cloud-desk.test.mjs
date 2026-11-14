@@ -108,7 +108,7 @@ test('shared-stack lock accepts any exact declared owner, rejects missing/foreig
 });
 const message = (text) => ({ role: 'user', content: text });
 const external = (marker, id = '019f0000-0000-7000-8000-000000000001') =>
-  message(`[Auriga external message ${id}]\n${marker}`);
+  message(`[Auriga DSH external message ${id}]\n${marker}`);
 
 test('resume preserves the existing desktop identity and rejects another authenticated subject', async () => {
   const request = async () => ({

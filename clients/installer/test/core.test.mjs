@@ -540,10 +540,10 @@ test('a non-empty directory without our marker is refused and left untouched', (
         dataHome: f.dataHome,
         smoke: noSmoke,
       }),
-    /not empty and is not an Auriga Desktop installation/,
+    /not empty and is not an Auriga DSH installation/,
   );
   assert.deepEqual(readdirSync(f.root), ['precious.txt']);
-  assert.throws(() => uninstall({ root: f.root }), /not an Auriga Desktop/);
+  assert.throws(() => uninstall({ root: f.root }), /not an Auriga DSH/);
   assert.equal(text(join(f.root, 'precious.txt')), 'user file');
 });
 

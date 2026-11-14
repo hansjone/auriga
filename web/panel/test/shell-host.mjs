@@ -13,6 +13,7 @@ export function surfaceHost(
     slotCore,
     hostTheme = 'light',
     osTheme = 'light',
+    title = '',
     consentFetch,
     settingsFetch,
     remote,
@@ -23,6 +24,7 @@ export function surfaceHost(
   });
   const { window } = dom;
   const { document } = window;
+  document.title = title;
   const modules = new Map(),
     moduleImports = [];
   const navigations = [];

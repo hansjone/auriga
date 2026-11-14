@@ -58,6 +58,17 @@ node --test contracts/test/msgnet-v2.test.mjs
 
 `node contracts/network/fixtures/check-msgnet-v2-mutations.mjs`先运行所有正常判定器，确认全部expected一致。随后对两个参考判定器的每个if门禁逐条禁用，并递归拆分每个复合条件的全部AND/OR子条件。边界触发、时钟异常和成熟期表达式也逐项变异。新增if门禁及其子条件自动进入自检。范围校验统一读取生产RenewalConfig schema，逐字段越界向量覆盖每项上界、下界和组合政策。
 
-变异须被至少一个向量发现，存活项须与`fixtures/msgnet-v2-equivalent-mutations.json`逐项精确匹配。该清单逐条说明在合法输入域内的等价理由。未声明的存活项、重复声明、空理由、已经被向量发现的陈旧等价项均导致失败。测试明确断言存活数等于等价清单条数，以及被杀死数加等价数等于总数。当前共255个变异，248个被杀死，7个等价。四个等价项由受签schema固定字段推出，其余三个分别来自历史钥终态与唯一性、前置首发版本上界、墓碑相等比较。
+变异须被至少一个向量发现，存活项须与`fixtures/msgnet-v2-equivalent-mutations.json`逐项精确匹配。该清单逐条说明在合法输入域内的等价理由。未声明的存活项、重复声明、空理由、已经被向量发现的陈旧等价项均导致失败。测试明确断言存活数等于等价清单条数，以及被杀死数加等价数等于总数。当前共493个变异，485个被杀死，8个等价。四个等价项由受签schema固定字段推出，其余四个分别来自历史钥终态与唯一性、前置首发版本上界、墓碑相等比较、文件集合的排序唯一性重复检查。
 
 脚本输出逐项witness，标明发现该变异的向量。`contracts/test/msgnet-v2.test.mjs`已接入同一自检，npm check-schemas会自动执行。脚本通过data URL载入内存变异版本，源文件保持原字节。删除成熟期检查的自检使用首发账本完全一致、前驱签名有效的未成熟next向量。撤销授权、同代际保留active、各锚点字段、历史授权和三项能力的负例也分别保持其余约束合法。
+
+## K2 端点与本地协议补充
+
+比较运算符逐个翻转也纳入变异门禁，覆盖三个参考判定器中的 === / !==、< / <=、> / >=，包含回调和 if 以外的表达式。新增端点向量保持现有 cases 原内容，覆盖 24h、360s、now+60、回拨−60、授权起点、归档宽限/截止、业务钥期限与配置组合等号；部分用途恢复同时覆盖保留一用途和保留两用途。当前493项变异，485项被发现，8项与等价清单匹配，新增运算符变异全部被发现。
+
+N/I/D 另共同读取 `fixtures/msgnet-local-projection-vectors.json`，通过生产本地投影状态/文件完整性 adapter 核 expected。该组独立测试本地协议的摘要、文件完整性、代际与持久状态，合成文件字节只用于这一层。根链、证书与私钥匹配须由原三组及真实材料测试另行核验。参考函数 `msgnet-local-projection-oracle.mjs` 只用于契约测试。覆盖四种回退、同代改字节、未知摘要、损坏/缺失/额外文件、失败持续重试、断电精确重入、confirm 尚未加载、同清单/bundle 的新材料代。
+
+插件运行时产物由 K 使用 `node clients/dsh-plugin/scripts/gen-network-keyset.mjs --v2` 生成。产物导出完整 schema，包含所有 $defs、边界及未知字段限制，契约测试与源定义深比较以检查新鲜度。Java/Go/TS 生成命令沿主契约说明，LocalProjection* 与可选 ProjectionReceipt.local_selector 一起生成；本地投影路径的回执必须携带该绑定。
+
+
+第2轮补充按用途混合恢复、第二个 CA 周期及本地判定器的变异覆盖。24个本地向量包含只违反文件摘要、绑定、必需文件、长度和字节摘要的单项负例。`migration-real-v1-pair-and-material` 使用同目录 `keyset-signature-vector.json` 的真实受签合成 v1 pair，成员摘要的公钥材料按 MigrationMaterialCommitment 计算。C/N/P 共同读取新增恢复/周期用例，Java/Go的现有适配器读取同份数据。`pnpm gen:plugin-network` 调用插件 --v2 CLI 生成类型和运行时schema，web.yml 在 web 的 gen:api 后单独执行此命令，再用生成目录 diff/status 门禁覆盖字节与格式漂移。契约测试继续与源schema做语义深比较。

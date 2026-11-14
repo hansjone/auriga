@@ -21,19 +21,20 @@ var _ MappedNullable = &ProjectionReceipt{}
 
 // ProjectionReceipt struct for ProjectionReceipt
 type ProjectionReceipt struct {
-	TenantId          string    `json:"tenant_id"`
-	Realm             string    `json:"realm" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	InstallationId    string    `json:"installation_id"`
-	Component         string    `json:"component"`
-	Nonce             string    `json:"nonce" validate:"regexp=^[A-Za-z0-9_-]+$"`
-	Generation        string    `json:"generation" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	KeysetVersion     string    `json:"keyset_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	PublicationDigest string    `json:"publication_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
-	BundleVersion     string    `json:"bundle_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	BundleDigest      string    `json:"bundle_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
-	Phase             string    `json:"phase"`
-	ObservedAt        string    `json:"observed_at" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"`
-	IdentityAuth      Signature `json:"identity_auth"`
+	TenantId          string                   `json:"tenant_id"`
+	Realm             string                   `json:"realm" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	InstallationId    string                   `json:"installation_id"`
+	Component         string                   `json:"component"`
+	Nonce             string                   `json:"nonce" validate:"regexp=^[A-Za-z0-9_-]+$"`
+	Generation        string                   `json:"generation" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	KeysetVersion     string                   `json:"keyset_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	PublicationDigest string                   `json:"publication_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
+	BundleVersion     string                   `json:"bundle_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	BundleDigest      string                   `json:"bundle_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
+	Phase             string                   `json:"phase"`
+	ObservedAt        string                   `json:"observed_at" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"`
+	IdentityAuth      Signature                `json:"identity_auth"`
+	LocalSelector     *LocalProjectionSelector `json:"local_selector,omitempty"`
 }
 
 type _ProjectionReceipt ProjectionReceipt
@@ -380,6 +381,38 @@ func (o *ProjectionReceipt) SetIdentityAuth(v Signature) {
 	o.IdentityAuth = v
 }
 
+// GetLocalSelector returns the LocalSelector field value if set, zero value otherwise.
+func (o *ProjectionReceipt) GetLocalSelector() LocalProjectionSelector {
+	if o == nil || IsNil(o.LocalSelector) {
+		var ret LocalProjectionSelector
+		return ret
+	}
+	return *o.LocalSelector
+}
+
+// GetLocalSelectorOk returns a tuple with the LocalSelector field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ProjectionReceipt) GetLocalSelectorOk() (*LocalProjectionSelector, bool) {
+	if o == nil || IsNil(o.LocalSelector) {
+		return nil, false
+	}
+	return o.LocalSelector, true
+}
+
+// HasLocalSelector returns a boolean if a field has been set.
+func (o *ProjectionReceipt) HasLocalSelector() bool {
+	if o != nil && !IsNil(o.LocalSelector) {
+		return true
+	}
+
+	return false
+}
+
+// SetLocalSelector gets a reference to the given LocalProjectionSelector and assigns it to the LocalSelector field.
+func (o *ProjectionReceipt) SetLocalSelector(v LocalProjectionSelector) {
+	o.LocalSelector = &v
+}
+
 func (o ProjectionReceipt) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -403,6 +436,9 @@ func (o ProjectionReceipt) ToMap() (map[string]interface{}, error) {
 	toSerialize["phase"] = o.Phase
 	toSerialize["observed_at"] = o.ObservedAt
 	toSerialize["identity_auth"] = o.IdentityAuth
+	if !IsNil(o.LocalSelector) {
+		toSerialize["local_selector"] = o.LocalSelector
+	}
 	return toSerialize, nil
 }
 

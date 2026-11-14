@@ -13,7 +13,13 @@ export function entryAssets(response, audience) {
   assert.equal(contentType(response), 'text/html', `${audience} entry MIME`);
   const html = response.text;
   assert.match(html, /<!doctype html>/i, 'entry must be an HTML document');
-  assert.match(html, new RegExp(`<title>Auriga ${audience}</title>`, 'i'));
+  assert.match(
+    html,
+    new RegExp(
+      `<title>Auriga DSH · ${audience === 'portal' ? '门户 / Portal' : '管理台 / Admin'}</title>`,
+      'i',
+    ),
+  );
   assert.match(html, /<div\s+id=["']app["']/i, 'entry app mount missing');
   const assets = [];
   for (const tag of html.match(/<(?:script|link)\b[^>]*>/gi) || []) {

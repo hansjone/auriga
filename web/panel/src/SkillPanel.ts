@@ -264,8 +264,8 @@ export class SkillPanel {
       this.element(
         'p',
         this.text(
-          '共享技能仅在具备可信 guardian 的云端或 Auriga Desktop 生效。私有技能在原生设置中管理。',
-          'Shared skills require a trusted cloud or Auriga Desktop guardian. Manage private skills in native settings.',
+          '共享技能仅在具备可信 guardian 的云端或 Auriga DSH 生效。私有技能在原生设置中管理。',
+          'Shared skills require a trusted cloud or Auriga DSH guardian. Manage private skills in native settings.',
         ),
       ),
     );

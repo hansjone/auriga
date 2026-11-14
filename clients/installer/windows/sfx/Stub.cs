@@ -45,10 +45,10 @@ static class Setup
             }
             string package = Path.Combine(temp, "pkg");
             Directory.CreateDirectory(package);
-            Console.WriteLine("Unpacking Auriga Desktop setup...");
+            Console.WriteLine("Unpacking Auriga DSH setup...");
             int rc = Run(Path.Combine(Environment.SystemDirectory, "tar.exe"), "-xf \"" + zip + "\" -C \"" + package + "\"");
             if (rc != 0) return rc;
-            Console.WriteLine("Installing Auriga Desktop...");
+            Console.WriteLine("Installing Auriga DSH...");
             string forwarded = string.Join(" ", Array.ConvertAll(args, a => "\"" + a.Replace("\"", "\\\"") + "\""));
             return Run(
                 Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),

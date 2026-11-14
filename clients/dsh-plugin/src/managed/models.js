@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../login/brand.js';
 import { createPlatform } from '../local/platform.js';
 import { modelDirectory } from '../ai/catalog.js';
 import { operation } from '../ai/transport.js';
@@ -46,7 +47,9 @@ const raw = (/** @type {any} */ service) =>
   service?.[Symbol.for('cordis.original')] ?? service;
 const forbidden = () =>
   Object.assign(
-    new Error('Auriga managed model connection is supplied by the platform.'),
+    new Error(
+      'Auriga DSH managed model connection is supplied by the platform.',
+    ),
     {
       code: 'common.forbidden',
     },
@@ -206,7 +209,7 @@ export function createManagedModels({
                   ...next.providers,
                   [PROVIDER]: {
                     ...safe,
-                    displayName: provider.displayName ?? 'Auriga',
+                    displayName: provider.displayName ?? BRAND_NAME,
                     api: 'openai-completions',
                     baseURL: material.value.baseUrl,
                     apiKeyEnv: MANAGED_MODEL_REF,
