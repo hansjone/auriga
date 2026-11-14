@@ -164,6 +164,8 @@ export class BusinessProxy {
         'network_submit',
         'getNetworkKeys',
         'getNetworkKeyAnnouncement',
+        'getPublicNetworkControl',
+        'confirmNetworkControl',
       ].includes(definition.operation)
     )
       return this.network.execute(
@@ -247,6 +249,8 @@ export class BusinessProxy {
           'provider_diagnostic',
           'getNetworkKeys',
           'getNetworkKeyAnnouncement',
+          'getPublicNetworkControl',
+          'confirmNetworkControl',
         ].includes(definition.operation)
           ? 'GET'
           : 'POST');

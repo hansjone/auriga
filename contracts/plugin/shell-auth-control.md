@@ -106,7 +106,7 @@ D 解码后须严格词法解析，再依原资源契约校验签名封套、主
 C 不替 D 宣称验签通过；错误响应仍走既有安全错误映射。共享向量 `test/auth-k3-fixtures.json` 要求 wire 逐字节保真。
 其余操作没有 wire 通道，D 不得提供任意 URL/header 或注册身份字段。
 
-`profile_read` 的 memberId 取已验证 device-session；account.id 与设备 JWT sub（accountId）比较，account.tenantId 与当前 tenant 比较，displayName 取 account。accountId/memberId 可不同，详见 K2 shell-auth-host.md 的资料边界与 IAM 当前能力限制。
+`profile_read` 固定读取 `/api/iam/v1/me/device-profile`，memberId 取已验证 device-session；account.id 与设备 JWT sub（accountId）比较，account.tenantId 与当前 tenant 比较，displayName 取 account。accountId/memberId 可不同；IAM 设备在线资料接口和迁移依据见 K2 shell-auth-host.md。
 `provider_diagnostic.available` 表示已启用 providers.items 中存在当前登录的 providerId；空表或仅其他源为 false。
 非法结构拒绝，输出仍是严格固定 DTO，额外 account/session/provider 数据不传给 D。
 
@@ -117,3 +117,11 @@ Desktop 按 manifest 校验插件内全部文件，并逐文件比较插件与�
 本地验证：`node --test clients/shell-auth/test/artifact.test.mjs scripts/plugin/package.test.mjs`，检查一次构建的两消费者字节、打包后 manifest/helper 及缺失/篡改拒绝。
 
 迁移说明：以上三个下载票操作原有 DTO 输出已移除，不再双发；D 必须从 wire 解码原始字节、严格词法解析及验签后自行生成业务 DTO。所有消费者应与此契约同步升级，不得将 wire 当旧 DTO 使用。
+
+## MSGNET v2 固定控制操作
+
+`getNetworkKeys` / `getNetworkKeyAnnouncement` 分别读取 `/api/collab/v2/network/keys` 和 `/api/collab/v2/network/keys/announcement`，消费 `Publication` / `SignedKeysetAnnouncementV2`，权限 `collab.msgnet.read`。受签原文以 base64 wire 返回，解码上限 32MiB；协议帧和信封仍沿用 64KiB 上限。
+
+`getPublicNetworkControl` 独立 GET `/api/collab/v2/network/bootstrap/controls`，平台请求不带 Authorization，不依赖消息连接或 `network_open` 权限。`confirmNetworkControl` 独立 POST `/api/collab/v2/network/controls/receipts`，权限 `collab.msgnet.control.install`，仅发送本地已持久化的安装签名回执；响应 `IsolationRecord` 的 scope、revision、digest、challenge 完全匹配后才清除待报标记。它们与调用点清单一一对应，均不接受 URL、header、pin 或私钥路径参数。本地 broker 的主人/epoch/revision 门禁仍适用。
+
+桌面 broker 使用同一生产 v2 信任库，tenant/realm 和安装身份从可信设备及安装配置派生，根控制隔离立即关闭现存连接；公有控制与回执操作可在没有 NATS 连接时执行。安装器通过受保护 pin/私钥文件提供独立身份，与插件安装说明一致。

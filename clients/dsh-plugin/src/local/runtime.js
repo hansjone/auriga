@@ -17,6 +17,7 @@ import { createRefreshBroker } from '../ai/refresh-broker.js';
 import { createModelLifecycle } from '../ai/installation.js';
 import { createNetworkLifecycle } from '../network/lifecycle.js';
 import { createDeviceProvider } from '../network/device-provider.js';
+import { createControlInstallation } from '../network/trust/installation-control.js';
 import {
   deviceMemberName,
   loginMemberName,
@@ -197,12 +198,28 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   const killSession = (/** @type {any} */ row) => {
     sessions.delete(row.key);
   };
+  const controlInstallation = createControlInstallation({
+    config,
+    directory: join(directory, 'network'),
+    getScope: () => {
+      const claims = vault.snapshot().credential?.claims;
+      return (
+        claims && {
+          tenant_id: claims.tid,
+          realm: config.network?.realm,
+          target_id: claims.did,
+        }
+      );
+    },
+  });
   const network = createNetworkLifecycle({
     directory: join(directory, 'network'),
     installation: config.network,
+    offlineControl: controlInstallation,
     defaultProvider: config.network
       ? createDeviceProvider({
           config,
+          loadInstallation: controlInstallation.prepare,
           async getDevice(signal) {
             const g = generation,
               saved = vault.snapshot().credential;
@@ -648,6 +665,13 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     attachNetwork: network.attach,
     consentUI: network.consentUI,
     messagingUI: network.messagingUI,
+    networkControl: {
+      get available() {
+        return controlInstallation.available;
+      },
+      importPackage: (/** @type {any} */ input) =>
+        network.importControlOffline(input),
+    },
     get consentAvailable() {
       return network.consentAvailable;
     },

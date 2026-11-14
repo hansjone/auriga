@@ -18,6 +18,16 @@ import tools.jackson.databind.json.JsonMapper;
 /** 跨语言公有合成签名向量；生产转换验证由实现线消费同一 cases。 */
 class MsgnetV2VectorsTest {
   @Test
+  void generatedStatusExpressesBothPublishedStatesWithoutInventingVersions() {
+    var status = new auriga.contracts.msgnet.model.RenewalStatusOutput();
+    for (var wire : new String[] {"ready", "projection_pending"}) {
+      status.setState(auriga.contracts.msgnet.model.RenewalStatusOutput.StateEnum.fromValue(wire));
+      assertEquals(wire, status.getState().getValue());
+      assertNull(status.getKeysetVersion());
+    }
+  }
+
+  @Test
   void consumesEverySemanticCaseThroughContractReferenceAdapter() throws Exception {
     // 契约线共用参考adapter；C/N/P必须把此协议接到各自生产验证器，不能据此声称生产互操作通过。
     var json = JsonMapper.builder().build();

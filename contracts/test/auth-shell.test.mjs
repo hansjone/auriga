@@ -108,7 +108,13 @@ test('AUTH-K fixed operation projection stays current and covers all platform fa
   for (const op of operations) {
     assert.ok(op.input.startsWith('ShellAuth'));
     assert.ok(op.output.startsWith('ShellAuth'));
-    assert.ok(op.permission && op.audience && op.retry);
+    if (op.operation === 'getPublicNetworkControl') {
+      assert.equal(op.permission, null);
+      assert.equal(op.authentication, 'none');
+      assert.equal(op.method, 'get');
+      assert.equal(op.route, '/api/collab/v2/network/bootstrap/controls');
+    } else assert.ok(op.permission);
+    assert.ok(op.audience && op.retry);
     assert.doesNotMatch(
       op.route,
       /\/internal\/|\/admin\/|\/oauth2\/|\/network\/tickets/,
@@ -1919,4 +1925,58 @@ test('AUTH-K3 profile uses device-session member identity and accountId stays di
     registration({ ...vector, systemAddress: 'aur1:02.40.0' }),
     false,
   );
+});
+
+test('MSGNET control operations have independent route, method and authentication bindings', () => {
+  const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
+  for (const call of inventory.calls.filter(
+    (c) =>
+      c.file === 'network/device-provider.js' &&
+      c.routePattern.startsWith('/api/collab/v2/network/'),
+  )) {
+    assert.equal(call.operations.length, 1);
+    const op = operations.find((o) => o.operation === call.operations[0]);
+    assert.equal(op.route, call.routePattern);
+    assert.deepEqual(call.methods, [op.method.toUpperCase()]);
+    assert.equal(
+      op.authentication,
+      op.operation === 'getPublicNetworkControl' ? 'none' : 'bearer',
+    );
+  }
+  const receipt = operations.find(
+    (o) => o.operation === 'confirmNetworkControl',
+  );
+  assert.equal(receipt.permission, 'collab.msgnet.control.install');
+  assert.equal(receipt.method, 'post');
+});
+
+test('AUTH-K3 profile uses the explicit standard-device endpoint without changing browser Me', () => {
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  assert.equal(
+    operations.find((op) => op.operation === 'profile_read').route,
+    '/api/iam/v1/me/device-profile',
+  );
+  assert.equal(
+    spec.paths['/me'].get.responses['200'].content['application/json'].schema
+      .$ref,
+    '#/components/schemas/Me',
+  );
+  assert.equal(
+    spec.paths['/me/device-profile'].get.responses['200'].content[
+      'application/json'
+    ].schema.$ref,
+    '../auth/standard-device.schema.json#/$defs/StandardDeviceProfile',
+  );
+  const check = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceProfile',
+  );
+  const account = {
+    id: '11111111-1111-1111-1111-111111111111',
+    tenantId: '22222222-2222-2222-2222-222222222222',
+    displayName: 'test',
+  };
+  assert.ok(check({ account }));
+  assert.equal(check({ account, session: {} }), false);
+  assert.equal(check({ account: { ...account, token: 'hidden' } }), false);
 });

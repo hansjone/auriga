@@ -31,7 +31,11 @@ test('profile and provider upstream responses project to fixed DTOs; invalid dat
   f.claims.sub = randomUUID();
   await login(f);
   let body;
-  const proxy = new BusinessProxy(f.broker, async () => Response.json(body));
+  const seen = [];
+  const proxy = new BusinessProxy(f.broker, async (url) => {
+    seen.push(new URL(url).pathname);
+    return Response.json(body);
+  });
   t.after(async () => {
     proxy.close();
     await f.broker.close();
@@ -50,7 +54,9 @@ test('profile and provider upstream responses project to fixed DTOs; invalid dat
     },
     session: { secret: 'hidden' },
   };
-  assert.deepEqual((await call('profile_read')).output.body, {
+  const projected = await call('profile_read');
+  assert.equal(seen.at(-1), '/api/iam/v1/me/device-profile');
+  assert.deepEqual(projected.output.body, {
     memberId: f.identity.memberId,
     displayName: 'test',
   });

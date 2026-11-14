@@ -33,7 +33,7 @@ public final class IamNetworkDirectory implements NetworkDirectory {
   private static final String ELIGIBLE =
       """
       NOT n.revoked AND a.data->>'status'='active'
-      AND d.data->>'accountId'=n.account_id::text AND d.data->>'scope'='auriga.connect'
+      AND d.data->>'accountId'=n.account_id::text AND d.data->>'scope' ~ '(^| )auriga[.]connect( |$)'
       AND NOT COALESCE((d.data->>'revoked')::boolean,false)
       AND s.data->>'accountId'=n.account_id::text AND s.data->>'tenantId'=n.tenant_id::text
       AND s.data->>'audience'='portal' AND NOT COALESCE((s.data->>'revoked')::boolean,false)
@@ -57,6 +57,11 @@ public final class IamNetworkDirectory implements NetworkDirectory {
     var principal = reader();
     if (limit < 1 || limit > 200) throw new AurigaException(CommonErrors.VALIDATION_FAILED);
     String after = position(cursor);
+    store.requireTransactionReleased();
+    if (principal.type() == PrincipalType.DEVICE
+        && devices.standard(principal.deviceId())
+        && !devices.standardOnline(
+            principal.tenantId().toString(), principal.subject(), principal.deviceId())) deny();
     return store.tx(
         () -> {
           jdbc.execute("SET LOCAL statement_timeout='2000ms'");

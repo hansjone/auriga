@@ -19,6 +19,36 @@ class AuditDataTest {
   private static final JsonMapper JSON = JsonMapper.builder().build();
 
   @Test
+  void uacProjectionRetainsTypedMetadataButNeverRawCredentialOrArbitraryCookieFamily() {
+    String hash = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    var entry =
+        AuditEntry.builder("iam.uac.token_verify")
+            .detail("tokenHashPrefix", hash)
+            .detail("oldTokenHashPrefix", hash)
+            .detail("newTokenHashPrefix", hash)
+            .detail("tokenMissing", false)
+            .detail("cookiePresent", true)
+            .detail("cookieFamily", "portal")
+            .detail("token", "must-stay-hidden")
+            .build();
+    var data = JSON.valueToTree(OutboxAuditLogger.toData(entry, null));
+    for (String field : List.of("tokenHashPrefix", "oldTokenHashPrefix", "newTokenHashPrefix"))
+      assertEquals(hash, data.path("details").path(field).asString());
+    assertFalse(data.path("details").path("tokenMissing").asBoolean(true));
+    assertTrue(data.path("details").path("cookiePresent").asBoolean());
+    assertFalse(data.toString().contains("must-stay-hidden"));
+    var malicious =
+        AuditEntry.builder("iam.uac.sso_cookie_check")
+            .detail("tokenHashPrefix", "invalid-secret")
+            .detail("cookiePresent", "invalid-secret")
+            .detail("cookieFamily", "invalid-secret")
+            .build();
+    assertFalse(
+        JSON.writeValueAsString(OutboxAuditLogger.toData(malicious, null))
+            .contains("invalid-secret"));
+  }
+
+  @Test
   void secretFieldsKeepOnlyTheirName() {
     AuditChanges changes =
         AuditChanges.create()

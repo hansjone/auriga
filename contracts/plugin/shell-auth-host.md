@@ -38,6 +38,8 @@ C 用自己持有的当前平台凭据调用既有 `POST /api/iam/v1/me/uac/cred
 ## K3 profile_read 的账号与成员边界
 
 选择以已验证 `/me/device-session` 的 memberId 为成员权威，不假定它与 accountId 相等。
-`profile_read` 读取 `/me` 时，account.id 只与当前已验证设备 JWT 的 sub（accountId）比较，account.tenantId 与当前 tenant 比较；输出 memberId 始终取设备会话，displayName 取账号资料。不能从 account.id 推导 memberId。
-实现事实：当前 main 的 TokenService 对 device context 要求 session=null，因此设备 JWT 不带 sid；IamMeController.me() 仍要求 activeById(principal.sessionId())，不能把浏览器版 `/me` 已支持标准设备 Bearer 当成事实。当前 main 也没有 `/me/device-session` 的生产实现；K2 已冻结其 DTO，A 线须补齐设备在线定位与设备资料访问。C 不伪造 sid/Me.session、不回退浏览器 cookie。上游拒绝时安全返回错误；本次只修正 C 投影和契约，不宣称 IAM A 线及真实设备资料读取已交付。
-契约测试和 C 测试分别校验固定 DTO，以及 accountId 与 memberId 不同的正确投影和跨账号拒绝。
+`profile_read` 的固定上游改为 `GET /api/iam/v1/me/device-profile`，仍只接收 `{}`；C 持有的当前平台设备 Bearer 不交给 D。返回 StandardDeviceProfile：`{account:{id,tenantId,displayName}}`，账号 id 只与已验证设备 JWT sub 比较，tenantId 与当前租户比较；C 输出 `{memberId,displayName}`，其中 memberId 始终来自设备会话。D 不得用 account.id 推导成员 ID，不得选择设备或来源会话。
+
+`StandardDeviceController` 的新接口与现有 device-session 共用 `StandardDevices.access` 的在线核验：签名/audience、已登记 client、tenant/account/device、Org 有效权限和当前来源状态均校验；在最终事务再次核对设备账号/来源，读取当前 active 账号资料。无查询参数，重复 Authorization 拒绝，响应 no-store，不返回或伪造浏览器 Me.session、Cookie 或令牌，不延长来源 idle。未知、失效来源或控制面失败均失败关闭。
+
+选择独立设备资料接口，是因为现有 `/me` 依赖浏览器 sid，不能用合法的无 sid 设备令牌读取。浏览器 `/me` 的 Me schema 和处理逻辑保持不变；原来 C 调 `/me` 的接线在本批迁移为 device-profile，不允许回退浏览器 cookie。IAM 本分支已实现所需接口，AUTH-D 无须再等一个资料接口补丁；仍须在主控安排的真实 Desktop/DSH 入口联调时验证。

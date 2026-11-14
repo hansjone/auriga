@@ -13,9 +13,30 @@ import tools.jackson.databind.JsonNode;
  */
 public final class OrgIdentityPolicyHooks implements IdentityPolicyHooks {
   private final OrgService org;
+  private final UacOrgPolicy uac;
 
   public OrgIdentityPolicyHooks(OrgService org) {
+    this(org, null);
+  }
+
+  OrgIdentityPolicyHooks(OrgService org, UacOrgPolicy uac) {
     this.org = org;
+    this.uac = uac;
+  }
+
+  @Override
+  public Optional<UUID> resolveUacEmployee(UUID provider, String employee) {
+    return uac == null ? Optional.empty() : uac.resolve(provider, employee);
+  }
+
+  @Override
+  public Optional<UacMember> uacMember(UUID account) {
+    return uac == null ? Optional.empty() : uac.member(account);
+  }
+
+  @Override
+  public boolean consumeUacInvitation(String code, UUID provider, String employee, UUID account) {
+    return uac != null && uac.consume(code, provider, employee, account);
   }
 
   @Override

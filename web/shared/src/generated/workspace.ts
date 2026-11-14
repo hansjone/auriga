@@ -1,4 +1,63 @@
 export interface paths {
+  '/me/placement': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** 读取本人当前分配 */
+    get: operations['getMyDshPlacement'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/members/{memberId}/placement-switches': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 提权到独立或降权回共享
+     * @description ctx=admin，workspace.placements.write，600秒内 step-up，Origin/CSRF。
+     *     tenant 来自可信上下文，memberId 必须属于该租户。UAC 与邀请成员规则一致。
+     *     If-Match 必须匹配当前分配修订；每成员最多一个在途操作。
+     *     Idempotency-Key 按租户、操作者、成员及请求指纹绑定；同键异请求返回409。
+     *     在模式提交前停止并证明旧执行全部结束，销毁旧会话，增加 epoch，撤销旧票据及连接。
+     *     文件保留策略固定为封存本人文件30天并创建空工作区，会话始终丢弃。
+     */
+    post: operations['createDshPlacementSwitch'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/placement-switches/{operationId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** 读取模式切换结果 */
+    get: operations['getDshPlacementSwitch'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/admin/ops/backups/{id}': {
     parameters: {
       query?: never;
@@ -745,6 +804,96 @@ export interface components {
       viewCleared: boolean;
       newSessionRequired: boolean;
     } & unknown;
+    /**
+     * @description 物理进程共享模式；不表示取得容器 root 权限。
+     * @enum {string}
+     */
+    DshInstanceMode: 'shared' | 'dedicated';
+    /** @description epoch 是不可回退的授权代次；不向成员暴露物理 pool、路径或其他用户。 */
+    DshPlacement: {
+      /** Format: uuid */
+      memberId: string;
+      /** Format: uuid */
+      placementId: string;
+      mode: components['schemas']['DshInstanceMode'];
+      /** Format: int64 */
+      epoch: number;
+      /** Format: int64 */
+      revision: number;
+      /** @enum {string} */
+      state: 'pending' | 'ready' | 'switching' | 'unavailable';
+    };
+    FieldError: {
+      /** @description JSON Pointer，例如 `/email`。 */
+      field: string;
+      code: string;
+      message?: string;
+    };
+    /** @description RFC 9457 问题详情。 */
+    Problem: {
+      /**
+       * Format: uri-reference
+       * @default about:blank
+       */
+      type: string;
+      /** @description 英文短标题。 */
+      title: string;
+      status: number;
+      /** @description 按 Accept-Language 返回的说明。 */
+      detail?: string;
+      /** Format: uri-reference */
+      instance?: string;
+      /**
+       * @description 机器可读的错误码，形如 `<域>.<snake_case>`。
+       * @example iam.login_tx_expired
+       */
+      code: string;
+      /** @description 错误文案里的参数。 */
+      params?: Record<string, never>;
+      /** @description 字段级错误（validation_failed 时）。 */
+      errors?: components['schemas']['FieldError'][];
+      traceId?: string;
+    };
+    DshPlacementSwitchRequest: {
+      targetMode: components['schemas']['DshInstanceMode'];
+      reason: string;
+      /** @enum {string} */
+      sessionPolicy: 'discard';
+      /**
+       * @description 已定规则：本人文件封存30天，新模式空目录，会话丢弃；不允许客户端选择自动迁移或即时删除。
+       * @enum {string}
+       */
+      filePolicy: 'archive-and-reset';
+    };
+    /** @description succeeded 不带 failureCode；failed/blocked 必须带；fromMode 与 targetMode 必须不同，服务端校验。 */
+    DshPlacementSwitch: {
+      /** Format: uuid */
+      operationId: string;
+      /** Format: uuid */
+      memberId: string;
+      fromMode: components['schemas']['DshInstanceMode'];
+      targetMode: components['schemas']['DshInstanceMode'];
+      /** @enum {string} */
+      state:
+        | 'accepted'
+        | 'fencing'
+        | 'draining'
+        | 'preparing'
+        | 'committing'
+        | 'succeeded'
+        | 'failed'
+        | 'blocked';
+      /** Format: int64 */
+      revision: number;
+      sessionsDiscarded: boolean;
+      /** @enum {string} */
+      failureCode?:
+        | 'capacity'
+        | 'stop-unconfirmed'
+        | 'prepare-failed'
+        | 'revoked'
+        | 'recovery-required';
+    } & (unknown & unknown);
     OpsUpgradeInventory: {
       /** Format: date-time */
       reportedAt: string;
@@ -852,37 +1001,6 @@ export interface components {
     };
     /** Format: uuid */
     Uuid: string;
-    FieldError: {
-      /** @description JSON Pointer，例如 `/email`。 */
-      field: string;
-      code: string;
-      message?: string;
-    };
-    /** @description RFC 9457 问题详情。 */
-    Problem: {
-      /**
-       * Format: uri-reference
-       * @default about:blank
-       */
-      type: string;
-      /** @description 英文短标题。 */
-      title: string;
-      status: number;
-      /** @description 按 Accept-Language 返回的说明。 */
-      detail?: string;
-      /** Format: uri-reference */
-      instance?: string;
-      /**
-       * @description 机器可读的错误码，形如 `<域>.<snake_case>`。
-       * @example iam.login_tx_expired
-       */
-      code: string;
-      /** @description 错误文案里的参数。 */
-      params?: Record<string, never>;
-      /** @description 字段级错误（validation_failed 时）。 */
-      errors?: components['schemas']['FieldError'][];
-      traceId?: string;
-    };
     items: {
       /** @constant */
       kty: 'OKP';
@@ -976,10 +1094,18 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 太频繁（common.rate_limited）。 */
-    RateLimited: {
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
       headers: {
-        'Retry-After': components['headers']['RetryAfter'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 没有权限（common.forbidden 或更具体的码）。 */
+    Forbidden: {
+      headers: {
         [name: string]: unknown;
       };
       content: {
@@ -989,6 +1115,16 @@ export interface components {
     /** @description 资源不存在（common.not_found）。 */
     NotFound: {
       headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 太频繁（common.rate_limited）。 */
+    RateLimited: {
+      headers: {
+        'Retry-After': components['headers']['RetryAfter'];
         [name: string]: unknown;
       };
       content: {
@@ -1006,15 +1142,6 @@ export interface components {
     };
     /** @description 状态冲突（common.conflict 等）。 */
     Conflict: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
       headers: {
         [name: string]: unknown;
       };
@@ -1041,6 +1168,122 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getMyDshPlacement: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 当前分配；ETag 为修订号。 */
+      200: {
+        headers: {
+          /** @description 不透明修订标签 */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshPlacement'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      /** @description 尚未创建本人分配（包括首次登录尚未 open），返回 common.not_found。 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  createDshPlacementSwitch: {
+    parameters: {
+      query?: never;
+      header: {
+        'If-Match': string;
+        'Idempotency-Key': string;
+      };
+      path: {
+        memberId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DshPlacementSwitchRequest'];
+      };
+    };
+    responses: {
+      /** @description 操作已登记，不表示新模式已可用。 */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshPlacementSwitch'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description 在途、相同模式、幂等冲突或容量不足。 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 分配修订已变化。 */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 缺少 If-Match，返回 common.validation_failed。 */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  getDshPlacementSwitch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        operationId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 要求 ctx=admin 与 workspace.placements.read；跨租户返回404。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshPlacementSwitch'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
   deleteOpsBackup: {
     parameters: {
       query?: never;

@@ -85,6 +85,7 @@ export function buildBroker(output) {
     'source-control',
     'protocol',
     'keyset',
+    'auto-renewal-v2',
     'send',
   ]) {
     const file = 'schemas/network/' + name + '.schema.json';

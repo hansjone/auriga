@@ -13,6 +13,7 @@ import {
   isDeviceRevocationError,
 } from './device-provider.js';
 import { createNetworkLifecycle } from './lifecycle.js';
+import { createControlInstallation } from './trust/installation-control.js';
 import { networkIsolation } from './isolation.js';
 import { parseStrictJson } from './trust/jcs.js';
 import { deviceMemberName } from '../local/member-profile.js';
@@ -30,6 +31,8 @@ export function createManagedNetwork(options) {
   let rejected = '';
   /** @type {ReturnType<typeof createNetworkLifecycle>|undefined} */
   let lifecycle;
+  /** @type {ReturnType<typeof createControlInstallation>|undefined} */
+  let controlInstallation;
   /** @type {{accessToken:string,claims:any}|undefined} */
   let access;
   /** Resource-only server adapter; never exposed to the browser or public SDK.
@@ -219,6 +222,15 @@ export function createManagedNetwork(options) {
           const { value, config } = validate(next);
           diagnosticConfig = config;
           localDirectory = join(options.directory, 'network', value.deviceId);
+          controlInstallation = createControlInstallation({
+            config,
+            directory: localDirectory,
+            getScope: () => ({
+              tenant_id: options.tenantId,
+              realm: config.network?.realm,
+              target_id: value.deviceId,
+            }),
+          });
           materialUntil = Date.parse(value.expiresAt);
           if (next !== raw) displayName = undefined;
           raw = next;
@@ -367,8 +379,10 @@ export function createManagedNetwork(options) {
             directory: join(options.directory, 'network', value.deviceId),
             ctx: options.ctx,
             installation: config.network,
+            offlineControl: controlInstallation,
             defaultProvider: createDeviceProvider({
               config,
+              loadInstallation: controlInstallation.prepare,
               getDevice: async (signal) => {
                 const device = await getDevice();
                 signal.throwIfAborted();
@@ -458,6 +472,18 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    networkControl: {
+      get available() {
+        return controlInstallation?.available === true;
+      },
+      importPackage: async (/** @type {any} */ input) => {
+        await retiring;
+        if (lifecycle) return lifecycle.importControlOffline(input);
+        if (!controlInstallation)
+          throw new Error('managed control import unavailable');
+        return controlInstallation.importPackage(input);
+      },
+    },
     baseTools,
     get resourceSession() {
       return !closed &&

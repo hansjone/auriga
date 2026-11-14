@@ -357,13 +357,42 @@ for (const [operation, input, output] of [
   [
     'getNetworkKeys',
     obj({}),
-    obj({ wire: wire('network/keyset.schema.json#/$defs/SignedKeyset') }),
+    obj({
+      wire: wire(
+        'network/auto-renewal-v2.schema.json#/$defs/Publication',
+        33554432,
+      ),
+    }),
   ],
   [
     'getNetworkKeyAnnouncement',
     obj({}),
     obj({
-      wire: wire('network/protocol.schema.json#/$defs/KeysetAnnouncement'),
+      wire: wire(
+        'network/auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2',
+        33554432,
+      ),
+    }),
+  ],
+  [
+    'getPublicNetworkControl',
+    obj({}),
+    obj({
+      wire: wire(
+        'network/auto-renewal-v2.schema.json#/$defs/SignedRootControl',
+        33554432,
+      ),
+    }),
+  ],
+  [
+    'confirmNetworkControl',
+    obj({
+      receiptWire: wire(
+        'network/auto-renewal-v2.schema.json#/$defs/InstallationReceipt',
+      ),
+    }),
+    obj({
+      wire: wire('network/auto-renewal-v2.schema.json#/$defs/IsolationRecord'),
     }),
   ],
   [
@@ -392,24 +421,47 @@ for (const [operation, input, output] of [
       operation.startsWith('team_') || operation === 'network_submit'
         ? 'auriga.ai-gateway'
         : 'auriga',
-    permission: 'auriga.connect',
+    permission:
+      operation === 'getPublicNetworkControl'
+        ? null
+        : operation === 'confirmNetworkControl'
+          ? 'collab.msgnet.control.install'
+          : ['getNetworkKeys', 'getNetworkKeyAnnouncement'].includes(operation)
+            ? 'collab.msgnet.read'
+            : 'auriga.connect',
+    ...([
+      'getNetworkKeys',
+      'getNetworkKeyAnnouncement',
+      'getPublicNetworkControl',
+      'confirmNetworkControl',
+    ].includes(operation)
+      ? {
+          authentication:
+            operation === 'getPublicNetworkControl' ? 'none' : 'bearer',
+          method: operation === 'confirmNetworkControl' ? 'post' : 'get',
+        }
+      : {}),
     stream: operation.includes('open'),
     retry: 'never',
     route: operation.startsWith('upload_')
       ? 'broker:upload'
       : operation === 'getNetworkKeys'
-        ? '/api/collab/v1/network/keys'
+        ? '/api/collab/v2/network/keys'
         : operation === 'getNetworkKeyAnnouncement'
-          ? '/api/collab/v1/network/keys/announcement'
-          : operation.startsWith('team_')
-            ? '/ai/mcp'
-            : operation === 'network_submit'
-              ? '/api/ai/v1/network/submit'
-              : operation.startsWith('network_')
-                ? 'broker:nats'
-                : operation === 'profile_read'
-                  ? '/api/iam/v1/me'
-                  : '/api/iam/v1/login/providers',
+          ? '/api/collab/v2/network/keys/announcement'
+          : operation === 'getPublicNetworkControl'
+            ? '/api/collab/v2/network/bootstrap/controls'
+            : operation === 'confirmNetworkControl'
+              ? '/api/collab/v2/network/controls/receipts'
+              : operation.startsWith('team_')
+                ? '/ai/mcp'
+                : operation === 'network_submit'
+                  ? '/api/ai/v1/network/submit'
+                  : operation.startsWith('network_')
+                    ? 'broker:nats'
+                    : operation === 'profile_read'
+                      ? '/api/iam/v1/me/device-profile'
+                      : '/api/iam/v1/login/providers',
   });
   arms.push(
     obj({

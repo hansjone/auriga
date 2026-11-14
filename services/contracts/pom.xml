@@ -203,7 +203,7 @@
               <goal>generate</goal>
             </goals>
             <configuration>
-              <inputSpec>${project.build.directory}/bundled/network-keys-v2.json</inputSpec>
+              <inputSpec>${project.build.directory}/bundled/network-keys-v2-java.json</inputSpec>
               <output>${project.build.directory}/generated-sources/openapi/msgnet</output>
               <apiPackage>auriga.contracts.msgnet.web.api</apiPackage>
               <modelPackage>auriga.contracts.msgnet.model</modelPackage>

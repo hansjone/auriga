@@ -28,7 +28,7 @@ discovery.relabel "compose" {
 loki.source.docker "compose" {
   host = "unix:///var/run/docker.sock"
   targets = discovery.relabel.compose.output
-  forward_to = [loki.write.local.receiver]
+  forward_to = [loki.process.uac_safe.receiver]
 }
 
 // Runtime instances are not Compose members. Discovery is observational only.
@@ -63,7 +63,7 @@ discovery.relabel "managed" {
 loki.source.docker "managed" {
   host = "unix:///var/run/docker.sock"
   targets = discovery.relabel.managed.output
-  forward_to = [loki.write.local.receiver]
+  forward_to = [loki.process.uac_safe.receiver]
 }
 
 local.file_match "plugin" {
@@ -71,10 +71,28 @@ local.file_match "plugin" {
 }
 loki.source.file "plugin" {
   targets = local.file_match.plugin.targets
-  forward_to = [loki.write.local.receiver]
+  forward_to = [loki.process.uac_safe.receiver]
 }
 loki.write "local" {
   endpoint {
     url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Producer-side closed UAC projection is authoritative. This secondary redactor
+// masks known secret/PII fields in both JSON and the escaped JSON message.
+// No employee, correlation or token-hash value becomes an index label.
+loki.process "uac_safe" {
+  forward_to = [loki.write.local.receiver]
+  stage.match {
+    selector = "{service=~\"platform|iam\"} |= \"auriga.iam.uac\""
+    stage.replace {
+      expression = "(?i)\"(?:token|access_token|refresh_token|id_token|password|secret|authorization|cookie|set-cookie|verifyCode|verifier|binding|device_code|user_code|clientIP|systemCode|name|department|email|phone|x|y)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\""
+      replace = "[REDACTED]"
+    }
+    stage.replace {
+      expression = "(?i)\\\\\"(?:token|access_token|refresh_token|id_token|password|secret|authorization|cookie|set-cookie|verifyCode|verifier|binding|device_code|user_code|clientIP|systemCode|name|department|email|phone|x|y)\\\\\"\\s*:\\s*\\\\\"((?:[^\"\\\\]|\\\\\\\\\\\\\"|\\\\\\\\\\\\\\\\|\\\\\\\\[^\"\\\\])*)\\\\\""
+      replace = "[REDACTED]"
+    }
   }
 }
