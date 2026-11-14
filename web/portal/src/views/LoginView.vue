@@ -24,6 +24,7 @@ import {
   takeNavigationContext,
 } from '../../../shared/src/api/correlation';
 import DesktopDownload from '../components/DesktopDownload.vue';
+import { loginReturnTo } from '../login-return';
 
 const { t, locale } = useI18n();
 const props = defineProps<{ deviceContinuation?: boolean; authApi?: IamApi }>();
@@ -212,7 +213,7 @@ function onComplete(redirectTo: string) {
     return;
   }
   if (alive && uacContinuation) {
-    globalThis.location.assign('/instance-login.html');
+    finishLogin();
     return;
   }
   if (
@@ -225,7 +226,10 @@ function onComplete(redirectTo: string) {
 }
 function finishLogin() {
   if (props.deviceContinuation) emit('signedIn');
-  else globalThis.location.assign('/instance-login.html');
+  else
+    globalThis.location.assign(
+      loginReturnTo(route.query.returnTo) ?? '/instance-login.html',
+    );
 }
 async function backToProviders() {
   if (!alive || busy.value) return;

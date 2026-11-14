@@ -25,12 +25,12 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { 'Content-Type': 'application/json' },
   });
-async function render() {
+async function render(path = '/login') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/login', component: LoginView }],
   });
-  await router.push('/login');
+  await router.push(path);
   const navigate = vi.fn();
   bindApiRouter(router, navigate);
   return mount(LoginView, {
@@ -135,56 +135,100 @@ describe('portal UAC normal entry', () => {
     expect(wrapper.find('[data-testid=provider-select]').exists()).toBe(true);
     wrapper.unmount();
   });
-  it('continues additional verification and then opens the fixed workspace entry', async () => {
-    context();
-    const assign = vi.fn();
-    vi.stubGlobal('location', { href: 'http://localhost/login', assign });
-    const tx = {
-      id,
-      purpose: 'login',
-      status: 'pending',
-      provider,
-      expiresAt: '2099-01-01T00:00:00Z',
-      step: {
-        type: 'form',
-        formId: 'totp',
-        fields: [
-          { name: 'code', kind: 'otp', required: true, label: { en: 'TOTP' } },
-        ],
-      },
-    };
-    const calls: string[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<typeof fetch>(async (input) => {
-        const path = String(input);
-        calls.push(path);
-        if (path.endsWith('/providers')) return json({ items: [provider] });
-        if (path.endsWith('/sso'))
-          return json({ state: 'additional_step_required', transactionId: id });
-        if (path.endsWith('/advance'))
-          return json({
-            ...tx,
-            status: 'completed',
-            step: {
-              type: 'complete',
-              redirectTo: 'https://untrusted.example.com/',
+  it.each([
+    ['', '/instance-login.html'],
+    ['?returnTo=%2Faccount%2Fsecurity', '/account/security'],
+    ['?returnTo=%2F%2Funtrusted.example', '/instance-login.html'],
+  ])(
+    'continues additional verification and respects a safe return destination (%s)',
+    async (query, target) => {
+      context();
+      const assign = vi.fn();
+      vi.stubGlobal('location', { href: 'http://localhost/login', assign });
+      const tx = {
+        id,
+        purpose: 'login',
+        status: 'pending',
+        provider,
+        expiresAt: '2099-01-01T00:00:00Z',
+        step: {
+          type: 'form',
+          formId: 'totp',
+          fields: [
+            {
+              name: 'code',
+              kind: 'otp',
+              required: true,
+              label: { en: 'TOTP' },
             },
-          });
-        if (path.endsWith('/transactions/' + id)) return json(tx);
-        throw new Error('Unexpected endpoint');
-      }),
-    );
-    const wrapper = await render();
-    await flushPromises();
-    expect(assign).not.toHaveBeenCalled();
-    expect(calls.some((path) => path.includes('/workspace/'))).toBe(false);
-    await wrapper.get('input[name=code]').setValue('123456');
-    await wrapper.get('form').trigger('submit');
-    await flushPromises();
-    expect(assign).toHaveBeenCalledExactlyOnceWith('/instance-login.html');
-    wrapper.unmount();
-  });
+          ],
+        },
+      };
+      const calls: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>(async (input) => {
+          const path = String(input);
+          calls.push(path);
+          if (path.endsWith('/providers')) return json({ items: [provider] });
+          if (path.endsWith('/sso'))
+            return json({
+              state: 'additional_step_required',
+              transactionId: id,
+            });
+          if (path.endsWith('/advance'))
+            return json({
+              ...tx,
+              status: 'completed',
+              step: {
+                type: 'complete',
+                redirectTo: 'https://untrusted.example.com/',
+              },
+            });
+          if (path.endsWith('/transactions/' + id)) return json(tx);
+          throw new Error('Unexpected endpoint');
+        }),
+      );
+      const wrapper = await render('/login' + query);
+      await flushPromises();
+      expect(assign).not.toHaveBeenCalled();
+      expect(calls.some((path) => path.includes('/workspace/'))).toBe(false);
+      await wrapper.get('input[name=code]').setValue('123456');
+      await wrapper.get('form').trigger('submit');
+      await flushPromises();
+      expect(assign).toHaveBeenCalledExactlyOnceWith(target);
+      wrapper.unmount();
+    },
+  );
+  it.each([
+    ['', '/instance-login.html'],
+    [
+      '?returnTo=%2Faccount%2Fsecurity%3Ftab%3Dkeys%23current',
+      '/account/security?tab=keys#current',
+    ],
+    ['?returnTo=https%3A%2F%2Funtrusted.example', '/instance-login.html'],
+  ])(
+    'returns authenticated SSO to a safe destination (%s)',
+    async (query, target) => {
+      context();
+      const assign = vi.fn();
+      vi.stubGlobal('location', { href: 'http://localhost/login', assign });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>(async (input) => {
+          const path = String(input);
+          if (path.endsWith('/providers')) return json({ items: [provider] });
+          if (path.endsWith('/sso'))
+            return json({ state: 'authenticated', transactionId: id });
+          throw new Error('Unexpected endpoint');
+        }),
+      );
+      const wrapper = await render('/login' + query);
+      await flushPromises();
+      expect(assign).toHaveBeenCalledExactlyOnceWith(target);
+      wrapper.unmount();
+    },
+  );
   it('does not revive a login page when a provider list arrives after unmount', async () => {
     let resolve!: (response: Response) => void;
     const fetcher = vi.fn<typeof fetch>(

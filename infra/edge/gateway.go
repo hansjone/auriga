@@ -57,6 +57,9 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	if err := cfg.validateUacCookieNames(); err != nil {
+		return nil, err
+	}
 	if err := cfg.DevicePresence.validate(); err != nil {
 		return nil, err
 	}

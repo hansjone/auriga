@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -263,6 +264,9 @@ func applyEnv(cfg *Config) {
 }
 
 func (c Config) validate() error {
+	if err := c.validateUacCookieNames(); err != nil {
+		return err
+	}
 	if err := c.validateLinkOrigins(); err != nil {
 		return err
 	}
@@ -368,6 +372,17 @@ func (c Config) validate() error {
 	}
 	if c.RateLimit.Burst <= 0 {
 		return fmt.Errorf("rateLimit.burst must be > 0")
+	}
+	return nil
+}
+
+func (c Config) validateUacCookieNames() error {
+	seen := map[string]bool{}
+	for i, name := range c.UacSSOCookieNames {
+		if (&http.Cookie{Name: name}).Valid() != nil || strings.Contains(strings.ToLower(name), "auriga_") || seen[name] {
+			return fmt.Errorf("uacSsoCookieNames[%d]: invalid, reserved or duplicate cookie name", i)
+		}
+		seen[name] = true
 	}
 	return nil
 }

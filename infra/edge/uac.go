@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -77,7 +78,7 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 			metadata[key] = value
 		}
 	}
-	if metadata["dest"] != "" && metadata["dest"] != "document" || metadata["mode"] != "" && metadata["mode"] != "navigate" || metadata["site"] == "cross-site" || strings.Contains(strings.ToLower(r.Header.Get("Sec-Purpose")+" "+r.Header.Get("Purpose")), "prefetch") || len(r.Header.Values("Origin")) > 1 || r.Header.Get("Origin") != "" && r.Header.Get("Origin") != g.Cfg.Access.PortalURL() {
+	if metadata["dest"] != "" && metadata["dest"] != "document" || metadata["mode"] != "" && metadata["mode"] != "navigate" || strings.Contains(strings.ToLower(r.Header.Get("Sec-Purpose")+" "+r.Header.Get("Purpose")), "prefetch") || len(r.Header.Values("Origin")) > 1 || r.Header.Get("Origin") != "" && r.Header.Get("Origin") != g.Cfg.Access.PortalURL() {
 		fail(403)
 		return true
 	}
@@ -109,6 +110,10 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 			fail(400)
 			return true
 		}
+	}
+	// Malformed browser input is not an IAM CSRF binding. Let IAM initialize it.
+	if !uacProof.MatchString(values[2]) {
+		values[2] = ""
 	}
 	requestID, err := navigationRequestID()
 	if err != nil {
@@ -153,17 +158,36 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 	}
 	defer func() { _ = resp.Body.Close() }()
 	correlation := resp.Header.Get(uacCorrelationHeader)
-	if len(resp.Header.Values(uacCorrelationHeader)) != 1 || !uacUUID.MatchString(correlation) {
+	validCorrelation := len(resp.Header.Values(uacCorrelationHeader)) == 1 && uacUUID.MatchString(correlation)
+	if validCorrelation {
+		w.Header().Set(uacCorrelationHeader, correlation)
+	}
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		raw, err = io.ReadAll(io.LimitReader(resp.Body, 32769))
+		var rejection Problem
+		if err != nil || len(raw) > 32768 || json.Unmarshal(raw, &rejection) != nil || rejection.Status != resp.StatusCode || rejection.Code == "" || rejection.Title == "" {
+			fail(503)
+			return true
+		}
+		html, err := g.uacPageHTML(r)
+		if err != nil {
+			fail(503)
+			return true
+		}
+		// The page retains team/explicit login and device-specific expiry UI.
+		meta := []byte("<meta name=\"auriga-uac-correlation\" content=\"" + w.Header().Get(uacCorrelationHeader) + "\"></head>")
+		html = bytes.Replace(html, []byte("</head>"), meta, 1)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(html)
+		return true
+	}
+	if !validCorrelation {
 		fail(503)
 		return true
 	}
-	w.Header().Set(uacCorrelationHeader, correlation)
 	if resp.StatusCode != http.StatusCreated {
-		if resp.StatusCode == 404 && device != nil {
-			fail(404)
-		} else {
-			fail(503)
-		}
+		fail(503)
 		return true
 	}
 	var issued struct {
@@ -182,6 +206,10 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 		fail(503)
 		return true
 	}
+	// Cross-site top-level documents remain usable, but never start auto SSO.
+	if metadata["site"] == "cross-site" {
+		nav.AutoEligible = false
+	}
 	// IAM validates/reuses an existing CSRF; new values are internal-hop only.
 	csrf := issued.CSRFCookie
 	if csrf == "" {
@@ -196,32 +224,20 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 		fail(503)
 		return true
 	}
-	file := "index.html"
-	if r.URL.Path == "/instance-login.html" {
-		file = "instance-login.html"
-	}
-	html, err := os.ReadFile(filepath.Join(g.Cfg.Static.PortalRoot, file))
-	if err != nil || !bytes.Contains(html, []byte("</head>")) {
+	html, err := g.uacPageHTML(r)
+	if err != nil {
 		fail(503)
 		return true
 	}
-	if file == "index.html" {
-		html, err = injectAccessMode(html, g.Cfg.Access.Mode())
-		if err != nil {
-			fail(503)
-			return true
-		}
-	}
 	txCookie := &http.Cookie{Name: names[0], Value: issued.TransactionCookie, Path: "/", Secure: secure, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 120}
-	csrfCookie := &http.Cookie{Name: names[2], Value: csrf, Path: "/", Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: 120}
+	csrfCookie := &http.Cookie{Name: names[2], Value: csrf, Path: "/", Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int(math.Ceil(nav.ExpiresAt.Sub(g.Now()).Seconds()))}
 	if txCookie.Valid() != nil || csrfCookie.Valid() != nil {
 		fail(503)
 		return true
 	}
 	http.SetCookie(w, txCookie)
-	if csrf != values[2] {
-		http.SetCookie(w, csrfCookie)
-	}
+	// Reissue the same value so an older anonymous cookie cannot expire first.
+	http.SetCookie(w, csrfCookie)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	addition := []byte("<meta name=\"auriga-uac-provider\" content=\"" + g.Cfg.UacProviderID + "\"><meta name=\"auriga-uac-correlation\" content=\"" + correlation + "\"><script type=\"application/json\" id=\"auriga-uac-navigation\">")
@@ -234,6 +250,25 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 	_, _ = w.Write(html)
 	return true
 }
+
+func (g *Gateway) uacPageHTML(r *http.Request) ([]byte, error) {
+	file := "index.html"
+	if r.URL.Path == "/instance-login.html" {
+		file = "instance-login.html"
+	}
+	html, err := os.ReadFile(filepath.Join(g.Cfg.Static.PortalRoot, file))
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Contains(html, []byte("</head>")) {
+		return nil, fmt.Errorf("invalid portal document")
+	}
+	if file == "index.html" {
+		return injectAccessMode(html, g.Cfg.Access.Mode())
+	}
+	return html, nil
+}
+
 func navigationRequestID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

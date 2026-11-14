@@ -355,24 +355,45 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap bool) (st
 		}
 	}
 	if e.role == "portal" && r.URL.Path == "/api/iam/v1/login/uac/sso" {
-		for _, name := range g.Cfg.UacSSOCookieNames {
-			if strings.Contains(strings.ToLower(name), "auriga_") {
-				return "", errString("invalid SSO cookie name")
-			}
-			count := 0
-			for _, cookie := range r.Cookies() {
-				if cookie.Name == name {
-					count++
-				}
-			}
-			if count > 1 {
-				return "", errString("ambiguous SSO cookie")
-			}
-			value, ok := singleCookie(r, name)
-			if ok {
-				selected = append(selected, (&http.Cookie{Name: name, Value: value}).String())
-			}
+		raw, err := rawSSOCookies(r, g.Cfg.UacSSOCookieNames)
+		if err != nil {
+			return "", err
 		}
+		selected = append(selected, raw...)
 	}
 	return strings.Join(selected, "; "), nil
+}
+
+// Preserve private enterprise values byte-for-byte. net/http Cookie parsing and
+// serialization can discard quotes/spaces, silently turning SSO into QR fallback.
+func rawSSOCookies(r *http.Request, names []string) ([]string, error) {
+	allowed := map[string]bool{}
+	for _, name := range names {
+		allowed[name] = true
+	}
+	seen := map[string]bool{}
+	var selected []string
+	for _, line := range r.Header.Values("Cookie") {
+		for _, part := range strings.Split(line, ";") {
+			part = strings.TrimLeft(part, " \t")
+			name, value, hasValue := strings.Cut(part, "=")
+			if !allowed[name] {
+				continue
+			}
+			if !hasValue || seen[name] {
+				return nil, errString("ambiguous SSO cookie")
+			}
+			for _, c := range []byte(value) {
+				if c < 0x20 || c >= 0x7f {
+					return nil, errString("invalid SSO cookie value")
+				}
+			}
+			if strings.HasPrefix(value, `"`) && (len(value) < 2 || !strings.HasSuffix(value, `"`)) {
+				return nil, errString("invalid quoted SSO cookie value")
+			}
+			seen[name] = true
+			selected = append(selected, name+"="+value)
+		}
+	}
+	return selected, nil
 }

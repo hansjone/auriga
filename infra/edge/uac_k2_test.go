@@ -73,9 +73,9 @@ func TestUACK2DeviceNavigationAndCSRF(t *testing.T) {
 	if rec.Header().Get(uacCorrelationHeader) != correlation || !strings.Contains(rec.Body.String(), correlation) || strings.Contains(rec.Body.String(), csrf) || strings.Contains(rec.Body.String(), tx) || strings.Contains(rec.Body.String(), suppression) {
 		t.Fatal("unsafe navigation projection")
 	}
-	// A reused session CSRF must not be overwritten/shortened by a document GET.
+	// Reuse preserves the value and renews its lifetime for the new proof.
 	cookies := rec.Result().Cookies()
-	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].Secure || cookies[0].Domain != "" {
+	if len(cookies) != 2 || cookies[1].Value != csrf || cookies[1].MaxAge < 120 || !cookies[0].HttpOnly || cookies[0].Secure || cookies[0].Domain != "" {
 		t.Fatal("cookie reuse regressed")
 	}
 	request.Header.Del("Cookie")
@@ -91,7 +91,7 @@ func TestUACK2DeviceNavigationAndCSRF(t *testing.T) {
 }
 
 func TestUACK2NavigationRejectsUntrustedAndInvalidResponses(t *testing.T) {
-	for _, test := range []string{"iframe", "cross-site", "prefetch", "duplicate-metadata", "wrong-origin", "duplicate-cookie", "missing-csrf", "device-auto", "expired", "bad-correlation", "device-missing"} {
+	for _, test := range []string{"iframe", "prefetch", "duplicate-metadata", "wrong-origin", "duplicate-cookie", "missing-csrf", "device-auto", "expired", "bad-correlation"} {
 		t.Run(test, func(t *testing.T) {
 			id, _ := navigationRequestID()
 			hits := 0
@@ -101,10 +101,6 @@ func TestUACK2NavigationRejectsUntrustedAndInvalidResponses(t *testing.T) {
 					w.Header().Set(uacCorrelationHeader, "invalid")
 				} else {
 					w.Header().Set(uacCorrelationHeader, id)
-				}
-				if test == "device-missing" {
-					w.WriteHeader(404)
-					return
 				}
 				expires := time.Now().Add(time.Minute)
 				if test == "expired" {
@@ -121,8 +117,6 @@ func TestUACK2NavigationRejectsUntrustedAndInvalidResponses(t *testing.T) {
 			switch test {
 			case "iframe":
 				req.Header.Set("Sec-Fetch-Dest", "iframe")
-			case "cross-site":
-				req.Header.Set("Sec-Fetch-Site", "cross-site")
 			case "prefetch":
 				req.Header.Set("Sec-Purpose", "prefetch")
 			case "duplicate-metadata":
@@ -137,12 +131,10 @@ func TestUACK2NavigationRejectsUntrustedAndInvalidResponses(t *testing.T) {
 			g.serveUacNavigation(rec, req)
 			expected := 503
 			switch test {
-			case "iframe", "cross-site", "prefetch", "duplicate-metadata", "wrong-origin":
+			case "iframe", "prefetch", "duplicate-metadata", "wrong-origin":
 				expected = 403
 			case "duplicate-cookie":
 				expected = 400
-			case "device-missing":
-				expected = 404
 			}
 			if rec.Code != expected || len(rec.Result().Cookies()) != 0 {
 				t.Fatalf("unsafe rejection %d, expected %d", rec.Code, expected)

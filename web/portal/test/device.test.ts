@@ -83,6 +83,25 @@ function ordinary() {
   });
 }
 describe('normal portal device confirmation', () => {
+  it('shows the expired device page after an authoritative 404 without navigation context', async () => {
+    fetcher.mockImplementation(async (input) => {
+      if (String(input).endsWith('/me')) return json(me);
+      if (String(input) === '/api/iam/v1/device/' + code)
+        return json(
+          { status: 404, code: 'common.not_found', title: 'Not found' },
+          404,
+        );
+      throw new Error('Unexpected request');
+    });
+    await render();
+    expect(wrapper!.text()).toContain('已过期或不可用');
+    expect(wrapper!.find('[data-testid=verify-user-code]').exists()).toBe(
+      false,
+    );
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(
+      false,
+    );
+  });
   it('drops pagehide results and reloads a restored document instead of reviving its old attempt', async () => {
     let resolve!: (value: Response) => void;
     fetcher.mockImplementationOnce(
