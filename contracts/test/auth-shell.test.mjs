@@ -6,8 +6,8 @@ import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/i
 import YAML from '../../services/contracts/node_modules/yaml/dist/index.js';
 import { spawnSync } from 'node:child_process';
 import {
-  platformCallSites,
-  platformSourceDigests,
+  checkPlatformMigration,
+  readPluginSources,
 } from './auth-k-source-scan.mjs';
 
 const root = new URL('../', import.meta.url);
@@ -23,6 +23,7 @@ for (const file of [
   'plugin/shell-business.schema.json',
   'plugin/shell-auth-control.schema.json',
   'auth/uac-control.schema.json',
+  'auth/standard-device.schema.json',
   'auth/uac-diagnostic-log.schema.json',
   'auth/uac-session-binding.schema.json',
   'auth/uac-login-info.schema.json',
@@ -66,15 +67,7 @@ test('AUTH-K fixed operation projection stays current and covers all platform fa
   assert.equal(result.status, 0, result.stderr);
   const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
   const calls = inventory.calls;
-  assert.deepEqual(
-    platformSourceDigests(calls.map((c) => c.file)),
-    inventory.sources,
-    'platform helper changed: review dynamic routes and update the independent inventory',
-  );
-  assert.deepEqual(
-    platformCallSites(),
-    calls.map(({ file, evidence }) => ({ file, evidence })),
-  );
+  checkPlatformMigration(inventory, operations);
   for (const call of calls) {
     assert.ok(call.methods.length);
     assert.ok(call.routePattern.startsWith('/'));
@@ -709,8 +702,8 @@ test('SSO result supports safe QR fallback without returning upstream tokens', (
   const operation = spec.paths['/login/uac/sso'].post;
   assert.deepEqual(operation.security, [{}]);
   assert.equal(
-    operation.responses['403'].$ref,
-    'common.yaml#/components/responses/Forbidden',
+    operation.responses['403'].content['application/problem+json'].schema.$ref,
+    'common.yaml#/components/schemas/Problem',
   );
 });
 
@@ -732,7 +725,14 @@ test('enterprise credential reads use only the authenticated caller and return a
   }
   assert.equal(request(null), false);
   assert.deepEqual(operation.security, [{ bearerAuth: [] }]);
-  const value = ajv.compile(spec.components.schemas.UacEnterpriseCredentials);
+  const credentialSchema = structuredClone(
+    spec.components.schemas.UacEnterpriseCredentials,
+  );
+  // This test compiles an extracted schema, so resolve its new component reference.
+  credentialSchema.properties.binding.$ref =
+    new URL('auth/uac-control.schema.json', root).href +
+    '#/$defs/UacCredentialBinding';
+  const value = ajv.compile(credentialSchema);
   const valid = {
     empNo: '00123',
     token: 'synthetic',
@@ -1065,7 +1065,7 @@ test('SSO proof issuance is an internal edge to IAM port with evidence and a 120
   assert.equal(request({ ...good, continuation: 'device' }), false);
   assert.equal(
     request({ ...good, continuation: 'device', deviceGrantId: id }),
-    true,
+    false,
   );
   assert.equal(request({ ...good, deviceGrantId: id }), false);
   for (const key of [
@@ -1184,4 +1184,658 @@ test('maximal compact network key publication fits the existing 64 KiB transport
         ' / 65536; synthetic signature, size validation only',
     );
   }
+});
+
+test('K2 device navigation resolves only public user code at the internal IAM port', () => {
+  const valid = validate(
+    'auth/uac-control.schema.json',
+    'UacDeviceNavigationIssueRequest',
+  );
+  const good = {
+    requestId: id,
+    providerId: id,
+    origin: 'https://portal.example.com',
+    continuation: 'device',
+    userCode: 'BCDF-GHJK',
+    fetchMetadata: {},
+  };
+  assert.equal(valid(good), true);
+  for (const patch of [
+    { userCode: 'INVALID' },
+    { userCode: '' },
+    { deviceGrantId: id },
+    { continuation: 'portal' },
+    { token: 'secret' },
+    { tenantId: id },
+  ])
+    assert.equal(valid({ ...good, ...patch }), false);
+  const missing = { ...good };
+  delete missing.userCode;
+  assert.equal(valid(missing), false);
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  const op = spec.paths['/internal/uac/device-navigation-proofs'].post;
+  assert.equal(op['x-internal-only'], true);
+  assert.equal(op['x-service-caller'], 'svc:edge');
+  assert.deepEqual(op.security, [{ internalServiceAuth: [] }]);
+  assert.ok(op.responses['404']);
+  for (const item of Object.values(spec.paths))
+    for (const op of Object.values(item))
+      for (const response of Object.values(op.responses ?? {})) {
+        if (response.headers?.['X-Auriga-Correlation-Id'])
+          assert.equal(
+            response.headers['X-Auriga-Correlation-Id'].$ref,
+            '#/components/headers/UacCorrelationId',
+          );
+      }
+  for (const route of [
+    '/login/uac/sso',
+    '/internal/uac/device-navigation-proofs',
+  ])
+    for (const response of Object.values(spec.paths[route].post.responses))
+      assert.ok(response.headers['X-Auriga-Correlation-Id']);
+  const header = ajv.compile(spec.components.headers.UacCorrelationId.schema);
+  assert.equal(header(id), true);
+  assert.equal(header('token'), false);
+});
+
+test('K2 device attempt has bounded public projection and is forbidden in terminal snapshots', () => {
+  const value = {
+    attemptId: id,
+    pageOwner: id,
+    userCode: 'BCDF-GHJK',
+    expiresAt: base.expiresAt,
+    verificationRequired: true,
+  };
+  const attempt = validate(
+    'plugin/shell-auth.schema.json',
+    'ShellAuthDeviceAttempt',
+  );
+  assert.equal(attempt(value), true);
+  for (const patch of [
+    { verificationRequired: false },
+    { expiresAt: 'tomorrow' },
+    { userCode: 'bad' },
+    { pageOwner: 'bad' },
+    { device_code: 'secret' },
+    { token: 'secret' },
+    { url: 'https://evil.example.com' },
+  ])
+    assert.equal(attempt({ ...value, ...patch }), false);
+  for (const key of Object.keys(value)) {
+    const missing = { ...value };
+    delete missing[key];
+    assert.equal(attempt(missing), false);
+  }
+  assert.equal(
+    snapshot({ ...base, state: 'authenticating', deviceAttempt: value }),
+    true,
+  );
+  for (const state of [
+    'signed_out',
+    'authenticated',
+    'revoked',
+    'unreachable',
+    'reauth_required',
+  ])
+    assert.equal(snapshot({ ...base, state, deviceAttempt: value }), false);
+});
+
+test('K2 migration gate allows unrelated edits and removal but rejects new or remaining direct transport', () => {
+  const legacy = {
+    migrationState: 'legacy',
+    calls: [{ file: 'x.js', evidence: "fetch('/api/iam/v1/me')" }],
+  };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(legacy, operations, {
+      'x.js': "// changed comment\nfetch('/api/iam/v1/me')",
+    }),
+  );
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(legacy, operations, { 'x.js': '// removed' }),
+  );
+  assert.throws(() =>
+    checkPlatformMigration(legacy, operations, {
+      'x.js': "fetch('/api/ai/v1/new')",
+    }),
+  );
+  const broker = { migrationState: 'broker', calls: [] };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, {
+      'x.js': "broker.call('profile_read', {})",
+    }),
+  );
+  for (const source of [
+    'fetch(dynamicUrl)',
+    'new WebSocket(url)',
+    "import http from 'node:http'",
+    'broker.call(operation, {})',
+    "broker.call('invented', {})",
+    "broker.call('profile_read' + suffix, {})",
+  ])
+    assert.throws(
+      () => checkPlatformMigration(broker, operations, { 'x.js': source }),
+      source,
+    );
+  assert.throws(() =>
+    checkPlatformMigration({ ...broker, calls: legacy.calls }, operations, {}),
+  );
+});
+
+test('K2 broker migration preserves actual documented local, managed and personal channels', () => {
+  const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
+  const sources = readPluginSources();
+  for (const file of [
+    'managed/heartbeat.js',
+    'managed/host-auth.js',
+    'managed/keys.js',
+    'identity/oidc-http.js',
+    'local/host.js',
+    'client.js',
+    'settings/view.js',
+    'ai/transport.js',
+  ])
+    assert.ok(
+      inventory.retainedChannels.some((channel) => channel.file === file),
+      file,
+    );
+  const retained = Object.fromEntries(
+    inventory.retainedChannels.map((channel) => {
+      assert.ok(
+        channel.reason &&
+          channel.design.includes('docs/design/auth-shell.zh.md'),
+        channel.file,
+      );
+      assert.ok(Object.hasOwn(sources, channel.file), channel.file);
+      return [channel.file, sources[channel.file]];
+    }),
+  );
+  const broker = { ...inventory, migrationState: 'broker', calls: [] };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, retained),
+  );
+  // 迁移后结构夹具：仅以broker替身替换D待迁的旧平台文件及NATS传输，
+  // 其它真实插件文件完整保留，证明合法原代码不会令最终状态不可达。
+  const migrated = { ...sources };
+  const retainedFiles = new Set(
+    inventory.retainedChannels.map((channel) => channel.file),
+  );
+  for (const call of inventory.calls)
+    if (!retainedFiles.has(call.file))
+      migrated[call.file] = '// platform branches migrated';
+  migrated['network/transport/ws-socket.js'] = '// broker-owned NATS transport';
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, migrated),
+  );
+  // 纯协议字段、文案、类型注释和个人流处理不再因为出现fetch/WS字样被误拦。
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, {
+      ...retained,
+      'network/protocol.js':
+        "const frame = {type:'fetch'}; // WebSocket\n/** @type {import('node:http').Server} */",
+    }),
+  );
+  for (const source of [
+    "fetch('/api/iam/v1/me')",
+    'fetch(computedUrl)',
+    "import http from 'node:https'",
+    'new WebSocket(url)',
+  ])
+    assert.throws(
+      () =>
+        checkPlatformMigration(broker, operations, {
+          ...retained,
+          'unlisted.js': source,
+        }),
+      /direct/,
+      source,
+    );
+  // 白名单不是整文件豁免：心跳文件不能新增成员API，也不能新增其它传输。
+  assert.throws(
+    () =>
+      checkPlatformMigration(broker, operations, {
+        'managed/heartbeat.js': "fetch('/api/iam/v1/me')",
+      }),
+    /direct platform route/,
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(broker, operations, {
+        'managed/heartbeat.js': 'new WebSocket(url)',
+      }),
+    /direct transport/,
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(broker, operations, {
+        'client.js': "fetch('/api/org/v1/members')",
+      }),
+    /direct platform route/,
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(
+        { ...broker, retainedChannels: [{ file: 'unlisted.js' }] },
+        operations,
+        {},
+      ),
+    /invalid retained channel/,
+  );
+});
+
+test('K2 legacy normalizes literal route formatting and documents dynamic-analysis limits', () => {
+  const legacy = {
+    migrationState: 'legacy',
+    calls: [{ file: 'x.js', evidence: "fetch('/api/iam/v1/me')" }],
+  };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(legacy, operations, {
+      'x.js': '// comment\nfetch (\n  "/api/iam/v1/me",\n {}\n)',
+    }),
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(legacy, operations, {
+        'x.js': "fetch('/api/iam/v1/new')",
+      }),
+    /new direct/,
+  );
+  const dynamic = "fetch('/api/' + family + '/v1/new')";
+  // legacy不执行常量折叠或方法/调用数分析；必须在文档中明示，不宣称它证明迁移完成。
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(legacy, operations, { 'x.js': dynamic }),
+  );
+  assert.throws(
+    () =>
+      checkPlatformMigration(
+        { migrationState: 'broker', calls: [] },
+        operations,
+        { 'x.js': dynamic },
+      ),
+    /direct transport/,
+  );
+  const policy = read('plugin/shell-auth-migration.md');
+  for (const term of ['动态拼接', '方法', 'broker', '固定接缝'])
+    assert.ok(policy.includes(term));
+});
+
+test('K2 fixed broker seam forbids common renaming and checks the operation whitelist', () => {
+  const broker = { migrationState: 'broker', calls: [] };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, {
+      'x.js': "const result = broker . call ( 'profile_read', {} )",
+    }),
+  );
+  for (const source of [
+    "const bridge=broker; bridge.call('invented',{})",
+    "import {broker as bridge} from './adapter.js'",
+    'const {call}=broker',
+    "broker.call('invented',{})",
+  ])
+    assert.throws(() =>
+      checkPlatformMigration(broker, operations, { 'x.js': source }),
+    );
+  // 无来源信息的任意对象不是可识别的broker；该静态局限不冒充类型/导入溯源。
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, {
+      'x.js': "other.call('not-a-broker-method')",
+    }),
+  );
+});
+
+test('K2 anonymous CSRF bootstrap remains bounded and internal only', () => {
+  const issued = validate(
+    'auth/uac-control.schema.json',
+    'UacNavigationIssued',
+  );
+  const response = {
+    context: {
+      navigationProof: 'A'.repeat(43),
+      expiresAt: base.expiresAt,
+      transactionId: id,
+      purpose: 'portal',
+      autoEligible: false,
+      autoSuppressed: true,
+    },
+    transactionCookie: 'B'.repeat(43),
+    ttlSeconds: 120,
+    csrfCookie: 'C'.repeat(43),
+  };
+  assert.equal(issued(response), true);
+  for (const csrfCookie of ['', 'short', '+'.repeat(43), 'D'.repeat(44)])
+    assert.equal(issued({ ...response, csrfCookie }), false);
+  assert.equal(issued({ ...response, accessToken: 'secret' }), false);
+  const policy = read('auth/navigation-cookie-policy.md');
+  for (const value of [
+    '__Host-auriga_portal_sso_suppression',
+    'HttpOnly',
+    'SameSite=Lax',
+    'X-Auriga-CSRF',
+    '120 秒',
+    '终态',
+  ])
+    assert.ok(policy.includes(value));
+});
+
+test('K2 host registration hands back broker-owned handles without accepting caller ownership', () => {
+  const command = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthHostContextCommand',
+  );
+  const envelope = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    expectedRevision: 0,
+    expiresAt: base.expiresAt,
+  };
+  const context = {
+    kind: 'session',
+    hostSessionId: 'synthetic-host-session',
+    expiresAt: base.expiresAt,
+  };
+  const register = { ...envelope, action: 'register', context };
+  assert.equal(command(register), true);
+  assert.equal(
+    command({
+      ...register,
+      context: {
+        ...context,
+        kind: 'tool',
+        parentExecutionContextId: id,
+        toolCallId: 'call',
+        rootCallId: 'root',
+      },
+    }),
+    true,
+  );
+  for (const patch of [
+    { executionContextId: id },
+    { ownerId: id },
+    { peerRole: 'plugin-backend' },
+    { token: 'synthetic' },
+    { url: 'https://example.com' },
+  ])
+    assert.equal(command({ ...register, ...patch }), false);
+  assert.equal(
+    command({ ...register, context: { ...context, kind: 'tool' } }),
+    false,
+  );
+  assert.equal(
+    command({ ...register, context: { ...context, endpointId: id } }),
+    false,
+  );
+  assert.equal(
+    command({ ...envelope, action: 'revoke', executionContextId: id }),
+    true,
+  );
+  assert.equal(
+    command({ ...register, action: 'revoke', executionContextId: id }),
+    false,
+  );
+  const result = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthHostContextResult',
+  );
+  const response = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    revision: 0,
+    action: 'register',
+    context: {
+      executionContextId: id,
+      ownerId: id,
+      hostSessionId: context.hostSessionId,
+      kind: 'session',
+      expiresAt: base.expiresAt,
+    },
+  };
+  assert.equal(result(response), true);
+  assert.equal(
+    result({
+      ...response,
+      error: {
+        code: 'common.forbidden',
+        reason: 'owner_mismatch',
+        retryable: false,
+      },
+    }),
+    false,
+  );
+  const spec = YAML.parse(read('openapi/shell-auth.yaml'));
+  for (const path of ['/host/contexts', '/host/credentials']) {
+    assert.equal(spec.paths[path].post['x-local-ipc-only'], true);
+    assert.equal(spec.paths[path].post['x-peer-role'], 'plugin-backend');
+  }
+  const page = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthPageCommand',
+  );
+  for (const action of ['register', 'revoke', 'read_credentials'])
+    assert.equal(page({ ...envelope, action }), false);
+});
+
+test('K2 host enterprise reads are identity-bound, purpose-limited and never expose platform credentials', () => {
+  const request = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthHostCredentialsRequest',
+  );
+  const input = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    expectedRevision: 0,
+    expiresAt: base.expiresAt,
+    executionContextId: id,
+    purpose: 'raw',
+  };
+  assert.equal(request(input), true);
+  assert.equal(request({ ...input, purpose: 'outbound' }), true);
+  for (const patch of [
+    { purpose: 'model' },
+    { empNo: 'other' },
+    { tenantId: id },
+    { sourceSessionId: id },
+    { ownerId: id },
+    { accessToken: 'synthetic' },
+  ])
+    assert.equal(request({ ...input, ...patch }), false);
+  const result = validate(
+    'plugin/shell-auth-control.schema.json',
+    'ShellAuthHostCredentialsResult',
+  );
+  const credentials = {
+    binding: {
+      tenantId: id,
+      memberId: id,
+      deviceId: id,
+      sourceSessionId: id,
+      providerId: id,
+      authGeneration: 3,
+      expiresAt: base.expiresAt,
+    },
+    credentialVersion: 1,
+    empNo: 'synthetic-employee',
+    token: 'synthetic-enterprise-value',
+    updatedAt: base.expiresAt,
+  };
+  const response = {
+    protocolVersion: 1,
+    requestId: id,
+    shellEpoch: id,
+    revision: 0,
+    executionContextId: id,
+    purpose: 'raw',
+    credentials,
+  };
+  assert.equal(result(response), true);
+  assert.equal(
+    result({
+      ...response,
+      credentials: {
+        ...credentials,
+        credentialVersion: 2,
+        token: 'synthetic-rotated-value',
+      },
+    }),
+    true,
+  );
+  for (const patch of [
+    { access_token: 'synthetic' },
+    { refresh_token: 'synthetic' },
+    { cookies: { x: 3 } },
+    { binding: { ...credentials.binding, authGeneration: 0 } },
+  ])
+    assert.equal(
+      result({ ...response, credentials: { ...credentials, ...patch } }),
+      false,
+    );
+  const missing = { ...credentials };
+  delete missing.binding;
+  assert.equal(result({ ...response, credentials: missing }), false);
+  const error = {
+    code: 'common.forbidden',
+    reason: 'raw_token_disabled',
+    retryable: false,
+  };
+  assert.equal(result({ ...response, credentials: undefined, error }), true);
+  assert.equal(result({ ...response, error }), false);
+  assert.equal(
+    result({
+      ...response,
+      credentials: undefined,
+      error: { ...error, retryable: true },
+    }),
+    false,
+  );
+  assert.equal(
+    result({
+      ...response,
+      credentials: undefined,
+      error: { ...error, token: 'synthetic' },
+    }),
+    false,
+  );
+});
+
+test('K2 authority vectors cover owner, epoch, expiry, logout, rotation and raw shutdown', () => {
+  const fixture = JSON.parse(read('test/auth-k2-host-fixtures.json'));
+  const accepts = ajv.compile(fixture.acceptanceSchema);
+  for (const vector of fixture.vectors)
+    assert.equal(accepts(vector.input), vector.accepted, vector.name);
+});
+
+test('K2 standard devices have a fixed AI resource, token-possession revocation and device-only identity', () => {
+  const refresh = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceRefreshRequest',
+  );
+  const input = {
+    grant_type: 'refresh_token',
+    client_id: 'auriga-dsh',
+    refresh_token: 'synthetic-refresh',
+  };
+  assert.equal(refresh(input), true);
+  assert.equal(refresh({ ...input, resource: 'urn:auriga:ai-gateway' }), true);
+  for (const patch of [
+    { resource: 'auriga.ai-gateway' },
+    { resource: ['urn:auriga:ai-gateway'] },
+    { audience: 'auriga' },
+    { deviceId: id },
+    { uacSessionBinding: {} },
+    { grant_type: 'token-exchange' },
+  ])
+    assert.equal(refresh({ ...input, ...patch }), false);
+  const revoke = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceRevokeRequest',
+  );
+  assert.equal(
+    revoke({
+      client_id: 'auriga-dsh',
+      token: 'synthetic-access',
+      token_type_hint: 'access_token',
+    }),
+    true,
+  );
+  assert.equal(
+    revoke({
+      client_id: 'auriga-dsh',
+      token: 'synthetic-refresh',
+      token_type_hint: 'refresh_token',
+    }),
+    true,
+  );
+  assert.equal(
+    revoke({
+      client_id: 'auriga-dsh',
+      token: 'synthetic-access',
+      deviceId: id,
+    }),
+    false,
+  );
+  const claims = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceAiClaims',
+  );
+  const jwt = {
+    iss: 'https://portal.example.com',
+    sub: id,
+    tid: id,
+    did: id,
+    jti: id,
+    aud: 'auriga.ai-gateway',
+    ptyp: 'device',
+    ctx: 'device',
+    scope: 'auriga.connect',
+    iat: 1,
+    exp: 301,
+    perms: ['auriga.connect.collab.use'],
+    mtyp: 'member',
+  };
+  assert.equal(claims(jwt), true);
+  assert.equal(
+    claims({ ...jwt, perms: ['auriga.connect.models.invoke'] }),
+    true,
+  );
+  for (const patch of [
+    { aud: 'auriga' },
+    { aud: ['auriga', 'auriga.ai-gateway'] },
+    { perms: ['iam.accounts.write'] },
+    { perms: [] },
+    { sid: id },
+    { ctx: 'portal' },
+  ])
+    assert.equal(claims({ ...jwt, ...patch }), false);
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  assert.ok(spec.paths['/me/device-session'].get.responses['200']);
+  const deviceIdentity = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceIdentity',
+  );
+  const identity = {
+    accountId: id,
+    tenantId: id,
+    memberId: id,
+    deviceId: id,
+    providerId: id,
+    clientId: 'auriga-dsh',
+    authorizationMode: 'standard_device',
+    expiresAt: base.expiresAt,
+  };
+  assert.equal(deviceIdentity(identity), true);
+  for (const patch of [
+    { authorizationMode: 'native_tx' },
+    { access_token: 'synthetic' },
+    { session: { id } },
+    { uacSessionBinding: { sourceSessionId: id } },
+  ])
+    assert.equal(deviceIdentity({ ...identity, ...patch }), false);
+  assert.equal(
+    spec.paths['/me'].get.responses['200'].content['application/json'].schema
+      .$ref,
+    '#/components/schemas/Me',
+  );
+  const proto = read('proto/auriga/iam/v1/iam.proto');
+  assert.match(proto, /rpc VerifyStandardDeviceAiAccess\(/);
 });

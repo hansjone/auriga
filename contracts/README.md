@@ -139,3 +139,5 @@ JSON Schema 用 Ajv（2020-12，strict）编译全部 `*.schema.json`。OpenAPI 
 1. 改契约和改实现放在同一个变更里；
 2. 跑 lint 和兼容性检查；
 3. 不兼容的修改先在 ADR 里说明理由，再开新主版本。
+
+AUTH-K2 登录增补及 B/C/D 消费约定见 [导航与浏览器 Cookie](auth/navigation-cookie-policy.md)。

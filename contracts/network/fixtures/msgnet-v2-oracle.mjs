@@ -323,8 +323,9 @@ export function evaluate(v) {
       if (k.mode === 'restart_recovery') {
         if (old && valid(old)) {
           if (next.kid !== old.kid) err('invalid_transition');
+        } else if (matureNext) {
+          if (next.kid !== matureNext.kid) err('invalid_transition');
         } else if (
-          matureNext ||
           prev.some((x) => x.kid === next.kid) ||
           seconds(next.not_before) !== issued ||
           seconds(next.not_after) - issued > a.limits.restart_key_seconds
@@ -359,8 +360,46 @@ export function evaluate(v) {
       if (BigInt(t.payload.bundle_version) <= BigInt(i.seen_bundle_version))
         err('version_rollback');
       const phase = { dual_trust: 0, new_leaves: 1, retire_old: 2 };
+      const cycle =
+        i.previous_transport_phase === 'retire_old' &&
+        t.payload.phase === 'dual_trust';
+      if (cycle) {
+        const previous = i.previous_transport;
+        if (!previous) err('invalid_transition');
+        check(
+          previous,
+          'Auriga.NetworkTransportTrustBundle.v2',
+          a.public_key_spki,
+        );
+        for (const field of [
+          'tenant_id',
+          'realm',
+          'authority_id',
+          'authority_digest',
+          'generation',
+        ])
+          if (previous.payload[field] !== t.payload[field])
+            err('invalid_transition');
+        if (
+          previous.payload.phase !== 'retire_old' ||
+          previous.payload.bundle_version !== i.seen_bundle_version ||
+          digest(previous) !== t.payload.previous_bundle_digest
+        )
+          err('invalid_transition');
+        if (
+          !previous.payload.cas.every((old) =>
+            t.payload.cas.some((ca) => jcs(ca) === jcs(old)),
+          ) ||
+          !t.payload.cas.some(
+            (ca) => !previous.payload.cas.some((old) => old.ca_id === ca.ca_id),
+          )
+        )
+          err('invalid_transition');
+      }
+
       if (
         i.previous_transport_phase &&
+        !cycle &&
         phase[t.payload.phase] !== phase[i.previous_transport_phase] + 1
       )
         err('invalid_transition');

@@ -7,6 +7,7 @@ import {
 } from 'node:crypto';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { jcs, digest, purposes } from './msgnet-v2-oracle.mjs';
+import { extendEndpoints } from './msgnet-v2-endpoint-vectors.mjs';
 import { extendVectors } from './msgnet-v2-extra-vectors.mjs';
 let counter = 0;
 // 明示合成种子，绝不可用于安装/生产；私钥只在内存构造。
@@ -502,6 +503,16 @@ extendVectors({
   jcs,
   generateKeyPairSync,
 });
+extendEndpoints({
+  cases,
+  issuer_cases,
+  boundary_cases,
+  signed,
+  auth,
+  root,
+  runtime,
+  digest,
+});
 for (const v of cases)
   for (const [field, domain] of [
     ['keyset', 'Auriga.NetworkKeyset.v2'],
@@ -537,7 +548,8 @@ const serialized =
   JSON.stringify(
     {
       synthetic: true,
-      producer: 'Node Ed25519 runtime generated; no private keys persisted',
+      producer:
+        'Node Ed25519 runtime generated; exact endpoint vectors; no private keys persisted',
       cases,
       issuer_cases,
       boundary_cases,

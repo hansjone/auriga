@@ -10,6 +10,58 @@ servers:
   - url: http://127.0.0.1
 security: []
 paths:
+  /host/contexts:
+    post:
+      operationId: exchangeShellAuthHostContext
+      summary: 登记或撤销可信宿主上下文并交还句柄
+      x-local-ipc-only: true
+      x-peer-role: plugin-backend
+      description: 仅OS身份/受控进程/连接能力均通过的插件后端IPC投影；不是HTTP路由，页面/模型/skill禁止调用。owner从已验证连接派生，不信任消息字段。详见../plugin/shell-auth-host.md。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShellAuthHostContextCommand"
+      responses:
+        "200":
+          description: 受控IPC结果，成功与安全错误互斥；no-store且不记录消息体
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthHostContextResult"
+        "403":
+          description: OS/peer认证失败，消息体不进入broker
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
+  /host/credentials:
+    post:
+      operationId: readShellAuthHostCredentials
+      summary: 插件后端读取本人最新企业凭据
+      x-local-ipc-only: true
+      x-peer-role: plugin-backend
+      description: 仅OS身份/受控进程/连接能力均通过的插件后端IPC投影；不是HTTP路由，页面/模型/skill禁止调用。owner从已验证连接派生，不信任消息字段。详见../plugin/shell-auth-host.md。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShellAuthHostCredentialsRequest"
+      responses:
+        "200":
+          description: 受控IPC结果，成功与安全错误互斥；no-store且不记录消息体
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellAuthHostCredentialsResult"
+        "403":
+          description: OS/peer认证失败，消息体不进入broker
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
   /messages:
     post:
       operationId: exchangeShellAuthMessage
@@ -363,3 +415,19 @@ components:
       $ref: ../plugin/shell-business.schema.json#/$defs/ShellAuthBusinessError
     ShellAuthUploadReference:
       $ref: ../plugin/shell-business.schema.json#/$defs/ShellAuthUploadReference
+    ShellAuthHostError:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostError
+    ShellAuthHostContext:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostContext
+    ShellAuthHostContextCommand:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostContextCommand
+    ShellAuthHostContextHandle:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostContextHandle
+    ShellAuthHostContextResult:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostContextResult
+    ShellAuthHostCredentialsRequest:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostCredentialsRequest
+    ShellAuthHostCredentials:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostCredentials
+    ShellAuthHostCredentialsResult:
+      $ref: ../plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostCredentialsResult

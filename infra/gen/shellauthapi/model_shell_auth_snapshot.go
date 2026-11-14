@@ -30,7 +30,8 @@ type ShellAuthSnapshot struct {
 	Identity        *ShellAuthIdentity `json:"identity,omitempty"`
 	Reason          *string            `json:"reason,omitempty"`
 	// 仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除
-	UacLoginInfo *UacLoginInfo `json:"uacLoginInfo,omitempty"`
+	UacLoginInfo  *UacLoginInfo           `json:"uacLoginInfo,omitempty"`
+	DeviceAttempt *ShellAuthDeviceAttempt `json:"deviceAttempt,omitempty"`
 }
 
 type _ShellAuthSnapshot ShellAuthSnapshot
@@ -273,6 +274,38 @@ func (o *ShellAuthSnapshot) SetUacLoginInfo(v UacLoginInfo) {
 	o.UacLoginInfo = &v
 }
 
+// GetDeviceAttempt returns the DeviceAttempt field value if set, zero value otherwise.
+func (o *ShellAuthSnapshot) GetDeviceAttempt() ShellAuthDeviceAttempt {
+	if o == nil || IsNil(o.DeviceAttempt) {
+		var ret ShellAuthDeviceAttempt
+		return ret
+	}
+	return *o.DeviceAttempt
+}
+
+// GetDeviceAttemptOk returns a tuple with the DeviceAttempt field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthSnapshot) GetDeviceAttemptOk() (*ShellAuthDeviceAttempt, bool) {
+	if o == nil || IsNil(o.DeviceAttempt) {
+		return nil, false
+	}
+	return o.DeviceAttempt, true
+}
+
+// HasDeviceAttempt returns a boolean if a field has been set.
+func (o *ShellAuthSnapshot) HasDeviceAttempt() bool {
+	if o != nil && !IsNil(o.DeviceAttempt) {
+		return true
+	}
+
+	return false
+}
+
+// SetDeviceAttempt gets a reference to the given ShellAuthDeviceAttempt and assigns it to the DeviceAttempt field.
+func (o *ShellAuthSnapshot) SetDeviceAttempt(v ShellAuthDeviceAttempt) {
+	o.DeviceAttempt = &v
+}
+
 func (o ShellAuthSnapshot) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -296,6 +329,9 @@ func (o ShellAuthSnapshot) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.UacLoginInfo) {
 		toSerialize["uacLoginInfo"] = o.UacLoginInfo
+	}
+	if !IsNil(o.DeviceAttempt) {
+		toSerialize["deviceAttempt"] = o.DeviceAttempt
 	}
 	return toSerialize, nil
 }
