@@ -22,7 +22,8 @@ export function buildBroker(output) {
   mkdirSync(output, { recursive: true });
   const files = readdirSync(source).filter(
     (f) =>
-      f.endsWith('.mjs') && !['build.mjs', 'eslint.config.mjs'].includes(f),
+      f.endsWith('.mjs') &&
+      !['build.mjs', 'eslint.config.mjs', 'network-core.mjs'].includes(f),
   );
   for (const part of ['public', 'windows']) {
     mkdirSync(join(output, part), { recursive: true });
@@ -34,10 +35,34 @@ export function buildBroker(output) {
   const helper = 'windows/shell-helper.exe';
   buildHelper(join(output, helper));
   files.push(helper);
+  const rootLoader = createRequire(
+    new URL('../../package.json', import.meta.url),
+  );
+  const esbuild = createRequire(rootLoader.resolve('vite/package.json'))(
+    'esbuild',
+  );
+  esbuild.buildSync({
+    entryPoints: [join(source, 'network-core.mjs')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    outfile: join(output, 'network-core.bundle.mjs'),
+    banner: {
+      js: "import {createRequire as networkRequire} from 'node:module'; const require=networkRequire(import.meta.url);",
+    },
+    external: ['bufferutil', 'utf-8-validate'],
+  });
+  files.push('network-core.bundle.mjs');
   for (const part of ['auth', 'plugin']) {
     mkdirSync(join(output, 'schemas', part), { recursive: true });
     for (const name of part === 'auth'
-      ? ['uac-login-info', 'uac-session-binding', 'uac-control']
+      ? [
+          'uac-login-info',
+          'uac-session-binding',
+          'uac-control',
+          'standard-device',
+        ]
       : ['shell-auth', 'shell-auth-control', 'shell-business']) {
       const file = `schemas/${part}/${name}.schema.json`;
       copyFileSync(
@@ -53,6 +78,22 @@ export function buildBroker(output) {
     join(output, operations),
   );
   files.push(operations);
+  mkdirSync(join(output, 'schemas', 'network'), { recursive: true });
+  for (const name of [
+    'address',
+    'envelope',
+    'source-control',
+    'protocol',
+    'keyset',
+    'send',
+  ]) {
+    const file = 'schemas/network/' + name + '.schema.json';
+    copyFileSync(
+      join(source, '../../contracts/network', name + '.schema.json'),
+      join(output, file),
+    );
+    files.push(file);
+  }
   const loader = createRequire(
     new URL('../dsh-plugin/package.json', import.meta.url),
   );

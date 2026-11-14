@@ -1,3 +1,4 @@
+import { OWNER, OTHER } from './fixtures.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
@@ -8,13 +9,27 @@ import { fixture, login } from './fixtures.mjs';
 import { BusinessProxy, mapBusinessError } from '../business.mjs';
 import { Streams } from '../streams.mjs';
 import { valid } from '../schema.mjs';
-test('MCP tool calls use only registered native execution context and clear it on logout', async () => {
+test('MCP uses K2 session and tool handles and server-derived endpoint binding', async (t) => {
   const f = fixture();
   await login(f);
   f.platform.audience = async () => f.tokens;
-  const seen = [];
-  const proxy = new BusinessProxy(f.broker, async (_url, options) => {
+  const endpointId = randomUUID(),
+    bindingId = randomUUID(),
+    seen = [];
+  const proxy = new BusinessProxy(f.broker, async (url, options) => {
     const request = JSON.parse(options.body);
+    if (String(url).endsWith('/register'))
+      return new Response(JSON.stringify({ endpoint: { id: endpointId } }));
+    if (String(url).endsWith('/bind'))
+      return new Response(
+        JSON.stringify({
+          binding: {
+            id: bindingId,
+            endpointId,
+            hostSessionId: request.hostSessionId,
+          },
+        }),
+      );
     seen.push(request);
     return new Response(
       JSON.stringify({
@@ -24,39 +39,96 @@ test('MCP tool calls use only registered native execution context and clear it o
       }),
     );
   });
-  const id = randomUUID(),
-    input = { executionContextId: id, arguments: { limit: 10 } };
-  const denied = await proxy.call(
-    call(f.broker, 'team_list_endpoints', input),
-    'one',
-  );
-  assert.equal(denied.error.code, 'common.forbidden');
-  assert.equal(seen.length, 0);
-  proxy.team.register('one', {
-    executionContextId: id,
-    endpointId: randomUUID(),
-    bindingId: randomUUID(),
-    meta: {
-      'auriga/sessionId': 'real-host-session',
-      'auriga/toolCallId': 'real-tool-call',
-      'auriga/rootCallId': 'real-root-call',
-    },
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
   });
-  assert.equal(
-    (await proxy.call(call(f.broker, 'team_list_endpoints', input), 'other'))
-      .error.code,
-    'common.forbidden',
+  const a = proxy.host.connect({
+    verified: true,
+    connectionId: randomUUID(),
+    sid: randomUUID(),
+    processStart: String(Date.now()),
+    role: 'plugin-backend',
+  });
+  const envelope = () => ({
+    protocolVersion: 1,
+    requestId: randomUUID(),
+    shellEpoch: f.broker.epoch,
+    expectedRevision: f.broker.revision,
+    expiresAt: new Date(Date.now() + 25000).toISOString(),
+  });
+  const session = (
+    await proxy.host.command(
+      {
+        ...envelope(),
+        action: 'register',
+        context: {
+          kind: 'session',
+          hostSessionId: 'real-host-session',
+          expiresAt: new Date(Date.now() + 600000).toISOString(),
+        },
+      },
+      a,
+    )
+  ).context;
+  const invalid = await proxy.call(
+    call(f.broker, 'team_list_endpoints', {
+      executionContextId: randomUUID(),
+      arguments: { limit: 10 },
+    }),
+    a.id,
   );
+  assert.equal(invalid.error.code, 'common.forbidden');
+  assert.ok(
+    (
+      await proxy.call(
+        call(f.broker, 'team_node_register', {
+          executionContextId: session.executionContextId,
+          arguments: { label: 'test', receiveEnabled: true },
+        }),
+        a.id,
+      )
+    ).output,
+  );
+  assert.ok(
+    (
+      await proxy.call(
+        call(f.broker, 'team_node_bind', {
+          executionContextId: session.executionContextId,
+          arguments: { endpointId, hostSessionId: 'real-host-session' },
+        }),
+        a.id,
+      )
+    ).output,
+  );
+  const tool = (
+    await proxy.host.command(
+      {
+        ...envelope(),
+        action: 'register',
+        context: {
+          kind: 'tool',
+          hostSessionId: 'real-host-session',
+          toolCallId: randomUUID(),
+          rootCallId: randomUUID(),
+          parentExecutionContextId: session.executionContextId,
+          expiresAt: new Date(Date.now() + 600000).toISOString(),
+        },
+      },
+      a,
+    )
+  ).context;
   const result = await proxy.call(
-    call(f.broker, 'team_list_endpoints', input),
-    'one',
+    call(f.broker, 'team_list_endpoints', {
+      executionContextId: tool.executionContextId,
+      arguments: { limit: 10 },
+    }),
+    a.id,
   );
-  assert.ok(result.output.body.streamId);
+  assert.ok(result.output);
   assert.equal(seen[0].params._meta['auriga/sessionId'], 'real-host-session');
   await f.broker.logout();
-  assert.equal(proxy.team.contexts.size, 0);
-  proxy.close();
-  await f.broker.close();
+  assert.equal(proxy.host.contexts.size, 0);
 });
 test('SSE preserves UTF-8 bytes across chunks and requires DONE before end', async () => {
   const f = fixture();
@@ -85,7 +157,7 @@ test('SSE preserves UTF-8 bytes across chunks and requires DONE before end', asy
         stream: true,
       },
     }),
-    'one',
+    OWNER,
   );
   assert.ok(result.output, result.error?.code);
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -99,13 +171,13 @@ test('SSE preserves UTF-8 bytes across chunks and requires DONE before end', asy
   const end = new Promise((resolve) => {
     ended = resolve;
   });
-  proxy.streams.subscribe(subscription, 'one', (e) => {
+  proxy.streams.subscribe(subscription, OWNER, (e) => {
     events.push(e);
     if (e.type === 'end' || e.type === 'error') ended();
   });
   await proxy.streams.command(
     { ...subscription, action: 'credit', creditBytes: 1048576 },
-    'one',
+    OWNER,
   );
   await end;
   assert.equal(events.at(-1).type, 'end');
@@ -145,19 +217,19 @@ test('fixed proxy binds origin, bearer, headers and schema; retries reuse result
     });
   });
   const request = call(f.broker, 'listResourcePackages', {}),
-    result = await proxy.call(request, 'one');
+    result = await proxy.call(request, OWNER);
   assert.equal(result.output.statusCode, 200);
   assert.equal(result.output.headers['set-cookie'], undefined);
   assert.ok(valid('ShellAuthBusinessResult', result));
-  await proxy.call(request, 'one');
+  await proxy.call(request, OWNER);
   assert.equal(requests, 1);
   await assert.rejects(
-    proxy.call({ ...request, url: 'https://elsewhere.example.com' }, 'one'),
+    proxy.call({ ...request, url: 'https://elsewhere.example.com' }, OWNER),
     /validation_failed/,
   );
   await f.broker.logout();
   assert.equal(
-    (await proxy.call(request, 'one')).error.code,
+    (await proxy.call(request, OWNER)).error.code,
     'common.unauthenticated',
   );
   assert.deepEqual(mapBusinessError(503, 'private upstream text', '12'), {
@@ -182,7 +254,7 @@ test('in-flight business response is rejected after identity change', async () =
       release = r;
     });
   });
-  const pending = proxy.call(call(f.broker, 'listResourcePackages', {}), 'one');
+  const pending = proxy.call(call(f.broker, 'listResourcePackages', {}), OWNER);
   await begin;
   await f.broker.logout();
   release(new Response('{"items":[]}'));
@@ -196,19 +268,19 @@ test('stream requires credit, preserves byte order and closes on logout', async 
   await login(f);
   const streams = new Streams(f.broker),
     context = f.broker.guard(),
-    stream = streams.create(context, 'one'),
+    stream = streams.create(context, OWNER),
     events = [];
   const subscription = {
     streamId: stream.id,
     shellEpoch: f.broker.epoch,
     expectedRevision: f.broker.revision,
   };
-  streams.subscribe(subscription, 'one', (e) => events.push(e));
+  streams.subscribe(subscription, OWNER, (e) => events.push(e));
   streams.push(stream, Buffer.from('你好'));
   assert.equal(events.length, 0);
   await streams.command(
     { ...subscription, action: 'credit', creditBytes: 100 },
-    'one',
+    OWNER,
   );
   assert.equal(Buffer.from(events[0].data, 'base64').toString(), '你好');
   await f.broker.logout();
@@ -229,7 +301,7 @@ test('upload is durable, digest checked, owner-bound, one-use and removed after 
   const upload = streams.openUpload(
     { sizeBytes: bytes.length, sha256, mediaType: 'application/octet-stream' },
     context,
-    'one',
+    OWNER,
   ).body;
   const command = {
     streamId: upload.streamId,
@@ -239,13 +311,13 @@ test('upload is durable, digest checked, owner-bound, one-use and removed after 
     sequence: 0,
     data: bytes.toString('base64'),
   };
-  assert.throws(() => streams.command(command, 'other'), /forbidden/);
-  assert.equal(streams.command(command, 'one').type, 'upload_ack');
+  assert.throws(() => streams.command(command, OTHER), /forbidden/);
+  assert.equal(streams.command(command, OWNER).type, 'upload_ack');
   assert.equal(readdirSync(directory).length, 1);
-  const reference = streams.finishUpload(upload.uploadId, context, 'one').body;
-  assert.deepEqual(streams.consume(reference, context, 'one').bytes, bytes);
+  const reference = streams.finishUpload(upload.uploadId, context, OWNER).body;
+  assert.deepEqual(streams.consume(reference, context, OWNER).bytes, bytes);
   assert.equal(readdirSync(directory).length, 0);
-  assert.throws(() => streams.consume(reference, context, 'one'), /forbidden/);
+  assert.throws(() => streams.consume(reference, context, OWNER), /forbidden/);
   streams.close();
   await f.broker.close();
 });

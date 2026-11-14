@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 
@@ -94,7 +94,7 @@ export async function createLoopback({
           until: now() + 900000,
           epoch: broker.epoch,
           clientNonce: body.clientNonce,
-          owner: key,
+          owner: randomUUID(),
         });
         send(200, {
           pageToken,
@@ -104,6 +104,7 @@ export async function createLoopback({
           port,
           clientNonce: body.clientNonce,
           expiresAt: new Date(Date.now() + 900000).toISOString(),
+          pageOwner: sessions.get(digest(pageToken)).owner,
         });
         return;
       }

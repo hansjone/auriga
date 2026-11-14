@@ -1,3 +1,4 @@
+import { OWNER, OTHER } from './fixtures.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PlatformError } from '../platform.mjs';
@@ -51,7 +52,7 @@ test('cancel after token request discards and revokes late credential', async ()
       });
     },
   });
-  f.broker.begin('one');
+  f.broker.begin(OWNER);
   await polled;
   f.broker.cancel();
   release(f.tokens);
@@ -66,14 +67,14 @@ test('cancel after token request discards and revokes late credential', async ()
 });
 test('cancel cannot affect another window; skip cannot revoke current authenticated identity', async () => {
   const f = fixture();
-  f.broker.begin('one');
+  f.broker.begin(OWNER);
   await assert.rejects(
-    f.broker.command(command(f.broker, 'cancel_login'), 'other'),
+    f.broker.command(command(f.broker, 'cancel_login'), OTHER),
     /common.conflict/,
   );
   await Promise.all([...f.broker.inflight]);
   await assert.rejects(
-    f.broker.pageCommand(command(f.broker, 'skip_login'), 'one'),
+    f.broker.pageCommand(command(f.broker, 'skip_login'), OWNER),
     /common.conflict/,
   );
   assert.equal(f.broker.state, 'authenticated');
@@ -92,6 +93,25 @@ test('logout stops local access before remote revoke; durable outbox survives fa
   assert.equal(f.saved.at(-1).manualLoginRequired, true);
   assert.equal(f.saved.at(-1).revocations.length, 2);
   assert.equal(f.broker.snapshot().reason, 'user_logout');
+  const revocations = f.logs.filter(
+    (event) => event.stage === 'session_revoke',
+  );
+  assert.ok(revocations.some((event) => event.result === 'committed'));
+  assert.ok(
+    revocations.every((event) => event.tenantId === f.identity.tenantId),
+  );
+  f.platform.revoke = async (token) => {
+    f.revoked.push(token);
+  };
+  await f.broker.check();
+  assert.equal(f.broker.record.revocations.length, 0);
+  assert.equal(f.broker.snapshot().state, 'signed_out');
+  assert.ok(
+    f.logs.some(
+      (event) =>
+        event.stage === 'session_revoke' && event.result === 'propagated',
+    ),
+  );
   await f.broker.close();
 });
 test('transient platform failure becomes unreachable; explicit source disable revokes and clears identity', async () => {
@@ -133,21 +153,21 @@ test('command ids are idempotent, owner/content conflicts fail, snapshot discove
   const f = fixture();
   const cmd = command(f.broker, 'snapshot');
   assert.deepEqual(
-    await f.broker.command(cmd, 'one'),
-    await f.broker.command(cmd, 'one'),
+    await f.broker.command(cmd, OWNER),
+    await f.broker.command(cmd, OWNER),
   );
   await assert.rejects(
-    f.broker.command({ ...cmd, action: 'logout' }, 'one'),
+    f.broker.command({ ...cmd, action: 'logout' }, OWNER),
     /common.conflict/,
   );
-  await assert.rejects(f.broker.command(cmd, 'two'), /common.conflict/);
+  await assert.rejects(f.broker.command(cmd, OTHER), /common.conflict/);
   await assert.rejects(
     f.broker.command(
       {
         ...command(f.broker, 'logout'),
         shellEpoch: '00000000-0000-0000-0000-000000000000',
       },
-      'one',
+      OWNER,
     ),
     /common.conflict/,
   );

@@ -33,8 +33,9 @@ export function trustedConfig(input) {
   return Object.freeze({
     platformOrigin: url.origin,
     issuer: issuer.href.replace(/\/$/, ''),
-    clientId: input.clientId ?? 'auriga-desktop',
+    clientId: input.clientId ?? 'auriga-dsh',
     deviceName: 'Auriga Desktop',
+    ...(input.network ? { network: structuredClone(input.network) } : {}),
   });
 }
 export async function boundedBody(response, limit = 2097152) {
@@ -109,6 +110,7 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         : {}),
     });
     const raw = await boundedBody(response);
+    const correlationId = response.headers.get('x-auriga-correlation-id');
     let data;
     try {
       data = raw.length ? JSON.parse(raw.toString('utf8')) : {};
@@ -116,10 +118,27 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
       throw new PlatformError(response.status, 'common.unavailable');
     }
     if (!response.ok)
-      throw new PlatformError(
-        response.status,
-        typeof data.error === 'string' ? data.error : data.code,
+      throw Object.assign(
+        new PlatformError(
+          response.status,
+          typeof data.error === 'string' ? data.error : data.code,
+        ),
+        {
+          correlationId: /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
+            correlationId ?? '',
+          )
+            ? correlationId
+            : undefined,
+        },
       );
+    if (
+      correlationId &&
+      /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(correlationId)
+    )
+      Object.defineProperty(data, 'correlationId', {
+        value: correlationId,
+        enumerable: false,
+      });
     return data;
   }
   async function verifyDevice(token, expected, audience = 'auriga') {
@@ -143,6 +162,8 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
       claims.ptyp !== 'device' ||
       claims.ctx !== 'device' ||
       claims.scope !== 'auriga.connect' ||
+      claims.sid !== undefined ||
+      claims.instanceId !== undefined ||
       !Number.isSafeInteger(claims.exp) ||
       claims.exp <= now ||
       !Number.isSafeInteger(claims.iat) ||
@@ -155,8 +176,23 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
     )
       throw new Error('invalid credential');
     if (
+      audience === 'auriga.ai-gateway' &&
+      (header.typ !== 'at+jwt' ||
+        !requireValid('StandardDeviceAiClaims', claims) ||
+        claims.exp - claims.iat > 300 ||
+        claims.exp <= claims.iat ||
+        claims.exp > now + 330)
+    )
+      throw new Error('invalid AI credential');
+    if (
       expected &&
-      ['tid', 'sub', 'did'].some((k) => claims[k] !== expected[k])
+      (['tid', 'sub', 'did'].some((k) => claims[k] !== expected[k]) ||
+        Boolean(claims.uacSessionBinding) !==
+          Boolean(expected.uacSessionBinding) ||
+        ['sourceSessionId', 'providerId', 'authGeneration'].some(
+          (k) =>
+            claims.uacSessionBinding?.[k] !== expected.uacSessionBinding?.[k],
+        ))
     )
       throw new Error('credential identity changed');
     const jwks = await request(issuerPath + '/oauth2/jwks');
@@ -219,20 +255,36 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         body: { client_id: config.clientId, token },
       }),
     async profile(token, claims) {
-      const me = await request('/api/iam/v1/me', { token });
+      const me = requireValid(
+        'StandardDeviceIdentity',
+        await request('/api/iam/v1/me/device-session', { token }),
+      );
       if (
-        me.account?.id !== claims.sub ||
-        me.account?.tenantId !== claims.tid ||
-        me.account?.status !== 'active'
+        me.accountId !== claims.sub ||
+        me.tenantId !== claims.tid ||
+        me.deviceId !== claims.did ||
+        me.clientId !== config.clientId ||
+        Date.parse(me.expiresAt) <= Date.now() ||
+        Boolean(me.uacSessionBinding) !== Boolean(claims.uacSessionBinding) ||
+        (me.uacSessionBinding &&
+          ['sourceSessionId', 'providerId', 'authGeneration'].some(
+            (k) => me.uacSessionBinding[k] !== claims.uacSessionBinding?.[k],
+          ))
       )
         throw new Error('identity mismatch');
       const identity = {
         tenantId: claims.tid,
-        memberId: claims.sub,
+        memberId: me.memberId,
         deviceId: claims.did,
-        providerId: me.session?.providerId,
-        ...(me.session?.uacSessionBinding
-          ? { uacSessionBinding: me.session.uacSessionBinding }
+        providerId: me.providerId,
+        ...(me.uacSessionBinding
+          ? {
+              uacSessionBinding: {
+                sourceSessionId: me.uacSessionBinding.sourceSessionId,
+                providerId: me.uacSessionBinding.providerId,
+                authGeneration: me.uacSessionBinding.authGeneration,
+              },
+            }
           : {}),
       };
       requireValid('ShellAuthIdentity', identity);
@@ -241,8 +293,7 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         identity.uacSessionBinding.providerId !== identity.providerId
       )
         throw new Error('source mismatch');
-      if (me.uacLoginInfo) requireValid('UacLoginInfo', me.uacLoginInfo);
-      return { identity, uacLoginInfo: me.uacLoginInfo };
+      return { identity, expiresAt: me.expiresAt };
     },
     enterprise: (token) =>
       request('/api/iam/v1/me/uac/credentials', {

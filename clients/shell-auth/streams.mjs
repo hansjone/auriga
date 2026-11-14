@@ -151,7 +151,9 @@ export class Streams {
     return () => this.end(stream, 'closed');
   }
   end(stream, type, code) {
-    if (!this.streams.has(stream.id) || stream.terminal) return;
+    if (!this.streams.has(stream.id) || stream.terminal || stream.ending)
+      return;
+    stream.ending = true;
     stream.cancel();
     stream.drain?.();
     stream.drain = undefined;

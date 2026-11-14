@@ -1,3 +1,4 @@
+import { OWNER } from './fixtures.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, login } from './fixtures.mjs';
@@ -39,7 +40,7 @@ test('artifact download streams original bytes with bounded credit and never ret
         },
       },
     },
-    'one',
+    OWNER,
   );
   assert.ok(result.output, result.error?.code);
   assert.equal(result.output.headers, undefined);
@@ -53,13 +54,13 @@ test('artifact download streams original bytes with bounded credit and never ret
     shellEpoch: f.broker.epoch,
     expectedRevision: f.broker.revision,
   };
-  proxy.streams.subscribe(subscription, 'one', (event) => {
+  proxy.streams.subscribe(subscription, OWNER, (event) => {
     events.push(event);
     if (event.type === 'end' || event.type === 'error') done();
   });
   await proxy.streams.command(
     { ...subscription, action: 'credit', creditBytes: 1048576 },
-    'one',
+    OWNER,
   );
   await ended;
   assert.equal(events.at(-1).type, 'end');

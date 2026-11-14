@@ -67,6 +67,8 @@ public static class Helper {
   }
   static void Serve(NamedPipeServerStream pipe) {
     StreamWriter connectionWriter = null;
+    string connectionId = null;
+    Timer peerLease = null;
     try {
        string peer = null;
       pipe.RunAsClient(() => { peer = WindowsIdentity.GetCurrent().User.Value; });
@@ -77,18 +79,24 @@ public static class Helper {
         connectionWriter = writer;
          var hello = Decode(Line(reader, 1024));
         if (!hello.ContainsKey("capability") || !Object.Equals(hello["capability"], Capability)) return;
+        connectionId = Guid.NewGuid().ToString();
+        using(var process = Process.GetProcessById((int)pid)) Emit(new { opened = connectionId, peerPid = pid, sid = peer, processStart = process.StartTime.ToUniversalTime().Ticks.ToString(), role = "plugin-backend" });
+        peerLease = new Timer(_ => { try { if (Controlled((int)pid)) return; } catch {} try { pipe.Dispose(); } catch {} }, null, 500, 500);
         writer.WriteLine("{\"ready\":true}");
         for (string line; !Closing && (line = Line(reader, 2097152)) != null;) {
+          if (!Controlled((int)pid)) return;
           var id = Guid.NewGuid().ToString();
           lock(StateLock) { if (Pending.Count >= 128) return; Pending[id] = writer; }
-          Emit(new { id = id, peerPid = pid, payload = Decode(line) });
+          Emit(new { id = id, connectionId = connectionId, payload = Decode(line) });
         }
       }
     } catch { /* Never echo raw input, exceptions or credentials. */ }
     finally {
+      if(peerLease != null) peerLease.Dispose();
       var remove = new List<string>();
       lock(StateLock) { foreach(var item in Pending) if (Object.ReferenceEquals(item.Value, connectionWriter)) remove.Add(item.Key); foreach(var id in remove) Pending.Remove(id); }
       foreach(var id in remove) Emit(new { closed = id });
+      if(connectionId != null) Emit(new { disconnected = connectionId });
       pipe.Dispose();
     }
   }

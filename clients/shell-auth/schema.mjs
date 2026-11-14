@@ -31,6 +31,7 @@ const files = [
   'auth/uac-login-info',
   'auth/uac-session-binding',
   'auth/uac-control',
+  'auth/standard-device',
   'plugin/shell-auth',
   'plugin/shell-auth-control',
   'plugin/shell-business',

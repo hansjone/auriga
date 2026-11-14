@@ -51,6 +51,13 @@ test(
     mkdirSync(join(dataHome, 'auriga', 'logs'), { recursive: true });
     writeFileSync(join(root, '.auriga-desktop-install'), 'test');
     writeFileSync(
+      join(root, 'desktop-origin.json'),
+      JSON.stringify({
+        origin: 'https://example.com',
+        allowRawAgentToken: false,
+      }),
+    );
+    writeFileSync(
       join(root, 'install.json'),
       JSON.stringify({ current: 'test-build', dataHome }),
     );
@@ -96,7 +103,7 @@ test(
       'python',
       [
         '-c',
-        `import zipfile,json,hashlib,sys\nz=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None\nm=json.loads(z.read('manifest.json'));assert m['partial']\nfor f in m['files']: assert hashlib.sha256(z.read(f['name'])).hexdigest()==f['sha256']\ns=z.read('uac-steps.jsonl').decode();assert sys.argv[2] not in s;assert 'wrong-tenant' not in s\nprint('zip/hash/redaction OK')`,
+        `import zipfile,json,hashlib,sys\nz=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None\nm=json.loads(z.read('manifest.json'));assert m['partial']\nfor f in m['files']: assert hashlib.sha256(z.read(f['name'])).hexdigest()==f['sha256']\ns=z.read('uac-steps.jsonl').decode();assert sys.argv[2] not in s;assert 'wrong-tenant' not in s\nc=json.loads(z.read('sanitized-config.json'));assert c['installationConfiguration']['allowRawAgentToken'] is False;assert c['uacEffectiveConfigAvailable'] is False\nprint('zip/hash/redaction OK')`,
         result.file,
         secret,
       ],

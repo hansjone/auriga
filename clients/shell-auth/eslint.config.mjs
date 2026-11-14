@@ -1,5 +1,6 @@
 import config from '../installer/eslint.config.mjs';
 export default [
+  { ignores: ['**/target/**', '**/node_modules/**'] },
   ...config,
   {
     languageOptions: {

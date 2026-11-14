@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { requireValid } from './schema.mjs';
+import { HostChannel } from './host.mjs';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -15,6 +16,8 @@ export async function startIpc({ helper, broker, business }) {
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+  const host = business.host ?? new HostChannel(broker, business.streams),
+    peers = new Map();
   const waiters = new Map(),
     subscriptions = new Map();
   let readyResolve,
@@ -30,6 +33,9 @@ export async function startIpc({ helper, broker, business }) {
   };
   const cleanup = () => {
     closed = true;
+    for (const peer of peers.values()) host.disconnect(peer);
+    peers.clear();
+    if (!business.host) host.close();
     readyReject(new Error('shell IPC helper unavailable'));
     for (const stop of subscriptions.values()) stop();
     subscriptions.clear();
@@ -53,6 +59,24 @@ export async function startIpc({ helper, broker, business }) {
         readyResolve(undefined);
         return;
       }
+      if (message.opened) {
+        peers.set(
+          message.opened,
+          host.connect({
+            verified: true,
+            connectionId: message.opened,
+            sid: message.sid,
+            processStart: message.processStart,
+            role: message.role,
+          }),
+        );
+        return;
+      }
+      if (message.disconnected) {
+        host.disconnect(peers.get(message.disconnected));
+        peers.delete(message.disconnected);
+        return;
+      }
       if (message.registered) {
         waiters.get(message.registered)?.resolve();
         waiters.delete(message.registered);
@@ -63,8 +87,20 @@ export async function startIpc({ helper, broker, business }) {
         subscriptions.delete(message.closed);
         return;
       }
-      const { id, payload, peerPid } = message;
-      const owner = `windows:${peerPid}`;
+      const { id, payload, connectionId } = message;
+      const peer = peers.get(connectionId);
+      host.checkPeer(peer);
+      const owner = peer.id;
+      if (payload.path === '/host/contexts') {
+        const response = await host.command(payload.body, peer);
+        send({ id, payload: { requestId: payload.requestId, body: response } });
+        return;
+      }
+      if (payload.path === '/host/credentials') {
+        const response = await host.credentials(payload.body, peer);
+        send({ id, payload: { requestId: payload.requestId, body: response } });
+        return;
+      }
       if (payload.path === '/business/events') {
         const stop = business.streams.subscribe(payload.body, owner, (event) =>
           send({
@@ -79,19 +115,6 @@ export async function startIpc({ helper, broker, business }) {
       if (payload.path === '/business/streams') {
         const response = await business.streams.command(payload.body, owner);
         send({ id, payload: { requestId: payload.requestId, body: response } });
-        return;
-      }
-      // Fixed IPC routing envelope; its body/result use the frozen enterprise
-      // schemas. This endpoint is never registered as browser HTTP.
-      if (payload.path === '/dsh-team/agent-credentials') {
-        requireValid('ShellAuthAgentCredentialsRequest', payload.body);
-        const context = broker.guard();
-        const credentials = await broker.enterprise();
-        broker.assert(context);
-        send({
-          id,
-          payload: { requestId: payload.requestId, body: credentials },
-        });
         return;
       }
       if (payload.action === 'subscribe') {
@@ -225,15 +248,21 @@ export function connectIpc(descriptor) {
         child.stdin.write(JSON.stringify(command) + '\n');
       });
     },
-    async enterprise() {
+    async hostContext(message) {
       const result = await this.call({
         requestId: randomUUID(),
-        path: '/dsh-team/agent-credentials',
-        body: {},
+        path: '/host/contexts',
+        body: message,
       });
-      if (result.type === 'error')
-        throw new Error('enterprise credentials unavailable');
-      return result.body;
+      return requireValid('ShellAuthHostContextResult', result.body);
+    },
+    async enterprise(message) {
+      const result = await this.call({
+        requestId: randomUUID(),
+        path: '/host/credentials',
+        body: message,
+      });
+      return requireValid('ShellAuthHostCredentialsResult', result.body);
     },
     async streamCommand(command) {
       const result = await this.call({

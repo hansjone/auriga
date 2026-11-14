@@ -266,6 +266,31 @@ export async function exportDiagnostics({
   const tempZip = join(stage, 'bundle.zip'),
     auditId = randomUUID();
   const missing = ['iam', 'audit', 'ops', 'loki'];
+  let installationConfiguration = {
+    available: false,
+    platformConfigured: false,
+    networkConfigured: false,
+    allowRawAgentToken: false,
+  };
+  const configurationFile = safePath(join(root, 'desktop-origin.json'));
+  if (
+    existsSync(configurationFile) &&
+    lstatSync(configurationFile).size <= 65536
+  ) {
+    try {
+      const configuration = JSON.parse(readFileSync(configurationFile, 'utf8'));
+      installationConfiguration = {
+        available: true,
+        platformConfigured: typeof configuration.origin === 'string',
+        networkConfigured: Boolean(configuration.network),
+        allowRawAgentToken:
+          configuration.allowRawAgentToken === undefined ||
+          configuration.allowRawAgentToken === true,
+      };
+    } catch {
+      /* Unreadable policy must not be reported as raw enabled. */
+    }
+  }
   const logs = [];
   let bytes = 0,
     dropped = 0,
@@ -371,6 +396,15 @@ export async function exportDiagnostics({
         JSON.stringify({
           brokerVersion: '1',
           localOnly: true,
+          installationConfiguration,
+          uacEffectiveConfigAvailable: false,
+          sourceScheduleAvailable: logs.some((entry) => entry.nextRevalidateAt),
+          schedulingMetadata: logs
+            .filter(
+              (entry) =>
+                entry.nextRevalidateAt || entry.retryAt || entry.retryDeadline,
+            )
+            .map((entry) => redact(entry)),
           purposeStatistics,
           loginInfoFailureRevocationObserved,
           ssoMissing: logs.filter(

@@ -59,6 +59,7 @@ export async function startDesktopAuth({
           platformOrigin: origin,
           issuer: installation.issuer,
           clientId: installation.clientId,
+          network: installation.network,
         }),
       ),
       vault,
@@ -74,6 +75,14 @@ export async function startDesktopAuth({
         join(dataHome, 'auriga', 'shell-auth', 'uploads'),
         helper,
       ),
+      {
+        networkDirectory: privateDirectory(
+          join(dataHome, 'auriga', 'shell-auth', 'network'),
+          helper,
+        ),
+        readConfig: () =>
+          JSON.parse(readFileSync(safePath(originFile), 'utf8')),
+      },
     );
     ipc = await startIpc({ helper, broker, business });
     const timer = setInterval(() => broker.check().catch(() => {}), 10000);

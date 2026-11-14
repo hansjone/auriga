@@ -37,7 +37,14 @@ export class Broker extends EventEmitter {
     this.platform = platform;
     this.vault = vault;
     this.openBrowser = openBrowser;
-    this.log = log;
+    this.log = (event) => {
+      try {
+        log(event);
+      } catch {
+        if (!this.logFailed) console.error('Auriga diagnostic log unavailable');
+        this.logFailed = true;
+      }
+    };
     this.now = now;
     this.mono = mono;
     this.wait = wait;
@@ -71,12 +78,16 @@ export class Broker extends EventEmitter {
     return this;
   }
   transition(state, reason, projection) {
+    const identity = projection?.identity ?? this.projection?.identity;
     this.state = state;
     this.reason = reason;
     this.projection = projection;
     this.revision++;
     const snapshot = this.snapshot();
     this.log({
+      ...(identity
+        ? { tenantId: identity.tenantId, providerId: identity.providerId }
+        : {}),
       stage: 'shell_identity',
       phase: 'end',
       result: 'success',
@@ -87,7 +98,7 @@ export class Broker extends EventEmitter {
     });
     this.emit('changed', snapshot);
   }
-  snapshot() {
+  snapshot(pageOwner) {
     if (
       this.state === 'authenticated' &&
       (this.now() >= this.tokenUntil || this.mono() >= this.tokenMonoUntil)
@@ -117,6 +128,11 @@ export class Broker extends EventEmitter {
       expiresAt: new Date(expiry).toISOString(),
       ...(reason ? { reason } : {}),
       ...(state === 'authenticated' && this.projection ? this.projection : {}),
+      ...(state === 'authenticating' &&
+      this.attempt?.display &&
+      this.attempt.owner === pageOwner
+        ? { deviceAttempt: this.attempt.display }
+        : {}),
     });
   }
   guard(epoch = this.epoch, revision = this.revision) {
@@ -186,7 +202,7 @@ export class Broker extends EventEmitter {
       protocolVersion: 1,
       requestId: command.requestId,
       type: 'snapshot',
-      snapshot: this.snapshot(),
+      snapshot: this.snapshot(owner),
     };
   }
   pageCommand(command, owner) {
@@ -249,34 +265,94 @@ export class Broker extends EventEmitter {
     // the unused grant; a response already in flight is revoked below.
     this.transition('signed_out');
   }
-  async queueRevoke(tokens) {
+  async queueRevoke(tokens, identity) {
     if (!tokens) return;
+    const correlationId = randomUUID(),
+      metadata = {
+        correlationId,
+        ...(identity
+          ? { tenantId: identity.tenantId, providerId: identity.providerId }
+          : {}),
+      };
+    this.log({
+      ...metadata,
+      stage: 'session_revoke',
+      phase: 'start',
+      result: 'requested',
+      chain: 'revocation',
+    });
+    this.record.revocationBindings ??= {};
     for (const token of [tokens.refresh_token, tokens.access_token])
       if (
         typeof token === 'string' &&
         token &&
         !this.record.revocations.includes(token)
-      )
+      ) {
         this.record.revocations.push(token);
+        this.record.revocationBindings[
+          createHash('sha256').update(token).digest('hex')
+        ] = metadata;
+      }
     await this.save();
+    this.log({
+      ...metadata,
+      stage: 'session_revoke',
+      phase: 'end',
+      result: 'committed',
+      chain: 'revocation',
+    });
     await this.drainRevocations();
   }
   async drainRevocations() {
     if (this.draining) return this.draining;
     this.draining = (async () => {
       for (const token of [...this.record.revocations].slice(0, 4)) {
+        const hash = createHash('sha256').update(token).digest('hex'),
+          metadata = this.record.revocationBindings?.[hash] ?? {
+            correlationId: randomUUID(),
+          };
+        const started = this.mono();
+        this.log({
+          ...metadata,
+          stage: 'session_revoke',
+          phase: 'start',
+          result: 'requested',
+          chain: 'revocation',
+          tokenHashPrefix: hash.slice(0, 12),
+        });
         try {
-          await this.platform.revoke(token);
+          const result = await this.platform.revoke(token);
           this.record.revocations = this.record.revocations.filter(
             (t) => t !== token,
           );
-          await this.save();
+          if (this.record.revocationBindings)
+            delete this.record.revocationBindings[hash];
+          try {
+            await this.save();
+          } catch (error) {
+            if (!this.record.revocations.includes(token))
+              this.record.revocations.push(token);
+            this.record.revocationBindings ??= {};
+            this.record.revocationBindings[hash] = metadata;
+            throw error;
+          }
+          this.log({
+            ...metadata,
+            correlationId: result?.correlationId ?? metadata.correlationId,
+            stage: 'session_revoke',
+            phase: 'end',
+            result: 'propagated',
+            chain: 'revocation',
+            durationMs: Math.max(0, Math.floor(this.mono() - started)),
+            tokenHashPrefix: hash.slice(0, 12),
+          });
         } catch {
           this.log({
+            ...metadata,
             stage: 'session_revoke',
             phase: 'end',
             result: 'failure',
-            correlationId: randomUUID(),
+            chain: 'revocation',
           });
           break;
         }
@@ -299,6 +375,7 @@ export class Broker extends EventEmitter {
     let tokens;
     try {
       const grant = await this.platform.begin(signal);
+      attempt.correlationId = grant.correlationId ?? attempt.correlationId;
       if (!this.current(attempt)) return;
       if (
         typeof grant.device_code !== 'string' ||
@@ -328,7 +405,14 @@ export class Broker extends EventEmitter {
         Number.isSafeInteger(grant.interval) ? grant.interval : 5,
       );
       if (interval > 60) throw new Error('invalid interval');
-      // K2 will add the public attempt projection; never send device_code to UI.
+      attempt.display = requireValid('ShellAuthDeviceAttempt', {
+        attemptId: randomUUID(),
+        pageOwner: attempt.owner,
+        userCode: grant.user_code,
+        expiresAt: new Date(this.now() + grant.expires_in * 1000).toISOString(),
+        verificationRequired: true,
+      });
+      this.revision++;
       if (this.record.manualLoginRequired)
         url.searchParams.set('mode', 'manual');
       await this.openBrowser(url.href);
@@ -336,9 +420,33 @@ export class Broker extends EventEmitter {
         await this.wait(interval * 1000, undefined, { signal });
         if (!this.current(attempt) || this.mono() >= until) break;
         try {
+          this.log({
+            stage: 'device_poll',
+            phase: 'start',
+            result: 'waiting',
+            chain: 'login',
+            correlationId: randomUUID(),
+            parentCorrelationId: attempt.correlationId,
+          });
           tokens = await this.platform.poll(grant.device_code, signal);
+          this.log({
+            stage: 'device_poll',
+            phase: 'end',
+            result: 'success',
+            correlationId: tokens.correlationId ?? attempt.correlationId,
+            parentCorrelationId: attempt.correlationId,
+          });
           break;
         } catch (error) {
+          this.log({
+            stage: 'device_poll',
+            phase: 'end',
+            result: ['authorization_pending', 'slow_down'].includes(error.code)
+              ? 'waiting'
+              : 'failure',
+            correlationId: error.correlationId ?? randomUUID(),
+            parentCorrelationId: attempt.correlationId,
+          });
           if (error.code === 'authorization_pending') continue;
           if (error.code === 'slow_down') {
             interval = Math.min(60, interval + 5);
@@ -363,7 +471,8 @@ export class Broker extends EventEmitter {
         await this.queueRevoke(tokens);
         return;
       }
-      const old = this.record.tokens;
+      const old = this.record.tokens,
+        oldIdentity = this.projection?.identity;
       this.record.tokens = tokens;
       this.record.manualLoginRequired = false;
       await this.save();
@@ -374,7 +483,7 @@ export class Broker extends EventEmitter {
       this.attempt = undefined;
       this.acceptVerified(verified);
       this.transition('authenticated', undefined, verified.projection);
-      if (old) await this.queueRevoke(old);
+      if (old) await this.queueRevoke(old, oldIdentity);
       this.log({
         stage: 'device_authorization',
         phase: 'end',
@@ -416,17 +525,33 @@ export class Broker extends EventEmitter {
     if (
       expected &&
       this.projection &&
-      JSON.stringify(projection.identity) !==
-        JSON.stringify(this.projection.identity)
+      (['tenantId', 'memberId', 'deviceId', 'providerId'].some(
+        (k) => projection.identity[k] !== this.projection.identity[k],
+      ) ||
+        Boolean(projection.identity.uacSessionBinding) !==
+          Boolean(this.projection.identity.uacSessionBinding) ||
+        ['sourceSessionId', 'providerId', 'authGeneration'].some(
+          (k) =>
+            projection.identity.uacSessionBinding?.[k] !==
+            this.projection.identity.uacSessionBinding?.[k],
+        ))
     )
       throw Object.assign(new Error('source binding changed'), {
         status: 403,
         code: 'iam.provider_disabled',
       });
-    const tokenUntil = claims.exp * 1000;
+    const tokenUntil = Math.min(
+      claims.exp * 1000,
+      projection.expiresAt ? Date.parse(projection.expiresAt) : Infinity,
+    );
+    if (!Number.isFinite(tokenUntil) || tokenUntil <= this.now())
+      throw unavailable();
     return {
       claims,
       tokenUntil,
+      sourceUntil: projection.expiresAt
+        ? Date.parse(projection.expiresAt)
+        : tokenUntil,
       tokenMonoUntil: this.mono() + Math.max(0, tokenUntil - this.now()),
       projection: {
         identity: projection.identity,
@@ -439,6 +564,7 @@ export class Broker extends EventEmitter {
   acceptVerified(verified) {
     this.claims = verified.claims;
     this.tokenUntil = verified.tokenUntil;
+    this.sourceUntil = verified.sourceUntil;
     this.tokenMonoUntil = verified.tokenMonoUntil;
   }
   check() {
@@ -450,7 +576,11 @@ export class Broker extends EventEmitter {
     return this.checking;
   }
   async checkOnce() {
-    if (!this.record.tokens || this.closed || this.attempt) return;
+    if (this.closed) return;
+    if (!this.record.tokens || this.attempt) {
+      await this.drainRevocations();
+      return;
+    }
     const generation = this.generation,
       old = this.record.tokens;
     let next;
@@ -495,7 +625,8 @@ export class Broker extends EventEmitter {
     await this.drainRevocations();
   }
   async logout() {
-    const tokens = this.record.tokens;
+    const tokens = this.record.tokens,
+      identity = this.projection?.identity;
     this.generation++;
     this.attempt?.controller.abort();
     this.attempt = undefined;
@@ -503,7 +634,7 @@ export class Broker extends EventEmitter {
     this.record.manualLoginRequired = true;
     this.transition('signed_out', 'user_logout'); // local stop before network
     await this.save();
-    this.track(this.queueRevoke(tokens));
+    this.track(this.queueRevoke(tokens, identity));
   }
   async enterprise() {
     const context = this.guard();

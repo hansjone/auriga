@@ -9,8 +9,9 @@ import { once } from 'node:events';
 import { buildHelper } from '../windows/build.mjs';
 import { Vault } from '../vault.mjs';
 import { createInterface } from 'node:readline';
+import { BusinessProxy } from '../business.mjs';
 import { startIpc, connectIpc } from '../ipc.mjs';
-import { fixture, command } from './fixtures.mjs';
+import { fixture, command, login } from './fixtures.mjs';
 
 test(
   'real Windows DPAPI roundtrip and protected current-user ACL; ciphertext contains no token',
@@ -127,5 +128,49 @@ test(
       /disconnected/,
     );
     client.close();
+  },
+);
+
+test(
+  'real Windows K2 host context and current enterprise credential exchange',
+  { skip: process.platform !== 'win32', timeout: 20000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'auriga-k2-ipc-')),
+      helper = buildHelper(join(directory, 'helper.exe')),
+      f = fixture();
+    await login(f);
+    const business = new BusinessProxy(f.broker);
+    const ipc = await startIpc({ helper, broker: f.broker, business });
+    t.after(async () => {
+      await ipc.close();
+      business.close();
+      await f.broker.close();
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    });
+    const script = `import{createReadStream}from'node:fs';import{createInterface}from'node:readline';import{once}from'node:events';import{randomUUID}from'node:crypto';import{connectIpc}from ${JSON.stringify(new URL('../ipc.mjs', import.meta.url).href)};const input=createReadStream('',{fd:3}),lines=createInterface({input});const[line]=await once(lines,'line');lines.close();input.destroy();const client=connectIpc(JSON.parse(line));const state=(await client.call({protocolVersion:1,requestId:randomUUID(),shellEpoch:'00000000-0000-0000-0000-000000000000',expectedRevision:0,action:'snapshot'})).snapshot;const envelope=()=>({protocolVersion:1,requestId:randomUUID(),shellEpoch:state.shellEpoch,expectedRevision:state.revision,expiresAt:new Date(Date.now()+25000).toISOString()});const result=await client.hostContext({...envelope(),action:'register',context:{kind:'session',hostSessionId:'native-host-session',expiresAt:new Date(Date.now()+600000).toISOString()}});if(!result.context)throw new Error('host register failed');const credentials=await client.enterprise({...envelope(),executionContextId:result.context.executionContextId,purpose:'raw'});if(!credentials.credentials)throw new Error('credential read failed');await client.hostContext({...envelope(),action:'revoke',executionContextId:result.context.executionContextId});const rejected=await client.enterprise({...envelope(),executionContextId:result.context.executionContextId,purpose:'raw'});console.log(JSON.stringify({version:credentials.credentials.credentialVersion,revoked:rejected.error?.reason==='context_revoked'}));client.close();`;
+    const child = spawn(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { stdio: ['ignore', 'pipe', 'pipe', 'pipe'], windowsHide: true },
+    );
+    t.after(() => child.kill());
+    let stdout = '',
+      stderr = '';
+    child.stdout.on('data', (b) => {
+      stdout += b;
+    });
+    child.stderr.on('data', (b) => {
+      stderr += b;
+    });
+    const exited = once(child, 'exit');
+    await ipc.attach(child);
+    const [code] = await exited;
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(JSON.parse(stdout), { version: 1, revoked: true });
   },
 );

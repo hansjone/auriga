@@ -4,6 +4,8 @@ import { requireValid, valid, contractFile } from './schema.mjs';
 import { boundedBody } from './platform.mjs';
 import { Streams } from './streams.mjs';
 import { TeamProxy } from './team.mjs';
+import { HostChannel } from './host.mjs';
+import { NetworkProxy } from './network.mjs';
 const operations = new Map(
   JSON.parse(
     contractFile('plugin/shell-business-operations.json'),
@@ -46,9 +48,21 @@ export function mapBusinessError(status, code, retryAfter) {
 }
 /** Fixed-schema JSON operations. No arbitrary target, headers, or bearer input. */
 export class BusinessProxy {
-  constructor(broker, fetcher = globalThis.fetch, uploadDirectory) {
+  constructor(
+    broker,
+    fetcher = globalThis.fetch,
+    uploadDirectory,
+    hostOptions = {},
+  ) {
     this.streams = new Streams(broker, uploadDirectory);
-    this.team = new TeamProxy(broker, this.streams, fetcher);
+    this.host = new HostChannel(broker, this.streams, hostOptions);
+    this.network = new NetworkProxy(broker, this.host, this.streams, {
+      directory: hostOptions.networkDirectory,
+      config: broker.platform.config.network,
+      core: hostOptions.networkCore,
+      fetcher,
+    });
+    this.team = new TeamProxy(broker, this.streams, fetcher, this.host);
     this.broker = broker;
     this.fetcher = fetcher;
     this.requests = new Map();
@@ -124,6 +138,22 @@ export class BusinessProxy {
     return result;
   }
   async execute(definition, input, context, remaining, owner) {
+    if (
+      [
+        'network_open',
+        'network_send',
+        'network_submit',
+        'getNetworkKeys',
+        'getNetworkKeyAnnouncement',
+      ].includes(definition.operation)
+    )
+      return this.network.execute(
+        definition,
+        input,
+        context,
+        owner,
+        AbortSignal.timeout(remaining),
+      );
     if (definition.operation === 'upload_open')
       return this.streams.openUpload(input, context, owner);
     if (definition.operation === 'upload_finish')
@@ -319,6 +349,8 @@ export class BusinessProxy {
     }
   }
   close() {
+    this.network.close();
+    this.host.close();
     this.team.close();
     this.streams.close();
     this.changed();

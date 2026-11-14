@@ -15,8 +15,11 @@
       body: JSON.stringify({
         protocolVersion: 1,
         requestId: crypto.randomUUID(),
-        shellEpoch: session.shellEpoch,
-        expectedRevision: snapshot?.revision ?? 0,
+        shellEpoch:
+          action === 'snapshot'
+            ? '00000000-0000-0000-0000-000000000000'
+            : session.shellEpoch,
+        expectedRevision: action === 'snapshot' ? 0 : (snapshot?.revision ?? 0),
         action,
       }),
     });
@@ -26,6 +29,9 @@
       throw new Error('操作未完成，请稍后重试或重新打开认证页。');
     if (!result.snapshot) return; // ack is acceptance, not login completion
     snapshot = result.snapshot;
+    document.getElementById('attempt').textContent = snapshot.deviceAttempt
+      ? `用户码：${snapshot.deviceAttempt.userCode}；有效至 ${new Date(snapshot.deviceAttempt.expiresAt).toLocaleTimeString()}。请在自己刚发起的门户中逐字核对。`
+      : '';
     status.textContent = {
       signed_out: '未登录，可继续使用本地 DSH。',
       authenticating: '请在系统浏览器中的门户完成登录并批准设备。',
