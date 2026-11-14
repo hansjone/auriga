@@ -1,4 +1,4 @@
-import { updateOrigin } from './platform-origin.mjs';
+import { updateOrigin, normalizePlatformBinding } from './platform-origin.mjs';
 import { cleanupDownloads } from './update-state.mjs';
 import { createRequire } from 'node:module';
 import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
@@ -526,10 +526,28 @@ export function install({
   smoke = defaultSmoke,
   fault = noFault,
 }) {
-  if (platformOrigin) updateOrigin(platformOrigin, platformBinding);
+  const explicitConfirmation = platformBinding.confirmedOrigin !== undefined;
+  const selectedBinding = platformOrigin
+    ? normalizePlatformBinding(platformOrigin, platformBinding)
+    : undefined;
+  if (explicitConfirmation && !selectedBinding)
+    throw new Error('explicit confirmation requires a platform address');
+  platformOrigin = selectedBinding?.origin;
   root = resolve(root);
   dataHome = resolve(dataHome);
   assertLayout(root, dataHome);
+  const bindingFile = join(root, 'desktop-origin.json');
+  const previousBinding =
+    !explicitConfirmation && existsSync(bindingFile)
+      ? readJson(bindingFile)
+      : null;
+  if (previousBinding) {
+    updateOrigin(previousBinding.origin, previousBinding);
+    if (selectedBinding && previousBinding.origin !== selectedBinding.origin)
+      throw new Error(
+        'platform binding differs; reinstall with explicit address confirmation',
+      );
+  }
   // An existing installation keeps its data directory: moving data is not
   // supported, so a different one is refused before anything changes.
   const existing = existsSync(join(root, 'install.json'))
@@ -588,12 +606,8 @@ export function install({
       smoke(target, dataHome);
     },
   });
-  if (platformOrigin && !existsSync(join(root, 'desktop-origin.json')))
-    writeJsonAtomic(join(root, 'desktop-origin.json'), {
-      origin: new URL(platformOrigin).origin,
-      accessMode: platformBinding.accessMode,
-      confirmedOrigin: platformBinding.confirmedOrigin,
-    });
+  if (selectedBinding && (explicitConfirmation || !previousBinding))
+    writeJsonAtomic(bindingFile, selectedBinding);
   return { id, previous, upgraded: Boolean(previous && previous !== id) };
 }
 

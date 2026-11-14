@@ -310,7 +310,7 @@ test('同版本同包更高序号续期不会重复更新，周期检查不重�
 });
 
 test('HTTP requires confirmed literal IP binding; domain HTTP stays forbidden', () => {
-  const origin = 'http://192.0.2.10:8080';
+  const origin = 'http://192.168.2.10:8080'; // gitleaks:allow
   const binding = { accessMode: 'ip', confirmedOrigin: origin };
   assert.equal(
     platformUrl(origin, 'latest', binding),
@@ -319,7 +319,7 @@ test('HTTP requires confirmed literal IP binding; domain HTTP stays forbidden', 
   for (const policy of [
     {},
     { ...binding, accessMode: 'domain' },
-    { ...binding, confirmedOrigin: 'http://192.0.2.11:8080' },
+    { ...binding, confirmedOrigin: 'http://192.168.2.11:8080' }, // gitleaks:allow
   ])
     assert.throws(() => platformUrl(origin, 'latest', policy));
   assert.throws(() =>
@@ -346,7 +346,7 @@ test('HTTP install confirmation persists once and updater uses it', async (t) =>
     root = join(base, 'install'),
     dataHome = join(base, 'home');
   const payload = buildPayload(base);
-  const origin = 'http://192.0.2.10:8080';
+  const origin = 'http://192.168.2.10:8080'; // gitleaks:allow
   assert.throws(() =>
     install({
       root,
@@ -378,7 +378,7 @@ test('HTTP install confirmation persists once and updater uses it', async (t) =>
   await updater.check();
   assert.equal(updater.status().available.version, '2.0.0');
   assert.throws(
-    () => createUpdater({ root, origin: 'http://192.0.2.11:8080' }),
+    () => createUpdater({ root, origin: 'http://192.168.2.11:8080' }), // gitleaks:allow
     /binding/,
   );
 });

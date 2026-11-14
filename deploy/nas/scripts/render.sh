@@ -217,6 +217,7 @@ chmod 0700 "$AURIGA_DATA_ROOT/desktop"
 chown_required 10001:10001 "$AURIGA_DATA_ROOT/desktop"
 _desktop_tenant=${AURIGA_DESKTOP_PUBLISHER_TENANT_ID:-}
 if [ -n "$_desktop_tenant" ]; then
+  require_cmd openssl
   printf '%s\n' "$_desktop_tenant" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' || die 'invalid Desktop publisher tenant UUID'
   _desktop_key="$CONFIG/desktop/release-public.pem"
   [ -f "$_desktop_key" ] && [ ! -L "$_desktop_key" ] || die 'provision Desktop release public key before enabling Desktop'
