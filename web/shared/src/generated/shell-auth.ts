@@ -1,4 +1,44 @@
 export interface paths {
+  '/host/contexts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 登记或撤销可信宿主上下文并交还句柄
+     * @description 仅OS身份/受控进程/连接能力均通过的插件后端IPC投影；不是HTTP路由，页面/模型/skill禁止调用。owner从已验证连接派生，不信任消息字段。详见../plugin/shell-auth-host.md。
+     */
+    post: operations['exchangeShellAuthHostContext'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/host/credentials': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 插件后端读取本人最新企业凭据
+     * @description 仅OS身份/受控进程/连接能力均通过的插件后端IPC投影；不是HTTP路由，页面/模型/skill禁止调用。owner从已验证连接派生，不信任消息字段。详见../plugin/shell-auth-host.md。
+     */
+    post: operations['readShellAuthHostCredentials'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/messages': {
     parameters: {
       query?: never;
@@ -204,7 +244,8 @@ export interface components {
         | 'member_disabled';
       /** @description 仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除 */
       uacLoginInfo?: components['schemas']['UacLoginInfo'];
-    } & (unknown & unknown & unknown);
+      deviceAttempt?: components['schemas']['ShellAuthDeviceAttempt'];
+    } & (unknown & unknown & unknown & unknown);
     ShellAuthIdentity: {
       /** Format: uuid */
       tenantId: string;
@@ -259,6 +300,11 @@ export interface components {
       clientNonce: string;
       /** Format: date-time */
       expiresAt: string;
+      /**
+       * Format: uuid
+       * @description broker为票据交换生成的页面归属ID，设备尝试只回送同一owner；不作为令牌且不接受命令自报。
+       */
+      pageOwner?: string;
     };
     ShellAuthEnterpriseConfig: {
       /** @default true */
@@ -1183,27 +1229,175 @@ export interface components {
       sizeBytes: number;
       sha256: string;
     };
-    UacSessionBinding: {
-      /** Format: uuid */
-      sourceSessionId: string;
-      authGeneration: number;
-      /** Format: uuid */
-      providerId: string;
-    };
-    /** @description 当前认证会话的展示资料。purpose固定login_info。available时必须具有department和updatedAt，pending/unavailable时省略department，由生产方执行状态关联校验。该资料不参与授权或复验截止计算。 */
-    UacLoginInfo: {
-      /** @constant */
-      purpose: 'login_info';
+    ShellAuthHostError: {
       /** @enum {string} */
-      status: 'pending' | 'available' | 'unavailable';
-      /** @description 仅available时展示，禁止写入普通日志和诊断包 */
-      department?: string;
-      /**
-       * Format: date-time
-       * @description 该次信息查询状态持久化的时间，不作为复验时钟
-       */
-      updatedAt?: string;
+      code:
+        | 'common.validation_failed'
+        | 'common.unauthenticated'
+        | 'common.forbidden'
+        | 'common.conflict'
+        | 'common.not_found'
+        | 'common.rate_limited'
+        | 'common.unavailable';
+      /** @enum {string} */
+      reason:
+        | 'invalid_message'
+        | 'peer_not_allowed'
+        | 'owner_mismatch'
+        | 'stale_identity'
+        | 'expired'
+        | 'context_revoked'
+        | 'raw_token_disabled'
+        | 'credentials_unavailable'
+        | 'capacity_exceeded'
+        | 'not_authenticated';
+      retryable: boolean;
+    } & (unknown & unknown & unknown & unknown & unknown & unknown);
+    /** @description 由已认证插件后端从宿主可信会话/工具执行回调采集；页面和模型参数不得构造。session先登记，tool引用同owner同宿主会话的有效session句柄。 */
+    ShellAuthHostContext: {
+      /** @enum {string} */
+      kind: 'session' | 'tool';
+      hostSessionId: string;
+      toolCallId?: string;
+      rootCallId?: string;
+      /** Format: uuid */
+      parentExecutionContextId?: string;
+      /** Format: date-time */
+      expiresAt: string;
     } & unknown;
+    ShellAuthHostContextCommand: {
+      /** @constant */
+      protocolVersion: 1;
+      /** Format: uuid */
+      requestId: string;
+      /** Format: uuid */
+      shellEpoch: string;
+      /** Format: int64 */
+      expectedRevision: number;
+      /** Format: date-time */
+      expiresAt: string;
+      /** @enum {string} */
+      action: 'register' | 'revoke';
+      context?: components['schemas']['ShellAuthHostContext'];
+      /** Format: uuid */
+      executionContextId?: string;
+    } & (
+      | {
+          /** @constant */
+          action?: 'register';
+          executionContextId?: never;
+          context: unknown;
+        }
+      | {
+          /** @constant */
+          action?: 'revoke';
+          context?: never;
+          executionContextId: unknown;
+        }
+    );
+    /** @description broker生成ID和ownerId；仅交还原IPC peer内存，不是OS认证凭据，禁止交模型、浏览器或跨owner转让。epoch/revision沿结果信封。 */
+    ShellAuthHostContextHandle: {
+      /** Format: uuid */
+      executionContextId: string;
+      /** Format: uuid */
+      ownerId: string;
+      hostSessionId: string;
+      /** @enum {string} */
+      kind: 'session' | 'tool';
+      /** Format: date-time */
+      expiresAt: string;
+    };
+    ShellAuthHostContextResult: {
+      /** @constant */
+      protocolVersion: 1;
+      /** Format: uuid */
+      requestId: string;
+      /** Format: uuid */
+      shellEpoch: string;
+      /** Format: int64 */
+      revision: number;
+      /** @enum {string} */
+      action: 'register' | 'revoke';
+      context?: components['schemas']['ShellAuthHostContextHandle'];
+      /** Format: uuid */
+      revokedExecutionContextId?: string;
+      error?: components['schemas']['ShellAuthHostError'];
+    } & (
+      | {
+          /** @constant */
+          action?: 'register';
+          revokedExecutionContextId?: never;
+          error?: never;
+          context: unknown;
+        }
+      | {
+          /** @constant */
+          action?: 'revoke';
+          context?: never;
+          error?: never;
+          revokedExecutionContextId: unknown;
+        }
+      | {
+          context?: never;
+          revokedExecutionContextId?: never;
+          error: unknown;
+        }
+    );
+    /** @description 仅已认证本机插件后端，读取当前身份材料；无账号/工号/tenant/session选择器。raw遵守allowRawAgentToken，outbound仅供受信handler代发。 */
+    ShellAuthHostCredentialsRequest: {
+      /** @constant */
+      protocolVersion: 1;
+      /** Format: uuid */
+      requestId: string;
+      /** Format: uuid */
+      shellEpoch: string;
+      /** Format: int64 */
+      expectedRevision: number;
+      /** Format: date-time */
+      expiresAt: string;
+      /** Format: uuid */
+      executionContextId: string;
+      /** @enum {string} */
+      purpose: 'raw' | 'outbound';
+    };
+    /** @description 当前权威企业凭据，仅后端内存；credentialVersion只作换新/CAS元数据，不作为身份准入代次。binding由IAM产生且必须与broker当前身份一致。禁止平台access/refresh token。 */
+    ShellAuthHostCredentials: {
+      binding: components['schemas']['UacCredentialBinding'];
+      /** Format: int64 */
+      credentialVersion: number;
+      empNo: string;
+      token: string;
+      /** Format: date-time */
+      updatedAt: string;
+      cookies?: {
+        [key: string]: string;
+      };
+    };
+    ShellAuthHostCredentialsResult: {
+      /** @constant */
+      protocolVersion: 1;
+      /** Format: uuid */
+      requestId: string;
+      /** Format: uuid */
+      shellEpoch: string;
+      /** Format: int64 */
+      revision: number;
+      /** Format: uuid */
+      executionContextId: string;
+      /** @enum {string} */
+      purpose: 'raw' | 'outbound';
+      credentials?: components['schemas']['ShellAuthHostCredentials'];
+      error?: components['schemas']['ShellAuthHostError'];
+    } & (
+      | {
+          error?: never;
+          credentials: unknown;
+        }
+      | {
+          credentials?: never;
+          error: unknown;
+        }
+    );
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;
@@ -1234,6 +1428,55 @@ export interface components {
       /** @description 字段级错误（validation_failed 时）。 */
       errors?: components['schemas']['FieldError'][];
       traceId?: string;
+    };
+    UacCredentialBinding: {
+      /** Format: uuid */
+      tenantId: string;
+      /** Format: uuid */
+      memberId: string;
+      /** Format: uuid */
+      deviceId: string;
+      /** Format: uuid */
+      sourceSessionId: string;
+      /** Format: uuid */
+      providerId: string;
+      authGeneration: number;
+      /** @description 可选凭据读取/CAS元数据，不参与设备或外壳准入；token轮换不使绑定失效 */
+      credentialVersion?: number;
+      /** Format: date-time */
+      expiresAt: string;
+    };
+    UacSessionBinding: {
+      /** Format: uuid */
+      sourceSessionId: string;
+      authGeneration: number;
+      /** Format: uuid */
+      providerId: string;
+    };
+    /** @description 当前认证会话的展示资料。purpose固定login_info。available时必须具有department和updatedAt，pending/unavailable时省略department，由生产方执行状态关联校验。该资料不参与授权或复验截止计算。 */
+    UacLoginInfo: {
+      /** @constant */
+      purpose: 'login_info';
+      /** @enum {string} */
+      status: 'pending' | 'available' | 'unavailable';
+      /** @description 仅available时展示，禁止写入普通日志和诊断包 */
+      department?: string;
+      /**
+       * Format: date-time
+       * @description 该次信息查询状态持久化的时间，不作为复验时钟
+       */
+      updatedAt?: string;
+    } & unknown;
+    /** @description broker只向发起控制页投影本次公开用户码；pageOwner来自票据交换的服务端页面会话，不接受命令自报。必须提示用户在可信门户人工核对本次用户码。无device_code、令牌或URL。 */
+    ShellAuthDeviceAttempt: {
+      /** Format: uuid */
+      attemptId: string;
+      /** Format: uuid */
+      pageOwner: string;
+      userCode: string;
+      /** Format: date-time */
+      expiresAt: string;
+      verificationRequired: boolean;
     };
     ShellAuthInput_listResourcePackages: {
       /** @default 50 */
@@ -3255,6 +3498,72 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  exchangeShellAuthHostContext: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShellAuthHostContextCommand'];
+      };
+    };
+    responses: {
+      /** @description 受控IPC结果，成功与安全错误互斥；no-store且不记录消息体 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthHostContextResult'];
+        };
+      };
+      /** @description OS/peer认证失败，消息体不进入broker */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  readShellAuthHostCredentials: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShellAuthHostCredentialsRequest'];
+      };
+    };
+    responses: {
+      /** @description 受控IPC结果，成功与安全错误互斥；no-store且不记录消息体 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShellAuthHostCredentialsResult'];
+        };
+      };
+      /** @description OS/peer认证失败，消息体不进入broker */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   exchangeShellAuthMessage: {
     parameters: {
       query?: never;
