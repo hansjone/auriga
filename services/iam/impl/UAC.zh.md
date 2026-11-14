@@ -74,6 +74,8 @@ SSO 退出抑制使用 host-only 会话 Cookie；HTTPS 带 `__Host-`、Secure、
 
 Compose 与 NAS 的 `auriga-dsh` 登记为 platform 公共设备客户端：`native-connect=false`，grant 为 `urn:ietf:params:oauth:grant-type:device_code,refresh_token`，scope 默认 `auriga.connect`。tenant 从部署登记取得；插件不能自报身份。`openid`、`offline_access` 只有部署登记允许时才能请求。旧 Beta 的 `native_tx` 分支保留原围栏，不能以客户端配置变化把标准 lineage 转入旧分支。
 
+公共客户端同时登记浏览器授权码时，IAM按权威grant区分refresh：浏览器家族保留user/portal/sid；standard_device及历史设备模式继续受设备围栏约束。不能仅凭客户端scope把浏览器refresh解释成设备授权，也不能给历史设备补信任。
+
 设备导航只走 `POST /internal/uac/device-navigation-proofs`，以 `userCode` 在线解析并绑定，返回 201；旧 `/internal/uac/navigation-proofs` 只接受 portal。设备确认仍须人工核码与原有 step-up，auto 不出站。所有浏览器关联号只读 `X-Auriga-Correlation-Id` 响应头。
 
 批准从当前权威门户 session 保存设备、provider、账号与 UAC 来源绑定。标准平台票只有字符串 `aud=auriga`、`ptyp=ctx=device`、`did`，没有浏览器 `sid` 或实例身份。C 用 Bearer 访问 `GET /api/iam/v1/me/device-session` 取得冻结的 `StandardDeviceIdentity`，逐项比较 JWT 与来源绑定；此入口不接受身份选择参数、不返回凭据、不延长来源 idle。本人 UAC 凭据读取也在线验证标准设备来源，原始凭据仍只允许受信后端消费。

@@ -29,8 +29,20 @@ public final class OAuthProvider {
   }
 
   boolean standardToken(Map<String, String> input) {
-    return StandardDevices.client(client(input.get("client_id")))
-        && Set.of(DEVICE, "refresh_token").contains(input.getOrDefault("grant_type", ""));
+    OAuthClient registered = client(input.get("client_id"));
+    if (!StandardDevices.client(registered)) return false;
+    if (DEVICE.equals(input.get("grant_type"))) return true;
+    if (!"refresh_token".equals(input.get("grant_type"))) return false;
+    if (!registered.grants().contains("authorization_code")) return true;
+    String raw = input.getOrDefault("refresh_token", "");
+    if (raw == null || raw.isEmpty() || raw.length() > 16384) return true;
+    var grant = store.tx(() -> store.get("oauth_grant", Secrets.hash(raw), false));
+    // A mixed public client may also hold browser authorization-code refresh grants. Only those
+    // untyped, non-device lineages retain the browser path; historical device modes never upgrade.
+    return grant == null
+        || !"refresh".equals(grant.path("kind").asString())
+        || grant.has("deviceId")
+        || grant.has("authorizationMode");
   }
 
   private IamManagedDevices managedDevices;
@@ -319,8 +331,7 @@ public final class OAuthProvider {
       return managedDevices.exchange(input);
     }
     OAuthClient registered = client(input.get("client_id"));
-    if (StandardDevices.client(registered)
-        && Set.of(DEVICE, "refresh_token").contains(input.getOrDefault("grant_type", ""))) {
+    if (standardToken(input)) {
       if (input.containsKey("client_secret")) return error("invalid_client");
       if (input.containsKey("audience")) return error("invalid_target");
       return standardDevices.token(registered, input);

@@ -52,6 +52,8 @@ class StandardDevicePostgresTest {
   static final class Harness implements AutoCloseable {
     final UacFlowPostgresTest.Fixture f;
     final TokenService tokens;
+    final SigningKeys signing = mock(SigningKeys.class);
+    final SessionManager.Issued browser;
     final OAuthProvider oauth;
     final InstanceAiAuthorization authorization = mock(InstanceAiAuthorization.class);
     final String sid;
@@ -66,7 +68,6 @@ class StandardDevicePostgresTest {
     Harness() throws Exception {
       f = new UacFlowPostgresTest.Fixture("token-verify", 3);
       var key = new ECKeyGenerator(Curve.P_256).keyID(UUID.randomUUID().toString()).generate();
-      var signing = mock(SigningKeys.class);
       when(signing.current())
           .thenAnswer(
               i -> {
@@ -116,7 +117,8 @@ class StandardDevicePostgresTest {
                 true,
                 false));
       oauth = new OAuthProvider(store, f.sessions, tokens, f.time, clients, authorization);
-      sid = f.login().session().session().path("sessionId").asString();
+      browser = f.login().session();
+      sid = browser.session().path("sessionId").asString();
     }
 
     ObjectNode issue() {
@@ -801,6 +803,101 @@ class StandardDevicePostgresTest {
       String refresh = issued.path("refresh_token").asString();
       assertEquals("invalid_grant", h.refresh(refresh, null).path("error").asString());
       assertFalse(h.consumed(refresh));
+    }
+  }
+
+  @Test
+  void mixedPublicClientKeepsBrowserCodeRefreshSeparateFromItsStandardDevices() throws Exception {
+    try (var h = new Harness()) {
+      var browserTokens =
+          new TokenService(
+              h.signing,
+              new ContractSchemas(),
+              (t, a, c) -> Set.of("auriga.connect", "auriga.connect.collab.use"),
+              h.f.time,
+              "https://portal.example.com",
+              Map.of());
+      var mixed =
+          new OAuthProvider(
+              store,
+              h.f.sessions,
+              browserTokens,
+              h.f.time,
+              List.of(
+                  new OAuthClient(
+                      "mixed-example",
+                      h.f.tenant,
+                      null,
+                      Set.of("https://client.example.com/callback"),
+                      Set.of("auriga.connect", "openid", "offline_access"),
+                      Set.of("authorization_code", OAuthProvider.DEVICE, "refresh_token"),
+                      true,
+                      false)),
+              h.authorization);
+      String verifier = Secrets.random();
+      var request =
+          Map.of(
+              "client_id",
+              "mixed-example",
+              "response_type",
+              "code",
+              "redirect_uri",
+              "https://client.example.com/callback",
+              "code_challenge_method",
+              "S256",
+              "code_challenge",
+              OAuthProvider.challenge(verifier),
+              "scope",
+              "openid offline_access");
+      String redirect = h.f.call(() -> mixed.authorize(request, h.browser.cookie(), "portal"));
+      String code =
+          java.net.URLDecoder.decode(
+              java.net.URI.create(redirect).getRawQuery().split("code=")[1].split("&")[0],
+              java.nio.charset.StandardCharsets.UTF_8);
+      var first =
+          h.f.call(
+              () ->
+                  browserTokens.withSigningKey(
+                      () ->
+                          mixed.token(
+                              Map.of(
+                                  "client_id",
+                                  "mixed-example",
+                                  "grant_type",
+                                  "authorization_code",
+                                  "code",
+                                  code,
+                                  "code_verifier",
+                                  verifier,
+                                  "redirect_uri",
+                                  "https://client.example.com/callback"))));
+      assertTrue(first.has("refresh_token"), first.toString());
+      var refresh =
+          new HashMap<>(
+              Map.of(
+                  "client_id",
+                  "mixed-example",
+                  "grant_type",
+                  "refresh_token",
+                  "refresh_token",
+                  first.path("refresh_token").asString()));
+      var next = h.f.call(() -> browserTokens.withSigningKey(() -> mixed.token(refresh)));
+      assertTrue(next.has("access_token"), next.toString());
+      var claims = h.f.call(() -> browserTokens.verify(next.path("access_token").asString()));
+      assertEquals("user", claims.path("ptyp").asString());
+      assertEquals("portal", claims.path("ctx").asString());
+      assertEquals(h.sid, claims.path("sid").asString());
+      assertFalse(claims.has("did"));
+      refresh.put("refresh_token", next.path("refresh_token").asString());
+      assertFalse(h.f.call(() -> mixed.standardToken(refresh)));
+      refresh.put("resource", DeviceAiResource.RESOURCE);
+      assertEquals("invalid_target", h.f.call(() -> mixed.token(refresh)).path("error").asString());
+      assertFalse(h.consumed(refresh.get("refresh_token")));
+      assertTrue(
+          h.f.call(
+              () ->
+                  mixed.standardToken(
+                      Map.of("client_id", "mixed-example", "grant_type", OAuthProvider.DEVICE))));
     }
   }
 
