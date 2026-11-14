@@ -150,7 +150,7 @@ class MsgnetRenewalPostgresTest {
     var signer = Signature.getInstance("Ed25519");
     signer.initSign(root.getPrivate());
     signer.update(
-        ("Auriga." + kind + ".v2\0" + NetworkJson.canonical(payload))
+        ("Auriga." + kind + ".v2\0" + MsgnetRenewal.canonical(payload))
             .getBytes(StandardCharsets.UTF_8));
     var signed = MsgnetRenewal.object();
     signed.set("payload", payload);
@@ -659,5 +659,557 @@ class MsgnetRenewalPostgresTest {
         .put("alg", "Ed25519")
         .put("kid", kid)
         .put("signature", encode(signer.sign()));
+  }
+
+  record MigrationInput(
+      JsonNode permit,
+      JsonNode authority,
+      JsonNode control,
+      JsonNode ancestor,
+      MsgnetMigration.Member member,
+      RootKeyPublication legacy) {}
+
+  MigrationInput migrationInput() throws Exception {
+    return migrationInput(false);
+  }
+
+  MigrationInput migrationInput(boolean staggered) throws Exception {
+    install();
+    var authority = service().run(() -> service().requiredState().path("authority"));
+    var old =
+        MsgnetRenewal.object()
+            .put("schema_version", 1)
+            .put("realm", "1")
+            .put("keyset_version", "9")
+            .put("issued_at", wall.now.toString())
+            .put("valid_until", wall.now.plusSeconds(86400).toString());
+    var keys = old.putArray("keys");
+    var privateKeys = new java.util.HashMap<String, byte[]>();
+    for (String purpose :
+        java.util.List.of("business_delivery", "management_state", "protocol_response")) {
+      var pair = KeyTestMaterial.pair();
+      privateKeys.put(purpose, pair.getPrivate().getEncoded());
+      java.time.Instant before = wall.now.minusSeconds(3600),
+          after = wall.now.plusSeconds(7 * 86400);
+      if (staggered) {
+        before = "management_state".equals(purpose) ? wall.now.minusSeconds(3 * 86400) : wall.now;
+        after =
+            wall.now.plusSeconds(
+                "management_state".equals(purpose)
+                    ? 4 * 86400
+                    : "business_delivery".equals(purpose) ? 2 * 86400 : 84 * 3600);
+      }
+      keys.addObject()
+          .put("kid", purpose)
+          .put("alg", "Ed25519")
+          .put("purpose", purpose)
+          .put("state", "active")
+          .put("not_before", before.toString())
+          .put("not_after", after.toString())
+          .put("public_key_spki", encode(pair.getPublic().getEncoded()));
+    }
+    var release = OfflineKeySigning.sign(MsgnetRenewal.canonical(old), "root", root.getPrivate());
+    var legacy =
+        new RootKeyPublication(
+            "1", "root", root.getPublic(), RootKeyPublication.fingerprint(root.getPublic()), wall);
+    new NetworkKeyOperations(jdbc, manager, tenant, "1", legacy, "1", wall).publish(release);
+    var ancestor = MsgnetRenewal.object().putArray("archive");
+    var entry = ancestor.addObject();
+    entry.set("signed_keyset", NetworkJson.parse(release.signedKeyset()));
+    entry.set("announcement", NetworkJson.parse(release.announcement()));
+    var materials = MsgnetRenewal.object().put("schema_version", 2);
+    var materialKeys = materials.putArray("keys");
+    keys.valueStream()
+        .sorted(java.util.Comparator.comparing(k -> text(k, "kid")))
+        .forEach(
+            key -> {
+              var material = materialKeys.addObject();
+              for (String field :
+                  java.util.List.of("kid", "purpose", "public_key_spki", "not_before", "not_after"))
+                material.set(field, key.path(field));
+            });
+    var members = MsgnetRenewal.object().putArray("members");
+    members
+        .addObject()
+        .put("version", "9")
+        .put("pair_digest", MsgnetV2Verifier.digest(NetworkJson.parse(release.signedKeyset())))
+        .put("material_digest", MsgnetV2Verifier.digest(materials));
+    var permit =
+        MsgnetRenewal.object()
+            .put("schema_version", 2)
+            .put("tenant_id", tenant.toString())
+            .put("realm", "1")
+            .put("permit_id", "migration")
+            .put("ancestor_digest", MsgnetV2Verifier.digest(ancestor))
+            .put("queue_commitment_digest", MsgnetV2Verifier.digest(members))
+            .put("maximum_committed_v1_version", "9")
+            .put("minimum_v2_version", "10")
+            .put("minimum_generation", "1");
+    var control =
+        (ObjectNode) NetworkJson.parse(service().publicControl()).path("payload").deepCopy();
+    control
+        .put(
+            "control_revision",
+            number(control, "control_revision").add(java.math.BigInteger.ONE).toString())
+        .put("minimum_keyset_version", "10");
+    return new MigrationInput(
+        MsgnetOfflineRoot.sign("migration", permit, "root", root.getPrivate()),
+        authority,
+        MsgnetOfflineRoot.sign("control", control, "root", root.getPrivate()),
+        ancestor,
+        new MsgnetMigration.Member(release, privateKeys),
+        legacy);
+  }
+
+  @Test
+  void migrationVerifiesRealMaterialsAndAtomicallyPreservesActiveAndLegacyHistory()
+      throws Exception {
+    try (ring;
+        var signingKeys = new NetworkSigningKeys(wall, 1)) {
+      var input = migrationInput();
+      var migrate = new MsgnetMigration(service(), jdbc, tenant, "1", input.legacy(), wall);
+      var invalid = new java.util.HashMap<>(input.member().privateKeys());
+      invalid.put("business_delivery", KeyTestMaterial.pair().getPrivate().getEncoded());
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              migrate.migrate(
+                  input.permit(),
+                  input.authority(),
+                  input.control(),
+                  runtime.getPrivate().getEncoded(),
+                  input.ancestor(),
+                  java.util.List.of(
+                      new MsgnetMigration.Member(input.member().release(), invalid))));
+      assertEquals(0, count("msgnet_publication_history"));
+      var receipt =
+          migrate.migrate(
+              input.permit(),
+              input.authority(),
+              input.control(),
+              runtime.getPrivate().getEncoded(),
+              input.ancestor(),
+              java.util.List.of(input.member()));
+      assertTrue(receipt.path("barrier_committed").asBoolean());
+      assertEquals("migration", text(payload(), "mode"));
+      assertEquals("10", text(payload(), "keyset_version"));
+      for (var key : payload().path("keys"))
+        if ("active".equals(text(key, "state")))
+          assertEquals(text(key, "purpose"), text(key, "kid"));
+      assertEquals(1, count("msgnet_migration"));
+      assertEquals(
+          MsgnetRenewal.canonical(receipt),
+          MsgnetRenewal.canonical(
+              migrate.migrate(
+                  input.permit(),
+                  input.authority(),
+                  input.control(),
+                  runtime.getPrivate().getEncoded(),
+                  input.ancestor(),
+                  java.util.List.of(input.member()))));
+      service().reload(signingKeys);
+      assertNotNull(signingKeys.publicKey("business_delivery"));
+      assertEquals(
+          input.member().release().signedKeyset(),
+          service()
+              .run(
+                  () ->
+                      jdbc.queryForObject(
+                          "SELECT signed_keyset FROM collab.network_key_publication WHERE tenant_id = ?",
+                          String.class,
+                          tenant)));
+      assertThrows(
+          org.springframework.dao.DataAccessException.class,
+          () ->
+              service()
+                  .run(
+                      () ->
+                          jdbc.update(
+                              "UPDATE collab.network_key_publication SET pending_push = true WHERE tenant_id = ?",
+                              tenant)));
+    }
+  }
+
+  @Test
+  void migrationTimeoutRollsBackEntireBarrierAndUnfreezesLegacyWriter() throws Exception {
+    try (ring) {
+      var input = migrationInput();
+      var calls = new java.util.concurrent.atomic.AtomicInteger();
+      var migrate =
+          new MsgnetMigration(
+              service(),
+              jdbc,
+              tenant,
+              "1",
+              input.legacy(),
+              wall,
+              () -> calls.getAndIncrement() == 0 ? 0 : 601_000_000_000L);
+      var failure =
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  migrate.migrate(
+                      input.permit(),
+                      input.authority(),
+                      input.control(),
+                      runtime.getPrivate().getEncoded(),
+                      input.ancestor(),
+                      java.util.List.of(input.member())));
+      assertEquals("collab.msgnet_migration_expired", failure.errorCode().code());
+      assertEquals(0, count("msgnet_publication_history"));
+      assertFalse(
+          service()
+              .run(
+                  () ->
+                      jdbc.queryForObject(
+                          "SELECT legacy_disabled FROM collab.msgnet_realm WHERE tenant_id = ?",
+                          Boolean.class,
+                          tenant)));
+      assertEquals(1, count("msgnet_migration"));
+      assertEquals(
+          1,
+          service()
+              .run(
+                  () ->
+                      jdbc.update(
+                          "UPDATE collab.network_key_publication SET pending_push = true WHERE tenant_id = ?",
+                          tenant)));
+    }
+  }
+
+  @Test
+  void revokedPublicControlDoesNotNeedRuntimeOrKekSecretsAndKeepsItsHighWaterMark()
+      throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      var original = NetworkJson.parse(renewal.publicControl(), 1048576);
+      var body = (ObjectNode) original.path("payload").deepCopy();
+      body.put(
+          "control_revision",
+          number(body, "control_revision").add(java.math.BigInteger.ONE).toString());
+      ((tools.jackson.databind.node.ArrayNode) body.path("revoked_authority_ids"))
+          .add(
+              text(
+                  renewal.run(() -> renewal.requiredState()).path("authority").path("payload"),
+                  "authority_id"));
+      var revoked = rootSigned(body, "NetworkRootControl");
+      var source =
+          new MsgnetPublicControl(
+              jdbc,
+              manager,
+              tenant,
+              "1",
+              new MsgnetV2Verifier(tenant.toString(), "1", "root", root.getPublic()),
+              null);
+      source.install(revoked, false);
+      assertEquals("authority_revoked", text(NetworkJson.parse(renewal.status()), "state"));
+      assertThrows(AurigaException.class, () -> source.install(original, false));
+      assertEquals(revoked, NetworkJson.parse(renewal.publicControl(), 1048576));
+    }
+  }
+
+  @Test
+  void largeRootControlRoundTripsWithoutRelaxingTheLegacyJsonLimit() throws Exception {
+    try (ring) {
+      install();
+      var control =
+          (ObjectNode) NetworkJson.parse(service().publicControl()).path("payload").deepCopy();
+      control.put(
+          "control_revision",
+          number(control, "control_revision").add(java.math.BigInteger.ONE).toString());
+      var ids = (tools.jackson.databind.node.ArrayNode) control.path("revoked_installation_ids");
+      for (int n = 0; n < 2200; n++) ids.add(UUID.randomUUID().toString());
+      var signed = rootSigned(control, "NetworkRootControl");
+      assertTrue(MsgnetRenewal.canonical(signed).length() > 65536);
+      service().installControl(signed);
+      assertEquals(signed, NetworkJson.parse(service().publicControl(), 1048576));
+      assertThrows(AurigaException.class, () -> NetworkJson.parse(MsgnetRenewal.canonical(signed)));
+    }
+  }
+
+  @Test
+  void normalAuthorityHandoverAfterDowntimeRecoversBeforeChangingSigner() throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      renewal.reconcile();
+      var replacement = KeyTestMaterial.pair();
+      var authority =
+          (ObjectNode)
+              renewal
+                  .run(() -> renewal.requiredState().path("authority").path("payload"))
+                  .deepCopy();
+      authority
+          .put("authority_id", "replacement")
+          .put("runtime_kid", "replacement-runtime")
+          .put("public_key_spki", encode(replacement.getPublic().getEncoded()));
+      var signedAuthority = rootSigned(authority, "NetworkRuntimeAuthority");
+      var control =
+          (ObjectNode) NetworkJson.parse(renewal.publicControl()).path("payload").deepCopy();
+      control.put(
+          "control_revision",
+          number(control, "control_revision").add(java.math.BigInteger.ONE).toString());
+      ((tools.jackson.databind.node.ArrayNode) control.path("allowed_authorities"))
+          .addObject()
+          .put("authority_id", "replacement")
+          .put("authority_digest", MsgnetV2Verifier.digest(signedAuthority));
+      advance(9 * 86400L);
+      renewal.install(
+          signedAuthority,
+          rootSigned(control, "NetworkRootControl"),
+          replacement.getPrivate().getEncoded());
+      renewal.reconcile();
+      assertEquals("authority_transition", text(payload(), "mode"));
+      assertEquals("replacement", text(payload(), "authority_id"));
+      assertEquals(3, count("msgnet_publication_history"));
+      var predecessor =
+          NetworkJson.parse(renewal.publication(), 1048576)
+              .path("predecessor")
+              .path("keyset")
+              .path("payload");
+      assertEquals("restart_recovery", text(predecessor, "mode"));
+      for (var key : payload().path("keys"))
+        if ("active".equals(text(key, "state")))
+          assertTrue(MsgnetV2Verifier.valid(key, wall.instant()));
+    }
+  }
+
+  @Test
+  void lostPgConnectionAfterPrivateAndHistoryWritesRollsBackAndRetriesWithoutHalfACommit()
+      throws Exception {
+    try (ring) {
+      install();
+      var calls = new java.util.concurrent.atomic.AtomicInteger();
+      var config =
+          template
+              .path("boundary_cases")
+              .valueStream()
+              .filter(v -> "config-defaults".equals(text(v, "id")))
+              .findFirst()
+              .orElseThrow()
+              .path("input")
+              .path("config");
+      var failing =
+          new MsgnetRenewal(
+              jdbc,
+              manager,
+              tenant,
+              "1",
+              new MsgnetV2Verifier(tenant.toString(), "1", "root", root.getPublic()),
+              new MsgnetPrivateKeyStore(jdbc, manager, tenant, "1", ring),
+              wall,
+              guard,
+              () -> {
+                if (calls.incrementAndGet() == 3)
+                  jdbc.execute("SELECT pg_terminate_backend(pg_backend_pid())");
+                return wall.instant();
+              },
+              config);
+      assertThrows(RuntimeException.class, failing::reconcile);
+      assertEquals(0, count("msgnet_key_history"));
+      assertEquals(0, count("msgnet_publication_history"));
+      assertEquals(1, count("msgnet_private_key"));
+      service().reconcile();
+      assertEquals(1, count("msgnet_publication_history"));
+      assertEquals(3, count("msgnet_key_history"));
+    }
+  }
+
+  @Test
+  void mixedRecoveryKeepsValidActiveActivatesMatureNextAndRestartsOnlyTheMissingPurpose()
+      throws Exception {
+    try (ring) {
+      var input = migrationInput(true);
+      new MsgnetMigration(service(), jdbc, tenant, "1", input.legacy(), wall)
+          .migrate(
+              input.permit(),
+              input.authority(),
+              input.control(),
+              runtime.getPrivate().getEncoded(),
+              input.ancestor(),
+              java.util.List.of(input.member()));
+      advance(3 * 86400L);
+      service().reconcile();
+      assertEquals("restart_recovery", text(payload(), "mode"));
+      String kept = text(findActive(payload(), "business_delivery"), "kid");
+      var mature =
+          payload()
+              .path("keys")
+              .valueStream()
+              .filter(
+                  k ->
+                      "management_state".equals(text(k, "purpose"))
+                          && "next".equals(text(k, "state")))
+              .findFirst()
+              .orElseThrow();
+      advance(36 * 3600L);
+      service().reconcile();
+      assertEquals("restart_recovery", text(payload(), "mode"));
+      assertEquals(kept, text(findActive(payload(), "business_delivery"), "kid"));
+      assertEquals(text(mature, "kid"), text(findActive(payload(), "management_state"), "kid"));
+      assertNotEquals("protocol_response", text(findActive(payload(), "protocol_response"), "kid"));
+      assertEquals(wall.instant(), time(findActive(payload(), "protocol_response"), "not_before"));
+    }
+  }
+
+  private static JsonNode findActive(JsonNode payload, String purpose) {
+    return payload
+        .path("keys")
+        .valueStream()
+        .filter(k -> purpose.equals(text(k, "purpose")) && "active".equals(text(k, "state")))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  @Test
+  void servicePortDoesNotRebindAForeignCallerToTheConfiguredTenant() throws Exception {
+    try (ring) {
+      install();
+      var api = new MsgnetNetworkRenewal(service(), null, null);
+      var failure =
+          assertThrows(
+              AurigaException.class, () -> TenantContext.call(UUID.randomUUID(), api::status));
+      assertEquals("collab.msgnet_scope_denied", failure.errorCode().code());
+      assertEquals("renewing", MsgnetNetworkRenewal.tree(api.status()).path("state").asString());
+    }
+  }
+
+  @Test
+  void raisedRootFloorPublishesDirectlyAtTheFloorAndCannotBeRolledBack() throws Exception {
+    try (ring;
+        var loaded = new NetworkSigningKeys(wall, 1)) {
+      install();
+      service().reconcile();
+      service().reload(loaded);
+      var guard =
+          (NetworkSigningKeys.SigningGuard)
+              org.springframework.test.util.ReflectionTestUtils.getField(loaded, "runtimeGuard");
+      var control =
+          (ObjectNode) NetworkJson.parse(service().publicControl()).path("payload").deepCopy();
+      control
+          .put(
+              "control_revision",
+              number(control, "control_revision").add(java.math.BigInteger.ONE).toString())
+          .put("minimum_keyset_version", "100");
+      service().installControl(rootSigned(control, "NetworkRootControl"));
+      var called = new java.util.concurrent.atomic.AtomicBoolean();
+      assertEquals(
+          "collab.msgnet_version_rollback",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      guard.sign(
+                          loaded,
+                          () -> {
+                            called.set(true);
+                            return MsgnetRenewal.object();
+                          }))
+              .errorCode()
+              .code());
+      assertFalse(called.get());
+      advance(60);
+      service().reconcile();
+      assertEquals("100", text(payload(), "keyset_version"));
+      var rollback =
+          control
+              .deepCopy()
+              .put(
+                  "control_revision",
+                  number(control, "control_revision").add(java.math.BigInteger.ONE).toString())
+              .put("minimum_keyset_version", "99");
+      var signed = rootSigned(rollback, "NetworkRootControl");
+      assertEquals(
+          "collab.msgnet_control_rollback",
+          assertThrows(AurigaException.class, () -> service().installControl(signed))
+              .errorCode()
+              .code());
+    }
+  }
+
+  @Test
+  void transportRejectsWrongTenantRealmAndSigningKidEvenWithAValidRuntimeSignature()
+      throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      renewal.reconcile();
+      var config =
+          template
+              .path("boundary_cases")
+              .valueStream()
+              .filter(v -> "config-defaults".equals(text(v, "id")))
+              .findFirst()
+              .orElseThrow()
+              .path("input")
+              .path("config");
+      var pki =
+          new MsgnetPki(
+              renewal,
+              new MsgnetPrivateKeyStore(jdbc, manager, tenant, "1", ring),
+              jdbc,
+              tenant,
+              "1",
+              config);
+      pki.reconcile();
+      var authority = renewal.run(() -> renewal.requiredState().path("authority"));
+      var verifier = new MsgnetV2Verifier(tenant.toString(), "1", "root", root.getPublic());
+      verifier.verifyTransport(pki.bundle(), authority, "0", "", false, false);
+      for (String field : java.util.List.of("tenant_id", "realm")) {
+        var payload = (ObjectNode) pki.bundle().path("payload").deepCopy();
+        payload.put(field, "realm".equals(field) ? "2" : UUID.randomUUID().toString());
+        var changed = renewal.run(() -> renewal.signTransport(payload));
+        assertEquals(
+            "collab.msgnet_scope_denied",
+            assertThrows(
+                    AurigaException.class,
+                    () -> verifier.verifyTransport(changed, authority, "0", "", false, false))
+                .errorCode()
+                .code());
+      }
+      var wrongKid = (ObjectNode) pki.bundle().deepCopy();
+      ((ObjectNode) wrongKid.path("runtime_auth")).put("kid", "foreign");
+      assertEquals(
+          "collab.msgnet_scope_denied",
+          assertThrows(
+                  AurigaException.class,
+                  () -> verifier.verifyTransport(wrongKid, authority, "0", "", false, false))
+              .errorCode()
+              .code());
+    }
+  }
+
+  @Test
+  void durablePauseFencesAnAlreadyLoadedSignerAndRemainsPausedAfterReload() throws Exception {
+    try (ring;
+        var loaded = new NetworkSigningKeys(wall, 1);
+        var restarted = new NetworkSigningKeys(wall, 1)) {
+      install();
+      service().reconcile();
+      service().reload(loaded);
+      var guard =
+          (NetworkSigningKeys.SigningGuard)
+              org.springframework.test.util.ReflectionTestUtils.getField(loaded, "runtimeGuard");
+      service().paused(true);
+      var invoked = new java.util.concurrent.atomic.AtomicBoolean();
+      assertThrows(
+          AurigaException.class,
+          () ->
+              guard.sign(
+                  loaded,
+                  () -> {
+                    invoked.set(true);
+                    return MsgnetRenewal.object();
+                  }));
+      assertFalse(invoked.get());
+      assertThrows(AurigaException.class, () -> service().reload(restarted));
+      assertEquals("paused", text(NetworkJson.parse(service().status()), "state"));
+      service().paused(false);
+      service().reload(restarted);
+      var restored =
+          (NetworkSigningKeys.SigningGuard)
+              org.springframework.test.util.ReflectionTestUtils.getField(restarted, "runtimeGuard");
+      assertNotNull(restored.sign(restarted, MsgnetRenewal::object));
+    }
   }
 }

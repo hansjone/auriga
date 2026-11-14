@@ -19,31 +19,47 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @ConditionalOnExpression(
-    "${auriga.services.collab.enabled:true} && ${auriga.collab.network.auto-renew.enabled:false} && '${auriga.service.schema:}' == 'collab'")
+    "${auriga.services.collab.enabled:true} && ${auriga.collab.network.auto-renew.enabled:false} && ('${auriga.service.schema:}' == 'collab' || ${auriga.platform.combined:false})")
 public class MsgnetRenewalController {
-  private final MsgnetRenewal service;
+  private final java.util.function.Supplier<MsgnetRenewal> service;
   private final NetworkRenewal api;
-  private final MsgnetPki pki;
-  private final MsgnetControlLedger identities;
+  private final java.util.function.Supplier<String> publicControl;
+  private final java.util.function.Supplier<MsgnetPki> pki;
+  private final java.util.function.Supplier<MsgnetControlLedger> identities;
 
   public MsgnetRenewalController(
       MsgnetRenewal service, NetworkRenewal api, MsgnetPki pki, MsgnetControlLedger identities) {
-    this.service = service;
+    this.service = () -> service;
     this.api = api;
-    this.pki = pki;
-    this.identities = identities;
+    this.publicControl = service::publicControl;
+    this.pki = () -> pki;
+    this.identities = () -> identities;
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public MsgnetRenewalController(
+      org.springframework.beans.factory.ObjectProvider<MsgnetRenewal> service,
+      NetworkRenewal api,
+      org.springframework.beans.factory.ObjectProvider<MsgnetPki> pki,
+      org.springframework.beans.factory.ObjectProvider<MsgnetControlLedger> identities,
+      org.springframework.beans.factory.ObjectProvider<MsgnetPublicControl> publicControl) {
+    this.service = service::getObject;
+    this.api = api;
+    this.publicControl = () -> MsgnetNetworkRenewal.available(publicControl::getObject).current();
+    this.pki = pki::getObject;
+    this.identities = identities::getObject;
   }
 
   @GetMapping(value = "/api/collab/v2/network/keys", produces = "application/json")
   @RequiresPermission("collab.msgnet.read")
   public ResponseEntity<String> publication() {
-    return response(service::publication);
+    return response(() -> MsgnetNetworkRenewal.available(service).publication());
   }
 
   @GetMapping(value = "/api/collab/v2/network/keys/announcement", produces = "application/json")
   @RequiresPermission("collab.msgnet.read")
   public ResponseEntity<String> announcement() {
-    return response(service::announcement);
+    return response(() -> MsgnetNetworkRenewal.available(service).announcement());
   }
 
   @GetMapping(value = "/api/collab/v2/network/keys/status", produces = "application/json")
@@ -55,19 +71,19 @@ public class MsgnetRenewalController {
   @PublicEndpoint
   @GetMapping(value = "/api/collab/v2/network/bootstrap/controls", produces = "application/json")
   public ResponseEntity<String> publicControl() {
-    return publicResponse(service.publicControl());
+    return publicResponse(publicControl.get());
   }
 
   @PublicEndpoint
   @GetMapping(value = "/api/collab/v2/network/bootstrap/keys", produces = "application/json")
   public ResponseEntity<String> publicKeys() {
-    return publicResponse(service.publication());
+    return publicResponse(MsgnetNetworkRenewal.available(service).publication());
   }
 
   @PublicEndpoint
   @GetMapping(value = "/api/collab/v2/network/bootstrap/transport", produces = "application/json")
   public ResponseEntity<String> publicTransport() {
-    return publicResponse(MsgnetRenewal.canonical(pki.bundle()));
+    return publicResponse(MsgnetRenewal.canonical(MsgnetNetworkRenewal.available(pki).bundle()));
   }
 
   @RequiresPermission("collab.msgnet.control.install")
@@ -149,7 +165,7 @@ public class MsgnetRenewalController {
     if (!request.isSecure()
         || !(certificates instanceof java.security.cert.X509Certificate[] chain)
         || chain.length == 0) throw new AurigaException(CommonErrors.FORBIDDEN);
-    identities.mtls(MsgnetNetworkRenewal.tree(model), chain[0]);
+    MsgnetNetworkRenewal.available(identities).mtls(MsgnetNetworkRenewal.tree(model), chain[0]);
   }
 
   private ResponseEntity<String> response(java.util.function.Supplier<String> body) {
@@ -158,6 +174,9 @@ public class MsgnetRenewalController {
             .orElseThrow(() -> new AurigaException(CommonErrors.UNAUTHENTICATED));
     return TenantContext.call(
         principal.tenantId(),
-        () -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body.get()));
+        () -> {
+          MsgnetNetworkRenewal.available(service).requireCallerTenant();
+          return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body.get());
+        });
   }
 }

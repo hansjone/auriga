@@ -19,6 +19,7 @@ import javax.crypto.KeyAgreement;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Internal collab repository. No transport/controller may expose this unrestricted decrypt port.
@@ -52,11 +53,13 @@ public final class MsgnetPrivateKeyStore {
     run(
         () -> {
           lock();
+          writingCurrent();
           var previous = find(aad);
           if (previous != null) {
             if (!previous.aad().equals(NetworkJson.canonical(aad))
                 || !previous.spki().equals(publicSpki)) throw invalid();
-            byte[] existing = encryption.decrypt(NetworkJson.parse(previous.encrypted()), aad);
+            byte[] existing =
+                encryption.decrypt(NetworkJson.parse(previous.encrypted(), 1048576), aad);
             try {
               if (!java.security.MessageDigest.isEqual(existing, pkcs8)) throw invalid();
             } finally {
@@ -90,7 +93,8 @@ public final class MsgnetPrivateKeyStore {
         () -> {
           var row = find(expectedAad);
           if (row == null || !row.aad().equals(NetworkJson.canonical(expectedAad))) throw invalid();
-          byte[] plaintext = encryption.decrypt(NetworkJson.parse(row.encrypted()), expectedAad);
+          byte[] plaintext =
+              encryption.decrypt(NetworkJson.parse(row.encrypted(), 1048576), expectedAad);
           try {
             match(row.spki(), plaintext, expectedAad.path("alg").asString());
             return plaintext;
@@ -107,9 +111,11 @@ public final class MsgnetPrivateKeyStore {
     run(
         () -> {
           lock();
+          writingCurrent();
           var row = find(expectedAad);
           if (row == null || !row.aad().equals(NetworkJson.canonical(expectedAad))) throw invalid();
-          var replacement = encryption.reencrypt(NetworkJson.parse(row.encrypted()), expectedAad);
+          var replacement =
+              encryption.reencrypt(NetworkJson.parse(row.encrypted(), 1048576), expectedAad);
           jdbc.update(
               """
           UPDATE collab.msgnet_private_key SET encrypted_key = ?, kek_id = ?
@@ -122,6 +128,103 @@ public final class MsgnetPrivateKeyStore {
               expectedAad.path("kid").asString());
           return null;
         });
+  }
+
+  /** Startup rejects an incomplete removal even if the last row was rewritten before a crash. */
+  public void checkRing() {
+    run(
+        () -> {
+          var used =
+              jdbc.queryForList(
+                  "SELECT DISTINCT kek_id FROM collab.msgnet_private_key WHERE tenant_id = ? AND realm = ?",
+                  String.class,
+                  tenant,
+                  realm);
+          if (!encryption.keyIds().containsAll(used)) throw invalid();
+          var rotations =
+              jdbc.queryForList(
+                  "SELECT source_kek_ids FROM collab.msgnet_kek_rotation WHERE tenant_id = ? AND realm = ? AND completed_at IS NULL",
+                  String.class,
+                  tenant,
+                  realm);
+          for (String rotation : rotations)
+            for (var id : NetworkJson.parse(rotation, 1048576))
+              if (!encryption.keyIds().contains(id.asString())) throw invalid();
+          return null;
+        });
+  }
+
+  /**
+   * Per-row short transactions, stale-writer fence, then one durable all-rows completion record.
+   */
+  public ObjectNode rewrapAll() {
+    checkRing();
+    run(
+        () -> {
+          lock();
+          var ids = auriga.collab.network.keys.MsgnetRenewal.object().putArray("ids");
+          jdbc.queryForList(
+                  "SELECT DISTINCT kek_id FROM collab.msgnet_private_key WHERE tenant_id = ? AND realm = ? ORDER BY kek_id",
+                  String.class,
+                  tenant,
+                  realm)
+              .forEach(ids::add);
+          jdbc.update(
+              "INSERT INTO collab.msgnet_kek_rotation (id, tenant_id, realm, current_kek_id, source_kek_ids) VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, realm) DO UPDATE SET current_kek_id = EXCLUDED.current_kek_id, source_kek_ids = EXCLUDED.source_kek_ids, completed_at = NULL",
+              UuidV7.next(Clock.systemUTC()),
+              tenant,
+              realm,
+              encryption.currentId(),
+              NetworkJson.canonical(ids));
+          return null;
+        });
+    while (true) {
+      var batch =
+          run(
+              () ->
+                  jdbc.queryForList(
+                      "SELECT aad FROM collab.msgnet_private_key WHERE tenant_id = ? AND realm = ? AND kek_id <> ? ORDER BY kid LIMIT 100",
+                      String.class,
+                      tenant,
+                      realm,
+                      encryption.currentId()));
+      if (batch.isEmpty()) break;
+      for (String aad : batch) rewrap(NetworkJson.parse(aad, 1048576));
+    }
+    return run(
+        () -> {
+          lock();
+          writingCurrent();
+          int remaining =
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM collab.msgnet_private_key WHERE tenant_id = ? AND realm = ? AND kek_id <> ?",
+                  Integer.class,
+                  tenant,
+                  realm,
+                  encryption.currentId());
+          if (remaining != 0) throw invalid();
+          jdbc.update(
+              "UPDATE collab.msgnet_kek_rotation SET completed_at = clock_timestamp() WHERE tenant_id = ? AND realm = ? AND current_kek_id = ?",
+              tenant,
+              realm,
+              encryption.currentId());
+          return MsgnetRenewal.object()
+              .put("tenant_id", tenant.toString())
+              .put("realm", realm)
+              .put("current_kek_id", encryption.currentId())
+              .put("completed", true)
+              .put("remaining", remaining);
+        });
+  }
+
+  private void writingCurrent() {
+    var expected =
+        jdbc.queryForList(
+            "SELECT current_kek_id FROM collab.msgnet_kek_rotation WHERE tenant_id = ? AND realm = ?",
+            String.class,
+            tenant,
+            realm);
+    if (!expected.isEmpty() && !encryption.currentId().equals(expected.getFirst())) throw invalid();
   }
 
   private void scope(JsonNode aad) {
@@ -162,7 +265,7 @@ public final class MsgnetPrivateKeyStore {
                 }));
   }
 
-  private static void match(String publicSpki, byte[] pkcs8, String algorithm) {
+  static void match(String publicSpki, byte[] pkcs8, String algorithm) {
     if (publicSpki == null
         || publicSpki.length() > 2048
         || pkcs8 == null

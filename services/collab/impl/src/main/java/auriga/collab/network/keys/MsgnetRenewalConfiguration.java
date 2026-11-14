@@ -2,14 +2,12 @@ package auriga.collab.network.keys;
 
 import auriga.collab.app.NetworkJson;
 import auriga.collab.app.NetworkSigningKeys;
-import auriga.common.persistence.TenantTransactionManager;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.bind.Bindable;
@@ -26,7 +24,7 @@ import tools.jackson.databind.JsonNode;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnExpression(
-    "${auriga.services.collab.enabled:true} && ${auriga.collab.network.auto-renew.enabled:false} && '${auriga.service.schema:}' == 'collab'")
+    "${auriga.services.collab.enabled:true} && ${auriga.collab.network.auto-renew.enabled:false} && ('${auriga.service.schema:}' == 'collab' || ${auriga.platform.combined:false})")
 @EnableScheduling
 @Import(MsgnetRenewalController.class)
 public class MsgnetRenewalConfiguration {
@@ -81,6 +79,7 @@ public class MsgnetRenewalConfiguration {
   }
 
   @Bean(destroyMethod = "close")
+  @org.springframework.context.annotation.Lazy
   MsgnetKeyEncryption msgnetKeyEncryption(Environment env) {
     var config = config(env);
     var values = new HashMap<String, byte[]>();
@@ -99,12 +98,41 @@ public class MsgnetRenewalConfiguration {
   }
 
   @Bean
+  @org.springframework.context.annotation.Lazy
+  MsgnetPublicControl msgnetPublicControl(
+      org.springframework.context.ApplicationContext context, Environment env) {
+    String prefix = "auriga.collab.network.key-operations.";
+    var tenant = UUID.fromString(env.getRequiredProperty(prefix + "tenant-id"));
+    String realm = env.getRequiredProperty(prefix + "realm");
+    Path rootFile = Path.of(env.getRequiredProperty(prefix + "root-public-file"));
+    ProtectedKeyFiles.check(rootFile, false);
+    var root =
+        RootKeyPublication.publicKey(
+            java.util.Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(ProtectedKeyFiles.read(rootFile, 1024)));
+    if (!RootKeyPublication.fingerprint(root)
+        .equals(env.getRequiredProperty(prefix + "root-fingerprint")))
+      throw ProtectedKeyFiles.invalid();
+    return new MsgnetPublicControl(
+        new JdbcTemplate(MsgnetDatabase.source(context, env)),
+        MsgnetDatabase.manager(context, env),
+        tenant,
+        realm,
+        new MsgnetV2Verifier(
+            tenant.toString(), realm, env.getRequiredProperty(prefix + "root-kid"), root),
+        Path.of(env.getRequiredProperty(PREFIX + "control-source")));
+  }
+
+  @Bean
   @DependsOnDatabaseInitialization
+  @org.springframework.context.annotation.Lazy
   MsgnetRenewal msgnetRenewal(
-      DataSource source,
-      TenantTransactionManager manager,
+      org.springframework.context.ApplicationContext context,
       MsgnetKeyEncryption ring,
       Environment env) {
+    var source = MsgnetDatabase.source(context, env);
+    var manager = MsgnetDatabase.manager(context, env);
     var config = config(env);
     String settings = "auriga.collab.network.key-operations.";
     UUID tenant = UUID.fromString(env.getRequiredProperty(settings + "tenant-id"));
@@ -124,14 +152,15 @@ public class MsgnetRenewalConfiguration {
             tenant.toString(), realm, env.getRequiredProperty(settings + "root-kid"), root);
     var jdbc = new JdbcTemplate(source);
     var keys = new MsgnetPrivateKeyStore(jdbc, manager, tenant, realm, ring);
+    keys.checkRing();
     var service =
         new MsgnetRenewal(jdbc, manager, tenant, realm, trust, keys, Clock.systemUTC(), config);
     var authority =
         NetworkJson.parse(
-            ProtectedKeyFiles.readText(Path.of(config.path("authority_source").asString())));
-    var control =
-        NetworkJson.parse(
-            ProtectedKeyFiles.readText(Path.of(config.path("control_source").asString())));
+            ProtectedKeyFiles.readText(
+                Path.of(config.path("authority_source").asString()), 1048576),
+            1048576);
+    var control = context.getBean(MsgnetPublicControl.class).refresh();
     String runtimeFile = env.getProperty(PREFIX + "runtime-private-file");
     byte[] secret =
         runtimeFile == null
@@ -154,36 +183,39 @@ public class MsgnetRenewalConfiguration {
   }
 
   @Bean(destroyMethod = "close")
-  NetworkSigningKeys runtimeNetworkSigningKeys(MsgnetRenewal service) {
-    var keys = new NetworkSigningKeys(Clock.systemUTC(), 1);
-    try {
-      service.reload(keys);
-      return keys;
-    } catch (auriga.common.error.AurigaException e) {
-      return keys;
-    }
+  NetworkSigningKeys runtimeNetworkSigningKeys() {
+    // Message signing stays unavailable until the first successful maintenance reconciliation.
+    return new NetworkSigningKeys(Clock.systemUTC(), 1);
   }
 
   @Bean
+  @org.springframework.context.annotation.Lazy
   MsgnetControlLedger msgnetControlLedger(
-      MsgnetRenewal renewal, DataSource source, Environment env) {
+      MsgnetRenewal renewal,
+      org.springframework.context.ApplicationContext context,
+      Environment env) {
+    var source = MsgnetDatabase.source(context, env);
     UUID tenant =
         UUID.fromString(env.getRequiredProperty("auriga.collab.network.key-operations.tenant-id"));
     String realm = env.getRequiredProperty("auriga.collab.network.key-operations.realm");
     String file = env.getRequiredProperty(PREFIX + "identities-file");
     var identities =
         MsgnetControlLedger.pins(
-            NetworkJson.parse(ProtectedKeyFiles.readText(Path.of(file)), 1048576), tenant, realm);
+            NetworkJson.parse(ProtectedKeyFiles.readText(Path.of(file), 1048576), 1048576),
+            tenant,
+            realm);
     return new MsgnetControlLedger(renewal, new JdbcTemplate(source), tenant, realm, identities);
   }
 
   @Bean
+  @org.springframework.context.annotation.Lazy
   MsgnetPki msgnetPki(
       MsgnetRenewal renewal,
-      DataSource source,
-      TenantTransactionManager manager,
+      org.springframework.context.ApplicationContext context,
       MsgnetKeyEncryption ring,
       Environment env) {
+    var source = MsgnetDatabase.source(context, env);
+    var manager = MsgnetDatabase.manager(context, env);
     UUID tenant =
         UUID.fromString(env.getRequiredProperty("auriga.collab.network.key-operations.tenant-id"));
     String realm = env.getRequiredProperty("auriga.collab.network.key-operations.realm");
@@ -206,14 +238,16 @@ public class MsgnetRenewalConfiguration {
   }
 
   @Bean
+  @org.springframework.context.annotation.Lazy
   MsgnetMaterials msgnetMaterials(
       MsgnetRenewal renewal,
       MsgnetControlLedger controls,
       MsgnetPki pki,
-      DataSource source,
-      TenantTransactionManager manager,
+      org.springframework.context.ApplicationContext context,
       MsgnetKeyEncryption ring,
       Environment env) {
+    var source = MsgnetDatabase.source(context, env);
+    var manager = MsgnetDatabase.manager(context, env);
     UUID tenant =
         UUID.fromString(env.getRequiredProperty("auriga.collab.network.key-operations.tenant-id"));
     String realm = env.getRequiredProperty("auriga.collab.network.key-operations.realm");
@@ -230,42 +264,56 @@ public class MsgnetRenewalConfiguration {
 
   @Bean
   auriga.collab.api.NetworkRenewal networkRenewal(
-      MsgnetRenewal renewal, MsgnetControlLedger controls, MsgnetMaterials materials) {
-    return new MsgnetNetworkRenewal(renewal, controls, materials);
+      ObjectProvider<MsgnetRenewal> renewal,
+      ObjectProvider<MsgnetControlLedger> controls,
+      ObjectProvider<MsgnetMaterials> materials) {
+    return new MsgnetNetworkRenewal(renewal::getObject, controls::getObject, materials::getObject);
   }
 
   @Bean
   Maintenance msgnetMaintenance(
-      MsgnetRenewal service,
+      ObjectProvider<MsgnetRenewal> service,
       NetworkSigningKeys keys,
       ObjectProvider<NetworkKeyPush> transport,
-      MsgnetPki pki) {
-    return new Maintenance(service, keys, transport, pki);
+      ObjectProvider<MsgnetPki> pki,
+      ObjectProvider<MsgnetPublicControl> control) {
+    return new Maintenance(service, keys, transport, pki, control);
   }
 
   static final class Maintenance {
-    private final MsgnetRenewal service;
+    private final ObjectProvider<MsgnetRenewal> serviceProvider;
     private final NetworkSigningKeys keys;
     private final ObjectProvider<NetworkKeyPush> transport;
-    private final MsgnetPki pki;
+    private final ObjectProvider<MsgnetPki> pkiProvider;
+    private final ObjectProvider<MsgnetPublicControl> controlProvider;
 
     Maintenance(
-        MsgnetRenewal service,
+        ObjectProvider<MsgnetRenewal> service,
         NetworkSigningKeys keys,
         ObjectProvider<NetworkKeyPush> transport,
-        MsgnetPki pki) {
-      this.service = service;
+        ObjectProvider<MsgnetPki> pki,
+        ObjectProvider<MsgnetPublicControl> control) {
+      this.serviceProvider = service;
       this.keys = keys;
       this.transport = transport;
-      this.pki = pki;
+      this.pkiProvider = pki;
+      this.controlProvider = control;
     }
 
     @Scheduled(fixedDelayString = "${auriga.collab.network.auto-renew.reload-seconds:5}000")
     public void refresh() {
       try {
+        controlProvider.getObject().refresh();
+        var service = serviceProvider.getObject();
         service.reconcile();
         service.reload(keys);
-        pki.reconcile();
+        try {
+          pkiProvider.getObject().reconcile();
+          service.transportFailure(null);
+        } catch (RuntimeException failure) {
+          service.transportFailure(failure);
+          throw failure;
+        }
         var push = transport.getIfAvailable();
         if (push != null) service.pushPending(push);
       } catch (RuntimeException e) {

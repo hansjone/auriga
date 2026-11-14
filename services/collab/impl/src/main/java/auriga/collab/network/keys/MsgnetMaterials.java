@@ -100,9 +100,23 @@ public final class MsgnetMaterials {
   public ObjectNode protocol(JsonNode request) {
     return renewal.run(
         () -> {
-          authorize(request, true);
+          var identity = authorize(request, true);
           require("network".equals(text(request, "component")), "scope_denied");
-          return protocolMaterial(consume(request));
+          var publication = consume(request);
+          var binding = MsgnetRenewal.object();
+          for (String field :
+              java.util.List.of("tenant_id", "realm", "installation_id", "component", "nonce"))
+            binding.set(field, request.path(field));
+          binding.set("generation", publication.path("keyset").path("payload").path("generation"));
+          binding.set(
+              "keyset_version", publication.path("keyset").path("payload").path("keyset_version"));
+          MsgnetPolicy.projection(
+              request,
+              binding,
+              RootKeyPublication.publicKey(identity.signingSpki()),
+              false,
+              java.util.List.of("protocol_response"));
+          return protocolMaterial(publication);
         });
   }
 
@@ -215,7 +229,7 @@ public final class MsgnetMaterials {
               "scope_denied");
           var rows =
               jdbc.queryForList(
-                  "SELECT authorized_snapshot, local_selector, receipts::text FROM collab.msgnet_projection_nonce WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND nonce = ? FOR UPDATE",
+                  "SELECT authorized_snapshot, local_selector, receipts::text, superseded FROM collab.msgnet_projection_nonce WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND nonce = ? FOR UPDATE",
                   tenant,
                   realm,
                   identity.identityId(),
@@ -224,7 +238,25 @@ public final class MsgnetMaterials {
               rows.size() == 1 && rows.getFirst().get("authorized_snapshot") != null,
               "invalid_transition");
           var row = rows.getFirst();
+          require(!Boolean.TRUE.equals(row.get("superseded")), "invalid_transition");
           var snapshot = NetworkJson.parse(row.get("authorized_snapshot").toString(), 1048576);
+          if ("failed".equals(text(receipt, "phase")) && !receipt.has("local_selector")) {
+            for (String field : snapshot.propertyNames())
+              if (!"files".equals(field))
+                require(snapshot.path(field).equals(receipt.path(field)), "invalid_chain");
+            var saved = (ObjectNode) NetworkJson.parse(row.get("receipts").toString(), 1048576);
+            if (saved.has("failed"))
+              require(saved.path("failed").equals(receipt), "same_version_conflict");
+            saved.set("failed", receipt);
+            jdbc.update(
+                "UPDATE collab.msgnet_projection_nonce SET receipts = ?::jsonb WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND nonce = ?",
+                MsgnetRenewal.canonical(saved),
+                tenant,
+                realm,
+                identity.identityId(),
+                text(receipt, "nonce"));
+            return receipt;
+          }
           var selector = receipt.path("local_selector");
           var prior =
               jdbc.queryForList(
@@ -238,10 +270,10 @@ public final class MsgnetMaterials {
               snapshot,
               selector,
               receipt,
-              prior.isEmpty() ? null : NetworkJson.parse(prior.getFirst()));
+              prior.isEmpty() ? null : NetworkJson.parse(prior.getFirst(), 1048576));
           if (row.get("local_selector") != null)
             require(
-                NetworkJson.parse(row.get("local_selector").toString()).equals(selector),
+                NetworkJson.parse(row.get("local_selector").toString(), 1048576).equals(selector),
                 "same_version_conflict");
           var receipts = (ObjectNode) NetworkJson.parse(row.get("receipts").toString(), 1048576);
           String phase = text(receipt, "phase");

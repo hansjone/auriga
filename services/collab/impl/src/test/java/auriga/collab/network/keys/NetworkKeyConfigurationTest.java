@@ -586,13 +586,19 @@ class NetworkKeyConfigurationTest {
     var client = mock(NetworkAuthorityClient.class);
     var locals = mock(NetworkLocalTargets.class);
     var factory = new StaticListableBeanFactory(Map.of("locals", locals));
-    NetworkSourceGrpcAuthority source =
-        ReflectionTestUtils.invokeMethod(
-            new CollabNetworkConfiguration(),
-            "networkSourceGrpcAuthority",
-            client,
-            manager,
-            factory.getBeanProvider(NetworkLocalTargets.class));
+    NetworkSourceGrpcAuthority source;
+    try (var context = new org.springframework.context.support.GenericApplicationContext()) {
+      context.registerBean(TenantTransactionManager.class, () -> manager);
+      context.refresh();
+      source =
+          ReflectionTestUtils.invokeMethod(
+              new CollabNetworkConfiguration(),
+              "networkSourceGrpcAuthority",
+              client,
+              context,
+              new org.springframework.mock.env.MockEnvironment(),
+              factory.getBeanProvider(NetworkLocalTargets.class));
+    }
     var order =
         approvedFirst
             ? new Class<?>[] {

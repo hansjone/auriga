@@ -383,6 +383,11 @@ public final class MsgnetV2Verifier {
         "Auriga.NetworkTransportTrustBundle.v2",
         RootKeyPublication.publicKey(text(a, "public_key_spki")));
     var t = bundle.path("payload");
+    require(
+        scope(t)
+            && text(t, "authority_id").equals(text(a, "authority_id"))
+            && text(bundle.path("runtime_auth"), "kid").equals(text(a, "runtime_kid")),
+        "scope_denied");
     require(text(t, "authority_digest").equals(MsgnetV2Verifier.digest(authority)), "scope_denied");
     for (var scope : t.path("scope"))
       require(list(a.path("transport_scope")).contains(scope), "scope_denied");
@@ -419,6 +424,34 @@ public final class MsgnetV2Verifier {
     if ("new_leaves".equals(text(t, "phase"))) require(readersPersisted, "projection_pending");
     if ("retire_old".equals(text(t, "phase"))) require(handshakesVerified, "projection_pending");
     schema("SignedTransportTrustBundle", bundle, "invalid_chain");
+  }
+
+  void verifyMigration(
+      JsonNode permit,
+      JsonNode members,
+      String currentVersion,
+      String currentDigest,
+      long frozenSeconds,
+      long remainingSeconds,
+      String firstVersion,
+      boolean committed,
+      boolean disabled) {
+    MsgnetPolicy.migration(
+        permit,
+        root,
+        members,
+        currentVersion,
+        currentDigest,
+        frozenSeconds,
+        remainingSeconds,
+        firstVersion,
+        committed,
+        disabled);
+  }
+
+  void verifyMigrationPermit(JsonNode permit) {
+    rootSignature(permit, "NetworkMigrationPermit");
+    schema("SignedMigrationPermit", permit, "invalid_chain");
   }
 
   private void rootSignature(JsonNode signed, String domain) {

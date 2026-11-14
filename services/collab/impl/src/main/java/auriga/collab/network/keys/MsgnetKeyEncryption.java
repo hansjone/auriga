@@ -35,6 +35,14 @@ public final class MsgnetKeyEncryption implements AutoCloseable {
     this.current = current;
   }
 
+  String currentId() {
+    return current;
+  }
+
+  java.util.Set<String> keyIds() {
+    return java.util.Set.copyOf(ring.keySet());
+  }
+
   public synchronized ObjectNode encrypt(JsonNode aad, byte[] privateKey) {
     checkOpen();
     MsgnetSchema.validate("PrivateKeyAad", aad);

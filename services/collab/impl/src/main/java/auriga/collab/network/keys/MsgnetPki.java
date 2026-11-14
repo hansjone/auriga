@@ -61,14 +61,9 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
             payload.put("phase", "dual_trust");
           } else if (!text(previous.path("payload"), "authority_digest")
               .equals(MsgnetV2Verifier.digest(authority))) {
-            payload = (ObjectNode) previous.path("payload").deepCopy();
-            var oldCas = list(payload.path("cas"));
-            var cas = payload.putArray("cas");
-            for (var ca : oldCas.subList(Math.max(0, oldCas.size() - 2), oldCas.size()))
-              cas.add(ca);
-            cas.add(ca("server", now));
-            cas.add(ca("client", now));
-            payload.put("phase", "dual_trust");
+            // Frozen transport vectors define cycles within one authority only. Until an
+            // authenticated handover rule is supplied, keep the committed package unchanged.
+            throw failure("invalid_transition");
           } else {
             payload = (ObjectNode) previous.path("payload").deepCopy();
             String phase = text(payload, "phase");
@@ -77,7 +72,10 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
               payload.put("phase", "new_leaves");
               issueLeaves = true;
             } else if ("new_leaves".equals(phase)) {
-              if (!acknowledged(payload, true)) return null;
+              if (!acknowledged(payload, true)) {
+                issueLeaves(payload, authority.path("payload").path("transport_scope"), now, false);
+                return null;
+              }
               var cas = list(payload.path("cas"));
               var retained = payload.putArray("cas");
               for (var ca : cas.subList(Math.max(0, cas.size() - 2), cas.size())) retained.add(ca);
@@ -133,6 +131,7 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
           for (var scope : payload.path("scope"))
             if (seen.add(text(scope, "identity_id"))) readers.add(text(scope, "identity_id"));
           if (issueLeaves) issueLeaves(payload, payload.path("scope"), now, true);
+          number(payload, "bundle_version");
           var signed = renewal.signTransport(payload);
           schema("SignedTransportTrustBundle", signed, "invalid_chain");
           renewal.checkedTime();
@@ -156,7 +155,8 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
               realm,
               id.asString());
       if (!isolated.isEmpty()
-          && "quarantined".equals(text(NetworkJson.parse(isolated.getFirst()), "state"))) continue;
+          && "quarantined".equals(text(NetworkJson.parse(isolated.getFirst(), 1048576), "state")))
+        continue;
       var receipts =
           jdbc.queryForList(
               "SELECT receipt FROM collab.msgnet_projection_receipt WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND bundle_version = ?",
@@ -166,7 +166,12 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
               id.asString(),
               new java.math.BigDecimal(text(payload, "bundle_version")));
       if (receipts.isEmpty()) return false;
-      String phase = text(NetworkJson.parse(receipts.getFirst()), "phase");
+      var receipt = NetworkJson.parse(receipts.getFirst(), 1048576);
+      if (!text(receipt, "publication_digest")
+          .equals(
+              MsgnetV2Verifier.digest(
+                  NetworkJson.parse(renewal.publication(), 1048576).path("keyset")))) return false;
+      String phase = text(receipt, "phase");
       if (handshake
           ? !"handshake_verified".equals(phase)
           : !List.of("persisted", "loaded", "handshake_verified").contains(phase)) return false;
@@ -221,7 +226,7 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
         if (!force
             && !old.isEmpty()
             && now.isBefore(
-                time(NetworkJson.parse(old.getFirst()), "not_after")
+                time(NetworkJson.parse(old.getFirst(), 1048576), "not_after")
                     .minusSeconds(config.path("leaf_renew_before_days").asLong() * 86400)))
           continue;
         var ca =
@@ -243,6 +248,11 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
                 List.of(eku),
                 certificate,
                 secret(text(ca, "ca_id"), "network_transport_ca", "collab"));
+        jdbc.update(
+            "UPDATE collab.msgnet_projection_nonce SET superseded = true WHERE tenant_id = ? AND realm = ? AND installation_id = ?",
+            tenant,
+            realm,
+            text(scope, "identity_id"));
         jdbc.update(
             "DELETE FROM collab.msgnet_projection_receipt WHERE tenant_id = ? AND realm = ? AND installation_id = ?",
             tenant,
@@ -271,6 +281,18 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
             text(ca, "ca_id"),
             kid,
             MsgnetRenewal.canonical(leaf));
+        renewal.audit(
+            "collab.msgnet.certificate_issued",
+            "none",
+            java.util.Map.of(
+                "target_id",
+                text(scope, "identity_id"),
+                "component",
+                component,
+                "role",
+                role,
+                "certificate_not_after",
+                text(leaf, "not_after")));
       }
     }
   }
@@ -330,7 +352,7 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
             String.class,
             tenant,
             realm);
-    return rows.isEmpty() ? null : NetworkJson.parse(rows.getFirst());
+    return rows.isEmpty() ? null : NetworkJson.parse(rows.getFirst(), 1048576);
   }
 
   @Override
@@ -356,7 +378,13 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
               "SELECT leaf, kid FROM collab.msgnet_transport_leaf WHERE tenant_id = ? AND realm = ? AND identity_id = ? ORDER BY role",
               (org.springframework.jdbc.core.RowCallbackHandler)
                   rs -> {
-                    var leaf = (ObjectNode) NetworkJson.parse(rs.getString(1));
+                    var leaf = (ObjectNode) NetworkJson.parse(rs.getString(1), 1048576);
+                    if (!time(leaf, "not_after").isAfter(renewal.checkedTime())) {
+                      require(
+                          "dual_trust".equals(text(bundle().path("payload"), "phase")),
+                          "projection_pending");
+                      return;
+                    }
                     require(identity.component().equals(text(leaf, "component")), "scope_denied");
                     byte[] bytes =
                         secrets.read(

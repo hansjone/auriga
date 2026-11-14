@@ -67,6 +67,15 @@ public final class MsgnetControlLedger {
               text(value, "subject"));
       canonicalSpki(pin.signingSpki(), "Ed25519");
       canonicalSpki(pin.sealingSpki(), "X25519");
+      try {
+        require(
+            new javax.security.auth.x500.X500Principal(pin.subject())
+                .getName(javax.security.auth.x500.X500Principal.RFC2253)
+                .equals(pin.subject()),
+            "invalid_chain");
+      } catch (IllegalArgumentException invalidSubject) {
+        throw failure("invalid_chain");
+      }
       require(
           pins.putIfAbsent(pin.targetId(), pin) == null && ids.add(pin.identityId()),
           "scope_denied");
@@ -102,11 +111,16 @@ public final class MsgnetControlLedger {
         !contains(control.path("revoked_installation_ids"), identity.identityId()),
         "identity_quarantined");
     var row = row(identity.targetId());
-    if (row != null)
+    if (row != null) {
+      require(
+          identity.identityId().equals(text(row, "identity_id"))
+              && identity.signingSpki().equals(text(row, "identity_spki")),
+          "identity_quarantined");
       require(
           "ready".equals(text(row.path("isolation"), "state"))
               && !row.path("isolation").path("identity_compromised").asBoolean(),
           "identity_quarantined");
+    }
   }
 
   void mtls(JsonNode request, java.security.cert.X509Certificate certificate) {
@@ -138,7 +152,10 @@ public final class MsgnetControlLedger {
                   && MsgnetV2Verifier.digest(control).equals(text(request, "control_digest")),
               "control_rollback");
           var previous = row(identity.targetId());
-          if (previous != null && previous.path("package").path("control").equals(control))
+          if (previous != null
+              && previous.path("package").path("control").equals(control)
+              && identity.identityId().equals(text(previous, "identity_id"))
+              && identity.signingSpki().equals(text(previous, "identity_spki")))
             return (ObjectNode) previous.path("package");
           byte[] random = new byte[32];
           new SecureRandom().nextBytes(random);
@@ -170,7 +187,8 @@ public final class MsgnetControlLedger {
               """
           INSERT INTO collab.msgnet_control_target (id, tenant_id, realm, target_id, identity_id, identity_spki, control_package, isolation_record)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, realm, target_id) DO UPDATE SET
-            control_package = EXCLUDED.control_package, isolation_record = EXCLUDED.isolation_record, receipt = NULL
+            control_package = EXCLUDED.control_package, isolation_record = EXCLUDED.isolation_record, receipt = NULL,
+            identity_id = EXCLUDED.identity_id, identity_spki = EXCLUDED.identity_spki, enforcement_confirmed = false
           """,
               auriga.common.persistence.UuidV7.next(java.time.Clock.systemUTC()),
               tenant,
@@ -274,12 +292,14 @@ public final class MsgnetControlLedger {
   private ObjectNode row(String target) {
     var rows =
         jdbc.query(
-            "SELECT control_package, receipt, isolation_record FROM collab.msgnet_control_target WHERE tenant_id = ? AND realm = ? AND target_id = ?",
+            "SELECT control_package, receipt, isolation_record, identity_id, identity_spki FROM collab.msgnet_control_target WHERE tenant_id = ? AND realm = ? AND target_id = ?",
             (rs, n) -> {
               var value = MsgnetRenewal.object();
-              value.set("package", NetworkJson.parse(rs.getString(1)));
-              if (rs.getString(2) != null) value.set("receipt", NetworkJson.parse(rs.getString(2)));
-              value.set("isolation", NetworkJson.parse(rs.getString(3)));
+              value.set("package", NetworkJson.parse(rs.getString(1), 1048576));
+              if (rs.getString(2) != null)
+                value.set("receipt", NetworkJson.parse(rs.getString(2), 1048576));
+              value.set("isolation", NetworkJson.parse(rs.getString(3), 1048576));
+              value.put("identity_id", rs.getString(4)).put("identity_spki", rs.getString(5));
               return value;
             },
             tenant,

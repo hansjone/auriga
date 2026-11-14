@@ -41,6 +41,9 @@ public final class MsgnetRenewal {
   private final MsgnetClock timeGuard;
   private final Supplier<Instant> databaseTime;
   private final JsonNode config;
+  private static final auriga.common.events.EventSchemas EVENTS =
+      new auriga.common.events.EventSchemas();
+  private final auriga.common.audit.AuditLogger audit;
 
   public MsgnetRenewal(
       JdbcTemplate jdbc,
@@ -91,6 +94,10 @@ public final class MsgnetRenewal {
     this.timeGuard = timeGuard;
     this.databaseTime = databaseTime;
     this.config = config.deepCopy();
+    this.audit =
+        new auriga.common.audit.OutboxAuditLogger(
+            new auriga.common.events.OutboxEventPublisher(
+                jdbc, "collab", "collab", EVENTS, JsonMapper.builder().build(), clock, null));
   }
 
   /**
@@ -98,6 +105,15 @@ public final class MsgnetRenewal {
    * KEK-wrapped runtime key.
    */
   public void install(JsonNode authority, JsonNode control, byte[] runtimePkcs8) {
+    install(authority, control, runtimePkcs8, false);
+  }
+
+  void installForMigration(JsonNode authority, JsonNode control, byte[] runtimePkcs8) {
+    install(authority, control, runtimePkcs8, true);
+  }
+
+  private void install(
+      JsonNode authority, JsonNode control, byte[] runtimePkcs8, boolean migration) {
     try {
       verifier.verifyAuthority(authority, control, clock.instant());
     } catch (AurigaException e) {
@@ -106,11 +122,19 @@ public final class MsgnetRenewal {
       return;
     }
     MsgnetPolicy.authorizedConfig(config, authority);
+    new MsgnetPublicControl(
+            jdbc,
+            (TenantTransactionManager) tx.getTransactionManager(),
+            tenant,
+            realm,
+            verifier,
+            null)
+        .install(control, migration);
     run(
         () -> {
           lock();
           var old = stored();
-          if (old == null)
+          if (old == null && !migration)
             require(
                 jdbc.queryForObject(
                         "SELECT count(*) FROM collab.network_key_publication WHERE tenant_id = ? AND realm = ?",
@@ -153,31 +177,56 @@ public final class MsgnetRenewal {
   }
 
   public void installControl(JsonNode control) {
-    verifier.verifyControl(control);
-    run(
-        () -> {
-          lock();
-          var state = requiredState();
-          var old = state.path("control");
-          int order =
-              number(control.path("payload"), "control_revision")
-                  .compareTo(number(old.path("payload"), "control_revision"));
-          require(order >= 0, "control_rollback");
-          if (order == 0) require(old.equals(control), "same_version_conflict");
-          for (String field : List.of("revoked_authority_ids", "revoked_installation_ids"))
-            for (var id : old.path("payload").path(field))
-              require(
-                  contains(control.path("payload").path(field), id.asString()), "control_rollback");
-          jdbc.update(
-              "UPDATE collab.msgnet_realm SET root_control = ? WHERE tenant_id = ? AND realm = ?",
-              canonical(control),
-              tenant,
-              realm);
-          return null;
-        });
+    new MsgnetPublicControl(
+            jdbc,
+            (TenantTransactionManager) tx.getTransactionManager(),
+            tenant,
+            realm,
+            verifier,
+            null)
+        .install(control, false);
   }
 
   public void reconcile() {
+    reconcile(null);
+  }
+
+  void verifyMigration(
+      JsonNode permit,
+      JsonNode members,
+      String currentVersion,
+      String currentDigest,
+      long frozenSeconds,
+      long remainingSeconds,
+      String firstVersion,
+      boolean committed,
+      boolean disabled) {
+    verifier.verifyMigration(
+        permit,
+        members,
+        currentVersion,
+        currentDigest,
+        frozenSeconds,
+        remainingSeconds,
+        firstVersion,
+        committed,
+        disabled);
+  }
+
+  void verifyMigrationPermit(JsonNode permit) {
+    verifier.verifyMigrationPermit(permit);
+  }
+
+  void importKey(JsonNode key, byte[] privateKey) {
+    secrets.install(
+        aad(text(key, "kid"), text(key, "purpose")), text(key, "public_key_spki"), privateKey);
+  }
+
+  void reconcileMigration(JsonNode seed) {
+    reconcile(seed);
+  }
+
+  private void reconcile(JsonNode migrationSeed) {
     try {
       run(
           () -> {
@@ -194,6 +243,10 @@ public final class MsgnetRenewal {
             boolean authorityChanged =
                 !initial
                     && !text(old, "authority_digest").equals(MsgnetV2Verifier.digest(authority));
+            boolean controlChanged =
+                !initial
+                    && !old.path("control_revision")
+                        .equals(control.path("payload").path("control_revision"));
             boolean incident =
                 !initial
                     && !old.path("generation")
@@ -225,6 +278,7 @@ public final class MsgnetRenewal {
             }
             if (!initial
                 && !authorityChanged
+                && !controlChanged
                 && !incident
                 && !now.isBefore(time(old, "issued_at"))
                 && now.isBefore(
@@ -236,7 +290,9 @@ public final class MsgnetRenewal {
             String version =
                 initial || incident
                     ? text(control.path("payload"), "minimum_keyset_version")
-                    : increment(text(old, "keyset_version"));
+                    : integer(increment(text(old, "keyset_version")))
+                        .max(number(control.path("payload"), "minimum_keyset_version"))
+                        .toString();
             payload
                 .put("schema_version", 2)
                 .put("tenant_id", tenant.toString())
@@ -257,9 +313,20 @@ public final class MsgnetRenewal {
             if (initial) {
               payload.putArray("keys");
               payload.putArray("first_publications");
+              if (migrationSeed != null) {
+                payload.set("keys", migrationSeed.path("keys").deepCopy());
+                var proofs =
+                    (tools.jackson.databind.node.ArrayNode) payload.path("first_publications");
+                for (var key : payload.path("keys"))
+                  proofs
+                      .addObject()
+                      .put("kid", text(key, "kid"))
+                      .put("committed_version", version)
+                      .put("committed_at", now.toString());
+              }
             }
             String mode = initial ? "bootstrap" : "refresh";
-            boolean changed = initial || authorityChanged || incident;
+            boolean changed = initial || authorityChanged || controlChanged || incident;
             boolean restarted = false;
             boolean activated = false;
             if (!initial && now.isBefore(time(old, "issued_at"))) {
@@ -277,6 +344,14 @@ public final class MsgnetRenewal {
                 if (List.of("active", "next").contains(text(key, "state")))
                   ((ObjectNode) key).put("state", "revoked");
             }
+            boolean recovering =
+                !initial
+                    && PURPOSES.stream()
+                        .anyMatch(
+                            p -> {
+                              var key = active(payload, p);
+                              return key == null || !valid(key, now);
+                            });
             for (String purpose : PURPOSES) {
               if (incident) {
                 generate(
@@ -325,7 +400,8 @@ public final class MsgnetRenewal {
                       version);
                   if (!initial) restarted = true;
                 }
-              } else if (next != null
+              } else if (!recovering
+                  && next != null
                   && mature
                   && !now.isBefore(
                       time(active, "not_before")
@@ -369,6 +445,10 @@ public final class MsgnetRenewal {
             if (restarted) mode = "restart_recovery";
             else if (activated) mode = "activate";
             if (authorityChanged || incident) mode = "authority_transition";
+            if (migrationSeed != null) {
+              require(initial, "invalid_transition");
+              mode = "migration";
+            }
             payload.put("mode", mode);
             timeGuard.sample(databaseTime.get());
             archive(payload, now, limits);
@@ -447,16 +527,20 @@ public final class MsgnetRenewal {
                 new BigDecimal(version),
                 tenant,
                 realm);
+            audit("collab.msgnet.renewed", "none", java.util.Map.of());
             return null;
           });
     } catch (AurigaException e) {
       run(
           () -> {
+            var previousFailure = text(requiredState(), "failure_code");
             jdbc.update(
                 "UPDATE collab.msgnet_realm SET failure_code = ? WHERE tenant_id = ? AND realm = ?",
                 e.errorCode().code(),
                 tenant,
                 realm);
+            if (!e.errorCode().code().equals(previousFailure))
+              audit("collab.msgnet.renewal_failed", e.errorCode().code(), java.util.Map.of());
             return null;
           });
       throw e;
@@ -537,6 +621,15 @@ public final class MsgnetRenewal {
       var proof = find(proofs, "kid", text(key, "kid"));
       if (proof != null && !time(proof, "committed_at").isAfter(now)) retainedProofs.add(proof);
     }
+    var removed = object().putArray("removed");
+    for (var key : keys) if (find(retained, "kid", text(key, "kid")) == null) removed.add(key);
+    MsgnetPolicy.archive(
+        now,
+        before,
+        limits.path("archive_grace_seconds").asLong(),
+        removed,
+        object().putArray("tombstones"),
+        object().putArray("reappeared"));
     try {
       var digest = java.security.MessageDigest.getInstance("SHA-256");
       digest.update((byte) '[');
@@ -547,8 +640,8 @@ public final class MsgnetRenewal {
               rs -> {
                 if (comma[0]) digest.update((byte) ',');
                 var entry = object();
-                entry.set("key", NetworkJson.parse(rs.getString(1)));
-                entry.set("first_publication", NetworkJson.parse(rs.getString(2)));
+                entry.set("key", NetworkJson.parse(rs.getString(1), 1048576));
+                entry.set("first_publication", NetworkJson.parse(rs.getString(2), 1048576));
                 digest.update(canonical(entry).getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 comma[0] = true;
               },
@@ -571,7 +664,9 @@ public final class MsgnetRenewal {
           jdbc.query(
               "SELECT key_material, first_publication FROM collab.msgnet_key_history WHERE tenant_id = ? AND realm = ? AND kid = ?",
               (rs, n) ->
-                  List.of(NetworkJson.parse(rs.getString(1)), NetworkJson.parse(rs.getString(2))),
+                  List.of(
+                      NetworkJson.parse(rs.getString(1), 1048576),
+                      NetworkJson.parse(rs.getString(2), 1048576)),
               tenant,
               realm,
               text(key, "kid"));
@@ -604,7 +699,7 @@ public final class MsgnetRenewal {
   private List<JsonNode> historyProofs() {
     return jdbc.query(
         "SELECT first_publication FROM collab.msgnet_key_history WHERE tenant_id = ? AND realm = ?",
-        (rs, n) -> NetworkJson.parse(rs.getString(1)),
+        (rs, n) -> NetworkJson.parse(rs.getString(1), 1048576),
         tenant,
         realm);
   }
@@ -662,6 +757,7 @@ public final class MsgnetRenewal {
         run(
             () -> {
               var current = requiredState();
+              require(!current.path("paused").asBoolean(), "projection_pending");
               var publication = current.path("publication");
               var k = publication.path("keyset").path("payload");
               verifier.verify(
@@ -704,6 +800,15 @@ public final class MsgnetRenewal {
                       tenant,
                       realm);
                   var current = requiredState();
+                  require(!current.path("paused").asBoolean(), "projection_pending");
+                  var signedPayload = current.path("publication").path("keyset").path("payload");
+                  var rootPolicy = current.path("control").path("payload");
+                  require(
+                      signedPayload.path("generation").equals(rootPolicy.path("minimum_generation"))
+                          && number(signedPayload, "keyset_version")
+                                  .compareTo(number(rootPolicy, "minimum_keyset_version"))
+                              >= 0,
+                      "version_rollback");
                   timeGuard.sample(databaseTime.get());
                   verifier.verifyAuthority(
                       current.path("publication").path("authority"),
@@ -844,16 +949,19 @@ public final class MsgnetRenewal {
   private ObjectNode stored() {
     var rows =
         jdbc.query(
-            "SELECT root_control, runtime_authority, publication, announcement, paused, failure_code FROM collab.msgnet_realm WHERE tenant_id = ? AND realm = ?",
+            "SELECT root_control, runtime_authority, publication, announcement, paused, failure_code, transport_failure_code FROM collab.msgnet_realm WHERE tenant_id = ? AND realm = ?",
             (rs, n) -> {
               var state = object();
-              state.set("control", NetworkJson.parse(rs.getString(1)));
-              state.set("authority", NetworkJson.parse(rs.getString(2)));
+              state.set("control", NetworkJson.parse(rs.getString(1), 1048576));
+              state.set("authority", NetworkJson.parse(rs.getString(2), 1048576));
               if (rs.getString(3) != null)
                 state.set("publication", NetworkJson.parse(rs.getString(3), 1048576));
               if (rs.getString(4) != null)
-                state.set("announcement", NetworkJson.parse(rs.getString(4)));
-              state.put("paused", rs.getBoolean(5)).put("failure_code", rs.getString(6));
+                state.set("announcement", NetworkJson.parse(rs.getString(4), 1048576));
+              state
+                  .put("paused", rs.getBoolean(5))
+                  .put("failure_code", rs.getString(6))
+                  .put("transport_failure_code", rs.getString(7));
               return state;
             },
             tenant,
@@ -897,6 +1005,58 @@ public final class MsgnetRenewal {
         });
   }
 
+  void audit(String action, String failure, java.util.Map<String, Object> details) {
+    var state = requiredState();
+    var authority = state.path("authority").path("payload");
+    var entry =
+        auriga.common.audit.AuditEntry.builder(action)
+            .target("message_network", realm)
+            .actor(auriga.common.audit.AuditEntry.Actor.SYSTEM)
+            .detail("tenant_id", tenant.toString())
+            .detail("realm", realm)
+            .detail("authority_id", text(authority, "authority_id"))
+            .detail(
+                "review_due_at",
+                time(authority, "not_before").plusSeconds(365L * 86400).toString());
+    details.forEach(entry::detail);
+    if (!"none".equals(failure)) entry.failure(failure);
+    audit.record(entry.build());
+  }
+
+  void transportFailure(RuntimeException failure) {
+    run(
+        () -> {
+          lock();
+          String code =
+              failure == null
+                  ? "none"
+                  : failure instanceof AurigaException a
+                      ? a.errorCode().code()
+                      : "collab.msgnet_projection_pending";
+          String previous = text(requiredState(), "transport_failure_code");
+          jdbc.update(
+              "UPDATE collab.msgnet_realm SET transport_failure_code = ? WHERE tenant_id = ? AND realm = ?",
+              code,
+              tenant,
+              realm);
+          if (!code.equals(previous))
+            audit(
+                failure == null
+                    ? "collab.msgnet.transport_recovered"
+                    : "collab.msgnet.transport_failed",
+                code,
+                java.util.Map.of());
+          return null;
+        });
+  }
+
+  void requireCallerTenant() {
+    auriga.common.context.TenantContext.current()
+        .ifPresent(current -> require(tenant.equals(current), "scope_denied"));
+    auriga.common.security.AuthorizationRules.currentPrincipal()
+        .ifPresent(principal -> require(tenant.equals(principal.tenantId()), "scope_denied"));
+  }
+
   public String status() {
     return run(() -> status(requiredState()));
   }
@@ -915,6 +1075,8 @@ public final class MsgnetRenewal {
     var a = state.path("authority").path("payload");
     Instant due = time(a, "not_before").plusSeconds(365L * 86400);
     String failureCode = text(state, "failure_code");
+    if ("none".equals(failureCode) && !text(state, "transport_failure_code").isEmpty())
+      failureCode = text(state, "transport_failure_code");
     if (contains(
         state.path("control").path("payload").path("revoked_authority_ids"),
         text(a, "authority_id"))) failureCode = "collab.msgnet_authority_revoked";
@@ -937,7 +1099,7 @@ public final class MsgnetRenewal {
                   "state",
                   state.path("paused").asBoolean()
                       ? "paused"
-                      : timeGuard.clockError()
+                      : (timeGuard.clockError() || "collab.msgnet_clock_error".equals(failureCode))
                           ? "clock_error"
                           : "collab.msgnet_authority_revoked".equals(failureCode)
                               ? "authority_revoked"
@@ -964,10 +1126,20 @@ public final class MsgnetRenewal {
             tenant,
             realm);
     if (!bundles.isEmpty()) {
-      var bundle = NetworkJson.parse(bundles.getFirst());
+      var bundle = NetworkJson.parse(bundles.getFirst(), 1048576);
       var body = bundle.path("payload");
       projected = "retire_old".equals(text(body, "phase"));
       for (var reader : body.path("required_reader_ids")) {
+        var isolated =
+            jdbc.queryForList(
+                "SELECT isolation_record FROM collab.msgnet_control_target WHERE tenant_id = ? AND realm = ? AND identity_id = ? AND enforcement_confirmed = true",
+                String.class,
+                tenant,
+                realm,
+                reader.asString());
+        if (!isolated.isEmpty()
+            && "quarantined".equals(text(NetworkJson.parse(isolated.getFirst(), 1048576), "state")))
+          continue;
         var receipts =
             jdbc.queryForList(
                 "SELECT receipt FROM collab.msgnet_projection_receipt WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND bundle_version = ?",
@@ -980,7 +1152,7 @@ public final class MsgnetRenewal {
           projected = false;
           continue;
         }
-        var receipt = NetworkJson.parse(receipts.getFirst());
+        var receipt = NetworkJson.parse(receipts.getFirst(), 1048576);
         if (!List.of("loaded", "handshake_verified").contains(text(receipt, "phase"))
             || !text(receipt, "publication_digest")
                 .equals(MsgnetV2Verifier.digest(state.path("publication").path("keyset"))))
@@ -1018,7 +1190,7 @@ public final class MsgnetRenewal {
                 "state",
                 state.path("paused").asBoolean()
                     ? "paused"
-                    : timeGuard.clockError()
+                    : (timeGuard.clockError() || "collab.msgnet_clock_error".equals(failureCode))
                         ? "clock_error"
                         : "collab.msgnet_authority_revoked".equals(failureCode)
                             ? "authority_revoked"

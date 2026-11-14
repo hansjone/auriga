@@ -70,6 +70,7 @@ public final class NetworkKeyOperations {
               "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
               Object.class,
               tenant + ":network-keys:" + realm);
+          assertLegacyEnabled();
           Stored old = stored();
           if (expiredRecovery && old == null) throw RootKeyPublication.invalid();
           ObjectNode history = JsonMapper.builder().build().createObjectNode();
@@ -112,10 +113,20 @@ public final class NetworkKeyOperations {
         });
   }
 
+  private void assertLegacyEnabled() {
+    if (jdbc.queryForObject(
+            "SELECT count(*) FROM collab.msgnet_realm WHERE tenant_id = ? AND realm = ? AND legacy_disabled",
+            Integer.class,
+            tenant,
+            realm)
+        != 0) throw unavailable();
+  }
+
   /** Fixed endpoint and response adapters share the same complete, currently valid release. */
   public RootKeyPublication.Release current() {
     return run(
         () -> {
+          assertLegacyEnabled();
           Stored row = stored();
           if (row == null || row.version().compareTo(floor) < 0) throw unavailable();
           try {

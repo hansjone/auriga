@@ -187,4 +187,32 @@ class MsgnetPrivateKeyStorePostgresTest {
       assertArrayEquals(pair.getPrivate().getEncoded(), store(encryption).read(aad()));
     }
   }
+
+  @Test
+  void wholeRingRotationRecordsCompletionAndFencesAnOldWriter() {
+    var pair = KeyTestMaterial.pair();
+    String spki =
+        Base64.getUrlEncoder().withoutPadding().encodeToString(pair.getPublic().getEncoded());
+    try (var old = new MsgnetKeyEncryption("old", Map.of("old", oldKek));
+        var rolling = new MsgnetKeyEncryption("new", Map.of("old", oldKek, "new", newKek));
+        var completed = new MsgnetKeyEncryption("new", Map.of("new", newKek))) {
+      store(old).install(aad(), spki, pair.getPrivate().getEncoded());
+      assertThrows(IllegalArgumentException.class, () -> store(completed).checkRing());
+      assertTrue(store(rolling).rewrapAll().path("completed").asBoolean());
+      store(completed).checkRing();
+      assertArrayEquals(pair.getPrivate().getEncoded(), store(completed).read(aad()));
+      var other = KeyTestMaterial.pair();
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              store(old)
+                  .install(
+                      aad().put("kid", "stale-writer"),
+                      Base64.getUrlEncoder()
+                          .withoutPadding()
+                          .encodeToString(other.getPublic().getEncoded()),
+                      other.getPrivate().getEncoded()));
+      assertTrue(store(completed).rewrapAll().path("completed").asBoolean());
+    }
+  }
 }
