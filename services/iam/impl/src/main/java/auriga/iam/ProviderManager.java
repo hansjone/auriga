@@ -15,6 +15,27 @@ public final class ProviderManager {
   private final AuditLogger audit;
   private final Clock clock;
   private final String issuer;
+  private java.util.function.Consumer<String> uacDisable =
+      id -> {
+        throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+      };
+
+  void uacDisable(java.util.function.Consumer<String> callback) {
+    this.uacDisable = callback;
+  }
+
+  void delete(String id) {
+    store.tx(
+        () -> {
+          ObjectNode row = store.get("idp_provider", id, true);
+          IamError.require(row != null, "not_found", 404);
+          IamError.require(!row.path("builtin").asBoolean(), "builtin_provider", 409);
+          row.put("enabled", false);
+          store.save("idp_provider", row);
+          if ("uac".equals(row.path("connectorType").asString())) uacDisable.accept(id);
+          return null;
+        });
+  }
 
   public ProviderManager(
       IamStore store,
@@ -36,7 +57,12 @@ public final class ProviderManager {
         () -> {
           String type = input.path("connectorType").asString();
           IamError.require(!type.equals("emergency"), "builtin_provider", 409);
-          registry.validate(type, input.path("config"));
+          if (type.equals("uac")) {
+            IamError.validate(input.path("config").isObject() && input.path("config").isEmpty());
+            IamError.validate(
+                !input.has("enabled")
+                    || input.path("enabled").isBoolean() && !input.path("enabled").asBoolean());
+          } else registry.validate(type, input.path("config"));
           if (!registry.get(type).descriptor().path("multipleInstances").asBoolean(true))
             IamError.require(
                 store.all("idp_provider").stream()
@@ -60,7 +86,7 @@ public final class ProviderManager {
                       "builtin",
                       false,
                       "enabled",
-                      input.path("enabled").asBoolean(true),
+                      input.path("enabled").asBoolean(!type.equals("uac")),
                       "display",
                       input.path("display"),
                       "config",
@@ -97,6 +123,7 @@ public final class ProviderManager {
           IamError.require(row != null, "not_found", 404);
           IamError.require(!row.path("builtin").asBoolean(), "builtin_provider", 409);
           String type = row.path("connectorType").asString();
+          IamError.validate(!type.equals("uac") || !patch.has("enabled") && !patch.has("config"));
           if (patch.has("display")) row.set("display", patch.path("display"));
           if (patch.has("enabled")) row.put("enabled", patch.path("enabled").asBoolean());
           if (patch.has("admission")) {
@@ -182,6 +209,14 @@ public final class ProviderManager {
     return Json.read(
         secrets.decrypt(
             row.path("config").asString(),
+            "provider:" + TenantContext.require() + ":" + row.path("providerId").asString()));
+  }
+
+  void encryptConfig(ObjectNode row, JsonNode config) {
+    row.put(
+        "config",
+        secrets.encrypt(
+            config.toString(),
             "provider:" + TenantContext.require() + ":" + row.path("providerId").asString()));
   }
 

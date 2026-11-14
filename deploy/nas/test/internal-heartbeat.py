@@ -96,7 +96,7 @@ native = {
     'SCOPES': 'auriga.connect',
     'GRANTS': 'urn:ietf:params:oauth:grant-type:device_code,refresh_token',
     'PLATFORM': 'true',
-    'NATIVECONNECT': 'true',
+    'NATIVECONNECT': 'false',
 }
 check(
     {key: str(value) for key, value in platform_env.items()

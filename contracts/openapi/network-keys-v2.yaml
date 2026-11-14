@@ -356,6 +356,148 @@ paths:
         "503":
           description: 材料不可用或clock_error
       security: []
+  /api/collab/v2/network/transport/confirmation:
+    post:
+      operationId: getTransportConfirmation
+      tags: [NetworkRenewal]
+      summary: 读取精确运输阶段的全局确认台账
+      description: 只读查询，不写回执或解除隔离；内部 HTTPS/mTLS 与 JWT 双重认证，tenant/realm 从身份绑定。不存在返回404，尚未收齐仍返回完整逐目标证据。Cache-Control no-store。签名域 Auriga.NetworkTransportConfirmation.v2。
+      x-permission: collab.msgnet.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportConfirmationQuery
+      responses:
+        "200":
+          description: 一个一致性台账快照，签名回显随机挑战
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedTransportConfirmation
+        "403":
+          description: 身份或scope拒绝
+        "404":
+          description: 精确bundle不存在
+        "409":
+          description: 同版本摘要冲突
+        "503":
+          description: 台账或当前运行签发者不可用
+  /api/collab/v2/network/isolation/{target_id}:
+    get:
+      operationId: getNetworkIsolation
+      tags: [NetworkRenewal]
+      summary: getNetworkIsolation
+      description: 只读逐目标耐久隔离状态；故障或不存在保持隔离，不得写状态。 内部HTTPS/mTLS与JWT，scope和target从可信安装记录核对，Cache-Control no-store。
+      x-permission: collab.msgnet.read
+      parameters:
+        - name: target_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: 精确台账记录
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/IsolationRecord
+        "403":
+          description: 身份或scope拒绝
+        "404":
+          description: 无记录；不表示目标READY
+        "503":
+          description: 权威台账不可用
+  /api/collab/v2/network/controls/pending/{target_id}:
+    get:
+      operationId: getPendingNetworkControl
+      tags: [NetworkRenewal]
+      summary: getPendingNetworkControl
+      description: 只读该目标待确认的精确公有包；只返回最早未确认控制，精确回执后查询下一包。 内部HTTPS/mTLS与JWT，scope和target从可信安装记录核对，Cache-Control no-store。
+      x-permission: collab.msgnet.read
+      parameters:
+        - name: target_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: 精确台账记录
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/ControlPackage
+        "403":
+          description: 身份或scope拒绝
+        "404":
+          description: 无记录；不表示目标READY
+        "503":
+          description: 权威台账不可用
+  /api/collab/v2/network/transport/history/{digest}:
+    get:
+      operationId: getTransportPredecessor
+      tags: [NetworkRenewal]
+      summary: getTransportPredecessor
+      description: 只读完整历史运输证明；历史根控制只作验真，不覆盖最新控制。 内部HTTPS/mTLS与JWT，scope和target从可信安装记录核对，Cache-Control no-store。
+      x-permission: collab.msgnet.read
+      parameters:
+        - name: digest
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 71
+            maxLength: 71
+            pattern: "^sha256:[0-9a-f]{64}$"
+      responses:
+        "200":
+          description: 精确台账记录
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportPredecessor
+        "403":
+          description: 身份或scope拒绝
+        "404":
+          description: 无记录；不表示目标READY
+        "503":
+          description: 权威台账不可用
+  /api/collab/v2/network/transport/transitions/{authority_digest}:
+    get:
+      operationId: getTransportTransitionProof
+      tags: [NetworkRenewal]
+      summary: 读取跨授权的不可变根锚起点证明
+      description: 内部HTTPS/mTLS和JWT，安装域绑定，no-store。返回该授权最新代际起点的历史根签控制及完整前驱，不以历史控制覆盖最新控制。
+      x-permission: collab.msgnet.read
+      parameters:
+        - name: authority_digest
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 71
+            maxLength: 71
+            pattern: "^sha256:[0-9a-f]{64}$"
+      responses:
+        "200":
+          description: 根锚起点证明
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportTransitionProof
+        "403":
+          description: 身份或scope拒绝
+        "404":
+          description: 无根锚证明
+        "503":
+          description: 台账不可用
 components:
   securitySchemes:
     bearerAuth:
@@ -465,3 +607,21 @@ components:
       $ref: ../network/auto-renewal-v2.schema.json#/$defs/MigrationMaterialCommitment
     MigrationCommitmentMember:
       $ref: ../network/auto-renewal-v2.schema.json#/$defs/MigrationCommitmentMember
+    TransportTransition:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportTransition
+    TransportPredecessor:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportPredecessor
+    TransportReaderEvidence:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportReaderEvidence
+    TransportConfirmation:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportConfirmation
+    SignedTransportConfirmation:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/SignedTransportConfirmation
+    TransportConfirmationQuery:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportConfirmationQuery
+    NodeControlPin:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/NodeControlPin
+    NodeControlPins:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/NodeControlPins
+    TransportTransitionProof:
+      $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportTransitionProof

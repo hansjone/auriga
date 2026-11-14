@@ -12,7 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 /** Tenant-owned durable state. No reads of another service's schema. */
-public class OpsStore implements OpsSignals {
+public class OpsStore implements OpsSignals, auriga.ops.api.UacOpsAlerts {
   static final JsonMapper JSON = JsonMapper.builder().build();
   final JdbcTemplate jdbc;
   private final TransactionTemplate tx;
@@ -49,7 +49,8 @@ public class OpsStore implements OpsSignals {
                     "instance_failed",
                     "upstream_failed",
                     "credential_expiring",
-                    "disk_low")
+                    "disk_low",
+                    "iam_uac")
                 .contains(source)
             && subject != null
             && !subject.isBlank()
@@ -130,6 +131,54 @@ public class OpsStore implements OpsSignals {
                         UuidV7.next(),
                         TenantContext.PLATFORM_TENANT,
                         tenant)));
+  }
+
+  @Override
+  public auriga.ops.api.UacOpsAlerts.Page readUac(
+      java.time.Instant from, java.time.Instant to, UUID provider, int limit) {
+    var principal =
+        auriga.common.security.AuthorizationRules.currentPrincipal()
+            .orElseThrow(
+                () ->
+                    new auriga.common.error.AurigaException(
+                        auriga.common.error.CommonErrors.UNAUTHENTICATED));
+    if (!principal.tenantId().equals(tenant())
+        || !principal.isAdminContext()
+        || !principal.hasPermission("ops.alerts.read"))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+    OpsError.require(
+        from != null
+            && to != null
+            && from.isBefore(to)
+            && java.time.Duration.between(from, to).compareTo(java.time.Duration.ofDays(1)) <= 0
+            && limit >= 1
+            && limit <= 1000);
+    return transaction(
+        () -> {
+          var rows =
+              jdbc.query(
+                  "SELECT id,severity,first_seen,last_seen,resolved_at FROM ops.alert WHERE tenant_id=? AND source='iam_uac' AND subject=? AND first_seen<? AND last_seen>=? ORDER BY first_seen,id LIMIT ?",
+                  (rs, i) -> {
+                    var n = JSON.createObjectNode();
+                    n.put("id", rs.getString("id"));
+                    n.put("providerId", provider.toString());
+                    n.put("source", "iam_uac");
+                    n.put("severity", rs.getString("severity"));
+                    n.put("firstSeen", rs.getTimestamp("first_seen").toInstant().toString());
+                    n.put("lastSeen", rs.getTimestamp("last_seen").toInstant().toString());
+                    var resolved = rs.getTimestamp("resolved_at");
+                    if (resolved == null) n.putNull("resolvedAt");
+                    else n.put("resolvedAt", resolved.toInstant().toString());
+                    return n.toString();
+                  },
+                  tenant(),
+                  provider.toString(),
+                  java.sql.Timestamp.from(to),
+                  java.sql.Timestamp.from(from),
+                  limit + 1);
+          return new auriga.ops.api.UacOpsAlerts.Page(
+              List.copyOf(rows.subList(0, Math.min(rows.size(), limit))), rows.size() > limit);
+        });
   }
 
   public java.util.List<UUID> tenants() {

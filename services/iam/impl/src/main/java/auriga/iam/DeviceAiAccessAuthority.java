@@ -62,6 +62,7 @@ public final class DeviceAiAccessAuthority {
               .isActualTransactionActive()
           || org.springframework.transaction.support.TransactionSynchronizationManager
               .isSynchronizationActive()) throw new AurigaException(CommonErrors.UNAVAILABLE);
+      if (devices.standard(device)) return null;
       if (devices.credential(tenant, account, device) == null) return null;
       // credential owns and releases its IAM locks before the org call.
       GetEffectivePermissionsResponse effective;
