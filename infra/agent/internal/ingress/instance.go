@@ -7,6 +7,7 @@ import (
 
 // Instance describes a local instance for ingress routing.
 type Instance struct {
+	Shared   bool // Set by authoritative shared runtime registration.
 	ID       string
 	Upstream *url.URL // HTTP base for /i/ reverse proxy
 	RootDir  string   // filesystem root for /files/

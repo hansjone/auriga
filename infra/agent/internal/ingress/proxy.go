@@ -18,7 +18,7 @@ func stripAndForwardIdentity(req *http.Request, edgeIdentity string) {
 	// Also strip uncommon casings that Go's Header map may not normalize if set oddly.
 	for k := range req.Header {
 		if strings.EqualFold(k, identityHeader) {
-			req.Header.Del(k)
+			delete(req.Header, k)
 		}
 	}
 	if edgeIdentity != "" {
@@ -32,6 +32,9 @@ func (s *Server) newInstanceProxy(inst *Instance) *httputil.ReverseProxy {
 			pr.SetURL(inst.Upstream)
 			pr.Out.Host = inst.Upstream.Host
 			fwd := SelectForwardIdentity(pr.In.Header.Values(identityHeader), s.cfg.IdentityKeys, s.cfg.Now, inst.ID)
+			if inst.Shared {
+				fwd = pr.In.Header.Get(identityHeader)
+			}
 			stripAndForwardIdentity(pr.Out, fwd)
 		},
 		Transport: s.transport,
@@ -44,7 +47,7 @@ func (s *Server) newInstanceProxy(inst *Instance) *httputil.ReverseProxy {
 
 // serveInstanceProxy handles /i/<id>/...
 func (s *Server) serveInstanceProxy(w http.ResponseWriter, r *http.Request, instanceID, rest string) {
-	if len(s.cfg.IdentityKeys) == 0 {
+	if len(s.cfg.IdentityKeys) == 0 && s.cfg.Shared == nil {
 		writeProblem(w, http.StatusServiceUnavailable, CodeUnauthorized, "Unavailable", "identity verification keys required")
 		return
 	}
@@ -53,12 +56,31 @@ func (s *Server) serveInstanceProxy(w http.ResponseWriter, r *http.Request, inst
 		writeProblem(w, http.StatusNotFound, CodeInstanceNotFound, "Not Found", "instance not found")
 		return
 	}
+	canonical := strings.TrimPrefix(r.URL.EscapedPath(), "/i/"+instanceID)
+	if canonical == "" {
+		canonical = "/"
+	}
+	if inst.Shared {
+		checked, cleanup, err := s.sharedRequest(r, instanceID, canonical)
+		if err != nil {
+			status := 403
+			code := CodeUnauthorized
+			if err.Error() == "common.unavailable" {
+				status = 503
+				code = "common.unavailable"
+			}
+			writeProblem(w, status, code, http.StatusText(status), "shared identity rejected")
+			return
+		}
+		defer cleanup()
+		r = checked
+	}
 	// Rewrite path to what the instance sees (strip /i/<id>).
 	r.URL.Path = "/" + strings.TrimPrefix(rest, "/")
 	if r.URL.Path == "/" && rest == "" {
 		r.URL.Path = "/"
 	}
-	r.URL.RawPath = ""
+	r.URL.RawPath = canonical
 	s.newInstanceProxy(inst).ServeHTTP(w, r)
 }
 
