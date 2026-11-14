@@ -53,6 +53,8 @@ func RunCLI(args []string, out, logs io.Writer) error {
 		return runAgent(args[1:], logs)
 	case "recover-runtime":
 		return recoverRuntime(args[1:], out, logs)
+	case "msgnet-pin":
+		return msgnetPublicPin(args[1:], out, logs)
 	default:
 		return fmt.Errorf("unknown command %q (want join|run|recover-runtime|--version)", args[0])
 	}

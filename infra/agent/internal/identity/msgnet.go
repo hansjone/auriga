@@ -3,6 +3,7 @@ package identity
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"fmt"
 	"os"
@@ -10,6 +11,16 @@ import (
 )
 
 const MsgnetConfirmationKeyFile = "msgnet-confirmation.pk8"
+
+// MsgnetIdentityDir prevents an independently enrolled replacement ID from
+// silently reusing the compromised identity's confirmation private key.
+func MsgnetIdentityDir(agentDir, identityID string) (string, error) {
+	if !filepath.IsAbs(agentDir) || filepath.Clean(agentDir) != agentDir || identityID == "" || len(identityID) > 128 {
+		return "", fmt.Errorf("invalid confirmation identity directory")
+	}
+	digest := sha256.Sum256([]byte(identityID))
+	return filepath.Join(agentDir, "msgnet-identities", fmt.Sprintf("%x", digest)), nil
+}
 
 // MsgnetConfirmationKey is independent of native node.key (ECDSA) and sealing
 // credentials. Its public SPKI must be enrolled by D in NodeControlPins. Merely

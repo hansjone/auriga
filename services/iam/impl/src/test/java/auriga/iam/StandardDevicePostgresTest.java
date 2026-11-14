@@ -694,7 +694,8 @@ class StandardDevicePostgresTest {
               h.oauth.deviceAuthority(),
               mock(auriga.common.audit.AuditLogger.class),
               h.f.time,
-              Set.of("gateway-example"));
+              Set.of("gateway-example"),
+              (tenant, realm, target) -> true);
       String raw = response.path("access_token").asString();
       var node = h.f.call(() -> network.register(raw));
       var ticket = h.f.call(() -> network.prepare(raw, node.node(), "gateway-example"));

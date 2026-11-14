@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	trust "github.com/hansjone/auriga/infra/edge/pkg/msgnet"
 	api "github.com/hansjone/auriga/infra/gen/msgnetapi"
 	"math/big"
 	"os"
@@ -236,6 +237,11 @@ func TestWrongScopeSignatureAndJournalTamperingReject(t *testing.T) {
 
 func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 	o, root, b := fixture(t)
+	var schemaErr error
+	o.Schemas, schemaErr = trust.LoadSchemas("../../../../contracts/network/auto-renewal-v2.schema.json")
+	if schemaErr != nil {
+		t.Fatal(schemaErr)
+	}
 	runtimePub, runtimePrivate, e := ed25519.GenerateKey(rand.Reader)
 	if e != nil {
 		t.Fatal(e)
@@ -251,6 +257,20 @@ func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 	p.Control.RootAuth = signature(t, root, o.RootKid, "Auriga.NetworkRootControl.v2", p.Control.Payload)
 	raw, _ = Bytes(p.Control)
 	p.ControlDigest = Digest(raw)
+	history := map[string]api.TransportPredecessor{}
+	source := &testTransportSource{history: history}
+	source.confirm = func(q api.TransportConfirmationQuery) (api.SignedTransportConfirmation, error) {
+		previous, ok := history[q.BundleDigest]
+		if !ok {
+			return api.SignedTransportConfirmation{}, errors.New("no committed bundle")
+		}
+		bp := previous.Bundle.Payload
+		digest := Digest(nil)
+		selector := api.LocalProjectionSelector{TenantId: o.Tenant, Realm: o.Realm, InstallationId: scope.IdentityId, Component: "edge", Nonce: p.Challenge, Generation: bp.Generation, KeysetVersion: "1", PublicationDigest: digest, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, MaterialRevision: "1", ManifestDigest: digest}
+		proof := api.TransportConfirmation{TenantId: o.Tenant, Realm: o.Realm, AuthorityId: a.AuthorityId, AuthorityDigest: bp.AuthorityDigest, ControlRevision: p.Control.Payload.ControlRevision, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, Phase: bp.Phase, RequiredReaderIds: bp.RequiredReaderIds, Readers: []api.TransportReaderEvidence{{ReaderId: bp.RequiredReaderIds[0], IdentityId: scope.IdentityId, Selector: selector, Phase: "handshake_verified"}}, Challenge: q.Challenge, IssuedAt: o.Now().Format(time.RFC3339)}
+		return api.SignedTransportConfirmation{Payload: proof, RuntimeAuth: signature(t, runtimePrivate, a.RuntimeKid, "Auriga.NetworkTransportConfirmation.v2", proof)}, nil
+	}
+	o.TransportSource = source
 	i, e := New(o)
 	if e != nil {
 		t.Fatal(e)
@@ -262,7 +282,7 @@ func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "synthetic-ca"}, NotBefore: o.Now().Add(-time.Minute), NotAfter: o.Now().AddDate(10, 0, 0), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "synthetic-ca"}, NotBefore: o.Now().Add(-time.Minute), NotAfter: o.Now().Add(-time.Minute).AddDate(10, 0, 0), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
 	der, e := x509.CreateCertificate(rand.Reader, ca, ca, caPub, caKey)
 	if e != nil {
 		t.Fatal(e)
@@ -270,6 +290,7 @@ func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 	payload := api.TransportTrustBundle{SchemaVersion: 2, TenantId: o.Tenant, Realm: o.Realm, AuthorityId: a.AuthorityId, AuthorityDigest: digest, ControlRevision: "1", Generation: "1", BundleVersion: "1", IssuedAt: o.Now().Format(time.RFC3339), Phase: "dual_trust", Cas: []api.TransportCa{{CaId: "ca", Role: "server", CertificateDer: base64.RawURLEncoding.EncodeToString(der), NotBefore: ca.NotBefore.Format(time.RFC3339), NotAfter: ca.NotAfter.Format(time.RFC3339)}}, Scope: []api.TransportScope{scope}, RequiredReaderIds: []string{o.Pin.IdentityId}, PreviousBundleDigest: "sha256:" + fmt.Sprintf("%064d", 0)}
 	bundle := api.SignedTransportTrustBundle{Payload: payload, RuntimeAuth: signature(t, runtimePrivate, a.RuntimeKid, "Auriga.NetworkTransportTrustBundle.v2", payload)}
 	raw, _ = Bytes(bundle)
+	history[Digest(raw)] = api.TransportPredecessor{Bundle: bundle, Authority: authority, Control: p.Control}
 	if e = i.InstallTransport(context.Background(), raw); e != nil {
 		t.Fatal(e)
 	}
@@ -277,6 +298,7 @@ func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 		t.Helper()
 		signed := api.SignedTransportTrustBundle{Payload: next, RuntimeAuth: signature(t, runtimePrivate, a.RuntimeKid, "Auriga.NetworkTransportTrustBundle.v2", next)}
 		wire, _ := Bytes(signed)
+		history[Digest(wire)] = api.TransportPredecessor{Bundle: signed, Authority: authority, Control: p.Control}
 		if err := i.InstallTransport(context.Background(), wire); (err == nil) != accept {
 			t.Fatalf("phase %s version %s, accepted=%v, error=%v", next.Phase, next.BundleVersion, accept, err)
 		}
@@ -342,6 +364,25 @@ func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 	}
 }
 
+type testTransportSource struct {
+	history map[string]api.TransportPredecessor
+	confirm func(api.TransportConfirmationQuery) (api.SignedTransportConfirmation, error)
+}
+
+func (s *testTransportSource) Predecessor(_ context.Context, d string) (api.TransportPredecessor, error) {
+	v, ok := s.history[d]
+	if !ok {
+		return v, errors.New("no committed predecessor")
+	}
+	return v, nil
+}
+func (s *testTransportSource) Transition(context.Context, string) (api.TransportTransitionProof, error) {
+	return api.TransportTransitionProof{}, errors.New("no root transition")
+}
+func (s *testTransportSource) Confirmation(_ context.Context, q api.TransportConfirmationQuery) (api.SignedTransportConfirmation, error) {
+	return s.confirm(q)
+}
+
 func TestReplacementIdentityRequiresNewerRootControl(t *testing.T) {
 	o, root, _ := fixture(t)
 	first, e := New(o)
@@ -371,6 +412,36 @@ func TestReplacementIdentityRequiresNewerRootControl(t *testing.T) {
 	}
 	if _, e = New(o); e != nil {
 		t.Fatal("replacement journal not restartable:", e)
+	}
+}
+
+func TestReplacementCannotReuseTheOldKeyOrChangeAKeyUnderTheOldID(t *testing.T) {
+	o, root, b := fixture(t)
+	b.fail = true
+	first, e := New(o)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = install(t, first, control(t, o, root, "3", []string{})); e == nil {
+		t.Fatal("failed backend issued receipt")
+	}
+	b.fail = false
+	oldID := o.Pin.IdentityId
+	o.Pin.IdentityId = "replacement-node"
+	o.Pin.IdentityRevision = "2"
+	if _, e = New(o); e == nil {
+		t.Fatal("replacement reused the compromised identity key")
+	}
+	o.Pin.IdentityId = oldID
+	o.Pin.IdentityRevision = "1"
+	pub, key, e := ed25519.GenerateKey(rand.Reader)
+	if e != nil {
+		t.Fatal(e)
+	}
+	o.Pin.SigningSpki = encoded(t, pub)
+	o.SigningKey = key
+	if _, e = New(o); e == nil {
+		t.Fatal("old identity changed key after an interrupted receipt")
 	}
 }
 

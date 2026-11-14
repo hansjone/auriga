@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	trust "github.com/hansjone/auriga/infra/edge/pkg/msgnet"
 	api "github.com/hansjone/auriga/infra/gen/msgnetapi"
 )
 
@@ -34,15 +35,19 @@ type Options struct {
 	SigningKey                                ed25519.PrivateKey
 	Backend                                   Backend
 	ResolveAuthority                          func(context.Context, string, string) (api.SignedRuntimeAuthority, error)
+	Schemas                                   *trust.Schemas
+	TransportSource                           trust.TransportSource
 	Now                                       func() time.Time
 }
 type state struct {
 	IdentityId       string                          `json:"identity_id"`
 	IdentityRevision string                          `json:"identity_revision"`
 	NodeId           string                          `json:"node_id"`
+	SigningSPKI      string                          `json:"signing_spki,omitempty"`
 	Package          api.ControlPackage              `json:"package"`
 	Receipt          *api.InstallationReceipt        `json:"receipt,omitempty"`
 	Bundle           *api.SignedTransportTrustBundle `json:"bundle,omitempty"`
+	Transport        trust.TransportState            `json:"transport"`
 }
 type Installer struct {
 	options     Options
@@ -123,8 +128,13 @@ func New(o Options) (*Installer, error) {
 			return nil, fmt.Errorf("receipt identity does not match journal")
 		}
 		if saved.IdentityId != o.Pin.IdentityId {
+			if saved.SigningSPKI != "" && saved.SigningSPKI == o.Pin.SigningSpki {
+				return nil, fmt.Errorf("replacement identity reuses the previous confirmation key")
+			}
 			installer.replacement = true
 			saved.Receipt = nil
+		} else if saved.SigningSPKI != "" && saved.SigningSPKI != o.Pin.SigningSpki {
+			return nil, fmt.Errorf("node confirmation key changed without replacement identity")
 		}
 		if saved.Receipt != nil {
 			if e = installer.receipt(*saved.Receipt, saved.Package); e != nil {
@@ -286,10 +296,12 @@ func (i *Installer) InstallControl(ctx context.Context, raw []byte) ([]byte, err
 		}
 		return Bytes(i.state.Receipt)
 	}
-	next := &state{Package: p, IdentityId: i.options.Pin.IdentityId, IdentityRevision: i.options.Pin.IdentityRevision, NodeId: i.options.NodeId}
+	next := &state{Package: p, IdentityId: i.options.Pin.IdentityId, IdentityRevision: i.options.Pin.IdentityRevision, NodeId: i.options.NodeId, SigningSPKI: i.options.Pin.SigningSpki}
 	if i.state != nil {
 		next.Bundle = i.state.Bundle
+		next.Transport = i.state.Transport
 	}
+	next.Transport.Control = &p.Control
 	if e := i.persist(next); e != nil {
 		return nil, e
 	}
@@ -298,8 +310,8 @@ func (i *Installer) InstallControl(ctx context.Context, raw []byte) ([]byte, err
 	if e := i.options.Backend.ApplyControl(ctx, p); e != nil {
 		return nil, e
 	}
-	if slices.Contains(p.Control.Payload.RevokedInstallationIds, i.options.Pin.IdentityId) {
-		return nil, fmt.Errorf("installation revoked; replacement identity required")
+	if e := trust.VerifyNodeBinding(i.options.Pin, trust.NodeBinding{AuthenticatedNodeID: i.options.NodeId, TargetID: p.TargetId, IdentityID: i.options.Pin.IdentityId, IdentityRevision: i.options.Pin.IdentityRevision, Compromised: slices.Contains(p.Control.Payload.RevokedInstallationIds, i.options.Pin.IdentityId), IndependentlyEnrolled: true}); e != nil {
+		return nil, e
 	}
 	receipt := api.InstallationReceipt{PackageId: p.PackageId, TenantId: p.TenantId, Realm: p.Realm, TargetId: p.TargetId, IdentityId: i.options.Pin.IdentityId, Challenge: p.Challenge, ControlRevision: p.Control.Payload.ControlRevision, ControlDigest: p.ControlDigest, Result: "installed", PersistedAt: i.options.Now().UTC().Truncate(time.Second).Format(time.RFC3339)}
 	encoded, e := Bytes(receipt)
