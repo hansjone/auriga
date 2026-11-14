@@ -548,3 +548,17 @@ func atomicWrite(path string, data []byte, private bool) error {
 	}
 	return restrictFile(path)
 }
+
+// WritePrivateSnapshot atomically writes a caller-owned private state file and
+// completes the existing platform durability barrier before returning success.
+func WritePrivateSnapshot(path string, data []byte) error {
+	if err := atomicWrite(path, data, true); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return syncTrustGuard(f, filepath.Dir(path))
+}
