@@ -35,4 +35,13 @@ public class StandardDeviceController {
     response.setHeader("Pragma", "no-cache");
     return requests.call(request, () -> oauth.standardDevices().identity(bearer(request)));
   }
+
+  @GetMapping("/api/iam/v1/me/device-profile")
+  @AuthenticatedOnly
+  public ObjectNode profile(HttpServletRequest request, HttpServletResponse response) {
+    IamError.validate(request.getParameterMap().isEmpty());
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Pragma", "no-cache");
+    return requests.call(request, () -> oauth.standardDevices().profile(bearer(request)));
+  }
 }
