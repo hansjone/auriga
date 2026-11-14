@@ -136,6 +136,14 @@ class IamFlowTest {
                                 .startsWith(TenantContext.require() + ":" + i.getArgument(0) + ":"))
                     .map(e -> e.getValue().deepCopy())
                     .toList());
+    when(store.matching(anyString(), anyString(), anyString()))
+        .thenAnswer(
+            i ->
+                store.all(i.getArgument(0)).stream()
+                    .filter(
+                        row ->
+                            i.getArgument(2).equals(row.path((String) i.getArgument(1)).asString()))
+                    .toList());
     doAnswer(
             i -> {
               ObjectNode n = i.getArgument(1);

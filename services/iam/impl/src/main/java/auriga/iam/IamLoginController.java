@@ -25,6 +25,12 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   private final SessionManager sessions;
   private final QrChallenges qr;
   private final Secrets secrets;
+  private UacNavigation uacNavigation;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  void uacNavigation(UacNavigation navigation) {
+    this.uacNavigation = navigation;
+  }
 
   public IamLoginController(
       LoginManager login,
@@ -70,6 +76,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   }
 
   private String primaryStep(ObjectNode provider) {
+    if (provider.path("connectorType").asString().equals("uac")) return "qr";
     if (!provider.path("connectorType").asString().equals("team-account")) return "form";
     try {
       ObjectNode cfg =
@@ -133,12 +140,14 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
 
   @GetMapping("/login/transactions/{id}")
   @PublicEndpoint
-  public ObjectNode get(@PathVariable String id, HttpServletRequest request) {
+  public ObjectNode get(
+      @PathVariable String id, HttpServletRequest request, HttpServletResponse response) {
     return requests.call(
         request,
         () ->
             store.tx(
                 () -> {
+                  requests.correlate(request, response, id, null);
                   login.checkEntry(
                       id,
                       requests.binding(request),
@@ -146,6 +155,10 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
                       requests.origin(request));
                   return login.get(id, requests.binding(request)).transaction();
                 }));
+  }
+
+  public ObjectNode get(String id, HttpServletRequest request) {
+    return get(id, request, null);
   }
 
   @DeleteMapping("/login/transactions/{id}")
@@ -159,6 +172,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
             store.tx(
                 () -> {
                   flow(id, request, true);
+                  requests.correlate(request, response, id, null);
                   login.cancel(id, requests.binding(request));
                   requests.setCookie(
                       request, response, requests.transactionCookie(request), "", true, 0);
@@ -176,6 +190,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
     return requests.call(
         request,
         () -> {
+          requests.correlate(request, response, id, null);
           var result =
               login.advanceResponse(
                   id,
@@ -278,6 +293,14 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
             sessions.response(
                 () -> {
                   ObjectNode session = requests.browserSession(request, sessions, true);
+                  if (uacNavigation != null && requests.host(request).audience().equals("portal"))
+                    requests.setCookie(
+                        request,
+                        response,
+                        UacNavigation.SUPPRESSION_COOKIE,
+                        uacNavigation.suppress(requests.origin(request)),
+                        true,
+                        -1);
                   sessions.revokeOne(session, "logout");
                   String binding = requests.binding(request);
                   if (binding != null)

@@ -59,7 +59,7 @@ class EmergencyPolicyTests(unittest.TestCase):
                                   'environment': {'AURIGA_DEPLOYMENT_ACCESS_FILE': '/etc/auriga/access.json'}})
         native = {'ID': 'auriga-dsh', 'TENANT': access['tenantId'], 'SECRETHASH': '', 'REDIRECTURIS': '',
                   'SCOPES': 'auriga.connect', 'GRANTS': 'urn:ietf:params:oauth:grant-type:device_code,refresh_token',
-                  'PLATFORM': 'true', 'NATIVECONNECT': 'true'}
+                  'PLATFORM': 'true', 'NATIVECONNECT': 'false'}
         self.environment = {'AURIGA_IAM_CLIENTS_0_' + key: value for key, value in native.items()}
         self.environment.update({
             'AURIGA_LINKS_TRUSTED_PROXIES': '192.0.2.138', 'SPRING_PROFILES_ACTIVE': 'combined',
