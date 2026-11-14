@@ -1,296 +1,149 @@
-import { ownerRequest } from './owner-request.js';
-import { test } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, rename, rm } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { readFile, rename, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import {
-  persistNativeAttempt,
-  abandonNativeAttempt,
-} from '../src/local/runtime.js';
-import { LoginJar } from '../src/local/platform.js';
+import { setImmediate as nextTurn } from 'node:timers/promises';
+import { shellRuntimePeer } from './shell-runtime-peer.js';
+import { teamRuntimePeer } from './team-runtime-peer.js';
 import { createVault } from '../src/local/vault.js';
-import { createTeam } from '../src/local/team.js';
-import { peer } from './team-http-peer.js';
-import { runtimePeer } from './local-runtime-peer.js';
+import { createConnectRuntime } from '../src/local/runtime.js';
 
-// These tests enter at the already-verified device commit boundary. Random
-// opaque records are not JWTs; no password/TOTP/JWKS/IAM success is simulated.
-const credential = () => ({
-  accessToken: randomBytes(24).toString('base64url'),
-  refreshToken: randomBytes(24).toString('base64url'),
-  claims: { tid: 'fixture-tenant', sub: 'alice', did: randomUUID() },
-});
-const attempt = () => ({
-  version: 1,
-  controller: new AbortController(),
-  jar: new LoginJar(),
-  verifier: 'ephemeral-proof',
-  device: { code: 'ephemeral-device-code' },
-});
-async function state() {
-  const directory = await mkdtemp(join(tmpdir(), 'auriga-native-commit-')),
-    vault = await createVault(directory);
-  return {
-    directory,
-    vault,
-    close: async () => {
-      vault.close();
-      await rm(directory, { recursive: true, force: true });
-    },
+async function legacy(directory) {
+  const credential = {
+    accessToken: randomBytes(32).toString('base64url'),
+    refreshToken: randomBytes(32).toString('base64url'),
   };
-}
-
-test('durable device survives transient Team start failure; fresh connection attempt resumes its same record', async () => {
-  const local = await state(),
-    remote = await peer(),
-    row = attempt(),
-    saved = credential(),
-    tools = new Set();
-  let backingActive = true,
-    compensations = 0,
-    first,
-    retry;
-  const options = {
-    platform: remote.platform,
-    vault: local.vault,
-    getAccess: async () => {
-      if (!backingActive || !local.vault.snapshot().credential)
-        throw new Error('backing unavailable');
-      return local.vault.snapshot().credential.accessToken;
-    },
-    assertActive() {},
-    label: 'Handshake probe',
-    ctx: {
-      tools: {
-        register(tool) {
-          tools.add(tool.name);
-          return () => tools.delete(tool.name);
-        },
-      },
-    },
-  };
-  try {
-    await persistNativeAttempt(row, () =>
-      local.vault.update((s) => {
-        s.credential = saved;
-      }),
-    );
-    remote.state.available = false;
-    first = createTeam(options);
-    await assert.rejects(first.start(), (error) => error.status === 503);
-    first.close();
-    assert.equal(tools.size, 0);
-    await abandonNativeAttempt(row, async () => {
-      compensations++;
-      backingActive = false;
-    });
-    assert.equal(compensations, 0);
-    assert.equal(backingActive, true);
-    assert.deepEqual(local.vault.snapshot().credential, saved);
-    remote.state.available = true;
-    retry = createTeam(options);
-    await retry.start();
-    assert.equal(tools.size, 4);
-    assert.deepEqual(local.vault.snapshot().credential, saved);
-  } finally {
-    first?.close();
-    retry?.close();
-    await remote.close();
-    await local.close();
-  }
-});
-
-test('actual failed vault rename compensates once and never treats an uncommitted record as resumable', async () => {
-  const local = await state(),
-    row = attempt();
-  let compensations = 0;
-  try {
-    await local.vault.update(() => {});
-    await rename(
-      join(local.directory, 'connect.json'),
-      join(local.directory, 'preserved.json'),
-    );
-    await mkdir(join(local.directory, 'connect.json'));
-    await assert.rejects(
-      persistNativeAttempt(row, () =>
-        local.vault.update((s) => {
-          s.credential = credential();
-        }),
-      ),
-    );
-    const cleanup = () =>
-      abandonNativeAttempt(row, async () => {
-        compensations++;
-      });
-    await Promise.all([cleanup(), cleanup()]);
-    assert.equal(compensations, 1);
-    assert.equal(await row.commit, false);
-    assert.equal(local.vault.snapshot().credential, null);
-    assert.equal(row.verifier, undefined);
-  } finally {
-    await local.close();
-  }
-});
-
-test('cancellation before commit admission compensates; the aborted proof cannot enter the vault', async () => {
-  const local = await state(),
-    row = attempt();
-  let compensations = 0;
-  try {
-    const write = persistNativeAttempt(row, () =>
-      local.vault.update((s) => {
-        row.controller.signal.throwIfAborted();
-        s.credential = credential();
-      }),
-    );
-    const rejected = assert.rejects(write);
-    await abandonNativeAttempt(row, async () => {
-      compensations++;
-    });
-    await rejected;
-    assert.equal(compensations, 1);
-    assert.equal(await row.commit, false);
-    assert.equal(local.vault.snapshot().credential, null);
-  } finally {
-    await local.close();
-  }
-});
-
-test('cancellation while asynchronous vault commit is pending waits; a later successful commit preserves its backing', async () => {
-  const local = await state(),
-    row = attempt(),
-    saved = credential(),
-    entered = Promise.withResolvers(),
-    release = Promise.withResolvers();
-  let compensations = 0,
-    cleaned = false;
-  try {
-    const write = persistNativeAttempt(row, () =>
-      local.vault.update(async (s) => {
-        row.controller.signal.throwIfAborted();
-        s.credential = saved;
-        entered.resolve();
-        await release.promise;
-      }),
-    );
-    await entered.promise;
-    const cleanup = abandonNativeAttempt(row, async () => {
-      compensations++;
-    }).then(() => {
-      cleaned = true;
-    });
-    await Promise.resolve();
-    assert.equal(cleaned, false);
-    assert.equal(compensations, 0);
-    release.resolve();
-    await Promise.all([write, cleanup]);
-    assert.equal(await row.commit, true);
-    assert.equal(compensations, 0);
-    assert.deepEqual(local.vault.snapshot().credential, saved);
-    assert.equal(row.controller.signal.aborted, true);
-    const reopened = await createVault(local.directory);
-    assert.deepEqual(reopened.snapshot().credential, saved);
-    reopened.close();
-  } finally {
-    release.resolve();
-    await local.close();
-  }
-});
-
-test('an in-flight commit that eventually fails is compensated after settlement, not before', async () => {
-  const local = await state(),
-    row = attempt(),
-    entered = Promise.withResolvers(),
-    release = Promise.withResolvers();
-  let compensations = 0;
-  try {
-    const write = persistNativeAttempt(row, () =>
-      local.vault.update(async () => {
-        entered.resolve();
-        await release.promise;
-        throw new Error('commit rejected');
-      }),
-    );
-    const rejected = assert.rejects(write);
-    await entered.promise;
-    const cleanup = abandonNativeAttempt(row, async () => {
-      compensations++;
-    });
-    await Promise.resolve();
-    assert.equal(compensations, 0);
-    release.resolve();
-    await Promise.all([rejected, cleanup]);
-    assert.equal(compensations, 1);
-    assert.equal(await row.commit, false);
-    assert.equal(local.vault.snapshot().credential, null);
-  } finally {
-    release.resolve();
-    await local.close();
-  }
-});
-
-test('explicit runtime logout queues behind an in-flight real vault write and tombstones it before remote retry', async (t) => {
-  const entered = Promise.withResolvers(),
-    release = Promise.withResolvers(),
-    row = attempt();
-  let runtime,
-    compensations = 0;
-  const server = createServer((req, res) => {
-    assert.equal(req.url, '/oauth2/revoke');
-    res.writeHead(503);
-    res.end();
+  const vault = await createVault(directory);
+  await vault.update((s) => {
+    s.credential = credential;
+    s.endpoint = 'old-endpoint';
+    s.threads.private = { local: true };
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const origin = 'http://127.0.0.1:' + server.address().port;
-  try {
-    const fixture = await runtimePeer(t, {
-      config: {
-        platformOrigin: origin,
-        issuer: origin,
-        clientId: 'native-test',
-        providerId: 'team',
-        allowLocalHttp: true,
-      },
-      revokeHttp: true,
-    });
-    runtime = fixture.runtime;
-    const { request, credential: saved } = fixture;
-    const write = persistNativeAttempt(row, () =>
-      runtime.vault.update(async (s) => {
-        s.credential = saved;
-        entered.resolve();
-        await release.promise;
-      }),
-    );
-    await entered.promise;
-    const logout = runtime.logout(request),
-      cleanup = abandonNativeAttempt(row, async () => {
-        compensations++;
-      });
-    release.resolve();
-    await Promise.all([write, cleanup]);
-    const out = await logout;
-    assert.equal(compensations, 0);
-    assert.equal(out.body.loggedIn, false);
-    assert.equal(out.body.remoteRevocation, 'pending');
-    assert.equal(runtime.resolve(request), null);
-    assert.equal(runtime.vault.snapshot().credential, null);
-    assert.equal(runtime.vault.snapshot().revocations.length, 1);
-    await assert.rejects(runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
-    const next = { headers: {} };
-    const prepared = runtime.prepare(ownerRequest(runtime, next));
-
-    assert.equal(prepared.body.resumeAvailable, false);
-    await assert.rejects(
-      runtime.login(next, { action: 'resume' }),
-      /no device credential/,
-    );
-  } finally {
-    release.resolve();
-    runtime?.close();
-    await new Promise((resolve) => server.close(resolve));
-  }
+  await vault.close();
+  return credential;
+}
+test('legacy platform records are removed before Team startup while private local state survives', async (t) => {
+  const f = await teamRuntimePeer(t, {
+    async setup(directory) {
+      await legacy(directory);
+    },
+    before() {
+      throw new Error('Team unavailable');
+    },
+  });
+  await f.settled();
+  // The old device commit/compensation implementation belongs solely to C.
+  for (const name of ['login', 'cancelAttempt', 'getAccess'])
+    assert.equal(f.runtime[name], undefined);
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+  assert.equal(f.runtime.status(f.request).communication, 'unavailable');
+  assert.equal(f.runtime.vault.snapshot().credential, undefined);
+});
+test('an actual filesystem read failure aborts legacy migration before any broker authority is used', async (t) => {
+  const f = await shellRuntimePeer(t);
+  await f.runtime.close();
+  const credential = await legacy(f.directory);
+  await rename(
+    join(f.directory, 'connect.json'),
+    join(f.directory, 'preserved.json'),
+  );
+  await mkdir(join(f.directory, 'connect.json'));
+  const before = f.connection.calls.length;
+  await assert.rejects(
+    createConnectRuntime({
+      directory: f.directory,
+      config: {},
+      ctx: {},
+      connection: f.connection,
+    }),
+    /state unavailable/,
+  );
+  assert.equal(f.connection.calls.length, before);
+  const ciphertext = await readFile(
+    join(f.directory, 'preserved.json'),
+    'utf8',
+  );
+  assert.equal(ciphertext.includes(credential.accessToken), false);
+  assert.equal(ciphertext.includes(credential.refreshToken), false);
+});
+test('saved platform secrets never resume an identity when the shell is signed out', async (t) => {
+  let credential;
+  const f = await shellRuntimePeer(t, {
+    configure(c) {
+      c.transition('signed_out');
+    },
+    async setup(directory) {
+      credential = await legacy(directory);
+      await writeFile(join(directory, 'private.txt'), 'private-content');
+    },
+  });
+  assert.equal(f.runtime.status(f.request).loggedIn, false);
+  assert.equal(f.runtime.status(f.request).migrationRequired, true);
+  assert.equal(f.runtime.getAccess, undefined);
+  const vault = await createVault(f.directory);
+  assert.equal(vault.snapshot().credential, null);
+  assert.equal(vault.snapshot().endpoint, null);
+  assert.deepEqual(vault.snapshot().revocations, []);
+  assert.equal(vault.snapshot().threads.private.local, true);
+  await vault.close();
+  assert.equal(
+    await readFile(join(f.directory, 'private.txt'), 'utf8'),
+    'private-content',
+  );
+  assert.equal(
+    JSON.stringify(f.connection.calls).includes(credential.accessToken),
+    false,
+  );
+});
+test('logout fences a pending resource identity gate before its late successful completion', async (t) => {
+  const f = await shellRuntimePeer(t),
+    entered = Promise.withResolvers(),
+    release = Promise.withResolvers();
+  const detach = f.runtime.vault.subscribeResourceIdentityGate(async (who) => {
+    if (who) {
+      entered.resolve();
+      await release.promise;
+    }
+  });
+  t.after(detach);
+  f.connection.transition('authenticated');
+  await entered.promise;
+  assert.equal(f.runtime.resolve(f.request), undefined);
+  await f.runtime.command(f.request, 'logout');
+  assert.equal(f.runtime.resolve(f.request), undefined);
+  release.resolve();
+  await nextTurn();
+  assert.equal(f.runtime.resolve(f.request), undefined);
+});
+test('a failed isolation gate never publishes the candidate and a later clean generation can recover', async (t) => {
+  const f = await shellRuntimePeer(t);
+  const detach = f.runtime.vault.subscribeResourceIdentityGate(async () => {
+    throw new Error('isolation unavailable');
+  });
+  f.connection.transition('authenticated');
+  await nextTurn();
+  assert.equal(f.runtime.resolve(f.request), undefined);
+  assert.equal(!!f.runtime.vault.snapshot().resourceIsolationPending, true);
+  detach();
+  f.connection.transition('authenticated');
+  await nextTurn();
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+});
+test('closing during Team initialization drains local storage and late IPC cannot restart it', async (t) => {
+  const entered = Promise.withResolvers(),
+    release = Promise.withResolvers();
+  const f = await teamRuntimePeer(t, {
+    before() {
+      entered.resolve();
+      return release.promise;
+    },
+  });
+  await entered.promise;
+  await f.runtime.close();
+  assert.equal(f.tools.size, 0);
+  release.resolve();
+  await nextTurn();
+  assert.equal(f.tools.size, 0);
+  assert.equal(f.runtime.resolve(f.request), undefined);
 });

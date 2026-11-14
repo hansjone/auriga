@@ -1,244 +1,129 @@
-import { ownerRequest } from './owner-request.js';
-import { test } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setTimeout as delay } from 'node:timers/promises';
-import { join } from 'node:path';
-import { runtimePeer } from './local-runtime-peer.js';
-import { createConnectRuntime } from '../src/local/runtime.js';
-import { createLocalLoginController } from '../src/login/local-controller.js';
-import { installNativeLoginRPC } from '../src/local/native-rpc.js';
-import { createVault } from '../src/local/vault.js';
-import { PlatformError } from '../src/local/platform.js';
+import { setImmediate as nextTurn } from 'node:timers/promises';
+import { randomBytes } from 'node:crypto';
+import { shellRuntimePeer } from './shell-runtime-peer.js';
+import { teamRuntimePeer } from './team-runtime-peer.js';
 
-test('R4 saved credential remains recoverable after access/session expiry', async (t) => {
-  const { runtime, request, credential } = await runtimePeer(t);
-  t.mock.timers.enable({
-    apis: ['Date'],
-    now: credential.claims.exp * 1000 + 1,
-  });
-  const status = runtime.status(request);
+test('R4 expired snapshots cannot offer a saved credential resume path', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const f = await shellRuntimePeer(t);
+  t.mock.timers.tick(30001);
+  const status = f.runtime.status(f.request);
   assert.equal(status.loggedIn, false);
-  assert.equal(status.resumeAvailable, true);
-  assert.equal(status.platform, 'recovering');
-  runtime.prepare(ownerRequest(runtime, request));
-  await runtime.cancelAttempt(request);
-  assert.equal(runtime.status(request).resumeAvailable, true);
-  assert.deepEqual(runtime.vault.snapshot().credential, credential);
-  assert.deepEqual(runtime.vault.snapshot().revocations ?? [], []);
+  assert.equal(status.platform, 'unreachable');
+  assert.equal(status.account, null);
+  assert.equal(status.resumeAvailable, undefined);
+  assert.equal(f.runtime.getAccess, undefined);
+  assert.equal(f.runtime.vault.snapshot().credential, undefined);
 });
-
-for (const [error, category] of [
-  [new Error('login attempt busy'), 'busy'],
-  [new Error('team account login unavailable'), 'configuration'],
-  [new PlatformError(503, 'SECRET'), 'platform_http'],
-  [
-    new TypeError('SECRET', {
-      cause: Object.assign(new Error('SECRET'), { code: 'ENOTFOUND' }),
-    }),
-    'dns',
-  ],
-])
+for (const kind of ['busy', 'configuration', 'platform_http', 'dns'])
   test(
-    'R4 native RPC exposes only safe UI classification: ' + category,
+    'R4 native RPC never leaks broker exception details: ' + kind,
     async (t) => {
-      t.mock.method(console, 'warn', () => {});
-      let handler;
-      installNativeLoginRPC(
-        {
-          connection: {
-            register: (_ctx, _path, callback) => {
-              handler = callback;
-            },
-          },
-        },
-        () => ({
-          nativeRequest: () => ({ headers: {} }),
-          login: async () => {
-            throw error;
-          },
-        }),
-      );
-      const result = await handler(
-        'aurigaAuth/login',
-        { args: { input: { action: 'begin' } } },
-        new AbortController().signal,
-        { principal: { kind: 'owner' } },
-      );
+      const f = await shellRuntimePeer(t),
+        secret = randomBytes(32).toString('base64url');
+      f.connection.ipc.call = async () => {
+        throw Object.assign(new Error(secret), { code: kind, status: 503 });
+      };
+      const result = await f.rpc('aurigaAuth/login');
       assert.equal(result.ok, false);
-      assert.equal(result.error.diagnostic.category, category);
-      assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+      assert.equal(JSON.stringify(result).includes(secret), false);
+      assert.equal(result.error.code, 'common.unavailable');
     },
   );
-
-test('R4 offline cold start cancel/restart preserves saved device and automatically restores online', async (t) => {
-  const f = await runtimePeer(t);
-  const onlineFetch = globalThis.fetch;
-  let offline = true;
-  t.mock.method(globalThis, 'fetch', (...args) => {
-    if (offline)
-      throw new TypeError('offline', {
-        cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }),
-      });
-    return onlineFetch(...args);
-  });
-  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
-  const directory = join(f.directory, 'cold');
-  const saved = await createVault(directory);
-  await saved.update((s) => {
-    s.credential = f.credential;
-  });
-  saved.close();
-  const runtime = await createConnectRuntime({
-    directory,
-    config: {
-      platformOrigin: 'https://portal.example.com',
-      issuer: 'https://portal.example.com',
-      clientId: 'auriga-dsh',
-      providerId: 'team',
-    },
+test('R4 unreachable shell can recover by an authenticated push without restarting local DSH', async (t) => {
+  let stopped = 0;
+  const f = await shellRuntimePeer(t, {
     ctx: {
-      webServer: { protocol: 'http:' },
-      tools: { register: () => () => {} },
-      sessions: { get() {}, flush() {} },
-      sessionController: { create() {}, prompt() {} },
-    },
-  });
-  try {
-    const request = runtime.nativeRequest({ principal: { kind: 'owner' } });
-    const calls = [];
-    const controller = createLocalLoginController({
-      native: true,
-      fetch: async (path, init) => {
-        const envelope = JSON.parse(init.body),
-          action = envelope.method.split('/')[1];
-        calls.push(action);
-        try {
-          const value =
-            action === 'status'
-              ? runtime.prepare(ownerRequest(runtime, request)).body
-              : action === 'cancel'
-                ? (await runtime.cancelAttempt(request), { cancelled: true })
-                : action === 'logout'
-                  ? (await runtime.logout(request)).body
-                  : {
-                      step: (
-                        await runtime.login(
-                          request,
-                          envelope.payload.args.input,
-                        )
-                      ).step,
-                    };
-          return Response.json({
-            type: 'server-response',
-            rpcId: envelope.rpcId,
-            result: { ok: true, value },
-          });
-        } catch {
-          return Response.json({
-            type: 'server-response',
-            rpcId: envelope.rpcId,
-            result: {
-              ok: false,
-              error: {
-                code: 'common.unavailable',
-                diagnostic: { category: 'connection' },
-              },
-            },
-          });
-        }
-      },
-    });
-    const signal = new AbortController().signal;
-    await assert.rejects(controller.start({ signal }));
-    await controller.cancel(signal);
-    await assert.rejects(controller.restart({ signal }));
-    assert.deepEqual(runtime.vault.snapshot().credential, f.credential);
-    assert.deepEqual(runtime.vault.snapshot().revocations ?? [], []);
-    assert.equal(calls.includes('logout'), false);
-    assert.equal(runtime.status(request).resumeAvailable, true);
-    offline = false;
-    t.mock.timers.tick(10000);
-    for (let i = 0; i < 50 && !runtime.isReady(); i++) await delay(10);
-    assert.equal(runtime.isReady(), true);
-    assert.equal(runtime.status(request).loggedIn, true);
-    assert.deepEqual(runtime.vault.snapshot().credential, f.credential);
-  } finally {
-    await runtime.close();
-  }
-});
-
-test('R4 closing an owner RPC does not cancel a shared login form', async () => {
-  let handler,
-    finish,
-    cancelled = 0;
-  const pending = new Promise((resolve) => {
-    finish = resolve;
-  });
-  installNativeLoginRPC(
-    {
-      connection: {
-        register: (_ctx, _path, callback) => {
-          handler = callback;
+      sessionController: {
+        stop() {
+          stopped++;
         },
       },
     },
-    () => ({
-      nativeRequest: () => ({ headers: {} }),
-      attemptToken: () => 'shared',
-      cancelAttempt: async () => {
-        cancelled++;
-      },
-      login: async () => pending,
-    }),
+  });
+  f.connection.transition('unreachable');
+  assert.equal(f.runtime.resolve(f.request), undefined);
+  await f.rpc('aurigaAuth/cancel');
+  assert.equal(f.runtime.status(f.request).loggedIn, false);
+  f.connection.transition('authenticated');
+  await nextTurn();
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+  assert.equal(stopped, 0);
+  assert.equal(
+    f.connection.calls.some((c) => /oauth2/.test(c.path ?? '')),
+    false,
   );
-  const controller = new AbortController();
-  const result = handler(
-    'aurigaAuth/login',
-    { args: { input: { action: 'begin' } } },
-    controller.signal,
-    { principal: { kind: 'owner' } },
-  );
-  controller.abort();
-  finish({ step: { type: 'form', formId: 'team', fields: [] } });
-  assert.equal((await result).ok, true);
-  assert.equal(cancelled, 0);
 });
-
+test('R4 closing a native RPC discards the result without issuing a shared cancel or logout', async (t) => {
+  const f = await shellRuntimePeer(t),
+    entered = Promise.withResolvers(),
+    release = Promise.withResolvers();
+  const call = f.connection.ipc.call;
+  f.connection.ipc.call = async (message) => {
+    if (message.action === 'open_login') {
+      entered.resolve();
+      await release.promise;
+    }
+    return call(message);
+  };
+  const abort = new AbortController();
+  const result = f.rpc('aurigaAuth/login', { args: {} }, f.peer, abort.signal);
+  await entered.promise;
+  abort.abort();
+  release.resolve();
+  assert.equal((await result).ok, false);
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+  assert.equal(
+    f.connection.calls.some((c) =>
+      ['cancel_login', 'logout'].includes(c.action),
+    ),
+    false,
+  );
+});
 for (const name of [undefined, 'Verified Alice'])
   test(
-    'R4 display name comes from signed platform claims, never a saved form value: ' +
+    'R4 display name is projected from the member-bound broker profile: ' +
       name,
     async (t) => {
-      const { runtime, request } = await runtimePeer(t, {
-        claims: name ? { name } : {},
+      const f = await shellRuntimePeer(t, {
+        configure(connection) {
+          const call = connection.ipc.call;
+          connection.ipc.call = async (message) =>
+            message.call?.operation === 'profile_read'
+              ? {
+                  requestId: message.requestId,
+                  operation: 'profile_read',
+                  output: {
+                    statusCode: 200,
+                    body: {
+                      memberId: connection.identity.memberId,
+                      displayName: name ?? '',
+                    },
+                  },
+                }
+              : call(message);
+        },
       });
-      await runtime.vault.update((s) => {
-        s.credential.accountName = 'Untrusted input';
-      });
-      assert.equal(runtime.status(request).account.displayName, name);
+      await nextTurn();
+      assert.equal(f.runtime.status(f.request).account.displayName, name);
     },
   );
-
-test('R4 an online owner does not reverify or reconnect Team every timer tick', async (t) => {
-  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
-  const { runtime, requests } = await runtimePeer(t);
-  const authorityRequests = () =>
-    requests.filter((path) => !path.startsWith('/api/iam/v1/network/systems'))
-      .length;
-  const before = authorityRequests();
-  for (let i = 0; i < 30; i++) {
-    t.mock.timers.tick(1000);
-    await delay(2);
-  }
-  assert.equal(runtime.isReady(), true);
-  assert.equal(authorityRequests(), before);
-  assert.ok(
-    requests.filter((path) => path.startsWith('/api/iam/v1/network/systems'))
-      .length <= 1,
-  );
+test('R4 valid same-generation snapshots do not reconnect Team or refresh platform tokens', async (t) => {
+  const f = await teamRuntimePeer(t);
+  await f.settled();
+  for (let i = 0; i < 30; i++) f.connection.refresh();
+  await nextTurn();
   assert.equal(
-    runtime.status(runtime.nativeRequest({ principal: { kind: 'owner' } }))
-      .communication,
-    'ready',
+    f.connection.calls.filter((c) => c.call?.operation === 'team_initialize')
+      .length,
+    1,
+  );
+  assert.equal(f.tools.size, 4);
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+  assert.equal(
+    f.connection.calls.some((c) => /oauth2/.test(c.path ?? '')),
+    false,
   );
 });

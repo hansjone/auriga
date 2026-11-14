@@ -14,6 +14,7 @@ export async function shellRuntimePeer(t, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-shell-peer-'));
   const connection = brokerFixture();
   options.configure?.(connection);
+  await options.setup?.(directory, connection);
   const runtime = await createConnectRuntime({
     directory,
     config: { platformOrigin: '' },

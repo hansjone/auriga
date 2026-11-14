@@ -458,6 +458,7 @@ export async function createConnectRuntime({
         loggedIn: !!who,
         connected: !!who && communication === 'ready',
         communication,
+        connection: who && team ? team.summary : null,
         platform: s?.state ?? 'unreachable',
         reason: s?.reason,
         brokerAvailable: !!s,

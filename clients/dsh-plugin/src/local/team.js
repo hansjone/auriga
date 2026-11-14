@@ -610,6 +610,20 @@ export function createTeam({
     get connected() {
       return !closed && endpointContexts.size > 0;
     },
+    get summary() {
+      active();
+      const state = vault.snapshot(),
+        deliveries = Object.values(state.deliveries);
+      return {
+        received: deliveries.filter((row) => row.accepted === true).length,
+        unsupported: deliveries.filter((row) => row.status === 'unsupported')
+          .length,
+        pendingSourceOpens: Object.keys(state.pendingOpens ?? {}).length,
+        unknownSourceOpens: Object.values(state.openOutcomes ?? {}).filter(
+          (row) => row.status === 'result_unknown',
+        ).length,
+      };
+    },
     async activateSession(/** @type {string} */ sessionId) {
       await endpoint(sessionId);
       primarySession = sessionId;

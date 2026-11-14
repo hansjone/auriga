@@ -55,6 +55,39 @@ export async function createBroker({ ipc, validate, onInvalidate, onChange }) {
       }
     : undefined;
   const state = createShellState({ transport, onInvalidate, onChange });
+  // Stop consumers immediately on shell invalidation even when the IPC producer
+  // never settles. The producer still owns cancellation of its remote work.
+  async function pending(/** @type {()=>Promise<any>} */ work) {
+    const check = state.fence();
+    let off = () => {};
+    /** @type {ReturnType<typeof setTimeout>|undefined} */ let timer;
+    try {
+      return await new Promise((resolve, reject) => {
+        off = state.subscribeInvalidation(() =>
+          reject(unavailable('common.unauthenticated')),
+        );
+        timer = setTimeout(() => reject(unavailable()), 30000);
+        timer.unref();
+        check();
+        Promise.resolve()
+          .then(() => {
+            check();
+            return work();
+          })
+          .then((result) => {
+            try {
+              check();
+              resolve(result);
+            } catch (error) {
+              reject(error);
+            }
+          }, reject);
+      });
+    } finally {
+      off();
+      clearTimeout(timer);
+    }
+  }
   const envelope = () => {
     const s = state.current();
     if (s?.state !== 'authenticated' || closed)
@@ -78,11 +111,13 @@ export async function createBroker({ ipc, validate, onInvalidate, onChange }) {
     const check = state.fence(),
       command = { ...envelope(), ...input };
     validate(requestSchema, command);
-    const event = await ipc.call({
-      requestId: command.requestId,
-      path,
-      body: command,
-    });
+    const event = await pending(() =>
+      ipc.call({
+        requestId: command.requestId,
+        path,
+        body: command,
+      }),
+    );
     check();
     const result = event?.body ?? event;
     validate(resultSchema, result);
@@ -104,7 +139,7 @@ export async function createBroker({ ipc, validate, onInvalidate, onChange }) {
       const check = state.fence(),
         command = { ...envelope(), call: { operation, input } };
       validate('ShellAuthBusinessCall', command);
-      const result = await ipc.call(command);
+      const result = await pending(() => ipc.call(command));
       check();
       validate('ShellAuthBusinessResult', result);
       if (

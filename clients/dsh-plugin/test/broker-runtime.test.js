@@ -134,3 +134,30 @@ test('arbitrary fetch-style platform targets and unknown operations fail before 
   assert.equal(connection.calls.length, before);
   await assert.rejects(runtime.broker.call('unknown', {}));
 });
+
+test('an IPC business call that never settles rejects immediately when the shell is invalidated', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  const entered = Promise.withResolvers();
+  const call = connection.ipc.call;
+  connection.ipc.call = (message) => {
+    if (message.call?.operation === 'listAiModels') {
+      entered.resolve();
+      return new Promise(() => {});
+    }
+    return call(message);
+  };
+  const pending = runtime.broker.call('listAiModels', {});
+  const denied = assert.rejects(pending, { code: 'common.unauthenticated' });
+  await entered.promise;
+  connection.logout();
+  await denied;
+});
+test('revocation before the IPC microtask prevents a queued platform call from starting', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  const before = connection.calls.length;
+  const pending = runtime.broker.call('listAiModels', {});
+  const denied = assert.rejects(pending, { code: 'common.unauthenticated' });
+  connection.logout();
+  await denied;
+  assert.equal(connection.calls.length, before);
+});
