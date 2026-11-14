@@ -260,6 +260,10 @@ test('M5 empty and temp-only orphan locks recover only after confirmed stop', as
 });
 test('M6 unchanged tick does not rewrite state/high water or enumerate processes each second', async (t) => {
   const f = harness(t);
+  // Pair the harness's fixed monotonic clock with a fixed wall clock. CPU load
+  // must not turn this unchanged tick into a legitimate wall-clock recheck.
+  const now = Date.now();
+  f.s.now = () => now;
   await f.s.prepare();
   const file = f.s.guardian.file,
     marks = f.s.watermarks;

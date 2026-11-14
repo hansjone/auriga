@@ -30,10 +30,10 @@ def display(access, credentials, output, remote_enabled=True):
             or not re.fullmatch(r'[A-Z2-7]{16,128}', credentials['totpSecret'])):
         raise DisplayError('invalid enrollment material')
     username = credentials['username']
-    uri = 'otpauth://totp/' + quote('Auriga:' + username, safe='') + '?' + urlencode({
-        'secret': credentials['totpSecret'], 'issuer': 'Auriga',
+    uri = 'otpauth://totp/' + quote('Auriga DSH:' + username, safe='') + '?' + urlencode({
+        'secret': credentials['totpSecret'], 'issuer': 'Auriga DSH',
         'algorithm': 'SHA1', 'digits': 6, 'period': 30,
-    })
+    }, quote_via=quote)
     # Construct and validate everything before the first byte of sensitive output.
     text = (
         '\nAuriga 应急账号（请在私密终端查看并妥善保管）\n'

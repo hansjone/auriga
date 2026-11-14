@@ -308,6 +308,30 @@ class TeamAccountFlowTest {
   }
 
   @Test
+  void previouslyBoundTotpSecretStillVerifies() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID account = UUID.randomUUID();
+          // Model the persisted credential from before the issuer display-name change.
+          String oldSecret = Totp.generate();
+          String encrypted = secrets.encrypt(oldSecret, "totp:" + tenant + ":" + account);
+          long counter = clock.instant().getEpochSecond() / 30;
+          store.insert(
+              "team_totp",
+              account.toString(),
+              Json.object(
+                  "accountId", account.toString(), "totp", encrypted, "lastCounter", counter - 1),
+              null);
+          String code = Totp.code(oldSecret, counter);
+          assertTrue(team.verifyTotp(account, code));
+          assertFalse(team.verifyTotp(account, code));
+          assertEquals(
+              encrypted, store.get("team_totp", account.toString(), false).path("totp").asString());
+        });
+  }
+
+  @Test
   void passwordAndTotpLogin() {
     TenantContext.call(
         tenant,
@@ -1084,6 +1108,13 @@ class TeamAccountFlowTest {
               .run(
                   () -> {
                     var enrollment = controller.beginTotp();
+                    assertEquals(
+                        "otpauth://totp/Auriga%20DSH:"
+                            + account
+                            + "?secret="
+                            + enrollment.path("secret").asString()
+                            + "&issuer=Auriga%20DSH&digits=6&period=30",
+                        enrollment.path("otpauthUri").asString());
                     controller.confirmTotp(
                         enrollment.path("enrollmentId").asString(),
                         Json.object(

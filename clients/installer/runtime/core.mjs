@@ -355,11 +355,17 @@ export function defaultSmoke(dir, dataHome) {
     { env: launchEnv(dir, dataHome), encoding: 'utf8', timeout: 120000 },
   );
   if (result.status !== 0)
-    throw new Error(
-      `smoke failed (exit ${result.status}): ${(result.stderr || result.stdout || '').slice(-600)}`,
+    throw Object.assign(
+      new Error(
+        `smoke failed (exit ${result.status}): ${(result.stderr || result.stdout || '').slice(-600)}`,
+      ),
+      { code: 'desktop.smoke_failed' },
     );
   if (!/auriga-dsh/.test(result.stdout))
-    throw new Error('smoke failed: effective config does not list auriga-dsh');
+    throw Object.assign(
+      new Error('smoke failed: effective config does not list auriga-dsh'),
+      { code: 'desktop.smoke_failed' },
+    );
 }
 
 // ----------------------------------------------------------- transaction --
@@ -759,8 +765,13 @@ export async function launch({ root, args = [], env = process.env }) {
     const apply = async () => {
       try {
         await applyPending(root);
-      } catch {
-        console.error(`${BRAND_NAME} 更新失败，已保留旧版。`);
+      } catch (error) {
+        // Keep upstream config/error output private; expose only a fixed reason.
+        console.error(
+          error?.code === 'desktop.smoke_failed'
+            ? `${BRAND_NAME} 更新失败，已保留旧版。[desktop.smoke_failed]`
+            : `${BRAND_NAME} 更新失败，已保留旧版。`,
+        );
       }
     };
     await apply();
