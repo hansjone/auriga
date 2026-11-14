@@ -105,7 +105,7 @@ class NetworkPolicyRevisionPostgresTest {
             () -> {
               UUID provider = UuidV7.next();
               store.insert("account", account.toString(), Json.object("status", "active"), null);
-              store.insert("idp_provider", provider.toString(), Json.object(), null);
+              store.insert("idp_provider", provider.toString(), Json.object("enabled", true), null);
               return sessions.create(
                   account, provider, "portal", true, Duration.ofHours(2), Duration.ofHours(1));
             });
@@ -123,7 +123,9 @@ class NetworkPolicyRevisionPostgresTest {
                     Set.of(),
                     Set.of("auriga.connect"),
                     Set.of(OAuthProvider.DEVICE, "refresh_token"),
-                    true)));
+                    true)),
+            StandardDevicePostgresTest.networkAuthorization());
+    devices.standardDevices(oauth.standardDevices());
     TenantContext.run(
         tenant,
         () -> {

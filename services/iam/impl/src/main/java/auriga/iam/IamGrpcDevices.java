@@ -11,6 +11,14 @@ import io.grpc.stub.StreamObserver;
 public class IamGrpcDevices extends DeviceAccessServiceGrpc.DeviceAccessServiceImplBase {
   private final DeviceAccessAuthority authority;
   private final DeviceAiAccessAuthority aiAuthority;
+  private StandardDevices standard;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  IamGrpcDevices standardDevices(StandardDevices value) {
+    standard = value;
+    authority.standardDevices(value);
+    return this;
+  }
 
   public IamGrpcDevices(DeviceAccessAuthority authority) {
     this(authority, null);
@@ -30,6 +38,35 @@ public class IamGrpcDevices extends DeviceAccessServiceGrpc.DeviceAccessServiceI
         || !TenantContext.PLATFORM_TENANT.equals(principal.tenantId())
         || TenantContext.current().filter(t -> !TenantContext.PLATFORM_TENANT.equals(t)).isEmpty())
       throw new AurigaException(CommonErrors.FORBIDDEN);
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void verifyStandardDeviceAiAccess(
+      VerifyStandardDeviceAiAccessRequest request,
+      StreamObserver<VerifyStandardDeviceAiAccessResponse> observer) {
+    caller("svc:ai-gateway");
+    if (!StandardDevices.AI.contains(request.getPermission()))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    if (standard == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    try {
+      var identity =
+          standard.access(request.getAccessToken(), "auriga.ai-gateway", request.getPermission());
+      var response = VerifyStandardDeviceAiAccessResponse.newBuilder();
+      if (identity != null)
+        response
+            .setActive(true)
+            .setTenantId(identity.tenant())
+            .setAccountId(identity.account())
+            .setDeviceId(identity.device())
+            .setExpiresAt(timestamp(identity));
+      observer.onNext(response.build());
+      observer.onCompleted();
+    } catch (AurigaException failure) {
+      throw failure;
+    } catch (RuntimeException unavailable) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
   }
 
   @Override

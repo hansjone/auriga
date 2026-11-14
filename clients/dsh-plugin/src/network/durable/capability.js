@@ -180,7 +180,7 @@ export function createDeviceMessaging(options) {
       unregister = ctx.tools.register({
         name: 'auriga_send_message',
         description:
-          'Send text to an online Auriga session that explicitly enabled receiving. A submitted result is not a host delivery receipt.',
+          'Send text to an online Auriga DSH session that explicitly enabled receiving. A submitted result is not a host delivery receipt.',
         parameters: {
           type: 'object',
           properties: {

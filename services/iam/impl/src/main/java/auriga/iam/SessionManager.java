@@ -22,6 +22,20 @@ public final class SessionManager implements Sessions {
   private final EventPublisher events;
   private final AuditLogger audit;
   private java.util.function.Predicate<ObjectNode> managedValidator = row -> false;
+  private java.util.function.Predicate<ObjectNode> uacValidator =
+      row -> !row.has("uacCredentialId") && !row.has("uacSessionBinding");
+  private java.util.function.BiFunction<ObjectNode, String, java.util.function.Consumer<Boolean>>
+      uacRevocation = (row, reason) -> success -> {};
+
+  void uacRevocation(
+      java.util.function.BiFunction<ObjectNode, String, java.util.function.Consumer<Boolean>>
+          callback) {
+    uacRevocation = callback;
+  }
+
+  void uacValidator(java.util.function.Predicate<ObjectNode> validator) {
+    this.uacValidator = Objects.requireNonNull(validator);
+  }
 
   public void managedValidator(java.util.function.Predicate<ObjectNode> validator) {
     managedValidator = Objects.requireNonNull(validator);
@@ -187,6 +201,7 @@ public final class SessionManager implements Sessions {
         || !clock.instant().isBefore(Instant.parse(row.path("idleExpiresAt").asString())))
       return false;
     if (row.has("managedInstance") && !managedValidator.test(row)) return false;
+    if (!uacValidator.test(row)) return false;
     ObjectNode account = store.get("account", row.path("accountId").asString(), false);
     return account != null && account.path("status").asString().equals("active");
   }
@@ -255,30 +270,52 @@ public final class SessionManager implements Sessions {
       kv.delete(row.path("cookieHash").asString());
       return;
     }
-    row.put("revoked", true);
-    row.remove("adminCsrfTokens");
-    store.save("session", row);
-    kv.delete(row.path("cookieHash").asString());
-    Map<String, Object> data = new LinkedHashMap<>();
-    data.put("accountId", row.path("accountId").asString());
-    data.put("sessionIds", List.of(row.path("sessionId").asString()));
-    data.put("reason", reason);
-    data.put(
-        "actorId",
-        RequestContext.currentPrincipal()
-            .filter(p -> p.subject() != null && !p.subject().startsWith("svc:"))
-            .map(p -> p.subject())
-            .orElse(null));
-    events.publish("identity.session_revoked", row.path("accountId").asString(), data);
-    IamAudit.record(
-        audit,
-        IamAudit.entry(
-                "iam.session.revoke",
-                "session",
-                row.path("sessionId").asString(),
-                row.path("accountId").asString())
-            .detail("reason", reason)
-            .build());
+    var observed =
+        row.has("uacCredentialId")
+            ? uacRevocation.apply(row, reason)
+            : (java.util.function.Consumer<Boolean>) (success -> {});
+    boolean complete = false;
+    try {
+      row.put("revoked", true);
+      row.remove("adminCsrfTokens");
+      store.save("session", row);
+      kv.delete(row.path("cookieHash").asString());
+      if (row.has("uacSessionBinding")) {
+        String source = row.path("sessionId").asString();
+        for (ObjectNode device : store.matching("device", "sessionId", source))
+          if (source.equals(device.path("sessionId").asString())) revokeDevice(device);
+        for (ObjectNode grant : store.matching("oauth_grant", "sessionId", source))
+          if (source.equals(grant.path("sessionId").asString())) {
+            grant = store.byId("oauth_grant", grant.path("id").asString(), true);
+            grant.put("revoked", true);
+            grant.put("status", "revoked");
+            store.save("oauth_grant", grant);
+          }
+      }
+      Map<String, Object> data = new LinkedHashMap<>();
+      data.put("accountId", row.path("accountId").asString());
+      data.put("sessionIds", List.of(row.path("sessionId").asString()));
+      data.put("reason", reason);
+      data.put(
+          "actorId",
+          RequestContext.currentPrincipal()
+              .filter(p -> p.subject() != null && !p.subject().startsWith("svc:"))
+              .map(p -> p.subject())
+              .orElse(null));
+      events.publish("identity.session_revoked", row.path("accountId").asString(), data);
+      IamAudit.record(
+          audit,
+          IamAudit.entry(
+                  "iam.session.revoke",
+                  "session",
+                  row.path("sessionId").asString(),
+                  row.path("accountId").asString())
+              .detail("reason", reason)
+              .build());
+      complete = true;
+    } finally {
+      observed.accept(complete);
+    }
   }
 
   static Timestamp timestamp(String time) {

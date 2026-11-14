@@ -112,7 +112,7 @@ class NetworkRegistrationOutcomePostgresTest {
             () -> {
               UUID provider = UuidV7.next();
               store.insert("account", account.toString(), Json.object("status", "active"), null);
-              store.insert("idp_provider", provider.toString(), Json.object(), null);
+              store.insert("idp_provider", provider.toString(), Json.object("enabled", true), null);
               return sessions.create(
                   account, provider, "portal", true, Duration.ofHours(2), Duration.ofHours(1));
             });
@@ -130,17 +130,13 @@ class NetworkRegistrationOutcomePostgresTest {
                     Set.of(),
                     Set.of("auriga.connect"),
                     Set.of(OAuthProvider.DEVICE, "refresh_token"),
-                    true)));
+                    true)),
+            StandardDevicePostgresTest.networkAuthorization());
     credential = login();
     access = credential.path("access_token").asString();
     device = tokens.verify(access).path("did").asString();
     authority =
-        new IamNetworkAuthority(
-            store,
-            new DeviceAccessAuthority(store, sessions, tokens),
-            audit,
-            clock,
-            Set.of("server-a"));
+        new IamNetworkAuthority(store, oauth.deviceAuthority(), audit, clock, Set.of("server-a"));
     var settings =
         new AccessTokenSettings(
             tokens.issuer(),

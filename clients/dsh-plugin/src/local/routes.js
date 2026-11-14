@@ -7,6 +7,7 @@ import { localFailureDiagnostic } from './diagnostic.js';
 import { logEvent } from '../observability/index.js';
 const BASE = '/auriga/local-login';
 const assets = new Map([
+  ['brand.js', new URL('../login/brand.js', import.meta.url)],
   ['adapter.js', new URL('../login/local-adapter.js', import.meta.url)],
   ['index.js', new URL('../login/index.js', import.meta.url)],
   ['styles.js', new URL('../login/styles.js', import.meta.url)],
@@ -196,7 +197,7 @@ export function createConnectRoutes({
         res.end(
           file
             ? await readFile(file)
-            : '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Auriga</title><body><main id="auriga-login"></main><script type="module" src="/auriga/local-login/assets/adapter.js"></script></body></html>',
+            : '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Auriga DSH · 登录 / Sign in</title><body><main id="auriga-login"></main><script type="module" src="/auriga/local-login/assets/adapter.js"></script></body></html>',
         );
         return;
       }

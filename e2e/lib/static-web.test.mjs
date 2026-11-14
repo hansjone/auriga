@@ -12,7 +12,7 @@ const response = (text, mime = 'text/html; charset=utf-8', status = 200) => ({
   res: { headers: { get: () => mime } },
 });
 const html = (audience = 'portal', js = '/assets/index-Ab12.js') =>
-  `<!doctype html><html><head><title>Auriga ${audience}</title>
+  `<!doctype html><html><head><title>Auriga DSH · ${audience === 'portal' ? '门户 / Portal' : '管理台 / Admin'}</title>
   <script type="module" src="${js}"></script>
   <link rel="stylesheet" href="./assets/index-CD34.css"></head>
   <body><div id="app"></div></body></html>`;

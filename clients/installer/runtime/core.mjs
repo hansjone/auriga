@@ -1,3 +1,4 @@
+import { BRAND_NAME } from './brand.mjs';
 import { updateOrigin, normalizePlatformBinding } from './platform-origin.mjs';
 import { cleanupDownloads } from './update-state.mjs';
 import { createRequire } from 'node:module';
@@ -10,6 +11,7 @@ import {
 } from './process-tree.mjs';
 import { Supervisor, packagedTrust } from './supervisor.mjs';
 import { superviseDsh } from './desktop-supervision.mjs';
+import { startShellAuth } from './shell-auth.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -167,14 +169,14 @@ export function assertLayout(root, dataHome) {
     const entries = readdirSync(root);
     if (entries.length > 0 && !entries.includes(INSTALL_MARKER))
       throw new Error(
-        'install directory is not empty and is not an Auriga Desktop installation',
+        `install directory is not empty and is not an ${BRAND_NAME} installation`,
       );
   }
 }
 
 function assertOwned(root) {
   if (!existsSync(join(root, INSTALL_MARKER)))
-    throw new Error(`not an Auriga Desktop installation: ${root}`);
+    throw new Error(`not an ${BRAND_NAME} installation: ${root}`);
 }
 
 // --------------------------------------------------------------- profile --
@@ -229,7 +231,7 @@ function seedProfile(dataHome, { platformOrigin, target }) {
     );
     upgradeSkillPatch(patch, yamlParser(yaml), dataHome);
   } catch (error) {
-    console.error(`Auriga 共享技能配置未启用：${error.message}`);
+    console.error(`${BRAND_NAME} 共享技能配置未启用：${error.message}`);
   }
 }
 
@@ -353,11 +355,17 @@ export function defaultSmoke(dir, dataHome) {
     { env: launchEnv(dir, dataHome), encoding: 'utf8', timeout: 120000 },
   );
   if (result.status !== 0)
-    throw new Error(
-      `smoke failed (exit ${result.status}): ${(result.stderr || result.stdout || '').slice(-600)}`,
+    throw Object.assign(
+      new Error(
+        `smoke failed (exit ${result.status}): ${(result.stderr || result.stdout || '').slice(-600)}`,
+      ),
+      { code: 'desktop.smoke_failed' },
     );
   if (!/auriga-dsh/.test(result.stdout))
-    throw new Error('smoke failed: effective config does not list auriga-dsh');
+    throw Object.assign(
+      new Error('smoke failed: effective config does not list auriga-dsh'),
+      { code: 'desktop.smoke_failed' },
+    );
 }
 
 // ----------------------------------------------------------- transaction --
@@ -712,7 +720,7 @@ export function desktopSession(root) {
           continue;
         }
       }
-      throw new Error('Auriga Desktop 已在运行，请先退出。');
+      throw new Error(`${BRAND_NAME} 已在运行，请先退出。`);
     }
   }
   throw new Error('desktop session busy');
@@ -737,7 +745,11 @@ export async function launch({ root, args = [], env = process.env }) {
     packagedTrust(versionDir(root, initial.current)),
   );
   const releaseSingleton = tree.singleton();
-  let session;
+  let session, shellAuth;
+  const hasShell = existsSync(
+    join(versionDir(root, initial.current), 'auriga/shell-auth/desktop.mjs'),
+  );
+  if (hasShell) supervisor.shellSnapshot = () => shellAuth?.snapshot();
 
   try {
     await supervisor.prepare();
@@ -753,8 +765,13 @@ export async function launch({ root, args = [], env = process.env }) {
     const apply = async () => {
       try {
         await applyPending(root);
-      } catch {
-        console.error('Auriga Desktop 更新失败，已保留旧版。');
+      } catch (error) {
+        // Keep upstream config/error output private; expose only a fixed reason.
+        console.error(
+          error?.code === 'desktop.smoke_failed'
+            ? `${BRAND_NAME} 更新失败，已保留旧版。[desktop.smoke_failed]`
+            : `${BRAND_NAME} 更新失败，已保留旧版。`,
+        );
       }
     };
     await apply();
@@ -763,6 +780,10 @@ export async function launch({ root, args = [], env = process.env }) {
     // The update transaction may have changed packaged trust or profile bytes.
     verifyPackage(dir, { trees: false });
     supervisor.trust = packagedTrust(dir);
+    if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
+      supervisor.shellSnapshot = () => shellAuth?.snapshot();
+      shellAuth = await startShellAuth({ root, dataHome: state.dataHome, dir });
+    }
     await supervisor.reconcile(true);
     if (
       supervisor.privateOnly ||
@@ -774,9 +795,21 @@ export async function launch({ root, args = [], env = process.env }) {
       supervisor,
       session,
       notify: notifySharedRestart,
+      attach: async (child) => {
+        if (shellAuth) {
+          try {
+            await shellAuth.attach(child);
+          } catch {
+            child.stdio[3]?.destroy();
+            console.error('Auriga 平台通道不可用，本地 DSH 继续运行。');
+          }
+        }
+      },
       start: () =>
         spawn(nodeBin(dir), [dshBin(dir), '--profile', PROFILE, ...args], {
-          stdio: 'inherit',
+          stdio: shellAuth
+            ? ['inherit', 'inherit', 'inherit', 'pipe']
+            : 'inherit',
           env: launchEnv(dir, state.dataHome, {
             ...env,
             AURIGA_DESKTOP_ROOT: root,
@@ -789,7 +822,11 @@ export async function launch({ root, args = [], env = process.env }) {
     return status;
   } finally {
     try {
-      await tree.stopTree();
+      try {
+        await shellAuth?.close();
+      } finally {
+        await tree.stopTree();
+      }
     } finally {
       session?.close();
       releaseSingleton();

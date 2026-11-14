@@ -191,7 +191,7 @@ export async function runNativeModels(
     ];
     const overlay = globalThis.structuredClone(rows);
     const provider = {
-      displayName: 'Auriga',
+      displayName: 'Auriga DSH',
       api: 'openai-completions',
       baseURL: material.baseUrl,
       models,

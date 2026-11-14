@@ -13,12 +13,13 @@
 - SignedKeysetV2：`Auriga.NetworkKeyset.v2`
 - SignedKeysetAnnouncementV2：`Auriga.NetworkKeysetAnnouncement.v2`
 - SignedTransportTrustBundle：`Auriga.NetworkTransportTrustBundle.v2`
+- SignedTransportConfirmation：`Auriga.NetworkTransportConfirmation.v2`
 - SignedMigrationPermit：`Auriga.NetworkMigrationPermit.v2`
 - InstallationReceipt：`Auriga.NetworkControlReceipt.v2`
 - ProjectionRequest：`Auriga.NetworkProjectionRequest.v2`
 - ProjectionReceipt：`Auriga.NetworkProjectionReceipt.v2`
 
-后三种对移除 identity_auth 后的完整对象签名。运行钥只允许前三种运行对象（清单、公告、transport bundle）；不得签业务封装、根控制、授权、X.509、IAM、发行、资源或再委托。业务三用途钥与 CA 钥保持独立。授权没有 not_after，也不允许增加硬截止、通配能力或再委托字段。365天复核不改变授权有效性。
+后三种对移除 identity_auth 后的完整对象签名。运行钥允许四种运行对象（清单、公告、TransportTrustBundle、TransportConfirmation）。后两种均要求根授权包含 `network_transport` 能力。不得签业务封装、根控制、授权、X.509、IAM、发行、资源或再委托。业务三用途钥与 CA 钥保持独立。授权没有 not_after，也不允许增加硬截止、通配能力或再委托字段。365天复核不改变授权有效性。
 
 ## 控制、代际和原子持久化
 
@@ -124,3 +125,7 @@ C 线须将 NetworkRenewal.status()、服务适配器和 /keys/status 的 HTTP �
 C 线须按 /bootstrap/materials 的 security=[] 与 x-auriga-installation-auth 接线，请求体 ProjectionRequest.identity_auth 和 InstallationPins 是此端点的独立认证依据。该端点使用固定 HTTPS、安装签名、nonce 防重放、撤销/隔离检查及 HPKE 密封响应。C/I 的 HTTP 安全配置须让此端点进入该安装认证流程，投影权限由 pin 的 scope 决定。内部明文材料端口继续使用既有 mTLS/JWT 认证。
 
 contracts.yml 的契约测试与源 schema 做语义深比较，运行时产物的逐字节新鲜度由 web.yml 依次执行 pnpm gen:api、pnpm gen:plugin-network 后的 generated 目录 diff/status 门禁验证。gen:plugin-network 调用插件 --v2 生成器，输出 auto-renewal-v2-schema.js 与 auto-renewal-v2.d.ts。web 镜像的 gen:api 只写 web 目录。
+
+## K3 实现接缝裁决
+
+[第三批消费方须知](auto-renewal-v2-k3.md)冻结跨授权运输锚、全局确认查询、edge专属projector UID65532、独立NodeControlPins以及Java状态生成视图。该文逐项列出替换K2的语义，C/N/I/P/D须同批跟进。
