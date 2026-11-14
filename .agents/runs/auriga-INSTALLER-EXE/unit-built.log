@@ -1,1570 +1,1570 @@
-TAP version 13
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZDDOb0\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-mtIytN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-mtIytN\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-B6lqHJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-9cefdfc6a7f2\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-B6lqHJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-2d37bb6e8fd9\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-FT3GPu\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-RCupCV\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-9Micxt\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-9Micxt\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ccKh0N\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ccKh0N\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-2JTpeU\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-2JTpeU\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-jU5DrT\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-jU5DrT\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-8Pwg9i\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-8Pwg9i\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-2cyepJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-2cyepJ\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-TmiCB5\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-TmiCB5\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-qUsC57\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-qUsC57\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-H2x9jl\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-H2x9jl\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OegM51\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OegM51\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-IUGUlp\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-IUGUlp\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-c7KT8K\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-c7KT8K\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-l7qA6X\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-l7qA6X\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XCj2ci\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XCj2ci\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-VduSLK\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-VduSLK\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-7oZ2D8\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-7oZ2D8\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-UhygHW\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-UhygHW\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-1QUakv\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-1QUakv\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XuADBk\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XuADBk\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-b357kq\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-b357kq\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QAIWcA\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QAIWcA\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-YT8fS0\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-YT8fS0\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-blvOPw\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-blvOPw\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-An27sz\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-MY4Le4\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-NaSGNK\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-HNBSxk\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-RWVYki\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-oEPOWJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-oEPOWJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-xl9E4s\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-xl9E4s\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OmCfOM\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OmCfOM\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Aly7U6\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Aly7U6\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QxSdrp\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QxSdrp\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
-# Subtest: default smoke distinguishes command and missing-plugin failures with a safe reason code
-ok 1 - default smoke distinguishes command and missing-plugin failures with a safe reason code
-  ---
-  duration_ms: 5069.0289
-  type: 'test'
-  ...
-# Subtest: fresh install seeds profile, plugin, ownership marker and platform address
-ok 2 - fresh install seeds profile, plugin, ownership marker and platform address
-  ---
-  duration_ms: 1001.4289
-  type: 'test'
-  ...
-# Subtest: upgrade keeps user data and settings and keeps the previous version
-ok 3 - upgrade keeps user data and settings and keeps the previous version
-  ---
-  duration_ms: 1278.0621
-  type: 'test'
-  ...
-# Subtest: components with equal versions but different content get different ids and replace the old ones
-ok 4 - components with equal versions but different content get different ids and replace the old ones
-  ---
-  duration_ms: 2061.4062
-  type: 'test'
-  ...
-# Subtest: upgrade failing at after-backup returns to the exact pre-upgrade state
-ok 5 - upgrade failing at after-backup returns to the exact pre-upgrade state
-  ---
-  duration_ms: 939.9655
-  type: 'test'
-  ...
-# Subtest: crash at after-backup is repaired by recover()
-ok 6 - crash at after-backup is repaired by recover()
-  ---
-  duration_ms: 1232.3326
-  type: 'test'
-  ...
-# Subtest: upgrade failing at after-apply returns to the exact pre-upgrade state
-ok 7 - upgrade failing at after-apply returns to the exact pre-upgrade state
-  ---
-  duration_ms: 1217.9402
-  type: 'test'
-  ...
-# Subtest: crash at after-apply is repaired by recover()
-ok 8 - crash at after-apply is repaired by recover()
-  ---
-  duration_ms: 1225.9167
-  type: 'test'
-  ...
-# Subtest: upgrade failing at launcher-file returns to the exact pre-upgrade state
-ok 9 - upgrade failing at launcher-file returns to the exact pre-upgrade state
-  ---
-  duration_ms: 666.0851
-  type: 'test'
-  ...
-# Subtest: crash at launcher-file is repaired by recover()
-ok 10 - crash at launcher-file is repaired by recover()
-  ---
-  duration_ms: 513.8052
-  type: 'test'
-  ...
-# Subtest: upgrade failing at after-launchers returns to the exact pre-upgrade state
-ok 11 - upgrade failing at after-launchers returns to the exact pre-upgrade state
-  ---
-  duration_ms: 535.5242
-  type: 'test'
-  ...
-# Subtest: crash at after-launchers is repaired by recover()
-ok 12 - crash at after-launchers is repaired by recover()
-  ---
-  duration_ms: 551.1735
-  type: 'test'
-  ...
-# Subtest: upgrade failing at after-install-json returns to the exact pre-upgrade state
-ok 13 - upgrade failing at after-install-json returns to the exact pre-upgrade state
-  ---
-  duration_ms: 523.432
-  type: 'test'
-  ...
-# Subtest: crash at after-install-json is repaired by recover()
-ok 14 - crash at after-install-json is repaired by recover()
-  ---
-  duration_ms: 485.4171
-  type: 'test'
-  ...
-# Subtest: upgrade failing at after-current-txt returns to the exact pre-upgrade state
-ok 15 - upgrade failing at after-current-txt returns to the exact pre-upgrade state
-  ---
-  duration_ms: 469.398
-  type: 'test'
-  ...
-# Subtest: crash at after-current-txt is repaired by recover()
-ok 16 - crash at after-current-txt is repaired by recover()
-  ---
-  duration_ms: 405.7022
-  type: 'test'
-  ...
-# Subtest: a crash between the two pointer writes never leaves mixed pointers
-ok 17 - a crash between the two pointer writes never leaves mixed pointers
-  ---
-  duration_ms: 524.5471
-  type: 'test'
-  ...
-# Subtest: failed smoke check during upgrade restores everything
-ok 18 - failed smoke check during upgrade restores everything
-  ---
-  duration_ms: 648.3425
-  type: 'test'
-  ...
-# Subtest: profile is fully backed up before it is modified
-ok 19 - profile is fully backed up before it is modified
-  ---
-  duration_ms: 747.4481
-  type: 'test'
-  ...
-# Subtest: an unfinished backup is never used for restoring
-ok 20 - an unfinished backup is never used for restoring
-  ---
-  duration_ms: 948.927
-  type: 'test'
-  ...
-# Subtest: first install failing leaves no pointers, profile or version behind
-ok 21 - first install failing leaves no pointers, profile or version behind
-  ---
-  duration_ms: 1040.4083
-  type: 'test'
-  ...
-# Subtest: rollback restores previous version, plugin files and launchers
-ok 22 - rollback restores previous version, plugin files and launchers
-  ---
-  duration_ms: 520.8936
-  type: 'test'
-  ...
-# Subtest: rollback keeps settings changed after the upgrade
-ok 23 - rollback keeps settings changed after the upgrade
-  ---
-  duration_ms: 402.9186
-  type: 'test'
-  ...
-# Subtest: rollback failing at the smoke check restores plugin files and pointers
-ok 24 - rollback failing at the smoke check restores plugin files and pointers
-  ---
-  duration_ms: 489.4451
-  type: 'test'
-  ...
-# Subtest: rollback failing at after-backup leaves version and plugin consistent
-ok 25 - rollback failing at after-backup leaves version and plugin consistent
-  ---
-  duration_ms: 569.1121
-  type: 'test'
-  ...
-# Subtest: rollback failing at after-apply leaves version and plugin consistent
-ok 26 - rollback failing at after-apply leaves version and plugin consistent
-  ---
-  duration_ms: 878.1945
-  type: 'test'
-  ...
-# Subtest: rollback failing at launcher-file leaves version and plugin consistent
-ok 27 - rollback failing at launcher-file leaves version and plugin consistent
-  ---
-  duration_ms: 1080.35
-  type: 'test'
-  ...
-# Subtest: rollback failing at after-launchers leaves version and plugin consistent
-ok 28 - rollback failing at after-launchers leaves version and plugin consistent
-  ---
-  duration_ms: 591.2406
-  type: 'test'
-  ...
-# Subtest: rollback failing at after-install-json leaves version and plugin consistent
-ok 29 - rollback failing at after-install-json leaves version and plugin consistent
-  ---
-  duration_ms: 475.2736
-  type: 'test'
-  ...
-# Subtest: rollback failing at after-current-txt leaves version and plugin consistent
-ok 30 - rollback failing at after-current-txt leaves version and plugin consistent
-  ---
-  duration_ms: 472.6024
-  type: 'test'
-  ...
-# Subtest: rollback without previous version fails
-ok 31 - rollback without previous version fails
-  ---
-  duration_ms: 191.1373
-  type: 'test'
-  ...
-# Subtest: data directory inside the install directory is refused before any write
-ok 32 - data directory inside the install directory is refused before any write
-  ---
-  duration_ms: 52.4878
-  type: 'test'
-  ...
-# Subtest: install directory inside or above the data directory is refused
-ok 33 - install directory inside or above the data directory is refused
-  ---
-  duration_ms: 76.7721
-  type: 'test'
-  ...
-# Subtest: a drive or filesystem root is refused as install directory
-ok 34 - a drive or filesystem root is refused as install directory
-  ---
-  duration_ms: 69.0482
-  type: 'test'
-  ...
-# Subtest: a non-empty directory without our marker is refused and left untouched
-ok 35 - a non-empty directory without our marker is refused and left untouched
-  ---
-  duration_ms: 59.7304
-  type: 'test'
-  ...
-# Subtest: uninstall removes only what we own and keeps user data and foreign files
-ok 36 - uninstall removes only what we own and keeps user data and foreign files
-  ---
-  duration_ms: 210.9266
-  type: 'test'
-  ...
-# Subtest: uninstall never deletes a data directory that ended up inside the install directory
-ok 37 - uninstall never deletes a data directory that ended up inside the install directory
-  ---
-  duration_ms: 269.0871
-  type: 'test'
-  ...
-# Subtest: purge removes our marked profile only and refuses unmarked directories
-ok 38 - purge removes our marked profile only and refuses unmarked directories
-  ---
-  duration_ms: 636.5775
-  type: 'test'
-  ...
-# Subtest: install rejects a corrupted package before copying anything
-ok 39 - install rejects a corrupted package before copying anything
-  ---
-  duration_ms: 72.0026
-  type: 'test'
-  ...
-# Subtest: install rejects unlisted extra file
-ok 40 - install rejects unlisted extra file
-  ---
-  duration_ms: 93.158
-  type: 'test'
-  ...
-# Subtest: install rejects missing listed file
-ok 41 - install rejects missing listed file
-  ---
-  duration_ms: 59.494
-  type: 'test'
-  ...
-# Subtest: install rejects id that does not match the component digest
-ok 42 - install rejects id that does not match the component digest
-  ---
-  duration_ms: 56.9885
-  type: 'test'
-  ...
-# Subtest: install rejects manifest without files
-ok 43 - install rejects manifest without files
-  ---
-  duration_ms: 50.5385
-  type: 'test'
-  ...
-# Subtest: install rejects unsafe path in the manifest
-ok 44 - install rejects unsafe path in the manifest
-  ---
-  duration_ms: 99.0448
-  type: 'test'
-  ...
-# Subtest: install rejects upstream version different from the manifest
-ok 45 - install rejects upstream version different from the manifest
-  ---
-  duration_ms: 65.7561
-  type: 'test'
-  ...
-# Subtest: install rejects a plugin whose engines.dsh the upstream does not satisfy
-ok 46 - install rejects a plugin whose engines.dsh the upstream does not satisfy
-  ---
-  duration_ms: 72.2925
-  type: 'test'
-  ...
-# Subtest: a corrupted installed version is replaced when the package is installed again
-ok 47 - a corrupted installed version is replaced when the package is installed again
-  ---
-  duration_ms: 426.565
-  type: 'test'
-  ...
-# Subtest: launch environment: own data home, bundled node and pnpm first on PATH
-ok 48 - launch environment: own data home, bundled node and pnpm first on PATH
-  ---
-  duration_ms: 0.8276
-  type: 'test'
-  ...
-# Subtest: entry points exist at every moment of a launcher change (also after a crash in the middle)
-ok 49 - entry points exist at every moment of a launcher change (also after a crash in the middle)
-  ---
-  duration_ms: 478.5231
-  type: 'test'
-  ...
-# Subtest: a different data directory is refused for an existing installation
-ok 50 - a different data directory is refused for an existing installation
-  ---
-  duration_ms: 412.9218
-  type: 'test'
-  ...
-# Subtest: install rejects a modified upstream DSH file and leaves nothing behind
-ok 51 - install rejects a modified upstream DSH file and leaves nothing behind
-  ---
-  duration_ms: 124.6878
-  type: 'test'
-  ...
-# Subtest: install rejects an extra file in the upstream tree and leaves nothing behind
-ok 52 - install rejects an extra file in the upstream tree and leaves nothing behind
-  ---
-  duration_ms: 135.6741
-  type: 'test'
-  ...
-# Subtest: install rejects a removed upstream file and leaves nothing behind
-ok 53 - install rejects a removed upstream file and leaves nothing behind
-  ---
-  duration_ms: 51.2309
-  type: 'test'
-  ...
-# Subtest: install rejects a modified pnpm file and leaves nothing behind
-ok 54 - install rejects a modified pnpm file and leaves nothing behind
-  ---
-  duration_ms: 124.4676
-  type: 'test'
-  ...
-# Subtest: install rejects an extra file in the pnpm tree and leaves nothing behind
-ok 55 - install rejects an extra file in the pnpm tree and leaves nothing behind
-  ---
-  duration_ms: 126.0762
-  type: 'test'
-  ...
-# Subtest: an upstream file changed after installation is replaced when the package is installed again
-ok 56 - an upstream file changed after installation is replaced when the package is installed again
-  ---
-  duration_ms: 305.9574
-  type: 'test'
-  ...
-# Subtest: active shared state prevents rollback into a version without guardian
-ok 57 - active shared state prevents rollback into a version without guardian
-  ---
-  duration_ms: 426.4152
-  type: 'test'
-  ...
-# Subtest: test sandbox canonicalizes TEMP aliases while production still rejects them
-ok 58 - test sandbox canonicalizes TEMP aliases while production still rejects them
-  ---
-  duration_ms: 419.023
-  type: 'test'
-  ...
-# Subtest: Cordis fixture: minimal
-ok 59 - Cordis fixture: minimal
-  ---
-  duration_ms: 10.8404
-  type: 'test'
-  ...
-# Subtest: Cordis fixture: user-preset
-ok 60 - Cordis fixture: user-preset
-  ---
-  duration_ms: 9.8746
-  type: 'test'
-  ...
-# Subtest: Cordis fixture: idempotent
-ok 61 - Cordis fixture: idempotent
-  ---
-  duration_ms: 20.8038
-  type: 'test'
-  ...
-# Subtest: Cordis fixture: invalid-yaml
-ok 62 - Cordis fixture: invalid-yaml
-  ---
-  duration_ms: 3.8186
-  type: 'test'
-  ...
-# Subtest: Cordis fixture: missing-preset
-ok 63 - Cordis fixture: missing-preset
-  ---
-  duration_ms: 3.0387
-  type: 'test'
-  ...
-# Subtest: Cordis fixture: provider-collision
-ok 64 - Cordis fixture: provider-collision
-  ---
-  duration_ms: 1.6334
-  type: 'test'
-  ...
-# Subtest: Cordis fixture: conflicting-owned-row
-ok 65 - Cordis fixture: conflicting-owned-row
-  ---
-  duration_ms: 2.7779
-  type: 'test'
-  ...
-# Subtest: Cordis fixture: duplicate-owned-row
-ok 66 - Cordis fixture: duplicate-owned-row
-  ---
-  duration_ms: 4.0816
-  type: 'test'
-  ...
-# Subtest: lock fixture: E-live-owner-within-lease
-ok 67 - lock fixture: E-live-owner-within-lease
-  ---
-  duration_ms: 2.1068
-  type: 'test'
-  ...
-# Subtest: lock fixture: C-cannot-reclaim-dead-owner
-ok 68 - lock fixture: C-cannot-reclaim-dead-owner
-  ---
-  duration_ms: 0.2223
-  type: 'test'
-  ...
-# Subtest: lock fixture: C-cannot-reclaim-expired-owner
-ok 69 - lock fixture: C-cannot-reclaim-expired-owner
-  ---
-  duration_ms: 0.1775
-  type: 'test'
-  ...
-# Subtest: lock fixture: E-reclaims-dead-owner
-ok 70 - lock fixture: E-reclaims-dead-owner
-  ---
-  duration_ms: 0.141
-  type: 'test'
-  ...
-# Subtest: lock fixture: E-expired-live-owner-needs-stop
-ok 71 - lock fixture: E-expired-live-owner-needs-stop
-  ---
-  duration_ms: 0.1381
-  type: 'test'
-  ...
-# Subtest: lock fixture: E-expired-stopped-owner
-ok 72 - lock fixture: E-expired-stopped-owner
-  ---
-  duration_ms: 0.2931
-  type: 'test'
-  ...
-# Subtest: lock fixture: unknown-process-fails-closed
-ok 73 - lock fixture: unknown-process-fails-closed
-  ---
-  duration_ms: 0.1648
-  type: 'test'
-  ...
-# Subtest: lock fixture: replaced-owner-token-refused
-ok 74 - lock fixture: replaced-owner-token-refused
-  ---
-  duration_ms: 0.1221
-  type: 'test'
-  ...
-# Subtest: lock fixture: missing-owner-record-waits
-ok 75 - lock fixture: missing-owner-record-waits
-  ---
-  duration_ms: 0.2153
-  type: 'test'
-  ...
-# Subtest: lock fixture: different-boot-live-owner-not-compared
-ok 76 - lock fixture: different-boot-live-owner-not-compared
-  ---
-  duration_ms: 0.141
-  type: 'test'
-  ...
-# Subtest: lock fixture: release-by-other-owner-refused
-ok 77 - lock fixture: release-by-other-owner-refused
-  ---
-  duration_ms: 0.1158
-  type: 'test'
-  ...
-# Subtest: lock fixture: release-by-current-owner
-ok 78 - lock fixture: release-by-current-owner
-  ---
-  duration_ms: 0.1126
-  type: 'test'
-  ...
-# Subtest: lock fixture: reclaim-requires-host-quiescence
-ok 79 - lock fixture: reclaim-requires-host-quiescence
-  ---
-  duration_ms: 0.1407
-  type: 'test'
-  ...
-# Subtest: lock fixture: release-role-mismatch
-ok 80 - lock fixture: release-role-mismatch
-  ---
-  duration_ms: 0.1156
-  type: 'test'
-  ...
-# Subtest: transition: activation-after-complete-recovery
-ok 81 - transition: activation-after-complete-recovery
-  ---
-  duration_ms: 0.3979
-  type: 'test'
-  ...
-# Subtest: transition: pending-isolation-denies-activation
-ok 82 - transition: pending-isolation-denies-activation
-  ---
-  duration_ms: 0.2234
-  type: 'test'
-  ...
-# Subtest: host-lock sources use OS uptime and keep the frozen trusted-clock UUID schema
-ok 83 - host-lock sources use OS uptime and keep the frozen trusted-clock UUID schema
-  ---
-  duration_ms: 3783.6787
-  type: 'test'
-  ...
-# Subtest: real boot clock is shared across processes
-ok 84 - real boot clock is shared across processes
-  ---
-  duration_ms: 2796.1981
-  type: 'test'
-  ...
-# Subtest: real concurrent mkdir grants one owner only
-ok 85 - real concurrent mkdir grants one owner only
-  ---
-  duration_ms: 3941.052
-  type: 'test'
-  ...
-# Subtest: lock refuses expired release and a replaced owner token
-ok 86 - lock refuses expired release and a replaced owner token
-  ---
-  duration_ms: 79.5257
-  type: 'test'
-  ...
-# Subtest: clock rollback tolerance cannot extend UTC or monotonic deadlines
-ok 87 - clock rollback tolerance cannot extend UTC or monotonic deadlines
-  ---
-  duration_ms: 1.9519
-  type: 'test'
-  ...
-# Subtest: plugin-free isolation stops first and preserves history and quarantine
-ok 88 - plugin-free isolation stops first and preserves history and quarantine
-  ---
-  duration_ms: 763.3218
-  type: 'test'
-  ...
-# Subtest: unconfirmed process stop keeps current and blocks startup
-ok 89 - unconfirmed process stop keeps current and blocks startup
-  ---
-  duration_ms: 363.7716
-  type: 'test'
-  ...
-# Subtest: restart after rename finishes isolation and durable receipt
-ok 90 - restart after rename finishes isolation and durable receipt
-  ---
-  duration_ms: 654.6681
-  type: 'test'
-  ...
-# Subtest: empty flow patch upgrades to valid block YAML
-ok 91 - empty flow patch upgrades to valid block YAML
-  ---
-  duration_ms: 1.7245
-  type: 'test'
-  ...
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QDNIUY\\app\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-JbeqGS\\app\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Subtest: launch logs only the safe update failure notice: desktop.smoke_failed
-ok 92 - launch logs only the safe update failure notice: desktop.smoke_failed
-  ---
-  duration_ms: 1559.5382
-  type: 'test'
-  ...
-# Subtest: launch logs only the safe update failure notice: unexpected_failure
-ok 93 - launch logs only the safe update failure notice: unexpected_failure
-  ---
-  duration_ms: 2294.1324
-  type: 'test'
-  ...
-# Subtest: package ID uses the independent Desktop version, not the plugin version
-ok 94 - package ID uses the independent Desktop version, not the plugin version
-  ---
-  duration_ms: 173.7275
-  type: 'test'
-  ...
-# Subtest: upstream.json pins an exact dsh version the plugin accepts
-ok 95 - upstream.json pins an exact dsh version the plugin accepts
-  ---
-  duration_ms: 2.9222
-  type: 'test'
-  ...
-# Subtest: committed upstream lock resolves exactly the pinned dsh with integrity
-ok 96 - committed upstream lock resolves exactly the pinned dsh with integrity
-  ---
-  duration_ms: 12.6449
-  type: 'test'
-  ...
-# Subtest: secret scanner flags keys, tokens and credential files
-ok 97 - secret scanner flags keys, tokens and credential files
-  ---
-  duration_ms: 52.0811
-  type: 'test'
-  ...
-# Subtest: built package: manifest, checksums, version lock and contents
-ok 98 - built package: manifest, checksums, version lock and contents
-  ---
-  duration_ms: 50586.2269
-  type: 'test'
-  ...
-# Subtest: built package: product name, licences, pnpm and trimming
-ok 99 - built package: product name, licences, pnpm and trimming
-  ---
-  duration_ms: 694.7488
-  type: 'test'
-  ...
-# Subtest: built package: no secrets in our files
-ok 100 - built package: no secrets in our files
-  ---
-  duration_ms: 1046.2379
-  type: 'test'
-  ...
-# Subtest: secret scan does not skip large files of ours
-ok 101 - secret scan does not skip large files of ours
-  ---
-  duration_ms: 23.5816
-  type: 'test'
-  ...
-# Subtest: build scan covers our plugin files and the expanded plugin tarball
-ok 102 - build scan covers our plugin files and the expanded plugin tarball
-  ---
-  duration_ms: 105.0885
-  type: 'test'
-  ...
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZhMcrf\\install-0\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZhMcrf\\install-1\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZhMcrf\\install-2\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-cNJcZn\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-cNJcZn\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-cNJcZn\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Subtest: HTTPS installer input normalizes slash, host case, default port and path
-ok 103 - HTTPS installer input normalizes slash, host case, default port and path
-  ---
-  duration_ms: 2545.1301
-  type: 'test'
-  ...
-# Subtest: HTTP confirms canonical private and loopback IP origins only
-ok 104 - HTTP confirms canonical private and loopback IP origins only
-  ---
-  duration_ms: 20.2097
-  type: 'test'
-  ...
-# Subtest: credentials, HTTP paths, aliases and public IPs are rejected before installation
-ok 105 - credentials, HTTP paths, aliases and public IPs are rejected before installation
-  ---
-  duration_ms: 1.6072
-  type: 'test'
-  ...
-# Subtest: explicit confirmation replaces the binding; missing confirmation fails without mutation
-ok 106 - explicit confirmation replaces the binding; missing confirmation fails without mutation
-  ---
-  duration_ms: 2631.1439
-  type: 'test'
-  ...
-# Subtest: CI 制品记录与离线审阅确认绑定，变更后必须重新审阅
-ok 107 - CI 制品记录与离线审阅确认绑定，变更后必须重新审阅
-  ---
-  duration_ms: 11753.3023
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: skill-v2-valid
-ok 108 - Desktop frozen vector: skill-v2-valid
-  ---
-  duration_ms: 1104.9988
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: online-empty-artifacts-valid
-ok 109 - Desktop frozen vector: online-empty-artifacts-valid
-  ---
-  duration_ms: 4.0556
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: plugin-v1-valid
-ok 110 - Desktop frozen vector: plugin-v1-valid
-  ---
-  duration_ms: 29.6991
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: v1-rejected-by-v2
-ok 111 - Desktop frozen vector: v1-rejected-by-v2
-  ---
-  duration_ms: 0.5099
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: v2-rejected-by-v1
-ok 112 - Desktop frozen vector: v2-rejected-by-v1
-  ---
-  duration_ms: 0.9454
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: skill-tampered-kind
-ok 113 - Desktop frozen vector: skill-tampered-kind
-  ---
-  duration_ms: 1.3698
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: skill-tampered-artifact-digest
-ok 114 - Desktop frozen vector: skill-tampered-artifact-digest
-  ---
-  duration_ms: 1.2967
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: skill-signed-wrong-artifact-set
-ok 115 - Desktop frozen vector: skill-signed-wrong-artifact-set
-  ---
-  duration_ms: 2.5691
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: skill-raw-byte-change
-ok 116 - Desktop frozen vector: skill-raw-byte-change
-  ---
-  duration_ms: 3.3713
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: migration-proof-valid
-ok 117 - Desktop frozen vector: migration-proof-valid
-  ---
-  duration_ms: 48.9758
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: migration-forged-mapping
-ok 118 - Desktop frozen vector: migration-forged-mapping
-  ---
-  duration_ms: 3.6615
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: migration-replaced-M
-ok 119 - Desktop frozen vector: migration-replaced-M
-  ---
-  duration_ms: 7.3059
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: migration-cross-tenant
-ok 120 - Desktop frozen vector: migration-cross-tenant
-  ---
-  duration_ms: 1.3999
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: migration-t0-tampered
-ok 121 - Desktop frozen vector: migration-t0-tampered
-  ---
-  duration_ms: 1.9092
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: migration-t0-unmatched
-ok 122 - Desktop frozen vector: migration-t0-unmatched
-  ---
-  duration_ms: 2.7706
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: revoked-dual-digest
-ok 123 - Desktop frozen vector: revoked-dual-digest
-  ---
-  duration_ms: 32.2148
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: revoked-only-A
-ok 124 - Desktop frozen vector: revoked-only-A
-  ---
-  duration_ms: 2.5679
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: revoked-only-M
-ok 125 - Desktop frozen vector: revoked-only-M
-  ---
-  duration_ms: 5.7213
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: revoked-artifact-reuse
-ok 126 - Desktop frozen vector: revoked-artifact-reuse
-  ---
-  duration_ms: 2.511
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: revocations-empty-valid
-ok 127 - Desktop frozen vector: revocations-empty-valid
-  ---
-  duration_ms: 3.2379
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: revocations-tampered
-ok 128 - Desktop frozen vector: revocations-tampered
-  ---
-  duration_ms: 6.1156
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: revocations-cross-tenant
-ok 129 - Desktop frozen vector: revocations-cross-tenant
-  ---
-  duration_ms: 3.4975
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: same-sequence-proved-alias
-ok 130 - Desktop frozen vector: same-sequence-proved-alias
-  ---
-  duration_ms: 7.2632
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: same-sequence-unproved-alias
-ok 131 - Desktop frozen vector: same-sequence-unproved-alias
-  ---
-  duration_ms: 1.9015
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: same-sequence-version-swap
-ok 132 - Desktop frozen vector: same-sequence-version-swap
-  ---
-  duration_ms: 8.164
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: cross-protocol-rollback-v1
-ok 133 - Desktop frozen vector: cross-protocol-rollback-v1
-  ---
-  duration_ms: 2.9458
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: cross-protocol-rollback-v2
-ok 134 - Desktop frozen vector: cross-protocol-rollback-v2
-  ---
-  duration_ms: 1.797
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: v1-renewal-at-fixed-deadline
-ok 135 - Desktop frozen vector: v1-renewal-at-fixed-deadline
-  ---
-  duration_ms: 12.0688
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: v1-renewal-past-fixed-deadline
-ok 136 - Desktop frozen vector: v1-renewal-past-fixed-deadline
-  ---
-  duration_ms: 0.8992
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: v1-renewal-after-cutoff
-ok 137 - Desktop frozen vector: v1-renewal-after-cutoff
-  ---
-  duration_ms: 0.868
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: v1-renewal-cannot-reset-t0
-ok 138 - Desktop frozen vector: v1-renewal-cannot-reset-t0
-  ---
-  duration_ms: 0.8489
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: downgrade-signed-valid
-ok 139 - Desktop frozen vector: downgrade-signed-valid
-  ---
-  duration_ms: 23.7448
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: downgrade-other-version
-ok 140 - Desktop frozen vector: downgrade-other-version
-  ---
-  duration_ms: 0.9724
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: downgrade-other-instance
-ok 141 - Desktop frozen vector: downgrade-other-instance
-  ---
-  duration_ms: 1.3645
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: downgrade-expired
-ok 142 - Desktop frozen vector: downgrade-expired
-  ---
-  duration_ms: 1.361
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: downgrade-replayed
-ok 143 - Desktop frozen vector: downgrade-replayed
-  ---
-  duration_ms: 1.0459
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: downgrade-tampered
-ok 144 - Desktop frozen vector: downgrade-tampered
-  ---
-  duration_ms: 1.9123
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: downgrade-wrong-purpose
-ok 145 - Desktop frozen vector: downgrade-wrong-purpose
-  ---
-  duration_ms: 0.9612
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-clock-valid
-ok 146 - Desktop frozen vector: guardian-clock-valid
-  ---
-  duration_ms: 0.4307
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-clock-small-wall-adjustment
-ok 147 - Desktop frozen vector: guardian-clock-small-wall-adjustment
-  ---
-  duration_ms: 0.2505
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-clock-wall-tolerance-boundary
-ok 148 - Desktop frozen vector: guardian-clock-wall-tolerance-boundary
-  ---
-  duration_ms: 0.3537
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-clock-wall-beyond-tolerance
-ok 149 - Desktop frozen vector: guardian-clock-wall-beyond-tolerance
-  ---
-  duration_ms: 0.4865
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-clock-tolerance-cannot-extend-lease
-ok 150 - Desktop frozen vector: guardian-clock-tolerance-cannot-extend-lease
-  ---
-  duration_ms: 0.6038
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-clock-wall-rollback
-ok 151 - Desktop frozen vector: guardian-clock-wall-rollback
-  ---
-  duration_ms: 0.2412
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-clock-monotonic-rollback
-ok 152 - Desktop frozen vector: guardian-clock-monotonic-rollback
-  ---
-  duration_ms: 0.219
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-clock-new-boot-offline
-ok 153 - Desktop frozen vector: guardian-clock-new-boot-offline
-  ---
-  duration_ms: 0.2003
-  type: 'test'
-  ...
-# Subtest: Desktop frozen vector: guardian-active-lease-expired
-ok 154 - Desktop frozen vector: guardian-active-lease-expired
-  ---
-  duration_ms: 0.2048
-  type: 'test'
-  ...
-# Subtest: F1 C holds lock and changes ledger between E snapshots without stopping DSH
-ok 155 - F1 C holds lock and changes ledger between E snapshots without stopping DSH
-  ---
-  duration_ms: 10079.4001
-  type: 'test'
-  ...
-# Subtest: F2 roots permits private Desktop with empty current
-ok 156 - F2 roots permits private Desktop with empty current
-  ---
-  duration_ms: 1076.0154
-  type: 'test'
-  ...
-# Subtest: F2 stale-envelope permits private Desktop with empty current
-ok 157 - F2 stale-envelope permits private Desktop with empty current
-  ---
-  duration_ms: 2247.8165
-  type: 'test'
-  ...
-# Subtest: F2 unknown-ledger permits private Desktop with empty current
-ok 158 - F2 unknown-ledger permits private Desktop with empty current
-  ---
-  duration_ms: 777.7332
-  type: 'test'
-  ...
-# Subtest: F2 unowned nonempty current still fails closed
-ok 159 - F2 unowned nonempty current still fails closed
-  ---
-  duration_ms: 300.1657
-  type: 'test'
-  ...
-# Subtest: F3 prepared revision/generation advancement reauthorizes while keeping old signed view alive
-ok 160 - F3 prepared revision/generation advancement reauthorizes while keeping old signed view alive
-  ---
-  duration_ms: 3452.322
-  type: 'test'
-  ...
-# Subtest: F4 real child is relaunched in the same session after private-only shared recovery
-ok 161 - F4 real child is relaunched in the same session after private-only shared recovery
-  ---
-  duration_ms: 3951.9577
-  type: 'test'
-  ...
-# Subtest: M4 K2 DISABLED takes precedence over enabled
-ok 162 - M4 K2 DISABLED takes precedence over enabled
-  ---
-  duration_ms: 183.7371
-  type: 'test'
-  ...
-# Subtest: M4 K2 REMOVED takes precedence over enabled
-ok 163 - M4 K2 REMOVED takes precedence over enabled
-  ---
-  duration_ms: 202.6462
-  type: 'test'
-  ...
-# Subtest: M4 K2 ENABLED takes precedence over enabled
-ok 164 - M4 K2 ENABLED takes precedence over enabled
-  ---
-  duration_ms: 698.0784
-  type: 'test'
-  ...
-# Subtest: M2 persisted effective time beyond lease never writes active
-ok 165 - M2 persisted effective time beyond lease never writes active
-  ---
-  duration_ms: 2646.1301
-  type: 'test'
-  ...
-# Subtest: M5 empty and temp-only orphan locks recover only after confirmed stop
-ok 166 - M5 empty and temp-only orphan locks recover only after confirmed stop
-  ---
-  duration_ms: 138.4862
-  type: 'test'
-  ...
-# Subtest: M6 unchanged tick does not rewrite state/high water or enumerate processes each second
-ok 167 - M6 unchanged tick does not rewrite state/high water or enumerate processes each second
-  ---
-  duration_ms: 1016.4921
-  type: 'test'
-  ...
-# Subtest: M7 recycled parent PID never adopts older unrelated processes
-ok 168 - M7 recycled parent PID never adopts older unrelated processes
-  ---
-  duration_ms: 18.7243
-  type: 'test'
-  ...
-# Subtest: L5 deployment rejects all public vector keys regardless of kid
-ok 169 - L5 deployment rejects all public vector keys regardless of kid
-  ---
-  duration_ms: 6.2395
-  type: 'test'
-  ...
-# Subtest: L4 extra empty directories do not match signed Skill bytes
-ok 170 - L4 extra empty directories do not match signed Skill bytes
-  ---
-  duration_ms: 1367.1581
-  type: 'test'
-  ...
-# Subtest: M6 stable rejected private staging avoids repeat crypto and retries on ledger change
-ok 171 - M6 stable rejected private staging avoids repeat crypto and retries on ledger change
-  ---
-  duration_ms: 2056.2408
-  type: 'test'
-  ...
-# Subtest: prerelease ordering follows semver
-ok 172 - prerelease ordering follows semver
-  ---
-  duration_ms: 2.2749
-  type: 'test'
-  ...
-# Subtest: engines.dsh minimum gate
-ok 173 - engines.dsh minimum gate
-  ---
-  duration_ms: 0.5471
-  type: 'test'
-  ...
-# Subtest: unsupported ranges and invalid versions fail closed
-ok 174 - unsupported ranges and invalid versions fail closed
-  ---
-  duration_ms: 2.0316
-  type: 'test'
-  ...
-# Subtest: embedded payload is read as data and malformed envelopes fail closed
-ok 175 - embedded payload is read as data and malformed envelopes fail closed
-  ---
-  duration_ms: 36.1634
-  type: 'test'
-  ...
-# Subtest: Windows setup silently forwards output, arguments and failure exit status
-ok 176 - Windows setup silently forwards output, arguments and failure exit status
-  ---
-  duration_ms: 6756.1478
-  type: 'test'
-  ...
-# Subtest: packaged Windows launcher exports diagnostics using its bundled Node and self-contained broker (auriga-package-auth-)
-ok 177 - packaged Windows launcher exports diagnostics using its bundled Node and self-contained broker (auriga-package-auth-)
-  ---
-  duration_ms: 11844.1714
-  type: 'test'
-  ...
-# Subtest: packaged Windows launcher exports diagnostics using its bundled Node and self-contained broker (auriga-runner~1-)
-ok 178 - packaged Windows launcher exports diagnostics using its bundled Node and self-contained broker (auriga-runner~1-)
-  ---
-  duration_ms: 5602.2755
-  type: 'test'
-  ...
-# Subtest: shell startup failure records a safe local diagnostic while allowing local DSH to continue
-ok 179 - shell startup failure records a safe local diagnostic while allowing local DSH to continue
-  ---
-  duration_ms: 3019.9088
-  type: 'test'
-  ...
-# Subtest: missing shell diagnostic sink emits safe structured stderr without exposing paths or raw errors
-ok 180 - missing shell diagnostic sink emits safe structured stderr without exposing paths or raw errors
-  ---
-  duration_ms: 5.793
-  type: 'test'
-  ...
-# Subtest: shell logout is reconciled by the existing single guardian writer before shared content can be reused
-ok 181 - shell logout is reconciled by the existing single guardian writer before shared content can be reused
-  ---
-  duration_ms: 6518.8617
-  type: 'test'
-  ...
-# Subtest: startup before shell initialization and transient platform states preserve an active shared view
-ok 182 - startup before shell initialization and transient platform states preserve an active shared view
-  ---
-  duration_ms: 7723.6204
-  type: 'test'
-  ...
-# Subtest: shell revoked still disables the shared view and requests a new DSH session
-ok 183 - shell revoked still disables the shared view and requests a new DSH session
-  ---
-  duration_ms: 1240.4246
-  type: 'test'
-  ...
-# Subtest: shell identity_changed still disables the shared view and requests a new DSH session
-ok 184 - shell identity_changed still disables the shared view and requests a new DSH session
-  ---
-  duration_ms: 1285.6905
-  type: 'test'
-  ...
-# Subtest: independent observer verifies signed bytes, receipts and materialized view
-ok 185 - independent observer verifies signed bytes, receipts and materialized view
-  ---
-  duration_ms: 5226.223
-  type: 'test'
-  ...
-# Subtest: full schema rejects nested unknown fields and installation receipt identity substitution
-ok 186 - full schema rejects nested unknown fields and installation receipt identity substitution
-  ---
-  duration_ms: 860.5851
-  type: 'test'
-  ...
-# Subtest: supervisor persists high-water marks and earliest lease, then independently disables revoked bytes
-ok 187 - supervisor persists high-water marks and earliest lease, then independently disables revoked bytes
-  ---
-  duration_ms: 5564.5112
-  type: 'test'
-  ...
-# Subtest: supervisor stops before isolation: clock_rollback
-ok 188 - supervisor stops before isolation: clock_rollback
-  ---
-  duration_ms: 2572.677
-  type: 'test'
-  ...
-# Subtest: supervisor stops before isolation: lease_expired
-ok 189 - supervisor stops before isolation: lease_expired
-  ---
-  duration_ms: 1233.6074
-  type: 'test'
-  ...
-# Subtest: supervisor stops before isolation: identity_changed
-ok 190 - supervisor stops before isolation: identity_changed
-  ---
-  duration_ms: 1292.1712
-  type: 'test'
-  ...
-# Subtest: prepared staging authorizes before applied receipt
-ok 191 - prepared staging authorizes before applied receipt
-  ---
-  duration_ms: 637.4617
-  type: 'test'
-  ...
-# Subtest: unknown stale lock retained, known quiesced writer lock reclaimed
-ok 192 - unknown stale lock retained, known quiesced writer lock reclaimed
-  ---
-  duration_ms: 67.5919
-  type: 'test'
-  ...
-# Subtest: different boot cannot reuse cached active trust
-ok 193 - different boot cannot reuse cached active trust
-  ---
-  duration_ms: 1208.6048
-  type: 'test'
-  ...
-# Subtest: Windows System32 tools ignore Git usr/bin on PATH
-ok 194 - Windows System32 tools ignore Git usr/bin on PATH
-  ---
-  duration_ms: 1279.7437
-  type: 'test'
-  ...
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZrMlYK\\app\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Subtest: Windows uninstall temp copy includes frozen protocol assets
-ok 195 - Windows uninstall temp copy includes frozen protocol assets
-  ---
-  duration_ms: 8297.3332
-  type: 'test'
-  ...
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-pGFrOK\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-pGFrOK\\install\\versions\\2.0.0-dsh0.2.1-rc.3-f003340998aa\\upstream\\app\\package.json
-# Subtest: 沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数据保留
-ok 196 - 沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数据保留
-  ---
-  duration_ms: 6016.4286
-  type: 'test'
-  ...
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-kHMFzR\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-kHMFzR\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-C2PgTs\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-5Q1BiX\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-pOuyEv\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-pOuyEv\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-t2ipJx\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-t2ipJx\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-lpKgXs\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Subtest: 签名、篡改、降级、到期、未来、序号重放均拒绝
-ok 197 - 签名、篡改、降级、到期、未来、序号重放均拒绝
-  ---
-  duration_ms: 17.866
-  type: 'test'
-  ...
-# Subtest: 更新只连接固定 HTTPS origin
-ok 198 - 更新只连接固定 HTTPS origin
-  ---
-  duration_ms: 12.6719
-  type: 'test'
-  ...
-# Subtest: 同一安装目录拒绝同时启动第二个 DSH，退出后可重开
-ok 199 - 同一安装目录拒绝同时启动第二个 DSH，退出后可重开
-  ---
-  duration_ms: 134.6869
-  type: 'test'
-  ...
-# Subtest: 成功更新保留数据并提示重启
-ok 200 - 成功更新保留数据并提示重启
-  ---
-  duration_ms: 4044.398
-  type: 'test'
-  ...
-# Subtest: badSha 拒绝并保持旧版且不留新版本目录
-ok 201 - badSha 拒绝并保持旧版且不留新版本目录
-  ---
-  duration_ms: 1115.4106
-  type: 'test'
-  ...
-# Subtest: badId 拒绝并保持旧版且不留新版本目录
-ok 202 - badId 拒绝并保持旧版且不留新版本目录
-  ---
-  duration_ms: 1430.81
-  type: 'test'
-  ...
-# Subtest: smokeFails 拒绝并保持旧版且不留新版本目录
-ok 203 - smokeFails 拒绝并保持旧版且不留新版本目录
-  ---
-  duration_ms: 1761.0302
-  type: 'test'
-  ...
-# Subtest: 下载中断后重试成功；关闭检查后不请求
-ok 204 - 下载中断后重试成功；关闭检查后不请求
-  ---
-  duration_ms: 1959.3047
-  type: 'test'
-  ...
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-lpKgXs\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-mxGHIE\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-9sYYmQ\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-9sYYmQ\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
-# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
-# Require stack:
-# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-LKfzRq\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
-# Subtest: 真实子进程被杀后锁失效，下次更新成功并清理残留
-ok 205 - 真实子进程被杀后锁失效，下次更新成功并清理残留
-  ---
-  duration_ms: 1900.8368
-  type: 'test'
-  ...
-# Subtest: 启动前清理空锁等崩溃残留；卸载删除下载残留且保留用户数据
-ok 206 - 启动前清理空锁等崩溃残留；卸载删除下载残留且保留用户数据
-  ---
-  duration_ms: 376.494
-  type: 'test'
-  ...
-# Subtest: Range 续传拼接完整包；忽略 Range 时安全重下；错误 Range 拒绝
-ok 207 - Range 续传拼接完整包；忽略 Range 时安全重下；错误 Range 拒绝
-  ---
-  duration_ms: 11.2016
-  type: 'test'
-  ...
-# Subtest: 同版本同包更高序号续期不会重复更新，周期检查不重新哈希安装树
-ok 208 - 同版本同包更高序号续期不会重复更新，周期检查不重新哈希安装树
-  ---
-  duration_ms: 621.6072
-  type: 'test'
-  ...
-# Subtest: HTTP requires confirmed literal IP binding; domain HTTP stays forbidden
-ok 209 - HTTP requires confirmed literal IP binding; domain HTTP stays forbidden
-  ---
-  duration_ms: 12.8126
-  type: 'test'
-  ...
-# Subtest: HTTP install confirmation persists once and updater uses it
-ok 210 - HTTP install confirmation persists once and updater uses it
-  ---
-  duration_ms: 255.8958
-  type: 'test'
-  ...
-# Subtest: a higher sequence cannot roll back a previously seen version
-ok 211 - a higher sequence cannot roll back a previously seen version
-  ---
-  duration_ms: 1.4917
-  type: 'test'
-  ...
-1..211
-# tests 211
-# suites 0
-# pass 211
-# fail 0
-# cancelled 0
-# skipped 0
-# todo 0
-# duration_ms 52964.6553
+TAP version 13
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZDDOb0\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-mtIytN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-mtIytN\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-B6lqHJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-9cefdfc6a7f2\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-B6lqHJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-2d37bb6e8fd9\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-FT3GPu\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-RCupCV\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-9Micxt\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-9Micxt\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ccKh0N\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ccKh0N\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-2JTpeU\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-2JTpeU\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-jU5DrT\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-jU5DrT\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-8Pwg9i\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-8Pwg9i\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-2cyepJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-2cyepJ\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-TmiCB5\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-TmiCB5\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-qUsC57\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-qUsC57\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-H2x9jl\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-H2x9jl\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OegM51\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OegM51\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-IUGUlp\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-IUGUlp\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-c7KT8K\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-c7KT8K\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-l7qA6X\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-l7qA6X\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XCj2ci\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XCj2ci\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-WGT0vN\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-VduSLK\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-VduSLK\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-7oZ2D8\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-7oZ2D8\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-UhygHW\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-UhygHW\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-1QUakv\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-1QUakv\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XuADBk\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-XuADBk\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-b357kq\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-b357kq\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QAIWcA\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QAIWcA\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-YT8fS0\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-YT8fS0\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-blvOPw\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-blvOPw\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-An27sz\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-MY4Le4\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-NaSGNK\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-HNBSxk\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-RWVYki\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-oEPOWJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-oEPOWJ\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-xl9E4s\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-xl9E4s\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OmCfOM\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-OmCfOM\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Aly7U6\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-Aly7U6\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QxSdrp\\app\\versions\\1.0.0-dsh0.2.1-rc.3-6e400067cb9e\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QxSdrp\\app\\versions\\1.1.0-dsh0.2.1-rc.3-0fdf00ab27a7\\upstream\\app\\package.json
+# Subtest: default smoke distinguishes command and missing-plugin failures with a safe reason code
+ok 1 - default smoke distinguishes command and missing-plugin failures with a safe reason code
+  ---
+  duration_ms: 5069.0289
+  type: 'test'
+  ...
+# Subtest: fresh install seeds profile, plugin, ownership marker and platform address
+ok 2 - fresh install seeds profile, plugin, ownership marker and platform address
+  ---
+  duration_ms: 1001.4289
+  type: 'test'
+  ...
+# Subtest: upgrade keeps user data and settings and keeps the previous version
+ok 3 - upgrade keeps user data and settings and keeps the previous version
+  ---
+  duration_ms: 1278.0621
+  type: 'test'
+  ...
+# Subtest: components with equal versions but different content get different ids and replace the old ones
+ok 4 - components with equal versions but different content get different ids and replace the old ones
+  ---
+  duration_ms: 2061.4062
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-backup returns to the exact pre-upgrade state
+ok 5 - upgrade failing at after-backup returns to the exact pre-upgrade state
+  ---
+  duration_ms: 939.9655
+  type: 'test'
+  ...
+# Subtest: crash at after-backup is repaired by recover()
+ok 6 - crash at after-backup is repaired by recover()
+  ---
+  duration_ms: 1232.3326
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-apply returns to the exact pre-upgrade state
+ok 7 - upgrade failing at after-apply returns to the exact pre-upgrade state
+  ---
+  duration_ms: 1217.9402
+  type: 'test'
+  ...
+# Subtest: crash at after-apply is repaired by recover()
+ok 8 - crash at after-apply is repaired by recover()
+  ---
+  duration_ms: 1225.9167
+  type: 'test'
+  ...
+# Subtest: upgrade failing at launcher-file returns to the exact pre-upgrade state
+ok 9 - upgrade failing at launcher-file returns to the exact pre-upgrade state
+  ---
+  duration_ms: 666.0851
+  type: 'test'
+  ...
+# Subtest: crash at launcher-file is repaired by recover()
+ok 10 - crash at launcher-file is repaired by recover()
+  ---
+  duration_ms: 513.8052
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-launchers returns to the exact pre-upgrade state
+ok 11 - upgrade failing at after-launchers returns to the exact pre-upgrade state
+  ---
+  duration_ms: 535.5242
+  type: 'test'
+  ...
+# Subtest: crash at after-launchers is repaired by recover()
+ok 12 - crash at after-launchers is repaired by recover()
+  ---
+  duration_ms: 551.1735
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-install-json returns to the exact pre-upgrade state
+ok 13 - upgrade failing at after-install-json returns to the exact pre-upgrade state
+  ---
+  duration_ms: 523.432
+  type: 'test'
+  ...
+# Subtest: crash at after-install-json is repaired by recover()
+ok 14 - crash at after-install-json is repaired by recover()
+  ---
+  duration_ms: 485.4171
+  type: 'test'
+  ...
+# Subtest: upgrade failing at after-current-txt returns to the exact pre-upgrade state
+ok 15 - upgrade failing at after-current-txt returns to the exact pre-upgrade state
+  ---
+  duration_ms: 469.398
+  type: 'test'
+  ...
+# Subtest: crash at after-current-txt is repaired by recover()
+ok 16 - crash at after-current-txt is repaired by recover()
+  ---
+  duration_ms: 405.7022
+  type: 'test'
+  ...
+# Subtest: a crash between the two pointer writes never leaves mixed pointers
+ok 17 - a crash between the two pointer writes never leaves mixed pointers
+  ---
+  duration_ms: 524.5471
+  type: 'test'
+  ...
+# Subtest: failed smoke check during upgrade restores everything
+ok 18 - failed smoke check during upgrade restores everything
+  ---
+  duration_ms: 648.3425
+  type: 'test'
+  ...
+# Subtest: profile is fully backed up before it is modified
+ok 19 - profile is fully backed up before it is modified
+  ---
+  duration_ms: 747.4481
+  type: 'test'
+  ...
+# Subtest: an unfinished backup is never used for restoring
+ok 20 - an unfinished backup is never used for restoring
+  ---
+  duration_ms: 948.927
+  type: 'test'
+  ...
+# Subtest: first install failing leaves no pointers, profile or version behind
+ok 21 - first install failing leaves no pointers, profile or version behind
+  ---
+  duration_ms: 1040.4083
+  type: 'test'
+  ...
+# Subtest: rollback restores previous version, plugin files and launchers
+ok 22 - rollback restores previous version, plugin files and launchers
+  ---
+  duration_ms: 520.8936
+  type: 'test'
+  ...
+# Subtest: rollback keeps settings changed after the upgrade
+ok 23 - rollback keeps settings changed after the upgrade
+  ---
+  duration_ms: 402.9186
+  type: 'test'
+  ...
+# Subtest: rollback failing at the smoke check restores plugin files and pointers
+ok 24 - rollback failing at the smoke check restores plugin files and pointers
+  ---
+  duration_ms: 489.4451
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-backup leaves version and plugin consistent
+ok 25 - rollback failing at after-backup leaves version and plugin consistent
+  ---
+  duration_ms: 569.1121
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-apply leaves version and plugin consistent
+ok 26 - rollback failing at after-apply leaves version and plugin consistent
+  ---
+  duration_ms: 878.1945
+  type: 'test'
+  ...
+# Subtest: rollback failing at launcher-file leaves version and plugin consistent
+ok 27 - rollback failing at launcher-file leaves version and plugin consistent
+  ---
+  duration_ms: 1080.35
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-launchers leaves version and plugin consistent
+ok 28 - rollback failing at after-launchers leaves version and plugin consistent
+  ---
+  duration_ms: 591.2406
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-install-json leaves version and plugin consistent
+ok 29 - rollback failing at after-install-json leaves version and plugin consistent
+  ---
+  duration_ms: 475.2736
+  type: 'test'
+  ...
+# Subtest: rollback failing at after-current-txt leaves version and plugin consistent
+ok 30 - rollback failing at after-current-txt leaves version and plugin consistent
+  ---
+  duration_ms: 472.6024
+  type: 'test'
+  ...
+# Subtest: rollback without previous version fails
+ok 31 - rollback without previous version fails
+  ---
+  duration_ms: 191.1373
+  type: 'test'
+  ...
+# Subtest: data directory inside the install directory is refused before any write
+ok 32 - data directory inside the install directory is refused before any write
+  ---
+  duration_ms: 52.4878
+  type: 'test'
+  ...
+# Subtest: install directory inside or above the data directory is refused
+ok 33 - install directory inside or above the data directory is refused
+  ---
+  duration_ms: 76.7721
+  type: 'test'
+  ...
+# Subtest: a drive or filesystem root is refused as install directory
+ok 34 - a drive or filesystem root is refused as install directory
+  ---
+  duration_ms: 69.0482
+  type: 'test'
+  ...
+# Subtest: a non-empty directory without our marker is refused and left untouched
+ok 35 - a non-empty directory without our marker is refused and left untouched
+  ---
+  duration_ms: 59.7304
+  type: 'test'
+  ...
+# Subtest: uninstall removes only what we own and keeps user data and foreign files
+ok 36 - uninstall removes only what we own and keeps user data and foreign files
+  ---
+  duration_ms: 210.9266
+  type: 'test'
+  ...
+# Subtest: uninstall never deletes a data directory that ended up inside the install directory
+ok 37 - uninstall never deletes a data directory that ended up inside the install directory
+  ---
+  duration_ms: 269.0871
+  type: 'test'
+  ...
+# Subtest: purge removes our marked profile only and refuses unmarked directories
+ok 38 - purge removes our marked profile only and refuses unmarked directories
+  ---
+  duration_ms: 636.5775
+  type: 'test'
+  ...
+# Subtest: install rejects a corrupted package before copying anything
+ok 39 - install rejects a corrupted package before copying anything
+  ---
+  duration_ms: 72.0026
+  type: 'test'
+  ...
+# Subtest: install rejects unlisted extra file
+ok 40 - install rejects unlisted extra file
+  ---
+  duration_ms: 93.158
+  type: 'test'
+  ...
+# Subtest: install rejects missing listed file
+ok 41 - install rejects missing listed file
+  ---
+  duration_ms: 59.494
+  type: 'test'
+  ...
+# Subtest: install rejects id that does not match the component digest
+ok 42 - install rejects id that does not match the component digest
+  ---
+  duration_ms: 56.9885
+  type: 'test'
+  ...
+# Subtest: install rejects manifest without files
+ok 43 - install rejects manifest without files
+  ---
+  duration_ms: 50.5385
+  type: 'test'
+  ...
+# Subtest: install rejects unsafe path in the manifest
+ok 44 - install rejects unsafe path in the manifest
+  ---
+  duration_ms: 99.0448
+  type: 'test'
+  ...
+# Subtest: install rejects upstream version different from the manifest
+ok 45 - install rejects upstream version different from the manifest
+  ---
+  duration_ms: 65.7561
+  type: 'test'
+  ...
+# Subtest: install rejects a plugin whose engines.dsh the upstream does not satisfy
+ok 46 - install rejects a plugin whose engines.dsh the upstream does not satisfy
+  ---
+  duration_ms: 72.2925
+  type: 'test'
+  ...
+# Subtest: a corrupted installed version is replaced when the package is installed again
+ok 47 - a corrupted installed version is replaced when the package is installed again
+  ---
+  duration_ms: 426.565
+  type: 'test'
+  ...
+# Subtest: launch environment: own data home, bundled node and pnpm first on PATH
+ok 48 - launch environment: own data home, bundled node and pnpm first on PATH
+  ---
+  duration_ms: 0.8276
+  type: 'test'
+  ...
+# Subtest: entry points exist at every moment of a launcher change (also after a crash in the middle)
+ok 49 - entry points exist at every moment of a launcher change (also after a crash in the middle)
+  ---
+  duration_ms: 478.5231
+  type: 'test'
+  ...
+# Subtest: a different data directory is refused for an existing installation
+ok 50 - a different data directory is refused for an existing installation
+  ---
+  duration_ms: 412.9218
+  type: 'test'
+  ...
+# Subtest: install rejects a modified upstream DSH file and leaves nothing behind
+ok 51 - install rejects a modified upstream DSH file and leaves nothing behind
+  ---
+  duration_ms: 124.6878
+  type: 'test'
+  ...
+# Subtest: install rejects an extra file in the upstream tree and leaves nothing behind
+ok 52 - install rejects an extra file in the upstream tree and leaves nothing behind
+  ---
+  duration_ms: 135.6741
+  type: 'test'
+  ...
+# Subtest: install rejects a removed upstream file and leaves nothing behind
+ok 53 - install rejects a removed upstream file and leaves nothing behind
+  ---
+  duration_ms: 51.2309
+  type: 'test'
+  ...
+# Subtest: install rejects a modified pnpm file and leaves nothing behind
+ok 54 - install rejects a modified pnpm file and leaves nothing behind
+  ---
+  duration_ms: 124.4676
+  type: 'test'
+  ...
+# Subtest: install rejects an extra file in the pnpm tree and leaves nothing behind
+ok 55 - install rejects an extra file in the pnpm tree and leaves nothing behind
+  ---
+  duration_ms: 126.0762
+  type: 'test'
+  ...
+# Subtest: an upstream file changed after installation is replaced when the package is installed again
+ok 56 - an upstream file changed after installation is replaced when the package is installed again
+  ---
+  duration_ms: 305.9574
+  type: 'test'
+  ...
+# Subtest: active shared state prevents rollback into a version without guardian
+ok 57 - active shared state prevents rollback into a version without guardian
+  ---
+  duration_ms: 426.4152
+  type: 'test'
+  ...
+# Subtest: test sandbox canonicalizes TEMP aliases while production still rejects them
+ok 58 - test sandbox canonicalizes TEMP aliases while production still rejects them
+  ---
+  duration_ms: 419.023
+  type: 'test'
+  ...
+# Subtest: Cordis fixture: minimal
+ok 59 - Cordis fixture: minimal
+  ---
+  duration_ms: 10.8404
+  type: 'test'
+  ...
+# Subtest: Cordis fixture: user-preset
+ok 60 - Cordis fixture: user-preset
+  ---
+  duration_ms: 9.8746
+  type: 'test'
+  ...
+# Subtest: Cordis fixture: idempotent
+ok 61 - Cordis fixture: idempotent
+  ---
+  duration_ms: 20.8038
+  type: 'test'
+  ...
+# Subtest: Cordis fixture: invalid-yaml
+ok 62 - Cordis fixture: invalid-yaml
+  ---
+  duration_ms: 3.8186
+  type: 'test'
+  ...
+# Subtest: Cordis fixture: missing-preset
+ok 63 - Cordis fixture: missing-preset
+  ---
+  duration_ms: 3.0387
+  type: 'test'
+  ...
+# Subtest: Cordis fixture: provider-collision
+ok 64 - Cordis fixture: provider-collision
+  ---
+  duration_ms: 1.6334
+  type: 'test'
+  ...
+# Subtest: Cordis fixture: conflicting-owned-row
+ok 65 - Cordis fixture: conflicting-owned-row
+  ---
+  duration_ms: 2.7779
+  type: 'test'
+  ...
+# Subtest: Cordis fixture: duplicate-owned-row
+ok 66 - Cordis fixture: duplicate-owned-row
+  ---
+  duration_ms: 4.0816
+  type: 'test'
+  ...
+# Subtest: lock fixture: E-live-owner-within-lease
+ok 67 - lock fixture: E-live-owner-within-lease
+  ---
+  duration_ms: 2.1068
+  type: 'test'
+  ...
+# Subtest: lock fixture: C-cannot-reclaim-dead-owner
+ok 68 - lock fixture: C-cannot-reclaim-dead-owner
+  ---
+  duration_ms: 0.2223
+  type: 'test'
+  ...
+# Subtest: lock fixture: C-cannot-reclaim-expired-owner
+ok 69 - lock fixture: C-cannot-reclaim-expired-owner
+  ---
+  duration_ms: 0.1775
+  type: 'test'
+  ...
+# Subtest: lock fixture: E-reclaims-dead-owner
+ok 70 - lock fixture: E-reclaims-dead-owner
+  ---
+  duration_ms: 0.141
+  type: 'test'
+  ...
+# Subtest: lock fixture: E-expired-live-owner-needs-stop
+ok 71 - lock fixture: E-expired-live-owner-needs-stop
+  ---
+  duration_ms: 0.1381
+  type: 'test'
+  ...
+# Subtest: lock fixture: E-expired-stopped-owner
+ok 72 - lock fixture: E-expired-stopped-owner
+  ---
+  duration_ms: 0.2931
+  type: 'test'
+  ...
+# Subtest: lock fixture: unknown-process-fails-closed
+ok 73 - lock fixture: unknown-process-fails-closed
+  ---
+  duration_ms: 0.1648
+  type: 'test'
+  ...
+# Subtest: lock fixture: replaced-owner-token-refused
+ok 74 - lock fixture: replaced-owner-token-refused
+  ---
+  duration_ms: 0.1221
+  type: 'test'
+  ...
+# Subtest: lock fixture: missing-owner-record-waits
+ok 75 - lock fixture: missing-owner-record-waits
+  ---
+  duration_ms: 0.2153
+  type: 'test'
+  ...
+# Subtest: lock fixture: different-boot-live-owner-not-compared
+ok 76 - lock fixture: different-boot-live-owner-not-compared
+  ---
+  duration_ms: 0.141
+  type: 'test'
+  ...
+# Subtest: lock fixture: release-by-other-owner-refused
+ok 77 - lock fixture: release-by-other-owner-refused
+  ---
+  duration_ms: 0.1158
+  type: 'test'
+  ...
+# Subtest: lock fixture: release-by-current-owner
+ok 78 - lock fixture: release-by-current-owner
+  ---
+  duration_ms: 0.1126
+  type: 'test'
+  ...
+# Subtest: lock fixture: reclaim-requires-host-quiescence
+ok 79 - lock fixture: reclaim-requires-host-quiescence
+  ---
+  duration_ms: 0.1407
+  type: 'test'
+  ...
+# Subtest: lock fixture: release-role-mismatch
+ok 80 - lock fixture: release-role-mismatch
+  ---
+  duration_ms: 0.1156
+  type: 'test'
+  ...
+# Subtest: transition: activation-after-complete-recovery
+ok 81 - transition: activation-after-complete-recovery
+  ---
+  duration_ms: 0.3979
+  type: 'test'
+  ...
+# Subtest: transition: pending-isolation-denies-activation
+ok 82 - transition: pending-isolation-denies-activation
+  ---
+  duration_ms: 0.2234
+  type: 'test'
+  ...
+# Subtest: host-lock sources use OS uptime and keep the frozen trusted-clock UUID schema
+ok 83 - host-lock sources use OS uptime and keep the frozen trusted-clock UUID schema
+  ---
+  duration_ms: 3783.6787
+  type: 'test'
+  ...
+# Subtest: real boot clock is shared across processes
+ok 84 - real boot clock is shared across processes
+  ---
+  duration_ms: 2796.1981
+  type: 'test'
+  ...
+# Subtest: real concurrent mkdir grants one owner only
+ok 85 - real concurrent mkdir grants one owner only
+  ---
+  duration_ms: 3941.052
+  type: 'test'
+  ...
+# Subtest: lock refuses expired release and a replaced owner token
+ok 86 - lock refuses expired release and a replaced owner token
+  ---
+  duration_ms: 79.5257
+  type: 'test'
+  ...
+# Subtest: clock rollback tolerance cannot extend UTC or monotonic deadlines
+ok 87 - clock rollback tolerance cannot extend UTC or monotonic deadlines
+  ---
+  duration_ms: 1.9519
+  type: 'test'
+  ...
+# Subtest: plugin-free isolation stops first and preserves history and quarantine
+ok 88 - plugin-free isolation stops first and preserves history and quarantine
+  ---
+  duration_ms: 763.3218
+  type: 'test'
+  ...
+# Subtest: unconfirmed process stop keeps current and blocks startup
+ok 89 - unconfirmed process stop keeps current and blocks startup
+  ---
+  duration_ms: 363.7716
+  type: 'test'
+  ...
+# Subtest: restart after rename finishes isolation and durable receipt
+ok 90 - restart after rename finishes isolation and durable receipt
+  ---
+  duration_ms: 654.6681
+  type: 'test'
+  ...
+# Subtest: empty flow patch upgrades to valid block YAML
+ok 91 - empty flow patch upgrades to valid block YAML
+  ---
+  duration_ms: 1.7245
+  type: 'test'
+  ...
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-QDNIUY\\app\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-JbeqGS\\app\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Subtest: launch logs only the safe update failure notice: desktop.smoke_failed
+ok 92 - launch logs only the safe update failure notice: desktop.smoke_failed
+  ---
+  duration_ms: 1559.5382
+  type: 'test'
+  ...
+# Subtest: launch logs only the safe update failure notice: unexpected_failure
+ok 93 - launch logs only the safe update failure notice: unexpected_failure
+  ---
+  duration_ms: 2294.1324
+  type: 'test'
+  ...
+# Subtest: package ID uses the independent Desktop version, not the plugin version
+ok 94 - package ID uses the independent Desktop version, not the plugin version
+  ---
+  duration_ms: 173.7275
+  type: 'test'
+  ...
+# Subtest: upstream.json pins an exact dsh version the plugin accepts
+ok 95 - upstream.json pins an exact dsh version the plugin accepts
+  ---
+  duration_ms: 2.9222
+  type: 'test'
+  ...
+# Subtest: committed upstream lock resolves exactly the pinned dsh with integrity
+ok 96 - committed upstream lock resolves exactly the pinned dsh with integrity
+  ---
+  duration_ms: 12.6449
+  type: 'test'
+  ...
+# Subtest: secret scanner flags keys, tokens and credential files
+ok 97 - secret scanner flags keys, tokens and credential files
+  ---
+  duration_ms: 52.0811
+  type: 'test'
+  ...
+# Subtest: built package: manifest, checksums, version lock and contents
+ok 98 - built package: manifest, checksums, version lock and contents
+  ---
+  duration_ms: 50586.2269
+  type: 'test'
+  ...
+# Subtest: built package: product name, licences, pnpm and trimming
+ok 99 - built package: product name, licences, pnpm and trimming
+  ---
+  duration_ms: 694.7488
+  type: 'test'
+  ...
+# Subtest: built package: no secrets in our files
+ok 100 - built package: no secrets in our files
+  ---
+  duration_ms: 1046.2379
+  type: 'test'
+  ...
+# Subtest: secret scan does not skip large files of ours
+ok 101 - secret scan does not skip large files of ours
+  ---
+  duration_ms: 23.5816
+  type: 'test'
+  ...
+# Subtest: build scan covers our plugin files and the expanded plugin tarball
+ok 102 - build scan covers our plugin files and the expanded plugin tarball
+  ---
+  duration_ms: 105.0885
+  type: 'test'
+  ...
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZhMcrf\\install-0\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZhMcrf\\install-1\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZhMcrf\\install-2\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-cNJcZn\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-cNJcZn\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-cNJcZn\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Subtest: HTTPS installer input normalizes slash, host case, default port and path
+ok 103 - HTTPS installer input normalizes slash, host case, default port and path
+  ---
+  duration_ms: 2545.1301
+  type: 'test'
+  ...
+# Subtest: HTTP confirms canonical private and loopback IP origins only
+ok 104 - HTTP confirms canonical private and loopback IP origins only
+  ---
+  duration_ms: 20.2097
+  type: 'test'
+  ...
+# Subtest: credentials, HTTP paths, aliases and public IPs are rejected before installation
+ok 105 - credentials, HTTP paths, aliases and public IPs are rejected before installation
+  ---
+  duration_ms: 1.6072
+  type: 'test'
+  ...
+# Subtest: explicit confirmation replaces the binding; missing confirmation fails without mutation
+ok 106 - explicit confirmation replaces the binding; missing confirmation fails without mutation
+  ---
+  duration_ms: 2631.1439
+  type: 'test'
+  ...
+# Subtest: CI 制品记录与离线审阅确认绑定，变更后必须重新审阅
+ok 107 - CI 制品记录与离线审阅确认绑定，变更后必须重新审阅
+  ---
+  duration_ms: 11753.3023
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: skill-v2-valid
+ok 108 - Desktop frozen vector: skill-v2-valid
+  ---
+  duration_ms: 1104.9988
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: online-empty-artifacts-valid
+ok 109 - Desktop frozen vector: online-empty-artifacts-valid
+  ---
+  duration_ms: 4.0556
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: plugin-v1-valid
+ok 110 - Desktop frozen vector: plugin-v1-valid
+  ---
+  duration_ms: 29.6991
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: v1-rejected-by-v2
+ok 111 - Desktop frozen vector: v1-rejected-by-v2
+  ---
+  duration_ms: 0.5099
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: v2-rejected-by-v1
+ok 112 - Desktop frozen vector: v2-rejected-by-v1
+  ---
+  duration_ms: 0.9454
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: skill-tampered-kind
+ok 113 - Desktop frozen vector: skill-tampered-kind
+  ---
+  duration_ms: 1.3698
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: skill-tampered-artifact-digest
+ok 114 - Desktop frozen vector: skill-tampered-artifact-digest
+  ---
+  duration_ms: 1.2967
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: skill-signed-wrong-artifact-set
+ok 115 - Desktop frozen vector: skill-signed-wrong-artifact-set
+  ---
+  duration_ms: 2.5691
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: skill-raw-byte-change
+ok 116 - Desktop frozen vector: skill-raw-byte-change
+  ---
+  duration_ms: 3.3713
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: migration-proof-valid
+ok 117 - Desktop frozen vector: migration-proof-valid
+  ---
+  duration_ms: 48.9758
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: migration-forged-mapping
+ok 118 - Desktop frozen vector: migration-forged-mapping
+  ---
+  duration_ms: 3.6615
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: migration-replaced-M
+ok 119 - Desktop frozen vector: migration-replaced-M
+  ---
+  duration_ms: 7.3059
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: migration-cross-tenant
+ok 120 - Desktop frozen vector: migration-cross-tenant
+  ---
+  duration_ms: 1.3999
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: migration-t0-tampered
+ok 121 - Desktop frozen vector: migration-t0-tampered
+  ---
+  duration_ms: 1.9092
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: migration-t0-unmatched
+ok 122 - Desktop frozen vector: migration-t0-unmatched
+  ---
+  duration_ms: 2.7706
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: revoked-dual-digest
+ok 123 - Desktop frozen vector: revoked-dual-digest
+  ---
+  duration_ms: 32.2148
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: revoked-only-A
+ok 124 - Desktop frozen vector: revoked-only-A
+  ---
+  duration_ms: 2.5679
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: revoked-only-M
+ok 125 - Desktop frozen vector: revoked-only-M
+  ---
+  duration_ms: 5.7213
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: revoked-artifact-reuse
+ok 126 - Desktop frozen vector: revoked-artifact-reuse
+  ---
+  duration_ms: 2.511
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: revocations-empty-valid
+ok 127 - Desktop frozen vector: revocations-empty-valid
+  ---
+  duration_ms: 3.2379
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: revocations-tampered
+ok 128 - Desktop frozen vector: revocations-tampered
+  ---
+  duration_ms: 6.1156
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: revocations-cross-tenant
+ok 129 - Desktop frozen vector: revocations-cross-tenant
+  ---
+  duration_ms: 3.4975
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: same-sequence-proved-alias
+ok 130 - Desktop frozen vector: same-sequence-proved-alias
+  ---
+  duration_ms: 7.2632
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: same-sequence-unproved-alias
+ok 131 - Desktop frozen vector: same-sequence-unproved-alias
+  ---
+  duration_ms: 1.9015
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: same-sequence-version-swap
+ok 132 - Desktop frozen vector: same-sequence-version-swap
+  ---
+  duration_ms: 8.164
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: cross-protocol-rollback-v1
+ok 133 - Desktop frozen vector: cross-protocol-rollback-v1
+  ---
+  duration_ms: 2.9458
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: cross-protocol-rollback-v2
+ok 134 - Desktop frozen vector: cross-protocol-rollback-v2
+  ---
+  duration_ms: 1.797
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: v1-renewal-at-fixed-deadline
+ok 135 - Desktop frozen vector: v1-renewal-at-fixed-deadline
+  ---
+  duration_ms: 12.0688
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: v1-renewal-past-fixed-deadline
+ok 136 - Desktop frozen vector: v1-renewal-past-fixed-deadline
+  ---
+  duration_ms: 0.8992
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: v1-renewal-after-cutoff
+ok 137 - Desktop frozen vector: v1-renewal-after-cutoff
+  ---
+  duration_ms: 0.868
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: v1-renewal-cannot-reset-t0
+ok 138 - Desktop frozen vector: v1-renewal-cannot-reset-t0
+  ---
+  duration_ms: 0.8489
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: downgrade-signed-valid
+ok 139 - Desktop frozen vector: downgrade-signed-valid
+  ---
+  duration_ms: 23.7448
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: downgrade-other-version
+ok 140 - Desktop frozen vector: downgrade-other-version
+  ---
+  duration_ms: 0.9724
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: downgrade-other-instance
+ok 141 - Desktop frozen vector: downgrade-other-instance
+  ---
+  duration_ms: 1.3645
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: downgrade-expired
+ok 142 - Desktop frozen vector: downgrade-expired
+  ---
+  duration_ms: 1.361
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: downgrade-replayed
+ok 143 - Desktop frozen vector: downgrade-replayed
+  ---
+  duration_ms: 1.0459
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: downgrade-tampered
+ok 144 - Desktop frozen vector: downgrade-tampered
+  ---
+  duration_ms: 1.9123
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: downgrade-wrong-purpose
+ok 145 - Desktop frozen vector: downgrade-wrong-purpose
+  ---
+  duration_ms: 0.9612
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-clock-valid
+ok 146 - Desktop frozen vector: guardian-clock-valid
+  ---
+  duration_ms: 0.4307
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-clock-small-wall-adjustment
+ok 147 - Desktop frozen vector: guardian-clock-small-wall-adjustment
+  ---
+  duration_ms: 0.2505
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-clock-wall-tolerance-boundary
+ok 148 - Desktop frozen vector: guardian-clock-wall-tolerance-boundary
+  ---
+  duration_ms: 0.3537
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-clock-wall-beyond-tolerance
+ok 149 - Desktop frozen vector: guardian-clock-wall-beyond-tolerance
+  ---
+  duration_ms: 0.4865
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-clock-tolerance-cannot-extend-lease
+ok 150 - Desktop frozen vector: guardian-clock-tolerance-cannot-extend-lease
+  ---
+  duration_ms: 0.6038
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-clock-wall-rollback
+ok 151 - Desktop frozen vector: guardian-clock-wall-rollback
+  ---
+  duration_ms: 0.2412
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-clock-monotonic-rollback
+ok 152 - Desktop frozen vector: guardian-clock-monotonic-rollback
+  ---
+  duration_ms: 0.219
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-clock-new-boot-offline
+ok 153 - Desktop frozen vector: guardian-clock-new-boot-offline
+  ---
+  duration_ms: 0.2003
+  type: 'test'
+  ...
+# Subtest: Desktop frozen vector: guardian-active-lease-expired
+ok 154 - Desktop frozen vector: guardian-active-lease-expired
+  ---
+  duration_ms: 0.2048
+  type: 'test'
+  ...
+# Subtest: F1 C holds lock and changes ledger between E snapshots without stopping DSH
+ok 155 - F1 C holds lock and changes ledger between E snapshots without stopping DSH
+  ---
+  duration_ms: 10079.4001
+  type: 'test'
+  ...
+# Subtest: F2 roots permits private Desktop with empty current
+ok 156 - F2 roots permits private Desktop with empty current
+  ---
+  duration_ms: 1076.0154
+  type: 'test'
+  ...
+# Subtest: F2 stale-envelope permits private Desktop with empty current
+ok 157 - F2 stale-envelope permits private Desktop with empty current
+  ---
+  duration_ms: 2247.8165
+  type: 'test'
+  ...
+# Subtest: F2 unknown-ledger permits private Desktop with empty current
+ok 158 - F2 unknown-ledger permits private Desktop with empty current
+  ---
+  duration_ms: 777.7332
+  type: 'test'
+  ...
+# Subtest: F2 unowned nonempty current still fails closed
+ok 159 - F2 unowned nonempty current still fails closed
+  ---
+  duration_ms: 300.1657
+  type: 'test'
+  ...
+# Subtest: F3 prepared revision/generation advancement reauthorizes while keeping old signed view alive
+ok 160 - F3 prepared revision/generation advancement reauthorizes while keeping old signed view alive
+  ---
+  duration_ms: 3452.322
+  type: 'test'
+  ...
+# Subtest: F4 real child is relaunched in the same session after private-only shared recovery
+ok 161 - F4 real child is relaunched in the same session after private-only shared recovery
+  ---
+  duration_ms: 3951.9577
+  type: 'test'
+  ...
+# Subtest: M4 K2 DISABLED takes precedence over enabled
+ok 162 - M4 K2 DISABLED takes precedence over enabled
+  ---
+  duration_ms: 183.7371
+  type: 'test'
+  ...
+# Subtest: M4 K2 REMOVED takes precedence over enabled
+ok 163 - M4 K2 REMOVED takes precedence over enabled
+  ---
+  duration_ms: 202.6462
+  type: 'test'
+  ...
+# Subtest: M4 K2 ENABLED takes precedence over enabled
+ok 164 - M4 K2 ENABLED takes precedence over enabled
+  ---
+  duration_ms: 698.0784
+  type: 'test'
+  ...
+# Subtest: M2 persisted effective time beyond lease never writes active
+ok 165 - M2 persisted effective time beyond lease never writes active
+  ---
+  duration_ms: 2646.1301
+  type: 'test'
+  ...
+# Subtest: M5 empty and temp-only orphan locks recover only after confirmed stop
+ok 166 - M5 empty and temp-only orphan locks recover only after confirmed stop
+  ---
+  duration_ms: 138.4862
+  type: 'test'
+  ...
+# Subtest: M6 unchanged tick does not rewrite state/high water or enumerate processes each second
+ok 167 - M6 unchanged tick does not rewrite state/high water or enumerate processes each second
+  ---
+  duration_ms: 1016.4921
+  type: 'test'
+  ...
+# Subtest: M7 recycled parent PID never adopts older unrelated processes
+ok 168 - M7 recycled parent PID never adopts older unrelated processes
+  ---
+  duration_ms: 18.7243
+  type: 'test'
+  ...
+# Subtest: L5 deployment rejects all public vector keys regardless of kid
+ok 169 - L5 deployment rejects all public vector keys regardless of kid
+  ---
+  duration_ms: 6.2395
+  type: 'test'
+  ...
+# Subtest: L4 extra empty directories do not match signed Skill bytes
+ok 170 - L4 extra empty directories do not match signed Skill bytes
+  ---
+  duration_ms: 1367.1581
+  type: 'test'
+  ...
+# Subtest: M6 stable rejected private staging avoids repeat crypto and retries on ledger change
+ok 171 - M6 stable rejected private staging avoids repeat crypto and retries on ledger change
+  ---
+  duration_ms: 2056.2408
+  type: 'test'
+  ...
+# Subtest: prerelease ordering follows semver
+ok 172 - prerelease ordering follows semver
+  ---
+  duration_ms: 2.2749
+  type: 'test'
+  ...
+# Subtest: engines.dsh minimum gate
+ok 173 - engines.dsh minimum gate
+  ---
+  duration_ms: 0.5471
+  type: 'test'
+  ...
+# Subtest: unsupported ranges and invalid versions fail closed
+ok 174 - unsupported ranges and invalid versions fail closed
+  ---
+  duration_ms: 2.0316
+  type: 'test'
+  ...
+# Subtest: embedded payload is read as data and malformed envelopes fail closed
+ok 175 - embedded payload is read as data and malformed envelopes fail closed
+  ---
+  duration_ms: 36.1634
+  type: 'test'
+  ...
+# Subtest: Windows setup silently forwards output, arguments and failure exit status
+ok 176 - Windows setup silently forwards output, arguments and failure exit status
+  ---
+  duration_ms: 6756.1478
+  type: 'test'
+  ...
+# Subtest: packaged Windows launcher exports diagnostics using its bundled Node and self-contained broker (auriga-package-auth-)
+ok 177 - packaged Windows launcher exports diagnostics using its bundled Node and self-contained broker (auriga-package-auth-)
+  ---
+  duration_ms: 11844.1714
+  type: 'test'
+  ...
+# Subtest: packaged Windows launcher exports diagnostics using its bundled Node and self-contained broker (auriga-runner~1-)
+ok 178 - packaged Windows launcher exports diagnostics using its bundled Node and self-contained broker (auriga-runner~1-)
+  ---
+  duration_ms: 5602.2755
+  type: 'test'
+  ...
+# Subtest: shell startup failure records a safe local diagnostic while allowing local DSH to continue
+ok 179 - shell startup failure records a safe local diagnostic while allowing local DSH to continue
+  ---
+  duration_ms: 3019.9088
+  type: 'test'
+  ...
+# Subtest: missing shell diagnostic sink emits safe structured stderr without exposing paths or raw errors
+ok 180 - missing shell diagnostic sink emits safe structured stderr without exposing paths or raw errors
+  ---
+  duration_ms: 5.793
+  type: 'test'
+  ...
+# Subtest: shell logout is reconciled by the existing single guardian writer before shared content can be reused
+ok 181 - shell logout is reconciled by the existing single guardian writer before shared content can be reused
+  ---
+  duration_ms: 6518.8617
+  type: 'test'
+  ...
+# Subtest: startup before shell initialization and transient platform states preserve an active shared view
+ok 182 - startup before shell initialization and transient platform states preserve an active shared view
+  ---
+  duration_ms: 7723.6204
+  type: 'test'
+  ...
+# Subtest: shell revoked still disables the shared view and requests a new DSH session
+ok 183 - shell revoked still disables the shared view and requests a new DSH session
+  ---
+  duration_ms: 1240.4246
+  type: 'test'
+  ...
+# Subtest: shell identity_changed still disables the shared view and requests a new DSH session
+ok 184 - shell identity_changed still disables the shared view and requests a new DSH session
+  ---
+  duration_ms: 1285.6905
+  type: 'test'
+  ...
+# Subtest: independent observer verifies signed bytes, receipts and materialized view
+ok 185 - independent observer verifies signed bytes, receipts and materialized view
+  ---
+  duration_ms: 5226.223
+  type: 'test'
+  ...
+# Subtest: full schema rejects nested unknown fields and installation receipt identity substitution
+ok 186 - full schema rejects nested unknown fields and installation receipt identity substitution
+  ---
+  duration_ms: 860.5851
+  type: 'test'
+  ...
+# Subtest: supervisor persists high-water marks and earliest lease, then independently disables revoked bytes
+ok 187 - supervisor persists high-water marks and earliest lease, then independently disables revoked bytes
+  ---
+  duration_ms: 5564.5112
+  type: 'test'
+  ...
+# Subtest: supervisor stops before isolation: clock_rollback
+ok 188 - supervisor stops before isolation: clock_rollback
+  ---
+  duration_ms: 2572.677
+  type: 'test'
+  ...
+# Subtest: supervisor stops before isolation: lease_expired
+ok 189 - supervisor stops before isolation: lease_expired
+  ---
+  duration_ms: 1233.6074
+  type: 'test'
+  ...
+# Subtest: supervisor stops before isolation: identity_changed
+ok 190 - supervisor stops before isolation: identity_changed
+  ---
+  duration_ms: 1292.1712
+  type: 'test'
+  ...
+# Subtest: prepared staging authorizes before applied receipt
+ok 191 - prepared staging authorizes before applied receipt
+  ---
+  duration_ms: 637.4617
+  type: 'test'
+  ...
+# Subtest: unknown stale lock retained, known quiesced writer lock reclaimed
+ok 192 - unknown stale lock retained, known quiesced writer lock reclaimed
+  ---
+  duration_ms: 67.5919
+  type: 'test'
+  ...
+# Subtest: different boot cannot reuse cached active trust
+ok 193 - different boot cannot reuse cached active trust
+  ---
+  duration_ms: 1208.6048
+  type: 'test'
+  ...
+# Subtest: Windows System32 tools ignore Git usr/bin on PATH
+ok 194 - Windows System32 tools ignore Git usr/bin on PATH
+  ---
+  duration_ms: 1279.7437
+  type: 'test'
+  ...
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-ZrMlYK\\app\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Subtest: Windows uninstall temp copy includes frozen protocol assets
+ok 195 - Windows uninstall temp copy includes frozen protocol assets
+  ---
+  duration_ms: 8297.3332
+  type: 'test'
+  ...
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-pGFrOK\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-pGFrOK\\install\\versions\\2.0.0-dsh0.2.1-rc.3-f003340998aa\\upstream\\app\\package.json
+# Subtest: 沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数据保留
+ok 196 - 沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数据保留
+  ---
+  duration_ms: 6016.4286
+  type: 'test'
+  ...
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-kHMFzR\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-kHMFzR\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-C2PgTs\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-5Q1BiX\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-pOuyEv\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-pOuyEv\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-t2ipJx\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-t2ipJx\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-lpKgXs\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Subtest: 签名、篡改、降级、到期、未来、序号重放均拒绝
+ok 197 - 签名、篡改、降级、到期、未来、序号重放均拒绝
+  ---
+  duration_ms: 17.866
+  type: 'test'
+  ...
+# Subtest: 更新只连接固定 HTTPS origin
+ok 198 - 更新只连接固定 HTTPS origin
+  ---
+  duration_ms: 12.6719
+  type: 'test'
+  ...
+# Subtest: 同一安装目录拒绝同时启动第二个 DSH，退出后可重开
+ok 199 - 同一安装目录拒绝同时启动第二个 DSH，退出后可重开
+  ---
+  duration_ms: 134.6869
+  type: 'test'
+  ...
+# Subtest: 成功更新保留数据并提示重启
+ok 200 - 成功更新保留数据并提示重启
+  ---
+  duration_ms: 4044.398
+  type: 'test'
+  ...
+# Subtest: badSha 拒绝并保持旧版且不留新版本目录
+ok 201 - badSha 拒绝并保持旧版且不留新版本目录
+  ---
+  duration_ms: 1115.4106
+  type: 'test'
+  ...
+# Subtest: badId 拒绝并保持旧版且不留新版本目录
+ok 202 - badId 拒绝并保持旧版且不留新版本目录
+  ---
+  duration_ms: 1430.81
+  type: 'test'
+  ...
+# Subtest: smokeFails 拒绝并保持旧版且不留新版本目录
+ok 203 - smokeFails 拒绝并保持旧版且不留新版本目录
+  ---
+  duration_ms: 1761.0302
+  type: 'test'
+  ...
+# Subtest: 下载中断后重试成功；关闭检查后不请求
+ok 204 - 下载中断后重试成功；关闭检查后不请求
+  ---
+  duration_ms: 1959.3047
+  type: 'test'
+  ...
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-lpKgXs\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-mxGHIE\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-9sYYmQ\\install\\versions\\1.0.0-dsh0.2.1-rc.3-1f2f87450c0d\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-9sYYmQ\\install\\versions\\2.0.0-dsh0.2.1-rc.3-46a7ea51609f\\upstream\\app\\package.json
+# Auriga DSH 共享技能配置未启用：Cannot find module 'yaml'
+# Require stack:
+# - C:\\Users\\zhout\\AppData\\Local\\Temp\\auriga-installer-LKfzRq\\install\\versions\\1.0.0-dsh0.2.1-rc.3-f2d47c787340\\upstream\\app\\package.json
+# Subtest: 真实子进程被杀后锁失效，下次更新成功并清理残留
+ok 205 - 真实子进程被杀后锁失效，下次更新成功并清理残留
+  ---
+  duration_ms: 1900.8368
+  type: 'test'
+  ...
+# Subtest: 启动前清理空锁等崩溃残留；卸载删除下载残留且保留用户数据
+ok 206 - 启动前清理空锁等崩溃残留；卸载删除下载残留且保留用户数据
+  ---
+  duration_ms: 376.494
+  type: 'test'
+  ...
+# Subtest: Range 续传拼接完整包；忽略 Range 时安全重下；错误 Range 拒绝
+ok 207 - Range 续传拼接完整包；忽略 Range 时安全重下；错误 Range 拒绝
+  ---
+  duration_ms: 11.2016
+  type: 'test'
+  ...
+# Subtest: 同版本同包更高序号续期不会重复更新，周期检查不重新哈希安装树
+ok 208 - 同版本同包更高序号续期不会重复更新，周期检查不重新哈希安装树
+  ---
+  duration_ms: 621.6072
+  type: 'test'
+  ...
+# Subtest: HTTP requires confirmed literal IP binding; domain HTTP stays forbidden
+ok 209 - HTTP requires confirmed literal IP binding; domain HTTP stays forbidden
+  ---
+  duration_ms: 12.8126
+  type: 'test'
+  ...
+# Subtest: HTTP install confirmation persists once and updater uses it
+ok 210 - HTTP install confirmation persists once and updater uses it
+  ---
+  duration_ms: 255.8958
+  type: 'test'
+  ...
+# Subtest: a higher sequence cannot roll back a previously seen version
+ok 211 - a higher sequence cannot roll back a previously seen version
+  ---
+  duration_ms: 1.4917
+  type: 'test'
+  ...
+1..211
+# tests 211
+# suites 0
+# pass 211
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 52964.6553
