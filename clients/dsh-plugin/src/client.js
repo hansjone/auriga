@@ -3,6 +3,8 @@
 window.__ModuleLoader__.load({
   id: 'auriga-dsh/client',
   factory(require) {
+    const BRAND_NAME = 'Auriga DSH';
+    document.title = BRAND_NAME;
     const React = require('react');
     const {
       IconUsersOutlineRegular,
@@ -14,7 +16,7 @@ window.__ModuleLoader__.load({
     const ELEMENT = 'auriga-team-panel';
     const loadedPanels = new WeakMap();
     const zh = {
-      panel: 'Auriga',
+      panel: BRAND_NAME,
       loading: '正在加载…',
       failed: '加载失败',
       retry: '重试',
@@ -67,10 +69,10 @@ window.__ModuleLoader__.load({
       toolsHint: '新建工具的默认部署位置将在工具创建能力接入后提供。',
       security: '账号、认证与安全',
       securityHint:
-        '账号资料、认证关联、安全与协作偏好尚未接入 Auriga 设置；需迁移原有功能。',
+        '账号资料、认证关联、安全与协作偏好尚未接入 Auriga DSH 设置；需迁移原有功能。',
       auth: '登录状态已失效，请重新登录后重试。',
       forbidden: '没有读取托管状态的权限。',
-      missing: '当前宿主尚未接入 Auriga 托管设置。',
+      missing: '当前宿主尚未接入 Auriga DSH 托管设置。',
       unsupported: '协议不受支持，请升级插件。',
       verification: '界面清单验证未通过，请检查受信发行配置。',
       unavailable: '暂时无法加载，请稍后重试。',
@@ -107,7 +109,7 @@ window.__ModuleLoader__.load({
       revokeHint: '撤销后重新核权；已执行的动作无法撤回，拒绝冷却仍然有效。',
     };
     const en = {
-      panel: 'Auriga',
+      panel: BRAND_NAME,
       loading: 'Loading…',
       failed: 'Failed to load',
       retry: 'Retry',
@@ -165,10 +167,10 @@ window.__ModuleLoader__.load({
         'The default deployment location will be available when tool creation is connected.',
       security: 'Account, authentication and security',
       securityHint:
-        'Account details, identity linking, security and collaboration preferences still require migration into Auriga settings.',
+        'Account details, identity linking, security and collaboration preferences still require migration into Auriga DSH settings.',
       auth: 'Your sign-in has expired. Sign in again and retry.',
       forbidden: 'You do not have permission to read managed status.',
-      missing: 'This host has not connected Auriga managed settings.',
+      missing: 'This host has not connected Auriga DSH managed settings.',
       unsupported: 'Unsupported protocol. Upgrade the plugin.',
       verification:
         'UI manifest verification failed. Check the trusted release configuration.',
@@ -242,7 +244,9 @@ window.__ModuleLoader__.load({
         ].includes(reason)
       )
         reason = 'unavailable';
-      return Object.assign(new Error('Auriga surface unavailable'), { reason });
+      return Object.assign(new Error('Auriga DSH surface unavailable'), {
+        reason,
+      });
     }
     // Only local categories reach UI state. Server detail/code can contain private data.
     function responseFailure(response, body) {
@@ -403,7 +407,7 @@ window.__ModuleLoader__.load({
         )
       ) {
         console.warn(
-          'Auriga entry recovery unavailable: Connection observables missing',
+          'Auriga DSH entry recovery unavailable: Connection observables missing',
         );
         return () => {};
       }
@@ -1497,9 +1501,9 @@ window.__ModuleLoader__.load({
             'section',
             {
               className: 'auriga-shell auriga-settings',
-              'aria-label': 'Auriga',
+              'aria-label': BRAND_NAME,
             },
-            h('h2', null, 'Auriga'),
+            h('h2', null, BRAND_NAME),
             phase.status !== 'ready' && notice(phase, retry, true),
             View
               ? h(View, {
@@ -1923,7 +1927,7 @@ window.__ModuleLoader__.load({
                   name: 'settings.section',
                   id: PANEL_ID,
                   order: 22,
-                  label: 'Auriga',
+                  label: BRAND_NAME,
                   locale: NS,
                   icon: 'users',
                 },

@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { onMounted, shallowRef, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { isApiError } from '@auriga/shared';
+import { BRAND_NAME, isApiError } from '@auriga/shared';
 import { apiClient } from '../api';
 import type { components } from '../../../shared/src/generated/resource';
 const { t } = useI18n({
   useScope: 'local',
   messages: {
     'zh-CN': {
-      title: 'Auriga Desktop',
+      title: BRAND_NAME,
       download: '下载 Windows 版',
       empty: '暂无可用版本',
       failed: '无法读取版本',
       retry: '重试',
     },
     en: {
-      title: 'Auriga Desktop',
+      title: BRAND_NAME,
       download: 'Download for Windows',
       empty: 'No release available',
       failed: 'Could not load release',

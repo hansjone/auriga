@@ -10,6 +10,7 @@ param(
   [switch]$NoShortcuts
 )
 $ErrorActionPreference = 'Stop'
+$BrandName = 'Auriga DSH'
 $payload = Join-Path $PSScriptRoot 'payload'
 $node = Join-Path $payload 'upstream\node\node.exe'
 $cli = Join-Path $payload 'auriga\runtime\cli.mjs'
@@ -27,13 +28,18 @@ try {
   if (-not $NoShortcuts) {
     foreach ($dir in @($StartMenuDir, $DesktopDir)) {
       New-Item -ItemType Directory -Force -Path $dir | Out-Null
-      $path = Join-Path $dir 'Auriga Desktop.lnk'
+      $path = Join-Path $dir "$BrandName.lnk"
       $link = $shell.CreateShortcut($path)
       $link.TargetPath = $launcher
       $link.WorkingDirectory = $InstallDir
       $link.WindowStyle = 7
-      $link.Description = 'Auriga Desktop'
+      $link.Description = $BrandName
       $link.Save()
+      $oldPath = Join-Path $dir 'Auriga Desktop.lnk'
+      if (Test-Path -LiteralPath $oldPath) {
+        $oldLink = $shell.CreateShortcut($oldPath)
+        if ($oldLink.TargetPath -eq $launcher) { Remove-Item -LiteralPath $oldPath -Force }
+      }
       $links += $path
     }
   }
@@ -41,9 +47,9 @@ try {
   New-Item -Path $key -Force | Out-Null
   $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'bin\uninstall.ps1')`""
   $values = @{
-    DisplayName = 'Auriga Desktop'
+    DisplayName = $BrandName
     DisplayVersion = $manifest.bundleVersion
-    Publisher = 'Auriga'
+    Publisher = $BrandName
     InstallLocation = $InstallDir
     UninstallString = $uninstall
   }
@@ -54,4 +60,4 @@ try {
 } catch {
   Write-Warning "Shell integration failed: $_"
 }
-Write-Host "Installed Auriga Desktop to $InstallDir. Start with: $InstallDir\bin\auriga-desktop.cmd"
+Write-Host "Installed $BrandName to $InstallDir. Start with: $InstallDir\bin\auriga-desktop.cmd"

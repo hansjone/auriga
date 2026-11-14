@@ -1,3 +1,4 @@
+import { BRAND_NAME } from './brand.js';
 import { loginStyles } from './styles.js';
 import { failureReason, failureStatus } from './errors.js';
 
@@ -80,6 +81,7 @@ const messages = {
  */
 export function createLoginView(root, options) {
   const doc = root.ownerDocument;
+  doc.title = `${BRAND_NAME} · 登录 / Sign in`;
   if (!doc.defaultView)
     throw new Error('Login view requires a browser document');
   const InputElement = doc.defaultView.HTMLInputElement;
@@ -275,7 +277,7 @@ export function createLoginView(root, options) {
     path.setAttribute('fill', 'none');
     path.setAttribute('stroke', 'currentColor');
     mark.append(path);
-    brand.append(mark, doc.createTextNode('Auriga'));
+    brand.append(mark, doc.createTextNode(BRAND_NAME));
     const card = element('section', '', 'card');
     card.dataset.step = step?.type ?? '';
     const title = element('h2', words().title);

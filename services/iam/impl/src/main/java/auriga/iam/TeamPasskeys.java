@@ -330,7 +330,7 @@ public final class TeamPasskeys {
     for (JsonNode o : config.path("origins")) origins.add(o.asString());
     IamError.require(!rpId.isBlank() && !origins.isEmpty(), "invalid_config", 400);
     return RelyingParty.builder()
-        .identity(RelyingPartyIdentity.builder().id(rpId).name("Auriga").build())
+        .identity(RelyingPartyIdentity.builder().id(rpId).name("Auriga DSH").build())
         .credentialRepository(new StoreCredentialRepository(accountFilter))
         .origins(origins)
         .build();

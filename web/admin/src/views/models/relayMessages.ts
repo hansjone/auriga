@@ -51,7 +51,7 @@ const zh = {
   importStop: '停止后续导入',
   importProgress: '已保存 {saved} / {total}',
   importSavedNote:
-    '外部新请求采用已保存模型。Auriga DSH 可在原生模型设置中编辑 Auriga，获取可用模型、勾选并保存目录；无需重启。',
+    '外部新请求采用已保存模型。Auriga DSH 可在原生模型设置中编辑 Auriga DSH，获取可用模型、勾选并保存目录；无需重启。',
   applyCapabilities: '刷新上游数据',
   capabilityAdoptUpstream: '采用上游优先',
   capabilityActionsNote:
@@ -284,7 +284,7 @@ const en: Record<keyof typeof zh, string> = {
   importStop: 'Stop subsequent imports',
   importProgress: 'Saved {saved} / {total}',
   importSavedNote:
-    'External requests use saved models. In native Models settings, edit Auriga, fetch available models, select and save without restarting DSH.',
+    'External requests use saved models. In native Models settings, edit Auriga DSH, fetch available models, select and save without restarting DSH.',
   applyCapabilities: 'Refresh upstream data',
   capabilityAdoptUpstream: 'Use upstream first',
   capabilityActionsNote:

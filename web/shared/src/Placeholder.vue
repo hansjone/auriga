@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { BRAND_NAME } from './brand';
 import { useI18n } from 'vue-i18n';
 defineProps<{ title: string }>();
 const { t } = useI18n();
 </script>
 <template>
   <section class="auriga-glass">
-    <p class="brand">AURIGA</p>
+    <p class="brand">{{ BRAND_NAME }}</p>
     <h1>{{ title }}</h1>
     <p>{{ t('welcome') }}</p>
     <p class="muted">{{ t('placeholder') }}</p>

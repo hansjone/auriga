@@ -1,4 +1,4 @@
-# Auriga Desktop installer (Windows test build)
+# Auriga DSH installer (Windows test build)
 
 设计见 `docs/design/dsh-installer.zh.md`。包一层不 fork，上游 `@deepseek-ai/dsh`、自带 Node 与 pnpm 是可替换组件，我们的插件、首启配置与安装核心单独存放。
 

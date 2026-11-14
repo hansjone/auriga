@@ -30,7 +30,7 @@ const platformRef = (/** @type {unknown} */ ref) =>
 
 function refuse() {
   const error = new Error(
-    '此设置由 Auriga 平台托管，不能修改；个人偏好、个人模型和 Agent 预设选择仍可修改。 / This setting is managed by Auriga; personal preferences, personal models and Agent preset selection remain editable.',
+    '此设置由 Auriga DSH 平台托管，不能修改；个人偏好、个人模型和 Agent 预设选择仍可修改。 / This setting is managed by Auriga DSH; personal preferences, personal models and Agent preset selection remain editable.',
   );
   return Object.assign(error, { code: 'common.forbidden' });
 }
