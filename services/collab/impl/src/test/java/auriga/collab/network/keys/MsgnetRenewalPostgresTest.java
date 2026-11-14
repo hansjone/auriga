@@ -291,6 +291,10 @@ class MsgnetRenewalPostgresTest {
               .put("phase", "persisted");
       confirmAllTransport(pki, receipt, identity);
       pki.reconcile();
+      assertEquals("dual_trust", text(pki.bundle().path("payload"), "phase"));
+      receipt.put("phase", "loaded");
+      confirmAllTransport(pki, receipt, identity);
+      pki.reconcile();
       assertEquals("new_leaves", text(pki.bundle().path("payload"), "phase"));
       var leaves = pki.leaves(identity);
       assertEquals(2, leaves.size());
@@ -332,17 +336,583 @@ class MsgnetRenewalPostgresTest {
     }
   }
 
-  private static void confirmAllTransport(
-      MsgnetPki pki, ObjectNode receipt, MsgnetControlLedger.Identity network) {
-    pki.confirm(receipt, network);
-    pki.confirm(
-        receipt,
+  final Map<String, KeyPair> transportSigners = new java.util.HashMap<>();
+  final Map<String, KeyPair> transportSealers = new java.util.HashMap<>();
+
+  private void confirmAllTransport(
+      MsgnetPki pki, ObjectNode receipt, MsgnetControlLedger.Identity ignored) throws Exception {
+    for (String component : java.util.List.of("network", "edge", "broker")) {
+      String id = "network".equals(component) ? "synthetic-projector" : component + "-projector";
+      project(pki, component, id, text(receipt, "phase"));
+    }
+  }
+
+  private void ready(MsgnetControlLedger ledger, MsgnetControlLedger.Identity pin, KeyPair signing)
+      throws Exception {
+    var request = controlRequest(pin.targetId());
+    var pack = ledger.create(request);
+    var receipt = MsgnetRenewal.object();
+    for (String field :
+        java.util.List.of(
+            "package_id", "tenant_id", "realm", "target_id", "challenge", "control_digest"))
+      receipt.set(field, pack.path(field));
+    receipt
+        .put("identity_id", pin.identityId())
+        .put("control_revision", text(pack.path("control").path("payload"), "control_revision"))
+        .put("result", "installed")
+        .put("persisted_at", wall.now.toString());
+    identitySign(receipt, signing, pin.identityId(), "NetworkControlReceipt");
+    var confirmed = ledger.confirm(receipt);
+    ledger.enforce(confirmed.deepCopy().put("state", "ready").put("new_chain_ready", true));
+  }
+
+  ObjectNode controlRequest(String target) {
+    var control = NetworkJson.parse(service().publicControl(), 1048576);
+    var request =
+        MsgnetRenewal.object()
+            .put("package_id", "request")
+            .put("tenant_id", tenant.toString())
+            .put("realm", "1")
+            .put("target_id", target)
+            .put("challenge", encode(MsgnetKeyEncryptionTest.kek()))
+            .put("control_digest", digest(control));
+    request.set("control", control);
+    return request;
+  }
+
+  private JsonNode project(MsgnetPki pki, String component, String id, String phase)
+      throws Exception {
+    var signer = transportSigners.computeIfAbsent(id, k -> KeyTestMaterial.pair());
+    var sealer = transportSealers.get(id);
+    if (sealer == null) {
+      sealer = java.security.KeyPairGenerator.getInstance("X25519").generateKeyPair();
+      transportSealers.put(id, sealer);
+    }
+    var pin =
         new MsgnetControlLedger.Identity(
-            "edge", "edge-projector", "", "edge", "gateway", "", "subject"));
-    pki.confirm(
-        receipt,
-        new MsgnetControlLedger.Identity(
-            "broker", "broker-projector", "", "broker", "gateway", "", "subject"));
+            id,
+            id,
+            encode(signer.getPublic().getEncoded()),
+            component,
+            "gateway",
+            encode(sealer.getPublic().getEncoded()),
+            "CN=projector");
+    var renewal = service();
+    var ledger = new MsgnetControlLedger(renewal, jdbc, tenant, "1", Map.of(id, pin));
+    ready(ledger, pin, signer);
+    var materials =
+        new MsgnetMaterials(
+            renewal,
+            ledger,
+            new MsgnetPrivateKeyStore(jdbc, manager, tenant, "1", ring),
+            jdbc,
+            tenant,
+            "1",
+            pki);
+    var request =
+        MsgnetRenewal.object()
+            .put("tenant_id", tenant.toString())
+            .put("realm", "1")
+            .put("installation_id", id)
+            .put("component", component)
+            .put("gateway_id", "gateway")
+            .put("nonce", encode(MsgnetKeyEncryptionTest.kek()))
+            .put("expected_generation", text(payload(), "generation"))
+            .put("expected_keyset_version", text(payload(), "keyset_version"));
+    identitySign(request, signer, id, "NetworkProjectionRequest");
+    assertTrue(
+        ledger.claim(
+            KeyTestMaterial.JSON.treeToValue(
+                request, auriga.contracts.msgnet.model.ProjectionRequest.class)));
+    assertFalse(
+        ledger.claim(
+            KeyTestMaterial.JSON.treeToValue(
+                request, auriga.contracts.msgnet.model.ProjectionRequest.class)));
+    var sealed = materials.sealed(request);
+    byte[] bytes = MsgnetHpke.open(sealed, sealer.getPrivate(), sealer.getPublic());
+    JsonNode material;
+    try {
+      material = NetworkJson.parse(new String(bytes, StandardCharsets.UTF_8), 1048576);
+    } finally {
+      java.util.Arrays.fill(bytes, (byte) 0);
+    }
+    var snapshot =
+        MsgnetProjectionBinding.snapshot(
+            material, NetworkJson.parse(renewal.publication(), 1048576));
+    String revision =
+        renewal.run(
+            () -> {
+              var rows =
+                  jdbc.queryForList(
+                      "SELECT selector FROM collab.msgnet_projection_head WHERE tenant_id = ? AND realm = '1' AND installation_id = ? AND component = ?",
+                      String.class,
+                      tenant,
+                      id,
+                      component);
+              return rows.isEmpty()
+                  ? "1"
+                  : number(NetworkJson.parse(rows.getFirst(), 1048576), "material_revision")
+                      .add(java.math.BigInteger.ONE)
+                      .toString();
+            });
+    var manifest = snapshot.deepCopy().put("material_revision", revision);
+    var selector = snapshot.deepCopy();
+    selector.remove("files");
+    selector.put("material_revision", revision).put("manifest_digest", digest(manifest));
+    var receipt = snapshot.deepCopy();
+    receipt.remove("files");
+    receipt.set("local_selector", selector);
+    receipt
+        .put("phase", "handshake_verified".equals(phase) ? "loaded" : phase)
+        .put("observed_at", wall.now.toString());
+    identitySign(receipt, signer, id, "NetworkProjectionReceipt");
+    materials.confirm(receipt);
+    if ("handshake_verified".equals(phase)) {
+      receipt.remove("identity_auth");
+      receipt.put("phase", phase);
+      identitySign(receipt, signer, id, "NetworkProjectionReceipt");
+      materials.confirm(receipt);
+    }
+    return selector;
+  }
+
+  MsgnetPki pki(MsgnetRenewal renewal) {
+    var config =
+        template
+            .path("boundary_cases")
+            .valueStream()
+            .filter(v -> "config-defaults".equals(text(v, "id")))
+            .findFirst()
+            .orElseThrow()
+            .path("input")
+            .path("config");
+    return new MsgnetPki(
+        renewal,
+        new MsgnetPrivateKeyStore(jdbc, manager, tenant, "1", ring),
+        jdbc,
+        tenant,
+        "1",
+        config);
+  }
+
+  ObjectNode confirmationQuery(JsonNode bundle) {
+    return MsgnetRenewal.object()
+        .put("tenant_id", tenant.toString())
+        .put("realm", "1")
+        .put("bundle_version", text(bundle.path("payload"), "bundle_version"))
+        .put("bundle_digest", digest(bundle))
+        .put("challenge", encode(MsgnetKeyEncryptionTest.kek()));
+  }
+
+  @Test
+  void transportConfirmationUsesExactDurableSelectorsAndFreshChallengeWithoutWriting()
+      throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      renewal.reconcile();
+      var pki = pki(renewal);
+      pki.reconcile();
+      var initial = pki.bundle();
+      var query = confirmationQuery(initial);
+      assertEquals(
+          "collab.msgnet_projection_pending",
+          assertThrows(AurigaException.class, () -> pki.confirmation(query)).errorCode().code());
+      var selector = project(pki, "network", "synthetic-projector", "loaded");
+      int nonces = count("msgnet_projection_nonce");
+      var evidence = pki.confirmation(query);
+      var expected = MsgnetRenewal.object().put("synthetic-projector", digest(selector));
+      renewal.run(
+          () -> {
+            renewal
+                .transportVerifier()
+                .confirmation(
+                    evidence,
+                    initial,
+                    renewal.requiredState().path("authority"),
+                    renewal.requiredState().path("control"),
+                    text(query, "challenge"),
+                    wall.instant(),
+                    "loaded",
+                    expected);
+            return null;
+          });
+      assertEquals(nonces, count("msgnet_projection_nonce"));
+      var retry = query.deepCopy().put("challenge", encode(MsgnetKeyEncryptionTest.kek()));
+      assertNotEquals(evidence, pki.confirmation(retry));
+      assertEquals(
+          "collab.msgnet_scope_denied",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      pki.confirmation(
+                          query.deepCopy().put("tenant_id", UUID.randomUUID().toString())))
+              .errorCode()
+              .code());
+      assertEquals(
+          "collab.msgnet_same_version_conflict",
+          assertThrows(
+                  AurigaException.class,
+                  () ->
+                      pki.confirmation(
+                          query.deepCopy().put("bundle_digest", "sha256:" + "0".repeat(64))))
+              .errorCode()
+              .code());
+      pki.reconcile();
+      assertEquals("new_leaves", text(pki.bundle().path("payload"), "phase"));
+      // Reissuing leaves supersedes live nonces, but the completed prerequisite remains immutable.
+      assertEquals(
+          evidence.path("payload").path("readers"),
+          pki.confirmation(query).path("payload").path("readers"));
+      assertEquals(initial, pki.history(digest(initial)).path("bundle"));
+      var immutable =
+          assertThrows(
+              org.springframework.dao.DataAccessException.class,
+              () ->
+                  renewal.run(
+                      () ->
+                          jdbc.update(
+                              "UPDATE collab.msgnet_transport_history SET predecessor = '{}' WHERE tenant_id = ?",
+                              tenant)));
+      assertEquals(
+          "55000",
+          assertInstanceOf(java.sql.SQLException.class, immutable.getCause()).getSQLState());
+      var control =
+          (ObjectNode) NetworkJson.parse(renewal.publicControl()).path("payload").deepCopy();
+      control.put("control_revision", "3");
+      renewal.installControl(rootSigned(control, "NetworkRootControl"));
+      var fresh = pki.confirmation(query);
+      assertEquals("3", text(fresh.path("payload"), "control_revision"));
+      renewal.run(
+          () -> {
+            assertEquals(
+                "collab.msgnet_control_required",
+                assertThrows(
+                        AurigaException.class,
+                        () ->
+                            renewal
+                                .transportVerifier()
+                                .confirmation(
+                                    evidence,
+                                    initial,
+                                    renewal.requiredState().path("authority"),
+                                    renewal.requiredState().path("control"),
+                                    text(query, "challenge"),
+                                    wall.instant(),
+                                    "loaded",
+                                    expected))
+                    .errorCode()
+                    .code());
+            return null;
+          });
+    }
+  }
+
+  @Test
+  void transportFinishesOldCycleThenUsesExactRootAnchorForAuthorityHandover() throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      renewal.reconcile();
+      var pki = pki(renewal);
+      pki.reconcile();
+      var old = pki.bundle();
+      var replacement = KeyTestMaterial.pair();
+      var a =
+          (ObjectNode)
+              renewal
+                  .run(() -> renewal.requiredState().path("authority").path("payload"))
+                  .deepCopy();
+      a.put("authority_id", "replacement")
+          .put("runtime_kid", "replacement-runtime")
+          .put("public_key_spki", encode(replacement.getPublic().getEncoded()));
+      var authority = rootSigned(a, "NetworkRuntimeAuthority");
+      var c = (ObjectNode) NetworkJson.parse(renewal.publicControl()).path("payload").deepCopy();
+      c.put("control_revision", "3");
+      ((tools.jackson.databind.node.ArrayNode) c.path("allowed_authorities"))
+          .addObject()
+          .put("authority_id", "replacement")
+          .put("authority_digest", digest(authority));
+      renewal.install(
+          authority, rootSigned(c, "NetworkRootControl"), replacement.getPrivate().getEncoded());
+      renewal.reconcile();
+      project(pki, "network", "synthetic-projector", "loaded");
+      var confirmation = pki.confirmation(confirmationQuery(old));
+      assertEquals(
+          old.path("runtime_auth").path("kid"), confirmation.path("runtime_auth").path("kid"));
+      assertEquals(
+          old.path("payload").path("authority_digest"),
+          confirmation.path("payload").path("authority_digest"));
+      pki.reconcile();
+      assertEquals(
+          text(old.path("payload"), "authority_id"),
+          text(pki.bundle().path("payload"), "authority_id"));
+      project(pki, "network", "synthetic-projector", "handshake_verified");
+      pki.reconcile();
+      var retired = pki.bundle();
+      assertEquals("retire_old", text(retired.path("payload"), "phase"));
+      assertThrows(AurigaException.class, pki::reconcile);
+      assertEquals(retired, pki.bundle());
+      c.put("control_revision", "4");
+      c.putObject("transport_transition")
+          .put("mode", "authority_transition")
+          .put("predecessor_digest", digest(retired))
+          .put("from_generation", "1")
+          .put("to_generation", "1")
+          .put("authority_id", "replacement")
+          .put("authority_digest", digest(authority))
+          .put("first_bundle_version", "4");
+      renewal.installControl(rootSigned(c, "NetworkRootControl"));
+      renewal.reconcile();
+      pki.reconcile();
+      var next = pki.bundle();
+      assertEquals("4", text(next.path("payload"), "bundle_version"));
+      assertEquals("dual_trust", text(next.path("payload"), "phase"));
+      for (var ca : retired.path("payload").path("cas"))
+        assertTrue(list(next.path("payload").path("cas")).contains(ca));
+      var proof = pki.transitionProof(digest(authority));
+      assertEquals(next, proof.path("first_bundle"));
+      assertEquals(retired, proof.path("predecessor").path("bundle"));
+      renewal.run(
+          () -> {
+            renewal
+                .transportVerifier()
+                .transition(
+                    next,
+                    authority,
+                    renewal.requiredState().path("control"),
+                    proof.path("predecessor"),
+                    new MsgnetTransportVerifier.SeenTransport("1", "3", digest(retired)),
+                    false);
+            return null;
+          });
+      pki.reconcile();
+      assertEquals(next, pki.bundle());
+      assertEquals(1, count("msgnet_transport_transition"));
+    }
+  }
+
+  @Test
+  void emergencyTransportRequiresCompletedIsolationAndKeepsOldPublicHistory() throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      renewal.reconcile();
+      var pki = pki(renewal);
+      pki.reconcile();
+      var old = pki.bundle();
+      var publication = NetworkJson.parse(renewal.publication(), 1048576);
+      var replacement = KeyTestMaterial.pair();
+      var a =
+          (ObjectNode)
+              renewal
+                  .run(() -> renewal.requiredState().path("authority").path("payload"))
+                  .deepCopy();
+      String oldAuthority = text(a, "authority_id");
+      a.put("authority_id", "recovery")
+          .put("runtime_kid", "recovery-runtime")
+          .put("public_key_spki", encode(replacement.getPublic().getEncoded()));
+      var authority = rootSigned(a, "NetworkRuntimeAuthority");
+      var c = (ObjectNode) NetworkJson.parse(renewal.publicControl()).path("payload").deepCopy();
+      c.put("control_revision", "3")
+          .put("minimum_generation", "2")
+          .put("minimum_keyset_version", "1");
+      c.putArray("allowed_authorities")
+          .addObject()
+          .put("authority_id", "recovery")
+          .put("authority_digest", digest(authority));
+      c.putArray("revoked_authority_ids").add(oldAuthority);
+      c.putObject("generation_transition")
+          .put("predecessor_digest", digest(publication.path("keyset")))
+          .put("from_generation", "1")
+          .put("to_generation", "2")
+          .put("authority_id", "recovery")
+          .put("authority_digest", digest(authority))
+          .put("first_version", "1");
+      c.putObject("transport_transition")
+          .put("mode", "emergency_recovery")
+          .put("predecessor_digest", digest(old))
+          .put("from_generation", "1")
+          .put("to_generation", "2")
+          .put("authority_id", "recovery")
+          .put("authority_digest", digest(authority))
+          .put("first_bundle_version", "1");
+      renewal.install(
+          authority, rootSigned(c, "NetworkRootControl"), replacement.getPrivate().getEncoded());
+      renewal.reconcile();
+      assertEquals(
+          "collab.msgnet_identity_quarantined",
+          assertThrows(AurigaException.class, pki::reconcile).errorCode().code());
+      var signer = KeyTestMaterial.pair();
+      var pin =
+          new MsgnetControlLedger.Identity(
+              "target",
+              "synthetic-projector",
+              encode(signer.getPublic().getEncoded()),
+              "network",
+              "gateway",
+              "",
+              "CN=projector");
+      var ledger = new MsgnetControlLedger(renewal, jdbc, tenant, "1", Map.of("target", pin));
+      ledger.create(controlRequest("target"));
+      var isolated = (ObjectNode) ledger.isolation("target").deepCopy();
+      ledger.enforce(isolated);
+      pki.reconcile();
+      var current = pki.bundle();
+      assertEquals("2", text(current.path("payload"), "generation"));
+      assertEquals("1", text(current.path("payload"), "bundle_version"));
+      for (var ca : current.path("payload").path("cas"))
+        for (var previous : old.path("payload").path("cas"))
+          assertNotEquals(text(ca, "certificate_der"), text(previous, "certificate_der"));
+      assertEquals(old, pki.history(digest(old)).path("bundle"));
+      assertEquals(0, pki.leaves(pin).size());
+    }
+  }
+
+  ObjectNode nodePins(String node, String identity, String revision, KeyPair signer) {
+    var source =
+        MsgnetRenewal.object()
+            .put("schema_version", 2)
+            .put("tenant_id", tenant.toString())
+            .put("realm", "1");
+    source
+        .putArray("pins")
+        .addObject()
+        .put("target_id", "node-target")
+        .put("node_id", node)
+        .put("identity_id", identity)
+        .put("identity_revision", revision)
+        .put("signing_spki", encode(signer.getPublic().getEncoded()));
+    return source;
+  }
+
+  ObjectNode installationReceipt(JsonNode pack, String identity, KeyPair signer) throws Exception {
+    var receipt = MsgnetRenewal.object();
+    for (String field :
+        java.util.List.of(
+            "package_id", "tenant_id", "realm", "target_id", "challenge", "control_digest"))
+      receipt.set(field, pack.path(field));
+    receipt
+        .put("identity_id", identity)
+        .put("control_revision", text(pack.path("control").path("payload"), "control_revision"))
+        .put("result", "installed")
+        .put("persisted_at", wall.now.toString());
+    identitySign(receipt, signer, identity, "NetworkControlReceipt");
+    return receipt;
+  }
+
+  @Test
+  void
+      nodePinsBindAuthenticatedNodeAndRequireIndependentHigherRevisionToReplaceCompromisedIdentity()
+          throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      renewal.reconcile();
+      String node = UUID.randomUUID().toString();
+      var signer = KeyTestMaterial.pair();
+      var pins = nodePins(node, "node-identity", "1", signer);
+      var entries = MsgnetNodePins.read(pins, tenant, "1");
+      var ledger = new MsgnetControlLedger(renewal, jdbc, tenant, "1", Map.of(), entries);
+      ledger.refreshTargets();
+      var pack = ledger.pendingNode(node);
+      var receipt = installationReceipt(pack, "node-identity", signer);
+      assertEquals(
+          "collab.msgnet_scope_denied",
+          assertThrows(AurigaException.class, () -> ledger.confirm(receipt)).errorCode().code());
+      assertEquals(
+          "collab.msgnet_scope_denied",
+          assertThrows(
+                  AurigaException.class,
+                  () -> ledger.confirmNode(UUID.randomUUID().toString(), "1", receipt))
+              .errorCode()
+              .code());
+      assertEquals(
+          "collab.msgnet_version_rollback",
+          assertThrows(AurigaException.class, () -> ledger.confirmNode(node, "2", receipt))
+              .errorCode()
+              .code());
+      assertEquals("confirmed", text(ledger.confirmNode(node, "1", receipt), "state"));
+      assertFalse(ledger.permitted(tenant.toString(), "1", "node-identity", "node-target"));
+      assertThrows(AurigaException.class, () -> ledger.identity("node-identity"));
+      var isolated = (ObjectNode) ledger.isolation("node-target").deepCopy();
+      isolated.put("state", "quarantined").put("identity_compromised", true);
+      ledger.enforce(isolated);
+      assertEquals(
+          "collab.msgnet_identity_quarantined",
+          assertThrows(AurigaException.class, () -> ledger.confirmNode(node, "1", receipt))
+              .errorCode()
+              .code());
+      var replacement = KeyTestMaterial.pair();
+      var nextPins = nodePins(node, "new-node-identity", "2", replacement);
+      var next =
+          new MsgnetControlLedger(
+              renewal, jdbc, tenant, "1", Map.of(), MsgnetNodePins.read(nextPins, tenant, "1"));
+      assertEquals(
+          "collab.msgnet_identity_quarantined",
+          assertThrows(AurigaException.class, next::refreshTargets).errorCode().code());
+      var control =
+          (ObjectNode) NetworkJson.parse(renewal.publicControl()).path("payload").deepCopy();
+      control.put("control_revision", "3");
+      ((tools.jackson.databind.node.ArrayNode) control.path("revoked_installation_ids"))
+          .add("node-identity");
+      renewal.installControl(rootSigned(control, "NetworkRootControl"));
+      next.refreshTargets();
+      assertEquals("quarantined", text(next.isolation("node-target"), "state"));
+      var newReceipt =
+          installationReceipt(next.pendingNode(node), "new-node-identity", replacement);
+      assertEquals("confirmed", text(next.confirmNode(node, newReceipt), "state"));
+      assertEquals(
+          "collab.msgnet_version_rollback",
+          assertThrows(AurigaException.class, ledger::refreshTargets).errorCode().code());
+      var unknownFields = nextPins.deepCopy();
+      ((ObjectNode) unknownFields.path("pins").get(0))
+          .put("sealing_spki", encode(replacement.getPublic().getEncoded()));
+      assertThrows(AurigaException.class, () -> MsgnetNodePins.read(unknownFields, tenant, "1"));
+      var duplicate = nextPins.deepCopy();
+      ((tools.jackson.databind.node.ArrayNode) duplicate.path("pins"))
+          .add(duplicate.path("pins").get(0).deepCopy());
+      assertThrows(AurigaException.class, () -> MsgnetNodePins.read(duplicate, tenant, "1"));
+    }
+  }
+
+  @Test
+  void pendingControlQueuePreservesOldChallengesAndOldReceiptCannotReadyLatestControl()
+      throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      renewal.reconcile();
+      var signer = KeyTestMaterial.pair();
+      var pin =
+          new MsgnetControlLedger.Identity(
+              "target",
+              "identity",
+              encode(signer.getPublic().getEncoded()),
+              "network",
+              "gateway",
+              "",
+              "CN=projector");
+      var ledger = new MsgnetControlLedger(renewal, jdbc, tenant, "1", Map.of("target", pin));
+      ledger.refreshTargets();
+      var first = ledger.pending("target");
+      var control =
+          (ObjectNode) NetworkJson.parse(renewal.publicControl()).path("payload").deepCopy();
+      control.put("control_revision", "3");
+      renewal.installControl(rootSigned(control, "NetworkRootControl"));
+      ledger.refreshTargets();
+      assertEquals(first, ledger.pending("target"));
+      assertEquals(
+          "quarantined",
+          text(ledger.confirm(installationReceipt(first, "identity", signer)), "state"));
+      var second = ledger.pending("target");
+      assertNotEquals(first, second);
+      var confirmed = ledger.confirm(installationReceipt(second, "identity", signer));
+      assertEquals("confirmed", text(confirmed, "state"));
+      assertThrows(AurigaException.class, () -> ledger.pending("target"));
+      assertFalse(ledger.permitted(tenant.toString(), "1", "identity", "target"));
+      assertEquals(2, count("msgnet_control_queue"));
+    }
   }
 
   @Test
@@ -546,6 +1116,8 @@ class MsgnetRenewalPostgresTest {
               encode(sealing.getPublic().getEncoded()),
               "CN=projector");
       var ledger = new MsgnetControlLedger(renewal, jdbc, tenant, "1", Map.of("target", pin));
+      assertFalse(ledger.permitted(tenant.toString(), "1", pin.identityId(), pin.targetId()));
+      ready(ledger, pin, signing);
       var config =
           template
               .path("boundary_cases")

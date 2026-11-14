@@ -64,7 +64,7 @@ class MsgnetProductionVectorsTest {
       var result = new ArrayList<DynamicTest>();
       for (var vector : vectors.path("cases")) result.add(test(vector, false));
       for (var vector : vectors.path("boundary_cases")) result.add(test(vector, true));
-      assertEquals(267, result.size());
+      assertEquals(421, result.size());
       return result;
     }
   }
@@ -89,7 +89,11 @@ class MsgnetProductionVectorsTest {
     return new MsgnetV2Verifier(
         text(context, "tenant_id"),
         text(context, "realm"),
-        text(context.path("latest_control").path("root_auth"), "kid"),
+        text(
+            context.has("latest_control")
+                ? context.path("latest_control").path("root_auth")
+                : context.path("control").path("root_auth"),
+            "kid"),
         RootKeyPublication.publicKey(text(context, "root_spki")));
   }
 
@@ -118,6 +122,57 @@ class MsgnetProductionVectorsTest {
   private static void boundary(JsonNode vector) throws Exception {
     var i = vector.path("input");
     switch (text(vector, "operation")) {
+      case "transport_transition" -> transportTransition(i);
+      case "transport_confirmation" ->
+          new MsgnetTransportVerifier(verifier(i))
+              .confirmation(
+                  i.path("evidence"),
+                  i.path("bundle"),
+                  i.path("authority"),
+                  i.path("control"),
+                  text(i, "challenge"),
+                  time(i, "now"),
+                  text(i, "required_phase"),
+                  i.path("expected_selectors"));
+      case "transport_catchup" -> {
+        var t = i.path("transition");
+        var proof = MsgnetRenewal.object();
+        proof.set("control", t.path("latest_control"));
+        proof.set("authority", t.path("authority"));
+        proof.set("predecessor", t.path("predecessor"));
+        proof.set("first_bundle", t.path("transport"));
+        new MsgnetTransportVerifier(verifier(t))
+            .catchup(
+                proof,
+                i.path("current"),
+                i.path("control"),
+                seenTransport(t),
+                text(i, "seen_version"),
+                text(i, "seen_digest"),
+                t.path("isolation_enforced").asBoolean(),
+                i.path("confirmation"));
+      }
+      case "node_control_binding" ->
+          MsgnetPolicy.nodeControlBinding(
+              i.path("pin"),
+              text(i, "authenticated_node_id"),
+              text(i, "target_id"),
+              text(i, "identity_id"),
+              text(i, "identity_revision"),
+              i.path("compromised").asBoolean(),
+              i.path("requests_private_material").asBoolean(),
+              i.path("independent_enrollment").asBoolean());
+      case "projection_access" ->
+          MsgnetPolicy.projectionAccess(
+              text(i, "component"),
+              i.path("projector_uid").asLong(),
+              i.path("reader_uid").asLong(),
+              i.path("peer_uid").asLong(),
+              i.path("owner_uid").asLong(),
+              i.path("directory_mode").asLong(),
+              i.path("file_mode").asLong(),
+              i.path("component_private_mount").asBoolean(),
+              i.path("cap_drop_all").asBoolean());
       case "signature_domain" ->
           signature(
               i.path("signed"),
@@ -175,6 +230,22 @@ class MsgnetProductionVectorsTest {
       case "config" -> MsgnetPolicy.config(i.path("config"));
       default -> fail("Unknown frozen boundary operation");
     }
+  }
+
+  private static MsgnetTransportVerifier.SeenTransport seenTransport(JsonNode i) {
+    return new MsgnetTransportVerifier.SeenTransport(
+        text(i, "seen_generation"), text(i, "seen_bundle_version"), text(i, "seen_bundle_digest"));
+  }
+
+  private static void transportTransition(JsonNode i) {
+    new MsgnetTransportVerifier(verifier(i))
+        .transition(
+            i.path("transport"),
+            i.path("authority"),
+            i.path("latest_control"),
+            i.path("predecessor"),
+            seenTransport(i),
+            i.path("isolation_enforced").asBoolean());
   }
 
   private static void hpke(JsonNode i) throws Exception {

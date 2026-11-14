@@ -16,6 +16,52 @@ import tools.jackson.databind.node.ObjectNode;
 public final class MsgnetPolicy {
   private MsgnetPolicy() {}
 
+  /** Installation facts are supplied by the OS adapter, never by a projection request. */
+  public static void projectionAccess(
+      String component,
+      long projectorUid,
+      long readerUid,
+      long peerUid,
+      long ownerUid,
+      long directoryMode,
+      long fileMode,
+      boolean privateMount,
+      boolean dropAll) {
+    require(List.of("network", "edge", "broker").contains(component), "scope_denied");
+    long expected = "edge".equals(component) ? 65532 : 10001;
+    require(
+        projectorUid == expected
+            && readerUid == expected
+            && peerUid == expected
+            && ownerUid == expected
+            && directoryMode == 0700
+            && fileMode == 0600
+            && privateMount
+            && dropAll,
+        "scope_denied");
+  }
+
+  /** Bind the independent confirmation identity to an authenticated NodeControl connection. */
+  public static void nodeControlBinding(
+      JsonNode pin,
+      String authenticatedNodeId,
+      String targetId,
+      String identityId,
+      String revision,
+      boolean compromised,
+      boolean privateMaterial,
+      boolean independentlyEnrolled) {
+    require(
+        authenticatedNodeId.equals(text(pin, "node_id"))
+            && targetId.equals(text(pin, "target_id"))
+            && identityId.equals(text(pin, "identity_id")),
+        "scope_denied");
+    require(revision.equals(text(pin, "identity_revision")), "version_rollback");
+    require(!compromised, "identity_quarantined");
+    require(!privateMaterial, "scope_denied");
+    require(independentlyEnrolled, "identity_quarantined");
+  }
+
   public static void config(JsonNode config) {
     schema("RenewalConfig", config, "invalid_transition");
     var reminders = new ArrayList<Long>();

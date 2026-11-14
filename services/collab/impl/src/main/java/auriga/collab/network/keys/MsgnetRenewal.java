@@ -443,7 +443,11 @@ public final class MsgnetRenewal {
                     time(old, "issued_at").plusSeconds(config.path("refresh_seconds").asLong()))
                 && "none".equals(text(state, "failure_code"))) return null;
             if (restarted) mode = "restart_recovery";
-            else if (activated) mode = "activate";
+            if (restarted) {
+              for (var key : payload.path("keys"))
+                if ("next".equals(text(key, "state")) && !mature(payload, key, limits, now))
+                  ((ObjectNode) key).put("state", "retired");
+            } else if (activated) mode = "activate";
             if (authorityChanged || incident) mode = "authority_transition";
             if (migrationSeed != null) {
               require(initial, "invalid_transition");
@@ -869,7 +873,11 @@ public final class MsgnetRenewal {
   static ObjectNode signed(JsonNode payload, String type, String kid, PrivateKey secret) {
     try {
       require(
-          List.of("NetworkKeyset", "NetworkKeysetAnnouncement", "NetworkTransportTrustBundle")
+          List.of(
+                  "NetworkKeyset",
+                  "NetworkKeysetAnnouncement",
+                  "NetworkTransportTrustBundle",
+                  "NetworkTransportConfirmation")
               .contains(type),
           "scope_denied");
       var signer = Signature.getInstance("Ed25519");
@@ -919,13 +927,51 @@ public final class MsgnetRenewal {
   }
 
   ObjectNode signTransport(JsonNode payload) {
-    var authority = requiredState().path("authority");
+    return signTransport(payload, requiredState().path("authority"));
+  }
+
+  ObjectNode signTransport(JsonNode payload, JsonNode authority) {
+    var state = requiredState();
+    require(!state.path("paused").asBoolean(), "projection_pending");
+    verifier.verifyAuthority(authority, state.path("control"), checkedTime());
     capability(authority.path("payload"), "network_transport");
+    require(text(payload, "authority_digest").equals(digest(authority)), "scope_denied");
+    require(
+        number(payload, "generation")
+                .compareTo(number(state.path("control").path("payload"), "minimum_generation"))
+            >= 0,
+        "version_rollback");
     return signed(
         payload,
         "NetworkTransportTrustBundle",
         text(authority.path("payload"), "runtime_kid"),
         runtimeKey(authority));
+  }
+
+  void verifyTransportAuthority(JsonNode authority) {
+    verifier.verifyAuthority(authority, requiredState().path("control"), checkedTime());
+    capability(authority.path("payload"), "network_transport");
+  }
+
+  ObjectNode signConfirmation(JsonNode payload) {
+    return signConfirmation(payload, requiredState().path("authority"));
+  }
+
+  ObjectNode signConfirmation(JsonNode payload, JsonNode authority) {
+    var state = requiredState();
+    require(!state.path("paused").asBoolean(), "projection_pending");
+    verifier.verifyAuthority(authority, state.path("control"), checkedTime());
+    capability(authority.path("payload"), "network_transport");
+    require(text(payload, "authority_digest").equals(digest(authority)), "scope_denied");
+    return signed(
+        payload,
+        "NetworkTransportConfirmation",
+        text(authority.path("payload"), "runtime_kid"),
+        runtimeKey(authority));
+  }
+
+  MsgnetTransportVerifier transportVerifier() {
+    return new MsgnetTransportVerifier(verifier);
   }
 
   <T> T run(Supplier<T> work) {
@@ -1133,15 +1179,22 @@ public final class MsgnetRenewal {
     if (!bundles.isEmpty()) {
       var bundle = NetworkJson.parse(bundles.getFirst(), 1048576);
       var body = bundle.path("payload");
-      projected = "retire_old".equals(text(body, "phase"));
+      projected =
+          "retire_old".equals(text(body, "phase"))
+              && text(body, "authority_digest").equals(digest(state.path("authority")))
+              && number(body, "generation")
+                      .compareTo(
+                          number(state.path("control").path("payload"), "minimum_generation"))
+                  >= 0;
       for (var reader : body.path("required_reader_ids")) {
         var isolated =
             jdbc.queryForList(
-                "SELECT isolation_record FROM collab.msgnet_control_target WHERE tenant_id = ? AND realm = ? AND identity_id = ? AND enforcement_confirmed = true",
+                "SELECT isolation_record FROM collab.msgnet_isolation_enforcement WHERE tenant_id = ? AND realm = ? AND identity_id = ? AND control_digest = ?",
                 String.class,
                 tenant,
                 realm,
-                reader.asString());
+                reader.asString(),
+                digest(state.path("control")));
         if (!isolated.isEmpty()
             && "quarantined".equals(text(NetworkJson.parse(isolated.getFirst(), 1048576), "state")))
           continue;
@@ -1159,6 +1212,8 @@ public final class MsgnetRenewal {
         }
         var receipt = NetworkJson.parse(receipts.getFirst(), 1048576);
         if (!List.of("loaded", "handshake_verified").contains(text(receipt, "phase"))
+            || !text(receipt, "bundle_digest").equals(digest(bundle))
+            || !receipt.path("generation").equals(body.path("generation"))
             || !text(receipt, "publication_digest")
                 .equals(MsgnetV2Verifier.digest(state.path("publication").path("keyset"))))
           projected = false;

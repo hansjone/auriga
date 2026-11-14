@@ -47,6 +47,11 @@ public final class MsgnetMaterials {
     this.transport = transport;
   }
 
+  MsgnetPki pki() {
+    require(transport instanceof MsgnetPki, "projection_pending");
+    return (MsgnetPki) transport;
+  }
+
   private MsgnetControlLedger.Identity authorize(JsonNode request, boolean plaintext) {
     schema("ProjectionRequest", request, "invalid_chain");
     require(

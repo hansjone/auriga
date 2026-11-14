@@ -51,6 +51,25 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
           var authority = state.path("authority");
           capability(authority.path("payload"), "network_transport");
           var previous = stored();
+          if (previous != null) remember(previous);
+          var currentAuthority = authority;
+          boolean transition =
+              previous != null
+                  && !text(previous.path("payload"), "authority_digest").equals(digest(authority));
+          boolean emergency =
+              transition
+                  && "emergency_recovery"
+                      .equals(
+                          text(
+                              state.path("control").path("payload").path("transport_transition"),
+                              "mode"));
+          if (transition
+              && !emergency
+              && !"retire_old".equals(text(previous.path("payload"), "phase"))) {
+            authority = history(digest(previous)).path("authority");
+            renewal.verifyTransportAuthority(authority);
+            transition = false;
+          }
           ObjectNode payload;
           boolean issueLeaves = false;
           if (previous == null) {
@@ -59,20 +78,33 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
             cas.add(ca("server", now));
             cas.add(ca("client", now));
             payload.put("phase", "dual_trust");
-          } else if (!text(previous.path("payload"), "authority_digest")
-              .equals(MsgnetV2Verifier.digest(authority))) {
-            // Frozen transport vectors define cycles within one authority only. Until an
-            // authenticated handover rule is supplied, keep the committed package unchanged.
-            throw failure("invalid_transition");
+          } else if (transition) {
+            payload = (ObjectNode) previous.path("payload").deepCopy();
+            if (emergency) {
+              require(allIsolated(previous.path("payload")), "identity_quarantined");
+              payload.putArray("cas");
+              jdbc.update(
+                  "DELETE FROM collab.msgnet_transport_leaf WHERE tenant_id = ? AND realm = ?",
+                  tenant,
+                  realm);
+              jdbc.update(
+                  "UPDATE collab.msgnet_projection_nonce SET superseded = true WHERE tenant_id = ? AND realm = ?",
+                  tenant,
+                  realm);
+            }
+            var cas = (tools.jackson.databind.node.ArrayNode) payload.path("cas");
+            cas.add(ca("server", now));
+            cas.add(ca("client", now));
+            payload.put("phase", "dual_trust");
           } else {
             payload = (ObjectNode) previous.path("payload").deepCopy();
             String phase = text(payload, "phase");
             if ("dual_trust".equals(phase)) {
-              if (!acknowledged(payload, false)) return null;
+              if (!acknowledged(previous, false)) return null;
               payload.put("phase", "new_leaves");
               issueLeaves = true;
             } else if ("new_leaves".equals(phase)) {
-              if (!acknowledged(payload, true)) {
+              if (!acknowledged(previous, true)) {
                 issueLeaves(payload, authority.path("payload").path("transport_scope"), now, false);
                 return null;
               }
@@ -111,14 +143,26 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
               .put(
                   "control_revision",
                   text(state.path("control").path("payload"), "control_revision"))
-              .put("generation", text(keyset, "generation"))
+              .put(
+                  "generation",
+                  transition
+                      ? text(
+                          state.path("control").path("payload").path("transport_transition"),
+                          "to_generation")
+                      : previous == null
+                          ? text(keyset, "generation")
+                          : text(previous.path("payload"), "generation"))
               .put(
                   "bundle_version",
-                  previous == null
-                      ? "1"
-                      : number(previous.path("payload"), "bundle_version")
-                          .add(java.math.BigInteger.ONE)
-                          .toString())
+                  transition
+                      ? text(
+                          state.path("control").path("payload").path("transport_transition"),
+                          "first_bundle_version")
+                      : previous == null
+                          ? "1"
+                          : number(previous.path("payload"), "bundle_version")
+                              .add(java.math.BigInteger.ONE)
+                              .toString())
               .put("issued_at", now.toString())
               .put(
                   "previous_bundle_digest",
@@ -126,13 +170,45 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
                       ? "sha256:" + "0".repeat(64)
                       : MsgnetV2Verifier.digest(previous));
           payload.set("scope", authority.path("payload").path("transport_scope").deepCopy());
-          var readers = payload.putArray("required_reader_ids");
-          var seen = new java.util.HashSet<String>();
-          for (var scope : payload.path("scope"))
-            if (seen.add(text(scope, "identity_id"))) readers.add(text(scope, "identity_id"));
+          if (previous == null || emergency) {
+            var readers = payload.putArray("required_reader_ids");
+            var seen = new java.util.HashSet<String>();
+            for (var scope : payload.path("scope"))
+              if (seen.add(text(scope, "identity_id"))) readers.add(text(scope, "identity_id"));
+          }
           if (issueLeaves) issueLeaves(payload, payload.path("scope"), now, true);
           number(payload, "bundle_version");
-          var signed = renewal.signTransport(payload);
+          var signed = renewal.signTransport(payload, authority);
+          if (transition) {
+            var predecessor = history(digest(previous));
+            renewal
+                .transportVerifier()
+                .transition(
+                    signed,
+                    currentAuthority,
+                    state.path("control"),
+                    predecessor,
+                    new MsgnetTransportVerifier.SeenTransport(
+                        text(previous.path("payload"), "generation"),
+                        text(previous.path("payload"), "bundle_version"),
+                        digest(previous)),
+                    emergency && allIsolated(previous.path("payload")));
+            var proof = MsgnetRenewal.object();
+            proof.set("control", state.path("control"));
+            proof.set("predecessor", predecessor);
+            proof.set("first_bundle", signed);
+            proof.set("authority", currentAuthority);
+            schema("TransportTransitionProof", proof, "invalid_chain");
+            jdbc.update(
+                "INSERT INTO collab.msgnet_transport_transition (id, tenant_id, realm, authority_digest, generation, proof) VALUES (?, ?, ?, ?, ?, ?)",
+                auriga.common.persistence.UuidV7.next(java.time.Clock.systemUTC()),
+                tenant,
+                realm,
+                digest(currentAuthority),
+                new java.math.BigDecimal(text(payload, "generation")),
+                MsgnetRenewal.canonical(proof));
+          }
+          remember(signed, authority, state.path("control"));
           schema("SignedTransportTrustBundle", signed, "invalid_chain");
           renewal.checkedTime();
           jdbc.update(
@@ -145,38 +221,262 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
         });
   }
 
-  private boolean acknowledged(JsonNode payload, boolean handshake) {
-    for (var id : payload.path("required_reader_ids")) {
-      var isolated =
+  private boolean acknowledged(JsonNode bundle, boolean handshake) {
+    try {
+      var readers = readers(bundle, handshake ? "handshake_verified" : "loaded");
+      jdbc.update(
+          "INSERT INTO collab.msgnet_transport_stage (id, tenant_id, realm, bundle_digest, readers) VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, realm, bundle_digest) DO NOTHING",
+          auriga.common.persistence.UuidV7.next(java.time.Clock.systemUTC()),
+          tenant,
+          realm,
+          digest(bundle),
+          MsgnetRenewal.canonical(readers));
+      return true;
+    } catch (auriga.common.error.AurigaException failure) {
+      if (!"collab.msgnet_projection_pending".equals(failure.errorCode().code())) throw failure;
+      return false;
+    }
+  }
+
+  private boolean allIsolated(JsonNode payload) {
+    for (var id : payload.path("required_reader_ids")) if (!isolated(id.asString())) return false;
+    return true;
+  }
+
+  private boolean isolated(String identity) {
+    var rows =
+        jdbc.queryForList(
+            "SELECT isolation_record FROM collab.msgnet_isolation_enforcement WHERE tenant_id = ? AND realm = ? AND identity_id = ? AND control_digest = ?",
+            String.class,
+            tenant,
+            realm,
+            identity,
+            digest(renewal.requiredState().path("control")));
+    return !rows.isEmpty()
+        && "quarantined".equals(text(NetworkJson.parse(rows.getFirst(), 1048576), "state"));
+  }
+
+  private JsonNode readers(JsonNode bundle, String requiredPhase) {
+    var frozen =
+        jdbc.queryForList(
+            "SELECT readers FROM collab.msgnet_transport_stage WHERE tenant_id = ? AND realm = ? AND bundle_digest = ?",
+            String.class,
+            tenant,
+            realm,
+            digest(bundle));
+    if (!frozen.isEmpty()) {
+      var readers = NetworkJson.parse(frozen.getFirst(), 1048576);
+      for (var row : readers) {
+        String id = text(row, "identity_id");
+        if (isolated(id)) {
+          ((ObjectNode) row).put("phase", "isolated").put("isolation_enforced", true);
+        } else
+          require(
+              !contains(
+                      renewal
+                          .requiredState()
+                          .path("control")
+                          .path("payload")
+                          .path("revoked_installation_ids"),
+                      id)
+                  && !"isolated".equals(text(row, "phase")),
+              "projection_pending");
+      }
+      return readers;
+    }
+    var result = MsgnetRenewal.object().putArray("readers");
+    for (var id : bundle.path("payload").path("required_reader_ids")) {
+      var rows =
           jdbc.queryForList(
-              "SELECT isolation_record FROM collab.msgnet_control_target WHERE tenant_id = ? AND realm = ? AND identity_id = ? AND enforcement_confirmed = true",
-              String.class,
+              "SELECT authorized_snapshot, local_selector, receipts::text AS receipts, superseded FROM collab.msgnet_projection_nonce WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND local_selector IS NOT NULL ORDER BY id DESC",
               tenant,
               realm,
               id.asString());
-      if (!isolated.isEmpty()
-          && "quarantined".equals(text(NetworkJson.parse(isolated.getFirst(), 1048576), "state")))
-        continue;
-      var receipts =
-          jdbc.queryForList(
-              "SELECT receipt FROM collab.msgnet_projection_receipt WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND bundle_version = ?",
-              String.class,
-              tenant,
-              realm,
-              id.asString(),
-              new java.math.BigDecimal(text(payload, "bundle_version")));
-      if (receipts.isEmpty()) return false;
-      var receipt = NetworkJson.parse(receipts.getFirst(), 1048576);
-      if (!text(receipt, "publication_digest")
-          .equals(
-              MsgnetV2Verifier.digest(
-                  NetworkJson.parse(renewal.publication(), 1048576).path("keyset")))) return false;
-      String phase = text(receipt, "phase");
-      if (handshake
-          ? !"handshake_verified".equals(phase)
-          : !List.of("persisted", "loaded", "handshake_verified").contains(phase)) return false;
+      JsonNode selected = null;
+      for (var row : rows) {
+        var selector = NetworkJson.parse(row.get("local_selector").toString(), 1048576);
+        if (!digest(bundle).equals(text(selector, "bundle_digest"))) continue;
+        var receipts = NetworkJson.parse(row.get("receipts").toString(), 1048576);
+        String phase = receipts.has("handshake_verified") ? "handshake_verified" : "loaded";
+        if (!isolated(id.asString())
+            && (Boolean.TRUE.equals(row.get("superseded"))
+                || !receipts.has(phase)
+                || ("handshake_verified".equals(requiredPhase) && !receipts.has(requiredPhase))))
+          continue;
+        var snapshot = NetworkJson.parse(row.get("authorized_snapshot").toString(), 1048576);
+        if (!isolated(id.asString()))
+          MsgnetProjectionBinding.verify(snapshot, selector, receipts.path(phase), null);
+        var evidence =
+            MsgnetRenewal.object()
+                .put("reader_id", id.asString())
+                .put("identity_id", id.asString())
+                .put("phase", isolated(id.asString()) ? "isolated" : phase)
+                .put("isolation_enforced", isolated(id.asString()));
+        evidence.set("selector", selector);
+        selected = evidence;
+        break;
+      }
+      require(selected != null, "projection_pending");
+      result.add(selected);
     }
-    return true;
+    return result;
+  }
+
+  private void remember(JsonNode bundle) {
+    var rows =
+        jdbc.queryForList(
+            "SELECT predecessor FROM collab.msgnet_transport_history WHERE tenant_id = ? AND realm = ? AND bundle_digest = ?",
+            String.class,
+            tenant,
+            realm,
+            digest(bundle));
+    if (!rows.isEmpty()) return;
+    // Upgrade an existing K2 public package using its original signed publication history.
+    var publications =
+        jdbc.queryForList(
+            "SELECT publication FROM collab.msgnet_publication_history WHERE tenant_id = ? AND realm = ? ORDER BY committed_at DESC",
+            String.class,
+            tenant,
+            realm);
+    for (var encoded : publications) {
+      var p = NetworkJson.parse(encoded, 1048576);
+      if (digest(p.path("authority")).equals(text(bundle.path("payload"), "authority_digest"))
+          && p.path("control")
+              .path("payload")
+              .path("control_revision")
+              .equals(bundle.path("payload").path("control_revision"))) {
+        remember(bundle, p.path("authority"), p.path("control"));
+        return;
+      }
+    }
+    throw failure("predecessor_required");
+  }
+
+  private void remember(JsonNode bundle, JsonNode authority, JsonNode control) {
+    var predecessor = MsgnetRenewal.object();
+    predecessor.set("bundle", bundle);
+    predecessor.set("authority", authority);
+    predecessor.set("control", control);
+    schema("TransportPredecessor", predecessor, "invalid_chain");
+    jdbc.update(
+        "INSERT INTO collab.msgnet_transport_history (id, tenant_id, realm, bundle_digest, generation, bundle_version, predecessor) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, realm, bundle_digest) DO NOTHING",
+        auriga.common.persistence.UuidV7.next(java.time.Clock.systemUTC()),
+        tenant,
+        realm,
+        digest(bundle),
+        new java.math.BigDecimal(text(bundle.path("payload"), "generation")),
+        new java.math.BigDecimal(text(bundle.path("payload"), "bundle_version")),
+        MsgnetRenewal.canonical(predecessor));
+  }
+
+  public JsonNode history(String digest) {
+    require(digest.matches("sha256:[0-9a-f]{64}"), "invalid_chain");
+    return renewal.run(
+        () -> {
+          var rows =
+              jdbc.queryForList(
+                  "SELECT predecessor FROM collab.msgnet_transport_history WHERE tenant_id = ? AND realm = ? AND bundle_digest = ?",
+                  String.class,
+                  tenant,
+                  realm,
+                  digest);
+          if (rows.isEmpty())
+            throw new auriga.common.error.AurigaException(
+                auriga.common.error.CommonErrors.NOT_FOUND);
+          return NetworkJson.parse(rows.getFirst(), 1048576);
+        });
+  }
+
+  public JsonNode transitionProof(String digest) {
+    require(digest.matches("sha256:[0-9a-f]{64}"), "invalid_chain");
+    return renewal.run(
+        () -> {
+          var rows =
+              jdbc.queryForList(
+                  "SELECT proof FROM collab.msgnet_transport_transition WHERE tenant_id = ? AND realm = ? AND authority_digest = ? ORDER BY generation DESC LIMIT 1",
+                  String.class,
+                  tenant,
+                  realm,
+                  digest);
+          if (rows.isEmpty())
+            throw new auriga.common.error.AurigaException(
+                auriga.common.error.CommonErrors.NOT_FOUND);
+          return NetworkJson.parse(rows.getFirst(), 1048576);
+        });
+  }
+
+  public JsonNode confirmation(JsonNode query) {
+    schema("TransportConfirmationQuery", query, "invalid_chain");
+    require(
+        tenant.toString().equals(text(query, "tenant_id")) && realm.equals(text(query, "realm")),
+        "scope_denied");
+    try {
+      return renewal.run(
+          () -> {
+            renewal.lock();
+            var rows =
+                jdbc.queryForList(
+                    "SELECT predecessor FROM collab.msgnet_transport_history WHERE tenant_id = ? AND realm = ? AND bundle_digest = ?",
+                    String.class,
+                    tenant,
+                    realm,
+                    text(query, "bundle_digest"));
+            if (rows.isEmpty()) {
+              var versions =
+                  jdbc.queryForList(
+                      "SELECT bundle_digest FROM collab.msgnet_transport_history WHERE tenant_id = ? AND realm = ? AND bundle_version = ?",
+                      String.class,
+                      tenant,
+                      realm,
+                      new java.math.BigDecimal(text(query, "bundle_version")));
+              require(versions.isEmpty(), "same_version_conflict");
+              throw new auriga.common.error.AurigaException(
+                  auriga.common.error.CommonErrors.NOT_FOUND);
+            }
+            var predecessor = NetworkJson.parse(rows.getFirst(), 1048576);
+            var bundle = predecessor.path("bundle");
+            require(
+                bundle.path("payload").path("bundle_version").equals(query.path("bundle_version")),
+                "same_version_conflict");
+            var state = renewal.requiredState();
+            require(
+                number(bundle.path("payload"), "generation")
+                        .compareTo(
+                            number(state.path("control").path("payload"), "minimum_generation"))
+                    >= 0,
+                "version_rollback");
+            var authority = predecessor.path("authority");
+            renewal.verifyTransportAuthority(authority);
+            var payload = MsgnetRenewal.object();
+            for (String field :
+                List.of(
+                    "tenant_id",
+                    "realm",
+                    "authority_id",
+                    "authority_digest",
+                    "bundle_version",
+                    "phase",
+                    "required_reader_ids")) payload.set(field, bundle.path("payload").path(field));
+            payload.set(
+                "control_revision", state.path("control").path("payload").path("control_revision"));
+            payload
+                .put("bundle_digest", digest(bundle))
+                .put("challenge", text(query, "challenge"))
+                .put("issued_at", renewal.checkedTime().toString());
+            payload.set(
+                "readers",
+                readers(
+                    bundle,
+                    "new_leaves".equals(text(bundle.path("payload"), "phase"))
+                        ? "handshake_verified"
+                        : "loaded"));
+            var signed = renewal.signConfirmation(payload, authority);
+            schema("SignedTransportConfirmation", signed, "invalid_chain");
+            return signed;
+          });
+    } catch (org.springframework.dao.DataAccessException unavailable) {
+      throw failure("projection_pending");
+    }
   }
 
   private ObjectNode ca(String role, Instant now) {
@@ -361,10 +661,16 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
         () -> {
           var bundle = stored();
           require(bundle != null, "projection_pending");
+          remember(bundle);
+          renewal.verifyTransportAuthority(history(digest(bundle)).path("authority"));
           require(
-              text(bundle.path("payload"), "authority_digest")
-                  .equals(MsgnetV2Verifier.digest(renewal.requiredState().path("authority"))),
-              "authority_revoked");
+              number(bundle.path("payload"), "generation")
+                      .compareTo(
+                          number(
+                              renewal.requiredState().path("control").path("payload"),
+                              "minimum_generation"))
+                  >= 0,
+              "version_rollback");
           return bundle;
         });
   }

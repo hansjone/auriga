@@ -32,7 +32,10 @@ class MsgnetContractAdapterTest {
     for (String state :
         java.util.List.of("ready", "projection_pending", "renewing", "clock_error")) {
       var node = MsgnetRenewal.object().put("state", state).put("tenant_id", "synthetic");
-      var model = new MsgnetNetworkRenewal.StatusOutput(node);
+      var model =
+          KeyTestMaterial.JSON.treeToValue(
+              node, auriga.contracts.msgnet.model.RenewalStatusOutput.class);
+      assertEquals(state, model.getState().getValue());
       assertEquals(node, MsgnetNetworkRenewal.tree(model));
     }
   }

@@ -13,6 +13,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -135,6 +136,61 @@ public class MsgnetRenewalController {
     return response(() -> json(api.confirmProjection(input(request, ProjectionReceipt.class))));
   }
 
+  @RequiresPermission("collab.msgnet.read")
+  @PostMapping(
+      value = "/api/collab/v2/network/transport/confirmation",
+      produces = "application/json")
+  public ResponseEntity<String> confirmation(@RequestBody byte[] request, HttpServletRequest http) {
+    internalMtls(http);
+    return response(
+        () -> json(api.transportConfirmation(input(request, TransportConfirmationQuery.class))));
+  }
+
+  @RequiresPermission("collab.msgnet.read")
+  @GetMapping(
+      value = "/api/collab/v2/network/transport/history/{digest}",
+      produces = "application/json")
+  public ResponseEntity<String> history(@PathVariable String digest, HttpServletRequest http) {
+    internalMtls(http);
+    return response(() -> json(api.transportHistory(digest)));
+  }
+
+  @RequiresPermission("collab.msgnet.read")
+  @GetMapping(
+      value = "/api/collab/v2/network/transport/transitions/{authority_digest}",
+      produces = "application/json")
+  public ResponseEntity<String> transition(
+      @PathVariable("authority_digest") String digest, HttpServletRequest http) {
+    internalMtls(http);
+    return response(() -> json(api.transportTransition(digest)));
+  }
+
+  @RequiresPermission("collab.msgnet.read")
+  @GetMapping(value = "/api/collab/v2/network/isolation/{target_id}", produces = "application/json")
+  public ResponseEntity<String> isolation(
+      @PathVariable("target_id") String target, HttpServletRequest http) {
+    internalMtls(http);
+    return response(() -> json(api.isolation(target)));
+  }
+
+  @RequiresPermission("collab.msgnet.read")
+  @GetMapping(
+      value = "/api/collab/v2/network/controls/pending/{target_id}",
+      produces = "application/json")
+  public ResponseEntity<String> pending(
+      @PathVariable("target_id") String target, HttpServletRequest http) {
+    internalMtls(http);
+    return response(() -> json(api.pendingControl(target)));
+  }
+
+  private void internalMtls(HttpServletRequest request) {
+    Object certificates = request.getAttribute("jakarta.servlet.request.X509Certificate");
+    if (!request.isSecure()
+        || !(certificates instanceof java.security.cert.X509Certificate[] chain)
+        || chain.length == 0) throw new AurigaException(CommonErrors.FORBIDDEN);
+    MsgnetNetworkRenewal.available(identities).mtlsReader(chain[0]);
+  }
+
   private static String json(Object value) {
     return MsgnetRenewal.canonical(MsgnetNetworkRenewal.tree(value));
   }
@@ -172,11 +228,15 @@ public class MsgnetRenewalController {
     var principal =
         AuthorizationRules.currentPrincipal()
             .orElseThrow(() -> new AurigaException(CommonErrors.UNAUTHENTICATED));
-    return TenantContext.call(
-        principal.tenantId(),
-        () -> {
-          MsgnetNetworkRenewal.available(service).requireCallerTenant();
-          return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body.get());
-        });
+    try {
+      return TenantContext.call(
+          principal.tenantId(),
+          () -> {
+            MsgnetNetworkRenewal.available(service).requireCallerTenant();
+            return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body.get());
+          });
+    } catch (org.springframework.dao.DataAccessException unavailable) {
+      throw MsgnetV2Verifier.failure("projection_pending");
+    }
   }
 }

@@ -287,6 +287,15 @@ public final class MsgnetV2Verifier {
           "invalid_transition");
       var old = find(oldKeys, "kid", text(key, "kid"));
       if (old != null) {
+        if ("restart_recovery".equals(mode) && "next".equals(text(old, "state"))) {
+          var first = find(previous.path("first_publications"), "kid", text(old, "kid"));
+          if (first == null
+              || time(first, "committed_at")
+                  .isAfter(
+                      issued.minusSeconds(a.path("limits").path("next_maturity_seconds").asLong())))
+            require(
+                Set.of("retired", "revoked").contains(text(key, "state")), "invalid_transition");
+        }
         for (String field : List.of("alg", "public_key_spki", "purpose", "not_before", "not_after"))
           require(old.path(field).equals(key.path(field)), "invalid_transition");
         if (Set.of("retired", "revoked").contains(text(old, "state")))
@@ -454,7 +463,7 @@ public final class MsgnetV2Verifier {
     schema("SignedMigrationPermit", permit, "invalid_chain");
   }
 
-  private void rootSignature(JsonNode signed, String domain) {
+  void rootSignature(JsonNode signed, String domain) {
     require(rootKid.equals(text(signed.path("root_auth"), "kid")), "invalid_chain");
     signature(signed, "Auriga." + domain + ".v2", root);
   }
@@ -480,7 +489,7 @@ public final class MsgnetV2Verifier {
     }
   }
 
-  private boolean scope(JsonNode node) {
+  boolean scope(JsonNode node) {
     return tenant.equals(text(node, "tenant_id")) && realm.equals(text(node, "realm"));
   }
 
@@ -491,7 +500,7 @@ public final class MsgnetV2Verifier {
                 time(k, "issued_at").plusSeconds(a.path("limits").path("keyset_seconds").asLong()));
   }
 
-  private static boolean allowed(JsonNode control, JsonNode authority) {
+  static boolean allowed(JsonNode control, JsonNode authority) {
     for (var entry : control.path("allowed_authorities"))
       if (entry.path("authority_id").equals(authority.path("payload").path("authority_id"))
           && text(entry, "authority_digest").equals(MsgnetV2Verifier.digest(authority)))

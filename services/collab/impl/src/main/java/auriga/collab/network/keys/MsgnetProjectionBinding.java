@@ -84,8 +84,10 @@ final class MsgnetProjectionBinding {
                   || number(selector, "keyset_version")
                           .compareTo(number(previous, "keyset_version"))
                       >= 0)
-              && number(selector, "bundle_version").compareTo(number(previous, "bundle_version"))
-                  >= 0
+              && (generation > 0
+                  || number(selector, "bundle_version")
+                          .compareTo(number(previous, "bundle_version"))
+                      >= 0)
               && number(selector, "material_revision")
                       .compareTo(number(previous, "material_revision"))
                   >= 0,

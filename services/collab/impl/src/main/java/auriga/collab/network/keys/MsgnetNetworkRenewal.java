@@ -35,7 +35,7 @@ public final class MsgnetNetworkRenewal implements NetworkRenewal {
     }
   }
 
-  static JsonNode tree(Object value) {
+  public static JsonNode tree(Object value) {
     JsonNode node = JSON.valueToTree(value);
     omitOptionalNulls(node);
     return node;
@@ -65,31 +65,64 @@ public final class MsgnetNetworkRenewal implements NetworkRenewal {
   @Override
   public RenewalStatusOutput status() {
     available(renewal).requireCallerTenant();
-    return new StatusOutput(NetworkJson.parse(available(renewal).status(), 1048576));
+    var value = NetworkJson.parse(available(renewal).status(), 1048576);
+    MsgnetV2Verifier.schema("RenewalStatusOutput", value, "invalid_chain");
+    return model(value, RenewalStatusOutput.class);
   }
 
-  // The generated oneOf model narrows the state enum to its unpublished branch.
-  // Preserve the frozen union on the wire without modifying generated sources.
-  static final class StatusOutput extends RenewalStatusOutput {
-    private final JsonNode output;
+  @Override
+  public IsolationRecord isolation(String targetId) {
+    available(renewal).requireCallerTenant();
+    return model(available(controls).isolation(targetId), IsolationRecord.class);
+  }
 
-    StatusOutput(JsonNode output) {
-      this.output = output;
-      var common = (tools.jackson.databind.node.ObjectNode) output.deepCopy();
-      common.remove("state");
-      org.springframework.beans.BeanUtils.copyProperties(
-          JSON.treeToValue(common, RenewalStatusOutput.class), this);
-      try {
-        setState(RenewalStatusOutput.StateEnum.fromValue(output.path("state").asString()));
-      } catch (IllegalArgumentException unsupportedPublishedState) {
-        // The exact published state remains available in the frozen JSON union above.
-      }
-    }
+  @Override
+  public ControlPackage pendingControl(String targetId) {
+    available(renewal).requireCallerTenant();
+    return model(available(controls).pending(targetId), ControlPackage.class);
+  }
 
-    @com.fasterxml.jackson.annotation.JsonValue
-    public JsonNode output() {
-      return output;
-    }
+  @Override
+  public ControlPackage pendingNodeControl(String authenticatedNodeId) {
+    available(renewal).requireCallerTenant();
+    return model(available(controls).pendingNode(authenticatedNodeId), ControlPackage.class);
+  }
+
+  @Override
+  public SignedTransportTrustBundle nodeTransport(String authenticatedNodeId) {
+    available(renewal).requireCallerTenant();
+    available(controls).requireNode(authenticatedNodeId);
+    return model(transport().bundle(), SignedTransportTrustBundle.class);
+  }
+
+  @Override
+  public IsolationRecord confirmNodeControl(
+      String authenticatedNodeId, InstallationReceipt receipt) {
+    available(renewal).requireCallerTenant();
+    return model(
+        available(controls).confirmNode(authenticatedNodeId, tree(receipt)), IsolationRecord.class);
+  }
+
+  private MsgnetPki transport() {
+    return available(materials).pki();
+  }
+
+  @Override
+  public SignedTransportConfirmation transportConfirmation(TransportConfirmationQuery query) {
+    available(renewal).requireCallerTenant();
+    return model(transport().confirmation(tree(query)), SignedTransportConfirmation.class);
+  }
+
+  @Override
+  public TransportPredecessor transportHistory(String digest) {
+    available(renewal).requireCallerTenant();
+    return model(transport().history(digest), TransportPredecessor.class);
+  }
+
+  @Override
+  public TransportTransitionProof transportTransition(String digest) {
+    available(renewal).requireCallerTenant();
+    return model(transport().transitionProof(digest), TransportTransitionProof.class);
   }
 
   @Override
@@ -102,6 +135,15 @@ public final class MsgnetNetworkRenewal implements NetworkRenewal {
   public IsolationRecord confirmControl(InstallationReceipt receipt) {
     available(renewal).requireCallerTenant();
     return model(available(controls).confirm(tree(receipt)), IsolationRecord.class);
+  }
+
+  @Override
+  public IsolationRecord confirmNodeControl(
+      String authenticatedNodeId, String identityRevision, InstallationReceipt receipt) {
+    available(renewal).requireCallerTenant();
+    return model(
+        available(controls).confirmNode(authenticatedNodeId, identityRevision, tree(receipt)),
+        IsolationRecord.class);
   }
 
   @Override

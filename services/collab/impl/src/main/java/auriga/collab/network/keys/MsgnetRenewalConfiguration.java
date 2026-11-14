@@ -204,7 +204,16 @@ public class MsgnetRenewalConfiguration {
             NetworkJson.parse(ProtectedKeyFiles.readText(Path.of(file), 1048576), 1048576),
             tenant,
             realm);
-    return new MsgnetControlLedger(renewal, new JdbcTemplate(source), tenant, realm, identities);
+    String nodeFile = env.getProperty(PREFIX + "node-control-pins-file");
+    var nodes =
+        nodeFile == null
+            ? Map.<String, JsonNode>of()
+            : MsgnetNodePins.read(
+                NetworkJson.parse(ProtectedKeyFiles.readText(Path.of(nodeFile), 1048576), 1048576),
+                tenant,
+                realm);
+    return new MsgnetControlLedger(
+        renewal, new JdbcTemplate(source), tenant, realm, identities, nodes);
   }
 
   @Bean
@@ -271,13 +280,28 @@ public class MsgnetRenewalConfiguration {
   }
 
   @Bean
+  auriga.iam.api.NetworkInstallationAuthority.Access msgnetInstallationAccess(
+      ObjectProvider<MsgnetControlLedger> controls) {
+    return (tenant, realm, identity, target) ->
+        MsgnetNetworkRenewal.available(controls::getObject)
+            .permitted(tenant, realm, identity, target);
+  }
+
+  @Bean
+  auriga.iam.api.NetworkInstallationAuthority.Nonces msgnetInstallationNonces(
+      ObjectProvider<MsgnetControlLedger> controls) {
+    return request -> MsgnetNetworkRenewal.available(controls::getObject).claim(request);
+  }
+
+  @Bean
   Maintenance msgnetMaintenance(
       ObjectProvider<MsgnetRenewal> service,
       NetworkSigningKeys keys,
       ObjectProvider<NetworkKeyPush> transport,
       ObjectProvider<MsgnetPki> pki,
-      ObjectProvider<MsgnetPublicControl> control) {
-    return new Maintenance(service, keys, transport, pki, control);
+      ObjectProvider<MsgnetPublicControl> control,
+      ObjectProvider<MsgnetControlLedger> identities) {
+    return new Maintenance(service, keys, transport, pki, control, identities);
   }
 
   static final class Maintenance {
@@ -286,13 +310,16 @@ public class MsgnetRenewalConfiguration {
     private final ObjectProvider<NetworkKeyPush> transport;
     private final ObjectProvider<MsgnetPki> pkiProvider;
     private final ObjectProvider<MsgnetPublicControl> controlProvider;
+    private final ObjectProvider<MsgnetControlLedger> identitiesProvider;
 
     Maintenance(
         ObjectProvider<MsgnetRenewal> service,
         NetworkSigningKeys keys,
         ObjectProvider<NetworkKeyPush> transport,
         ObjectProvider<MsgnetPki> pki,
-        ObjectProvider<MsgnetPublicControl> control) {
+        ObjectProvider<MsgnetPublicControl> control,
+        ObjectProvider<MsgnetControlLedger> identities) {
+      this.identitiesProvider = identities;
       this.serviceProvider = service;
       this.keys = keys;
       this.transport = transport;
@@ -306,6 +333,7 @@ public class MsgnetRenewalConfiguration {
         controlProvider.getObject().refresh();
         var service = serviceProvider.getObject();
         service.reconcile();
+        identitiesProvider.getObject().refreshTargets();
         service.reload(keys);
         try {
           pkiProvider.getObject().reconcile();
