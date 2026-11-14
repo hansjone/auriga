@@ -40,6 +40,15 @@ public final class NodeOutput {
   }
 
   public boolean send(SessionResponse response) {
+    return enqueue(response, true);
+  }
+
+  /** Message control remains in its authoritative ledger when lifecycle traffic owns the queue. */
+  public boolean trySendMessageControl(SessionResponse response) {
+    return enqueue(response, false);
+  }
+
+  private boolean enqueue(SessionResponse response, boolean failOnOverflow) {
     boolean overflow;
     synchronized (this) {
       if (closed) return false;
@@ -50,7 +59,7 @@ public final class NodeOutput {
       }
     }
     if (overflow) {
-      failure.accept(new AurigaException(CommonErrors.RATE_LIMITED));
+      if (failOnOverflow) failure.accept(new AurigaException(CommonErrors.RATE_LIMITED));
       return false;
     }
     drain();
