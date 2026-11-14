@@ -384,11 +384,11 @@ for (const locale of ['zh', 'en'])
         }
       });
 
-test('R2 logout preserves the existing explicit confirmation page', async () => {
+test('R2 logout sends the explicit shell command with CSRF and refreshes status', async () => {
   let status = signedIn,
     sent;
   const fixture = harness(async (url, init) => {
-    if (url.endsWith('/logout')) {
+    if (url.endsWith('/shell/command')) {
       sent = init;
       status = { loggedIn: false, connected: false };
       return Response.json({});
@@ -399,12 +399,14 @@ test('R2 logout preserves the existing explicit confirmation page', async () => 
     fixture.render();
     await setImmediate();
     await button(fixture.render(), '退出登录').props.onClick();
-    assert.equal(sent, undefined);
-    assert.ok(button(fixture.render(), '退出登录'));
-    assert.equal(
-      fixture.navigated,
-      'https://example.com/auriga/local-login?logout=1',
-    );
+    await setImmediate();
+    assert.equal(sent.method, 'POST');
+    assert.deepEqual(JSON.parse(sent.body), { action: 'logout' });
+    assert.equal(sent.headers['x-auriga-csrf'], 'test-csrf');
+    fixture.render();
+    await setImmediate();
+    assert.equal(button(fixture.render(), '退出登录'), undefined);
+    assert.equal(fixture.navigated, undefined);
   } finally {
     fixture.dispose();
   }

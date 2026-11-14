@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { createManagedModelStatus } from '../ai/managed-status.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedNetwork } from '../network/managed-device.js';
@@ -302,33 +301,6 @@ export async function createManaged(options = {}) {
       }
 
       host.ctx = ctx;
-      ctx.inject?.(
-        ['llm', 'settings', 'configEditor', 'credentials'],
-        (modelCtx) => {
-          modelCtx.effect(() => {
-            const models = createManagedModelStatus({
-              tenantId,
-              ownerId,
-              instanceId,
-            });
-            const detach = models.attach(
-              modelCtx.llm,
-              modelCtx.settings,
-              modelCtx.configEditor,
-              modelCtx.credentials,
-            );
-            const release = () => {
-              detach();
-              models.close();
-            };
-            detachModels = release;
-            return () => {
-              release();
-              if (detachModels === release) detachModels = undefined;
-            };
-          }, 'auriga-dsh: managed model catalog');
-        },
-      );
       disposeHostAuth = installHostAuthentication(ctx.connection, door, {
         browserOrigin,
       });
@@ -377,7 +349,7 @@ export async function createManaged(options = {}) {
 
       // Same public host services, provider and network lifecycle as connect mode.
       // Profile storage is only durable partitioning; it is not an isolation claim.
-      if (env.AURIGA_DEVICE_CREDENTIAL_FILE) {
+      if (typeof ctx.inject === 'function') {
         ctx.inject(['profileContext'], (profileCtx) => {
           const directory = profileCtx.profileContext?.dir;
           if (!directory)
@@ -388,7 +360,7 @@ export async function createManaged(options = {}) {
             ['tools', 'sessions', 'sessionController'],
             (networkCtx) => {
               const owned = createManagedNetwork({
-                file: env.AURIGA_DEVICE_CREDENTIAL_FILE,
+                platformOrigin: platformUrl,
                 directory: join(directory, 'auriga-managed'),
                 tenantId,
                 ownerId,
@@ -399,7 +371,22 @@ export async function createManaged(options = {}) {
                   browserFenceOk(req, browserOrigin),
               });
               network = owned;
-              owned.start();
+              void owned.start().catch(() => {});
+              networkCtx.inject(['llm'], (modelCtx) => {
+                let detach,
+                  disposed = false;
+                void owned.attachModels(modelCtx.llm).then((release) => {
+                  if (disposed) release();
+                  else detach = release;
+                });
+                modelCtx.effect(
+                  () => () => {
+                    disposed = true;
+                    detach?.();
+                  },
+                  'auriga: managed broker models',
+                );
+              });
               networkCtx.effect(
                 () => () => {
                   if (network === owned) network = undefined;
@@ -435,7 +422,7 @@ export async function createManaged(options = {}) {
           () =>
             ctx.webServer.register({
               kind: 'prefix',
-              path: '/auriga/local-login',
+              path: '/auriga/shell',
               async handler(req, res) {
                 if (!authorized(req)) {
                   res.writeHead(401, { 'cache-control': 'no-store' });
@@ -443,14 +430,11 @@ export async function createManaged(options = {}) {
                   return;
                 }
                 const path = (req.url ?? '').split('?')[0];
-                if (path.startsWith('/auriga/local-login/consent/'))
+                if (path.startsWith('/auriga/shell/consent/'))
                   return consent(req, res);
-                if (path.startsWith('/auriga/local-login/messaging/'))
+                if (path.startsWith('/auriga/shell/messaging/'))
                   return messaging(req, res);
-                if (
-                  req.method === 'GET' &&
-                  path === '/auriga/local-login/status'
-                ) {
+                if (req.method === 'GET' && path === '/auriga/shell/status') {
                   res.writeHead(200, {
                     'content-type': 'application/json',
                     'cache-control': 'no-store',
@@ -478,10 +462,37 @@ export async function createManaged(options = {}) {
                 }
                 if (
                   req.method === 'POST' &&
-                  path === '/auriga/local-login/logout' &&
+                  path === '/auriga/shell/command' &&
                   facade.checkCsrf(req)
                 ) {
-                  network?.logout();
+                  let size = 0;
+                  const chunks = [];
+                  for await (const chunk of req) {
+                    if ((size += chunk.length) > 1024) {
+                      res.writeHead(400);
+                      res.end();
+                      return;
+                    }
+                    chunks.push(chunk);
+                  }
+                  let input;
+                  try {
+                    input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                  } catch {
+                    res.writeHead(400);
+                    res.end();
+                    return;
+                  }
+                  if (
+                    !input ||
+                    Object.keys(input).join(',') !== 'action' ||
+                    input.action !== 'logout'
+                  ) {
+                    res.writeHead(400);
+                    res.end();
+                    return;
+                  }
+                  await network?.logout();
                   res.writeHead(200, {
                     'content-type': 'application/json',
                     'cache-control': 'no-store',

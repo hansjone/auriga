@@ -439,10 +439,7 @@ test('formal plugin entry consumes saved settings, applies changes immediately a
       deployment: 'cloud',
     });
     assert.equal(saved.activeOrigin, saved.platformOrigin);
-    assert.equal(
-      (await first.call('/auriga/local-login/status')).loggedIn,
-      false,
-    );
+    assert.equal((await first.call('/auriga/shell/status')).loggedIn, false);
   } finally {
     await first.close();
   }

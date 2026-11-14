@@ -2,8 +2,13 @@ import { fileURLToPath } from 'node:url';
 
 /** Public shellEnv/tools-result/jobs adapter, matching the original host lifecycle.
  * resolve is called with a trusted tool execution, never a page/model payload.
- * @param {{auth:any,getServer:()=>any,prepare?:(execution:any)=>Promise<string|undefined>}} options */
-export function createEnterpriseEnvironment({ auth, getServer, prepare }) {
+ * @param {{auth:any,getServer:()=>any,prepare?:(execution:any)=>Promise<string|undefined>,retain?:(id:string)=>boolean}} options */
+export function createEnterpriseEnvironment({
+  auth,
+  getServer,
+  prepare,
+  retain,
+}) {
   /** @type {Map<any,any>} */ const issued = new Map();
   const helpers = fileURLToPath(
     new URL('../../skills/uds-skill-auth/scripts/', import.meta.url),
@@ -51,6 +56,7 @@ export function createEnterpriseEnvironment({ auth, getServer, prepare }) {
       if (!cap) return empty;
       const row = {
         cap,
+        contextId,
         sessionId,
         signal: execution.signal,
         abort: () => release(execution),
@@ -97,6 +103,12 @@ export function createEnterpriseEnvironment({ auth, getServer, prepare }) {
           .list(row.sessionId)
           .find((/** @type {any} */ j) => j.id === value.jobId);
         if (job && ['running', 'stopping'].includes(job.status)) {
+          // Only this native jobs registry can transfer the tool's authority
+          // to a background job. Cancellation alone never extends a context.
+          if (retain && (!row.contextId || !retain(row.contextId))) {
+            release(execution);
+            return;
+          }
           row.signal?.removeEventListener('abort', row.abort);
           row.signal = null;
           row.off = jobs.events.subscribe(

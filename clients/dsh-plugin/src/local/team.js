@@ -1,5 +1,4 @@
-/* global AbortSignal */
-import { BUILTIN_TOOL_NAMES, connectionReason } from '../network/base-tools.js';
+import { BUILTIN_TOOL_NAMES } from '../network/base-tools.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { setInterval, clearInterval } from 'node:timers';
@@ -88,53 +87,32 @@ export function registerTeamTools(registry, tools, call, logger = console) {
   };
 }
 
-/** Remote HTTP MCP only; actor/session never comes from model arguments.
- * @param {{platform:ReturnType<typeof import('./platform.js').createPlatform>,vault:Awaited<ReturnType<typeof import('./vault.js').createVault>>,getAccess:()=>Promise<string>,assertActive:()=>void,ctx:any,label:string,onState?:(state:{connected:boolean,unauthorized?:boolean,reason?:string})=>void}} options */
+/** Fixed broker MCP operations; source context is taken from native execution only.
+ * @param {{broker:any,vault:Awaited<ReturnType<typeof import('./vault.js').createVault>>,getSessionContext:(id:string)=>Promise<any>,getToolContext:(execution:any)=>Promise<any>,readStream:(id:string)=>Promise<Buffer>,finishToolContext?:(id:string)=>Promise<void>,assertActive:()=>void,ctx:any,label:string,onState?:(state:any)=>void}} options */
 export function createTeam({
-  platform,
+  broker,
   vault,
-  getAccess,
+  getSessionContext,
+  getToolContext,
+  readStream,
+  finishToolContext = (id) => broker.revoke(id),
   assertActive,
   ctx,
   label,
   onState = () => {},
 }) {
-  let nextId = 0,
-    closed = false,
-    polling = false,
-    protocol = '2025-06-18';
+  let closed = false,
+    polling = false;
+  /** @type {string|undefined} */ let controlStream;
+  /** @type {string|undefined} */ let primarySession;
+  /** @type {Map<string,Promise<string>>} */ const endpointFlights = new Map();
+  /** @type {Map<string,{context:string,id:string}>} */ const endpointContexts =
+    new Map();
   /** @type {ReturnType<typeof setInterval>|undefined} */
   let timer;
-  /** @type {Promise<string>|undefined} */
-  let endpointPending;
   /** @type {(()=>void)[]} */
   const disposers = [],
     controller = new AbortController();
-  const transport = async (
-    /** @type {string} */ path,
-    /** @type {any} */ options,
-  ) => {
-    try {
-      const result = await platform.request(path, {
-        ...options,
-        signal: options.signal
-          ? AbortSignal.any([options.signal, controller.signal])
-          : controller.signal,
-      });
-      active();
-      onState({ connected: true });
-      return result;
-    } catch (error) {
-      onState({
-        connected: false,
-        reason: connectionReason(error),
-        unauthorized:
-          /** @type {any} */ (error).status === 401 ||
-          /** @type {any} */ (error).status === 403,
-      });
-      throw error;
-    }
-  };
   const active = () => {
     if (closed) throw new Error('Team connection closed');
     assertActive();
@@ -151,74 +129,139 @@ export function createTeam({
         expireOpenIntents(state);
       });
   }
+  async function decode(/** @type {any} */ output) {
+    const value = output.body?.streamId
+      ? JSON.parse((await readStream(output.body.streamId)).toString('utf8'))
+      : output.body;
+    active();
+    return value;
+  }
+  async function endpoint(
+    /** @type {string|undefined} */ sessionId = primarySession,
+  ) {
+    active();
+    if (!sessionId) throw new Error('trusted DSH session required');
+    const context = await getSessionContext(sessionId);
+    const existing = endpointContexts.get(sessionId);
+    if (existing && existing.context === context.executionContextId)
+      return existing.id;
+    let pending = endpointFlights.get(sessionId);
+    if (!pending) {
+      pending = (async () => {
+        const result = await decode(
+          await broker.call('team_node_register', {
+            executionContextId: context.executionContextId,
+            arguments: { label, receiveEnabled: true },
+          }),
+        );
+        if (!UUID.test(result.endpoint?.id) || result.endpoint.revoked)
+          throw new Error('invalid Team endpoint');
+        const old = vault.snapshot().endpoint;
+        if (old && old !== result.endpoint.id)
+          throw new Error('Team endpoint changed across native sessions');
+        await vault.update((state) => {
+          active();
+          state.endpoint = result.endpoint.id;
+        });
+        active();
+        endpointContexts.set(sessionId, {
+          context: context.executionContextId,
+          id: result.endpoint.id,
+        });
+        onState({ connected: true });
+        return result.endpoint.id;
+      })();
+      endpointFlights.set(sessionId, pending);
+    }
+    try {
+      return await pending;
+    } finally {
+      if (endpointFlights.get(sessionId) === pending)
+        endpointFlights.delete(sessionId);
+    }
+  }
   /** @param {string} method @param {any} body @param {AbortSignal} [signal] */
   async function privateCall(method, body, signal) {
     active();
-    const token = await getAccess();
-    active();
-    const result = await transport('/ai/team/node/' + method, {
-      method: 'POST',
-      body,
-      token,
-      signal,
-    });
-    active();
-    return result;
-  }
-  /** @param {string} method @param {any} params @param {AbortSignal} [signal] @param {Record<string,string>} [references] */
-  async function rpc(method, params, signal, references = {}) {
-    active();
-    const token = await getAccess();
-    active();
-    const id = ++nextId;
-    const result = await transport('/ai/mcp', {
-      method: 'POST',
-      token,
-      signal,
-      headers: {
-        'MCP-Protocol-Version': protocol,
-        accept: 'application/json, text/event-stream',
-        ...references,
-      },
-      body: { jsonrpc: '2.0', id, method, params },
-    });
-    active();
-    if (
-      result.jsonrpc !== '2.0' ||
-      result.id !== id ||
-      result.error ||
-      !result.result
-    )
-      throw new Error('remote MCP operation failed');
-    return result.result;
-  }
-  async function endpoint() {
-    const current = vault.snapshot().endpoint;
-    if (current) return current;
-    if (endpointPending) return endpointPending;
-    endpointPending = (async () => {
-      const result = await privateCall('register', {
-        label,
-        receiveEnabled: true,
-      });
-      if (!UUID.test(result.endpoint?.id) || result.endpoint.revoked)
-        throw new Error('invalid Team endpoint');
-      await vault.update((state) => {
-        state.endpoint = result.endpoint.id;
-      });
-      active();
-      return result.endpoint.id;
-    })();
-    try {
-      return await endpointPending;
-    } finally {
-      endpointPending = undefined;
+    signal?.throwIfAborted();
+    const sid = body.hostSessionId ?? primarySession;
+    await endpoint(sid);
+    const executionContextId = (await getSessionContext(sid))
+      .executionContextId;
+    const input = { executionContextId, arguments: body };
+    let output;
+    switch (method) {
+      case 'bind':
+        output = await broker.call('team_node_bind', input);
+        break;
+      case 'pull':
+        output = await broker.call('team_node_pull', input);
+        break;
+      case 'ack':
+        output = await broker.call('team_node_ack', input);
+        break;
+      case 'revoke':
+        output = await broker.call('team_node_revoke', input);
+        break;
+      default:
+        throw new Error('unknown fixed Team node operation');
     }
+    signal?.throwIfAborted();
+    return decode(output);
+  }
+  /** @param {string} method @param {any} params @param {AbortSignal} [signal] @param {Record<string,string>} [_references] @param {any} [execution] */
+  async function rpc(method, params, signal, _references = {}, execution) {
+    active();
+    signal?.throwIfAborted();
+    let output;
+    if (method === 'initialize') {
+      output = await broker.call('team_initialize', {
+        protocolVersion: '2025-06-18',
+      });
+      controlStream = output.body.streamId;
+    } else if (method === 'tools/list')
+      output = await broker.call('team_list_tools', {
+        streamId: controlStream,
+      });
+    else if (method === 'ping')
+      output = await broker.call('team_ping', { streamId: controlStream });
+    else if (method === 'tools/call') {
+      const context = execution;
+      const input = {
+        executionContextId: context.executionContextId,
+        arguments: params.arguments,
+      };
+      switch (params.name) {
+        case 'auriga_list_endpoints':
+          output = await broker.call('team_list_endpoints', input);
+          break;
+        case 'auriga_open_thread':
+          output = await broker.call('team_open_thread', input);
+          break;
+        case 'auriga_reply_thread':
+          output = await broker.call('team_reply_thread', input);
+          break;
+        case 'auriga_read_thread':
+          output = await broker.call('team_read_thread', input);
+          break;
+        default:
+          throw new Error('unknown fixed Team tool');
+      }
+      const result = await decode(output);
+      if (result.jsonrpc !== '2.0' || result.error || !result.result)
+        throw new Error('remote MCP operation failed');
+      return result.result;
+    } else throw new Error('unknown fixed Team operation');
+    const value = await decode(output);
+    signal?.throwIfAborted();
+    onState({ connected: endpointContexts.size > 0 });
+    return output.body?.streamId ? value.result : value;
   }
   /** @param {string} sessionId @param {string} [threadId] @param {AbortSignal} [signal] */
   async function binding(sessionId, threadId, signal) {
     if (!opaque(sessionId)) throw new Error('real DSH session required');
-    const endpointId = await endpoint();
+    const endpointId = await endpoint(sessionId);
+    primarySession = sessionId;
     const result = await privateCall(
       'bind',
       {
@@ -267,97 +310,104 @@ export function createTeam({
       )
     )
       throw new Error('untrusted Team arguments');
-    const row = await binding(sessionId, undefined, exec.signal);
-    // Persist bounded recovery evidence before sending. Independent first
-    // messages remain admissible; subsequent messages require a source mapping.
-    // Never automatically replay a model write or renew a retry's deadline.
-    let intentKey = '';
-    if (name === 'auriga_open_thread') {
-      if (!opaque(args.idempotencyKey))
-        throw new Error('Team open idempotency key required');
-      intentKey = createHash('sha256')
-        .update(JSON.stringify([row.endpointId, row.id, args.idempotencyKey]))
-        .digest('hex');
-      const intent = {
-        endpointId: row.endpointId,
-        sessionId,
-        bindingId: row.id,
-        targetEndpointId: args.targetEndpointId,
-        fingerprint: createHash('sha256')
-          .update(JSON.stringify([args.targetEndpointId, args.text]))
-          .digest('hex'),
-        expiresAt: Date.now() + OPEN_INTENT_TTL_MS,
-      };
-      await vault.update((state) => {
+    const context = await getToolContext(exec);
+    try {
+      const row = await binding(sessionId, undefined, exec.signal);
+      // Persist bounded recovery evidence before sending. Independent first
+      // messages remain admissible; subsequent messages require a source mapping.
+      // Never automatically replay a model write or renew a retry's deadline.
+      let intentKey = '';
+      if (name === 'auriga_open_thread') {
+        if (!opaque(args.idempotencyKey))
+          throw new Error('Team open idempotency key required');
+        intentKey = createHash('sha256')
+          .update(JSON.stringify([row.endpointId, row.id, args.idempotencyKey]))
+          .digest('hex');
+        const intent = {
+          endpointId: row.endpointId,
+          sessionId,
+          bindingId: row.id,
+          targetEndpointId: args.targetEndpointId,
+          fingerprint: createHash('sha256')
+            .update(JSON.stringify([args.targetEndpointId, args.text]))
+            .digest('hex'),
+          expiresAt: Date.now() + OPEN_INTENT_TTL_MS,
+        };
+        await vault.update((state) => {
+          active();
+          if (state.endpoint !== row.endpointId)
+            throw new Error('Team endpoint changed');
+          state.pendingOpens ??= {};
+          expireOpenIntents(state);
+          const previous = state.pendingOpens[intentKey];
+          if (
+            previous &&
+            (previous.endpointId !== intent.endpointId ||
+              previous.sessionId !== intent.sessionId ||
+              previous.bindingId !== intent.bindingId ||
+              previous.fingerprint !== intent.fingerprint)
+          )
+            throw new Error('Team open intent conflict');
+          if (
+            !previous &&
+            Object.keys(state.pendingOpens).length >= OPEN_INTENT_LIMIT
+          )
+            throw new Error('too many unresolved Team opens');
+          state.pendingOpens[intentKey] = previous ?? intent;
+        });
         active();
-        if (state.endpoint !== row.endpointId)
-          throw new Error('Team endpoint changed');
-        state.pendingOpens ??= {};
-        expireOpenIntents(state);
-        const previous = state.pendingOpens[intentKey];
-        if (
-          previous &&
-          (previous.endpointId !== intent.endpointId ||
-            previous.sessionId !== intent.sessionId ||
-            previous.bindingId !== intent.bindingId ||
-            previous.fingerprint !== intent.fingerprint)
-        )
-          throw new Error('Team open intent conflict');
-        if (
-          !previous &&
-          Object.keys(state.pendingOpens).length >= OPEN_INTENT_LIMIT
-        )
-          throw new Error('too many unresolved Team opens');
-        state.pendingOpens[intentKey] = previous ?? intent;
-      });
-      active();
-    }
-    const result = await rpc(
-      'tools/call',
-      {
-        name,
-        arguments: args,
-        _meta: {
-          'auriga/sessionId': sessionId,
-          'auriga/toolCallId': exec.callId,
-          'auriga/rootCallId': exec.rootCallId,
+      }
+      const result = await rpc(
+        'tools/call',
+        {
+          name,
+          arguments: args,
+          _meta: {
+            'auriga/sessionId': sessionId,
+            'auriga/toolCallId': exec.callId,
+            'auriga/rootCallId': exec.rootCallId,
+          },
         },
-      },
-      exec.signal,
-      { 'Auriga-Endpoint-Id': row.endpointId, 'Auriga-Binding-Id': row.id },
-    );
-    // A rejection on a retry cannot prove an earlier request did not commit.
-    // Keep its fixed deadline instead of reopening the random-mapping window.
-    if (result.isError) throw new Error('remote Team tool rejected');
-    if (name === 'auriga_open_thread') {
-      const message = result.structuredContent?.message;
-      if (
-        !UUID.test(message?.id) ||
-        !UUID.test(message?.threadId) ||
-        message.authorEndpointId !== row.endpointId ||
-        !UUID.test(row.id) ||
-        row.hostSessionId !== sessionId
-      )
-        throw new Error('invalid Team source thread response');
-      await vault.update((state) => {
-        active();
-        if (state.endpoint !== row.endpointId)
-          throw new Error('Team endpoint changed');
-        const existing = state.threads[message.threadId];
+        exec.signal,
+        { 'Auriga-Endpoint-Id': row.endpointId, 'Auriga-Binding-Id': row.id },
+        context,
+      );
+      // A rejection on a retry cannot prove an earlier request did not commit.
+      // Keep its fixed deadline instead of reopening the random-mapping window.
+      if (result.isError) throw new Error('remote Team tool rejected');
+      if (name === 'auriga_open_thread') {
+        const message = result.structuredContent?.message;
         if (
-          existing &&
-          (existing.sessionId !== sessionId ||
-            (existing.bindingId !== null && existing.bindingId !== row.id))
+          !UUID.test(message?.id) ||
+          !UUID.test(message?.threadId) ||
+          message.authorEndpointId !== row.endpointId ||
+          !UUID.test(row.id) ||
+          row.hostSessionId !== sessionId
         )
-          throw new Error('Team source thread binding conflict');
-        state.threads[message.threadId] = { sessionId, bindingId: row.id };
-        delete state.pendingOpens[intentKey];
-        if (state.openOutcomes) delete state.openOutcomes[intentKey];
-      });
-      active();
+          throw new Error('invalid Team source thread response');
+        await vault.update((state) => {
+          active();
+          if (state.endpoint !== row.endpointId)
+            throw new Error('Team endpoint changed');
+          const existing = state.threads[message.threadId];
+          if (
+            existing &&
+            (existing.sessionId !== sessionId ||
+              (existing.bindingId !== null && existing.bindingId !== row.id))
+          )
+            throw new Error('Team source thread binding conflict');
+          state.threads[message.threadId] = { sessionId, bindingId: row.id };
+          delete state.pendingOpens[intentKey];
+          if (state.openOutcomes) delete state.openOutcomes[intentKey];
+        });
+        active();
+      }
+      return result;
+    } finally {
+      await finishToolContext(context.executionContextId).catch(() => {});
     }
-    return result;
   }
+
   async function receive(/** @type {any} */ delivery) {
     active();
     const endpointId = await endpoint(),
@@ -527,7 +577,7 @@ export function createTeam({
       throw new Error('Team ACK not confirmed');
   }
   async function poll() {
-    if (closed || polling) return;
+    if (closed || polling || !primarySession) return;
     polling = true;
     try {
       await expireSourceIntents();
@@ -557,6 +607,13 @@ export function createTeam({
     }
   }
   return {
+    get connected() {
+      return !closed && endpointContexts.size > 0;
+    },
+    async activateSession(/** @type {string} */ sessionId) {
+      await endpoint(sessionId);
+      primarySession = sessionId;
+    },
     toolCall,
     receive,
     poll,
@@ -570,16 +627,6 @@ export function createTeam({
       });
       if (initialized.protocolVersion !== '2025-06-18')
         throw new Error('unsupported remote MCP version');
-      protocol = initialized.protocolVersion;
-      await transport('/ai/mcp', {
-        method: 'POST',
-        token: await getAccess(),
-        headers: {
-          'MCP-Protocol-Version': protocol,
-          accept: 'application/json, text/event-stream',
-        },
-        body: { jsonrpc: '2.0', method: 'notifications/initialized' },
-      });
       const list = await rpc('tools/list', {});
       if (
         !Array.isArray(list.tools) ||
@@ -590,7 +637,6 @@ export function createTeam({
         )
       )
         throw new Error('Team tool manifest incomplete');
-      await endpoint();
       disposers.push(
         registerTeamTools(ctx.tools, list.tools, toolCall, ctx.logger),
       );

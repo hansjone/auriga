@@ -1,3 +1,5 @@
+import { createHostContexts } from './host-contexts.js';
+import { createTeam } from './team.js';
 import { createModelLifecycle } from '../ai/installation.js';
 import { randomBytes, createHash } from 'node:crypto';
 import { readFileSync, lstatSync } from 'node:fs';
@@ -38,9 +40,14 @@ export async function createConnectRuntime({
   const csrf = randomBytes(32).toString('base64url');
   /** @type {Set<()=>Promise<void>>} */ const listeners = new Set();
   /** @type {Set<(identity:any)=>Promise<void>>} */ const gates = new Set();
-  /** @type {Map<string,any>} */ const sessions = new Map();
-  /** @type {Map<string,string>} */ const owners = new Map();
+
   /** @type {any} */ let principal;
+  /** @type {ReturnType<typeof createHostContexts>|undefined} */ let contexts;
+  /** @type {ReturnType<typeof createTeam>|undefined} */ let team;
+  /** @type {Awaited<ReturnType<typeof createVault>>|undefined} */ let teamVault;
+  let teamGeneration = 0,
+    communication = 'idle';
+  /** @type {Promise<void>|undefined} */ let teamStarting;
   let publishing = Promise.resolve();
   let isolationPending = false;
   let key = '',
@@ -49,7 +56,10 @@ export async function createConnectRuntime({
   /** @type {ReturnType<typeof createEnterpriseEnvironment>|undefined} */ let environment;
   /** @type {ReturnType<typeof createModelLifecycle>|undefined} */ let models;
   const installed =
-    connection ?? (await connectPackagedBroker().catch(() => undefined));
+    connection ??
+    (await connectPackagedBroker({ config, dataHome: directory }).catch(
+      () => undefined,
+    ));
   const broker = await createBroker({
     ipc: installed?.ipc,
     validate: installed?.validate ?? (() => refuse()),
@@ -57,7 +67,13 @@ export async function createConnectRuntime({
       principal = undefined;
       models?.logout();
       key = '';
-      sessions.clear();
+      contexts?.invalidate();
+      teamGeneration++;
+      team?.close();
+      team = undefined;
+      teamVault?.close();
+      teamVault = undefined;
+      communication = 'idle';
       enterprise?.revokeAll();
       for (const listener of listeners)
         void Promise.resolve()
@@ -96,8 +112,10 @@ export async function createConnectRuntime({
               })
             : undefined;
           isolationPending = false;
-          if (principal) models?.login();
-          else models?.logout();
+          if (principal) {
+            models?.login();
+            void beginTeam();
+          } else models?.logout();
           for (const listener of listeners)
             void Promise.resolve()
               .then(listener)
@@ -121,27 +139,81 @@ export async function createConnectRuntime({
     : undefined;
   const identity = () =>
     broker.state.current()?.state === 'authenticated' ? principal : undefined;
-  async function session(/** @type {string} */ id) {
-    const who = identity();
-    if (!who || closed || !ctx.sessions?.get(id))
-      return refuse('common.unauthenticated');
-    const owner = owners.get(id);
-    if (owner && owner !== who.ownerId) return refuse('common.forbidden');
-    owners.set(id, who.ownerId);
-    let handle = sessions.get(id);
-    if (!handle || Date.parse(handle.expiresAt) <= Date.now()) {
-      handle = await broker.register({
-        kind: 'session',
-        hostSessionId: id,
-        expiresAt: new Date(Date.now() + 600000).toISOString(),
-      });
-      sessions.set(id, handle);
+  contexts = createHostContexts({ broker, identity, ctx });
+  const sessionContexts = contexts;
+  async function beginTeam() {
+    if (
+      !contexts ||
+      closed ||
+      !identity() ||
+      team ||
+      teamStarting ||
+      typeof ctx.tools?.register !== 'function'
+    )
+      return;
+    const expected = teamGeneration,
+      who = identity();
+    communication = 'connecting';
+    const work = (async () => {
+      const partition = createHash('sha256')
+        .update(
+          JSON.stringify([
+            who.tenantId,
+            who.ownerId,
+            who.clientId,
+            who.providerId,
+          ]),
+        )
+        .digest('hex');
+      const saved = await createVault(join(directory, 'team', partition));
+      let candidate;
+      try {
+        if (closed || expected !== teamGeneration || !identity()) {
+          saved.close();
+          return;
+        }
+        const check = broker.state.fence();
+        candidate = createTeam({
+          broker,
+          vault: saved,
+          ctx,
+          getSessionContext: sessionContexts.session,
+          getToolContext: sessionContexts.tool,
+          finishToolContext: sessionContexts.finish,
+          readStream: (id) => runtime.readStream(id),
+          assertActive: check,
+          label: config.deviceName ?? 'Auriga DSH',
+          onState(value) {
+            if (expected === teamGeneration)
+              communication = value.connected ? 'ready' : 'unavailable';
+          },
+        });
+        await candidate.start();
+        check();
+        if (closed || expected !== teamGeneration) {
+          candidate.close();
+          saved.close();
+          return;
+        }
+        team = candidate;
+        teamVault = saved;
+        communication = candidate.connected ? 'ready' : 'idle';
+      } catch {
+        candidate?.close();
+        saved.close();
+        if (expected === teamGeneration) communication = 'unavailable';
+      }
+    })();
+    teamStarting = work;
+    try {
+      await work;
+    } finally {
+      if (teamStarting === work) teamStarting = undefined;
     }
-    return handle;
   }
   enterprise = createEnterpriseAuth({
     snapshot: broker.state.current,
-    getOwner: (id) => owners.get(id) ?? null,
+    getOwner: (id) => contexts?.owner(id) ?? null,
     config:
       enterpriseConfig ??
       (() => {
@@ -181,35 +253,30 @@ export async function createConnectRuntime({
       return result;
     },
     onRevoke(id) {
-      void broker.revoke(id).catch(() => {});
+      if (contexts) void contexts.finish(id);
+      else void broker.revoke(id).catch(() => {});
     },
   });
   if (typeof ctx.inject === 'function')
     ctx.inject(['shellEnv', 'webServer'], (/** @type {any} */ child) => {
+      if (
+        typeof child.shellEnv?.register !== 'function' ||
+        typeof child.on !== 'function' ||
+        typeof child.effect !== 'function'
+      )
+        return;
       environment = createEnterpriseEnvironment({
         auth: enterprise,
         getServer: () => child.webServer,
+        retain: (id) => contexts.retain(id),
         async prepare(execution) {
-          const id =
-            execution?.agent?.session?.header?.id ??
-            execution?.agent?.session?.id;
-          if (
-            typeof id !== 'string' ||
-            !execution?.callId ||
-            !execution?.rootCallId ||
-            execution.signal?.aborted
-          )
+          try {
+            const tool = await contexts.tool(execution);
+            await team?.activateSession(tool.hostSessionId).catch(() => {});
+            return tool.executionContextId;
+          } catch {
             return undefined;
-          const parent = await session(id);
-          const handle = await broker.register({
-            kind: 'tool',
-            hostSessionId: id,
-            toolCallId: execution.callId,
-            rootCallId: execution.rootCallId,
-            parentExecutionContextId: parent.executionContextId,
-            expiresAt: new Date(Date.now() + 600000).toISOString(),
-          });
-          return handle.executionContextId;
+          }
         },
       });
       child.shellEnv.register(environment.contributor);
@@ -293,8 +360,8 @@ export async function createConnectRuntime({
         available: true,
         configured: !!config.platformOrigin,
         loggedIn: !!who,
-        connected: false,
-        communication: 'idle',
+        connected: !!who && communication === 'ready',
+        communication,
         platform: s?.state ?? 'unreachable',
         reason: s?.reason,
         brokerAvailable: !!s,
@@ -318,7 +385,7 @@ export async function createConnectRuntime({
     async resetAuthentication() {
       broker.state.disconnect();
     },
-    attachNetwork() {
+    attachNetwork(/** @type {any} */ _provider) {
       return () => {};
     },
     attachModels: models.attach,
@@ -331,14 +398,14 @@ export async function createConnectRuntime({
     get consentAvailable() {
       return false;
     },
-    consentUI() {
+    consentUI(/** @type {any} */ _context) {
       return refuse();
     },
-    messagingUI() {
+    messagingUI(/** @type {any} */ _context) {
       return refuse();
     },
     isReady() {
-      return !!identity();
+      return !!identity() && communication === 'ready';
     },
     async upload(/** @type {Buffer} */ bytes, /** @type {string} */ mediaType) {
       const opened = (
@@ -459,7 +526,13 @@ export async function createConnectRuntime({
       });
     },
     close() {
+      if (closed) return;
       closed = true;
+      clearInterval(teamRetry);
+      contexts?.close();
+      teamGeneration++;
+      team?.close();
+      teamVault?.close();
       environment?.dispose();
       enterprise?.close();
       models?.close();
@@ -468,5 +541,24 @@ export async function createConnectRuntime({
       vault.close();
     },
   };
+  if (typeof ctx.inject === 'function')
+    ctx.inject(
+      ['agents', 'sessionPersistence', 'workspaceRegistry'],
+      (/** @type {any} */ native) => {
+        if (typeof native.effect !== 'function') return;
+        contexts.setHost(native);
+        native.effect(
+          () => () => {
+            contexts?.setHost(undefined);
+          },
+          'auriga: native execution source',
+        );
+      },
+    );
+  const teamRetry = setInterval(() => {
+    void beginTeam();
+  }, 5000);
+  teamRetry.unref();
+  void beginTeam();
   return runtime;
 }

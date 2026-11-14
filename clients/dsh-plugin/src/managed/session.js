@@ -35,7 +35,7 @@ export function installManagedSessionGuard(
         (['GET', 'HEAD'].includes(req.method) && path === '/_auriga/health') ||
         (req.method === 'GET' &&
           [
-            '/auriga/local-login/status',
+            '/auriga/shell/status',
             '/auriga/settings/state',
             '/auriga/settings/view.js',
           ].includes(path));

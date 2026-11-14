@@ -1,5 +1,16 @@
 import { createHash } from 'node:crypto';
-import { readFile, lstat, readdir, realpath } from 'node:fs/promises';
+import {
+  readFile,
+  lstat,
+  readdir,
+  realpath,
+  mkdir,
+  writeFile,
+  rename,
+  rm,
+} from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { fstatSync, readSync } from 'node:fs';
 import { resolve, relative, isAbsolute, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -91,46 +102,143 @@ function inheritedDescriptor() {
   }
 }
 
-/** @param {{directory?:string}} [options] */
+/** @param {{directory?:string,config?:any,dataHome?:string}} [options] */
 export async function connectPackagedBroker(options = {}) {
-  const descriptor = inheritedDescriptor();
-  if (!descriptor) return undefined;
-  const directory =
-    options.directory ??
-    fileURLToPath(new URL('../../shell-auth/', import.meta.url));
-  const artifact = await verifyBrokerPackage(directory);
-  const helper = artifact.manifest.files.find(
-    (/** @type {any} */ e) => e.path === 'windows/shell-helper.exe',
-  );
-  if (
-    descriptor.protocolVersion !== 1 ||
-    typeof descriptor.pipe !== 'string' ||
-    !/^auriga-shell-[a-f0-9]{32}$/.test(descriptor.pipe) ||
-    !/^[A-Za-z0-9_-]{43}$/.test(descriptor.capability) ||
-    typeof descriptor.helperPath !== 'string'
-  )
-    throw new Error('broker descriptor invalid');
-  const actual = await realpath(descriptor.helperPath);
-  if (
-    createHash('sha256')
-      .update(await readFile(actual))
-      .digest('hex') !== helper.sha256
-  )
-    throw new Error('broker helper version mismatch');
-  const { connectIpc } = await import(
-    pathToFileURL(resolve(artifact.base, 'ipc.mjs')).href
-  );
-  const { requireValid } = await import(
-    pathToFileURL(resolve(artifact.base, 'schema.mjs')).href
-  );
-  return {
-    ipc: connectIpc(descriptor),
-    validate: requireValid,
-    operations: JSON.parse(
-      await readFile(
-        join(artifact.base, 'schemas/plugin/shell-business-operations.json'),
-        'utf8',
-      ),
-    ).operations,
+  let descriptor = inheritedDescriptor();
+  /** @type {import('node:child_process').ChildProcess|undefined} */ let child;
+  const stop = () => {
+    if (!child || child.exitCode !== null) return;
+    const owned = child;
+    if (owned.connected) owned.send({ action: 'close' }, () => {});
+    const timer = setTimeout(() => {
+      owned.kill();
+    }, 5000);
+    timer.unref();
+    owned.once('exit', () => clearTimeout(timer));
   };
+  try {
+    if (
+      !descriptor &&
+      process.platform === 'win32' &&
+      options.config?.platformOrigin &&
+      options.dataHome
+    ) {
+      await verifyBrokerPackage(
+        options.directory ??
+          fileURLToPath(new URL('../../shell-auth/', import.meta.url)),
+      );
+      const root = join(options.dataHome, 'broker-installation');
+      await mkdir(root, { recursive: true, mode: 0o700 });
+      if ((await lstat(root)).isSymbolicLink())
+        throw new Error('broker linked installation rejected');
+      const file = join(root, 'desktop-origin.json'),
+        temp = join(root, randomUUID() + '.tmp');
+      try {
+        await writeFile(
+          temp,
+          JSON.stringify({
+            origin: options.config.platformOrigin,
+            issuer: options.config.issuer ?? options.config.platformOrigin,
+            clientId: options.config.clientId ?? 'auriga-dsh',
+            ...(options.config.network
+              ? { network: options.config.network }
+              : {}),
+          }),
+          { flag: 'wx', mode: 0o600 },
+        );
+        await rename(temp, file);
+      } finally {
+        await rm(temp, { force: true });
+      }
+      // Spawn only our packaged entry, with public storage paths on argv. The
+      // descriptor arrives exclusively on the inherited Node IPC pipe.
+      child = spawn(
+        process.execPath,
+        [
+          fileURLToPath(new URL('./broker-launcher.js', import.meta.url)),
+          root,
+          options.dataHome,
+        ],
+        {
+          windowsHide: true,
+          stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+        },
+      );
+      descriptor = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error('broker startup timeout'));
+        }, 15000);
+        const failed = () => {
+          cleanup();
+          reject(new Error('broker startup unavailable'));
+        };
+        const received = (/** @type {any} */ message) => {
+          cleanup();
+          if (!message?.descriptor)
+            reject(new Error('broker startup unavailable'));
+          else resolve(message.descriptor);
+        };
+        const cleanup = () => {
+          clearTimeout(timer);
+          child?.off('error', failed);
+          child?.off('exit', failed);
+          child?.off('message', received);
+        };
+        child?.once('error', failed);
+        child?.once('exit', failed);
+        child?.once('message', received);
+      });
+    }
+    if (!descriptor) return undefined;
+    const directory =
+      options.directory ??
+      fileURLToPath(new URL('../../shell-auth/', import.meta.url));
+    const artifact = await verifyBrokerPackage(directory);
+    const helper = artifact.manifest.files.find(
+      (/** @type {any} */ e) => e.path === 'windows/shell-helper.exe',
+    );
+    if (
+      descriptor.protocolVersion !== 1 ||
+      typeof descriptor.pipe !== 'string' ||
+      !/^auriga-shell-[a-f0-9]{32}$/.test(descriptor.pipe) ||
+      !/^[A-Za-z0-9_-]{43}$/.test(descriptor.capability) ||
+      typeof descriptor.helperPath !== 'string'
+    )
+      throw new Error('broker descriptor invalid');
+    const actual = await realpath(descriptor.helperPath);
+    if (
+      createHash('sha256')
+        .update(await readFile(actual))
+        .digest('hex') !== helper.sha256
+    )
+      throw new Error('broker helper version mismatch');
+    const { connectIpc } = await import(
+      pathToFileURL(resolve(artifact.base, 'ipc.mjs')).href
+    );
+    const { requireValid } = await import(
+      pathToFileURL(resolve(artifact.base, 'schema.mjs')).href
+    );
+    const ipc = connectIpc(descriptor),
+      close = ipc.close.bind(ipc);
+    ipc.close = () => {
+      close();
+      stop();
+    };
+    child?.once('exit', () => close());
+    child?.on('error', () => close());
+    return {
+      ipc,
+      validate: requireValid,
+      operations: JSON.parse(
+        await readFile(
+          join(artifact.base, 'schemas/plugin/shell-business-operations.json'),
+          'utf8',
+        ),
+      ).operations,
+    };
+  } catch (error) {
+    stop();
+    throw error;
+  }
 }

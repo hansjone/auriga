@@ -1025,7 +1025,7 @@ export function createSettingsView(
               (loggedIn || recovering) &&
                 (account.deviceName ?? state?.deviceName) &&
                 row(t.device, account.deviceName ?? state?.deviceName),
-              account.uacLoginInfo?.status === 'available' &&
+              account?.uacLoginInfo?.status === 'available' &&
                 row(t.department, account.uacLoginInfo.department),
               (loggedIn || recovering) &&
                 account.loginTime &&

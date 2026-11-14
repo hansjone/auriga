@@ -59,7 +59,10 @@ export async function peer() {
         if (
           state.phase !== 'new' ||
           body.params?.protocolVersion !== protocol ||
-          !Number.isInteger(body.id)
+          !(
+            Number.isInteger(body.id) ||
+            /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(body.id)
+          )
         )
           return reject(400);
         state.phase = 'initialized';
@@ -87,7 +90,13 @@ export async function peer() {
         return res.end();
       }
       if (body.method === 'tools/list') {
-        if (state.phase !== 'notified' || !Number.isInteger(body.id))
+        if (
+          state.phase !== 'notified' ||
+          !(
+            Number.isInteger(body.id) ||
+            /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(body.id)
+          )
+        )
           return reject(400);
         state.phase = 'listed';
         state.requests.push(body.method);

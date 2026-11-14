@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createTeam } from '../src/local/team.js';
+import { createTeam } from './team-broker-peer.js';
 import { createVault } from '../src/local/vault.js';
 
 import { peer, protocol, accept, names } from './team-http-peer.js';
@@ -92,12 +92,15 @@ async function clientHandshake(dropNotificationSse) {
     } else {
       await team.start();
       assert.deepEqual([...registered].sort(), [...names].sort());
-      assert.equal(vault.snapshot().endpoint, remote.state.endpointId);
+      assert.equal(
+        vault.snapshot().endpoint,
+        null,
+        'no endpoint before a real native session exists',
+      );
       assert.deepEqual(remote.state.requests, [
         'initialize',
         'notifications/initialized',
         'tools/list',
-        'register',
       ]);
       assert.deepEqual(remote.state.rejected, []);
     }

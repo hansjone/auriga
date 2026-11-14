@@ -290,3 +290,83 @@ test('shellEnv lifecycle and packaged unchanged Python request()/resolve() compa
     401,
   );
 });
+test('only a verified running native job retains enterprise context until its terminal event', async (t) => {
+  const f = await fixture(t),
+    controller = new AbortController();
+  let retained = 0,
+    event;
+  const env = createEnterpriseEnvironment({
+    auth: f.auth,
+    getServer: () => ({ port: f.port }),
+    prepare: async () => 'registered-tool-context',
+    retain(id) {
+      assert.equal(id, 'registered-tool-context');
+      retained++;
+      return true;
+    },
+  });
+  t.after(() => env.dispose());
+  const execution = {
+    token: {},
+    agent: { session: { header: { id: 'session' } } },
+    signal: controller.signal,
+  };
+  const values = await env.contributor.resolve(execution);
+  env.finish(
+    execution,
+    { value: { kind: 'background', jobId: 'job' } },
+    {
+      list: () => [{ id: 'job', status: 'running' }],
+      events: {
+        subscribe(_owner, callback) {
+          event = callback;
+          return () => {};
+        },
+      },
+    },
+  );
+  assert.equal(retained, 1);
+  controller.abort();
+  const headers = {
+    'X-Dsh-Team-Task-Capability': values.DSH_TEAM_TASK_CAPABILITY,
+  };
+  assert.equal((await f.raw(headers)).status, 200);
+  event({ job: { id: 'job' }, type: 'settled' });
+  assert.equal((await f.raw(headers)).status, 401);
+});
+test('failed native context retention revokes a promoted job capability immediately', async (t) => {
+  const f = await fixture(t);
+  const env = createEnterpriseEnvironment({
+    auth: f.auth,
+    getServer: () => ({ port: f.port }),
+    prepare: async () => 'registered-tool-context',
+    retain: () => false,
+  });
+  t.after(() => env.dispose());
+  const execution = {
+    token: {},
+    agent: { session: { header: { id: 'session' } } },
+    signal: new AbortController().signal,
+  };
+  const values = await env.contributor.resolve(execution);
+  env.finish(
+    execution,
+    { value: { kind: 'promoted', jobId: 'job' } },
+    {
+      list: () => [{ id: 'job', status: 'running' }],
+      events: {
+        subscribe() {
+          assert.fail('must not retain failed source');
+        },
+      },
+    },
+  );
+  assert.equal(
+    (
+      await f.raw({
+        'X-Dsh-Team-Task-Capability': values.DSH_TEAM_TASK_CAPABILITY,
+      })
+    ).status,
+    401,
+  );
+});
