@@ -26,7 +26,14 @@ test('package contains standalone runtime, version and matching digest; rebuild 
   const root = await mkdtemp(join(tmpdir(), 'auriga-dist-'));
   try {
     const plugin = join(root, 'clients/dsh-plugin');
-    for (const dir of ['src', 'ui', 'test', 'scripts'])
+    for (const dir of [
+      'src',
+      'ui',
+      'skills/example',
+      'shell-auth/windows',
+      'test',
+      'scripts',
+    ])
       await mkdir(join(plugin, dir), { recursive: true });
     const manifest = JSON.parse(
       await readFile(
@@ -44,8 +51,24 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       'ui/metadata.json',
       'test/private.js',
       'scripts/private.js',
+      'skills/example/SKILL.md',
     ])
       await writeFile(join(plugin, file), file);
+    const brokerFiles = ['ipc.mjs', 'schema.mjs', 'windows/shell-helper.exe'];
+    const brokerEntries = [];
+    for (const file of brokerFiles) {
+      const content = Buffer.from('non-executable packaging fixture: ' + file);
+      await writeFile(join(plugin, 'shell-auth', file), content);
+      brokerEntries.push({
+        path: file,
+        sha256: createHash('sha256').update(content).digest('hex'),
+      });
+    }
+    const brokerManifest = JSON.stringify({ version: 1, files: brokerEntries });
+    await writeFile(
+      join(plugin, 'shell-auth/broker-manifest.json'),
+      brokerManifest,
+    );
     const original = await readFile(join(plugin, 'package.json'), 'utf8');
     const first = await packagePlugin({
       root,
@@ -60,6 +83,10 @@ test('package contains standalone runtime, version and matching digest; rebuild 
     );
     const receipt = JSON.parse(await readFile(first.manifest));
     assert.equal(receipt.version, '1.2.3-rc.1');
+    assert.equal(
+      receipt.broker.manifestSha256,
+      createHash('sha256').update(brokerManifest).digest('hex'),
+    );
     assert.equal(
       receipt.sha256,
       createHash('sha256').update(bytes).digest('hex'),
@@ -85,6 +112,9 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       'cordis.patch.yml',
       'ui/auriga-team-panel.js',
       'ui/metadata.json',
+      'skills/example/SKILL.md',
+      'shell-auth/broker-manifest.json',
+      ...brokerFiles.map((file) => 'shell-auth/' + file),
     ])
       assert.ok(receipt.files.includes(file), file);
     assert.ok(
@@ -101,6 +131,18 @@ test('package contains standalone runtime, version and matching digest; rebuild 
     });
     assert.deepEqual(await readFile(second.tarball), bytes);
     assert.equal(
+      await readFile(
+        join(extraction, 'package/shell-auth/broker-manifest.json'),
+        'utf8',
+      ),
+      brokerManifest,
+    );
+    for (const file of brokerFiles)
+      assert.deepEqual(
+        await readFile(join(extraction, 'package/shell-auth', file)),
+        await readFile(join(plugin, 'shell-auth', file)),
+      );
+    assert.equal(
       await readFile(join(plugin, 'package.json'), 'utf8'),
       original,
     );
@@ -112,6 +154,23 @@ test('package contains standalone runtime, version and matching digest; rebuild 
         build: false,
       }),
       /already exists/,
+    );
+    await writeFile(
+      join(plugin, 'shell-auth/windows/shell-helper.exe'),
+      'tampered',
+    );
+    await assert.rejects(
+      packagePlugin({
+        root,
+        version: '1.2.3',
+        outDir: join(root, 'tampered'),
+        build: false,
+      }),
+      /digest mismatch/,
+    );
+    await assert.rejects(
+      readFile(join(root, 'tampered/auriga-dsh-1.2.3.tgz')),
+      /ENOENT/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });

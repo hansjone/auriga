@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { verifyBrokerPackage } from '../../clients/dsh-plugin/src/local/broker-package.js';
 
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 const semver =
@@ -99,6 +100,12 @@ export async function packagePlugin({
   // Never reuse or publish a tarball if required browser assets are absent.
   for (const file of ['ui/auriga-team-panel.js', 'ui/metadata.json'])
     await access(join(source, file));
+  // Consume C's already-built artifact. Recompiling a second helper here would
+  // break the Desktop/plugin manifest identity even at the same source HEAD.
+  await verifyBrokerPackage(join(source, 'shell-auth'));
+  const brokerManifestSha256 = createHash('sha256')
+    .update(await readFile(join(source, 'shell-auth/broker-manifest.json')))
+    .digest('hex');
   await mkdir(outDir, { recursive: true });
   const temporary = await mkdtemp(join(outDir, '.package-'));
   try {
@@ -106,9 +113,15 @@ export async function packagePlugin({
     await mkdir(stage);
     for (const entry of pkg.files) {
       if (
-        !['src', 'ui', 'LICENSE', 'README.md', 'cordis.patch.yml'].includes(
-          entry,
-        )
+        ![
+          'src',
+          'ui',
+          'skills',
+          'shell-auth',
+          'LICENSE',
+          'README.md',
+          'cordis.patch.yml',
+        ].includes(entry)
       )
         throw new Error(
           `Review new package file entry before releasing: ${entry}`,
@@ -118,6 +131,13 @@ export async function packagePlugin({
         dereference: false,
       });
     }
+    await verifyBrokerPackage(join(stage, 'shell-auth'));
+    if (
+      createHash('sha256')
+        .update(await readFile(join(stage, 'shell-auth/broker-manifest.json')))
+        .digest('hex') !== brokerManifestSha256
+    )
+      throw new Error('Broker artifact changed during packaging');
     // Distributable installation has no lifecycle scripts or build dependencies.
     const runtime = { ...pkg };
     delete runtime.scripts;
@@ -153,6 +173,7 @@ export async function packagePlugin({
       sha256,
       bytes: bytes.length,
       engines: runtime.engines,
+      broker: { manifestSha256: brokerManifestSha256 },
       files: packed.files.map((file) => file.path).sort(),
     };
     await writeFile(paths.tarball, bytes, { flag: 'wx' });

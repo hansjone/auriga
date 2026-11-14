@@ -1,5 +1,7 @@
 # N1 插件装配边界
 
+> AUTH-D 迁移现状：下文保留既有协议模块的安全与恢复约束，不代表本分支正式插件已挂接完整网络。平台凭据、换票和 NATS 已归 C broker；D 的 `broker-port.js` 仅有固定打开/发送/提交及背压、会话围栏。`network_open` 缺少可验证的注册身份与 `created` 首安证据投影，因此 runtime 仍不开启 READY/ledger/source/consent/durable。不能用猜测、空账本或减弱验签来补齐。
+
 ## 官方设备基础连接
 
 connect 安装具备完整 `network` pin 且原生设备登录成功后，`plugin.js → createConnectRuntime → createDeviceProvider → lifecycle → openNetworkRuntime(kind: device-connection) → openConnectionRuntime` 自动装配官方 provider。根只取安装 realm/SPKI；固定平台源上的 register、tickets、完整 keys、announcement 均使用现 `getPlatformAccess` 与已验证当前设备身份闭包，拒绝 cookie、重定向、响应超预算及迟到的失效代际。不增加可见登录或审批。票据严格核完整设备身份与随机票派生的 ingress、含 shard 的 up、down/reply，兑换截止与最长连接截止分开处理；每次新连接均取新票。无安装 pin 且无完整注入 provider 的行为仍为 unconfigured。

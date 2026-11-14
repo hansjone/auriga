@@ -172,6 +172,7 @@ for (const credential of [
       assert.equal(modelCalls, 0);
       return;
     }
+    await runtime.ready;
     const request = (path, authenticated = true) =>
       new Promise((resolve, reject) => {
         const method = path === '/api/session/prompt' ? 'POST' : 'GET';

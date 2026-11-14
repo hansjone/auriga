@@ -280,6 +280,9 @@ export async function createManaged(options = {}) {
     keyCache,
     panelKeyCache,
     workspaceRoot,
+    get ready() {
+      return network?.ready ?? Promise.resolve();
+    },
     get networkStatus() {
       return (
         network?.status ?? {

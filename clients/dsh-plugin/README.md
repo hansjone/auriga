@@ -9,8 +9,26 @@ Set `AURIGA_MODE` when explicitly selecting a runtime:
 - `standalone` (default): local emergency account + pluggable JS identity connectors, single owner, no platform connection.
 - `managed`: platform-hosted instance — identity door, plugin/workspace guards, `/_auriga/health`, heartbeat, team panel shell, `ctx.get('auriga')`.
 - `connect`: local DSH connected to a team platform. A saved platform origin in
-  native Auriga settings activates the local team login flow without requiring
+  native Auriga settings selects the shell broker binding without requiring
   members to set this environment variable.
+
+## Shell authentication migration status
+
+The plugin inherits the authenticated shell snapshot through C's private broker.
+Its sidebar/settings actions open or cancel shell login and request logout; it
+ships no login HTML, password/TOTP form or plugin-owned browser session. Native
+DSH owner admission and local/personal-model use remain independent of the
+platform snapshot. Expired, revoked or mismatched shell identity fences platform
+operations immediately, including pending calls and buffered model output.
+
+This branch is an implementation candidate. The broker network stream port is
+present, but the full network READY/ledger/source/consent/durable runtime is not
+yet connected: `network_open` does not carry the trusted first-registration
+projection needed for safe bootstrap. The protocol implementation described below
+remains independently tested; it does not establish a working installed network
+path. Platform model generation also still requires trusted capacity/tokenizer
+ports (see [AI status](src/ai/README.md)). Real isolated DSH/Desktop acceptance
+has not been completed.
 
 ## Library
 
@@ -58,8 +76,8 @@ dsh plugin --profile web add /absolute/path/auriga-dsh-0.1.0-rc.1.tgz
 Use the Desktop-bundled CLI with `desktop` for the Desktop profile; npm-installed
 DSH cannot manage that reserved profile. HTTPS tarball URLs are accepted by the
 same pnpm-backed command. Reload DSH, open Settings → Auriga, enter your team's
-platform origin, test and save it, then sign in. Sign out under Account and
-security. [Release preparation](../../docs/dev/plugin-distribution.md) uses
+platform origin, test and save it, then use the sidebar login action to open the shell. Sign out
+under Account and security. [Release preparation](../../docs/dev/plugin-distribution.md) uses
 `node scripts/plugin/package.mjs --version <SemVer>` from the repository root
 and produces a versioned tgz, SHA256 and content manifest without install hooks.
 
@@ -71,9 +89,13 @@ For a development directory link, first install the repository's documented work
 node clients/dsh-plugin/scripts/package-ui.mjs
 ```
 
-Add **`clients/dsh-plugin`** in DSH. A fresh checkout does not contain the ignored `ui/` build output; adding an unprepared directory can install the bundle but cannot serve its UI. Rebuild after changing panel sources. To prepare the distributable tarball, run `npm pack` in this plugin directory; its existing `prepack` performs the UI build. A consumer of the resulting tarball needs neither the monorepo nor Vite.
+Add **`clients/dsh-plugin`** in DSH. First place the verified C artifact at `clients/dsh-plugin/shell-auth/`. Desktop
+and plugin must reuse the same artifact bytes and manifest; rebuilding the helper
+separately can change its hash. `prepack` and the release preparer both reject a
+missing or modified broker artifact. A fresh checkout does not contain the ignored
+`ui/` build output; adding an unprepared directory can install the bundle but cannot serve its UI. Rebuild after changing panel sources. To prepare the distributable tarball, run `npm pack` in this plugin directory; its existing `prepack` performs the UI build. A consumer of the resulting tarball needs neither the monorepo nor Vite.
 
-The default installed surface is unconfigured and protected by native DSH authentication. Bundle installation does not complete Auriga login. Save the team platform origin in native Auriga settings and use the ordinary login page.
+The default installed surface is unconfigured and protected by native DSH authentication. Bundle installation does not complete Auriga login. Save the team platform origin in native Auriga settings and open login in the shell.
 
 The release preparer runs `npm pack` from this monorepo. `prepack` builds the native `web/panel` module and includes `ui/auriga-team-panel.js` and its package-version/SRI metadata. Published installs have no install hook, Vue dependency, frontend build step or requirement to download a homepage from headquarters. Managed mode continues to use the verified platform manifest; it never falls back to packaged UI after verification or loading failure.
 
@@ -112,15 +134,11 @@ fragment and non-WSS URLs are rejected. Platform and issuer still require the
 same HTTPS origin; `allowLocalHttp` remains an isolated loopback test exception
 and never permits WS or disabling TLS.
 
-Only the installer supplies these values. They are copied, deeply frozen and
-passed to trusted provider prepare, never exposed through settings, login input,
-status, diagnostics or SDK. In connect mode, successful native device login starts
-the official connection-only provider when these pins are installed. It validates
-the fixed IAM registration/ticket and collab keyset/announcement endpoints with
-the existing device credential, without another login or approval. Without pins
-or a trusted injected provider, networking remains unconfigured. No test roots
-are supplied by default. A complete trusted `aurigaNetwork` provider temporarily
-replaces the default; detaching it restores the installed default.
+Only the installer supplies these values. C owns the fixed platform endpoints,
+platform credentials, network tickets and transport. The plugin does not expose
+these pins through settings, login input, status or SDK. No test roots are supplied
+by default. The following C1/C2 rules describe the existing protocol modules;
+the shell migration status above governs whether they are mounted in this branch.
 
 First creation holds one host-ledger writer lock throughout bootstrap connection
 C1, atomic complete-ledger commit, actual C1 shutdown, a fresh ticket and normal
