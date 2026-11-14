@@ -1,8 +1,8 @@
 // Run from the plugin package: node scripts/gen-network-keyset.mjs
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { compile } from 'json-schema-to-typescript';
+import { compile, compileFromFile } from 'json-schema-to-typescript';
 import { format } from 'prettier';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const base = new URL('../../../contracts/network/', import.meta.url);
 async function resolve(value, file = 'keyset.schema.json') {
@@ -58,6 +58,13 @@ const renewalSource = await readFile(
   'utf8',
 );
 export const generatedRenewalFiles = {
+  'auto-renewal-v2.d.ts': await format(
+    await compileFromFile(
+      fileURLToPath(new URL('auto-renewal-v2.schema.json', base)),
+      { unreachableDefinitions: true },
+    ),
+    { ...style, parser: 'typescript' },
+  ),
   'auto-renewal-v2-schema.js': await format(
     '// Generated from contracts/network/auto-renewal-v2.schema.json; do not edit.\n' +
       'export const schema = ' +

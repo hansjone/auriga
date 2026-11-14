@@ -77,7 +77,7 @@ Redelivery 保留 message_id/delivery_id/sequence/body_digest/original_expires_a
 
 C采用全部根链/转换/首发/配置、归档及材料端口；N采用Publication、ProtocolMaterial、TransportTrustBundle及投影收据；P采用相同链、前驱/墓碑、控制包/回执、Redelivery；I采用安装身份scope及IsolationRecord、NodeControl公有JSON消息；O采用RenewalStatus及catalog告警；D采用MigrationPermit/Receipt、RenewalConfig及密封引导。
 
-Java：`mvnw -B -pl services/contracts -am verify -T1` 生成 `services/contracts/target/generated-sources/openapi/msgnet`；Go：加 `-Pgo-openapi-models generate-sources` 生成 `infra/gen/msgnetapi`；TS：`pnpm gen:api` 生成 `web/shared/src/generated/network-keys-v2.ts`，插件可从同schema生成类型。共享向量在 `fixtures/auto-renewal-v2-vectors.json`，签名输入以canonical字段供跨语言核对，私钥仅在生成进程内存在。
+Java：`mvnw -B -pl services/contracts -am verify -T1` 生成 `services/contracts/target/generated-sources/openapi/msgnet`；Go：加 `-Pgo-openapi-models generate-sources` 生成 `infra/gen/msgnetapi`；TS：`pnpm gen:api` 生成 `web/shared/src/generated/network-keys-v2.ts`，插件执行 `pnpm gen:plugin-network` 从同schema生成类型和运行时产物。共享向量在 `fixtures/auto-renewal-v2-vectors.json`，签名输入以canonical字段供跨语言核对，私钥仅在生成进程内存在。
 
 ## 第2轮补充：能力、运输与向量
 
@@ -123,4 +123,4 @@ C 线须将 NetworkRenewal.status()、服务适配器和 /keys/status 的 HTTP �
 
 C 线须按 /bootstrap/materials 的 security=[] 与 x-auriga-installation-auth 接线，请求体 ProjectionRequest.identity_auth 和 InstallationPins 是此端点的独立认证依据。该端点使用固定 HTTPS、安装签名、nonce 防重放、撤销/隔离检查及 HPKE 密封响应。C/I 的 HTTP 安全配置须让此端点进入该安装认证流程，投影权限由 pin 的 scope 决定。内部明文材料端口继续使用既有 mTLS/JWT 认证。
 
-contracts.yml 的契约测试与源 schema 做语义深比较，运行时产物的逐字节新鲜度由 web.yml 执行 pnpm gen:api 后的 generated 目录 diff/status 门禁验证。gen:api 复用插件 --v2 的 generatedRenewalFiles，完整覆盖 auto-renewal-v2-schema.js。
+contracts.yml 的契约测试与源 schema 做语义深比较，运行时产物的逐字节新鲜度由 web.yml 依次执行 pnpm gen:api、pnpm gen:plugin-network 后的 generated 目录 diff/status 门禁验证。gen:plugin-network 调用插件 --v2 生成器，输出 auto-renewal-v2-schema.js 与 auto-renewal-v2.d.ts。web 镜像的 gen:api 只写 web 目录。

@@ -1,4 +1,3 @@
-import { generatedRenewalFiles } from '../../../clients/dsh-plugin/scripts/gen-network-keyset.mjs';
 import { fileURLToPath } from 'node:url';
 import { mkdir, writeFile } from 'node:fs/promises';
 import openapiTS, { astToString, COMMENT_HEADER } from 'openapi-typescript';
@@ -6,25 +5,6 @@ import { format } from 'prettier';
 import { compileFromFile } from 'json-schema-to-typescript';
 const output = new URL('../src/generated/', import.meta.url);
 await mkdir(output, { recursive: true });
-// 插件消费同一 v2 schema；生成定义由 K 线拥有。
-await writeFile(
-  new URL(
-    '../../../clients/dsh-plugin/src/generated/network/auto-renewal-v2.d.ts',
-    import.meta.url,
-  ),
-  await format(
-    await compileFromFile(
-      fileURLToPath(
-        new URL(
-          '../../../contracts/network/auto-renewal-v2.schema.json',
-          import.meta.url,
-        ),
-      ),
-      { unreachableDefinitions: true },
-    ),
-    { parser: 'typescript', singleQuote: true },
-  ),
-);
 await writeFile(
   new URL('deployment-access.d.ts', output),
   await format(
@@ -81,16 +61,5 @@ for (const [name, filename] of [
         ),
       { parser: 'typescript', singleQuote: true },
     ),
-  );
-}
-
-// 与类型一同生成，现有 CI 的 generated 目录 diff 门禁覆盖运行时产物。
-for (const [name, content] of Object.entries(generatedRenewalFiles)) {
-  await writeFile(
-    new URL(
-      '../../../clients/dsh-plugin/src/generated/network/' + name,
-      import.meta.url,
-    ),
-    content,
   );
 }

@@ -71,4 +71,4 @@ N/I/D 另共同读取 `fixtures/msgnet-local-projection-vectors.json`，通过�
 插件运行时产物由 K 使用 `node clients/dsh-plugin/scripts/gen-network-keyset.mjs --v2` 生成。产物导出完整 schema，包含所有 $defs、边界及未知字段限制，契约测试与源定义深比较以检查新鲜度。Java/Go/TS 生成命令沿主契约说明，LocalProjection* 与可选 ProjectionReceipt.local_selector 一起生成；本地投影路径的回执必须携带该绑定。
 
 
-第2轮补充按用途混合恢复、第二个 CA 周期及本地判定器的变异覆盖。24个本地向量包含只违反文件摘要、绑定、必需文件、长度和字节摘要的单项负例。`migration-real-v1-pair-and-material` 使用同目录 `keyset-signature-vector.json` 的真实受签合成 v1 pair，成员摘要的公钥材料按 MigrationMaterialCommitment 计算。C/N/P 共同读取新增恢复/周期用例，Java/Go的现有适配器读取同份数据。`pnpm gen:api` 调用插件 --v2 CLI 共用的 generatedRenewalFiles 渲染并写出产物，因此 web.yml 现有生成目录 diff/status 门禁覆盖字节与格式漂移，另有逐字节新鲜度测试。
+第2轮补充按用途混合恢复、第二个 CA 周期及本地判定器的变异覆盖。24个本地向量包含只违反文件摘要、绑定、必需文件、长度和字节摘要的单项负例。`migration-real-v1-pair-and-material` 使用同目录 `keyset-signature-vector.json` 的真实受签合成 v1 pair，成员摘要的公钥材料按 MigrationMaterialCommitment 计算。C/N/P 共同读取新增恢复/周期用例，Java/Go的现有适配器读取同份数据。`pnpm gen:plugin-network` 调用插件 --v2 CLI 生成类型和运行时schema，web.yml 在 web 的 gen:api 后单独执行此命令，再用生成目录 diff/status 门禁覆盖字节与格式漂移。契约测试继续与源schema做语义深比较。
