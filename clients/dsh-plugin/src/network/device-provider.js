@@ -11,6 +11,13 @@ import { jsonLimits } from './trust/v2-schema.js';
 import { detach, structure } from './trust/v2.js';
 
 const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+// Fixed v2 installation transport; no caller-selected platform route.
+const v2ControlPaths = Object.freeze({
+  keys: '/api/collab/v2/network/keys',
+  announcement: '/api/collab/v2/network/keys/announcement',
+  control: '/api/collab/v2/network/bootstrap/controls',
+  receipts: '/api/collab/v2/network/controls/receipts',
+});
 /** Transient fetch failure only; validation and persistence errors never use it. */
 export class DeviceControlUnavailable extends Error {}
 /** Only proven credential invalidation may end the native login.
@@ -187,7 +194,7 @@ export function createDeviceProvider({
               size += value.byteLength;
               if (
                 size >
-                (path.startsWith('/api/collab/v2/')
+                (Object.values(v2ControlPaths).some((route) => route === path)
                   ? jsonLimits.maxBytes
                   : 65536)
               ) {
@@ -220,13 +227,7 @@ export function createDeviceProvider({
       async function confirmReceipt(receipt, active) {
         const record = structure(
           'IsolationRecord',
-          detach(
-            await request(
-              '/api/collab/v2/network/controls/receipts',
-              receipt,
-              active,
-            ),
-          ),
+          detach(await request(v2ControlPaths.receipts, receipt, active)),
         );
         if (
           [
@@ -277,7 +278,7 @@ export function createDeviceProvider({
           // Public control sync precedes every reconnect/refresh and does not
           // depend on a message ticket or the possibly revoked message chain.
           const control = await request(
-            '/api/collab/v2/network/bootstrap/controls',
+            v2ControlPaths.control,
             undefined,
             active,
           );
@@ -294,18 +295,13 @@ export function createDeviceProvider({
           active.throwIfAborted();
           const keys = await run(
             'keys_http',
-            () => request('/api/collab/v2/network/keys', undefined, active),
+            () => request(v2ControlPaths.keys, undefined, active),
             networkTiming.operationMs,
           );
           await run('keys_validate', () => trust.update(keys));
           const announcement = await run(
             'keys_announcement_http',
-            () =>
-              request(
-                '/api/collab/v2/network/keys/announcement',
-                undefined,
-                active,
-              ),
+            () => request(v2ControlPaths.announcement, undefined, active),
             networkTiming.operationMs,
           );
           await run('keys_announcement_validate', () =>
