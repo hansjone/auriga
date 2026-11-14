@@ -116,7 +116,8 @@
         "authorizationMode",
         "expiresAt"
       ],
-      "description": "GET /me/device-session由当前设备Bearer在线定位，不能传设备ID；UAC来源必须有IAM权威绑定且与JWT一致，其他来源省略。无需浏览器sid；不能捏造Me.session。"
+      "description": "GET /me/device-session由当前设备Bearer在线定位，不能传设备ID；UAC来源必须有IAM权威绑定且与JWT一致，其他来源省略。无需浏览器sid；不能捏造Me.session。",
+      "$comment": "accountId is the verified device JWT sub. memberId is independently authoritative from device-session and need not equal accountId. profile_read returns this memberId; any /me account.id comparison uses accountId, never memberId. Browser /me session must not be fabricated for a device token."
     },
     "StandardDeviceAiClaims": {
       "type": "object",
@@ -215,6 +216,39 @@
       ],
       "additionalProperties": false,
       "description": "标准设备AI票，不改变native_tx模型专票。IAM按当前授权交集签发，至少一种权限；实际验签、<=300秒/来源期限、UAC来源必带绑定及在线检查见standard-device.md；schema不能替代这些运行时检查。"
+    },
+    "StandardDeviceProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account"
+      ],
+      "properties": {
+        "account": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "tenantId",
+            "displayName"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "tenantId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "displayName": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        }
+      },
+      "description": "Online standard-device account profile; no browser session, credentials or identity selectors. account.id is accountId/JWT sub, not a memberId alias."
     }
   }
 }
