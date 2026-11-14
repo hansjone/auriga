@@ -1,8 +1,18 @@
+import {
+  verifyTransportTransition,
+  verifyTransportCatchup,
+  verifyTransportConfirmation,
+} from './v2-transport.js';
 import { createHash, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { publicKey, timeValue } from './keyset.js';
 import { detach, jcs, reject, structure } from './v2-schema.js';
 export { detach, jcs, reject, structure } from './v2-schema.js';
+export {
+  verifyTransportTransition,
+  verifyTransportCatchup,
+  verifyTransportConfirmation,
+} from './v2-transport.js';
 /** @param {any} value */
 export const digest = (value) =>
   'sha256:' + createHash('sha256').update(jcs(value)).digest('hex');
@@ -446,6 +456,24 @@ export function verifyPublication(context) {
     )
       reject('invalid_transition');
     if (k.mode === 'restart_recovery') {
+      for (const next of previous.filter(
+        (/** @type {any} */ x) => x.purpose === purpose && x.state === 'next',
+      )) {
+        const first = proof.keyset.payload.first_publications.find(
+          (/** @type {any} */ f) => f.kid === next.kid,
+        );
+        if (!first) reject('invalid_transition');
+        if (
+          seconds(first.committed_at) >
+          issued - a.limits.next_maturity_seconds
+        ) {
+          const terminal = k.keys.find(
+            (/** @type {any} */ x) => x.kid === next.kid,
+          );
+          if (!terminal || !['retired', 'revoked'].includes(terminal.state))
+            reject('invalid_transition');
+        }
+      }
       if (old && valid(old)) {
         if (old.kid !== current.kid) reject('invalid_transition');
       } else {
@@ -469,6 +497,85 @@ export function verifyPublication(context) {
 }
 /** @param {any} bundle @param {any} publication @param {any} context */
 export function verifyTransport(bundle, publication, context) {
+  const confirmation = context.transport_confirmation && {
+    ...context.transport_confirmation,
+    root_spki: context.roots.get(context.latest_control.root_auth.kid),
+    control: context.latest_control,
+    authority: publication.authority,
+    tenant_id: context.tenant_id,
+    realm: context.realm,
+    now: context.now,
+  };
+  // Proof data carries signed snapshots; installation facts always come from
+  // the caller's trusted context, never from the received proof.
+  if (context.transport_transition || context.transport_catchup) {
+    const catchup = context.transport_catchup;
+    const proof = catchup?.transition ?? context.transport_transition;
+    const transition = {
+      ...proof,
+      root_spki: context.roots.get(proof.latest_control.root_auth.kid),
+      tenant_id: context.tenant_id,
+      realm: context.realm,
+      seen_generation: catchup ? undefined : context.seen_transport_generation,
+      seen_bundle_version: catchup ? undefined : context.seen_bundle_version,
+      seen_bundle_digest: catchup ? undefined : context.seen_bundle_digest,
+      isolation_enforced: context.isolation_enforced,
+    };
+    if (!equal(proof.authority, publication.authority)) reject('invalid_chain');
+    if (catchup) {
+      const predecessor = proof.predecessor.bundle;
+      if (
+        context.seen_transport_generation === predecessor.payload.generation &&
+        context.seen_bundle_version === predecessor.payload.bundle_version &&
+        context.seen_bundle_digest !== digest(predecessor)
+      )
+        reject('invalid_transition');
+      if (
+        context.seen_transport_generation &&
+        BigInt(bundle.payload.generation) <
+          BigInt(context.seen_transport_generation)
+      )
+        reject('version_rollback');
+      verifyTransportCatchup({
+        ...catchup,
+        transition,
+        current: bundle,
+        control: context.latest_control,
+        seen_version:
+          !context.seen_transport_generation ||
+          context.seen_transport_generation === bundle.payload.generation
+            ? context.seen_bundle_version
+            : undefined,
+        seen_digest: context.seen_bundle_digest,
+        confirmation,
+      });
+    } else {
+      if (
+        !equal(proof.latest_control, context.latest_control) ||
+        !equal(proof.transport, bundle)
+      )
+        reject('invalid_chain');
+      verifyTransportTransition(transition);
+    }
+    return;
+  }
+  if (confirmation) {
+    verifyTransportConfirmation(confirmation);
+    if (digest(confirmation.bundle) !== bundle.payload.previous_bundle_digest)
+      reject('invalid_chain');
+    const phase = bundle.payload.phase;
+    if (
+      confirmation.bundle.payload.phase !==
+      (phase === 'new_leaves' ? 'dual_trust' : 'new_leaves')
+    )
+      reject('invalid_transition');
+    if (
+      confirmation.required_phase !==
+      (phase === 'new_leaves' ? 'loaded' : 'handshake_verified')
+    )
+      reject('projection_pending');
+  }
+
   const a = publication.authority.payload,
     t = bundle.payload;
   if (!a.capabilities.includes('network_transport')) reject('scope_denied');
