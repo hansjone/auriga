@@ -11,7 +11,8 @@ const { t } = useAdminI18n();
 const ledger = shallowRef<Ledger>({});
 const allowed = ref(false),
   busy = ref(false),
-  error = ref('');
+  error = ref(''),
+  notice = ref('');
 const manifest = shallowRef<File>(),
   archive = shallowRef<File>();
 const policy = shallowRef<{
@@ -38,20 +39,28 @@ async function selected(event: Event, kind: 'manifest' | 'archive') {
 async function load() {
   ledger.value = await apiClient.get<Ledger>(base);
 }
-async function run(action: () => Promise<unknown>) {
+async function run(action: () => Promise<unknown>, completedMessage = '') {
   busy.value = true;
   error.value = '';
+  notice.value = '';
+  let completed = false;
   try {
     await action();
+    if (completedMessage) {
+      completed = true;
+      notice.value = completedMessage;
+    }
     await load();
   } catch {
-    error.value = t('desktopFailed');
+    if (completed)
+      notice.value = `${completedMessage}，台账刷新失败，请验证身份并刷新。`;
+    else error.value = t('desktopFailed');
   } finally {
     busy.value = false;
   }
 }
 function withdraw(sequence: number) {
-  return run(() => apiClient.delete(`${base}/${sequence}`));
+  return run(() => apiClient.delete(`${base}/${sequence}`), '发行已下架');
 }
 async function publish() {
   if (!manifest.value || !archive.value || manifest.value.size > 32768) return;
@@ -61,15 +70,17 @@ async function publish() {
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replace(/=+$/, '');
-  await run(() =>
-    apiClient.request(base, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-Desktop-Manifest': header,
-      },
-      body: archive.value,
-    }),
+  await run(
+    () =>
+      apiClient.request(base, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-Desktop-Manifest': header,
+        },
+        body: archive.value,
+      }),
+    '发行已发布',
   );
 }
 onMounted(async () => {
@@ -90,6 +101,7 @@ onMounted(async () => {
     <p v-if="!allowed">{{ t('forbidden') }}</p>
     <template v-else>
       <p v-if="error" role="alert">{{ error }}</p>
+      <p v-if="notice" role="status">{{ notice }}</p>
       <button :disabled="busy" @click="run(requestStepUp)">
         {{ t('desktopVerify') }}
       </button>
