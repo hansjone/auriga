@@ -106,7 +106,7 @@ func (i *Installer) InstallTransport(ctx context.Context, raw []byte) error {
 	for _, scope := range p.Scope {
 		permitted := false
 		for _, grant := range a.TransportScope {
-			if grant.Component == scope.Component && grant.IdentityId == scope.IdentityId && subset(scope.Sans, grant.Sans) && subset(scope.Ekus, grant.Ekus) {
+			if Equal(grant, scope) {
 				permitted = true
 			}
 		}
@@ -160,11 +160,8 @@ func (i *Installer) InstallTransport(ctx context.Context, raw []byte) error {
 			}
 			rank := map[string]int{"dual_trust": 0, "new_leaves": 1, "retire_old": 2}
 			before, after := rank[old.Payload.Phase], rank[p.Phase]
-			if after < before && !(before == 2 && after == 0) || after > before+1 {
+			if (before != 2 || after != 0) && after != before+1 {
 				return fmt.Errorf("invalid transport phase transition")
-			}
-			if before == after && !Equal(p.Cas, old.Payload.Cas) {
-				return fmt.Errorf("CA changed within a phase")
 			}
 			if before == 0 && after == 1 && !Equal(p.Cas, old.Payload.Cas) {
 				return fmt.Errorf("new leaves dropped dual trust")
@@ -210,12 +207,4 @@ func (i *Installer) InstallTransport(ctx context.Context, raw []byte) error {
 	// Fence first, then apply. A crash or failed consumer must retry the exact
 	// signed bundle instead of making an older bundle acceptable after restart.
 	return o.Backend.ApplyTransport(ctx, bundle)
-}
-func subset(values, allowed []string) bool {
-	for _, value := range values {
-		if !slices.Contains(allowed, value) {
-			return false
-		}
-	}
-	return true
 }

@@ -559,6 +559,10 @@ func WritePrivateSnapshot(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return syncTrustGuard(f, filepath.Dir(path))
+	syncErr := syncTrustGuard(f, filepath.Dir(path))
+	closeErr := f.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }

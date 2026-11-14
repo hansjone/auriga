@@ -289,6 +289,8 @@ func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 	}
 	second := bundle.Payload
 	second.PreviousBundleDigest = Digest(raw)
+	second.BundleVersion = "2"
+	advance(second, false) // A higher version cannot repeat the same CA phase.
 	second.BundleVersion, second.Phase = "2", "retire_old"
 	advance(second, false)
 	second.Phase = "new_leaves"
