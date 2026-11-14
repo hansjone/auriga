@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tls from 'node:tls';
-import { platformConfig } from '../../../src/local/platform.js';
+import { platformConfig } from '../../../src/local/config.js';
 import { openConnectionRuntime } from '../../../src/network/connection-runtime.js';
 import { createFileLedgerStore } from '../../../src/network/host/store.js';
 import { decodeJson, encodeJson } from '../../../src/network/session/frames.js';

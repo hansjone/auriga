@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { createPlatform, platformConfig } from '../src/local/platform.js';
+import { createPlatform } from '../../shell-auth/platform.mjs';
 
 export const protocol = '2025-06-18';
 export const accept = 'application/json, text/event-stream';
@@ -140,15 +140,13 @@ export async function peer() {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
-  const platform = createPlatform(
-    platformConfig({
-      platformOrigin: origin,
-      issuer: origin,
-      clientId: 'transport-test',
-      providerId: 'team',
-      allowLocalHttp: true,
-    }),
-  );
+  const platform = createPlatform({
+    platformOrigin: origin,
+    issuer: origin,
+    clientId: 'transport-test',
+    providerId: 'team',
+    allowLocalHttp: true,
+  });
   return {
     state,
     platform,

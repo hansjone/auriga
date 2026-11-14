@@ -3,10 +3,7 @@ import assert from 'node:assert/strict';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { shellRuntimePeer } from '../shell-runtime-peer.js';
 import { teamRuntimePeer } from '../team-runtime-peer.js';
-import {
-  platformConfig,
-  savedPlatformConfig,
-} from '../../src/local/platform.js';
+import { platformConfig, savedPlatformConfig } from '../../src/local/config.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';

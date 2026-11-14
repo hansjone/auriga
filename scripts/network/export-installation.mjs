@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer';
 import { open, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { platformConfig } from '../../clients/dsh-plugin/src/local/platform.js';
+import { platformConfig } from '../../clients/dsh-plugin/src/local/config.js';
 import { parseStrictJson } from '../../clients/dsh-plugin/src/network/trust/jcs.js';
 import {
   positiveVersion,

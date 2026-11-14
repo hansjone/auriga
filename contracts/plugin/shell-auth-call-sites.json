@@ -35,25 +35,6 @@
       "routePattern": "/ai/v1/${path}"
     },
     {
-      "file": "ai/managed-status.js",
-      "evidence": "base.pathname !== '/ai/v1' ||",
-      "methods": ["GET", "POST"],
-      "operations": [
-        "listAiModels",
-        "createAiChatCompletion",
-        "createAiChatCompletionStream"
-      ],
-      "routePattern": "/ai/v1"
-    },
-    {
-      "file": "ai/refresh-broker.js",
-      "evidence": "tokens = await platform.request('/oauth2/token', {",
-      "methods": ["POST"],
-      "operations": [],
-      "control": "broker_token_refresh",
-      "routePattern": "/oauth2/token"
-    },
-    {
       "file": "local/member-profile.js",
       "evidence": "'/api/iam/v1/network/systems?limit=200' +",
       "methods": ["GET"],
@@ -66,22 +47,6 @@
       "methods": ["GET"],
       "operations": ["profile_read"],
       "routePattern": "/api/iam/v1/me"
-    },
-    {
-      "file": "local/platform.js",
-      "evidence": "const jwks = await request(issuerPath + '/oauth2/jwks');",
-      "methods": ["GET"],
-      "operations": [],
-      "control": "shell_authentication_lifecycle",
-      "routePattern": "/oauth2/jwks"
-    },
-    {
-      "file": "local/platform.js",
-      "evidence": "new URL(config.issuer).pathname.replace(/\\/$/, '') + '/oauth2/jwks',",
-      "methods": ["GET"],
-      "operations": [],
-      "control": "shell_authentication_lifecycle",
-      "routePattern": "/oauth2/jwks"
     },
     {
       "file": "local/runtime.js",
@@ -189,13 +154,6 @@
       "operations": [],
       "control": "managed_instance_heartbeat",
       "routePattern": "/api/workspace/v1/instance/heartbeat"
-    },
-    {
-      "file": "managed/models.js",
-      "evidence": ": platform.request('/ai/v1/models', {",
-      "methods": ["GET"],
-      "operations": ["listAiModels"],
-      "routePattern": "/ai/v1/models"
     },
     {
       "file": "network/base-tools.js",
@@ -651,20 +609,8 @@
       "sha256": "961e7ec12eaaf51e7bfefa7984b39161eabd47cc86e73f6651bc26be618e9c8b"
     },
     {
-      "file": "ai/managed-status.js",
-      "sha256": "316e937a31d59900ed537b57dbded7e1bf8eee5a39b49e175252047cbef1de30"
-    },
-    {
-      "file": "ai/refresh-broker.js",
-      "sha256": "71e745f9a615cb9051c80abccf4b024b91cee39250107308e86afb5f1818145e"
-    },
-    {
       "file": "local/member-profile.js",
       "sha256": "c821b8f06e74ceb4fed51ba9b454a782a2a176c3cbd9dd5f57871ed7a82c3a49"
-    },
-    {
-      "file": "local/platform.js",
-      "sha256": "003e867c53673ac61b5d8a9f50e5cafb93e18e9986ffabc6129c56793577171a"
     },
     {
       "file": "local/runtime.js",
@@ -677,10 +623,6 @@
     {
       "file": "managed/heartbeat.js",
       "sha256": "ba95419674cf4cca99863bcdd4941b2d76fa9b3896dc6bbde2dcfc4607b5f449"
-    },
-    {
-      "file": "managed/models.js",
-      "sha256": "ae26f7ac493ac434e4fa5c8736dc49c48896bb96341505f48ed35abb9ed1a30e"
     },
     {
       "file": "network/base-tools.js",

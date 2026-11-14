@@ -8,7 +8,7 @@ import { createManaged } from './modes/managed.js';
 import { selectMode } from './index.js';
 import { createLocalSurfaceHandler } from './local-ui.js';
 import { createConnectRuntime } from './local/runtime.js';
-import { savedPlatformConfig } from './local/platform.js';
+import { savedPlatformConfig } from './local/config.js';
 import { installNativeLoginRPC } from './local/native-rpc.js';
 import { installLocalAdmission } from './local/host.js';
 import {

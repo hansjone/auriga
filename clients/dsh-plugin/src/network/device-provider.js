@@ -3,7 +3,8 @@ import { clockToleranceMs } from './clock.js';
 import { tracedFetch } from '../observability/index.js';
 /* global AbortSignal */
 import { createHash } from 'node:crypto';
-import { platformConfig, PlatformError } from '../local/platform.js';
+import { platformConfig } from '../local/config.js';
+import { PlatformError } from '../local/platform-error.js';
 import { parseStrictJson } from './trust/jcs.js';
 import { positiveVersion } from './trust/keyset.js';
 import { diagnosticReason } from './diagnostics.js';

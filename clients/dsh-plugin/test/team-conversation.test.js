@@ -12,7 +12,7 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createPlatform, platformConfig } from '../src/local/platform.js';
+import { createPlatform } from '../../shell-auth/platform.mjs';
 import { createVault } from '../src/local/vault.js';
 import { createTeam } from './team-broker-peer.js';
 
@@ -281,15 +281,13 @@ async function conversation() {
         },
       },
     };
-    const platform = createPlatform(
-      platformConfig({
-        platformOrigin: origin,
-        issuer: origin,
-        clientId: 'transport-probe',
-        providerId: 'team',
-        allowLocalHttp: true,
-      }),
-    );
+    const platform = createPlatform({
+      platformOrigin: origin,
+      issuer: origin,
+      clientId: 'transport-probe',
+      providerId: 'team',
+      allowLocalHttp: true,
+    });
     // A mutable response adapter is used only by explicit malformed-response tests.
     let alter = (value) => value;
     const transport = {
