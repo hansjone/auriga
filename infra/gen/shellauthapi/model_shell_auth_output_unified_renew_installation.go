@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthOutputUnifiedRenewInstallation{}
 
 // ShellAuthOutputUnifiedRenewInstallation struct for ShellAuthOutputUnifiedRenewInstallation
 type ShellAuthOutputUnifiedRenewInstallation struct {
-	StatusCode int32                                                       `json:"statusCode"`
-	Headers    *ShellAuthOutputListResourcePackagesHeaders                 `json:"headers,omitempty"`
-	Body       ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket `json:"body"`
+	StatusCode int32                                          `json:"statusCode"`
+	Headers    *ShellAuthOutputListResourcePackagesHeaders    `json:"headers,omitempty"`
+	Body       ShellAuthOutputUnifiedCreateDownloadTicketBody `json:"body"`
 }
 
 type _ShellAuthOutputUnifiedRenewInstallation ShellAuthOutputUnifiedRenewInstallation
@@ -32,7 +32,7 @@ type _ShellAuthOutputUnifiedRenewInstallation ShellAuthOutputUnifiedRenewInstall
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputUnifiedRenewInstallation(statusCode int32, body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket) *ShellAuthOutputUnifiedRenewInstallation {
+func NewShellAuthOutputUnifiedRenewInstallation(statusCode int32, body ShellAuthOutputUnifiedCreateDownloadTicketBody) *ShellAuthOutputUnifiedRenewInstallation {
 	this := ShellAuthOutputUnifiedRenewInstallation{}
 	this.StatusCode = statusCode
 	this.Body = body
@@ -104,9 +104,9 @@ func (o *ShellAuthOutputUnifiedRenewInstallation) SetHeaders(v ShellAuthOutputLi
 }
 
 // GetBody returns the Body field value
-func (o *ShellAuthOutputUnifiedRenewInstallation) GetBody() ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket {
+func (o *ShellAuthOutputUnifiedRenewInstallation) GetBody() ShellAuthOutputUnifiedCreateDownloadTicketBody {
 	if o == nil {
-		var ret ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket
+		var ret ShellAuthOutputUnifiedCreateDownloadTicketBody
 		return ret
 	}
 
@@ -115,7 +115,7 @@ func (o *ShellAuthOutputUnifiedRenewInstallation) GetBody() ShellAuthresourceUni
 
 // GetBodyOk returns a tuple with the Body field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputUnifiedRenewInstallation) GetBodyOk() (*ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket, bool) {
+func (o *ShellAuthOutputUnifiedRenewInstallation) GetBodyOk() (*ShellAuthOutputUnifiedCreateDownloadTicketBody, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -123,7 +123,7 @@ func (o *ShellAuthOutputUnifiedRenewInstallation) GetBodyOk() (*ShellAuthresourc
 }
 
 // SetBody sets field value
-func (o *ShellAuthOutputUnifiedRenewInstallation) SetBody(v ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket) {
+func (o *ShellAuthOutputUnifiedRenewInstallation) SetBody(v ShellAuthOutputUnifiedCreateDownloadTicketBody) {
 	o.Body = v
 }
 
