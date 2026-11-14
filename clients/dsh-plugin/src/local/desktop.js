@@ -55,7 +55,11 @@ export async function idleFetch(url, init, lifetime, idleMs = 60_000) {
   try {
     const response = await fetch(url, {
       ...init,
-      signal: AbortSignal.any([lifetime, controller.signal]),
+      signal: AbortSignal.any([
+        lifetime,
+        controller.signal,
+        ...(init.signal ? [init.signal] : []),
+      ]),
     });
     // Error responses have no body consumed by the updater.
     if (!response.ok) {

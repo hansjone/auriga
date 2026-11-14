@@ -9,6 +9,8 @@ import { unsignedRelease } from './sign-release.mjs';
 
 export function makeRelease(options) {
   const body = unsignedRelease(options);
+  if (options.exe && sha256File(options.exe) !== body.sha256)
+    throw new Error('release artifact must be the setup exe');
   const commit = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
   const sourceCommit = commit.stdout.trim();
   if (commit.status !== 0 || !/^[a-f0-9]{40}$/.test(sourceCommit))

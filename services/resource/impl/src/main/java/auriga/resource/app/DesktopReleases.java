@@ -71,25 +71,38 @@ public final class DesktopReleases {
       if (!verifier.verify(Base64.getUrlDecoder().decode(sig.path("value").asString())))
         throw invalid();
       var fields =
-          Set.of(
-              "schema",
-              "product",
-              "version",
-              "packageId",
-              "channel",
-              "platform",
-              "sizeBytes",
-              "sha256",
-              "minimumVersion",
-              "publishedAt",
-              "notAfter",
-              "sequence",
-              "notes",
-              "components");
+          new HashSet<>(
+              Set.of(
+                  "schema",
+                  "product",
+                  "version",
+                  "packageId",
+                  "channel",
+                  "platform",
+                  "sizeBytes",
+                  "sha256",
+                  "minimumVersion",
+                  "publishedAt",
+                  "notAfter",
+                  "sequence",
+                  "notes",
+                  "components"));
+      int schema = body.path("schema").asInt();
+      if (schema == 2) fields.addAll(Set.of("rolloutPercentage", "rollbackFrom"));
       if (!body.propertyNames().equals(fields)
-          || (!body.path("schema").isIntegralNumber() || body.path("schema").asInt() != 1)
+          || (!body.path("schema").isIntegralNumber()
+              || (schema != 1 && schema != 2)
+              || body.path("schema").asLong() != schema)
           || !text(body, "product", 32).equals("Auriga Desktop")
-          || !text(body, "channel", 16).equals("stable")
+          || !Set.of("stable", "beta").contains(text(body, "channel", 16))
+          || (schema == 1 && !text(body, "channel", 16).equals("stable"))
+          || (schema == 2
+              && (!body.path("rolloutPercentage").isIntegralNumber()
+                  || !body.path("rolloutPercentage").canConvertToInt()
+                  || body.path("rolloutPercentage").asInt() < 0
+                  || body.path("rolloutPercentage").asInt() > 100
+                  || (!body.path("rollbackFrom").isNull()
+                      && !ResourceSemver.valid(text(body, "rollbackFrom", 128)))))
           || !text(body, "platform", 16).equals("win-x64")
           || !text(body, "packageId", 200).matches("[A-Za-z0-9.+-]{1,200}")
           || !text(body, "sha256", 64).matches("[a-f0-9]{64}")
@@ -100,6 +113,9 @@ public final class DesktopReleases {
           || !ResourceSemver.valid(text(body, "minimumVersion", 128))
           || !body.path("notes").isString()
           || body.path("notes").asString().length() > 8192) throw invalid();
+      if (ResourceSemver.compare(
+              body.path("minimumVersion").asString(), body.path("version").asString())
+          > 0) throw invalid();
       var components = body.path("components");
       if (!components.isObject()
           || !components
@@ -164,23 +180,35 @@ public final class DesktopReleases {
                 if (seq <= state.path("highestSequence").asLong())
                   throw new AurigaException(CONFLICT);
                 var items = state.withArray("items");
+                tools.jackson.databind.JsonNode previous = null;
                 for (var item : items) {
-                  var previous = item.path("manifest");
+                  var candidate = item.path("manifest");
+                  if (candidate.path("channel").equals(body.path("channel"))
+                      && (previous == null
+                          || candidate.path("sequence").asLong()
+                              > previous.path("sequence").asLong())) previous = candidate;
+                }
+                boolean rollback =
+                    !body.path("rollbackFrom").isMissingNode()
+                        && !body.path("rollbackFrom").isNull();
+                if (rollback
+                    && (previous == null
+                        || !body.path("rollbackFrom").equals(previous.path("version"))))
+                  throw new AurigaException(CONFLICT);
+                if (previous != null) {
                   int comparison =
                       ResourceSemver.compare(
                           body.path("version").asString(), previous.path("version").asString());
-                  if (comparison < 0) throw new AurigaException(CONFLICT);
+                  if (comparison < 0 && !rollback) throw new AurigaException(CONFLICT);
+                  if (rollback && comparison >= 0) throw new AurigaException(CONFLICT);
                   if (comparison == 0) {
                     for (String field : Set.of("packageId", "sha256", "sizeBytes", "components"))
                       if (!body.path(field).equals(previous.path(field)))
                         throw new AurigaException(CONFLICT);
-                    if (!Instant.parse(body.path("notAfter").asString())
-                        .isAfter(Instant.parse(previous.path("notAfter").asString())))
-                      throw new AurigaException(CONFLICT);
                   }
                 }
                 try {
-                  Path blob = store.root().resolve(body.path("sha256").asString() + ".zip");
+                  Path blob = store.root().resolve(body.path("sha256").asString() + ".exe");
                   if (Files.exists(blob)) Files.delete(stage);
                   else Files.move(stage, blob, StandardCopyOption.ATOMIC_MOVE);
                 } catch (IOException e) {
@@ -191,7 +219,7 @@ public final class DesktopReleases {
                 item.put("withdrawn", false);
                 items.add(item);
                 state.put("highestSequence", seq);
-                audit(state, principal, seq, "publish");
+                audit(state, principal, seq, rollback ? "rollback" : "publish");
                 return envelope;
               });
       flushAudit();
@@ -270,10 +298,19 @@ public final class DesktopReleases {
   }
 
   public ObjectNode latest() {
+    return latest("stable");
+  }
+
+  public ObjectNode latest(String channel) {
+    if (!Set.of("stable", "beta").contains(channel)) throw invalid();
     ObjectNode best = null;
     for (var item : store(publisherTenant).read().withArray("items")) {
       if (item.path("withdrawn").asBoolean()) continue;
       var manifest = (ObjectNode) item.path("manifest");
+      if (!channel.equals(manifest.path("channel").asString())) continue;
+      if (!Files.isRegularFile(
+          store(publisherTenant).root().resolve(manifest.path("sha256").asString() + ".exe"),
+          LinkOption.NOFOLLOW_LINKS)) continue;
       try {
         verify(manifest, true);
       } catch (AurigaException e) {
@@ -286,7 +323,7 @@ public final class DesktopReleases {
     return best;
   }
 
-  public record Download(InputStream stream, long size) {}
+  public record Download(InputStream stream, long size, String filename) {}
 
   public Download download(long sequence) {
     var store = store(publisherTenant);
@@ -299,9 +336,12 @@ public final class DesktopReleases {
               try {
                 var stream =
                     Files.newInputStream(
-                        store.root().resolve(body.path("sha256").asString() + ".zip"),
+                        store.root().resolve(body.path("sha256").asString() + ".exe"),
                         LinkOption.NOFOLLOW_LINKS);
-                return new Download(stream, body.path("sizeBytes").asLong());
+                return new Download(
+                    stream,
+                    body.path("sizeBytes").asLong(),
+                    "AurigaDSH-Setup-" + body.path("version").asString() + ".exe");
               } catch (IOException e) {
                 throw new AurigaException(UNAVAILABLE);
               }

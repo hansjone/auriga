@@ -326,10 +326,13 @@ export function createSettingsHandler({
           typeof input.enabled === 'boolean'
         )
           return json(200, updater.configure(input.enabled));
+        if (Object.keys(input ?? {}).join(',') === 'channel')
+          return json(200, updater.setChannel(input.channel));
         if (Object.keys(input ?? {}).join(',') !== 'action')
           return json(400, { reason: 'invalidSettings' });
         if (input.action === 'check') return json(200, await updater.check());
-        if (input.action === 'update') return json(200, await updater.update());
+        if (input.action === 'update') return json(202, updater.beginUpdate());
+        if (input.action === 'cancel') return json(200, updater.cancel());
         return json(400, { reason: 'invalidSettings' });
       }
       if (path === '/auriga/settings/test') {

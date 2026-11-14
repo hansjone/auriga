@@ -28,14 +28,31 @@ export function unsignedRelease({
   notAfter,
   notes = '',
   publishedAt = new Date().toISOString(),
+  channel = 'stable',
+  rolloutPercentage = 100,
+  rollbackFrom = null,
+  schema = 2,
 }) {
   const manifest = verifyPackage(payload);
+  schema = Number(schema);
+  rollbackFrom ||= null;
+  if (
+    ![1, 2].includes(schema) ||
+    (schema === 1 &&
+      (channel !== 'stable' ||
+        Number(rolloutPercentage) !== 100 ||
+        rollbackFrom))
+  )
+    throw new Error('invalid release schema policy');
   return {
-    schema: 1,
+    schema,
+    ...(schema === 2
+      ? { rolloutPercentage: Number(rolloutPercentage), rollbackFrom }
+      : {}),
     product: 'Auriga Desktop',
     version: manifest.bundleVersion,
     packageId: manifest.id,
-    channel: 'stable',
+    channel,
     platform: 'win-x64',
     sizeBytes: statSync(archive).size,
     sha256: sha256File(archive),
@@ -67,6 +84,7 @@ export function reviewRelease(options) {
     record = JSON.parse(readFileSync(options.buildRecord, 'utf8'));
     if (
       record.sha256 !== body.sha256 ||
+      (record.exeSha256 && record.exeSha256 !== body.sha256) ||
       record.sizeBytes !== body.sizeBytes ||
       record.packageId !== body.packageId ||
       record.desktopVersion !== body.version ||
@@ -138,6 +156,9 @@ export function reviewRelease(options) {
       sequence: body.sequence,
       notAfter: body.notAfter,
       minimumVersion: body.minimumVersion,
+      channel: body.channel,
+      rolloutPercentage: body.rolloutPercentage,
+      rollbackFrom: body.rollbackFrom,
       publishedAt: body.publishedAt,
       notes: body.notes,
     },
@@ -170,7 +191,8 @@ export function signRelease(options) {
   };
   verifyRelease(envelope, {
     publicKey: createPublicKey(key),
-    currentVersion: body.minimumVersion,
+    currentVersion: body.rollbackFrom ?? body.minimumVersion,
+    channel: body.channel,
   });
   return envelope;
 }

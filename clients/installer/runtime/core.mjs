@@ -76,7 +76,9 @@ const OWNED_ENTRIES = [
   'shell.json',
   'txn.json',
   'desktop-update.json',
+  'desktop-update.json.tmp',
   'desktop-pending',
+  '.desktop-resume',
   'desktop-origin.json',
   'desktop-session.json',
 ];

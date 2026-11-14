@@ -173,7 +173,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   }, 10000);
   revokeTimer.unref();
   void drainRevocations().catch(() => {});
+  /** @type {Awaited<ReturnType<typeof desktopUpdater>>} */
+  let desktop;
   const active = (g = generation) => {
+    if (desktop?.status().required) throw new Error('desktop.update_required');
     if (closed || g !== generation)
       throw new Error('local connection superseded');
   };
@@ -281,7 +284,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     broker,
     origin: config.platformOrigin,
   });
-  const desktop = await desktopUpdater({ origin: config.platformOrigin }).catch(
+  desktop = await desktopUpdater({ origin: config.platformOrigin }).catch(
     desktopStartupFailure,
   );
   let profileRetryAt = 0;
@@ -316,6 +319,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   let networkClosing;
   async function getAccess() {
     active();
+    if (desktop?.status().required) throw new Error('desktop.update_required');
     return broker.getPlatformAccess();
   }
   /** @param {any} tokens @param {any} [expected] */
@@ -679,7 +683,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       return network.status;
     },
     isReady() {
-      return !!team && online && !closed;
+      return !!team && online && !closed && !desktop?.status().required;
     },
     checkCsrf(/** @type {any} */ request) {
       const token = request.headers['x-auriga-csrf'];

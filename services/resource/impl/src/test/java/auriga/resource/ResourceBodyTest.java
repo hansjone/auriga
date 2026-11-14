@@ -10,6 +10,37 @@ import org.junit.jupiter.api.Test;
 
 class ResourceBodyTest {
   @Test
+  void nullableFieldsRequireEndpointOptInAndKeepStrictJsonValidation() {
+    var valid = "{\"rollbackFrom\":null}".getBytes(StandardCharsets.UTF_8);
+    assertThrows(AurigaException.class, () -> ResourceBody.parse(valid, 1024, null, Set.of()));
+    assertTrue(
+        ResourceBody.parse(valid, 1024, null, Set.of("rollbackFrom"), Set.of("rollbackFrom"))
+            .path("rollbackFrom")
+            .isNull());
+    for (String body :
+        new String[] {
+          "{\"rollbackFrom\":null,\"minimumVersion\":null}",
+          "{\"signature\":null}",
+          "{\"rollbackFrom\":null,\"rollbackFrom\":\"1.0.0\"}",
+          "{\"rollbackFrom\":null} {}"
+        })
+      assertThrows(
+          AurigaException.class,
+          () ->
+              ResourceBody.parse(
+                  body.getBytes(StandardCharsets.UTF_8),
+                  1024,
+                  null,
+                  Set.of(),
+                  Set.of("rollbackFrom")));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            ResourceBody.parse(
+                new byte[] {(byte) 0xc3, 0x28}, 1024, null, Set.of(), Set.of("rollbackFrom")));
+  }
+
+  @Test
   void manifestParserRejectsMalformedUtf8DuplicateKeysAndTrailingJson() {
     for (String body :
         new String[] {
