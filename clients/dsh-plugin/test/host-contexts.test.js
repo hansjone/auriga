@@ -100,3 +100,25 @@ test('replacing a same-id native session revokes its cached context and register
   assert.notEqual(next.executionContextId, old.executionContextId);
   assert.equal(f.connection.contexts.has(old.executionContextId), false);
 });
+test('deleted or replaced native sources lose enterprise authority before the cleanup timer', async (t) => {
+  const f = await nativeContexts(t),
+    tool = await f.contexts.tool(f.execution);
+  assert.equal(f.contexts.valid(tool.executionContextId), true);
+  f.sessions.delete(f.session.id);
+  assert.equal(f.contexts.owner(f.session.id), null);
+  assert.equal(f.contexts.valid(tool.executionContextId), false);
+  assert.equal(f.connection.contexts.has(tool.executionContextId), false);
+});
+test('a verified background handoff survives tool completion but cannot survive host unload', async (t) => {
+  const f = await nativeContexts(t),
+    controller = new AbortController();
+  const tool = await f.contexts.tool({
+    ...f.execution,
+    signal: controller.signal,
+  });
+  assert.equal(f.contexts.retain(tool.executionContextId), true);
+  controller.abort();
+  assert.equal(f.contexts.valid(tool.executionContextId), true);
+  f.contexts.setHost(undefined);
+  assert.equal(f.contexts.valid(tool.executionContextId), false);
+});

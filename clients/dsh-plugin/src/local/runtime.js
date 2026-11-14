@@ -229,8 +229,11 @@ export async function createConnectRuntime({
         }
       }),
     async credentials(_id, purpose, executionContextId) {
-      if (!executionContextId) return refuse('common.unauthenticated');
+      if (!executionContextId || !contexts?.valid(executionContextId))
+        return refuse('common.unauthenticated');
       const result = await broker.credentials(executionContextId, purpose);
+      if (!contexts.valid(executionContextId))
+        return refuse('common.unauthenticated');
       const s = broker.state.current(),
         binding = result.binding;
       if (

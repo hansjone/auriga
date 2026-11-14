@@ -171,6 +171,13 @@ export function createHostContexts({ broker, identity, ctx }) {
     session,
     tool,
     finish: retireTool,
+    valid(/** @type {string} */ id) {
+      const row = tools.get(id);
+      const current =
+        !!row && row.alive() && Date.parse(row.handle.expiresAt) > Date.now();
+      if (!current && row) void retireTool(id);
+      return current;
+    },
     retain(/** @type {string} */ id) {
       const row = tools.get(id);
       if (!row || !row.alive()) return false;
@@ -183,7 +190,14 @@ export function createHostContexts({ broker, identity, ctx }) {
       host = value;
     },
     owner(/** @type {string} */ id) {
-      return owners.get(id) === stamp() ? (identity()?.ownerId ?? null) : null;
+      const row = sessions.get(id);
+      return !closed &&
+        row &&
+        row.stamp === stamp() &&
+        ctx.sessions?.get(id) === row.native &&
+        Date.parse(row.handle.expiresAt) > Date.now()
+        ? (identity()?.ownerId ?? null)
+        : null;
     },
     close() {
       closed = true;
