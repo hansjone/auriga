@@ -4,6 +4,7 @@ import auriga.common.error.*;
 import auriga.contracts.node.v1.*;
 import java.time.Instant;
 import java.util.Set;
+import java.util.UUID;
 
 /** Initial budgets are admission limits, not measured capacity or isolation guarantees. */
 public final class SharedDshPolicy {
@@ -65,6 +66,14 @@ public final class SharedDshPolicy {
   }
 
   /** Exact immutable binding/action prevents late ACK from advancing a new step or generation. */
+  public static boolean uuid(String value) {
+    try {
+      return UUID.fromString(value).toString().equalsIgnoreCase(value);
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+  }
+
   public static boolean confirms(
       SharedDshRuntimeIntent intent, SharedDshRuntimeReceipt receipt, long now) {
     if (!receipt.getUnknownFields().asMap().isEmpty()
@@ -75,7 +84,7 @@ public final class SharedDshPolicy {
         || !receipt.getAction().equals(intent.getAction())
         || receipt.getObservedAt() > now
         || receipt.getObservedAt() < 0
-        || receipt.getReceiptId().isBlank()
+        || !uuid(receipt.getReceiptId())
         || !receipt.getOutcome().equals("confirmed")) return false;
     return switch (intent.getAction()) {
       case "stop-pool" -> receipt.getExecutionTreeStopped();
@@ -83,7 +92,7 @@ public final class SharedDshPolicy {
       case "prepare-empty" -> receipt.getWorkspaceEmpty();
       case "archive-reset" ->
           receipt.getWorkspaceEmpty()
-              && !receipt.getArchiveId().isBlank()
+              && uuid(receipt.getArchiveId())
               && receipt.getArchiveExpiresAt() == receipt.getObservedAt() + ARCHIVE_SECONDS;
       case "cooperative-cancel" -> true;
       default -> false;

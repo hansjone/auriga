@@ -23,7 +23,8 @@ public final class SharedDshMaintenance {
       String operationState,
       String action,
       UUID archive,
-      Long archiveExpiresAt) {}
+      Long archiveExpiresAt,
+      String failureCode) {}
 
   private final WorkspaceStore store;
   private final SharedDshPlacements placements;
@@ -125,69 +126,107 @@ public final class SharedDshMaintenance {
 
   /** Starts only after the export window; restart/retry returns the persisted operation IDs. */
   public List<Progress> start(UUID actor, UUID adminSession, UUID batch) {
+    var planned =
+        locked(
+            () -> {
+              admin(actor, adminSession);
+              var found = rows(batch);
+              if (found.isEmpty()) throw new AurigaException(CommonErrors.NOT_FOUND);
+              return found;
+            });
+    for (var item : planned) {
+      if (item.get("operation_id") != null || item.get("state").equals("succeeded")) continue;
+      UUID memberId = (UUID) item.get("member_id");
+      try {
+        locked(
+            () -> {
+              admin(actor, adminSession);
+              var row =
+                  store.one(
+                      "SELECT * FROM shared_dsh_maintenance WHERE tenant_id=? AND member_id=?",
+                      store.tenant(),
+                      memberId);
+              if (row.get("operation_id") != null) return null;
+              conflict(now() >= ((Number) row.get("export_until")).longValue());
+              UUID member = (UUID) row.get("member_id"), id = (UUID) row.get("legacy_instance_id");
+              inputs.requireMember(store.tenant(), member);
+              var legacy = store.instance(id);
+              if (!legacy.get("owner_id").equals(member))
+                throw new AurigaException(CommonErrors.NOT_FOUND);
+              var spec = WorkspaceService.spec(legacy);
+              var stopped =
+                  spec.toBuilder()
+                      .setGeneration(spec.getGeneration() + 1)
+                      .setDesired(DesiredState.DESIRED_STATE_STOPPED)
+                      .clearSecrets()
+                      .build();
+              store.jdbc.update(
+                  "UPDATE instance SET shared_rebuild_hold=true,spec=?,generation=?,ready=false,managed_credential=NULL,managed_model_credential=NULL,managed_credential_version=managed_credential_version+1 WHERE tenant_id=? AND id=?",
+                  stopped.toByteArray(),
+                  stopped.getGeneration(),
+                  store.tenant(),
+                  id);
+              store.jdbc.update(
+                  "INSERT INTO instance_spec(id,tenant_id,instance_id,generation,spec,created_at) VALUES(?,?,?,?,?,?)",
+                  UuidV7.next(),
+                  store.tenant(),
+                  id,
+                  stopped.getGeneration(),
+                  stopped.toByteArray(),
+                  WorkspaceStore.time(clock.instant()));
+              store.jdbc.update(
+                  "UPDATE workspace_job SET done=true WHERE tenant_id=? AND instance_id=? AND NOT done",
+                  store.tenant(),
+                  id);
+              var digest = inputs.authorizationSetDigest(store.tenant(), member);
+              valid(digest != null && digest.matches("sha256:[a-f0-9]{64}"));
+              store.jdbc.update(
+                  "INSERT INTO shared_dsh_pool(id,tenant_id,mode,authorization_digest,state) VALUES(?,?,'dedicated',?,'ready')",
+                  id,
+                  store.tenant(),
+                  digest);
+              store.jdbc.update(
+                  "INSERT INTO shared_dsh_placement(id,tenant_id,member_id,pool_id,mode,state) VALUES(?,?,?,?,'dedicated','ready')",
+                  UuidV7.next(),
+                  store.tenant(),
+                  member,
+                  id);
+              UUID operation =
+                  placements.rebuild(
+                      member,
+                      actor,
+                      Boolean.TRUE.equals(row.get("continue_dedicated")) ? "dedicated" : "shared",
+                      batch,
+                      adminSession);
+              store.jdbc.update(
+                  "UPDATE shared_dsh_maintenance SET state='accepted',operation_id=? WHERE tenant_id=? AND member_id=?",
+                  operation,
+                  store.tenant(),
+                  member);
+
+              store.jdbc.update(
+                  "UPDATE shared_dsh_maintenance SET failure_code=NULL WHERE tenant_id=? AND member_id=?",
+                  store.tenant(),
+                  memberId);
+              return null;
+            });
+      } catch (AurigaException e) {
+        // Before the export window this is a caller error, not a failed member migration.
+        if (now() < ((Number) item.get("export_until")).longValue()) throw e;
+        locked(
+            () -> {
+              admin(actor, adminSession);
+              return store.jdbc.update(
+                  "UPDATE shared_dsh_maintenance SET state='blocked',failure_code=? WHERE tenant_id=? AND member_id=? AND operation_id IS NULL",
+                  e.errorCode().code(),
+                  store.tenant(),
+                  memberId);
+            });
+      }
+    }
     return locked(
         () -> {
           admin(actor, adminSession);
-          var rows = rows(batch);
-          if (rows.isEmpty()) throw new AurigaException(CommonErrors.NOT_FOUND);
-          for (var row : rows) {
-            if (!row.get("state").equals("export-window")) continue;
-            conflict(now() >= ((Number) row.get("export_until")).longValue());
-            UUID member = (UUID) row.get("member_id"), id = (UUID) row.get("legacy_instance_id");
-            inputs.requireMember(store.tenant(), member);
-            var legacy = store.instance(id);
-            if (!legacy.get("owner_id").equals(member))
-              throw new AurigaException(CommonErrors.NOT_FOUND);
-            var spec = WorkspaceService.spec(legacy);
-            var stopped =
-                spec.toBuilder()
-                    .setGeneration(spec.getGeneration() + 1)
-                    .setDesired(DesiredState.DESIRED_STATE_STOPPED)
-                    .clearSecrets()
-                    .build();
-            store.jdbc.update(
-                "UPDATE instance SET shared_rebuild_hold=true,spec=?,generation=?,ready=false,managed_credential=NULL,managed_model_credential=NULL,managed_credential_version=managed_credential_version+1 WHERE tenant_id=? AND id=?",
-                stopped.toByteArray(),
-                stopped.getGeneration(),
-                store.tenant(),
-                id);
-            store.jdbc.update(
-                "INSERT INTO instance_spec(id,tenant_id,instance_id,generation,spec,created_at) VALUES(?,?,?,?,?,?)",
-                UuidV7.next(),
-                store.tenant(),
-                id,
-                stopped.getGeneration(),
-                stopped.toByteArray(),
-                WorkspaceStore.time(clock.instant()));
-            store.jdbc.update(
-                "UPDATE workspace_job SET done=true WHERE tenant_id=? AND instance_id=? AND NOT done",
-                store.tenant(),
-                id);
-            var digest = inputs.authorizationSetDigest(store.tenant(), member);
-            valid(digest != null && digest.matches("sha256:[a-f0-9]{64}"));
-            store.jdbc.update(
-                "INSERT INTO shared_dsh_pool(id,tenant_id,mode,authorization_digest,state) VALUES(?,?,'dedicated',?,'ready')",
-                id,
-                store.tenant(),
-                digest);
-            store.jdbc.update(
-                "INSERT INTO shared_dsh_placement(id,tenant_id,member_id,pool_id,mode,state) VALUES(?,?,?,?,'dedicated','ready')",
-                UuidV7.next(),
-                store.tenant(),
-                member,
-                id);
-            UUID operation =
-                placements.rebuild(
-                    member,
-                    actor,
-                    Boolean.TRUE.equals(row.get("continue_dedicated")) ? "dedicated" : "shared",
-                    batch);
-            store.jdbc.update(
-                "UPDATE shared_dsh_maintenance SET state='accepted',operation_id=? WHERE tenant_id=? AND member_id=?",
-                operation,
-                store.tenant(),
-                member);
-          }
           return progressRows(batch);
         });
   }
@@ -212,7 +251,7 @@ public final class SharedDshMaintenance {
     return store
         .jdbc
         .queryForList(
-            "SELECT m.*,o.state AS operation_state,o.action,o.archive_id,o.archive_expires_at FROM shared_dsh_maintenance m LEFT JOIN shared_dsh_operation o ON o.tenant_id=m.tenant_id AND o.id=m.operation_id WHERE m.tenant_id=? AND m.batch_id=? ORDER BY m.member_id",
+            "SELECT m.*,o.state AS operation_state,o.action,o.archive_id,o.archive_expires_at,o.failure_code AS operation_failure FROM shared_dsh_maintenance m LEFT JOIN shared_dsh_operation o ON o.tenant_id=m.tenant_id AND o.id=m.operation_id WHERE m.tenant_id=? AND m.batch_id=? ORDER BY m.member_id",
             store.tenant(),
             batch)
         .stream()
@@ -222,14 +261,19 @@ public final class SharedDshMaintenance {
                     (UUID) r.get("member_id"),
                     (UUID) r.get("legacy_instance_id"),
                     Boolean.TRUE.equals(r.get("continue_dedicated")),
-                    "blocked".equals(r.get("operation_state"))
+                    java.util.Set.of("blocked", "failed")
+                            .contains(java.util.Objects.toString(r.get("operation_state"), ""))
                         ? "blocked"
                         : r.get("state").toString(),
                     (UUID) r.get("operation_id"),
                     (String) r.get("operation_state"),
                     (String) r.get("action"),
                     (UUID) r.get("archive_id"),
-                    (Long) r.get("archive_expires_at")))
+                    (Long) r.get("archive_expires_at"),
+                    (String)
+                        (r.get("operation_failure") != null
+                            ? r.get("operation_failure")
+                            : r.get("failure_code"))))
         .toList();
   }
 }

@@ -228,7 +228,7 @@ class WorkspaceIntegrationTest {
     assertEquals(
         generation,
         store.in(tenant, () -> ((Number) store.instance(id).get("generation")).longValue()));
-    assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(id))));
+    assertTrue(store.in(tenant, () -> service.dispatchable(store.instance(id))));
     assertEquals(
         DesiredState.DESIRED_STATE_STOPPED,
         store.in(tenant, () -> WorkspaceService.spec(store.instance(id)).getDesired()));
@@ -243,6 +243,26 @@ class WorkspaceIntegrationTest {
                             .setInstanceId(id.toString())
                             .build()))
             .getActive());
+    service.sharedPlacements(placements);
+    var migration =
+        TenantContext.call(tenant, () -> maintenance.progress(owner, session, batch)).getFirst();
+    clock.now = clock.instant().plusSeconds(31);
+    TenantContext.run(tenant, () -> service.tickTenant());
+    assertEquals(
+        "blocked",
+        TenantContext.call(tenant, () -> maintenance.progress(owner, session, batch))
+            .getFirst()
+            .operationState());
+    assertTrue(
+        store.in(
+                tenant,
+                () ->
+                    store.jdbc.queryForObject(
+                        "SELECT count(*) FROM shared_dsh_pool_stop WHERE tenant_id=? AND id=?",
+                        Long.class,
+                        tenant,
+                        migration.operation()))
+            > 0);
   }
 
   @Test

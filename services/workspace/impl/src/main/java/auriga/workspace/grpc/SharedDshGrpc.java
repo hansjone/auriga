@@ -11,9 +11,21 @@ import java.util.*;
 /** Mount behind the existing authenticated internal gRPC server, never a plaintext new listener. */
 public class SharedDshGrpc extends SharedDshServiceGrpc.SharedDshServiceImplBase {
   private final SharedDshAuthority authority;
+  private final Set<String> runtimeCallers;
 
   public SharedDshGrpc(SharedDshAuthority authority) {
+    this(authority, Set.of("svc:workspace", "svc:agent"));
+  }
+
+  /**
+   * Only authenticated node relays; plugins/browser peers never receive an internal service token.
+   */
+  public SharedDshGrpc(SharedDshAuthority authority, Set<String> runtimeCallers) {
+    if (runtimeCallers.isEmpty()
+        || !Set.of("svc:workspace", "svc:agent").containsAll(runtimeCallers))
+      throw new IllegalArgumentException("Untrusted runtime relay");
     this.authority = authority;
+    this.runtimeCallers = Set.copyOf(runtimeCallers);
   }
 
   private void caller(Set<String> allowed) {
@@ -57,7 +69,7 @@ public class SharedDshGrpc extends SharedDshServiceGrpc.SharedDshServiceImplBase
   @AuthenticatedOnly
   public void registerSharedDshSession(
       RegisterSharedDshSessionRequest r, StreamObserver<RegisterSharedDshSessionResponse> o) {
-    caller(Set.of("svc:workspace"));
+    caller(runtimeCallers);
     tenant(r.getBinding().getTenantId());
     o.onNext(
         RegisterSharedDshSessionResponse.newBuilder()
@@ -85,7 +97,7 @@ public class SharedDshGrpc extends SharedDshServiceGrpc.SharedDshServiceImplBase
   @AuthenticatedOnly
   public void getSharedDshResourceView(
       GetSharedDshResourceViewRequest r, StreamObserver<GetSharedDshResourceViewResponse> o) {
-    caller(Set.of("svc:workspace"));
+    caller(runtimeCallers);
     tenant(r.getBinding().getTenantId());
     o.onNext(
         GetSharedDshResourceViewResponse.newBuilder()
@@ -98,7 +110,7 @@ public class SharedDshGrpc extends SharedDshServiceGrpc.SharedDshServiceImplBase
   @AuthenticatedOnly
   public void reportSharedDshResource(
       ReportSharedDshResourceRequest r, StreamObserver<ReportSharedDshResourceResponse> o) {
-    caller(Set.of("svc:workspace"));
+    caller(runtimeCallers);
     tenant(r.getReport().getBinding().getTenantId());
     o.onNext(
         ReportSharedDshResourceResponse.newBuilder()

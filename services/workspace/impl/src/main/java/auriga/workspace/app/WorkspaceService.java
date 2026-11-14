@@ -47,6 +47,13 @@ public final class WorkspaceService {
   private volatile Runnable changed = () -> {};
   private volatile boolean managedNetworkRequired;
 
+  private volatile SharedDshPlacements sharedPlacements;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  public void sharedPlacements(SharedDshPlacements shared) {
+    this.sharedPlacements = shared;
+  }
+
   public void requireManagedNetworkCredentials() {
     managedNetworkRequired = true;
   }
@@ -56,7 +63,8 @@ public final class WorkspaceService {
   }
 
   public boolean dispatchable(Map<String, Object> row) {
-    if (Boolean.TRUE.equals(row.get("shared_rebuild_hold"))) return false;
+    if (Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
+      return spec(row).getDesired() == DesiredState.DESIRED_STATE_STOPPED;
     return !managedNetworkRequired
         || spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING
         || "disabled".equals(row.get("managed_network_state"))
@@ -825,6 +833,7 @@ public final class WorkspaceService {
   }
 
   public void tickTenant() {
+    if (sharedPlacements != null) sharedPlacements.recover();
     UUID tenant = store.tenant();
     var policy = inputs.policy(tenant);
     store.tx(

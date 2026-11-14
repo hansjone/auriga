@@ -188,4 +188,22 @@ class SharedDshPolicyTest {
       process.destroyForcibly();
     }
   }
+
+  @Test
+  void receiptAndArchiveIdsMustBeCanonicalUuids() {
+    var upper = UUID.randomUUID().toString().toUpperCase(Locale.ROOT);
+    assertTrue(SharedDshPolicy.uuid(upper));
+    var i = intent("cooperative-cancel");
+    assertFalse(SharedDshPolicy.confirms(i, receipt(i).setReceiptId("not-a-uuid").build(), 1000));
+    var a = intent("archive-reset");
+    assertFalse(
+        SharedDshPolicy.confirms(
+            a,
+            receipt(a)
+                .setWorkspaceEmpty(true)
+                .setArchiveId("bad")
+                .setArchiveExpiresAt(2593000)
+                .build(),
+            1000));
+  }
 }

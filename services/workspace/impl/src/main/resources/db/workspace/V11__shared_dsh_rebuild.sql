@@ -1,4 +1,4 @@
--- V10 may already have been applied; maintenance completion is a separate additive migration.
+-- Maintenance metadata supplements the shared DSH authority tables.
 ALTER TABLE instance ADD COLUMN shared_rebuild_hold boolean NOT NULL DEFAULT false;
 ALTER TABLE shared_dsh_maintenance ADD COLUMN batch_id uuid;
 ALTER TABLE shared_dsh_maintenance ADD COLUMN legacy_instance_id uuid;
