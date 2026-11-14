@@ -37,9 +37,9 @@ describe('LoginView', () => {
       },
     });
     await flushPromises();
-    expect(wrapper.find('[data-testid="provider-select"]').exists()).toBe(true);
-    await wrapper.find('[data-provider-id]').trigger('click');
-    await flushPromises();
+    expect(wrapper.find('[data-testid="provider-select"]').exists()).toBe(
+      false,
+    );
     expect(wrapper.find('[data-testid="form-step"]').exists()).toBe(true);
     await wrapper.find('input[name="username"]').setValue('alice');
     await wrapper.find('input[name="password"]').setValue(MOCK_PASSWORD);

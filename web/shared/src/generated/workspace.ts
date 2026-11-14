@@ -1,4 +1,28 @@
 export interface paths {
+  '/me/placement/open': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 创建或打开本人权威分配
+     * @description 仅 portal 会话；租户和成员来自认证上下文，验证 Origin/CSRF。
+     *     首次创建默认 shared；维护窗口旧成员先批量重建，不隐式删除旧数据。
+     *     同成员串行分配，容量及统一资源授权不匹配拒绝；非ready不发票。
+     *     ready 返回60秒一次性签名票据，交换前再次核权威 epoch。
+     *     URL 由可信部署入口映射产生；具体交换见 shared-dsh/README.md。
+     */
+    post: operations['openMyDshPlacement'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/me/placement': {
     parameters: {
       query?: never;
@@ -823,6 +847,14 @@ export interface components {
       /** @enum {string} */
       state: 'pending' | 'ready' | 'switching' | 'unavailable';
     };
+    DshPlacementOpen: {
+      placement: components['schemas']['DshPlacement'];
+      ticket: string;
+      /** Format: uri-reference */
+      exchangeUrl: string;
+      /** Format: int64 */
+      expiresAt: number;
+    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;
@@ -1168,6 +1200,39 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  openMyDshPlacement: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 本人分配已就绪，票据不得持久化或写日志。 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DshPlacementOpen'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      /** @description 分配未就绪、容量或资源授权冲突。 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   getMyDshPlacement: {
     parameters: {
       query?: never;
