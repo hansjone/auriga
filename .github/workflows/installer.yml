@@ -6,6 +6,10 @@ on:
     tags: ['desktop-v*']
   pull_request:
     paths:
+      - 'clients/shell-auth/**'
+      - 'contracts/plugin/**'
+      - 'scripts/plugin/**'
+      - '.github/workflows/auth-release-artifacts.yml'
       - 'clients/installer/**'
       - 'clients/dsh-plugin/**'
       - 'web/panel/**'
@@ -30,7 +34,10 @@ permissions:
   contents: read
 
 jobs:
+  auth-artifacts:
+    uses: ./.github/workflows/auth-release-artifacts.yml
   windows:
+    needs: auth-artifacts
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -54,6 +61,14 @@ jobs:
         shell: bash
       - name: Lint and unit tests (core, upgrade/rollback, version lock, secret scan)
         run: pnpm --filter @auriga/installer lint && pnpm --filter @auriga/installer test
+      - uses: actions/download-artifact@v4
+        with:
+          name: auth-broker
+          path: dist/broker
+      - uses: actions/download-artifact@v4
+        with:
+          name: auriga-dsh
+          path: dist/plugin
       - name: Build package and single-file setup exe
         working-directory: clients/installer
         shell: bash
@@ -75,7 +90,7 @@ jobs:
             extra+=(--release-public-key "$RUNNER_TEMP/desktop-public.pem")
           fi
           if [ -n "$PLATFORM_ORIGIN" ]; then extra+=(--platform-origin "$PLATFORM_ORIGIN"); fi
-          node scripts/build.mjs "${extra[@]}" --out "$RUNNER_TEMP/installer" --exe
+          node scripts/build.mjs --broker-artifact ../../dist/broker --plugin-tgz "$(ls ../../dist/plugin/*.tgz)" "${extra[@]}" --out "$RUNNER_TEMP/installer" --exe
           echo "INSTALLER_STAGE=$(ls -d "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64)" >> "$GITHUB_ENV"
           echo "INSTALLER_EXE=$(ls "$RUNNER_TEMP"/installer/Auriga-Desktop-Setup-*.exe)" >> "$GITHUB_ENV"
           echo "INSTALLER_ZIP=$(ls "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64.zip)" >> "$GITHUB_ENV"

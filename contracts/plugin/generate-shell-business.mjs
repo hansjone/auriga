@@ -88,6 +88,9 @@ const wire = (source, maxBytes = 65536) => ({
     source +
     '；保留原始受签字节，不经生成模型重序列化。',
 });
+defs.ShellAuthNetworkRegistration = {
+  $ref: '../network/register-result.schema.json',
+};
 const codes = [
   'common.validation_failed',
   'common.unauthenticated',
@@ -294,7 +297,19 @@ for (const [operation, input, output] of [
     obj({ streamId: uuid }),
     obj({ available: { type: 'boolean' } }),
   ],
-  ['network_open', obj({ executionContextId: uuid }), obj({ streamId: uuid })],
+  [
+    'network_open',
+    obj({ executionContextId: uuid }),
+    obj({
+      streamId: uuid,
+      registration: { $ref: '#/$defs/ShellAuthNetworkRegistration' },
+      binding: obj({
+        executionContextId: uuid,
+        shellEpoch: uuid,
+        revision: integer,
+      }),
+    }),
+  ],
   [
     'upload_open',
     obj({
@@ -342,19 +357,55 @@ for (const [operation, input, output] of [
   [
     'getNetworkKeys',
     obj({}),
-    obj({ wire: wire('network/keyset.schema.json#/$defs/SignedKeyset') }),
+    obj({
+      wire: wire(
+        'network/auto-renewal-v2.schema.json#/$defs/Publication',
+        33554432,
+      ),
+    }),
   ],
   [
     'getNetworkKeyAnnouncement',
     obj({}),
     obj({
-      wire: wire('network/protocol.schema.json#/$defs/KeysetAnnouncement'),
+      wire: wire(
+        'network/auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2',
+        33554432,
+      ),
+    }),
+  ],
+  [
+    'getPublicNetworkControl',
+    obj({}),
+    obj({
+      wire: wire(
+        'network/auto-renewal-v2.schema.json#/$defs/SignedRootControl',
+        33554432,
+      ),
+    }),
+  ],
+  [
+    'confirmNetworkControl',
+    obj({
+      receiptWire: wire(
+        'network/auto-renewal-v2.schema.json#/$defs/InstallationReceipt',
+      ),
+    }),
+    obj({
+      wire: wire('network/auto-renewal-v2.schema.json#/$defs/IsolationRecord'),
     }),
   ],
   [
     'profile_read',
     obj({}),
-    obj({ memberId: uuid, displayName: { type: 'string', maxLength: 256 } }),
+    obj({
+      memberId: {
+        ...uuid,
+        description:
+          'Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId).',
+      },
+      displayName: { type: 'string', maxLength: 256 },
+    }),
   ],
   ['provider_diagnostic', obj({}), obj({ available: { type: 'boolean' } })],
 ]) {
@@ -370,24 +421,47 @@ for (const [operation, input, output] of [
       operation.startsWith('team_') || operation === 'network_submit'
         ? 'auriga.ai-gateway'
         : 'auriga',
-    permission: 'auriga.connect',
+    permission:
+      operation === 'getPublicNetworkControl'
+        ? null
+        : operation === 'confirmNetworkControl'
+          ? 'collab.msgnet.control.install'
+          : ['getNetworkKeys', 'getNetworkKeyAnnouncement'].includes(operation)
+            ? 'collab.msgnet.read'
+            : 'auriga.connect',
+    ...([
+      'getNetworkKeys',
+      'getNetworkKeyAnnouncement',
+      'getPublicNetworkControl',
+      'confirmNetworkControl',
+    ].includes(operation)
+      ? {
+          authentication:
+            operation === 'getPublicNetworkControl' ? 'none' : 'bearer',
+          method: operation === 'confirmNetworkControl' ? 'post' : 'get',
+        }
+      : {}),
     stream: operation.includes('open'),
     retry: 'never',
     route: operation.startsWith('upload_')
       ? 'broker:upload'
       : operation === 'getNetworkKeys'
-        ? '/api/collab/v1/network/keys'
+        ? '/api/collab/v2/network/keys'
         : operation === 'getNetworkKeyAnnouncement'
-          ? '/api/collab/v1/network/keys/announcement'
-          : operation.startsWith('team_')
-            ? '/ai/mcp'
-            : operation === 'network_submit'
-              ? '/api/ai/v1/network/submit'
-              : operation.startsWith('network_')
-                ? 'broker:nats'
-                : operation === 'profile_read'
-                  ? '/api/iam/v1/me'
-                  : '/api/iam/v1/login/providers',
+          ? '/api/collab/v2/network/keys/announcement'
+          : operation === 'getPublicNetworkControl'
+            ? '/api/collab/v2/network/bootstrap/controls'
+            : operation === 'confirmNetworkControl'
+              ? '/api/collab/v2/network/controls/receipts'
+              : operation.startsWith('team_')
+                ? '/ai/mcp'
+                : operation === 'network_submit'
+                  ? '/api/ai/v1/network/submit'
+                  : operation.startsWith('network_')
+                    ? 'broker:nats'
+                    : operation === 'profile_read'
+                      ? '/api/iam/v1/me/device-profile'
+                      : '/api/iam/v1/login/providers',
   });
   arms.push(
     obj({
@@ -576,7 +650,20 @@ defs.ShellAuthStreamEvent.allOf = [
 for (const operation of operations) {
   operation.requestHeaders ??= [];
   operation.responseHeaders ??= ['content-type', 'retry-after'];
-  const bodySchema = defs[operation.output];
+  const ticketWire = [
+    'UnifiedCreateDownloadTicket',
+    'UnifiedRenewInstallation',
+    'createMemberResourceDownloadTicket',
+  ].includes(operation.operation);
+  const bodySchema = ticketWire
+    ? obj({
+        wire: {
+          ...wire('original download ticket response'),
+          minLength: 4,
+          allOf: [{ if: { minLength: 87384 }, then: { pattern: '==$' } }],
+        },
+      })
+    : defs[operation.output];
   defs[operation.output] = obj(
     {
       statusCode: { type: 'integer', minimum: 200, maximum: 299 },

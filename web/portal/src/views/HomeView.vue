@@ -7,7 +7,7 @@ import {
   ElDropdownItem,
   ElDropdownMenu,
 } from 'element-plus';
-import { isApiError, type Me } from '@auriga/shared';
+import { BrandMark, isApiError, type Me } from '@auriga/shared';
 import { iamApi, redirectToLogin } from '../api';
 import {
   loginInfoText,
@@ -15,8 +15,10 @@ import {
 } from '../../../shared/src/native-login/login-info';
 import InstanceCard from '../components/InstanceCard.vue';
 import DesktopDownload from '../components/DesktopDownload.vue';
+import { portalMessages } from '../portal-messages';
 
 const { t, locale } = useI18n();
+const { t: portalT } = useI18n({ useScope: 'local', messages: portalMessages });
 const me = ref<Me | null>(null);
 const loginInfo = ref<Me['uacLoginInfo']>();
 const department = computed(() => loginInfoText(loginInfo.value, locale.value));
@@ -88,8 +90,13 @@ async function logout() {
 <template>
   <div class="shell">
     <header class="topbar">
-      <strong class="brand">{{ t('brand') }}</strong>
+      <RouterLink class="brand" to="/" :aria-label="t('home.title')"
+        ><BrandMark :size="28" />{{ t('brand') }}</RouterLink
+      >
       <nav class="actions">
+        <RouterLink class="security-link" to="/account/security">{{
+          portalT('security')
+        }}</RouterLink>
         <ElButton text @click="language">{{ t('language') }}</ElButton>
         <ElButton text @click="theme">{{ t('theme') }}</ElButton>
         <ElDropdown v-if="me">
@@ -135,12 +142,29 @@ async function logout() {
   backdrop-filter: blur(16px);
 }
 .brand {
-  letter-spacing: 0.12em;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: -0.02em;
 }
 .actions {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 0.25rem;
+}
+.security-link {
+  color: var(--auriga-text);
+  font-size: 14px;
+  margin-right: 12px;
+  text-decoration: none;
+}
+.topbar {
+  flex-wrap: wrap;
+  gap: 12px;
 }
 .content {
   margin: 2rem auto;

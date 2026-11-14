@@ -2,6 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ShellAuth 固定业务操作",
   "$defs": {
+    "ShellAuthNetworkRegistration": {
+      "$ref": "../network/register-result.schema.json"
+    },
     "ShellAuthUploadReference": {
       "type": "object",
       "additionalProperties": false,
@@ -1796,7 +1799,32 @@
           "required": []
         },
         "body": {
-          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket"
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wire": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "contentMediaType": "application/json",
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "maxLength": 87384,
+              "description": "解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。",
+              "minLength": 4,
+              "allOf": [
+                {
+                  "if": {
+                    "minLength": 87384
+                  },
+                  "then": {
+                    "pattern": "==$"
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "wire"
+          ]
         }
       },
       "required": [
@@ -4564,7 +4592,32 @@
           "required": []
         },
         "body": {
-          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadTicket"
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wire": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "contentMediaType": "application/json",
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "maxLength": 87384,
+              "description": "解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。",
+              "minLength": 4,
+              "allOf": [
+                {
+                  "if": {
+                    "minLength": 87384
+                  },
+                  "then": {
+                    "pattern": "==$"
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "wire"
+          ]
         }
       },
       "required": [
@@ -5375,7 +5428,32 @@
           "required": []
         },
         "body": {
-          "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedDownloadTicket"
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wire": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "contentMediaType": "application/json",
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "maxLength": 87384,
+              "description": "解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。",
+              "minLength": 4,
+              "allOf": [
+                {
+                  "if": {
+                    "minLength": 87384
+                  },
+                  "then": {
+                    "pattern": "==$"
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "wire"
+          ]
         }
       },
       "required": [
@@ -6750,10 +6828,40 @@
             "streamId": {
               "type": "string",
               "format": "uuid"
+            },
+            "registration": {
+              "$ref": "#/$defs/ShellAuthNetworkRegistration"
+            },
+            "binding": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "executionContextId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "shellEpoch": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "revision": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "executionContextId",
+                "shellEpoch",
+                "revision"
+              ]
             }
           },
           "required": [
-            "streamId"
+            "streamId",
+            "registration",
+            "binding"
           ]
         }
       },
@@ -7074,8 +7182,8 @@
               "contentEncoding": "base64",
               "contentMediaType": "application/json",
               "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
-              "maxLength": 87384,
-              "description": "解码后最多65536字节，必须严格验证 network/keyset.schema.json#/$defs/SignedKeyset；保留原始受签字节，不经生成模型重序列化。"
+              "maxLength": 44739244,
+              "description": "解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/Publication；保留原始受签字节，不经生成模型重序列化。"
             }
           },
           "required": [
@@ -7127,8 +7235,125 @@
               "contentEncoding": "base64",
               "contentMediaType": "application/json",
               "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "maxLength": 44739244,
+              "description": "解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2；保留原始受签字节，不经生成模型重序列化。"
+            }
+          },
+          "required": [
+            "wire"
+          ]
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
+    },
+    "ShellAuthInput_getPublicNetworkControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "required": []
+    },
+    "ShellAuthOutput_getPublicNetworkControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wire": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "contentMediaType": "application/json",
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "maxLength": 44739244,
+              "description": "解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/SignedRootControl；保留原始受签字节，不经生成模型重序列化。"
+            }
+          },
+          "required": [
+            "wire"
+          ]
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
+    },
+    "ShellAuthInput_confirmNetworkControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "receiptWire": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "contentMediaType": "application/json",
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "maxLength": 87384,
+          "description": "解码后最多65536字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/InstallationReceipt；保留原始受签字节，不经生成模型重序列化。"
+        }
+      },
+      "required": [
+        "receiptWire"
+      ]
+    },
+    "ShellAuthOutput_confirmNetworkControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wire": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "contentMediaType": "application/json",
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
               "maxLength": 87384,
-              "description": "解码后最多65536字节，必须严格验证 network/protocol.schema.json#/$defs/KeysetAnnouncement；保留原始受签字节，不经生成模型重序列化。"
+              "description": "解码后最多65536字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/IsolationRecord；保留原始受签字节，不经生成模型重序列化。"
             }
           },
           "required": [
@@ -7177,7 +7402,8 @@
           "properties": {
             "memberId": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "description": "Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId)."
             },
             "displayName": {
               "type": "string",
@@ -8827,6 +9053,40 @@
               "properties": {
                 "operation": {
                   "type": "string",
+                  "const": "getPublicNetworkControl"
+                },
+                "input": {
+                  "$ref": "#/$defs/ShellAuthInput_getPublicNetworkControl"
+                }
+              },
+              "required": [
+                "operation",
+                "input"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "operation": {
+                  "type": "string",
+                  "const": "confirmNetworkControl"
+                },
+                "input": {
+                  "$ref": "#/$defs/ShellAuthInput_confirmNetworkControl"
+                }
+              },
+              "required": [
+                "operation",
+                "input"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "operation": {
+                  "type": "string",
                   "const": "profile_read"
                 },
                 "input": {
@@ -10066,6 +10326,50 @@
             },
             "operation": {
               "type": "string",
+              "const": "getPublicNetworkControl"
+            },
+            "output": {
+              "$ref": "#/$defs/ShellAuthOutput_getPublicNetworkControl"
+            }
+          },
+          "required": [
+            "requestId",
+            "operation",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "confirmNetworkControl"
+            },
+            "output": {
+              "$ref": "#/$defs/ShellAuthOutput_confirmNetworkControl"
+            }
+          },
+          "required": [
+            "requestId",
+            "operation",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
               "const": "profile_read"
             },
             "output": {
@@ -10356,6 +10660,8 @@
                 "network_submit",
                 "getNetworkKeys",
                 "getNetworkKeyAnnouncement",
+                "getPublicNetworkControl",
+                "confirmNetworkControl",
                 "profile_read",
                 "provider_diagnostic",
                 "team_list_endpoints",

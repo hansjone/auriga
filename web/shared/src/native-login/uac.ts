@@ -3,6 +3,7 @@ import type { IamApi } from '../api/iam';
 import { isApiError } from '../api/problem';
 import { qrcodegen } from './qr/qrcodegen';
 import { validCorrelationId } from '../api/correlation';
+import './uac.css';
 
 type Navigation = components['schemas']['UacNavigationContext'];
 type Challenge = components['schemas']['UacChallenge'];
@@ -34,6 +35,7 @@ const messages = {
     warning: '请仅为本人扫码，避免转发二维码或共享屏幕。',
     qr: '登录二维码',
     reference: '关联编号',
+    validity: '二维码有效期',
   },
   en: {
     preparing: 'Preparing QR code',
@@ -59,11 +61,19 @@ const messages = {
     warning: 'Scan only for yourself. Do not share this code or your screen.',
     qr: 'Sign-in QR code',
     reference: 'Reference',
+    validity: 'QR code validity',
   },
 };
 type State = Exclude<
   keyof typeof messages.en,
-  'retry' | 'cancel' | 'proceed' | 'reload' | 'warning' | 'qr' | 'reference'
+  | 'retry'
+  | 'cancel'
+  | 'proceed'
+  | 'reload'
+  | 'warning'
+  | 'qr'
+  | 'reference'
+  | 'validity'
 >;
 type Stage = 'sso' | 'challenge' | 'status' | 'complete' | 'cancel';
 
@@ -92,6 +102,7 @@ export function createUacLoginView(
   options: UacLoginOptions,
 ) {
   const doc = root.ownerDocument;
+  root.classList.add('auriga-uac');
   let locale: 'en' | 'zh-CN' = options.locale?.startsWith('en')
     ? 'en'
     : 'zh-CN';
@@ -103,6 +114,9 @@ export function createUacLoginView(
     proof = options.navigation;
   let timer: ReturnType<typeof setTimeout> | undefined,
     expiry: ReturnType<typeof setTimeout> | undefined;
+  let clock: ReturnType<typeof setTimeout> | undefined;
+  let deadline = 0,
+    lifetime = 0;
   let flight: Promise<unknown> | undefined,
     mutating: Stage | undefined,
     correlationId = validCorrelationId(options.initialCorrelationId);
@@ -123,23 +137,68 @@ export function createUacLoginView(
   reference.dataset.testid = 'uac-reference';
   const qr = doc.createElement('div'),
     warning = doc.createElement('p');
+  qr.className = 'uac-code';
+  const frame = doc.createElement('div'),
+    overlay = doc.createElement('div'),
+    symbol = doc.createElement('span');
+  frame.className = 'uac-frame';
+  overlay.className = 'uac-overlay';
+  const overlayCaption = doc.createElement('p');
+  overlayCaption.className = 'uac-overlay-caption';
+  overlayCaption.setAttribute('aria-hidden', 'true');
+  symbol.className = 'uac-symbol';
+  symbol.setAttribute('aria-hidden', 'true');
+  overlay.append(symbol, overlayCaption);
+  frame.append(qr, overlay);
+  const countdown = doc.createElement('div'),
+    remaining = doc.createElement('span'),
+    progress = doc.createElement('progress');
+  countdown.className = 'uac-countdown';
+  remaining.dataset.testid = 'uac-countdown';
+  countdown.append(remaining);
+  frame.append(progress);
+  const statusRow = doc.createElement('div');
+  statusRow.className = 'uac-status-row';
+  statusRow.append(status, countdown);
+  const actions = doc.createElement('div');
+  actions.className = 'uac-actions';
+  status.className = 'uac-caption';
+  warning.className = 'uac-warning';
+  reference.className = 'uac-reference';
   const retry = doc.createElement('button'),
     cancel = doc.createElement('button');
   const proceed = doc.createElement('button'),
     reload = doc.createElement('button');
   for (const button of [retry, cancel, proceed, reload]) button.type = 'button';
-  root.replaceChildren(
-    target,
-    status,
-    reference,
-    qr,
-    warning,
-    proceed,
-    retry,
-    cancel,
-    reload,
-  );
+  cancel.className = 'uac-cancel';
+  actions.append(proceed, retry, cancel, reload);
+  root.replaceChildren(target, frame, statusRow, warning, actions, reference);
   const current = (version: number) => !disposed && epoch === version;
+  function updateCountdown() {
+    const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    countdown.hidden = !deadline || !['waiting', 'scanned'].includes(state);
+    progress.hidden = countdown.hidden;
+    remaining.textContent =
+      Math.floor(seconds / 60)
+        .toString()
+        .padStart(2, '0') +
+      ':' +
+      (seconds % 60).toString().padStart(2, '0');
+    remaining.setAttribute('aria-label', messages[locale].validity);
+    progress.setAttribute('aria-label', messages[locale].validity);
+    progress.max = Math.max(1, lifetime);
+    progress.value = Math.max(0, deadline - Date.now());
+  }
+  function startClock(remainingMs: number) {
+    lifetime = Math.min(remainingMs, 120000);
+    deadline = Date.now() + lifetime;
+    const tick = () => {
+      if (disposed || !deadline) return;
+      updateCountdown();
+      clock = setTimeout(tick, 1000);
+    };
+    tick();
+  }
   function render() {
     if (disposed) return;
     const words = messages[locale];
@@ -148,18 +207,39 @@ export function createUacLoginView(
       options.targetName?.en ??
       (locale === 'en' ? 'Company sign-in' : '企业登录');
     root.dataset.uacState = state;
+    const refreshInFrame = state === 'expired';
+    overlay.hidden = state === 'waiting';
+    symbol.hidden = refreshInFrame;
+    symbol.textContent = ['scanned', 'authenticated'].includes(state)
+      ? '✓'
+      : ['preparing', 'sso', 'completing'].includes(state)
+        ? '···'
+        : ['denied', 'failed'].includes(state)
+          ? '×'
+          : '!';
+    overlayCaption.textContent = words[state];
+    retry.classList.toggle('uac-refresh', refreshInFrame);
+    if (refreshInFrame) overlay.append(retry);
+    else actions.prepend(retry);
     status.textContent = words[state];
     reference.textContent = correlationId
       ? words.reference + ': ' + correlationId
       : '';
     reference.hidden = !correlationId;
     warning.textContent = words.warning;
+    frame.title = [words.warning, reference.textContent]
+      .filter(Boolean)
+      .join('\n');
     retry.textContent = words.retry;
+    retry.setAttribute('aria-label', words.retry);
     cancel.textContent = words.cancel;
     proceed.textContent = words.proceed;
     reload.textContent = words.reload;
     const needsReload = state === 'uncertain' || state === 'invalid_request';
-    retry.hidden = completed || needsReload;
+    retry.hidden =
+      completed ||
+      needsReload ||
+      !['expired', 'continue_required'].includes(state);
     retry.disabled = busy() || Date.now() < retryAt;
     cancel.hidden =
       completed ||
@@ -177,6 +257,7 @@ export function createUacLoginView(
     reload.hidden = !needsReload;
     root.setAttribute('aria-busy', String(busy()));
     qr.querySelector('svg')?.setAttribute('aria-label', words.qr);
+    updateCountdown();
   }
   function show(value: State) {
     state = value;
@@ -186,6 +267,9 @@ export function createUacLoginView(
     clearTimeout(timer);
     clearTimeout(expiry);
     clearTimeout(retryTimer);
+    clearTimeout(clock);
+    deadline = 0;
+    lifetime = 0;
     retryAt = 0;
     qr.replaceChildren();
   }
@@ -426,6 +510,7 @@ export function createUacLoginView(
         throw new Error('Invalid polling interval');
       challenge = value;
       image(value.qrContent);
+      startClock(remaining);
       expiry = setTimeout(
         () => {
           if (current(version)) {
@@ -508,6 +593,7 @@ export function createUacLoginView(
       disposed = true;
       const cleanup = invalidate();
       root.replaceChildren();
+      root.classList.remove('auriga-uac');
       await Promise.allSettled([cleanup, operation]);
     },
   };

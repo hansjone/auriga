@@ -28,6 +28,8 @@
 | `instance.stopped` | workspace | `instance.schema.json#/$defs/InstanceStopped` | audit、计量、collab |
 | `instance.failed` | workspace | `instance.schema.json#/$defs/InstanceFailed` | audit、collab（通知本人和管理员） |
 | `instance.deleted` | workspace | `instance.schema.json#/$defs/InstanceDeleted` | audit |
+| `placement.switched` | workspace | `placement.schema.json#/$defs/PlacementSwitched` | audit |
+| `placement.switch_failed` | workspace | `placement.schema.json#/$defs/PlacementSwitchFailed` | audit |
 | `audit.recorded` | 所有服务 | `audit.schema.json#/$defs/AuditRecorded` | audit |
 
 M3新增`usage.recorded`、`resource.version_published`、`resource.version_withdrawn`、
@@ -39,6 +41,8 @@ unknown用量显式null，不伪造0；事件不带prompt、响应正文、secre
 现有common事件生产方白名单实现仍须后续接入此目录，不能因新增schema就声称消费方已支持。
 `knowledge.*`仍留未来里程碑另定。
 
+共享 DSH 分配事件的 source、subject 和发布 ACL 也登记在 `catalog/m3.json`，subject 为 placementId。实现工作线完成生产与消费接线后启用。
+
 ## 统一资源事件
 
 - `resource.catalog_version_published` 对应 `resource.schema.json#/$defs/UnifiedResourceVersionPublished`。
@@ -46,3 +50,10 @@ unknown用量显式null，不伪造0；事件不带prompt、响应正文、secre
 - `resource.catalog_distribution_requested` 对应 `resource.schema.json#/$defs/UnifiedResourceDistributionRequested`。
 
 生产方均为 resource，消费方为 workspace、audit。统一事件仅使用 manifestDigest/artifactDigests，旧事件的 digest 继续表示插件归档摘要。分发选择携带精确 identity，重试同 selectionRevision 必须锁定同一组字节。
+## 共享 DSH 首期增补
+
+`placement.revoked` 由 workspace outbox 生产，subject=placementId，消费者 edge/ai-gateway/audit；节点仅经 NodeControl 字段11接收，不订阅此NATS事件。
+`placement.resource_reported`、`placement.guardian_impact` 的原始数据由节点经 mTLS NodeControl 上报，workspace 验证节点调度归属后通过 outbox 发布，source=auriga/workspace，消费者为audit；subject分别取 binding.placementId、physicalInstanceId。节点来源由受认证NodeControl连接及调度归属验证，不接受客户端自报source。
+数据定义见 `shared-dsh/shared-dsh.schema.json` 的 Revocation/ResourceReport/GuardianImpact，目录见 catalog/m3.json。
+沿 CloudEvents 信封 tenant，ResourceReport 与 GuardianImpact 的嵌套 binding 租户必须一致；同 operationId/receiptId 或 viewId+binding+observedAt 去重，旧epoch/revision不得覆盖新状态。
+撤销推送辅助及时断连，实时授权仍须查权威；节点断线不是停止收据。

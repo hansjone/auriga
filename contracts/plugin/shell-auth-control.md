@@ -89,3 +89,39 @@ url 必须 HTTPS、无 userinfo，hostname 精确匹配部署 outboundAllowedHos
 仅本地错误沿原型 `{error,message,sessionId?}`（sessionId兼容null），用error字段与出站结果区分：raw关闭403、认证或归属失败401、非本机403、非法400、未就绪503、请求运输失败502 upstream_failed、host_not_allowed403；不是Problem。上游HTTP500本身不是本地upstream_failed。message只给本地安全映射，不拼接可能带凭据的异常原文。这里是loopback HTTP加任务能力认证，业务代理端口才是受认证OS IPC。
 
 DSH_TEAM_BASE/DSH_TEAM_TASK_CAPABILITY、已有 DSH_SESSION_ID、DSH_WEB_URL 回退与 DSH_TEAM_HELPERS 保持；uds-skill-auth/scripts/uds_skill_auth.py 的 request()/resolve(apply_env_aliases=False) 不变。默认任务 outbound+credentials，关闭 raw 后仅 outbound；执行结束/撤销/jobs结束清能力。平台 token 不进全局环境，读取/代发前与结果提交时核认证代次，换发后下次读新值，退出后拒绝。凭据副本仅进本人 skill 进程内存，工具结果只交业务数据。
+
+## AUTH-K3：注册投影、下载票原始字节与发布制品
+
+`network_open` 输入仍只有 `executionContextId`，必须是当前已验证插件连接的存活原生 session 句柄。
+成功 body 为 `{streamId,registration,binding}`。registration 冻结为平台确认的
+`{tenant,realm,node,device,systemAddress,created}`；created 仅触发本次注册的首次 network_open 可消费一次；同连接再次打开或 requestId 重放均返回 false，不能持久化历史 true。结构直接引用 network/register-result.schema.json。
+C 核验 tenant/device 与当前登录、realm 与安装配置、systemAddress 与规范系统地址一致；realm/node 为正 uint64 十进制字符串。
+`binding={executionContextId,shellEpoch,revision}` 来自 C 当前上下文，句柄经 K2 绑定实际 hostSessionId 和 OS peer。
+D 先核对 binding 与当次请求再使用身份；注销、换代、会话撤销/到期、流关闭均须清除此投影。
+缓存重放重新检查会话句柄与流。选择扩展 network_open，使身份与已完成注册的连接原子返回，避免独立注册操作重复消费注册或产生脱离连接的身份。
+
+`UnifiedCreateDownloadTicket`、`UnifiedRenewInstallation`、`createMemberResourceDownloadTicket` 成功输出 body 改为 `{wire}`。
+wire 是完整 HTTP 成功响应 body 的标准 Base64，非某个 JSON 字段；C 在任何 JSON.parse 之前保留，非空、最多 65536 字节，返回前检查当前代次。
+D 解码后须严格词法解析，再依原资源契约校验签名封套、主体、用途和期限；重复键、1e0 等非法词法由 D 拒绝，不可先 JSON.parse 再 stringify。
+C 不替 D 宣称验签通过；错误响应仍走既有安全错误映射。共享向量 `test/auth-k3-fixtures.json` 要求 wire 逐字节保真。
+其余操作没有 wire 通道，D 不得提供任意 URL/header 或注册身份字段。
+
+`profile_read` 固定读取 `/api/iam/v1/me/device-profile`，memberId 取已验证 device-session；account.id 与设备 JWT sub（accountId）比较，account.tenantId 与当前 tenant 比较，displayName 取 account。accountId/memberId 可不同；IAM 设备在线资料接口和迁移依据见 K2 shell-auth-host.md。
+`provider_diagnostic.available` 表示已启用 providers.items 中存在当前登录的 providerId；空表或仅其他源为 false。
+非法结构拒绝，输出仍是严格固定 DTO，额外 account/session/provider 数据不传给 D。
+
+两个发布入口复用 `.github/workflows/auth-release-artifacts.yml`：每次调用只构建一次 broker/helper，以该目录打包插件，再传 auth-broker 与 auriga-dsh 制品给 Desktop 组装或插件发布。
+Desktop 显式传 `--broker-artifact` 和该次 `--plugin-tgz`；插件打包也必须传 `--broker-artifact`。
+消费者检查 manifest 文件摘要、路径及 helper 必需项；缺失、篡改、未列出文件均拒绝，不回退重新编译。
+Desktop 按 manifest 校验插件内全部文件，并逐文件比较插件与安装 broker 字节相同。不同发布运行不假设 C# 重编结果一致。
+本地验证：`node --test clients/shell-auth/test/artifact.test.mjs scripts/plugin/package.test.mjs`，检查一次构建的两消费者字节、打包后 manifest/helper 及缺失/篡改拒绝。
+
+迁移说明：以上三个下载票操作原有 DTO 输出已移除，不再双发；D 必须从 wire 解码原始字节、严格词法解析及验签后自行生成业务 DTO。所有消费者应与此契约同步升级，不得将 wire 当旧 DTO 使用。
+
+## MSGNET v2 固定控制操作
+
+`getNetworkKeys` / `getNetworkKeyAnnouncement` 分别读取 `/api/collab/v2/network/keys` 和 `/api/collab/v2/network/keys/announcement`，消费 `Publication` / `SignedKeysetAnnouncementV2`，权限 `collab.msgnet.read`。受签原文以 base64 wire 返回，解码上限 32MiB；协议帧和信封仍沿用 64KiB 上限。
+
+`getPublicNetworkControl` 独立 GET `/api/collab/v2/network/bootstrap/controls`，平台请求不带 Authorization，不依赖消息连接或 `network_open` 权限。`confirmNetworkControl` 独立 POST `/api/collab/v2/network/controls/receipts`，权限 `collab.msgnet.control.install`，仅发送本地已持久化的安装签名回执；响应 `IsolationRecord` 的 scope、revision、digest、challenge 完全匹配后才清除待报标记。它们与调用点清单一一对应，均不接受 URL、header、pin 或私钥路径参数。本地 broker 的主人/epoch/revision 门禁仍适用。
+
+桌面 broker 使用同一生产 v2 信任库，tenant/realm 和安装身份从可信设备及安装配置派生，根控制隔离立即关闭现存连接；公有控制与回执操作可在没有 NATS 连接时执行。安装器通过受保护 pin/私钥文件提供独立身份，与插件安装说明一致。

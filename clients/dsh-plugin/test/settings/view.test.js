@@ -110,6 +110,49 @@ const signedIn = {
   models: { available: false },
 };
 
+test('native settings imports a selected public file while signed out and offers the signed receipt', async (t) => {
+  const calls = [];
+  const f = harness(async (url, init) => {
+    if (url.endsWith('/network-control')) {
+      calls.push(init);
+      return Response.json({ receipt: { package_id: 'public-receipt' } });
+    }
+    return Response.json(
+      url.endsWith('/status')
+        ? { loggedIn: false }
+        : { ...settings, networkControl: { available: true } },
+    );
+  });
+  t.after(() => f.dispose());
+  f.render();
+  await setImmediate();
+  let tree = f.render();
+  const input = nodes(tree).find(
+    (n) => n.type === 'input' && n.props.type === 'file',
+  );
+  assert.equal(input.props.disabled, false);
+  await input.props.onChange({
+    target: { files: [{ size: 42, text: async () => 'original public JSON' }] },
+  });
+  tree = f.render();
+  const submit = button(tree, '导入控制包');
+  assert.equal(submit.props.disabled, false);
+  await submit.props.onClick();
+  assert.deepEqual(JSON.parse(calls[0].body), {
+    packageJson: 'original public JSON',
+  });
+  assert.equal(calls[0].headers['X-Auriga-Settings'], '1');
+  tree = f.render();
+  assert.match(text(tree), /联网后自动提交确认/);
+  const download = nodes(tree).find(
+    (n) => n.type === 'a' && n.props.download === 'auriga-control-receipt.json',
+  );
+  assert.deepEqual(
+    JSON.parse(decodeURIComponent(download.props.href.split(',')[1])),
+    { package_id: 'public-receipt' },
+  );
+});
+
 test('Desktop download survives the status deadline and displays the queued result', async (t) => {
   mockTimeouts(t);
   let finishDownload,

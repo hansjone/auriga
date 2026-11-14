@@ -1,3 +1,4 @@
+import { evaluateK3 } from './msgnet-v2-k3-oracle.mjs';
 // 仅契约参考判定器；生产实现必须通过文档定义的adapter独立消费全部数据。
 import { createPublicKey, verify } from 'node:crypto';
 import { jcs, digest, evaluate } from './msgnet-v2-oracle.mjs';
@@ -41,6 +42,12 @@ export function evaluateBoundary(v) {
   try {
     const i = v.input;
     switch (v.operation) {
+      case 'transport_catchup':
+      case 'transport_transition':
+      case 'transport_confirmation':
+      case 'node_control_binding':
+      case 'projection_access':
+        return evaluateK3(v);
       case 'signature_domain':
         check(i.signed, i.verification_domain, i.verification_spki);
         break;

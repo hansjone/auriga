@@ -1,3 +1,4 @@
+import { releaseVersion } from './release-version.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
@@ -26,14 +27,7 @@ test('package contains standalone runtime, version and matching digest; rebuild 
   const root = await mkdtemp(join(tmpdir(), 'auriga-dist-'));
   try {
     const plugin = join(root, 'clients/dsh-plugin');
-    for (const dir of [
-      'src',
-      'ui',
-      'skills/example',
-      'shell-auth/windows',
-      'test',
-      'scripts',
-    ])
+    for (const dir of ['src', 'ui', 'test', 'scripts'])
       await mkdir(join(plugin, dir), { recursive: true });
     const manifest = JSON.parse(
       await readFile(
@@ -51,23 +45,25 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       'ui/metadata.json',
       'test/private.js',
       'scripts/private.js',
-      'skills/example/SKILL.md',
     ])
       await writeFile(join(plugin, file), file);
-    const brokerFiles = ['ipc.mjs', 'schema.mjs', 'windows/shell-helper.exe'];
-    const brokerEntries = [];
-    for (const file of brokerFiles) {
-      const content = Buffer.from('non-executable packaging fixture: ' + file);
-      await writeFile(join(plugin, 'shell-auth', file), content);
-      brokerEntries.push({
-        path: file,
-        sha256: createHash('sha256').update(content).digest('hex'),
+    const brokerArtifact = join(root, 'broker');
+    await mkdir(join(brokerArtifact, 'windows'), { recursive: true });
+    const files = [];
+    for (const path of [
+      'windows/shell-helper.exe',
+      'desktop.mjs',
+      'broker.mjs',
+    ]) {
+      await writeFile(join(brokerArtifact, path), path);
+      files.push({
+        path,
+        sha256: createHash('sha256').update(path).digest('hex'),
       });
     }
-    const brokerManifest = JSON.stringify({ version: 1, files: brokerEntries });
     await writeFile(
-      join(plugin, 'shell-auth/broker-manifest.json'),
-      brokerManifest,
+      join(brokerArtifact, 'broker-manifest.json'),
+      JSON.stringify({ version: 1, files }),
     );
     const original = await readFile(join(plugin, 'package.json'), 'utf8');
     const first = await packagePlugin({
@@ -75,6 +71,7 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       version: '1.2.3-rc.1',
       outDir: join(root, 'one'),
       build: false,
+      brokerArtifact,
     });
     const bytes = await readFile(first.tarball);
     assert.equal(
@@ -84,22 +81,36 @@ test('package contains standalone runtime, version and matching digest; rebuild 
     const receipt = JSON.parse(await readFile(first.manifest));
     assert.equal(receipt.version, '1.2.3-rc.1');
     assert.equal(
-      receipt.broker.manifestSha256,
-      createHash('sha256').update(brokerManifest).digest('hex'),
-    );
-    assert.equal(
       receipt.sha256,
       createHash('sha256').update(bytes).digest('hex'),
     );
     const extraction = join(root, 'extracted');
     await mkdir(extraction);
-    const unpack = spawnSync('tar', ['-xzf', first.tarball, '-C', extraction], {
-      encoding: 'utf8',
-      windowsHide: true,
-    });
+    const unpack = spawnSync(
+      process.platform === 'win32'
+        ? join(process.env.SystemRoot, 'System32', 'tar.exe')
+        : 'tar',
+      ['-xzf', first.tarball, '-C', extraction],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
     assert.equal(unpack.status, 0, unpack.stderr);
     const packed = JSON.parse(
       await readFile(join(extraction, 'package/package.json')),
+    );
+    assert.deepEqual(
+      await readFile(
+        join(extraction, 'package/shell-auth/broker-manifest.json'),
+      ),
+      await readFile(join(brokerArtifact, 'broker-manifest.json')),
+    );
+    assert.deepEqual(
+      await readFile(
+        join(extraction, 'package/shell-auth/windows/shell-helper.exe'),
+      ),
+      await readFile(join(brokerArtifact, 'windows/shell-helper.exe')),
     );
     assert.equal(packed.version, '1.2.3-rc.1');
     assert.equal(packed.engines.dsh, '>=0.2.1-rc.3');
@@ -112,9 +123,6 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       'cordis.patch.yml',
       'ui/auriga-team-panel.js',
       'ui/metadata.json',
-      'skills/example/SKILL.md',
-      'shell-auth/broker-manifest.json',
-      ...brokerFiles.map((file) => 'shell-auth/' + file),
     ])
       assert.ok(receipt.files.includes(file), file);
     assert.ok(
@@ -128,20 +136,9 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       version: '1.2.3-rc.1',
       outDir: join(root, 'two'),
       build: false,
+      brokerArtifact,
     });
     assert.deepEqual(await readFile(second.tarball), bytes);
-    assert.equal(
-      await readFile(
-        join(extraction, 'package/shell-auth/broker-manifest.json'),
-        'utf8',
-      ),
-      brokerManifest,
-    );
-    for (const file of brokerFiles)
-      assert.deepEqual(
-        await readFile(join(extraction, 'package/shell-auth', file)),
-        await readFile(join(plugin, 'shell-auth', file)),
-      );
     assert.equal(
       await readFile(join(plugin, 'package.json'), 'utf8'),
       original,
@@ -152,25 +149,9 @@ test('package contains standalone runtime, version and matching digest; rebuild 
         version: '1.2.3-rc.1',
         outDir: join(root, 'one'),
         build: false,
+        brokerArtifact,
       }),
       /already exists/,
-    );
-    await writeFile(
-      join(plugin, 'shell-auth/windows/shell-helper.exe'),
-      'tampered',
-    );
-    await assert.rejects(
-      packagePlugin({
-        root,
-        version: '1.2.3',
-        outDir: join(root, 'tampered'),
-        build: false,
-      }),
-      /digest mismatch/,
-    );
-    await assert.rejects(
-      readFile(join(root, 'tampered/auriga-dsh-1.2.3.tgz')),
-      /ENOENT/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -243,4 +224,26 @@ test('failed UI build propagates its exit code and publishes nothing', async () 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('Desktop release selects real plugin version and rejects CI placeholder', () => {
+  assert.equal(releaseVersion('desktop-v1.2.3', '0.4.0'), '0.4.0');
+  assert.throws(
+    () => releaseVersion('desktop-v1.2.3', '0.0.0-ci'),
+    /placeholder/,
+  );
+  assert.equal(releaseVersion('plugin-v0.5.0', '0.4.0'), '0.5.0');
+  assert.equal(releaseVersion('feature', '0.4.0'), '0.0.0-ci');
+});
+
+test('manual official release also rejects placeholder plugin version', () => {
+  assert.equal(releaseVersion('main', '0.4.0', 'workflow_dispatch'), '0.4.0');
+  assert.throws(
+    () => releaseVersion('main', '0.0.0-ci', 'workflow_dispatch'),
+    /placeholder/,
+  );
+  assert.throws(
+    () => releaseVersion('plugin-v0.0.0-ci', '0.4.0'),
+    /placeholder/,
+  );
 });

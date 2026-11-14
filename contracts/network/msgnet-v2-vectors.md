@@ -72,3 +72,7 @@ N/I/D 另共同读取 `fixtures/msgnet-local-projection-vectors.json`，通过�
 
 
 第2轮补充按用途混合恢复、第二个 CA 周期及本地判定器的变异覆盖。24个本地向量包含只违反文件摘要、绑定、必需文件、长度和字节摘要的单项负例。`migration-real-v1-pair-and-material` 使用同目录 `keyset-signature-vector.json` 的真实受签合成 v1 pair，成员摘要的公钥材料按 MigrationMaterialCommitment 计算。C/N/P 共同读取新增恢复/周期用例，Java/Go的现有适配器读取同份数据。`pnpm gen:plugin-network` 调用插件 --v2 CLI 生成类型和运行时schema，web.yml 在 web 的 gen:api 后单独执行此命令，再用生成目录 diff/status 门禁覆盖字节与格式漂移。契约测试继续与源schema做语义深比较。
+
+## K3 共享输入
+
+新增 boundary_cases 操作 transport_transition / transport_catchup / transport_confirmation / node_control_binding / projection_access；字段由向量schema严格定义，生产来源与判定次序见[消费方须知](auto-renewal-v2-k3.md)。K3参考判定器也逐条件禁用、逐比较运算符翻转，存活项必须有精确等价说明。新正负例与原三组在同一JSON，Java/Go现有adapter自动全读，不以case ID选择结果。

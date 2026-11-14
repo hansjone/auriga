@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createRequire } from 'node:module';
-import { contractFile } from './schema.mjs';
+import { contractFile, valid } from './schema.mjs';
 import { boundedBody } from './platform.mjs';
 import { safePath } from './vault.mjs';
 const packaged = existsSync(
@@ -33,7 +33,9 @@ function schema(file, name, value) {
         import.meta.url,
       ),
     );
-    const Ajv = loader('ajv/dist/2020.js').default,
+    const Ajv = loader(
+        packaged ? './vendor-ajv.cjs' : 'ajv/dist/2020.js',
+      ).default,
       ajv = new Ajv({ strict: false });
     ajv.addFormat('date-time', (s) => Number.isFinite(Date.parse(s)));
     for (const f of [
@@ -42,6 +44,7 @@ function schema(file, name, value) {
       'source-control',
       'protocol',
       'keyset',
+      'auto-renewal-v2',
       'send',
     ]) {
       const object = JSON.parse(contractFile('network/' + f + '.schema.json'));
@@ -58,10 +61,10 @@ function schema(file, name, value) {
   if (!validate(file, name, value)) throw fail();
   return value;
 }
-const wire = (value, parse) => {
+const wire = (value, parse, limit = 65536) => {
   if (typeof value !== 'string') throw fail();
   const bytes = Buffer.from(value, 'base64');
-  if (bytes.length > 65536 || bytes.toString('base64') !== value) throw fail();
+  if (bytes.length > limit || bytes.toString('base64') !== value) throw fail();
   return { bytes, value: parse(bytes) };
 };
 export class NetworkProxy {
@@ -84,6 +87,7 @@ export class NetworkProxy {
     this.changed = () => {
       for (const link of this.links.values()) this.closeLink(link);
       this.links.clear();
+      this.trustStores.clear();
     };
     broker.on('changed', this.changed);
   }
@@ -100,7 +104,36 @@ export class NetworkProxy {
   }
   async execute(definition, input, context, owner, signal) {
     const core = this.core ?? (await loadCore());
+    if (definition.operation === 'getPublicNetworkControl') {
+      const raw = await this.readFixed(definition.route, context, signal, {
+        anonymous: true,
+        limit: core.jsonLimits.maxBytes,
+      });
+      core.structure('SignedRootControl', core.detach(raw));
+      return { statusCode: 200, body: { wire: raw.toString('base64') } };
+    }
+    if (definition.operation === 'confirmNetworkControl') {
+      const prepared = await this.installationTrust(core, context, signal);
+      const receipt = core.detach(
+        wire(input.receiptWire, core.parseStrictJson).bytes,
+      );
+      core.structure('InstallationReceipt', receipt);
+      if (
+        !prepared.trust
+          .pendingControlReceipts()
+          .some((saved) => core.equal(saved, receipt))
+      )
+        throw fail();
+      const raw = await this.readFixed(definition.route, context, signal, {
+        body: receipt,
+      });
+      // Reuse the exact binding checks used by normal control refresh.
+      core.verifyControlReceiptRecord(receipt, raw);
+      await prepared.trust.acknowledgeControlReceipt(receipt.package_id);
+      return { statusCode: 200, body: { wire: raw.toString('base64') } };
+    }
     if (definition.operation === 'network_open') {
+      let registeredHere = false;
       const execution = this.host.resolve(
         owner,
         input.executionContextId,
@@ -126,18 +159,44 @@ export class NetworkProxy {
         };
         this.links.set(owner, record);
         record.opening = this.open(record, signal);
+        registeredHere = true;
       }
       await record.opening;
       signal.throwIfAborted();
       this.host.resolve(owner, input.executionContextId, 'session');
       this.check(record);
+      const registration = record.registration;
+      if (
+        !valid('ShellAuthNetworkRegistration', registration) ||
+        registration.tenant !== context.identity.tenantId ||
+        registration.device !== context.identity.deviceId ||
+        registration.realm !== this.config.realm ||
+        BigInt(registration.realm) > 18446744073709551615n ||
+        BigInt(registration.node) > 18446744073709551615n ||
+        registration.systemAddress !==
+          `aur1:${BigInt(registration.realm).toString(16)}.${BigInt(registration.node).toString(16)}.0`
+      )
+        throw fail();
+      const created = registeredHere && registration.created;
+      if (registeredHere) record.registration = { ...registration, created: false };
       const stream = this.streams.create(context, owner, () => {
         record.streams.delete(stream.id);
         if (!record.streams.size) this.closeLink(record);
       });
       stream.executionContextId = execution.id;
       record.streams.add(stream.id);
-      return { statusCode: 200, body: { streamId: stream.id } };
+      return {
+        statusCode: 200,
+        body: {
+          streamId: stream.id,
+          registration: { ...registration, created },
+          binding: {
+            executionContextId: execution.id,
+            shellEpoch: context.epoch,
+            revision: context.revision,
+          },
+        },
+      };
     }
     if (definition.operation === 'network_send') {
       const stream = this.streams.get(input.streamId, owner),
@@ -249,13 +308,15 @@ export class NetworkProxy {
       const record = this.links.get(owner);
       if (!record) throw fail();
       this.check(record);
-      const raw = await this.readFixed(definition.route, context, signal);
-      const value = core.parseStrictJson(raw);
+      const raw = await this.readFixed(definition.route, context, signal, {
+        limit: core.jsonLimits.maxBytes,
+      });
+      const value = core.detach(raw);
       if (definition.operation === 'getNetworkKeys') {
-        schema('keyset', 'SignedKeyset', value);
+        schema('auto-renewal-v2', 'Publication', value);
         await record.trust.update(raw);
       } else {
-        schema('protocol', 'KeysetAnnouncement', value);
+        schema('auto-renewal-v2', 'SignedKeysetAnnouncementV2', value);
         await record.trust.announce(raw);
       }
       this.check(record);
@@ -264,75 +325,88 @@ export class NetworkProxy {
     }
     throw fail();
   }
-  async open(record, signal) {
-    try {
-      const provider = record.core.createDeviceProvider({
-        config: {
-          ...this.broker.platform.config,
-          providerId: 'discover',
-          network: this.config,
-        },
-        getDevice: async () => {
-          this.check(record);
-          return {
-            accessToken: this.broker.record.tokens.access_token,
-            claims: this.broker.claims,
-          };
+  async installationTrust(core, context, signal) {
+    if (!this.config || !this.directory)
+      throw new Error('trusted network installation required');
+    const installation = core.createControlInstallation({
+      config: { ...this.broker.platform.config, network: this.config },
+      directory: this.directory,
+    });
+    const provider = core.createDeviceProvider({
+      config: {
+        ...this.broker.platform.config,
+        providerId: 'discover',
+        network: this.config,
+      },
+      loadInstallation: (scope) => installation.prepare(scope),
+      getDevice: async () => {
+        this.broker.assert(context);
+        return {
+          accessToken: this.broker.record.tokens.access_token,
+          claims: this.broker.claims,
+        };
+      },
+    });
+    const prepared = await provider.prepare({ signal });
+    this.broker.assert(context);
+
+    const file = safePath(join(this.directory, prepared.storageKey + '.json'));
+    const cache = {
+      load: async () =>
+        existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : undefined,
+      commit: async (value) => {
+        const temp = file + '.' + randomUUID() + '.tmp';
+        try {
+          const fd = openSync(temp, 'wx', 0o600);
+          try {
+            writeSync(fd, JSON.stringify(value));
+            fsyncSync(fd);
+          } finally {
+            closeSync(fd);
+          }
+          renameSync(temp, file);
+        } finally {
+          if (existsSync(temp)) unlinkSync(temp);
+        }
+      },
+    };
+
+    let openingTrust = this.trustStores.get(prepared.storageKey);
+    if (!openingTrust) {
+      openingTrust = core.openTrustStore({
+        cache,
+        roots: prepared.roots,
+        realm: this.config.realm,
+        tenant_id: this.broker.claims.tid,
+        identity_id: prepared.controlIdentity?.identity_id,
+        migrationPermit: prepared.migrationPermit,
+        requireAnnouncement: true,
+        refresh: async () => {
+          this.broker.assert(context);
+          await prepared.refresh(await openingTrust, signal);
         },
       });
-      const prepared = await provider.prepare({ signal });
-      this.check(record);
-      record.prepared = prepared;
-      const file = safePath(
-        join(this.directory, prepared.storageKey + '.json'),
+      this.trustStores.set(prepared.storageKey, openingTrust);
+      openingTrust.catch(() => {
+        if (this.trustStores.get(prepared.storageKey) === openingTrust)
+          this.trustStores.delete(prepared.storageKey);
+      });
+    }
+    const trust = await openingTrust;
+
+    return { prepared, trust };
+  }
+  async open(record, signal) {
+    try {
+      const { prepared, trust } = await this.installationTrust(
+        record.core,
+        record.context,
+        signal,
       );
-      const cache = {
-        load: async () =>
-          existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : undefined,
-        commit: async (value) => {
-          const temp = file + '.' + randomUUID() + '.tmp';
-          try {
-            const fd = openSync(temp, 'wx', 0o600);
-            try {
-              writeSync(fd, JSON.stringify(value));
-              fsyncSync(fd);
-            } finally {
-              closeSync(fd);
-            }
-            renameSync(temp, file);
-          } finally {
-            if (existsSync(temp)) unlinkSync(temp);
-          }
-        },
-      };
-      record.storageKey = prepared.storageKey;
-      let openingTrust = this.trustStores.get(prepared.storageKey);
-      if (!openingTrust) {
-        openingTrust = record.core.openTrustStore({
-          cache,
-          roots: prepared.roots,
-          realm: this.config.realm,
-          requireAnnouncement: true,
-          refresh: async () => {
-            const active = [...this.links.values()].find(
-              (link) => !link.closed && link.storageKey === prepared.storageKey,
-            );
-            if (!active) throw fail();
-            this.check(active);
-            await active.prepared.refresh(
-              active.trust,
-              active.controller.signal,
-            );
-          },
-        });
-        this.trustStores.set(prepared.storageKey, openingTrust);
-        openingTrust.catch(() => {
-          if (this.trustStores.get(prepared.storageKey) === openingTrust)
-            this.trustStores.delete(prepared.storageKey);
-        });
-      }
-      const trust = await openingTrust;
+      record.prepared = prepared;
       record.trust = trust;
+      record.stopIsolation = trust.onIsolation(() => this.closeLink(record));
+      record.storageKey = prepared.storageKey;
       await prepared.refresh(trust, signal);
       record.registration = await prepared.register(signal);
       const ticket = await prepared.getTicket(signal);
@@ -375,8 +449,15 @@ export class NetworkProxy {
       throw error;
     }
   }
-  async readFixed(route, context, signal) {
-    const token = await this.broker.tokenFor('auriga', context);
+  async readFixed(
+    route,
+    context,
+    signal,
+    { anonymous = false, body, limit = 65536 } = {},
+  ) {
+    const token = anonymous
+      ? undefined
+      : await this.broker.tokenFor('auriga', context);
     this.broker.assert(context);
     const response = await this.fetcher(
       new URL(route, this.broker.platform.config.platformOrigin),
@@ -384,10 +465,15 @@ export class NetworkProxy {
         redirect: 'error',
         credentials: 'omit',
         signal,
-        headers: { Authorization: `Bearer ${token}` },
+        method: body ? 'POST' : 'GET',
+        headers: {
+          ...(anonymous ? {} : { Authorization: `Bearer ${token}` }),
+          ...(body ? { 'content-type': 'application/json' } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
       },
     );
-    const raw = await boundedBody(response, 65536);
+    const raw = await boundedBody(response, limit);
     this.broker.assert(context);
     if (!response.ok) throw new Error('network keys unavailable');
     return raw;
@@ -396,7 +482,23 @@ export class NetworkProxy {
     this.check(record);
     if (bytes.length > 65536) throw fail();
     const frame = record.core.parseStrictJson(bytes);
-    schema('protocol', 'Downstream', frame);
+    let protocolFrame = frame;
+    const page = frame.type === 'fetch_result' ? frame.page : frame;
+    if (
+      page?.keyset_announcement &&
+      (frame.type === 'fetch_result' ||
+        ['head', 'ready_result'].includes(frame.type))
+    ) {
+      record.core.structure(
+        'SignedKeysetAnnouncementV2',
+        record.core.detach(page.keyset_announcement),
+      );
+      const base = { ...page };
+      delete base.keyset_announcement;
+      protocolFrame =
+        frame.type === 'fetch_result' ? { ...frame, page: base } : base;
+    }
+    schema('protocol', 'Downstream', protocolFrame);
     const requestId =
       frame.type === 'fetch_result'
         ? frame.page.request_id
@@ -528,6 +630,7 @@ export class NetworkProxy {
     if (record.closed) return;
     record.closed = true;
     record.controller.abort();
+    record.stopIsolation?.();
     clearTimeout(record.expiry);
     record.link?.close().catch(() => {});
     if (this.links.get(record.owner) === record)

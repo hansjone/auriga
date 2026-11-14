@@ -8,7 +8,7 @@ import {
 
 /** Provider lifetime and login lifetime are independent. Late register/prepare
  * responses cannot resurrect an old login or a disposed native provider.
- * @param {{directory:string,ctx:any,installation?:import('./runtime-types.js').NetworkInstallation,defaultProvider?:import('./runtime-types.js').DeviceNetworkProvider,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void,backoff?:{baseMs:number,maxMs:number}}} options */
+ * @param {{directory:string,ctx:any,installation?:import('./runtime-types.js').NetworkInstallation,offlineControl?:{importPackage(input:any):Promise<any>},defaultProvider?:import('./runtime-types.js').DeviceNetworkProvider,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void,backoff?:{baseMs:number,maxMs:number}}} options */
 export function createNetworkLifecycle(options) {
   const installation = options.installation;
   let authenticated = false;
@@ -23,6 +23,8 @@ export function createNetworkLifecycle(options) {
   let controller;
   let tail = Promise.resolve();
   let cleanup = Promise.resolve();
+  let controlImporting = false;
+  let controlQueue = Promise.resolve();
   let phase = provider ? 'idle' : 'unconfigured';
   let reason = 'stopped';
   function retire() {
@@ -39,7 +41,7 @@ export function createNetworkLifecycle(options) {
   }
   function begin() {
     retire();
-    if (disposed || !authenticated || !provider) {
+    if (controlImporting || disposed || !authenticated || !provider) {
       phase = disposed ? 'stopped' : provider ? 'idle' : 'unconfigured';
       return;
     }
@@ -196,6 +198,29 @@ export function createNetworkLifecycle(options) {
     });
   }
   return {
+    /** Native owner settings may import a public package while signed out or
+     * isolated. Suspend the sole cache writer before opening the offline store.
+     * @param {any} input */
+    importControlOffline(input) {
+      const operation = controlQueue.then(async () => {
+        if (disposed || !options.offlineControl)
+          throw new Error('control import unavailable');
+        controlImporting = true;
+        retire();
+        await cleanup;
+        try {
+          return await options.offlineControl.importPackage(input);
+        } finally {
+          controlImporting = false;
+          begin();
+        }
+      });
+      controlQueue = operation.then(
+        () => {},
+        () => {},
+      );
+      return operation;
+    },
     /** Cordis-owned trusted provider; not a serialized plugin configuration.
      * @param {import('./runtime-types.js').NetworkProvider} value */
     attach(value) {
@@ -244,11 +269,18 @@ export function createNetworkLifecycle(options) {
         throw new Error('messaging unavailable');
       return runtime.messagingUI(context);
     },
+    /** @param {unknown} input @param {unknown} context */
+    importControlPackage(input, context) {
+      if (!runtime || !authenticated || disposed)
+        throw new Error('network control import unavailable');
+      return runtime.importControlPackage(input, context);
+    },
     async close() {
       disposed = true;
       authenticated = false;
       begin();
       await tail;
+      await controlQueue;
     },
   };
 }

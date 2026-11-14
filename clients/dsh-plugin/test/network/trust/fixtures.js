@@ -157,6 +157,12 @@ export async function signingFixture({ refresh, now: suppliedNow } = {}) {
     seal,
     delivery,
     pageInput,
-    config: structuredClone(persisted.publication.keyset),
+    config: structuredClone(
+      Object.fromEntries(
+        ['realm', 'keyset_version', 'issued_at', 'valid_until', 'keys'].map(
+          (field) => [field, persisted.publication.keyset.payload[field]],
+        ),
+      ),
+    ),
   };
 }

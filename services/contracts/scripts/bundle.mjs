@@ -7,6 +7,7 @@ const output = path.join(root, 'services/contracts/target/bundled');
 mkdirSync(output, { recursive: true });
 for (const service of [
   'network-keys-v2',
+  'shared-dsh-edge',
   'iam',
   'shell-auth',
   'org',
@@ -50,5 +51,25 @@ for (const service of [
     for (const child of Object.values(value)) preserveSignatureText(child);
   }
   preserveSignatureText(spec);
+  if (service === 'network-keys-v2') {
+    const javaSpec = structuredClone(spec);
+    const models = javaSpec.components.schemas;
+    // OpenAPI Generator merges oneOf enums by last-branch-wins. Generate a
+    // structural superset; validate the original wire oneOf at the boundary.
+    const published = models.RenewalStatus;
+    const unpublished = models.UnpublishedRenewalStatus;
+    models.RenewalStatusOutput = {
+      type: 'object',
+      properties: { ...unpublished.properties, ...published.properties },
+      required: published.required.filter((name) =>
+        unpublished.required.includes(name),
+      ),
+      additionalProperties: false,
+    };
+    writeFileSync(
+      path.join(output, 'network-keys-v2-java.json'),
+      JSON.stringify(javaSpec, null, 2) + '\n',
+    );
+  }
   writeFileSync(destination, JSON.stringify(spec, null, 2) + '\n');
 }

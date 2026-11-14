@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 /* global Headers */
 import assert from 'node:assert/strict';
-import { randomUUID, randomBytes, createHash, sign } from 'node:crypto';
+import {
+  randomUUID,
+  randomBytes,
+  createHash,
+  sign,
+  generateKeyPairSync,
+} from 'node:crypto';
 import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,8 +25,8 @@ import {
 import { startNatsServer } from '../../dsh-plugin/test/network/transport/support/nats-server.js';
 import {
   publicationFixture,
-  signedKeyset,
-  signedAnnouncement,
+  signedV2Keyset,
+  signedV2Announcement,
   signedReadyResult,
   testRoots,
 } from '../../dsh-plugin/test/network/trust/keyset-fixtures.js';
@@ -89,9 +95,11 @@ test(
       platformOrigin: 'https://example.com',
       network: { realm: '2', wssUrl: server.url, roots: testRoots },
     });
-    const keyWire = JSON.stringify(signedKeyset(publication.payload)),
+    const keyWire = JSON.stringify(
+        signedV2Keyset(publication.payload, f.claims.tid),
+      ),
       announcementWire = JSON.stringify(
-        signedAnnouncement(publication.payload),
+        signedV2Announcement(publication.payload, {}, f.claims.tid),
       );
     let registered = 0,
       submitted = 0;
@@ -100,6 +108,12 @@ test(
       assert.equal(options.redirect, 'error');
       assert.equal(options.credentials, 'omit');
       const headers = new Headers(options.headers);
+      if (new URL(url).pathname.endsWith('/bootstrap/controls')) {
+        assert.equal(headers.get('authorization'), null);
+        return Response.json(
+          signedV2Keyset(publication.payload, f.claims.tid).control,
+        );
+      }
       assert.ok(
         [f.tokens.access_token].some(
           (value) => headers.get('authorization') === 'Bearer ' + value,
@@ -229,12 +243,39 @@ test(
         throw error;
       }
     };
+    const openMessage = {
+      ...envelope(f.broker),
+      call: { operation: 'network_open', input: { executionContextId } },
+    };
     const opened = await Promise.all([
-      call('network_open', { executionContextId }),
+      proxy.call(openMessage, peer.id),
       call('network_open', { executionContextId }),
     ]);
-    for (const result of opened)
+    for (const result of opened) {
       assert.ok(result.output, failure?.stack ?? JSON.stringify(result.error));
+      assert.deepEqual(
+        { ...result.output.body.registration, created: false },
+        { ...identity, created: false },
+      );
+      assert.deepEqual(result.output.body.binding, {
+        executionContextId,
+        shellEpoch: f.broker.epoch,
+        revision: f.broker.revision,
+      });
+    }
+    assert.equal(
+      opened.filter((result) => result.output.body.registration.created).length,
+      1,
+    );
+    assert.equal(
+      (await proxy.call(openMessage, peer.id)).output.body.registration.created,
+      false,
+    );
+    assert.equal(
+      (await call('network_open', { executionContextId })).output.body
+        .registration.created,
+      false,
+    );
     assert.equal(
       registered,
       1,
@@ -459,3 +500,125 @@ test(
     assert.equal(proxy.network.links.size, 0);
   },
 );
+
+test('public control and durable receipt operations work without a NATS link and preserve exact permissions', async (t) => {
+  const { fixture: trustFixture } =
+    await import('../../dsh-plugin/test/network/trust/v2-cache-fixture.js');
+  const { openV2TrustStore } =
+    await import('../../dsh-plugin/src/network/trust/v2-store.js');
+  const { digest, jcs } =
+    await import('../../dsh-plugin/src/network/trust/v2.js');
+  const { contractFile } = await import('../schema.mjs');
+  const ops = JSON.parse(
+    contractFile('plugin/shell-business-operations.json'),
+  ).operations;
+  const publicOp = ops.find((o) => o.operation === 'getPublicNetworkControl');
+  const receiptOp = ops.find((o) => o.operation === 'confirmNetworkControl');
+  assert.equal(publicOp.authentication, 'none');
+  assert.equal(publicOp.permission, null);
+  assert.equal(receiptOp.permission, 'collab.msgnet.control.install');
+  assert.equal(receiptOp.method, 'post');
+  const f = fixture();
+  await login(f);
+  f.platform.audience = async () => f.tokens;
+  const v = trustFixture(),
+    trust = await openV2TrustStore(v.options);
+  const key = generateKeyPairSync('ed25519');
+  const control = v.control(3),
+    pack = {
+      package_id: 'desktop-control',
+      tenant_id: 'synthetic-tenant',
+      realm: '1',
+      target_id: 'desktop-target',
+      challenge: randomBytes(32).toString('base64url'),
+      control,
+      control_digest: digest(control),
+    };
+  const receipt = await trust.importControlPackage(pack, {
+    target_id: pack.target_id,
+    identity_id: 'desktop-installation',
+    sign: async (bytes) => ({
+      kid: 'desktop-installation',
+      alg: 'Ed25519',
+      signature: sign(null, bytes, key.privateKey).toString('base64url'),
+    }),
+  });
+  let wrong = true,
+    reads = 0,
+    posts = 0;
+  const proxy = new BusinessProxy(
+    f.broker,
+    async (url, options) => {
+      if (new URL(url).pathname === publicOp.route) {
+        reads++;
+        assert.equal(new Headers(options.headers).get('authorization'), null);
+        return Response.json(control);
+      }
+      assert.equal(new URL(url).pathname, receiptOp.route);
+      posts++;
+      assert.equal(options.method, 'POST');
+      assert.ok(new Headers(options.headers).get('authorization'));
+      const body = JSON.parse(options.body);
+      assert.equal(jcs(body), jcs(receipt));
+      return Response.json({
+        tenant_id: receipt.tenant_id,
+        realm: receipt.realm,
+        target_id: receipt.target_id,
+        challenge: wrong ? 'wrong-challenge' : receipt.challenge,
+        control_digest: receipt.control_digest,
+        minimum_control_revision: receipt.control_revision,
+        state: 'confirmed',
+        identity_compromised: false,
+        new_chain_ready: false,
+      });
+    },
+    undefined,
+    { networkCore: core },
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+  proxy.network.installationTrust = async () => ({ trust });
+  const context = f.broker.guard(f.broker.epoch, f.broker.revision);
+  await proxy.network.execute(
+    publicOp,
+    {},
+    context,
+    'owner',
+    new AbortController().signal,
+  );
+  assert.equal(reads, 1);
+  assert.equal(proxy.network.links.size, 0);
+  const input = { receiptWire: Buffer.from(jcs(receipt)).toString('base64') };
+  await assert.rejects(
+    proxy.network.execute(
+      receiptOp,
+      input,
+      context,
+      'owner',
+      new AbortController().signal,
+    ),
+  );
+  assert.equal(trust.pendingControlReceipts().length, 1);
+  wrong = false;
+  await proxy.network.execute(
+    receiptOp,
+    input,
+    context,
+    'owner',
+    new AbortController().signal,
+  );
+  assert.equal(trust.pendingControlReceipts().length, 0);
+  assert.equal(posts, 2);
+  await assert.rejects(
+    proxy.network.execute(
+      receiptOp,
+      input,
+      context,
+      'owner',
+      new AbortController().signal,
+    ),
+  );
+  assert.equal(posts, 2);
+});

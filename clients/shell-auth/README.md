@@ -44,3 +44,7 @@ node clients/shell-auth/build.mjs clients/shell-auth/target/<空目录>
 ```
 
 `network-core.mjs` 仅重导出现有 D 项目代码，由 D 项目 tsconfig 检查其实现，并由制品构建核实闭包。测试用运行时生成密钥和合成身份。已覆盖真实 Windows DPAPI/ACL/管道、K2 凭据与句柄、真实 NATS/WSS、用户码页面行为、独立打包后的签名设备流和凭据恢复；安装器另测随包 Node 的诊断命令。替身与页面组件测试不能代替正式 Desktop 启动器、门户 SSO/扫码及真实 DSH 的跨线正常入口验收，由主控串行安排。
+
+AUTH-K3 发布接线：先 `node clients/shell-auth/build.mjs dist/broker` 构建一次。
+插件打包传 `--broker-artifact dist/broker`，Desktop 从 clients/installer 执行时传 `--broker-artifact ../../dist/broker --plugin-tgz <本次插件tgz>`。
+缺制品不再重新编译。完整契约及 D 接续见 `contracts/plugin/shell-auth-control.md` 的 AUTH-K3 节。

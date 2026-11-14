@@ -1,9 +1,9 @@
 name: Plugin
 on:
   push:
-    paths: ['clients/dsh-plugin/**', 'contracts/network/**', 'web/pnpm-lock.yaml', '.github/workflows/plugin.yml']
+    paths: ['clients/dsh-plugin/**', 'clients/shell-auth/**', 'contracts/plugin/**', 'contracts/network/**', 'web/pnpm-lock.yaml', '.github/workflows/plugin.yml']
   pull_request:
-    paths: ['clients/dsh-plugin/**', 'contracts/network/**', 'web/pnpm-lock.yaml', '.github/workflows/plugin.yml']
+    paths: ['clients/dsh-plugin/**', 'clients/shell-auth/**', 'contracts/plugin/**', 'contracts/network/**', 'web/pnpm-lock.yaml', '.github/workflows/plugin.yml']
 permissions:
   contents: read
 jobs:
@@ -22,6 +22,9 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install
         shell: bash
-        run: pnpm install --frozen-lockfile --filter auriga-dsh... --store-dir "$(pnpm store path)"
+        run: pnpm install --frozen-lockfile --filter auriga-dsh... --filter . --store-dir "$(pnpm store path)"
       - run: pnpm test
         working-directory: clients/dsh-plugin
+
+      - name: Shell-auth regression tests
+        run: node --test clients/shell-auth/test/*.test.mjs
