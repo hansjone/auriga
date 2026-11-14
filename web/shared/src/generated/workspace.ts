@@ -32,7 +32,7 @@ export interface paths {
      *     If-Match 必须匹配当前分配修订；每成员最多一个在途操作。
      *     Idempotency-Key 按租户、操作者、成员及请求指纹绑定；同键异请求返回409。
      *     在模式提交前停止并证明旧执行全部结束，销毁旧会话，增加 epoch，撤销旧票据及连接。
-     *     文件保留策略是保留封存快照并创建空工作区，不迁移会话。
+     *     文件保留策略固定为封存本人文件30天并创建空工作区，会话始终丢弃。
      */
     post: operations['createDshPlacementSwitch'];
     delete?: never;
@@ -860,7 +860,7 @@ export interface components {
       /** @enum {string} */
       sessionPolicy: 'discard';
       /**
-       * @description 待用户决定的推荐草案；不允许客户端静默选择迁移或删除。
+       * @description 已定规则：本人文件封存30天，新模式空目录，会话丢弃；不允许客户端选择自动迁移或即时删除。
        * @enum {string}
        */
       filePolicy: 'archive-and-reset';
