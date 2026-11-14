@@ -61,11 +61,11 @@ jobs:
         shell: bash
       - name: Lint and unit tests (core, upgrade/rollback, version lock, secret scan)
         run: pnpm --filter @auriga/installer lint && pnpm --filter @auriga/installer test
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: auth-broker
           path: dist/broker
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: auriga-dsh
           path: dist/plugin
