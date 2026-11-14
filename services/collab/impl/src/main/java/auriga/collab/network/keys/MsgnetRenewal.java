@@ -198,6 +198,31 @@ public final class MsgnetRenewal {
                 !initial
                     && !old.path("generation")
                         .equals(control.path("payload").path("minimum_generation"));
+            if (authorityChanged
+                && !incident
+                && PURPOSES.stream()
+                    .anyMatch(
+                        p -> {
+                          var key = active(old, p);
+                          return key == null || !valid(key, now);
+                        })) {
+              // Complete recovery with the still-allowed former authority, then hand over.
+              // Both publications commit under the same realm lock and transaction.
+              verifier.verifyAuthority(previous.path("authority"), control, now);
+              jdbc.update(
+                  "UPDATE collab.msgnet_realm SET runtime_authority = ? WHERE tenant_id = ? AND realm = ?",
+                  canonical(previous.path("authority")),
+                  tenant,
+                  realm);
+              reconcile();
+              jdbc.update(
+                  "UPDATE collab.msgnet_realm SET runtime_authority = ? WHERE tenant_id = ? AND realm = ?",
+                  canonical(authority),
+                  tenant,
+                  realm);
+              reconcile();
+              return null;
+            }
             if (!initial
                 && !authorityChanged
                 && !incident
@@ -235,6 +260,8 @@ public final class MsgnetRenewal {
             }
             String mode = initial ? "bootstrap" : "refresh";
             boolean changed = initial || authorityChanged || incident;
+            boolean restarted = false;
+            boolean activated = false;
             if (!initial && now.isBefore(time(old, "issued_at"))) {
               changed = true;
               for (var key : payload.path("keys")) {
@@ -275,7 +302,7 @@ public final class MsgnetRenewal {
                 if (mature) {
                   if (active != null) active.put("state", "retired");
                   next.put("state", "active");
-                  mode = "activate";
+                  activated = true;
                 } else {
                   for (var key : payload.path("keys"))
                     if (purpose.equals(text(key, "purpose"))
@@ -296,7 +323,7 @@ public final class MsgnetRenewal {
                                   limits.path("business_key_seconds").asLong())),
                       now,
                       version);
-                  if (!initial) mode = "restart_recovery";
+                  if (!initial) restarted = true;
                 }
               } else if (next != null
                   && mature
@@ -309,7 +336,7 @@ public final class MsgnetRenewal {
                     "invalid_transition");
                 active.put("state", "retired");
                 next.put("state", "active");
-                mode = "activate";
+                activated = true;
                 changed = true;
               } else if (next == null
                   && !now.isBefore(
@@ -339,6 +366,8 @@ public final class MsgnetRenewal {
                 && now.isBefore(
                     time(old, "issued_at").plusSeconds(config.path("refresh_seconds").asLong()))
                 && "none".equals(text(state, "failure_code"))) return null;
+            if (restarted) mode = "restart_recovery";
+            else if (activated) mode = "activate";
             if (authorityChanged || incident) mode = "authority_transition";
             payload.put("mode", mode);
             timeGuard.sample(databaseTime.get());
@@ -889,6 +918,33 @@ public final class MsgnetRenewal {
     if (contains(
         state.path("control").path("payload").path("revoked_authority_ids"),
         text(a, "authority_id"))) failureCode = "collab.msgnet_authority_revoked";
+    if (state.path("publication").isNull() || state.path("publication").isMissingNode()) {
+      var unpublished =
+          object()
+              .put("tenant_id", tenant.toString())
+              .put("realm", realm)
+              .put("authority_id", text(a, "authority_id"))
+              .put("expiry_policy", "no_hard_expiry")
+              .put(
+                  "control_revision",
+                  text(state.path("control").path("payload"), "control_revision"))
+              .put("review_due_at", due.toString())
+              .put("review_required", !clock.instant().isBefore(due))
+              .put("announcement_confirmed", false)
+              .put("has_publication", false)
+              .put("failure_code", failureCode)
+              .put(
+                  "state",
+                  state.path("paused").asBoolean()
+                      ? "paused"
+                      : timeGuard.clockError()
+                          ? "clock_error"
+                          : "collab.msgnet_authority_revoked".equals(failureCode)
+                              ? "authority_revoked"
+                              : "none".equals(failureCode) ? "renewing" : "degraded");
+      schema("RenewalStatusOutput", unpublished, "invalid_chain");
+      return canonical(unpublished);
+    }
     if ("none".equals(failureCode) && !clock.instant().isBefore(time(k, "valid_until")))
       failureCode = "collab.msgnet_invalid_transition";
     boolean announced =
@@ -927,7 +983,8 @@ public final class MsgnetRenewal {
         var receipt = NetworkJson.parse(receipts.getFirst());
         if (!List.of("loaded", "handshake_verified").contains(text(receipt, "phase"))
             || !text(receipt, "publication_digest")
-                .equals(MsgnetMaterials.digest(state.path("publication")))) projected = false;
+                .equals(MsgnetV2Verifier.digest(state.path("publication").path("keyset"))))
+          projected = false;
       }
     }
     var out =

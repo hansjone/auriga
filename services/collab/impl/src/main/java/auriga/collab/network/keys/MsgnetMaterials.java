@@ -62,22 +62,20 @@ public final class MsgnetMaterials {
       var principal =
           auriga.common.security.AuthorizationRules.currentPrincipal()
               .orElseThrow(() -> failure("scope_denied"));
-      require(
-          tenant.equals(principal.tenantId()) && identity.subject().equals(principal.subject()),
-          "scope_denied");
+      require(tenant.equals(principal.tenantId()), "scope_denied");
     }
     MsgnetPolicy.identitySignature(
         request,
         "Auriga.NetworkProjectionRequest.v2",
         RootKeyPublication.publicKey(identity.signingSpki()));
-    var control = renewal.requiredState().path("control").path("payload");
     require(
-        !contains(control.path("revoked_installation_ids"), identity.identityId()),
-        "identity_quarantined");
+        identity.identityId().equals(text(request.path("identity_auth"), "kid")), "scope_denied");
+    identities.requireUsable(identity);
     return identity;
   }
 
   private JsonNode consume(JsonNode request) {
+    renewal.lock();
     var p = NetworkJson.parse(renewal.publication(), 1048576);
     var k = p.path("keyset").path("payload");
     require(
@@ -145,12 +143,20 @@ public final class MsgnetMaterials {
       result.set(field, request.path(field));
     result.set("generation", publication.path("keyset").path("payload").path("generation"));
     result.set("keyset_version", publication.path("keyset").path("payload").path("keyset_version"));
-    result.put("publication_digest", digest(publication));
+    result.put("publication_digest", MsgnetV2Verifier.digest(publication.path("keyset")));
     result.set("bundle", transport.bundle());
     result.set("leaves", transport.leaves(identity));
     if ("network".equals(identity.component()))
       result.set("protocol", protocolMaterial(publication));
     schema("ProjectionMaterial", result, "invalid_chain");
+    var snapshot = MsgnetProjectionBinding.snapshot(result, publication);
+    jdbc.update(
+        "UPDATE collab.msgnet_projection_nonce SET authorized_snapshot = ? WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND nonce = ?",
+        MsgnetRenewal.canonical(snapshot),
+        tenant,
+        realm,
+        identity.identityId(),
+        text(request, "nonce"));
     return result;
   }
 
@@ -190,8 +196,14 @@ public final class MsgnetMaterials {
   public JsonNode confirm(JsonNode receipt) {
     return renewal.run(
         () -> {
+          schema("ProjectionReceipt", receipt, "invalid_chain");
+          renewal.lock();
           require(transport != null, "projection_pending");
           var identity = identities.identity(text(receipt, "installation_id"));
+          require(
+              identity.identityId().equals(text(receipt.path("identity_auth"), "kid")),
+              "scope_denied");
+          identities.requireUsable(identity);
           MsgnetPolicy.identitySignature(
               receipt,
               "Auriga.NetworkProjectionReceipt.v2",
@@ -201,17 +213,69 @@ public final class MsgnetMaterials {
                   && tenant.toString().equals(text(receipt, "tenant_id"))
                   && realm.equals(text(receipt, "realm")),
               "scope_denied");
+          var rows =
+              jdbc.queryForList(
+                  "SELECT authorized_snapshot, local_selector, receipts::text FROM collab.msgnet_projection_nonce WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND nonce = ? FOR UPDATE",
+                  tenant,
+                  realm,
+                  identity.identityId(),
+                  text(receipt, "nonce"));
           require(
-              jdbc.queryForObject(
-                      "SELECT count(*) FROM collab.msgnet_projection_nonce WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND nonce = ?",
-                      Integer.class,
-                      tenant,
-                      realm,
-                      identity.identityId(),
-                      text(receipt, "nonce"))
-                  == 1,
+              rows.size() == 1 && rows.getFirst().get("authorized_snapshot") != null,
               "invalid_transition");
-          schema("ProjectionReceipt", receipt, "invalid_chain");
+          var row = rows.getFirst();
+          var snapshot = NetworkJson.parse(row.get("authorized_snapshot").toString(), 1048576);
+          var selector = receipt.path("local_selector");
+          var prior =
+              jdbc.queryForList(
+                  "SELECT selector FROM collab.msgnet_projection_head WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND component = ?",
+                  String.class,
+                  tenant,
+                  realm,
+                  identity.identityId(),
+                  identity.component());
+          MsgnetProjectionBinding.verify(
+              snapshot,
+              selector,
+              receipt,
+              prior.isEmpty() ? null : NetworkJson.parse(prior.getFirst()));
+          if (row.get("local_selector") != null)
+            require(
+                NetworkJson.parse(row.get("local_selector").toString()).equals(selector),
+                "same_version_conflict");
+          var receipts = (ObjectNode) NetworkJson.parse(row.get("receipts").toString(), 1048576);
+          String phase = text(receipt, "phase");
+          if (receipts.has(phase)) {
+            require(receipts.path(phase).equals(receipt), "same_version_conflict");
+            return receipts.path(phase);
+          }
+          if ("handshake_verified".equals(phase))
+            require(receipts.has("loaded"), "projection_pending");
+          if ("persisted".equals(phase))
+            require(
+                !receipts.has("loaded") && !receipts.has("handshake_verified"),
+                "invalid_transition");
+          if ("loaded".equals(phase))
+            require(!receipts.has("handshake_verified"), "invalid_transition");
+          receipts.set(phase, receipt);
+          jdbc.update(
+              "UPDATE collab.msgnet_projection_nonce SET local_selector = ?, receipts = ?::jsonb WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND nonce = ?",
+              MsgnetRenewal.canonical(selector),
+              MsgnetRenewal.canonical(receipts),
+              tenant,
+              realm,
+              identity.identityId(),
+              text(receipt, "nonce"));
+          jdbc.update(
+              "INSERT INTO collab.msgnet_projection_head (id, tenant_id, realm, installation_id, component, selector) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, realm, installation_id, component) DO UPDATE SET selector = EXCLUDED.selector",
+              auriga.common.persistence.UuidV7.next(java.time.Clock.systemUTC()),
+              tenant,
+              realm,
+              identity.identityId(),
+              identity.component(),
+              MsgnetRenewal.canonical(selector));
+          // Failure is durable in the nonce ledger and cannot overwrite a successful aggregate.
+          if ("failed".equals(phase)) return receipt;
           return transport.confirm(receipt, identity);
         });
   }

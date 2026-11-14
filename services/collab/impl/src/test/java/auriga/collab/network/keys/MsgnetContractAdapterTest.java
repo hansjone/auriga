@@ -26,4 +26,14 @@ class MsgnetContractAdapterTest {
           NetworkJson.canonical(original), NetworkJson.canonical(MsgnetNetworkRenewal.tree(model)));
     }
   }
+
+  @Test
+  void unionPreservesPublishedAndUnpublishedWireStates() {
+    for (String state :
+        java.util.List.of("ready", "projection_pending", "renewing", "clock_error")) {
+      var node = MsgnetRenewal.object().put("state", state).put("tenant_id", "synthetic");
+      var model = new MsgnetNetworkRenewal.StatusOutput(node);
+      assertEquals(node, MsgnetNetworkRenewal.tree(model));
+    }
+  }
 }

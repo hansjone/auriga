@@ -339,9 +339,12 @@ public final class MsgnetV2Verifier {
         if (old != null && valid(old, issued)) require(same, "invalid_transition");
         else {
           recoveryNeeded = true;
+          if (mature != null) {
+            require(mature.path("kid").equals(next.path("kid")), "invalid_transition");
+            continue;
+          }
           require(
-              mature == null
-                  && find(oldKeys, "kid", text(next, "kid")) == null
+              find(oldKeys, "kid", text(next, "kid")) == null
                   && time(next, "not_before").equals(issued)
                   && !time(next, "not_after")
                       .isAfter(
@@ -361,6 +364,18 @@ public final class MsgnetV2Verifier {
       String previousPhase,
       boolean readersPersisted,
       boolean handshakesVerified) {
+    verifyTransport(
+        bundle, authority, seenVersion, previousPhase, readersPersisted, handshakesVerified, null);
+  }
+
+  public void verifyTransport(
+      JsonNode bundle,
+      JsonNode authority,
+      String seenVersion,
+      String previousPhase,
+      boolean readersPersisted,
+      boolean handshakesVerified,
+      JsonNode previousTransport) {
     var a = authority.path("payload");
     capability(a, "network_transport");
     signature(
@@ -373,7 +388,31 @@ public final class MsgnetV2Verifier {
       require(list(a.path("transport_scope")).contains(scope), "scope_denied");
     require(number(t, "bundle_version").compareTo(integer(seenVersion)) > 0, "version_rollback");
     var phases = List.of("dual_trust", "new_leaves", "retire_old");
-    if (previousPhase != null && !previousPhase.isEmpty())
+    boolean cycle = "retire_old".equals(previousPhase) && "dual_trust".equals(text(t, "phase"));
+    if (cycle) {
+      require(
+          previousTransport != null && !previousTransport.isMissingNode(), "invalid_transition");
+      signature(
+          previousTransport,
+          "Auriga.NetworkTransportTrustBundle.v2",
+          RootKeyPublication.publicKey(text(a, "public_key_spki")));
+      var prior = previousTransport.path("payload");
+      for (String field :
+          List.of("tenant_id", "realm", "authority_id", "authority_digest", "generation"))
+        require(prior.path(field).equals(t.path(field)), "invalid_transition");
+      require(
+          "retire_old".equals(text(prior, "phase"))
+              && seenVersion.equals(text(prior, "bundle_version"))
+              && digest(previousTransport).equals(text(t, "previous_bundle_digest")),
+          "invalid_transition");
+      for (var ca : prior.path("cas"))
+        require(list(t.path("cas")).contains(ca), "invalid_transition");
+      require(
+          list(t.path("cas")).stream()
+              .anyMatch(ca -> find(prior.path("cas"), "ca_id", text(ca, "ca_id")) == null),
+          "invalid_transition");
+    }
+    if (previousPhase != null && !previousPhase.isEmpty() && !cycle)
       require(
           phases.indexOf(text(t, "phase")) == phases.indexOf(previousPhase) + 1,
           "invalid_transition");

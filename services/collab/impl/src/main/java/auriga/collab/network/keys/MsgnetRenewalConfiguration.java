@@ -170,24 +170,10 @@ public class MsgnetRenewalConfiguration {
     UUID tenant =
         UUID.fromString(env.getRequiredProperty("auriga.collab.network.key-operations.tenant-id"));
     String realm = env.getRequiredProperty("auriga.collab.network.key-operations.realm");
-    var identities = new HashMap<String, MsgnetControlLedger.Identity>();
-    String file = env.getProperty(PREFIX + "identities-file");
-    if (file != null) {
-      var installed = NetworkJson.parse(ProtectedKeyFiles.readText(Path.of(file)));
-      for (var identity : installed) {
-        var pin =
-            new MsgnetControlLedger.Identity(
-                identity.path("target_id").asString(),
-                identity.path("identity_id").asString(),
-                identity.path("signing_spki").asString(),
-                identity.path("component").asString(),
-                identity.path("gateway_id").asString(),
-                identity.path("sealing_spki").asString(),
-                identity.path("subject").asString());
-        RootKeyPublication.publicKey(pin.signingSpki());
-        if (identities.putIfAbsent(pin.targetId(), pin) != null) throw ProtectedKeyFiles.invalid();
-      }
-    }
+    String file = env.getRequiredProperty(PREFIX + "identities-file");
+    var identities =
+        MsgnetControlLedger.pins(
+            NetworkJson.parse(ProtectedKeyFiles.readText(Path.of(file)), 1048576), tenant, realm);
     return new MsgnetControlLedger(renewal, new JdbcTemplate(source), tenant, realm, identities);
   }
 

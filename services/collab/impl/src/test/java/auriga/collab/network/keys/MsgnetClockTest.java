@@ -27,7 +27,7 @@ class MsgnetClockTest {
             .getResourceAsStream("network-fixtures/auto-renewal-v2-vectors.json")) {
       assertNotNull(input);
       var vectors = KeyTestMaterial.JSON.readTree(input).path("issuer_cases");
-      assertEquals(8, vectors.size());
+      assertEquals(12, vectors.size());
       var tests = new ArrayList<DynamicTest>();
       for (var vector : vectors) {
         tests.add(

@@ -286,7 +286,8 @@ class MsgnetRenewalPostgresTest {
               .put("keyset_version", text(payload(), "keyset_version"))
               .put(
                   "publication_digest",
-                  MsgnetMaterials.digest(NetworkJson.parse(service.publication(), 1048576)))
+                  MsgnetV2Verifier.digest(
+                      NetworkJson.parse(service.publication(), 1048576).path("keyset")))
               .put("phase", "persisted");
       confirmAllTransport(pki, receipt, identity);
       pki.reconcile();
@@ -511,5 +512,152 @@ class MsgnetRenewalPostgresTest {
                                   tenant)));
       assertEquals(0, visible);
     }
+  }
+
+  @Test
+  void unpublishedStatusHasNoInventedVersionOrSuccess() throws Exception {
+    try (ring) {
+      install();
+      var status = NetworkJson.parse(service().status());
+      assertEquals("renewing", text(status, "state"));
+      assertFalse(status.path("has_publication").asBoolean());
+      assertFalse(status.has("generation"));
+      assertFalse(status.has("last_success_at"));
+      service().paused(true);
+      assertEquals("paused", text(NetworkJson.parse(service().status()), "state"));
+    }
+  }
+
+  @Test
+  void bootstrapAuthenticatesWithoutJwtAndBindsEveryReceiptToIssuedBytes() throws Exception {
+    try (ring) {
+      install();
+      var renewal = service();
+      renewal.reconcile();
+      var signing = KeyTestMaterial.pair();
+      var sealing = java.security.KeyPairGenerator.getInstance("X25519").generateKeyPair();
+      var pin =
+          new MsgnetControlLedger.Identity(
+              "target",
+              "synthetic-projector",
+              encode(signing.getPublic().getEncoded()),
+              "network",
+              "gateway",
+              encode(sealing.getPublic().getEncoded()),
+              "CN=projector");
+      var ledger = new MsgnetControlLedger(renewal, jdbc, tenant, "1", Map.of("target", pin));
+      var config =
+          template
+              .path("boundary_cases")
+              .valueStream()
+              .filter(v -> "config-defaults".equals(text(v, "id")))
+              .findFirst()
+              .orElseThrow()
+              .path("input")
+              .path("config");
+      var pki =
+          new MsgnetPki(
+              renewal,
+              new MsgnetPrivateKeyStore(jdbc, manager, tenant, "1", ring),
+              jdbc,
+              tenant,
+              "1",
+              config);
+      pki.reconcile();
+      var materials =
+          new MsgnetMaterials(
+              renewal,
+              ledger,
+              new MsgnetPrivateKeyStore(jdbc, manager, tenant, "1", ring),
+              jdbc,
+              tenant,
+              "1",
+              pki);
+      var request =
+          MsgnetRenewal.object()
+              .put("tenant_id", tenant.toString())
+              .put("realm", "1")
+              .put("installation_id", pin.identityId())
+              .put("component", "network")
+              .put("gateway_id", "gateway")
+              .put("nonce", encode(MsgnetKeyEncryptionTest.kek()))
+              .put("expected_generation", text(payload(), "generation"))
+              .put("expected_keyset_version", text(payload(), "keyset_version"));
+      identitySign(request, signing, pin.identityId(), "NetworkProjectionRequest");
+      var controller =
+          new MsgnetRenewalController(
+              renewal, new MsgnetNetworkRenewal(renewal, ledger, materials), pki, ledger);
+      var http = new org.springframework.mock.web.MockHttpServletRequest();
+      assertThrows(
+          AurigaException.class,
+          () ->
+              controller.sealed(
+                  MsgnetRenewal.canonical(request).getBytes(StandardCharsets.UTF_8), http));
+      http.setSecure(true);
+      var response =
+          controller.sealed(
+              MsgnetRenewal.canonical(request).getBytes(StandardCharsets.UTF_8), http);
+      assertEquals(200, response.getStatusCode().value());
+      var sealed = NetworkJson.parse(response.getBody(), 1048576);
+      byte[] clear = MsgnetHpke.open(sealed, sealing.getPrivate(), sealing.getPublic());
+      JsonNode material;
+      try {
+        material = NetworkJson.parse(new String(clear, StandardCharsets.UTF_8), 1048576);
+      } finally {
+        java.util.Arrays.fill(clear, (byte) 0);
+      }
+      assertThrows(AurigaException.class, () -> materials.sealed(request));
+      var snapshot =
+          MsgnetProjectionBinding.snapshot(
+              material, NetworkJson.parse(renewal.publication(), 1048576));
+      var manifest = snapshot.deepCopy().put("material_revision", "1");
+      var selector = snapshot.deepCopy();
+      selector.remove("files");
+      selector
+          .put("material_revision", "1")
+          .put("manifest_digest", MsgnetV2Verifier.digest(manifest));
+      var receipt = selector.deepCopy();
+      receipt.remove("material_revision");
+      receipt.remove("manifest_digest");
+      receipt.put("phase", "handshake_verified").put("observed_at", wall.now.toString());
+      receipt.set("local_selector", selector);
+      identitySign(receipt, signing, pin.identityId(), "NetworkProjectionReceipt");
+      assertThrows(AurigaException.class, () -> materials.confirm(receipt));
+      receipt.remove("identity_auth");
+      receipt.put("phase", "loaded");
+      identitySign(receipt, signing, pin.identityId(), "NetworkProjectionReceipt");
+      assertEquals(receipt, materials.confirm(receipt));
+      assertEquals(receipt, materials.confirm(receipt));
+      var conflicting = receipt.deepCopy();
+      ((ObjectNode) conflicting.path("local_selector")).put("material_revision", "2");
+      conflicting.remove("identity_auth");
+      identitySign(conflicting, signing, pin.identityId(), "NetworkProjectionReceipt");
+      assertThrows(AurigaException.class, () -> materials.confirm(conflicting));
+      receipt.remove("identity_auth");
+      receipt.put("phase", "handshake_verified");
+      identitySign(receipt, signing, pin.identityId(), "NetworkProjectionReceipt");
+      assertEquals(receipt, materials.confirm(receipt));
+      var wrongKid = request.deepCopy().put("nonce", encode(MsgnetKeyEncryptionTest.kek()));
+      wrongKid.remove("identity_auth");
+      identitySign(wrongKid, signing, "other", "NetworkProjectionRequest");
+      assertThrows(AurigaException.class, () -> materials.sealed(wrongKid));
+    }
+  }
+
+  private static String encode(byte[] bytes) {
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+  }
+
+  private static void identitySign(ObjectNode body, KeyPair pair, String kid, String type)
+      throws Exception {
+    var signer = Signature.getInstance("Ed25519");
+    signer.initSign(pair.getPrivate());
+    signer.update(
+        ("Auriga." + type + ".v2\0" + MsgnetRenewal.canonical(body))
+            .getBytes(StandardCharsets.UTF_8));
+    body.putObject("identity_auth")
+        .put("alg", "Ed25519")
+        .put("kid", kid)
+        .put("signature", encode(signer.sign()));
   }
 }

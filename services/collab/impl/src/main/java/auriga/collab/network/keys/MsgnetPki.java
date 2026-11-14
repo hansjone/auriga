@@ -243,6 +243,11 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
                 List.of(eku),
                 certificate,
                 secret(text(ca, "ca_id"), "network_transport_ca", "collab"));
+        jdbc.update(
+            "DELETE FROM collab.msgnet_projection_receipt WHERE tenant_id = ? AND realm = ? AND installation_id = ?",
+            tenant,
+            realm,
+            text(scope, "identity_id"));
         String kid = UUID.randomUUID().toString();
         save(kid, "network_transport_leaf", component, issued);
         var leaf =
@@ -348,7 +353,7 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
         () -> {
           var array = MsgnetRenewal.object().putArray("leaves");
           jdbc.query(
-              "SELECT leaf, kid FROM collab.msgnet_transport_leaf WHERE tenant_id = ? AND realm = ? AND identity_id = ?",
+              "SELECT leaf, kid FROM collab.msgnet_transport_leaf WHERE tenant_id = ? AND realm = ? AND identity_id = ? ORDER BY role",
               (org.springframework.jdbc.core.RowCallbackHandler)
                   rs -> {
                     var leaf = (ObjectNode) NetworkJson.parse(rs.getString(1));
@@ -388,7 +393,8 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
                   && receipt
                       .path("keyset_version")
                       .equals(p.path("keyset").path("payload").path("keyset_version"))
-                  && text(receipt, "publication_digest").equals(MsgnetMaterials.digest(p)),
+                  && text(receipt, "publication_digest")
+                      .equals(MsgnetV2Verifier.digest(p.path("keyset"))),
               "invalid_transition");
           jdbc.update(
               """

@@ -47,8 +47,23 @@ public final class MsgnetNetworkRenewal implements NetworkRenewal {
   }
 
   @Override
-  public RenewalStatus status() {
-    return model(NetworkJson.parse(renewal.status()), RenewalStatus.class);
+  public RenewalStatusOutput status() {
+    return new StatusOutput(NetworkJson.parse(renewal.status()));
+  }
+
+  // The generated oneOf model narrows the state enum to its unpublished branch.
+  // Preserve the frozen union on the wire without modifying generated sources.
+  static final class StatusOutput extends RenewalStatusOutput {
+    private final JsonNode output;
+
+    StatusOutput(JsonNode output) {
+      this.output = output;
+    }
+
+    @com.fasterxml.jackson.annotation.JsonValue
+    public JsonNode output() {
+      return output;
+    }
   }
 
   @Override

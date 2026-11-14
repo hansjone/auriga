@@ -48,6 +48,78 @@ public final class MsgnetControlLedger {
         .orElseThrow(() -> failure("scope_denied"));
   }
 
+  static Map<String, Identity> pins(JsonNode source, UUID tenant, String realm) {
+    schema("InstallationPins", source, "invalid_chain");
+    require(
+        tenant.toString().equals(text(source, "tenant_id")) && realm.equals(text(source, "realm")),
+        "scope_denied");
+    var pins = new java.util.HashMap<String, Identity>();
+    var ids = new java.util.HashSet<String>();
+    for (var value : source.path("pins")) {
+      var pin =
+          new Identity(
+              text(value, "target_id"),
+              text(value, "identity_id"),
+              text(value, "signing_spki"),
+              text(value, "component"),
+              text(value, "gateway_id"),
+              text(value, "sealing_spki"),
+              text(value, "subject"));
+      canonicalSpki(pin.signingSpki(), "Ed25519");
+      canonicalSpki(pin.sealingSpki(), "X25519");
+      require(
+          pins.putIfAbsent(pin.targetId(), pin) == null && ids.add(pin.identityId()),
+          "scope_denied");
+    }
+    return Map.copyOf(pins);
+  }
+
+  private static void canonicalSpki(String encoded, String algorithm) {
+    try {
+      byte[] bytes = Base64.getUrlDecoder().decode(encoded);
+      var key =
+          java.security.KeyFactory.getInstance(algorithm)
+              .generatePublic(new java.security.spec.X509EncodedKeySpec(bytes));
+      require(
+          Base64.getUrlEncoder().withoutPadding().encodeToString(key.getEncoded()).equals(encoded),
+          "invalid_chain");
+      String name =
+          key instanceof java.security.interfaces.EdECPublicKey ed
+              ? ed.getParams().getName()
+              : key instanceof java.security.interfaces.XECPublicKey x
+                      && x.getParams() instanceof java.security.spec.NamedParameterSpec spec
+                  ? spec.getName()
+                  : "";
+      require(algorithm.equals(name), "invalid_chain");
+    } catch (java.security.GeneralSecurityException | IllegalArgumentException e) {
+      throw failure("invalid_chain");
+    }
+  }
+
+  void requireUsable(Identity identity) {
+    var control = renewal.requiredState().path("control").path("payload");
+    require(
+        !contains(control.path("revoked_installation_ids"), identity.identityId()),
+        "identity_quarantined");
+    var row = row(identity.targetId());
+    if (row != null)
+      require(
+          "ready".equals(text(row.path("isolation"), "state"))
+              && !row.path("isolation").path("identity_compromised").asBoolean(),
+          "identity_quarantined");
+  }
+
+  void mtls(JsonNode request, java.security.cert.X509Certificate certificate) {
+    var pin = identity(text(request, "installation_id"));
+    require(
+        pin.subject()
+            .equals(
+                certificate
+                    .getSubjectX500Principal()
+                    .getName(javax.security.auth.x500.X500Principal.RFC2253)),
+        "scope_denied");
+  }
+
   public ObjectNode create(JsonNode request) {
     schema("ControlPackage", request, "invalid_chain");
     renewal.installControl(request.path("control"));

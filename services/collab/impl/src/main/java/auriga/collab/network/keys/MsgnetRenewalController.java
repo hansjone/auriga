@@ -24,11 +24,14 @@ public class MsgnetRenewalController {
   private final MsgnetRenewal service;
   private final NetworkRenewal api;
   private final MsgnetPki pki;
+  private final MsgnetControlLedger identities;
 
-  public MsgnetRenewalController(MsgnetRenewal service, NetworkRenewal api, MsgnetPki pki) {
+  public MsgnetRenewalController(
+      MsgnetRenewal service, NetworkRenewal api, MsgnetPki pki, MsgnetControlLedger identities) {
     this.service = service;
     this.api = api;
     this.pki = pki;
+    this.identities = identities;
   }
 
   @GetMapping(value = "/api/collab/v2/network/keys", produces = "application/json")
@@ -46,7 +49,7 @@ public class MsgnetRenewalController {
   @GetMapping(value = "/api/collab/v2/network/keys/status", produces = "application/json")
   @RequiresPermission("collab.msgnet.read")
   public ResponseEntity<String> status() {
-    return response(service::status);
+    return response(() -> json(api.status()));
   }
 
   @PublicEndpoint
@@ -88,8 +91,9 @@ public class MsgnetRenewalController {
   @RequiresPermission("collab.msgnet.projection.read")
   @PostMapping(value = "/api/collab/v2/network/projections/protocol", produces = "application/json")
   public ResponseEntity<String> protocol(@RequestBody byte[] request, HttpServletRequest http) {
-    mtls(http);
-    return response(() -> json(api.committedProtocol(input(request, ProjectionRequest.class))));
+    var model = input(request, ProjectionRequest.class);
+    mtls(http, model);
+    return response(() -> json(api.committedProtocol(model)));
   }
 
   @RequiresPermission("collab.msgnet.projection.read")
@@ -97,14 +101,16 @@ public class MsgnetRenewalController {
       value = "/api/collab/v2/network/projections/transport",
       produces = "application/json")
   public ResponseEntity<String> transport(@RequestBody byte[] request, HttpServletRequest http) {
-    mtls(http);
-    return response(() -> json(api.committedTransport(input(request, ProjectionRequest.class))));
+    var model = input(request, ProjectionRequest.class);
+    mtls(http, model);
+    return response(() -> json(api.committedTransport(model)));
   }
 
-  @RequiresPermission("collab.msgnet.projection.read")
+  @PublicEndpoint
   @PostMapping(value = "/api/collab/v2/network/bootstrap/materials", produces = "application/json")
-  public ResponseEntity<String> sealed(@RequestBody byte[] request) {
-    return response(() -> json(api.sealedBootstrap(input(request, ProjectionRequest.class))));
+  public ResponseEntity<String> sealed(@RequestBody byte[] request, HttpServletRequest http) {
+    if (!http.isSecure()) throw new AurigaException(CommonErrors.FORBIDDEN);
+    return publicResponse(json(api.sealedBootstrap(input(request, ProjectionRequest.class))));
   }
 
   @RequiresPermission("collab.msgnet.projection.ack")
@@ -138,11 +144,12 @@ public class MsgnetRenewalController {
     return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body);
   }
 
-  private static void mtls(HttpServletRequest request) {
+  private void mtls(HttpServletRequest request, ProjectionRequest model) {
     Object certificates = request.getAttribute("jakarta.servlet.request.X509Certificate");
     if (!request.isSecure()
         || !(certificates instanceof java.security.cert.X509Certificate[] chain)
         || chain.length == 0) throw new AurigaException(CommonErrors.FORBIDDEN);
+    identities.mtls(MsgnetNetworkRenewal.tree(model), chain[0]);
   }
 
   private ResponseEntity<String> response(java.util.function.Supplier<String> body) {

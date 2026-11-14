@@ -64,7 +64,7 @@ class MsgnetProductionVectorsTest {
       var result = new ArrayList<DynamicTest>();
       for (var vector : vectors.path("cases")) result.add(test(vector, false));
       for (var vector : vectors.path("boundary_cases")) result.add(test(vector, true));
-      assertEquals(220, result.size());
+      assertEquals(267, result.size());
       return result;
     }
   }
@@ -111,7 +111,8 @@ class MsgnetProductionVectorsTest {
           text(i, "seen_bundle_version"),
           text(i, "previous_transport_phase"),
           i.path("readers_persisted").asBoolean(),
-          i.path("handshakes_verified").asBoolean());
+          i.path("handshakes_verified").asBoolean(),
+          i.path("previous_transport"));
   }
 
   private static void boundary(JsonNode vector) throws Exception {
