@@ -61,8 +61,8 @@ public class DesktopController {
 
   @GetMapping("/desktop/latest")
   @PublicEndpoint
-  public ResponseEntity<JsonNode> latest() {
-    var manifest = releases.latest();
+  public ResponseEntity<JsonNode> latest(@RequestParam(defaultValue = "stable") String channel) {
+    var manifest = releases.latest(channel);
     return ResponseEntity.ok()
         .cacheControl(CacheControl.noStore())
         .header(

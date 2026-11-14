@@ -157,7 +157,7 @@ class DesktopReleasesTest {
     var first = envelope();
     releases.publish(actor, first, zip());
     var controller = new DesktopController(releases);
-    assertEquals(200, controller.latest().getStatusCode().value());
+    assertEquals(200, controller.latest("stable").getStatusCode().value());
     var response = controller.download(2, null);
     assertEquals(200, response.getStatusCode().value());
     assertEquals(
@@ -165,7 +165,7 @@ class DesktopReleasesTest {
         response.getHeaders().getFirst("Content-Disposition"));
     assertEquals(
         "AurigaDSH-Setup-2.0.0.exe",
-        controller.latest().getHeaders().getFirst("X-Desktop-Filename"));
+        controller.latest("stable").getHeaders().getFirst("X-Desktop-Filename"));
     response.getBody().getInputStream().close();
     rejects(controller::list, CommonErrors.UNAUTHENTICATED);
     var second = sign(envelope().put("version", "3.0.0").put("sequence", 3));
@@ -201,7 +201,7 @@ class DesktopReleasesTest {
   }
 
   @Test
-  void renewalAndExpiredPublicDownloadRemainAvailable() throws Exception {
+  void renewalRejectsExpiredPublicDownloadAndAllowsSignedPolicyChange() throws Exception {
     var first = envelope();
     releases.publish(actor, first, zip());
     var later =
@@ -213,10 +213,8 @@ class DesktopReleasesTest {
             tenant,
             event -> exported.add(event.deepCopy()));
     rejects(() -> later.verify(first), CommonErrors.VALIDATION_FAILED);
-    assertEquals(first, later.latest());
-    try (var stream = later.download(2).stream()) {
-      assertEquals("zip", new String(stream.readAllBytes(), StandardCharsets.UTF_8));
-    }
+    rejects(() -> later.latest(), CommonErrors.NOT_FOUND);
+    rejects(() -> later.download(2), CommonErrors.VALIDATION_FAILED);
     var renewed = sign(first.deepCopy().put("sequence", 3).put("notAfter", "2027-01-01T00:00:00Z"));
     later.publish(actor, renewed, zip());
     assertEquals(3, later.latest().path("sequence").asInt());
@@ -229,9 +227,10 @@ class DesktopReleasesTest {
                 .put("notAfter", "2027-02-01T00:00:00Z"));
     rejects(() -> later.publish(actor, changedId, zip()), CommonErrors.CONFLICT);
     var unchangedExpiry = sign(renewed.deepCopy().put("sequence", 4));
-    rejects(() -> later.publish(actor, unchangedExpiry, zip()), CommonErrors.CONFLICT);
+    assertEquals(4, later.publish(actor, unchangedExpiry, zip()).path("sequence").asInt());
+    later.withdraw(actor, 4);
     later.withdraw(actor, 3);
-    assertEquals(first, later.latest()); // expired fallback is still downloadable by new users
+    rejects(() -> later.latest(), CommonErrors.NOT_FOUND);
   }
 
   @Test
@@ -284,5 +283,40 @@ class DesktopReleasesTest {
       if (Set.of("publish", "withdraw", "list").contains(method.getName()))
         assertNotNull(method.getAnnotation(RequiresRecentStepUp.class));
     }
+  }
+
+  @Test
+  void signedChannelsPolicyAndExplicitRollback() throws Exception {
+    var stable =
+        sign(envelope().put("schema", 2).put("rolloutPercentage", 25).putNull("rollbackFrom"));
+    releases.publish(actor, stable, zip());
+    var beta =
+        sign(stable.deepCopy().put("channel", "beta").put("version", "3.0.0").put("sequence", 3));
+    releases.publish(actor, beta, zip());
+    assertEquals("2.0.0", releases.latest().path("version").asString());
+    assertEquals("3.0.0", releases.latest("beta").path("version").asString());
+    var mandatory =
+        sign(
+            stable
+                .deepCopy()
+                .put("minimumVersion", "2.0.0")
+                .put("sequence", 4)
+                .put("rolloutPercentage", 0));
+    releases.publish(actor, mandatory, zip());
+    assertEquals("2.0.0", releases.latest().path("minimumVersion").asString());
+    var downgrade = sign(stable.deepCopy().put("version", "1.5.0").put("sequence", 5));
+    rejects(() -> releases.publish(actor, downgrade, zip()), CommonErrors.CONFLICT);
+    var rollback = sign(downgrade.deepCopy().put("rollbackFrom", "2.0.0"));
+    releases.publish(actor, rollback, zip());
+    assertEquals("1.5.0", releases.latest().path("version").asString());
+    assertEquals("rollback", releases.list(actor).path("audit").get(3).path("action").asString());
+    releases.withdraw(actor, 5);
+    rejects(() -> releases.download(5), CommonErrors.NOT_FOUND);
+    var wrongSource = sign(rollback.deepCopy().put("sequence", 6).put("rollbackFrom", "9.0.0"));
+    rejects(() -> releases.publish(actor, wrongSource, zip()), CommonErrors.CONFLICT);
+    var badMinimum = sign(stable.deepCopy().put("minimumVersion", "9.0.0"));
+    rejects(() -> releases.verify(badMinimum), CommonErrors.VALIDATION_FAILED);
+    var badRollout = sign(stable.deepCopy().put("rolloutPercentage", 4294967296L));
+    rejects(() -> releases.verify(badRollout), CommonErrors.VALIDATION_FAILED);
   }
 }

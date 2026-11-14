@@ -14,11 +14,26 @@ const allowed = ref(false),
   error = ref('');
 const manifest = shallowRef<File>(),
   archive = shallowRef<File>();
+const policy = shallowRef<{
+  channel?: string;
+  minimumVersion?: string;
+  rolloutPercentage?: number;
+  rollbackFrom?: string | null;
+}>();
 const base = '/api/resource/v1/admin/desktop/releases';
-function selected(event: Event, kind: 'manifest' | 'archive') {
+async function selected(event: Event, kind: 'manifest' | 'archive') {
   const file = (event.target as HTMLInputElement).files?.[0];
-  if (kind === 'manifest') manifest.value = file;
-  else archive.value = file;
+  if (kind === 'manifest') {
+    manifest.value = file;
+    policy.value = undefined;
+    if (file && file.size <= 32768) {
+      try {
+        policy.value = JSON.parse(await file.text());
+      } catch {
+        error.value = t('desktopFailed');
+      }
+    }
+  } else archive.value = file;
 }
 async function load() {
   ledger.value = await apiClient.get<Ledger>(base);
@@ -78,6 +93,13 @@ onMounted(async () => {
       <button :disabled="busy" @click="run(requestStepUp)">
         {{ t('desktopVerify') }}
       </button>
+      <p>
+        发布策略包含在离线签名清单中。调整最低可用版本、渠道或灰度时，使用更高发行序号重新签名发布；服务端不持有私钥。
+      </p>
+      <p>
+        低于最低可用版本的客户端必须更新，不受灰度比例限制。显式回滚需在清单中指定
+        rollbackFrom 来源版本。
+      </p>
       <form @submit.prevent="publish">
         <label
           >{{ t('desktopManifest') }}
@@ -95,6 +117,15 @@ onMounted(async () => {
             :disabled="busy"
             @change="selected($event, 'archive')"
         /></label>
+        <p v-if="policy" role="status">
+          渠道：{{ policy.channel === 'beta' ? '测试' : '正式' }} ·
+          最低可用版本：{{ policy.minimumVersion }} · 灰度：{{
+            policy.rolloutPercentage ?? 100
+          }}%
+          <span v-if="policy.rollbackFrom">
+            · 显式回滚来源：{{ policy.rollbackFrom }}</span
+          >
+        </p>
         <button :disabled="busy || !manifest || !archive">
           {{ t('desktopPublish') }}
         </button>
@@ -107,6 +138,15 @@ onMounted(async () => {
           {{ item.manifest.publishedAt }}
         </p>
         <p>{{ item.manifest.notes }}</p>
+        <p>
+          渠道：{{ item.manifest.channel === 'beta' ? '测试' : '正式' }} ·
+          最低可用版本：{{ item.manifest.minimumVersion }} · 灰度：{{
+            item.manifest.rolloutPercentage ?? 100
+          }}%
+        </p>
+        <p v-if="item.manifest.rollbackFrom">
+          显式回滚来源：{{ item.manifest.rollbackFrom }}
+        </p>
         <code>{{ item.manifest.sha256 }}</code>
         <p v-if="item.withdrawn">{{ t('desktopWithdrawn') }}</p>
         <button

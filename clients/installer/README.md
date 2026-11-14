@@ -140,7 +140,7 @@ node payload/auriga/runtime/cli.mjs install --payload payload --root <独立安�
 
 工具沿用 Windows 自带 .NET Framework C# 编译器与本仓库开源 WinForms 向导，
 无需付费工具或额外下载。`app.manifest` 明确 `asInvoker`。
-`--installer-icon <PORTAL-HOME产出的ico>` 注入 PE 图标；未提供时为编译器默认占位图标。
+默认注入 `assets/brand/auriga-dsh.ico`；可用 `--installer-icon <ico>` 覆盖。
 换图标须重新构建、计算摘要和离线签名。
 
 CI 把 exe 作为 `make-release.mjs archive=` 输入，签名字段 `sha256`/`sizeBytes` 覆盖完整 exe。
@@ -158,3 +158,26 @@ DigiCert 官方资料示例约 USD 499–699/年，令牌和税费另计；签�
 参考：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、
 [SmartScreen](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation)、
 [DigiCert 价格示例](https://www.digicert.com/resources/fact-sheet/digicert-code-signing-instilling-trust-in-your-users.pdf)。
+
+## 桌面更新运营（清单 schema 2）
+
+启动检查，之后每 4–8 小时随机检查一次。主界面与设置页均提示新版；点击更新后后台下载，刷新继续显示进度。
+取消保留安装目录 `.desktop-resume` 的部分文件，重开后再次点击更新按 Range 续传。只复用相同签名 SHA 的字节；
+包换版时删除旧残片，服务端不支持 Range 时安全重下。下载后重新确认发行仍未撤回，再排队；退出后安装并冒烟，失败自动恢复旧版本和配置。
+安装和回滚结果在下一次启动的状态中显示。安装器从不清理用户会话目录。
+
+`make-release.mjs` / `sign-release.mjs` 新增 `channel=stable|beta`、`rolloutPercentage=0..100`（默认100）、
+`rollbackFrom=<精确来源版本>`（默认null）。这些字段与 `minimumVersion` 都属于离线签名，管理台不会修改签名后内容或持有发行私钥。
+管理台上传签好的清单和 exe，预览并展示渠道、最低可用版本、灰度与回滚来源；调整策略需同包更高 sequence 重签发布。
+客户端低于 minimumVersion 时强制提示、停用 Auriga 平台操作，不能关检查或切渠道绕过；强制更新不受灰度限制。
+原生 DSH 的本地用户数据始终保留。灰度按本机随机安装 ID 与发行序号稳定分桶，不上传设备标识。
+
+正式和测试渠道通过 `GET /api/resource/v1/desktop/latest?channel=stable|beta` 隔离，未传为正式。
+无签名的 HTTP 响应只能阻断可用性，不能授权安装、变更最低版本或回滚。
+降级只能由更高 sequence 的新签名授权，rollbackFrom 必须与受影响客户端的已装版本完全一致；
+管理台发布时还校验它等于该渠道上一发行版本，操作记入 rollback 审计。撤回保留账本及最高序号，撤回后包不可下载。
+过期清单不再用于最新发行或匿名下载，须以更高序号续期。
+
+schema 1 清单仍可验签，用于先发一版包含本更新器的过渡包。既有旧更新器仅识别 schema 1，
+运营者应先以 schema 1 发布过渡版本，再发布 schema 2 策略，不能让尚未升级的旧更新器直接解析 schema 2。
+离线签名 CLI 的审阅摘要包含渠道/灰度/最低版本/回滚来源，确认摘要后才签名。

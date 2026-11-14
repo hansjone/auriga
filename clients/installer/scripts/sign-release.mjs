@@ -28,14 +28,19 @@ export function unsignedRelease({
   notAfter,
   notes = '',
   publishedAt = new Date().toISOString(),
+  channel = 'stable',
+  rolloutPercentage = 100,
+  rollbackFrom = null,
 }) {
   const manifest = verifyPackage(payload);
   return {
-    schema: 1,
+    schema: 2,
+    rolloutPercentage: Number(rolloutPercentage),
+    rollbackFrom,
     product: 'Auriga Desktop',
     version: manifest.bundleVersion,
     packageId: manifest.id,
-    channel: 'stable',
+    channel,
     platform: 'win-x64',
     sizeBytes: statSync(archive).size,
     sha256: sha256File(archive),
@@ -139,6 +144,9 @@ export function reviewRelease(options) {
       sequence: body.sequence,
       notAfter: body.notAfter,
       minimumVersion: body.minimumVersion,
+      channel: body.channel,
+      rolloutPercentage: body.rolloutPercentage,
+      rollbackFrom: body.rollbackFrom,
       publishedAt: body.publishedAt,
       notes: body.notes,
     },
@@ -171,7 +179,8 @@ export function signRelease(options) {
   };
   verifyRelease(envelope, {
     publicKey: createPublicKey(key),
-    currentVersion: body.minimumVersion,
+    currentVersion: body.rollbackFrom ?? body.minimumVersion,
+    channel: body.channel,
   });
   return envelope;
 }

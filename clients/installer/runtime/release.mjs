@@ -1,5 +1,5 @@
 /** Desktop-only offline release trust. Provision before building a production installer. */
-import { createPublicKey, verify } from 'node:crypto';
+import { createHash, createPublicKey, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync } from 'node:fs';
 import { compare } from './semver-lite.mjs';
@@ -45,6 +45,8 @@ export function verifyRelease(
     highestPublishedAt,
     highestVersion,
     acceptedDigest = null,
+    acceptedEnvelope = null,
+    channel = 'stable',
   } = {},
 ) {
   const { signature, ...body } = envelope ?? {};
@@ -83,12 +85,21 @@ export function verifyRelease(
     'notes',
     'components',
   ];
+  if (body.schema === 2) fields.push('rolloutPercentage', 'rollbackFrom');
   if (
     Object.keys(body).length !== fields.length ||
     fields.some((k) => !(k in body)) ||
-    body.schema !== 1 ||
+    ![1, 2].includes(body.schema) ||
     body.product !== 'Auriga Desktop' ||
-    body.channel !== 'stable' ||
+    !['stable', 'beta'].includes(body.channel) ||
+    body.channel !== channel ||
+    (body.schema === 1 && body.channel !== 'stable') ||
+    (body.schema === 2 &&
+      (!Number.isInteger(body.rolloutPercentage) ||
+        body.rolloutPercentage < 0 ||
+        body.rolloutPercentage > 100 ||
+        (body.rollbackFrom !== null &&
+          typeof body.rollbackFrom !== 'string'))) ||
     body.platform !== 'win-x64' ||
     typeof body.packageId !== 'string' ||
     !/^[A-Za-z0-9.+-]{1,200}$/.test(body.packageId) ||
@@ -128,17 +139,28 @@ export function verifyRelease(
     expiry <= published
   )
     throw new Error('expired or future release');
+  const rollback = body.schema === 2 && body.rollbackFrom !== null;
+  if (rollback) compare(body.rollbackFrom, body.rollbackFrom);
+  // A rollback is a new signed release, scoped to the exact affected installed version.
+  const authorizedRollback = rollback && body.rollbackFrom === currentVersion;
   if (
-    compare(body.version, currentVersion) < 0 ||
-    (highestVersion && compare(body.version, highestVersion) < 0) ||
-    compare(currentVersion, body.minimumVersion) < 0
+    (!authorizedRollback &&
+      (compare(body.version, currentVersion) < 0 ||
+        (highestVersion && compare(body.version, highestVersion) < 0))) ||
+    compare(body.minimumVersion, body.version) > 0
   )
     throw new Error('release downgrade or minimum version');
   if (
     (highestPublishedAt && published < Date.parse(highestPublishedAt)) ||
     body.sequence < highestSequence ||
-    (body.sequence === highestSequence && body.sha256 !== acceptedDigest)
+    (body.sequence === highestSequence &&
+      (body.sha256 !== acceptedDigest ||
+        (acceptedEnvelope && releaseDigest(body) !== acceptedEnvelope)))
   )
     throw new Error('release replay');
   return body;
+}
+
+export function releaseDigest(body) {
+  return createHash('sha256').update(canonical(body)).digest('hex');
 }

@@ -56,11 +56,17 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     ...signingOptions,
     confirmSha256: reviewRelease(signingOptions).summary.reviewSha256,
   });
-  let corrupt = false;
+  let corrupt = false,
+    withdrawn = false;
   let interrupted = false,
     resumed = false;
   const server = createServer((req, res) => {
     if (req.url.endsWith('/latest')) {
+      if (withdrawn) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(manifest));
     } else {
@@ -113,7 +119,37 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   assert.equal(resumed, true);
   assert.equal(queued.queued, true);
   assert.equal(readState(root).current, old.id); // no live-session mutation
-  await applyPending(root, { publicKey: keys.publicKey, smoke: () => {} });
+  withdrawn = true;
+  await assert.rejects(
+    applyPending(root, { publicKey: keys.publicKey, request, smoke: () => {} }),
+    /withdrawn/,
+  );
+  assert.equal(readState(root).current, old.id);
+  withdrawn = false;
+  await updater.check();
+  await updater.update();
+  await assert.rejects(
+    applyPending(root, {
+      publicKey: keys.publicKey,
+      request,
+      smoke: () => {
+        throw new Error('smoke failed');
+      },
+    }),
+    /smoke/,
+  );
+  assert.equal(readState(root).current, old.id);
+  assert.equal(
+    readFileSync(join(profileDir(dataHome), 'conversations.json'), 'utf8'),
+    'keep',
+  );
+  await updater.check();
+  await updater.update();
+  await applyPending(root, {
+    publicKey: keys.publicKey,
+    smoke: () => {},
+    request,
+  });
   assert.equal(readState(root).current, next.id);
   assert.equal(
     readFileSync(join(profileDir(dataHome), 'conversations.json'), 'utf8'),

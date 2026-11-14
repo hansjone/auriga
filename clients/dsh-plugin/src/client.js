@@ -15,6 +15,13 @@ window.__ModuleLoader__.load({
     const ELEMENT = 'auriga-team-panel';
     const loadedPanels = new WeakMap();
     const zh = {
+      updateAvailable: '发现桌面新版',
+      updateRequired: '当前版本已停用，请更新并重启',
+      updateNow: '更新',
+      updateCancel: '取消下载',
+      updateDownloading: '正在下载',
+      updateRestart: '更新已准备好，请关闭并重新打开 Auriga DSH',
+      updateFailed: '更新失败，旧版和数据已保留，请重试',
       panel: BRAND_NAME,
       loading: '正在加载…',
       failed: '加载失败',
@@ -108,6 +115,15 @@ window.__ModuleLoader__.load({
       revokeHint: '撤销后重新核权；已执行的动作无法撤回，拒绝冷却仍然有效。',
     };
     const en = {
+      updateAvailable: 'Desktop update available',
+      updateRequired:
+        'This version is no longer supported. Update and restart.',
+      updateNow: 'Update',
+      updateCancel: 'Cancel download',
+      updateDownloading: 'Downloading',
+      updateRestart: 'Update ready. Close and reopen Auriga DSH.',
+      updateFailed:
+        'Update failed. Previous version and data preserved. Retry.',
       panel: BRAND_NAME,
       loading: 'Loading…',
       failed: 'Failed to load',
@@ -1536,7 +1552,65 @@ window.__ModuleLoader__.load({
             emit();
           }, 4000);
         };
+        function useDesktopUpdate() {
+          const [desktop, setDesktop] = React.useState(null);
+          const read = async (action, signal) => {
+            const response = await fetch(
+              localURL(
+                action ? 'auriga/settings/desktop' : 'auriga/settings/state',
+              ),
+              {
+                credentials: 'same-origin',
+                cache: 'no-store',
+                redirect: 'error',
+                signal,
+                ...(action
+                  ? {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auriga-Settings': '1',
+                      },
+                      body: JSON.stringify({ action }),
+                    }
+                  : {}),
+              },
+            );
+            if (!response.ok) throw failure();
+            const result = await response.json();
+            return action ? result : result.desktop;
+          };
+          React.useEffect(() => {
+            let live = true;
+            const controller = new AbortController();
+            const refresh = () =>
+              read(undefined, controller.signal)
+                .then((value) => {
+                  if (live && !disposed) setDesktop(value);
+                })
+                .catch(() => {});
+            void refresh();
+            const timer = setInterval(refresh, 5000);
+            return () => {
+              live = false;
+              controller.abort();
+              clearInterval(timer);
+            };
+          }, []);
+          const action = async (value) => {
+            try {
+              setDesktop(await read(value));
+            } catch {
+              setDesktop((previous) => ({
+                ...previous,
+                error: 'updateFailed',
+              }));
+            }
+          };
+          return [desktop, action];
+        }
         function Main() {
+          const [desktop, desktopAction] = useDesktopUpdate();
           const host = useHostState();
           const [phase, retry] = useBootstrap(true);
           const [authRequired, setAuthRequired] = React.useState(false);
@@ -1600,6 +1674,48 @@ window.__ModuleLoader__.load({
                 flexDirection: 'column',
               },
             },
+            desktop &&
+              (desktop.available || desktop.restartRequired || desktop.error) &&
+              h(
+                'section',
+                {
+                  role: desktop.required ? 'alert' : 'status',
+                  className: 'auriga-shell-status',
+                },
+                h(
+                  'span',
+                  null,
+                  t(
+                    desktop.required
+                      ? 'updateRequired'
+                      : desktop.restartRequired
+                        ? 'updateRestart'
+                        : desktop.error
+                          ? 'updateFailed'
+                          : desktop.downloading
+                            ? 'updateDownloading'
+                            : 'updateAvailable',
+                  ),
+                  desktop.available && ' · ' + desktop.available.version,
+                ),
+                desktop.downloading &&
+                  h('progress', {
+                    max: desktop.totalBytes,
+                    value: desktop.downloadedBytes,
+                  }),
+                !desktop.restartRequired &&
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      onClick: () =>
+                        desktopAction(
+                          desktop.downloading ? 'cancel' : 'update',
+                        ),
+                    },
+                    t(desktop.downloading ? 'updateCancel' : 'updateNow'),
+                  ),
+              ),
             authRequired &&
               h(
                 'div',
@@ -1630,7 +1746,7 @@ window.__ModuleLoader__.load({
                   'button',
                   {
                     type: 'button',
-                    disabled: !boot.connection.connected,
+                    disabled: !boot.connection.connected || desktop?.required,
                     onClick: () => navigate('session:new'),
                   },
                   t('conversation'),
@@ -1642,7 +1758,7 @@ window.__ModuleLoader__.load({
               h('summary', null, t('inbox')),
               h(ConsentSection),
             ),
-            h(ELEMENT, { ref, style: { flex: 1 } }),
+            !desktop?.required && h(ELEMENT, { ref, style: { flex: 1 } }),
           );
         }
         effect(

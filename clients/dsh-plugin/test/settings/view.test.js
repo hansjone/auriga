@@ -589,3 +589,58 @@ for (const locale of ['zh', 'en'])
       }
     },
   );
+
+test('刷新后下载进度可见并可取消，强制更新不能关闭检查和切渠道', async () => {
+  let cancelled = false;
+  const fixture = harness(async (url, init) => {
+    if (url.endsWith('/desktop')) {
+      assert.equal(JSON.parse(init.body).action, 'cancel');
+      cancelled = true;
+      return Response.json({ phase: 'cancelled' });
+    }
+    return Response.json(
+      url.endsWith('/status')
+        ? signedIn
+        : {
+            ...settings,
+            desktop: {
+              enabled: true,
+              channel: 'beta',
+              required: true,
+              available: { version: '2.0.0' },
+              downloading: !cancelled,
+              busy: !cancelled,
+              downloadedBytes: 1048576,
+              totalBytes: 2097152,
+              phase: cancelled ? 'cancelled' : 'downloading',
+            },
+          },
+    );
+  });
+  try {
+    fixture.render();
+    await setImmediate();
+    const tree = fixture.render();
+    assert.match(text(tree), /最低可用版本/);
+    assert.match(text(tree), /1.0 \/ 2.0 MiB/);
+    assert.equal(
+      nodes(tree).find((n) => n.type === 'progress').props.value,
+      1048576,
+    );
+    assert.equal(
+      nodes(tree).find((n) => n.type === 'select').props.disabled,
+      true,
+    );
+    assert.equal(
+      nodes(tree).find((n) => n.type === 'input' && n.props.type === 'checkbox')
+        .props.disabled,
+      true,
+    );
+    await button(tree, '取消下载（保留进度）').props.onClick();
+    assert.equal(cancelled, true);
+    assert.match(text(fixture.render()), /下载已暂停/);
+    assert.equal(button(fixture.render(), '更新').props.disabled, false);
+  } finally {
+    fixture.dispose();
+  }
+});

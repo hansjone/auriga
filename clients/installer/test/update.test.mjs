@@ -1,4 +1,4 @@
-/* global Response */
+/* global Response, setImmediate */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
@@ -15,7 +15,12 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { cleanupDownloads, downloadLock } from '../runtime/update-state.mjs';
 import { downloadPackage } from '../runtime/update.mjs';
-import { canonical, verifyRelease, RELEASE_KID } from '../runtime/release.mjs';
+import {
+  canonical,
+  verifyRelease,
+  RELEASE_KID,
+  releaseDigest,
+} from '../runtime/release.mjs';
 import { createUpdater, platformUrl } from '../runtime/update.mjs';
 import {
   install,
@@ -77,7 +82,11 @@ test('签名、篡改、降级、到期、未来、序号重放均拒绝', () =>
     /signature/,
   );
   assert.throws(() => verify(signed({ version: '0.9.0' })), /downgrade/);
-  assert.throws(() => verify(signed({ minimumVersion: '1.5.0' })), /minimum/);
+  assert.equal(
+    verify(signed({ minimumVersion: '1.5.0' })).minimumVersion,
+    '1.5.0',
+  );
+  assert.throws(() => verify(signed({ minimumVersion: '3.0.0' })), /minimum/);
   assert.throws(
     () => verify(signed({ notAfter: '2026-11-11T01:00:00Z' })),
     /expired/,
@@ -388,4 +397,203 @@ test('a higher sequence cannot roll back a previously seen version', () => {
     () => verify(signed({ sequence: 5 }), { highestVersion: '3.0.0' }),
     /downgrade/,
   );
+});
+
+test('签名渠道、最低版本、灰度和精确来源回滚授权', () => {
+  const policy = { schema: 2, rolloutPercentage: 25, rollbackFrom: null };
+  assert.throws(
+    () => verify(signed({ ...policy, channel: 'beta' })),
+    /malformed/,
+  );
+  assert.equal(
+    verify(signed({ ...policy, channel: 'beta' }), { channel: 'beta' }).channel,
+    'beta',
+  );
+  for (const rolloutPercentage of [-1, 101, 0.5])
+    assert.throws(
+      () => verify(signed({ ...policy, rolloutPercentage })),
+      /malformed|canonical domain/,
+    );
+  assert.throws(
+    () =>
+      verify(signed({ ...policy, version: '0.9.0', minimumVersion: '0.8.0' })),
+    /downgrade/,
+  );
+  const rollback = signed({
+    ...policy,
+    version: '0.9.0',
+    minimumVersion: '0.8.0',
+    rollbackFrom: '1.0.0',
+  });
+  assert.equal(verify(rollback, { highestVersion: '3.0.0' }).version, '0.9.0');
+  assert.throws(
+    () => verify(rollback, { currentVersion: '2.0.0' }),
+    /downgrade/,
+  );
+  assert.throws(() => verify(rollback, { highestSequence: 3 }), /replay/);
+  const { signature, ...body } = signed(policy);
+  assert.ok(signature);
+  assert.throws(
+    () =>
+      verify(signed({ ...policy, minimumVersion: '2.0.0' }), {
+        highestSequence: 2,
+        acceptedDigest: body.sha256,
+        acceptedEnvelope: releaseDigest(body),
+      }),
+    /replay/,
+  );
+});
+
+function resumedUpdater(f, request, extra = {}) {
+  return createUpdater({
+    root: f.root,
+    origin: 'https://example.com',
+    publicKey: keys.publicKey,
+    now: () => now,
+    request,
+    extract: () => f.next.dir,
+    smoke: () => {},
+    defer: false,
+    ...extra,
+  });
+}
+
+test('取消保留部分字节，刷新状态仍显示下载中，重建更新器后跨进程 Range 续传', async (t) => {
+  const f = fixture(t);
+  const manifest = signed({ packageId: f.next.id });
+  let started;
+  const reached = new Promise((resolve) => {
+    started = resolve;
+  });
+  const first = resumedUpdater(f, async (url, init) => {
+    if (url.endsWith('/latest')) return new Response(JSON.stringify(manifest));
+    return {
+      ok: true,
+      status: 200,
+      body: (async function* () {
+        yield Buffer.from('zi');
+        started();
+        await new Promise((resolve, reject) => {
+          init.signal.addEventListener(
+            'abort',
+            () => reject(init.signal.reason),
+            { once: true },
+          );
+        });
+      })(),
+    };
+  });
+  await first.check();
+  const downloading = first.update();
+  await reached;
+  assert.equal(first.status().downloading, true);
+  assert.equal(first.status().downloadedBytes, 2);
+  assert.equal(first.status().available.version, '2.0.0');
+  first.cancel();
+  await assert.rejects(downloading);
+  assert.equal(first.status().phase, 'cancelled');
+  let range;
+  const second = resumedUpdater(f, async (url, init) => {
+    if (url.endsWith('/latest')) return new Response(JSON.stringify(manifest));
+    range = init.headers.Range;
+    return new Response('p', {
+      status: 206,
+      headers: { 'Content-Range': 'bytes 2-2/3' },
+    });
+  });
+  assert.equal(second.status().available.version, '2.0.0');
+  await second.update();
+  assert.equal(range, 'bytes=2-');
+  assert.equal(readState(f.root).current, f.next.id);
+  assert.equal(
+    readFileSync(join(profileDir(f.dataHome), 'user-data.txt'), 'utf8'),
+    'keep',
+  );
+});
+
+test('强制最低版本绕过零灰度及检查偏好，不能关闭或切渠道逃避', async (t) => {
+  const f = fixture(t);
+  const manifest = signed({
+    packageId: f.next.id,
+    schema: 2,
+    minimumVersion: '2.0.0',
+    rolloutPercentage: 0,
+    rollbackFrom: null,
+  });
+  const updater = resumedUpdater(
+    f,
+    async () => new Response(JSON.stringify(manifest)),
+  );
+  updater.configure(false);
+  await updater.check();
+  assert.equal(updater.status().required, true);
+  assert.equal(updater.status().available.version, '2.0.0');
+  assert.throws(() => updater.configure(false), /mandatory/);
+  assert.throws(() => updater.setChannel('beta'), /channel/);
+});
+
+test('普通零灰度不提供更新，下载完成时撤回不会安装', async (t) => {
+  const f = fixture(t);
+  let withdrawn = false;
+  let manifest = signed({
+    packageId: f.next.id,
+    schema: 2,
+    rolloutPercentage: 0,
+    rollbackFrom: null,
+  });
+  const updater = resumedUpdater(f, async (url) => {
+    if (url.endsWith('/latest'))
+      return withdrawn
+        ? new Response('', { status: 404 })
+        : new Response(JSON.stringify(manifest));
+    withdrawn = true;
+    return new Response('zip');
+  });
+  await updater.check();
+  assert.equal(updater.status().available, null);
+  manifest = signed({
+    packageId: f.next.id,
+    schema: 2,
+    sequence: 3,
+    rolloutPercentage: 100,
+    rollbackFrom: null,
+  });
+  await updater.check();
+  await assert.rejects(updater.update(), /withdrawn/);
+  assert.equal(readState(f.root).current, f.old.id);
+});
+
+test('启动检查并在4至8小时内带抖动重排，关闭取消定时器', async (t) => {
+  const f = fixture(t);
+  let calls = 0,
+    callback,
+    delay,
+    cleared;
+  const timer = { unref() {} };
+  const updater = resumedUpdater(
+    f,
+    async () => {
+      calls++;
+      return new Response(JSON.stringify(signed({ packageId: f.next.id })));
+    },
+    {
+      random: () => 0.25,
+      schedule: (fn, ms) => {
+        callback = fn;
+        delay = ms;
+        return timer;
+      },
+      unschedule: (x) => {
+        cleared = x;
+      },
+    },
+  );
+  const stop = updater.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  assert.equal(delay, 5 * 60 * 60 * 1000);
+  await callback();
+  assert.equal(calls, 2);
+  stop();
+  assert.equal(cleared, timer);
 });

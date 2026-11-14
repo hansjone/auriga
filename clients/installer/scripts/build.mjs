@@ -504,7 +504,9 @@ export async function build(args) {
   if (args.exe) {
     exe = makeExe({
       stage,
-      icon: args['installer-icon'],
+      icon:
+        args['installer-icon'] ??
+        resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
       archive: zip,
       out: join(out, `AurigaDSH-Setup-${desktopVersion}.exe`),
     });
