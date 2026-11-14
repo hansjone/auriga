@@ -1695,7 +1695,8 @@ test('invalid refreshed ticket still fails closed on a healthy connection', asyn
 test('healthy refresh retries a control fetch failure but rejects trust validation failure', async (t) => {
   const f = await fixture(t, { longTrust: true });
   await f.runtime.start();
-  f.advance(13 * 3600000);
+  // The refresh deadline can be as late as 13.2h (12h + 10% jitter).
+  f.advance(14 * 3600000);
   const original = f.prepared.refresh;
   f.prepared.refresh = async () => {
     throw new DeviceControlUnavailable('network control unavailable');
@@ -1707,7 +1708,7 @@ test('healthy refresh retries a control fetch failure but rejects trust validati
   await f.connections[1].ticket();
   const broken = await fixture(t, { longTrust: true });
   await broken.runtime.start();
-  broken.advance(13 * 3600000);
+  broken.advance(14 * 3600000);
   broken.prepared.refresh = async () => {
     throw new TypeError('invalid keyset');
   };
@@ -1718,7 +1719,8 @@ test('healthy refresh retries a control fetch failure but rejects trust validati
 test('transient refresh never preserves connected past a newer announcement without its full keyset', async (t) => {
   const f = await fixture(t, { longTrust: true });
   await f.runtime.start();
-  f.advance(13 * 3600000);
+  // Advance beyond the latest jittered deadline so refresh is guaranteed.
+  f.advance(14 * 3600000);
   const gate = latch();
   let entered = false;
   f.prepared.refresh = async (trust) => {
