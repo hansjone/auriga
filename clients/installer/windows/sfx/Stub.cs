@@ -58,6 +58,21 @@ static class Setup
     [STAThread]
     static int Main(string[] args)
     {
+        ConfigurePaths();
+        return Start(args);
+    }
+
+    public static void ConfigurePaths()
+    {
+        // csc targets Framework 4.0 by default. On Windows' Framework 4.6.2+
+        // opt into modern System.IO before any path API caches the old defaults.
+        // This is process-local; no registry or TEMP changes are required.
+        AppContext.SetSwitch("Switch.System.IO.UseLegacyPathHandling", false);
+        AppContext.SetSwitch("Switch.System.IO.BlockLongPaths", false);
+    }
+
+    static int Start(string[] args)
+    {
         bool silent = Array.Exists(args, a => a.Equals("/VERYSILENT", StringComparison.OrdinalIgnoreCase));
         if (!silent)
         {
@@ -87,9 +102,38 @@ static class Setup
     {
         string name = entry.FullName.Replace('\\', '/');
         while (name.StartsWith("./")) name = name.Substring(2);
-        if (name.Length == 0 || name.EndsWith("/")) return null;
         if (name.StartsWith("/") || name.Contains(":") || Array.IndexOf(name.Split('/'), "..") >= 0) throw new IOException("unsafe package entry");
+        if (name.Length == 0 || name.EndsWith("/")) return null;
         return name;
+    }
+
+    // Shared by the wizard and /VERYSILENT: validate before creating any file.
+    public static string FileSystemPath(string path)
+    {
+        string full = Path.GetFullPath(path);
+        if (full.StartsWith("\\\\?\\")) return full;
+        return full.StartsWith("\\\\") ? "\\\\?\\UNC\\" + full.Substring(2) : "\\\\?\\" + full;
+    }
+
+    public static void Extract(ZipArchive zip, string package, Func<bool> cancelled, Action<string, long> progress)
+    {
+        foreach (var entry in zip.Entries) EntryPath(entry);
+        long done = 0;
+        foreach (var entry in zip.Entries)
+        {
+            if (cancelled()) throw new OperationCanceledException();
+            string name = EntryPath(entry);
+            if (name == null) continue;
+            string target = Path.GetFullPath(Path.Combine(package, name.Replace('/', '\\')));
+            if (!target.StartsWith(Path.GetFullPath(package).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase))
+                throw new IOException("unsafe package entry");
+            // Explicit extended syntax also works when Windows LongPathsEnabled
+            // is off. Only validated, canonical paths reach these file APIs.
+            Directory.CreateDirectory(FileSystemPath(Path.GetDirectoryName(target)));
+            entry.ExtractToFile(FileSystemPath(target), false);
+            done += entry.Length;
+            progress(name, done);
+        }
     }
 
     static int Install(string[] args)
@@ -98,16 +142,14 @@ static class Setup
         try
         {
             Directory.CreateDirectory(temp);
-            string zip = Path.Combine(temp, "package.zip");
-            FileStream file;
-            using (var payload = OpenPayload(out file))
-            using (file)
-            using (var output = File.Create(zip)) payload.CopyTo(output, 1 << 20);
             string package = Path.Combine(temp, "pkg");
             Directory.CreateDirectory(package);
             Console.WriteLine("Unpacking " + Brand + " setup...");
-            int rc = Run(Path.Combine(Environment.SystemDirectory, "tar.exe"), "-xf \"" + zip + "\" -C \"" + package + "\"", null);
-            if (rc != 0) return rc;
+            FileStream file;
+            using (var payload = OpenPayload(out file))
+            using (file)
+            using (var zip = new ZipArchive(payload, ZipArchiveMode.Read))
+                Extract(zip, package, () => false, (name, done) => { });
             Console.WriteLine("Installing " + Brand + "...");
             string forwarded = string.Join(" ", Array.ConvertAll(args, a => "\"" + a.Replace("\"", "\\\"") + "\""));
             return Run(PowerShell, "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(package, "install.ps1") + "\" " + forwarded, null);
@@ -119,7 +161,7 @@ static class Setup
         }
         finally
         {
-            try { Directory.Delete(temp, true); } catch (Exception) { }
+            try { Directory.Delete(FileSystemPath(temp), true); } catch (Exception) { }
         }
     }
 
@@ -437,18 +479,8 @@ sealed class Wizard : Form
                 using (file)
                 using (var zip = new ZipArchive(payload, ZipArchiveMode.Read))
                 {
-                    long done = 0;
-                    foreach (var entry in zip.Entries)
-                    {
-                        if (cancelRequested) throw new OperationCanceledException();
-                        string name = Setup.EntryPath(entry);
-                        if (name == null) continue;
-                        string target = Path.Combine(package, name.Replace('/', '\\'));
-                        Directory.CreateDirectory(Path.GetDirectoryName(target));
-                        entry.ExtractToFile(target, false);
-                        done += entry.Length;
-                        Report("正在解包安装文件… " + Path.GetFileName(name), 0.35 * done / Math.Max(1, unpackedBytes));
-                    }
+                    Setup.Extract(zip, package, () => cancelRequested, (name, done) =>
+                        Report("正在解包安装文件… " + Path.GetFileName(name), 0.35 * done / Math.Max(1, unpackedBytes)));
                 }
                 if (cancelRequested) throw new OperationCanceledException();
                 string arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(package, "install.ps1") + "\" -InstallDir \"" + root + "\" -Progress -CancelFile \"" + cancelFile + "\"" + (desktop || upgrade ? "" : " -NoDesktopShortcut");
@@ -477,7 +509,7 @@ sealed class Wizard : Form
             finally
             {
                 canCancel = false;
-                try { Directory.Delete(temp, true); } catch (Exception) { }
+                try { Directory.Delete(Setup.FileSystemPath(temp), true); } catch (Exception) { }
             }
             BeginInvoke((Action)delegate { Finished(code, failure); });
         }) { IsBackground = true };
