@@ -378,18 +378,23 @@ class WorkspaceIntegrationTest {
           attempted.countDown();
           if (!allowed.get()) throw new IllegalStateException("actual disconnect pending");
         };
-    sessions = new NodeSessions(enrollment, service, msgnet, isolation);
-    var control = new RecoveryControl(tenant);
-    control.stream.onNext(
-        SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
-    assertTrue(attempted.await(5, TimeUnit.SECONDS));
-    assertFalse(control.fake.error.isDone());
-    org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.never())
-        .controls(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     var wire =
         MsgnetControlPackage.newBuilder().setCanonicalJson(ByteString.copyFromUtf8("{}")).build();
-    org.mockito.Mockito.when(msgnet.controls(tenant, control.node)).thenReturn(List.of(wire));
-    org.mockito.Mockito.when(msgnet.transports(tenant, control.node)).thenReturn(List.of());
+    org.mockito.Mockito.when(
+            msgnet.controls(
+                org.mockito.ArgumentMatchers.eq(tenant), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of(wire));
+    org.mockito.Mockito.when(
+            msgnet.transports(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenThrow(new IllegalStateException("transport unavailable"));
+    sessions = new NodeSessions(enrollment, service, msgnet, isolation);
+    var control = new RecoveryControl(tenant);
+    assertTrue(attempted.await(5, TimeUnit.SECONDS));
+    assertTrue(control.fake.next().hasMsgnetControlPackage());
+    assertFalse(control.fake.error.isDone());
+    org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.atLeastOnce())
+        .controls(tenant, control.node);
     allowed.set(true);
     SessionResponse delivered = null;
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -399,8 +404,6 @@ class WorkspaceIntegrationTest {
       if (value != null && value.hasMsgnetControlPackage()) delivered = value;
     }
     assertNotNull(delivered);
-    org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.atLeastOnce())
-        .controls(tenant, control.node);
     var receipt =
         MsgnetControlReceipt.newBuilder()
             .setCanonicalJson(ByteString.copyFromUtf8("{\"node_id\":\"self-reported-node\"}"))

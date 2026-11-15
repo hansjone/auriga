@@ -56,9 +56,8 @@ public final class MsgnetRelayTls extends X509ExtendedKeyManager {
     byte[] pem = Files.readAllBytes(key), der = null;
     try {
       String text = new String(pem, java.nio.charset.StandardCharsets.US_ASCII).strip();
-      if (!text.startsWith(
-              "-----BEGIN PRIVATE KEY-----") // gitleaks:allow -- PEM label parser; key bytes come
-          // from the protected file
+      // Check PEM labels; private bytes are read from the protected file.
+      if (!text.startsWith("-----BEGIN PRIVATE KEY-----") // gitleaks:allow
           || !text.endsWith("-----END PRIVATE KEY-----"))
         throw new IOException("PKCS8 relay key required");
       der =

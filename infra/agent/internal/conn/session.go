@@ -26,6 +26,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -317,7 +318,7 @@ func (s *Session) runOnce(ctx context.Context) error {
 	defer func() { _ = conn.Close() }()
 
 	client := nodev1.NewNodeControlServiceClient(conn)
-	stream, err := client.Session(ctx)
+	stream, err := client.Session(ctx, grpc.MaxCallRecvMsgSize((32<<20)+1024))
 	if err != nil {
 		return fmt.Errorf("open session: %w", err)
 	}

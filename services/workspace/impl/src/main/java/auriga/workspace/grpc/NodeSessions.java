@@ -251,7 +251,8 @@ public final class NodeSessions implements AutoCloseable {
                                 .setHeartbeatInterval(Duration.newBuilder().setSeconds(15)))
                         .build());
               } else {
-                if (request.hasHello() || !inventory && !request.hasInventory())
+                if (request.hasHello()
+                    || !inventory && !request.hasInventory() && !request.hasMsgnetControlReceipt())
                   throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
                 if (request.hasInventory()) {
                   inventory = true;
@@ -335,7 +336,7 @@ public final class NodeSessions implements AutoCloseable {
                 });
         }
         for (var response : responses) if (!outbound.send(response)) return;
-        if (request.hasInventory()) dispatch();
+        if (request.hasHello() || request.hasInventory()) dispatch();
       } catch (RuntimeException e) {
         fail(e);
       }
@@ -364,11 +365,15 @@ public final class NodeSessions implements AutoCloseable {
     }
 
     synchronized void dispatch() {
-      if (closed || !inventory) return;
+      if (closed) return;
       checkTimeouts();
       if (closed) return;
       try {
         enrollment.identity(leaf);
+        if (!inventory) {
+          dispatchMessageControl();
+          return;
+        }
         var messages =
             lease.guard(
                 () -> {
@@ -417,13 +422,18 @@ public final class NodeSessions implements AutoCloseable {
           () -> {
             try {
               var messages = new ArrayList<SessionResponse>();
-              if (messageIsolation == null)
-                throw new IllegalStateException("message isolation executor unavailable");
-              messageIsolation.beforeControl(tenant, node);
               for (var control : msgnet.controls(tenant, node).stream().limit(32).toList())
                 if (control.getCanonicalJson().size() <= 32 * 1024 * 1024)
                   messages.add(
                       SessionResponse.newBuilder().setMsgnetControlPackage(control).build());
+              synchronized (Session.this) {
+                if (closed || sessions.get(node) != Session.this) return;
+                for (var message : messages) if (!outbound.trySendMessageControl(message)) break;
+              }
+              // Root controls must still arrive while isolation or message transport is
+              // unavailable.
+              if (messageIsolation != null) messageIsolation.beforeControl(tenant, node);
+              messages.clear();
               for (var bundle : msgnet.transports(tenant, node).stream().limit(32).toList())
                 if (bundle.getCanonicalJson().size() <= 32 * 1024 * 1024)
                   messages.add(

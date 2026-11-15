@@ -93,7 +93,7 @@ func TestMsgnetPrivateIsolationListenerRequiresOwnedFiles(t *testing.T) {
 			t.Error(serveError)
 		}
 	}()
-	transport := &http.Transport{TLSClientConfig: clientTLS, Proxy: nil}
+	transport := &http.Transport{TLSClientConfig: clientTLS, Proxy: nil, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
 	raw, e := trust.Bytes(api.IsolationRecord{TenantId: g.Cfg.Access.TenantID(), Realm: "1", TargetId: "empty-node", MinimumControlRevision: "1", ControlDigest: "sha256:" + strings.Repeat("0", 64), State: "quarantined", Challenge: "challenge"})
@@ -113,4 +113,29 @@ func TestMsgnetPrivateIsolationListenerRequiresOwnedFiles(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("private listener status %d", response.StatusCode)
 	}
+	previous := base64.RawURLEncoding.EncodeToString(response.TLS.PeerCertificates[0].RawSubjectPublicKeyInfo)
+	_ = response.Body.Close()
+	next := createAccessPKI(t)
+	rootBytes, e := os.ReadFile(next.hop.CAFile)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !clientTLS.RootCAs.AppendCertsFromPEM(rootBytes) {
+		t.Fatal("next test root")
+	}
+	nextKey, e := x509.MarshalPKCS8PrivateKey(next.server.PrivateKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	write("server.key", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: nextKey}))
+	write("server.crt", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: next.server.Certificate[0]}))
+	rotated, e := httpClient.Post("https://"+listener.Addr().String()+"/api/collab/v2/network/isolation", "application/json", bytes.NewReader(raw))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer func() { _ = rotated.Body.Close() }()
+	if rotated.StatusCode != http.StatusOK || base64.RawURLEncoding.EncodeToString(rotated.TLS.PeerCertificates[0].RawSubjectPublicKeyInfo) == previous {
+		t.Fatal("private execution listener retained its old TLS leaf")
+	}
+
 }

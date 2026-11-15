@@ -6,7 +6,7 @@
 
 Installer 验独立根，先持久化控制 fence，再由 NodeExecution 调固定中继。中继以原生 node 证书鉴别 node_id，并在服务端通过可信 pin 映射 target。IAM 提交消息拒连记录，edge 完成真实 CONNZ/KICK 和离线确认，随后 C 提交隔离事实，节点才返回独立 Ed25519 InstallationReceipt。执行失败会继续重试。该通路保留 NodeControl 和实例生命周期。
 
-公有控制包与回执沿既有 NodeControl 消息运输。历史、过渡证明、全局确认和隔离执行使用单独的原生 mTLS HTTPS 中继，沿用冻结的模型和 `/api/collab/v2/network` 路径。节点不会取得内部服务 JWT。中继只开放 bootstrap/keys、transport/history、transport/transitions、transport/confirmation 和本节点的 isolation。所有请求重新检查原生证书的当前序列号与撤销状态。节点每次使用当前证书握手，中继服务端叶子按每次握手热加载。
+公有控制包与回执沿既有 NodeControl 消息运输。Hello 后即可同步根控制，实例 inventory、隔离执行或运输包暂不可用时仍可送达公有根控制，成功回执继续等待实际执行确认。原生 gRPC 接收上限为32MiB加 protobuf 封装余量，消息队列继续有界。历史、过渡证明、全局确认和隔离执行使用单独的原生 mTLS HTTPS 中继，沿用冻结的模型和 `/api/collab/v2/network` 路径。节点不会取得内部服务 JWT。中继只开放 bootstrap/keys、transport/history、transport/transitions、transport/confirmation 和本节点的 isolation。所有请求重新检查原生证书的当前序列号与撤销状态。节点每次使用当前证书握手，中继服务端叶子按每次握手热加载。
 
 安装新运输包后，恢复请求还须经过 C 已验证的独立回执、当前控制、精确运输包和新鲜完整 reader 证据检查。new_leaves/retire_old 阶段要求真实 handshake_verified 或已执行的隔离。物理节点和各插件目标分别保留自己的 IAM fence，各插件仍须完成自己的新链确认。C 保留的历史挑战按队首先逐项确认，服务端在此期间持续执行最新的、更严格的隔离。
 

@@ -64,16 +64,7 @@ func newMsgnetIsolation(g *Gateway, cfg MsgnetIsolationConfig) (*msgnetIsolation
 	if _, e = x509.ParsePKIXPublicKey(caller); e != nil {
 		return nil, nil, e
 	}
-	key, e := projection.ReadPrivateConfiguration(cfg.KeyFile, 16384)
-	if e != nil {
-		return nil, nil, e
-	}
-	defer clear(key)
-	cert, e := os.ReadFile(cfg.CertFile)
-	if e != nil {
-		return nil, nil, e
-	}
-	identity, e := tls.X509KeyPair(cert, key)
+	_, e = isolationCertificate(cfg)
 	if e != nil {
 		return nil, nil, e
 	}
@@ -119,7 +110,29 @@ func newMsgnetIsolation(g *Gateway, cfg MsgnetIsolationConfig) (*msgnetIsolation
 		}
 		x.targets[key] = devices
 	}
-	return x, &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{identity}, ClientCAs: roots, ClientAuth: tls.RequireAndVerifyClientCert}, nil
+	return x, &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return isolationCertificate(cfg)
+	}, ClientCAs: roots, ClientAuth: tls.RequireAndVerifyClientCert}, nil
+}
+
+func isolationCertificate(cfg MsgnetIsolationConfig) (*tls.Certificate, error) {
+	key, e := projection.ReadPrivateConfiguration(cfg.KeyFile, 16384)
+	if e != nil {
+		return nil, e
+	}
+	defer clear(key)
+	cert, e := os.ReadFile(cfg.CertFile)
+	if e != nil {
+		return nil, e
+	}
+	pair, e := tls.X509KeyPair(cert, key)
+	if e != nil {
+		return nil, e
+	}
+	if !currentTLSLeaf(pair) {
+		return nil, fmt.Errorf("isolation TLS leaf expired or not yet valid")
+	}
+	return &pair, nil
 }
 
 func (x *msgnetIsolation) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -25,7 +25,7 @@ N 继续按冻结本地模型发送 reload/confirm。C 的 /transport/history、
 
 ## 消息隔离执行
 
-edge 配置 `msgnetIsolation` 可启用独立的 Linux 私有 mTLS 监听器。字段为 `listen`、`certFile`、`keyFile`、`caFile`、`callerSpki`、`targetsFile`、`schemaFile`。`callerSpki` 固定 IAM 执行服务叶子的公有 SPKI。私钥和 target 文件的父目录须为当前 edge 用户私有目录，Linux0700/0600。该监听器不注册到普通 Gateway Handler。
+edge 配置 `msgnetIsolation` 可启用独立的 Linux 私有 mTLS 监听器。字段为 `listen`、`certFile`、`keyFile`、`caFile`、`callerSpki`、`targetsFile`、`schemaFile`。`callerSpki` 固定 IAM 执行服务叶子的公有 SPKI。私钥和 target 文件的父目录须为当前 edge 用户私有目录，Linux0700/0600。该监听器不注册到普通 Gateway Handler。服务端叶子与私钥在每次握手按受保护文件重新加载。
 
 `targetsFile` 是 D 提供的本地数组，每行包含 `tenant_id`、`realm`、`target_id`、`devices`。`devices` 为该目标的 IAM device UUID 数组。物理节点目标列全体所辖设备，插件目标列自身设备。映射与 IAM 的受保护 target 配置应同批安装，更新映射需重启读取快照。
 
