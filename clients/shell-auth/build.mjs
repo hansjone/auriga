@@ -22,7 +22,12 @@ export function buildBroker(output) {
   const files = readdirSync(source).filter(
     (f) =>
       f.endsWith('.mjs') &&
-      !['build.mjs', 'eslint.config.mjs', 'network-core.mjs'].includes(f),
+      ![
+        'build.mjs',
+        'eslint.config.mjs',
+        'network-core.mjs',
+        'device-provider.mjs',
+      ].includes(f),
   );
   for (const part of ['public', 'windows']) {
     mkdirSync(join(output, part), { recursive: true });
@@ -62,7 +67,14 @@ export function buildBroker(output) {
           'uac-control',
           'standard-device',
         ]
-      : ['shell-auth', 'shell-auth-control', 'shell-business']) {
+      : [
+          'shell-auth',
+          'shell-auth-control',
+          'shell-business',
+          'local-login',
+          'managed-device',
+          'managed-model',
+        ]) {
       const file = `schemas/${part}/${name}.schema.json`;
       copyFileSync(
         join(source, '../../contracts', part, name + '.schema.json'),

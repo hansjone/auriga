@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
 import { EventEmitter } from 'node:events';
-import { generateKeyPairSync, sign } from 'node:crypto';
 import { apply } from '../../src/plugin.js';
 import { createSettingsStore } from '../../src/settings/store.js';
 
@@ -265,99 +264,15 @@ for (const startsStandalone of [false, true])
         );
       }
       await host.closed();
-      assert.equal((await host.call('/auriga/local-login/status')).status, 503);
+      assert.equal((await host.call('/auriga/shell/status')).status, 503);
       assert.equal(
         (await host.call('/auriga/settings/state')).body.platformOrigin,
         origin,
       );
       // The dependency can remain absent indefinitely: repeated requests stay shut.
       await host.closed();
-      const { privateKey, publicKey } = generateKeyPairSync('ec', {
-        namedCurve: 'P-256',
-      });
-      t.mock.method(globalThis, 'fetch', async (url, init) => {
-        const path = new URL(url).pathname;
-        if (path === '/api/iam/v1/login/providers')
-          return Response.json({
-            items: [
-              {
-                id: 'team',
-                connectorType: 'team-account',
-                primaryStep: 'form',
-              },
-            ],
-          });
-        if (path === '/api/iam/v1/login/transactions') {
-          const input = JSON.parse(init.body);
-          assert.equal(input.nativeConnect.clientId, 'auriga-dsh');
-          assert.equal(input.nativeConnect.codeChallengeMethod, 'S256');
-          return Response.json({
-            id: 'native-startup',
-            nativeDevice: {
-              deviceCode: 'synthetic-code',
-              expiresAt: new Date(Date.now() + 300000).toISOString(),
-              interval: 1,
-            },
-            step: { type: 'form', formId: 'totp', fields: [] },
-          });
-        }
-        if (path.endsWith('/native-startup/advance'))
-          return Response.json({
-            id: 'native-startup',
-            status: 'completed',
-            step: { type: 'complete' },
-          });
-        if (path === '/oauth2/token') {
-          const input = new URLSearchParams(init.body);
-          assert.equal(
-            input.get('grant_type'),
-            'urn:ietf:params:oauth:grant-type:device_code',
-          );
-          assert.ok(input.get('code_verifier'));
-          const now = Math.floor(Date.now() / 1000);
-          const encoded = [
-            { alg: 'ES256', kid: 'startup-fixture' },
-            {
-              iss: origin,
-              aud: 'auriga',
-              ptyp: 'device',
-              ctx: 'device',
-              scope: 'auriga.connect',
-              tid: 'tenant',
-              sub: 'alice',
-              did: 'device',
-              iat: now,
-              exp: now + 300,
-            },
-          ]
-            .map((part) =>
-              Buffer.from(JSON.stringify(part)).toString('base64url'),
-            )
-            .join('.');
-          return Response.json({
-            token_type: 'Bearer',
-            scope: 'auriga.connect',
-            refresh_token: 'synthetic-refresh',
-            access_token:
-              encoded +
-              '.' +
-              sign('sha256', Buffer.from(encoded), {
-                key: privateKey,
-                dsaEncoding: 'ieee-p1363',
-              }).toString('base64url'),
-          });
-        }
-        if (path === '/oauth2/jwks')
-          return Response.json({
-            keys: [
-              {
-                ...publicKey.export({ format: 'jwk' }),
-                kid: 'startup-fixture',
-              },
-            ],
-          });
-        if (path === '/ai/mcp') return Response.json({}, { status: 503 });
-        throw new Error('unexpected fixture path ' + path);
+      t.mock.method(globalThis, 'fetch', () => {
+        assert.fail('plugin must not perform the removed platform login');
       });
       host.ctx.tools = {
         register() {
@@ -368,35 +283,33 @@ for (const startsStandalone of [false, true])
       host.ctx.sessionController = { create() {}, prompt() {} };
       assert.deepEqual(await host.runReady(), []);
       await host.closed();
-      const prepared = await host.call('/auriga/local-login/status');
+      const prepared = await host.call('/auriga/shell/status');
       assert.equal(prepared.status, 200);
       assert.equal(prepared.body.loggedIn, false);
       const cookies = 'native=valid';
       const headers = { 'x-auriga-csrf': prepared.body.csrf };
-      const begun = await host.call(
-        '/auriga/local-login/login',
-        { action: 'begin' },
+      const command = await host.call(
+        '/auriga/shell/command',
+        { action: 'open_login' },
         cookies,
         headers,
       );
-      assert.equal(begun.status, 200);
-      assert.equal(begun.body.step.type, 'form');
-      t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 1100 });
-      const completed = await host.call(
-        '/auriga/local-login/login',
-        {
-          action: 'advance',
-          input: {
-            type: 'form',
-            formId: 'totp',
-            values: { code: 'synthetic' },
-          },
-        },
-        cookies,
-        headers,
+      assert.equal(
+        command.status,
+        503,
+        'missing packaged broker stays unavailable',
       );
-      assert.equal(completed.status, 200);
-      assert.equal(completed.body.step.type, 'complete');
+      assert.equal(
+        (
+          await host.call(
+            '/auriga/shell/login',
+            { action: 'begin' },
+            cookies,
+            headers,
+          )
+        ).status,
+        404,
+      );
       const authenticated = 'native=valid';
       assert.equal(
         host.ctx.connection.authorizeIndex(
@@ -424,14 +337,9 @@ for (const startsStandalone of [false, true])
         nativePeer,
       );
       assert.equal(
-        (
-          await host.call(
-            '/auriga/local-login/status',
-            undefined,
-            authenticated,
-          )
-        ).body.loggedIn,
-        true,
+        (await host.call('/auriga/shell/status', undefined, authenticated)).body
+          .loggedIn,
+        false,
       );
       await host.closed();
       if (startsStandalone) {

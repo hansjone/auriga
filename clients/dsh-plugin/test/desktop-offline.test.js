@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { installLocalAdmission } from '../src/local/host.js';
-import { savedPlatformConfig } from '../src/local/platform.js';
+import { savedPlatformConfig } from '../src/local/config.js';
 
 test('native owner local API and WS survive offline cold start without a platform runtime', () => {
   const peer = { principal: { kind: 'owner' } };

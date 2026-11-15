@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { createPlatform, platformConfig } from '../src/local/platform.js';
+import { createPlatform } from '../../shell-auth/platform.mjs';
 
 export const protocol = '2025-06-18';
 export const accept = 'application/json, text/event-stream';
@@ -59,7 +59,10 @@ export async function peer() {
         if (
           state.phase !== 'new' ||
           body.params?.protocolVersion !== protocol ||
-          !Number.isInteger(body.id)
+          !(
+            Number.isInteger(body.id) ||
+            /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(body.id)
+          )
         )
           return reject(400);
         state.phase = 'initialized';
@@ -87,7 +90,13 @@ export async function peer() {
         return res.end();
       }
       if (body.method === 'tools/list') {
-        if (state.phase !== 'notified' || !Number.isInteger(body.id))
+        if (
+          state.phase !== 'notified' ||
+          !(
+            Number.isInteger(body.id) ||
+            /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(body.id)
+          )
+        )
           return reject(400);
         state.phase = 'listed';
         state.requests.push(body.method);
@@ -131,15 +140,13 @@ export async function peer() {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
-  const platform = createPlatform(
-    platformConfig({
-      platformOrigin: origin,
-      issuer: origin,
-      clientId: 'transport-test',
-      providerId: 'team',
-      allowLocalHttp: true,
-    }),
-  );
+  const platform = createPlatform({
+    platformOrigin: origin,
+    issuer: origin,
+    clientId: 'transport-test',
+    providerId: 'team',
+    allowLocalHttp: true,
+  });
   return {
     state,
     platform,

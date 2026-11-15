@@ -1,150 +1,22 @@
-import { test } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLocalLoginController } from '../src/login/local-controller.js';
-const form = {
-  type: 'form',
-  formId: 'password',
-  fields: [{ name: 'password', kind: 'password' }],
-};
-const state = (extra = {}) => ({
-  available: true,
-  loggedIn: false,
-  connected: false,
-  csrf: 'proof',
-  ...extra,
-});
-const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), { status });
-function fixture(replies) {
-  const requests = [];
-  const controller = createLocalLoginController({
-    fetch: async (url, options) => {
-      requests.push({ url, ...options });
-      const next = replies.shift();
-      if (next instanceof Error) throw next;
-      assert.ok(next, 'unexpected network call');
-      return next;
-    },
+import { shellRuntimePeer } from './shell-runtime-peer.js';
+
+for (const input of [
+  null,
+  [],
+  { args: [] },
+  { args: 'password' },
+  { args: { action: 'begin' } },
+  { args: { type: 'form', values: { password: 'private' } } },
+  { args: {}, endpoint: 'https://other.example.com' },
+])
+  test(`native login never accepts plugin credentials or arbitrary targets: ${JSON.stringify(input)}`, async (t) => {
+    const f = await shellRuntimePeer(t);
+    const before = f.connection.calls.length;
+    const result = await f.rpc('aurigaAuth/login', input);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'common.validation_failed');
+    assert.equal(f.connection.calls.length, before);
+    assert.ok(f.runtime.resolve(f.request));
   });
-  return { controller, requests };
-}
-test('begin keeps CSRF/cookies on local origin; complete requires verified identity independently of Team', async () => {
-  const { controller, requests } = fixture([
-    json(state()),
-    json({ step: form }),
-    json({
-      step: { type: 'complete', redirectTo: 'https://evil.example.com' },
-    }),
-    json(state({ loggedIn: true, connected: false })),
-  ]);
-  assert.deepEqual(
-    await controller.start({ signal: new AbortController().signal }),
-    form,
-  );
-  assert.equal(requests[1].headers['X-Auriga-CSRF'], 'proof');
-  assert.equal(requests[1].credentials, 'same-origin');
-  assert.equal(requests[1].redirect, 'error');
-  assert.deepEqual(
-    await controller.submit(
-      { type: 'form', formId: 'password', values: {} },
-      { signal: new AbortController().signal },
-    ),
-    { type: 'complete', redirectTo: '/' },
-  );
-});
-test('resume expiry has a controlled recovery; explicit restart preserves device backing and never globally logs out', async () => {
-  const { controller, requests } = fixture([
-    json(state({ resumeAvailable: true })),
-    json({ code: 'common.unauthenticated' }, 401),
-    json(state()),
-    json(state()),
-    json({ cancelled: true }),
-    json(state()),
-    json({ step: form }),
-  ]);
-  await assert.rejects(
-    controller.start({ signal: new AbortController().signal }),
-    (error) => error.reason === 'expired',
-  );
-  assert.deepEqual(
-    await controller.restart({ signal: new AbortController().signal }),
-    form,
-  );
-  const cancel = requests.filter((r) => r.url.endsWith('/cancel'));
-  assert.equal(cancel.length, 1);
-  assert.deepEqual(JSON.parse(cancel[0].body), {});
-  assert.equal(
-    requests.some((r) => r.url.endsWith('/logout')),
-    false,
-  );
-});
-test('retry from authenticated disconnected status never posts logout', async () => {
-  const { controller, requests } = fixture([
-    json(state({ loggedIn: true, connected: false })),
-    json(state({ loggedIn: true, connected: true })),
-  ]);
-  assert.deepEqual(
-    await controller.restart({ signal: new AbortController().signal }),
-    { type: 'complete', redirectTo: '/' },
-  );
-  assert.deepEqual(
-    await controller.restart({ signal: new AbortController().signal }),
-    { type: 'complete', redirectTo: '/' },
-  );
-  assert.equal(
-    requests.some((r) => r.url.endsWith('/logout')),
-    false,
-  );
-});
-test('network failure, absent configuration, and expired credentials remain distinct', async () => {
-  for (const [replies, reason] of [
-    [[new TypeError('SECRET transport')], 'network'],
-    [[json({}, 404), json({ status: 'unconfigured' })], 'unconfigured'],
-    [[json({ code: 'iam.login_tx_expired' }, 400)], 'expired'],
-  ]) {
-    const { controller } = fixture(replies);
-    await assert.rejects(
-      controller.start({ signal: new AbortController().signal }),
-      (error) => error.reason === reason && !error.message.includes('SECRET'),
-    );
-  }
-});
-test('restart refuses to cancel an identity that appeared between status and anonymous cancellation', async () => {
-  const { controller, requests } = fixture([
-    json(state()),
-    json(state({ loggedIn: true })),
-  ]);
-  assert.deepEqual(
-    await controller.restart({ signal: new AbortController().signal }),
-    { type: 'complete', redirectTo: '/' },
-  );
-  assert.equal(
-    requests.some((r) => r.url.endsWith('/logout')),
-    false,
-  );
-});
-test('non-form inputs cannot bypass the local FormInput contract', async () => {
-  const { controller, requests } = fixture([]);
-  for (const input of [
-    { type: 'poll' },
-    { type: 'webauthn', credential: {} },
-    { type: 'event', name: 'qr_confirmed' },
-    { type: 'callback', params: {} },
-  ]) {
-    await assert.rejects(
-      controller.submit(input, { signal: new AbortController().signal }),
-      (error) => error.reason === 'unavailable',
-    );
-  }
-  assert.equal(requests.length, 0);
-});
-test('server unsupported step errors identify platform errors rather than unreachable network', async () => {
-  const { controller } = fixture([
-    json(state()),
-    json({ code: 'common.unavailable' }, 501),
-  ]);
-  await assert.rejects(
-    controller.start({ signal: new AbortController().signal }),
-    (error) => error.reason === 'platform',
-  );
-});

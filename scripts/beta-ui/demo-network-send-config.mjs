@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { platformConfig } from '../../clients/dsh-plugin/src/local/platform.js';
+import { platformConfig } from '../../clients/dsh-plugin/src/local/config.js';
 import { parseStrictJson } from '../../clients/dsh-plugin/src/network/trust/jcs.js';
 
 // Public installation metadata only. No remote discovery of the initial root.

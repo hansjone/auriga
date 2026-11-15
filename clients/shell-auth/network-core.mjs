@@ -4,7 +4,7 @@ export { NatsLink } from '../dsh-plugin/src/network/transport/nats-link.js';
 export {
   createDeviceProvider,
   verifyControlReceiptRecord,
-} from '../dsh-plugin/src/network/device-provider.js';
+} from './device-provider.mjs';
 export { openTrustStore } from '../dsh-plugin/src/network/trust/store.js';
 export { verifyEnvelopeWithRefresh } from '../dsh-plugin/src/network/trust/verifier.js';
 export { parseStrictJson } from '../dsh-plugin/src/network/trust/jcs.js';

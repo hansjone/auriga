@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers';
 import { createNetworkLifecycle } from '../../src/network/lifecycle.js';
 import { generateKeyPairSync } from 'node:crypto';
-import { platformConfig } from '../../src/local/platform.js';
+import { platformConfig } from '../../src/local/config.js';
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 

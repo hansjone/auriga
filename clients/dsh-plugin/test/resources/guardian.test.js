@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { fixture, id } from './fixtures.js';
 import { createMemberRoutes } from '../../src/resources/member-routes.js';
 import { createVault } from '../../src/local/vault.js';
-import { createMemberApi } from '../../src/resources/member-api.js';
+import { createMemberApi } from './broker-fixture.js';
 import { verifyResourceArchive } from '../../src/resources/verify.js';
 const input = {
   packageId: id(4),
