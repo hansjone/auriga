@@ -325,11 +325,25 @@ export function verifyTransportConfirmation(i) {
     fail('invalid_chain');
   if (e.readers.length !== b.required_reader_ids.length)
     fail('projection_pending');
+  const readerIds = [...b.required_reader_ids].sort();
+  if (jcs(Object.keys(i.expected_selectors).sort()) !== jcs(readerIds))
+    fail('invalid_chain');
+  if (
+    i.expected_identities &&
+    jcs(Object.keys(i.expected_identities).sort()) !== jcs(readerIds)
+  )
+    fail('invalid_chain');
   for (const id of b.required_reader_ids) {
     const row = e.readers.find((/** @type {any} */ x) => x.reader_id === id);
     if (!row) fail('projection_pending');
-    if (row.phase === 'isolated') {
-      if (!row.isolation_enforced) fail('identity_quarantined');
+    if (i.expected_identities && i.expected_identities[id] !== row.identity_id)
+      fail('invalid_chain');
+    if (!row.selector) {
+      if (
+        i.expected_selectors[id] !== null ||
+        i.expected_identities?.[id] !== row.identity_id
+      )
+        fail('invalid_chain');
     } else {
       if (row.selector.installation_id !== row.identity_id)
         fail('invalid_chain');
@@ -338,11 +352,14 @@ export function verifyTransportConfirmation(i) {
         fail('invalid_chain');
       if (i.expected_selectors[id] !== digest(row.selector))
         fail('invalid_chain');
-      if (
-        i.required_phase === 'handshake_verified' &&
-        row.phase !== 'handshake_verified'
-      )
-        fail('projection_pending');
+    }
+    if (row.phase === 'isolated') {
+      if (!row.isolation_enforced) fail('identity_quarantined');
+    } else if (
+      i.required_phase === 'handshake_verified' &&
+      row.phase !== 'handshake_verified'
+    ) {
+      fail('projection_pending');
     }
   }
   if (i.bundle.runtime_auth.kid !== a.runtime_kid) fail('invalid_chain');
@@ -360,4 +377,60 @@ export function verifyTransportConfirmation(i) {
     fail('control_required');
   if (BigInt(b.generation) < BigInt(c.minimum_generation))
     fail('version_rollback');
+}
+
+/** Validate the C ledger response against independently accepted bundle/control.
+ * The caller supplies the authenticated management-plane source and local time.
+ * @param {any} input */
+export function verifyExpectedSelectors(input) {
+  structure('ExpectedSelectorsQuery', input.query);
+  structure('ExpectedSelectors', input.response);
+  structure('SignedTransportTrustBundle', input.bundle);
+  structure('SignedRootControl', input.control);
+  if (!input.authenticated_c_ledger) fail('scope_denied');
+  const response = input.response;
+  const bundle = input.bundle.payload;
+  const control = input.control.payload;
+  for (const field of ['tenant_id', 'realm']) {
+    for (const object of [response, bundle, control, input.query]) {
+      if (object[field] !== input[field]) fail('scope_denied');
+    }
+  }
+  for (const field of [
+    'generation',
+    'bundle_version',
+    'phase',
+    'authority_id',
+    'authority_digest',
+  ]) {
+    if (response[field] !== bundle[field]) fail('invalid_chain');
+  }
+  if (
+    response.bundle_digest !== digest(input.bundle) ||
+    input.query.bundle_digest !== response.bundle_digest ||
+    input.query.bundle_version !== response.bundle_version
+  )
+    fail('invalid_chain');
+  if (
+    response.control_revision !== control.control_revision ||
+    input.query.control_revision !== control.control_revision ||
+    response.control_digest !== digest(input.control) ||
+    input.query.control_digest !== response.control_digest
+  )
+    fail('control_required');
+  if (response.challenge !== input.query.challenge) fail('invalid_chain');
+  const now = Date.parse(input.now);
+  const issued = Date.parse(response.issued_at);
+  if (!Number.isFinite(now) || issued > now || now - issued > 60000)
+    fail('projection_pending');
+  const readerIds = [...bundle.required_reader_ids].sort();
+  if (jcs([...response.required_reader_ids].sort()) !== jcs(readerIds))
+    fail('invalid_chain');
+  for (const mapping of [
+    response.expected_selectors,
+    response.reader_identities,
+  ]) {
+    if (jcs(Object.keys(mapping).sort()) !== jcs(readerIds))
+      fail('invalid_chain');
+  }
 }

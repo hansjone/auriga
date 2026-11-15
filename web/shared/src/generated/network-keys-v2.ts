@@ -259,6 +259,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/collab/v2/network/transport/expected-selectors': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Read authoritative selector ledger
+     * @description Read-only consistent C material ledger snapshot, HTTPS+mTLS/JWT, authenticated tenant/realm, no-store, fresh challenge and maximum age 60 seconds. Historical exact bundles remain readable offline from the message network. Never derive this mapping from evidence rows.
+     */
+    post: operations['getNetworkExpectedSelectors'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/collab/v2/network/transport/confirmation': {
     parameters: {
       query?: never;
@@ -1005,7 +1025,7 @@ export interface components {
     TransportReaderEvidence: {
       reader_id: string;
       identity_id: string;
-      selector: components['schemas']['LocalProjectionSelector'];
+      selector?: components['schemas']['LocalProjectionSelector'];
       /** @enum {unknown} */
       phase: 'loaded' | 'handshake_verified' | 'isolated';
       isolation_enforced: boolean;
@@ -1056,6 +1076,64 @@ export interface components {
       predecessor: components['schemas']['TransportPredecessor'];
       first_bundle: components['schemas']['SignedTransportTrustBundle'];
       authority: components['schemas']['SignedRuntimeAuthority'];
+    };
+    ExpectedSelectorsQuery: {
+      tenant_id: string;
+      realm: string;
+      bundle_version: string;
+      bundle_digest: string;
+      challenge: string;
+      control_revision: string;
+      control_digest: string;
+    };
+    ExpectedSelectors: {
+      tenant_id: string;
+      realm: string;
+      authority_id: string;
+      authority_digest: string;
+      control_revision: string;
+      bundle_version: string;
+      bundle_digest: string;
+      /** @enum {string} */
+      phase: 'dual_trust' | 'new_leaves' | 'retire_old';
+      required_reader_ids: string[];
+      challenge: string;
+      /** Format: date-time */
+      issued_at: string;
+      generation: string;
+      control_digest: string;
+      expected_selectors: {
+        [key: string]: string | unknown;
+      };
+      reader_identities: {
+        [key: string]: string;
+      };
+    };
+    TransportPendingReader: {
+      reader_id: string;
+      identity_id: string;
+      selector?: components['schemas']['LocalProjectionSelector'];
+      /** @enum {unknown} */
+      phase: 'loaded' | 'handshake_verified' | 'isolated' | 'pending';
+      isolation_enforced: boolean;
+    };
+    TransportConfirmationPending: {
+      tenant_id: string;
+      realm: string;
+      authority_id: string;
+      authority_digest: string;
+      control_revision: string;
+      bundle_version: string;
+      bundle_digest: string;
+      /** @enum {string} */
+      phase: 'dual_trust' | 'new_leaves' | 'retire_old';
+      required_reader_ids: string[];
+      readers: components['schemas']['TransportPendingReader'][];
+      challenge: string;
+      /** Format: date-time */
+      issued_at: string;
+      /** @constant */
+      state: 'projection_pending';
     };
   };
   responses: never;
@@ -1718,6 +1796,65 @@ export interface operations {
       };
     };
   };
+  getNetworkExpectedSelectors: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExpectedSelectorsQuery'];
+      };
+    };
+    responses: {
+      /** @description Authoritative material mapping, no private keys; not completion evidence. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ExpectedSelectors'];
+        };
+      };
+      /** @description Invalid query */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Domain or permission denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Exact bundle not recorded */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Control changed or version/digest conflict; refresh control */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Ledger unavailable; remain projection_pending */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   getTransportConfirmation: {
     parameters: {
       query?: never;
@@ -1738,6 +1875,15 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['SignedTransportConfirmation'];
+        };
+      };
+      /** @description Full frozen reader diagnostic rows; incomplete, never authorizes phase progression. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TransportConfirmationPending'];
         };
       };
       /** @description 身份或scope拒绝 */

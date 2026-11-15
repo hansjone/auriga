@@ -21,11 +21,11 @@ var _ MappedNullable = &TransportReaderEvidence{}
 
 // TransportReaderEvidence struct for TransportReaderEvidence
 type TransportReaderEvidence struct {
-	ReaderId          string                  `json:"reader_id"`
-	IdentityId        string                  `json:"identity_id"`
-	Selector          LocalProjectionSelector `json:"selector"`
-	Phase             string                  `json:"phase"`
-	IsolationEnforced bool                    `json:"isolation_enforced"`
+	ReaderId          string                   `json:"reader_id"`
+	IdentityId        string                   `json:"identity_id"`
+	Selector          *LocalProjectionSelector `json:"selector,omitempty"`
+	Phase             string                   `json:"phase"`
+	IsolationEnforced bool                     `json:"isolation_enforced"`
 }
 
 type _TransportReaderEvidence TransportReaderEvidence
@@ -34,11 +34,10 @@ type _TransportReaderEvidence TransportReaderEvidence
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewTransportReaderEvidence(readerId string, identityId string, selector LocalProjectionSelector, phase string, isolationEnforced bool) *TransportReaderEvidence {
+func NewTransportReaderEvidence(readerId string, identityId string, phase string, isolationEnforced bool) *TransportReaderEvidence {
 	this := TransportReaderEvidence{}
 	this.ReaderId = readerId
 	this.IdentityId = identityId
-	this.Selector = selector
 	this.Phase = phase
 	this.IsolationEnforced = isolationEnforced
 	return &this
@@ -100,28 +99,36 @@ func (o *TransportReaderEvidence) SetIdentityId(v string) {
 	o.IdentityId = v
 }
 
-// GetSelector returns the Selector field value
+// GetSelector returns the Selector field value if set, zero value otherwise.
 func (o *TransportReaderEvidence) GetSelector() LocalProjectionSelector {
-	if o == nil {
+	if o == nil || IsNil(o.Selector) {
 		var ret LocalProjectionSelector
 		return ret
 	}
-
-	return o.Selector
+	return *o.Selector
 }
 
-// GetSelectorOk returns a tuple with the Selector field value
+// GetSelectorOk returns a tuple with the Selector field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *TransportReaderEvidence) GetSelectorOk() (*LocalProjectionSelector, bool) {
-	if o == nil {
+	if o == nil || IsNil(o.Selector) {
 		return nil, false
 	}
-	return &o.Selector, true
+	return o.Selector, true
 }
 
-// SetSelector sets field value
+// HasSelector returns a boolean if a field has been set.
+func (o *TransportReaderEvidence) HasSelector() bool {
+	if o != nil && !IsNil(o.Selector) {
+		return true
+	}
+
+	return false
+}
+
+// SetSelector gets a reference to the given LocalProjectionSelector and assigns it to the Selector field.
 func (o *TransportReaderEvidence) SetSelector(v LocalProjectionSelector) {
-	o.Selector = v
+	o.Selector = &v
 }
 
 // GetPhase returns the Phase field value
@@ -184,7 +191,9 @@ func (o TransportReaderEvidence) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["reader_id"] = o.ReaderId
 	toSerialize["identity_id"] = o.IdentityId
-	toSerialize["selector"] = o.Selector
+	if !IsNil(o.Selector) {
+		toSerialize["selector"] = o.Selector
+	}
 	toSerialize["phase"] = o.Phase
 	toSerialize["isolation_enforced"] = o.IsolationEnforced
 	return toSerialize, nil
@@ -197,7 +206,6 @@ func (o *TransportReaderEvidence) UnmarshalJSON(data []byte) (err error) {
 	requiredProperties := []string{
 		"reader_id",
 		"identity_id",
-		"selector",
 		"phase",
 		"isolation_enforced",
 	}

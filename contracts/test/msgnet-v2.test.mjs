@@ -1,3 +1,4 @@
+import { structure as pluginStructure } from '../../clients/dsh-plugin/src/network/trust/v2-schema.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -49,6 +50,20 @@ test('every oracle guard deletion is detected by a shared vector', async () => {
   );
   assert.equal(result.survivors.length, equivalents.length);
   assert.equal(result.killed + result.equivalent, result.count);
+  const k4Coverage = result.coverage.filter(
+    (record) => record.file === 'msgnet-v2-k4-oracle.mjs',
+  );
+  const k4Source = readFileSync(
+    new URL('../network/fixtures/msgnet-v2-k4-oracle.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.equal(k4Coverage.length, discoverPredicates(k4Source).length);
+  assert.ok(
+    k4Coverage.some((record) => record.witness.startsWith('k4_cases/')),
+  );
+  assert.ok(
+    k4Coverage.some((record) => record.witness.startsWith('k3_cases/')),
+  );
 });
 test('all shared input groups conform to vector schema', () => {
   const validate = ajv.getSchema(vectorSchema.$id);
@@ -392,4 +407,115 @@ test('K3 consumer instructions preserve UTF-8 transport catchup text', () => {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   assert.doesNotMatch(text, /\?{2,}|\uFFFD/);
   assert.match(text, /^transport_catchup \p{Script=Han}[^\n]+JSON/mu);
+});
+
+test('K4 isolated absence and pending diagnostics retain strict wire boundaries', () => {
+  const source = structuredClone(
+    fixture.boundary_cases.find((v) => v.id === 'k4-isolated-no-selector').input
+      .evidence.payload,
+  );
+  const validate = ajv.getSchema(
+    schema.$id + '#/$defs/TransportReaderEvidence',
+  );
+  const row = source.readers[0];
+  assert.ok(validate(row), JSON.stringify(validate.errors));
+  for (const phase of ['loaded', 'handshake_verified'])
+    assert.equal(validate({ ...row, phase }), false);
+  assert.equal(validate({ ...row, selector: null }), false);
+  const pending = ajv.getSchema(
+    schema.$id + '#/$defs/TransportConfirmationPending',
+  );
+  const diagnostic = {
+    ...source,
+    state: 'projection_pending',
+    readers: [{ ...row, phase: 'pending', isolation_enforced: false }],
+  };
+  assert.ok(pending(diagnostic), JSON.stringify(pending.errors));
+  assert.equal(
+    ajv.getSchema(schema.$id + '#/$defs/TransportConfirmation')(diagnostic),
+    false,
+  );
+  assert.equal(pending({ ...diagnostic, runtime_auth: {} }), false);
+});
+test('K4 authoritative mapping endpoint and incomplete response are explicit', () => {
+  const api = YAML.parse(
+    readFileSync(
+      new URL('../openapi/network-keys-v2.yaml', import.meta.url),
+      'utf8',
+    ),
+  );
+  const op =
+    api.paths['/api/collab/v2/network/transport/expected-selectors'].post;
+  assert.equal(op['x-permission'], 'collab.msgnet.read');
+  assert.ok(
+    op.responses['200'].content['application/json'].schema.$ref.endsWith(
+      '/ExpectedSelectors',
+    ),
+  );
+  assert.ok(
+    api.paths['/api/collab/v2/network/transport/confirmation'].post.responses[
+      '202'
+    ],
+  );
+});
+
+test('K4 AJV and plugin enforce the same reader and ledger structure', () => {
+  const check = (type, value, expected) => {
+    const validate = ajv.getSchema(schema.$id + '#/$defs/' + type);
+    assert.equal(validate(value), expected, JSON.stringify(validate.errors));
+    if (expected) assert.doesNotThrow(() => pluginStructure(type, value));
+    else assert.throws(() => pluginStructure(type, value), /invalid_chain/);
+  };
+  const row = structuredClone(
+    fixture.boundary_cases.find(
+      (vector) => vector.id === 'k4-isolated-no-selector',
+    ).input.evidence.payload.readers[0],
+  );
+  check('TransportReaderEvidence', row, true);
+  check('TransportReaderEvidence', { ...row, phase: 'loaded' }, false);
+  check(
+    'TransportReaderEvidence',
+    { ...row, phase: 'handshake_verified' },
+    false,
+  );
+  check('TransportReaderEvidence', { ...row, selector: null }, false);
+  check('TransportPendingReader', { ...row, phase: 'pending' }, true);
+  const response = fixture.boundary_cases.find(
+    (vector) => vector.id === 'k4-ledger-complete',
+  ).input.response;
+  check('ExpectedSelectors', response, true);
+  for (const map of ['expected_selectors', 'reader_identities']) {
+    for (const key of ['', 'x'.repeat(129)]) {
+      check(
+        'ExpectedSelectors',
+        { ...response, [map]: { [key]: 'reader' } },
+        false,
+      );
+    }
+    const excessive = Object.fromEntries(
+      Array.from({ length: 65537 }, (_, index) => [
+        'reader-' + index,
+        map === 'expected_selectors' ? null : 'identity-' + index,
+      ]),
+    );
+    check('ExpectedSelectors', { ...response, [map]: excessive }, false);
+  }
+  for (const value of [null, 'sha256:' + 'a'.repeat(64)])
+    check(
+      'ExpectedSelectors',
+      { ...response, expected_selectors: { reader: value } },
+      true,
+    );
+  for (const value of ['bad-digest', 1, {}, []])
+    check(
+      'ExpectedSelectors',
+      { ...response, expected_selectors: { reader: value } },
+      false,
+    );
+  for (const value of [null, '', 'x'.repeat(129)])
+    check(
+      'ExpectedSelectors',
+      { ...response, reader_identities: { reader: value } },
+      false,
+    );
 });

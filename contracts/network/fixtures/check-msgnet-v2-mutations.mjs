@@ -128,7 +128,17 @@ export async function checkMutations() {
       'projection_access',
     ].includes(v.operation),
   );
+  fixture.k4_cases = fixture.boundary_cases.filter(
+    (vector) => vector.operation === 'expected_selectors',
+  );
   const modules = [
+    [
+      'msgnet-v2-k4-oracle.mjs',
+      [
+        ['k4_cases', 'evaluateK4'],
+        ['k3_cases', 'evaluateK3'],
+      ],
+    ],
     ['msgnet-v2-k3-oracle.mjs', [['k3_cases', 'evaluateK3']]],
     [
       'msgnet-local-projection-oracle.mjs',
@@ -148,7 +158,13 @@ export async function checkMutations() {
   let count = 0;
   for (const [name, groups] of modules) {
     const original = readFileSync(new URL(name, directory), 'utf8');
-    const baseline = await import(new URL(name, directory).href);
+    let baseline = await import(new URL(name, directory).href);
+    if (name === 'msgnet-v2-k4-oracle.mjs') {
+      baseline = {
+        ...baseline,
+        ...(await import(new URL('msgnet-v2-k3-oracle.mjs', directory).href)),
+      };
+    }
     for (const [group, fn] of groups)
       for (const vector of fixture[group])
         if (baseline[fn](vector) !== vector.expected)
@@ -166,12 +182,33 @@ export async function checkMutations() {
         'import.meta.url',
         JSON.stringify(new URL(name, directory).href),
       );
-      const mutant = await import(
+      const mutantUrl =
         'data:text/javascript;base64,' +
-          Buffer.from(source).toString('base64') +
-          '#' +
-          count++
-      );
+        Buffer.from(source).toString('base64') +
+        '#' +
+        count++;
+      let mutant = await import(mutantUrl);
+      if (name === 'msgnet-v2-k4-oracle.mjs') {
+        // K3 must call the mutated helper, rather than its cached original import.
+        const caller = readFileSync(
+          new URL('msgnet-v2-k3-oracle.mjs', directory),
+          'utf8',
+        ).replace(
+          /from\s+(['"])(\.\.?\/[^'"]+)\1/g,
+          (_, quote, relative) =>
+            'from ' +
+            quote +
+            (relative === './msgnet-v2-k4-oracle.mjs'
+              ? mutantUrl
+              : new URL(relative, directory).href) +
+            quote,
+        );
+        const dependent = await import(
+          'data:text/javascript;base64,' +
+            Buffer.from(caller).toString('base64')
+        );
+        mutant = { ...mutant, ...dependent };
+      }
       let witness;
       for (const [group, fn] of groups) {
         for (const vector of fixture[group]) {
