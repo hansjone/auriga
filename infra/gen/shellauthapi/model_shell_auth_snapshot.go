@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -30,8 +29,11 @@ type ShellAuthSnapshot struct {
 	Identity        *ShellAuthIdentity `json:"identity,omitempty"`
 	Reason          *string            `json:"reason,omitempty"`
 	// 仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除
-	UacLoginInfo  *UacLoginInfo           `json:"uacLoginInfo,omitempty"`
-	DeviceAttempt *ShellAuthDeviceAttempt `json:"deviceAttempt,omitempty"`
+	UacLoginInfo         *UacLoginInfo                `json:"uacLoginInfo,omitempty"`
+	DeviceAttempt        *ShellAuthDeviceAttempt      `json:"deviceAttempt,omitempty"`
+	LoginError           *ShellAuthSnapshotLoginError `json:"loginError,omitempty"`
+	InlineLogin          *ShellAuthInlineView         `json:"inlineLogin,omitempty"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthSnapshot ShellAuthSnapshot
@@ -306,6 +308,70 @@ func (o *ShellAuthSnapshot) SetDeviceAttempt(v ShellAuthDeviceAttempt) {
 	o.DeviceAttempt = &v
 }
 
+// GetLoginError returns the LoginError field value if set, zero value otherwise.
+func (o *ShellAuthSnapshot) GetLoginError() ShellAuthSnapshotLoginError {
+	if o == nil || IsNil(o.LoginError) {
+		var ret ShellAuthSnapshotLoginError
+		return ret
+	}
+	return *o.LoginError
+}
+
+// GetLoginErrorOk returns a tuple with the LoginError field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthSnapshot) GetLoginErrorOk() (*ShellAuthSnapshotLoginError, bool) {
+	if o == nil || IsNil(o.LoginError) {
+		return nil, false
+	}
+	return o.LoginError, true
+}
+
+// HasLoginError returns a boolean if a field has been set.
+func (o *ShellAuthSnapshot) HasLoginError() bool {
+	if o != nil && !IsNil(o.LoginError) {
+		return true
+	}
+
+	return false
+}
+
+// SetLoginError gets a reference to the given ShellAuthSnapshotLoginError and assigns it to the LoginError field.
+func (o *ShellAuthSnapshot) SetLoginError(v ShellAuthSnapshotLoginError) {
+	o.LoginError = &v
+}
+
+// GetInlineLogin returns the InlineLogin field value if set, zero value otherwise.
+func (o *ShellAuthSnapshot) GetInlineLogin() ShellAuthInlineView {
+	if o == nil || IsNil(o.InlineLogin) {
+		var ret ShellAuthInlineView
+		return ret
+	}
+	return *o.InlineLogin
+}
+
+// GetInlineLoginOk returns a tuple with the InlineLogin field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthSnapshot) GetInlineLoginOk() (*ShellAuthInlineView, bool) {
+	if o == nil || IsNil(o.InlineLogin) {
+		return nil, false
+	}
+	return o.InlineLogin, true
+}
+
+// HasInlineLogin returns a boolean if a field has been set.
+func (o *ShellAuthSnapshot) HasInlineLogin() bool {
+	if o != nil && !IsNil(o.InlineLogin) {
+		return true
+	}
+
+	return false
+}
+
+// SetInlineLogin gets a reference to the given ShellAuthInlineView and assigns it to the InlineLogin field.
+func (o *ShellAuthSnapshot) SetInlineLogin(v ShellAuthInlineView) {
+	o.InlineLogin = &v
+}
+
 func (o ShellAuthSnapshot) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -333,6 +399,17 @@ func (o ShellAuthSnapshot) ToMap() (map[string]interface{}, error) {
 	if !IsNil(o.DeviceAttempt) {
 		toSerialize["deviceAttempt"] = o.DeviceAttempt
 	}
+	if !IsNil(o.LoginError) {
+		toSerialize["loginError"] = o.LoginError
+	}
+	if !IsNil(o.InlineLogin) {
+		toSerialize["inlineLogin"] = o.InlineLogin
+	}
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -364,15 +441,30 @@ func (o *ShellAuthSnapshot) UnmarshalJSON(data []byte) (err error) {
 
 	varShellAuthSnapshot := _ShellAuthSnapshot{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthSnapshot)
+	err = json.Unmarshal(data, &varShellAuthSnapshot)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthSnapshot(varShellAuthSnapshot)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "protocolVersion")
+		delete(additionalProperties, "shellEpoch")
+		delete(additionalProperties, "revision")
+		delete(additionalProperties, "state")
+		delete(additionalProperties, "expiresAt")
+		delete(additionalProperties, "identity")
+		delete(additionalProperties, "reason")
+		delete(additionalProperties, "uacLoginInfo")
+		delete(additionalProperties, "deviceAttempt")
+		delete(additionalProperties, "loginError")
+		delete(additionalProperties, "inlineLogin")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

@@ -21,11 +21,12 @@ var _ MappedNullable = &ShellAuthCommand{}
 
 // ShellAuthCommand struct for ShellAuthCommand
 type ShellAuthCommand struct {
-	ProtocolVersion  int32  `json:"protocolVersion"`
-	RequestId        string `json:"requestId"`
-	ShellEpoch       string `json:"shellEpoch"`
-	ExpectedRevision int32  `json:"expectedRevision"`
-	Action           string `json:"action"`
+	ProtocolVersion  int32                 `json:"protocolVersion"`
+	RequestId        string                `json:"requestId"`
+	ShellEpoch       string                `json:"shellEpoch"`
+	ExpectedRevision int32                 `json:"expectedRevision"`
+	Action           string                `json:"action"`
+	Input            *ShellAuthInlineInput `json:"input,omitempty"`
 }
 
 type _ShellAuthCommand ShellAuthCommand
@@ -172,6 +173,38 @@ func (o *ShellAuthCommand) SetAction(v string) {
 	o.Action = v
 }
 
+// GetInput returns the Input field value if set, zero value otherwise.
+func (o *ShellAuthCommand) GetInput() ShellAuthInlineInput {
+	if o == nil || IsNil(o.Input) {
+		var ret ShellAuthInlineInput
+		return ret
+	}
+	return *o.Input
+}
+
+// GetInputOk returns a tuple with the Input field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthCommand) GetInputOk() (*ShellAuthInlineInput, bool) {
+	if o == nil || IsNil(o.Input) {
+		return nil, false
+	}
+	return o.Input, true
+}
+
+// HasInput returns a boolean if a field has been set.
+func (o *ShellAuthCommand) HasInput() bool {
+	if o != nil && !IsNil(o.Input) {
+		return true
+	}
+
+	return false
+}
+
+// SetInput gets a reference to the given ShellAuthInlineInput and assigns it to the Input field.
+func (o *ShellAuthCommand) SetInput(v ShellAuthInlineInput) {
+	o.Input = &v
+}
+
 func (o ShellAuthCommand) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -187,6 +220,9 @@ func (o ShellAuthCommand) ToMap() (map[string]interface{}, error) {
 	toSerialize["shellEpoch"] = o.ShellEpoch
 	toSerialize["expectedRevision"] = o.ExpectedRevision
 	toSerialize["action"] = o.Action
+	if !IsNil(o.Input) {
+		toSerialize["input"] = o.Input
+	}
 	return toSerialize, nil
 }
 
