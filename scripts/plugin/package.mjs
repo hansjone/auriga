@@ -1,3 +1,4 @@
+import { copyBrokerArtifact } from '../../clients/shell-auth/artifact.mjs';
 /** Build a self-contained DSH bundle. Only release preparation runs UI builds. */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -70,6 +71,7 @@ export async function packagePlugin({
   version,
   outDir = join(root, 'dist/plugin'),
   build = true,
+  brokerArtifact,
 } = {}) {
   if (typeof version !== 'string' || !semver.test(version))
     throw new Error('--version must be an exact SemVer, e.g. 0.1.0-rc.1');
@@ -118,13 +120,18 @@ export async function packagePlugin({
         dereference: false,
       });
     }
+    copyBrokerArtifact(brokerArtifact, join(stage, 'shell-auth'));
     // Distributable installation has no lifecycle scripts or build dependencies.
     const runtime = { ...pkg };
     delete runtime.scripts;
     delete runtime.devDependencies;
     await writeFile(
       join(stage, 'package.json'),
-      JSON.stringify({ ...runtime, version }, null, 2) + '\n',
+      JSON.stringify(
+        { ...runtime, version, files: [...runtime.files, 'shell-auth'] },
+        null,
+        2,
+      ) + '\n',
     );
     const packed = JSON.parse(
       run(
@@ -176,6 +183,7 @@ if (
       options: {
         version: { type: 'string' },
         out: { type: 'string' },
+        'broker-artifact': { type: 'string' },
         help: { type: 'boolean' },
       },
     });
@@ -186,7 +194,11 @@ if (
     } else {
       console.log(
         JSON.stringify(
-          await packagePlugin({ version: values.version, outDir: values.out }),
+          await packagePlugin({
+            version: values.version,
+            outDir: values.out,
+            brokerArtifact: values['broker-artifact'],
+          }),
           null,
           2,
         ),

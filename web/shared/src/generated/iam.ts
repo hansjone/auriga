@@ -1,4 +1,24 @@
 export interface paths {
+  '/me/device-profile': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the current standard device account profile
+     * @description Current platform device Bearer only. Rechecks the authoritative device, source and online permissions; accepts no identity selectors, never fabricates a browser Me.session.
+     */
+    get: operations['getStandardDeviceProfile'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/me/device-session': {
     parameters: {
       query?: never;
@@ -2179,6 +2199,16 @@ export interface components {
       /** Format: date-time */
       createdAt: string;
     };
+    /** @description Online standard-device account profile; no browser session, credentials or identity selectors. account.id is accountId/JWT sub, not a memberId alias. */
+    StandardDeviceProfile: {
+      account: {
+        /** Format: uuid */
+        id: string;
+        /** Format: uuid */
+        tenantId: string;
+        displayName: string;
+      };
+    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;
@@ -2598,6 +2628,38 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getStandardDeviceProfile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Bounded account profile; account id is the verified JWT sub. */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StandardDeviceProfile'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      /** @description Authoritative source unavailable; fail closed. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   getStandardDeviceSession: {
     parameters: {
       query?: never;

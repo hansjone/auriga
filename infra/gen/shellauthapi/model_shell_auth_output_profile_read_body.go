@@ -21,6 +21,7 @@ var _ MappedNullable = &ShellAuthOutputProfileReadBody{}
 
 // ShellAuthOutputProfileReadBody struct for ShellAuthOutputProfileReadBody
 type ShellAuthOutputProfileReadBody struct {
+	// Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId).
 	MemberId    string `json:"memberId"`
 	DisplayName string `json:"displayName"`
 }

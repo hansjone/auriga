@@ -243,12 +243,39 @@ test(
         throw error;
       }
     };
+    const openMessage = {
+      ...envelope(f.broker),
+      call: { operation: 'network_open', input: { executionContextId } },
+    };
     const opened = await Promise.all([
-      call('network_open', { executionContextId }),
+      proxy.call(openMessage, peer.id),
       call('network_open', { executionContextId }),
     ]);
-    for (const result of opened)
+    for (const result of opened) {
       assert.ok(result.output, failure?.stack ?? JSON.stringify(result.error));
+      assert.deepEqual(
+        { ...result.output.body.registration, created: false },
+        { ...identity, created: false },
+      );
+      assert.deepEqual(result.output.body.binding, {
+        executionContextId,
+        shellEpoch: f.broker.epoch,
+        revision: f.broker.revision,
+      });
+    }
+    assert.equal(
+      opened.filter((result) => result.output.body.registration.created).length,
+      1,
+    );
+    assert.equal(
+      (await proxy.call(openMessage, peer.id)).output.body.registration.created,
+      false,
+    );
+    assert.equal(
+      (await call('network_open', { executionContextId })).output.body
+        .registration.created,
+      false,
+    );
     assert.equal(
       registered,
       1,

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createRequire } from 'node:module';
-import { contractFile } from './schema.mjs';
+import { contractFile, valid } from './schema.mjs';
 import { boundedBody } from './platform.mjs';
 import { safePath } from './vault.mjs';
 const packaged = existsSync(
@@ -33,7 +33,9 @@ function schema(file, name, value) {
         import.meta.url,
       ),
     );
-    const Ajv = loader('ajv/dist/2020.js').default,
+    const Ajv = loader(
+        packaged ? './vendor-ajv.cjs' : 'ajv/dist/2020.js',
+      ).default,
       ajv = new Ajv({ strict: false });
     ajv.addFormat('date-time', (s) => Number.isFinite(Date.parse(s)));
     for (const f of [
@@ -131,6 +133,7 @@ export class NetworkProxy {
       return { statusCode: 200, body: { wire: raw.toString('base64') } };
     }
     if (definition.operation === 'network_open') {
+      let registeredHere = false;
       const execution = this.host.resolve(
         owner,
         input.executionContextId,
@@ -156,18 +159,44 @@ export class NetworkProxy {
         };
         this.links.set(owner, record);
         record.opening = this.open(record, signal);
+        registeredHere = true;
       }
       await record.opening;
       signal.throwIfAborted();
       this.host.resolve(owner, input.executionContextId, 'session');
       this.check(record);
+      const registration = record.registration;
+      if (
+        !valid('ShellAuthNetworkRegistration', registration) ||
+        registration.tenant !== context.identity.tenantId ||
+        registration.device !== context.identity.deviceId ||
+        registration.realm !== this.config.realm ||
+        BigInt(registration.realm) > 18446744073709551615n ||
+        BigInt(registration.node) > 18446744073709551615n ||
+        registration.systemAddress !==
+          `aur1:${BigInt(registration.realm).toString(16)}.${BigInt(registration.node).toString(16)}.0`
+      )
+        throw fail();
+      const created = registeredHere && registration.created;
+      if (registeredHere) record.registration = { ...registration, created: false };
       const stream = this.streams.create(context, owner, () => {
         record.streams.delete(stream.id);
         if (!record.streams.size) this.closeLink(record);
       });
       stream.executionContextId = execution.id;
       record.streams.add(stream.id);
-      return { statusCode: 200, body: { streamId: stream.id } };
+      return {
+        statusCode: 200,
+        body: {
+          streamId: stream.id,
+          registration: { ...registration, created },
+          binding: {
+            executionContextId: execution.id,
+            shellEpoch: context.epoch,
+            revision: context.revision,
+          },
+        },
+      };
     }
     if (definition.operation === 'network_send') {
       const stream = this.streams.get(input.streamId, owner),

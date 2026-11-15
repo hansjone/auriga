@@ -32,6 +32,32 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /me/device-profile:
+    get:
+      tags: [me]
+      operationId: getStandardDeviceProfile
+      summary: Read the current standard device account profile
+      description: Current platform device Bearer only. Rechecks the authoritative device, source and online permissions; accepts no identity selectors, never fabricates a browser Me.session.
+      responses:
+        '200':
+          description: Bounded account profile; account id is the verified JWT sub.
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema:
+                $ref: '../auth/standard-device.schema.json#/$defs/StandardDeviceProfile'
+        '401':
+          $ref: common.yaml#/components/responses/Unauthenticated
+        '403':
+          $ref: common.yaml#/components/responses/Forbidden
+        '503':
+          description: Authoritative source unavailable; fail closed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: common.yaml#/components/schemas/Problem
   /me/device-session:
     get:
       tags:

@@ -1846,6 +1846,87 @@ test('K2 standard devices have a fixed AI resource, token-possession revocation 
   assert.match(proto, /rpc VerifyStandardDeviceAiAccess\(/);
 });
 
+test('AUTH-K3 registration and ticket wire shared vectors freeze strict output boundaries', () => {
+  const vectors = JSON.parse(read('test/auth-k3-fixtures.json'));
+  const registration = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthNetworkRegistration',
+  );
+  assert.ok(registration(vectors.registration));
+  for (const key of Object.keys(vectors.registration)) {
+    const bad = { ...vectors.registration };
+    delete bad[key];
+    assert.equal(registration(bad), false, key);
+  }
+  assert.equal(registration({ ...vectors.registration, created: 0 }), false);
+  assert.equal(
+    registration({ ...vectors.registration, token: 'secret' }),
+    false,
+  );
+  for (const operation of [
+    'UnifiedCreateDownloadTicket',
+    'UnifiedRenewInstallation',
+    'createMemberResourceDownloadTicket',
+  ]) {
+    const output = validate(
+      'plugin/shell-business.schema.json',
+      'ShellAuthOutput_' + operation,
+    );
+    for (const vector of vectors.wireCases) {
+      assert.equal(
+        Buffer.from(vector.wire, 'base64').toString('utf8'),
+        vector.raw,
+      );
+      assert.ok(output({ statusCode: 200, body: { wire: vector.wire } }));
+    }
+    for (const body of [
+      { wire: 'x'.repeat(87385) },
+      { wire: '!!' },
+      { wire: '' },
+      { wire: 'e30=', version: 1 },
+    ])
+      assert.equal(output({ statusCode: 200, body }), false);
+  }
+});
+
+test('AUTH-K3 profile uses device-session member identity and accountId stays distinct', () => {
+  const definition = JSON.parse(
+    read('plugin/shell-business.schema.json'),
+  ).$defs;
+  assert.match(
+    definition.ShellAuthOutput_profile_read.properties.body.properties.memberId
+      .description,
+    /device-session/,
+  );
+  const profile = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthOutput_profile_read',
+  );
+  const memberId = '11111111-1111-1111-1111-111111111111';
+  assert.ok(
+    profile({ statusCode: 200, body: { memberId, displayName: 'test' } }),
+  );
+  assert.equal(
+    profile({
+      statusCode: 200,
+      body: { memberId, accountId: memberId, displayName: 'test' },
+    }),
+    false,
+  );
+  assert.deepEqual(definition.ShellAuthNetworkRegistration, {
+    $ref: '../network/register-result.schema.json',
+  });
+  const registration = validate(
+    'plugin/shell-business.schema.json',
+    'ShellAuthNetworkRegistration',
+  );
+  const vector = JSON.parse(read('test/auth-k3-fixtures.json')).registration;
+  assert.equal(
+    registration({ ...vector, systemAddress: 'aur1:02.40.0' }),
+    false,
+  );
+});
+
 test('MSGNET control operations have independent route, method and authentication bindings', () => {
   const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
   for (const call of inventory.calls.filter(
@@ -1867,4 +1948,35 @@ test('MSGNET control operations have independent route, method and authenticatio
   );
   assert.equal(receipt.permission, 'collab.msgnet.control.install');
   assert.equal(receipt.method, 'post');
+});
+
+test('AUTH-K3 profile uses the explicit standard-device endpoint without changing browser Me', () => {
+  const spec = YAML.parse(read('openapi/iam.yaml'));
+  assert.equal(
+    operations.find((op) => op.operation === 'profile_read').route,
+    '/api/iam/v1/me/device-profile',
+  );
+  assert.equal(
+    spec.paths['/me'].get.responses['200'].content['application/json'].schema
+      .$ref,
+    '#/components/schemas/Me',
+  );
+  assert.equal(
+    spec.paths['/me/device-profile'].get.responses['200'].content[
+      'application/json'
+    ].schema.$ref,
+    '../auth/standard-device.schema.json#/$defs/StandardDeviceProfile',
+  );
+  const check = validate(
+    'auth/standard-device.schema.json',
+    'StandardDeviceProfile',
+  );
+  const account = {
+    id: '11111111-1111-1111-1111-111111111111',
+    tenantId: '22222222-2222-2222-2222-222222222222',
+    displayName: 'test',
+  };
+  assert.ok(check({ account }));
+  assert.equal(check({ account, session: {} }), false);
+  assert.equal(check({ account: { ...account, token: 'hidden' } }), false);
 });

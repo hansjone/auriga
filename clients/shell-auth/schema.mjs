@@ -9,7 +9,7 @@ const base = packaged
 const loader = packaged
   ? createRequire(new URL('./package.json', import.meta.url))
   : createRequire(new URL('../dsh-plugin/package.json', import.meta.url));
-const Ajv = loader('ajv/dist/2020.js').default;
+const Ajv = loader(packaged ? './vendor-ajv.cjs' : 'ajv/dist/2020.js').default;
 const ajv = new Ajv({ strict: false, allErrors: true });
 ajv.addFormat(
   'uuid',
@@ -27,6 +27,11 @@ ajv.addFormat('uri', (s) => {
   }
 });
 ajv.addFormat('int64', { type: 'number', validate: Number.isSafeInteger });
+ajv.addSchema(
+  JSON.parse(
+    readFileSync(new URL('network/register-result.schema.json', base), 'utf8'),
+  ),
+);
 const files = [
   'auth/uac-login-info',
   'auth/uac-session-binding',
