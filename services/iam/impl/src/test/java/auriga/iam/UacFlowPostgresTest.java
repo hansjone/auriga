@@ -89,6 +89,8 @@ class UacFlowPostgresTest {
     final UacFlow flow;
     final UacWorker worker;
     final LoginManager login;
+    final TeamAccounts team;
+    final Secrets secrets;
     final IdentityPolicyHooks hooks = mock(IdentityPolicyHooks.class);
     final AtomicInteger scans = new AtomicInteger(),
         departments = new AtomicInteger(),
@@ -183,7 +185,7 @@ class UacFlowPostgresTest {
               })
           .when(adapter)
           .department(any(), any(), anyString());
-      var secrets = new Secrets(UacProviderPostgresTest.key());
+      secrets = new Secrets(UacProviderPostgresTest.key());
       var registry = new ConnectorRegistry(new ContractSchemas(), List.of(adapter));
       var providers =
           new ProviderManager(store, registry, secrets, audit, time, "https://portal.example.com");
@@ -209,6 +211,7 @@ class UacFlowPostgresTest {
               store, new UacDiagnosticSettings(store, config, audit, time), audit, time));
       when(hooks.uacMember(any()))
           .thenReturn(Optional.of(new IdentityPolicyHooks.UacMember("Test member", "member")));
+      team = new TeamAccounts(store, secrets, time, events);
       login =
           new LoginManager(
               store,
@@ -216,7 +219,7 @@ class UacFlowPostgresTest {
               new ContractSchemas(),
               registry,
               mock(EmergencyAccounts.class),
-              mock(TeamAccounts.class),
+              team,
               sessions,
               hooks,
               events,
@@ -2511,6 +2514,291 @@ class UacFlowPostgresTest {
                     assertEquals(1, credential.path("version").asInt());
                     return null;
                   }));
+    }
+  }
+
+  static LoginManager.Result adminLogin(Fixture f) {
+    var challenge =
+        f.call(
+            () ->
+                f.flow.create(
+                    Json.object("providerId", f.provider),
+                    "admin",
+                    "https://portal.example.com",
+                    "127.0.0.1",
+                    null,
+                    null));
+    f.run();
+    return f.call(
+        () ->
+            f.flow.complete(
+                challenge.challenge().path("id").asString(),
+                challenge.binding(),
+                "admin",
+                "https://portal.example.com"));
+  }
+
+  static AurigaPrincipal adminCaller(Fixture f, String sid) {
+    return new AurigaPrincipal(
+        f.account.toString(),
+        f.tenant,
+        PrincipalType.USER,
+        TokenContext.ADMIN,
+        sid,
+        null,
+        "member",
+        List.of("admin"),
+        Set.of(),
+        f.time.instant(),
+        null,
+        UUID.randomUUID().toString());
+  }
+
+  static LoginManager.Result beginStepUp(Fixture f, String sid, String provider) {
+    return f.call(
+        () ->
+            RequestContext.start("test-stepup", null)
+                .withPrincipal(adminCaller(f, sid))
+                .call(
+                    () ->
+                        f.login.begin(
+                            Json.object("providerId", provider, "purpose", "stepup"),
+                            "admin",
+                            "127.0.0.1",
+                            "test",
+                            "https://portal.example.com",
+                            null)));
+  }
+
+  static LoginManager.Result totpStepUp(Fixture f, LoginManager.Result pending, String secret) {
+    return f.call(
+        () ->
+            f.login.advance(
+                pending.transaction().path("id").asString(),
+                pending.bindingCookie(),
+                Json.object(
+                    "type",
+                    "form",
+                    "formId",
+                    pending.transaction().path("step").path("formId"),
+                    "values",
+                    Json.object("otp", Totp.code(secret, f.time.instant().getEpochSecond() / 30))),
+                false));
+  }
+
+  @ParameterizedTest
+  @CsvSource({"true", "false"})
+  void sharedDshStepUpPersistsInPostgresAndPreservesPortalAndDesktop(boolean bootstrap)
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String portal = f.login().session().session().path("sessionId").asString();
+      String admin = adminLogin(f).session().session().path("sessionId").asString();
+      String device = UUID.randomUUID().toString();
+      f.call(
+          () ->
+              store.tx(
+                  () ->
+                      store.insert(
+                          "device",
+                          device,
+                          Json.object(
+                              "deviceId",
+                              device,
+                              "sessionId",
+                              portal,
+                              "accountId",
+                              f.account.toString(),
+                              "revoked",
+                              false),
+                          null)));
+      String enrolled = Totp.generate();
+      if (!bootstrap)
+        f.call(
+            () ->
+                store.tx(
+                    () -> {
+                      f.team.enrollFirstTotp(
+                          f.account,
+                          enrolled,
+                          Totp.code(enrolled, f.time.instant().getEpochSecond() / 30));
+                      return null;
+                    }));
+      f.time.advance(bootstrap ? 31 : 601);
+      var pending = beginStepUp(f, admin, f.provider);
+      String secret =
+          bootstrap
+              ? f.call(
+                  () ->
+                      store.tx(
+                          () ->
+                              f.secrets.decrypt(
+                                  store
+                                      .get(
+                                          "login_tx",
+                                          pending.transaction().path("id").asString(),
+                                          false)
+                                      .path("firstTotpSecret")
+                                      .asString(),
+                                  "login:"
+                                      + f.tenant
+                                      + ":"
+                                      + pending.transaction().path("id").asString()
+                                      + ":first-totp")))
+              : enrolled;
+      assertEquals(
+          "completed", totpStepUp(f, pending, secret).transaction().path("status").asString());
+      assertEquals(f.time.instant().toString(), f.session(admin).path("stepUpAt").asString());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertNotNull(f.sessions.activeById(portal));
+                    assertFalse(store.get("device", device, false).path("revoked").asBoolean());
+                    return null;
+                  }));
+      f.time.advance(31);
+      var next = beginStepUp(f, admin, f.provider);
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var credential =
+                        store.byId(
+                            "uac_credential",
+                            f.session(admin).path("uacCredentialId").asString(),
+                            true);
+                    credential.put("invalid", true);
+                    store.save("uac_credential", credential);
+                    return null;
+                  }));
+      assertEquals("failed", totpStepUp(f, next, secret).transaction().path("status").asString());
+    }
+  }
+
+  @Test
+  void sharedDshStepUpRejectsExpiredPrimaryNonUacAndDifferentProviderInPostgres() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String admin = adminLogin(f).session().session().path("sessionId").asString();
+      f.time.advance(601);
+      assertEquals(
+          "iam.step_up_required",
+          assertThrows(AurigaException.class, () -> beginStepUp(f, admin, f.provider))
+              .errorCode()
+              .code());
+      String other = UUID.randomUUID().toString();
+      f.call(
+          () ->
+              store.tx(
+                  () ->
+                      store.insert(
+                          "idp_provider",
+                          other,
+                          Json.object("providerId", other, "connectorType", "uac", "enabled", true),
+                          null)));
+      assertEquals(
+          "iam.unauthenticated",
+          assertThrows(AurigaException.class, () -> beginStepUp(f, admin, other))
+              .errorCode()
+              .code());
+      UUID nonUacProvider = UUID.randomUUID();
+      f.call(
+          () ->
+              store.tx(
+                  () ->
+                      store.insert(
+                          "idp_provider",
+                          nonUacProvider.toString(),
+                          Json.object(
+                              "providerId",
+                              nonUacProvider.toString(),
+                              "connectorType",
+                              "team-account",
+                              "enabled",
+                              true),
+                          null)));
+      String nonUac =
+          f.call(
+                  () ->
+                      store.tx(
+                          () ->
+                              f.sessions.create(
+                                  f.account,
+                                  nonUacProvider,
+                                  "admin",
+                                  false,
+                                  Duration.ofDays(1),
+                                  Duration.ofDays(1))))
+              .session()
+              .path("sessionId")
+              .asString();
+      assertEquals(
+          "iam.unauthenticated",
+          assertThrows(AurigaException.class, () -> beginStepUp(f, nonUac, f.provider))
+              .errorCode()
+              .code());
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"false", "true"})
+  void sharedDshPasskeyOnlyAccountCompletesBoundAssertionInPostgres(boolean wrongAccount)
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String admin = adminLogin(f).session().session().path("sessionId").asString();
+      var authenticator = new StepUpPasskeyFixture();
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    String teamProvider = UUID.randomUUID().toString();
+                    store.insert(
+                        "idp_provider",
+                        teamProvider,
+                        Json.object(
+                            "providerId",
+                            teamProvider,
+                            "connectorType",
+                            "team-account",
+                            "enabled",
+                            true,
+                            "config",
+                            f.secrets.encrypt(
+                                Json.object(
+                                        "rpId",
+                                        "portal.example.com",
+                                        "origins",
+                                        List.of("https://portal.example.com"))
+                                    .toString(),
+                                "provider:" + f.tenant + ":" + teamProvider)),
+                        null);
+                    authenticator.enroll(store, f.account);
+                    return null;
+                  }));
+      f.time.advance(601);
+      var pending = beginStepUp(f, admin, f.provider);
+      assertEquals("webauthn", pending.transaction().path("step").path("type").asString());
+      assertFalse(pending.transaction().toString().contains("first_totp"));
+      var input =
+          Json.object(
+              "type",
+              "webauthn",
+              "credential",
+              authenticator.assertion(
+                  pending.transaction().path("step").path("publicKey"),
+                  wrongAccount ? UUID.randomUUID() : f.account));
+      var done =
+          f.call(
+              () ->
+                  f.login.advance(
+                      pending.transaction().path("id").asString(),
+                      pending.bindingCookie(),
+                      input,
+                      false));
+      assertEquals(
+          wrongAccount ? "failed" : "completed", done.transaction().path("status").asString());
+      if (wrongAccount) assertFalse(f.session(admin).has("stepUpAt"));
+      else assertEquals(f.time.instant().toString(), f.session(admin).path("stepUpAt").asString());
+      assertFalse(f.call(() -> store.tx(() -> f.team.hasTotp(f.account))));
     }
   }
 }
