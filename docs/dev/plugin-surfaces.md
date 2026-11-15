@@ -5,7 +5,7 @@ Auriga 插件有登录、功能、设置三部分；管理台是独立应用。�
 ## 宿主承载与设计对应
 
 - 功能页沿 `window.__ModuleLoader__` 取得宿主 React。`sidebar.panellist` 与 `main` 共用 `auriga-team` id/key，侧栏只有一个 Auriga 入口。`auriga-team-panel` 是原生 Custom Element，内部只有“资源市场／我的资源”两个水平页签。
-- 设置页单独注册 `settings.section`，id 为 `auriga-team`、order 为 22。DSH 拥有设置弹窗、左侧列表、关闭按钮、Esc 与焦点管理，插件只提供右侧 Auriga 内容，不拦截全局导航或自行制造弹窗。
+- Auriga 设置只在功能页“设置”页签内显示（2026-11-16 用户决定），不再注册原生 `settings.section`，DSH“更多-设置”中没有 Auriga 分节。插件不拦截全局导航或自行制造弹窗。
 - 两页分别对照设计目录的 `index.html`、`resources-2026-10-23.html` 及 README。设置采用“总部连接／工具／关于”的分组与细分隔设置行，复用 DSH 原生按钮和 `--dsw-alias-*` 变量，不导入管理台主题、Vue、Element Plus 或私带 React。
 - 设置打开、刷新和关闭不更新功能组件的 bootstrap/context，不重建资源元素。功能元素在同一连接只改变语言／主题时保留当前页签、搜索与已读数据；真实连接变化则取消请求并清空旧数据。
 
