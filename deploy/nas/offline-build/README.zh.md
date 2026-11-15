@@ -15,7 +15,7 @@ bash deploy/nas/offline-build/export-base.sh golang:1.27.3 /outputs/go-linux-amd
 - 在 golang:1.27.3 中执行 go-inputs.sh prepare /outputs/go。输入由 NAS 的实际 Go 构建目标解析，包含 Go workspace 与独立 bootstrap 模块的公共代理文件、源码锁哈希和逐文件哈希。
 - 在 node:22-bookworm 中执行 web-inputs.sh prepare /outputs/web。脚本保存钉定版本的 Corepack 工具包、pnpm store 和 workspace 锁文件哈希。
 - 在具有 curl 的 node:22-bookworm 中执行 java-tools.sh /outputs/java-tools。它从 Maven Wrapper 配置和契约工具的 POM 读取版本，校验 Maven 发行 ZIP、Wrapper JAR，以及 Linux amd64 Node 发行包。这个工具包可单独下载和校验。
-- 在 eclipse-temurin:25-jdk 中执行 java-inputs.sh prepare /outputs/java。它按生产的 Maven reactor 构建，保留 Wrapper 发行缓存、公共 Maven 依赖和契约工具的 npm 内容缓存。在线生成的应用 JAR 不进入输入包。Java 配方需要完成离线回归后纳入发布索引。
+- 在 eclipse-temurin:25-jdk 中执行 java-inputs.sh prepare /outputs/java。它按生产的 Maven reactor 构建，保留 Wrapper 发行缓存、公共 Maven 依赖和契约工具的 npm 内容缓存。在线生成的应用 JAR 不进入输入包。已冻结的 Maven 发布索引、源码锁覆盖及整栈验收范围见[Forgejo 构建说明](../../../docs/dev/forgejo-only-build.zh.md)。
 - 在对应的运行基镜像中执行 system-inputs.sh SERVICE /outputs/system/SERVICE。agent 用 debian:bookworm-slim，platform 用 eclipse-temurin:25-jre，bifrost 用官方 Dockerfile 固定的 alpine:3.22 摘要，operator 用 python:3.13.8-slim-bookworm。edge 直接使用 gcr.io/distroless/static-debian12:nonroot。
 
 以上脚本在本目录。容器的 /outputs 应映射到发布目录，源码绑定为只读。Java 和 Web 脚本将必要源码复制到新建临时目录。归档每个输出目录，登记包版本、精确源码提交、架构、基镜像摘要、归档校验和及锁清单。

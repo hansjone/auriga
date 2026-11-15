@@ -220,7 +220,7 @@ const result = {
   forgejoArtifactIndex: 'artifacts.json',
   completeness: 'static-discovery-only',
   limitations: [
-    'Maven BOM/plugin transitive closure awaits completed reactor and cache freeze',
+    'Static discovery records Maven declarations; resolve inherited versions and transitive inputs against a verified reactor closure',
     'download-reference includes conditional and test-only downloads; dynamic URL/version/digest require resolution',
     'go.sum includes historical and platform-specific modules; entries are not a minimal Linux build closure',
     'Forgejo archive availability is recorded separately; per-package membership is not inferred from archive names',

@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+  "recipeBaseCommit": "48feff5be421d515cef7635a7eec248551be65c8",
+  "recipeOverlay": [
+    {
+      "file": "deploy/nas/offline-build/assemble-image.sh",
+      "sha256": "ab718ecc354b9ba4f224a2f59954e8cab5608954aebb89e9f8eec7f6e6c7dd5e"
+    },
+    {
+      "file": "deploy/nas/offline-build/Dockerfile.assembly",
+      "sha256": "a6368694147eb78e6f1663af54d462a4bdeb45a15c3a112b627dd397f3db43d7"
+    },
+    {
+      "file": "deploy/nas/offline-build/export-base.sh",
+      "sha256": "feab2335419bf4b021e1312208d84a32568be40427422444070793253476b496"
+    },
+    {
+      "file": "deploy/nas/offline-build/go-inputs.sh",
+      "sha256": "95fbede81482e2edc5900fc29e22f96e4d51bc579e188a6b7fa597ab3d971dba"
+    },
+    {
+      "file": "deploy/nas/offline-build/java-inputs.sh",
+      "sha256": "40f8bb17d52903aa323814a53b6e2014bcba2f893bb708f1e29deafda6dbd3db"
+    },
+    {
+      "file": "deploy/nas/offline-build/java-tools.sh",
+      "sha256": "e75e8faf93fbb30d8186d6d085c8f5be14225886ff7a25a3e5034c1d827d8ab1"
+    },
+    {
+      "file": "deploy/nas/offline-build/system-inputs.sh",
+      "sha256": "3bb91ef670e97497cc9a597a307a2b26a63f15ff1cbe3712ffc4cdf45f1eec52"
+    },
+    {
+      "file": "deploy/nas/offline-build/web-inputs.sh",
+      "sha256": "2120ea049ce12babe0c58639d6f46bb2ea1e4ba80657f658372cc69c907ec6fd"
+    }
+  ],
+  "sourceTransport": "Authenticated Forgejo HTTPS via a Node 24 bridge restricted to Git upload-pack",
+  "inputTransport": "Previously published and readback-verified Forgejo archives were restored into a separate empty Docker and language build environment",
+  "isolation": {
+    "independentMountAndNetworkNamespaces": true,
+    "externalDefaultRoutes": 0,
+    "initialDockerImages": 0,
+    "initialBuildCaches": "empty",
+    "dataAndTemporaryFiles": "data disk",
+    "minimumSystemDiskFreeGiB": 15,
+    "serialBuilds": true
+  },
+  "build": {
+    "exitCode": 0,
+    "compileNetwork": "none",
+    "compilePull": "never",
+    "imageBuildArguments": [
+      "--network=none",
+      "--pull=false",
+      "--no-cache"
+    ],
+    "javaGoal": "-o -DskipTests package",
+    "go": [
+      {
+        "file": "auriga-agent",
+        "sha256": "f7920595fa3414662f9db5461f92381f4c5bfe16ea465acfd4d98ed31907d9fc"
+      },
+      {
+        "file": "auriga-ai-gateway",
+        "sha256": "2d0ad5b9aec621135325d48532f2738ca146060f4289ba66057a6730c143314d"
+      },
+      {
+        "file": "auriga-edge",
+        "sha256": "709e4d243056a4fc4be96eb704333d563ebc9e1ffa85cff29540e4cd8818a540"
+      },
+      {
+        "file": "auriga-egress",
+        "sha256": "cd57093d34c6f63249b5b36bae9ea900641bddb6211eaf94f3a0cb0c0883af44"
+      },
+      {
+        "file": "auriga-nas-bootstrap",
+        "sha256": "80f0fe3f553a2c356e79d6dfb3a02024ab31e7b84e7ce43d954cc4f6f6448df6"
+      },
+      {
+        "file": "auriga-network-broker",
+        "sha256": "427b8b8bfc111c1baad94fa8dc50a952b333a36ac9325d6f27fdec7b0106d135"
+      },
+      {
+        "file": "auriga-network-probe",
+        "sha256": "9123cfdcbf0168d904fa67cfdb0c1546b958e617f15326216fe8ace00f7e584c"
+      },
+      {
+        "file": "auriga-panel",
+        "sha256": "e9a1bfc40e1c8109cd9fe256c78e567e812c16e2f0c73fd38f98370397fbb37c"
+      },
+      {
+        "file": "bifrost",
+        "sha256": "805f06577cab97e4a8d1d912e86f3c0e50281f5783d0e18dd7fbc8e627fe52ef"
+      },
+      {
+        "file": "runtime-release",
+        "sha256": "8e19c1a29be2e68dd66cd33e0edec86b006bf239cfca3b0b93ab81f64be5427f"
+      }
+    ],
+    "java": [
+      {
+        "file": "platform.jar",
+        "sha256": "34fde2ca1c12a8cf8ed33b070714899fa23e1e8d198025d4ca082b0599ed36b8"
+      }
+    ],
+    "web": [
+      {
+        "file": "admin/assets/index-D-4EnIF-.css",
+        "sha256": "04c9c5c61f386a14599ed6a9e0c8a50b5c485366a4e64192b2e88cd47bf0e434"
+      },
+      {
+        "file": "admin/assets/index-DyXwTIds.js",
+        "sha256": "98a25ed753696945d14d4bffb4907aede64a22348d1e217a4c595270fe334063"
+      },
+      {
+        "file": "admin/brand/apple-touch-icon.png",
+        "sha256": "213141c61c935bcfec4372f70f23b26f35b7a448f1925171648dbfaedf786426"
+      },
+      {
+        "file": "admin/brand/favicon-32.png",
+        "sha256": "1ca52ed1f7b337eb860da39c933f81ddc444fefb188aa98a05feec90a09adb67"
+      },
+      {
+        "file": "admin/brand/favicon.svg",
+        "sha256": "571a7cef9d0fc618be40aaee5d368f98d1acc86e28d37067a227eb7370d433ce"
+      },
+      {
+        "file": "admin/index.html",
+        "sha256": "32e8f0a818417984f4e8674ee0b846a81947274588c3e2144fb905746be47d9c"
+      },
+      {
+        "file": "panel/auriga-team-panel.js",
+        "sha256": "64d11a0d4423e11a1499a0047a72b3a4bf75266ee54be2d315dfa0a7089b70ad"
+      },
+      {
+        "file": "portal/assets/iam-DVRK287h.js",
+        "sha256": "1f2bc8e3d5622f1d180dcbeaf36c854dc612e5806e586cd2c0fc6ad166de1368"
+      },
+      {
+        "file": "portal/assets/index-IvGX4F6x.css",
+        "sha256": "e09b7e2441621f56f8f3ba1c85422807c145e7f1cfa5f67406f08999539ffa9f"
+      },
+      {
+        "file": "portal/assets/index-jbF-h3As.js",
+        "sha256": "3ce58db26a154a0882dcb15755507bebda88188b18e5ef8e4a67f404758df7fb"
+      },
+      {
+        "file": "portal/assets/instanceLogin-BtcDonbC.css",
+        "sha256": "d866b955e4726603e3316cad490b0e758f388e33a4d27c06f53177fddb4c99fd"
+      },
+      {
+        "file": "portal/assets/instanceLogin-DaBT3Jkp.js",
+        "sha256": "d33af9b99169d2cfd6ea3798ae817b04817efb1769b8dc9b535c21900b0edd25"
+      },
+      {
+        "file": "portal/assets/lifecycle-CPe5dI9U.js",
+        "sha256": "b4b7fbcfd27c08cd6890d2c448fe514eb298b93452bd26d675c8c72e9de94a94"
+      },
+      {
+        "file": "portal/assets/logout-BSClv1go.css",
+        "sha256": "764f53574fc1248e4d8c47166107fd4859f4cbe1992245cea332e66aa3424381"
+      },
+      {
+        "file": "portal/assets/logout-KF0uyb25.js",
+        "sha256": "4a29cd5f4036a4732ed0a724a887c9a4b081125568490a8fba050b49e53c9ca9"
+      },
+      {
+        "file": "portal/assets/workspace-BjJZTTQh.js",
+        "sha256": "e6a3731a906f28cadd141a57322b75afa4715b289411f2eb5f62f52dc78480c4"
+      },
+      {
+        "file": "portal/assets/workspace-CT-KV55q.css",
+        "sha256": "9b67165248d0fa35fcc549fe6e95a1b796da2b35dec0fb545a3c3bfb5cddbc92"
+      },
+      {
+        "file": "portal/brand/apple-touch-icon.png",
+        "sha256": "213141c61c935bcfec4372f70f23b26f35b7a448f1925171648dbfaedf786426"
+      },
+      {
+        "file": "portal/brand/favicon-32.png",
+        "sha256": "1ca52ed1f7b337eb860da39c933f81ddc444fefb188aa98a05feec90a09adb67"
+      },
+      {
+        "file": "portal/brand/favicon.svg",
+        "sha256": "571a7cef9d0fc618be40aaee5d368f98d1acc86e28d37067a227eb7370d433ce"
+      },
+      {
+        "file": "portal/index.html",
+        "sha256": "21b78724dfa31217960fbf6e7dcda9712c940cb17b3c38fd0ff084c378aa2645"
+      },
+      {
+        "file": "portal/instance-login.html",
+        "sha256": "2c72661cd82bd5ab4ace884b87aa5c4c3128ff9d9916cbf32a56d77fbe8789fd"
+      },
+      {
+        "file": "portal/logout.html",
+        "sha256": "7c9f0dc30fc35eb46d274542e0ac9fd730e313178523f940fcfc759a5575522e"
+      }
+    ],
+    "images": [
+      {
+        "role": "agent",
+        "configDigest": "sha256:e6bf5c630cdb0b170c5ddcb6b2daa4078306eb9c4a9024de96c004e3cbf4a8dd",
+        "platform": "linux/amd64"
+      },
+      {
+        "role": "bifrost",
+        "configDigest": "sha256:234c80a317c94efea5105a8487f6bdaae2d2a9004f710755a2eb69a25815d9d7",
+        "platform": "linux/amd64"
+      },
+      {
+        "role": "edge",
+        "configDigest": "sha256:c04c50507cae5b6e7d10fa148465b477277a05f4651f9fd5f0be2197df4e53ad",
+        "platform": "linux/amd64"
+      },
+      {
+        "role": "platform",
+        "configDigest": "sha256:aaac0dd90785c7881a241b91af12413c3b2a72c88d69da7d913cbd479a0a79a1",
+        "platform": "linux/amd64"
+      },
+      {
+        "role": "operator",
+        "configDigest": "sha256:5456c667f0c7a8c2219181e5fd0b7224c36d3ed8aaa7c8ad8d61e838ef0e7cb2",
+        "platform": "linux/amd64"
+      }
+    ]
+  },
+  "stack": {
+    "commands": [
+      "scripts/init.sh",
+      "scripts/start.sh --network-offline"
+    ],
+    "coreHealthExitCode": 0,
+    "healthyServices": [
+      "platform",
+      "edge",
+      "bifrost",
+      "postgres",
+      "nats"
+    ],
+    "platformProbe": "/etc/auriga/iam-healthcheck.sh with generated TLS configuration",
+    "registryV2Status": 200,
+    "operatorPipCheckExitCode": 0,
+    "entryAssets": [
+      {
+        "role": "portal",
+        "htmlStatus": 200,
+        "javascriptMatchesColdBuild": true,
+        "javascriptSha256": "3ce58db26a154a0882dcb15755507bebda88188b18e5ef8e4a67f404758df7fb"
+      },
+      {
+        "role": "admin",
+        "htmlStatus": 200,
+        "javascriptMatchesColdBuild": true,
+        "javascriptSha256": "98a25ed753696945d14d4bffb4907aede64a22348d1e217a4c595270fe334063"
+      }
+    ],
+    "administratorBootstrap": {
+      "exitCode": 1,
+      "error": "unknown NAS source leaf: uac",
+      "occurredBeforeAdministratorCreation": true
+    },
+    "agentJoin": "pending first join token; agent periodically restarts",
+    "fullLoginAndSignedRuntimeImport": "pending"
+  },
+  "deployableImageArchive": {
+    "file": "cold-app-images-84dca4a6.tar.gz",
+    "bytes": 427080065,
+    "sha256": "14d6ff6f20d4bf6ffbd947b7dafe4b6d3092205588a98ce4d80beb6f1702b0de",
+    "location": "worker-local .agent-forgejo directory for lead collection"
+  },
+  "cleanup": {
+    "temporaryContainersRemoved": true,
+    "privateDaemonsStopped": true,
+    "mountsAndLoopDeviceRemoved": true,
+    "temporaryEngineFileRemoved": true
+  },
+  "pending": [
+    "Lead serial NAS development deployment and normal-page verification",
+    "Fix the public NAS uac source-leaf validation in its owning task and repeat administrator setup and Agent join",
+    "Target Docker Engine 26.1.4 import and full signed DSH runtime verification",
+    "Independent review and exact-head CI before main merge"
+  ]
+}

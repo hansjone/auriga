@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+  "package": "auriga-site-build-extra-java",
+  "version": "84dca4a6-linux-amd64-r1",
+  "archive": {
+    "file": "java-extra-84dca4a6.tar.gz",
+    "bytes": 5250596,
+    "sha256": "8ac62672e9d82cbd74316b420e436079e268104c1613252f892e49c712232e3f"
+  },
+  "artifacts": [
+    {
+      "file": "java-extra-84dca4a6.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-java/84dca4a6-linux-amd64-r1/java-extra-84dca4a6.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "59301998c553bc181a403167954cc719221b97a9509cddd951e67b06a276b0d9"
+    },
+    {
+      "file": "java-extra-84dca4a6.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-java/84dca4a6-linux-amd64-r1/java-extra-84dca4a6.tar.gz.part001",
+      "bytes": 1056292,
+      "sha256": "fa27dbf4f6d22a134de5eb587bea327b5d9f5ffec9a43620804573ae4c9121d5"
+    }
+  ]
+}

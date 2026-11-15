@@ -1,33 +1,101 @@
 # 只从 Forgejo 获取构建输入
 
-本入口采用 Forgejo Generic Packages 运输已经冻结的依赖闭包。镜像归档、Go 文件代理、Maven 本地仓库、npm/pnpm 缓存和系统包均先下载校验，再在无网络容器重建。公共 Dockerfile 的默认联网行为保持原样。现场真实域名、所有者和凭据配置放在被忽略的 `deploy/forgejo/config.local.json`。
+本入口通过 Forgejo Generic Packages 分发冻结的镜像、Go 文件代理、Maven 仓库、npm/pnpm 缓存和系统包。现场 HTTPS 地址、所有者和凭据环境变量名放在被忽略的 `deploy/forgejo/config.local.json`。公开 Dockerfile 继续使用原默认配置。
 
-当前是部分闭包：Maven 全 reactor 尚未冻结，五应用镜像、bootstrap/runtime-release 的同版本整体断网验收尚未完成。不能直接把本入口当作完整正式离线发行。已有源码重建配方复用于 `deploy/nas/offline-build/`，其前置条件和锁校验见该目录说明。
+已验收源码为 `84dca4a66e6a09f6c6e00628d833fce41920d855`，平台为 Linux amd64。五应用镜像、十个 Go 程序、三个 Web 产物和 Java reactor 已在空构建缓存、无外网路由的独立 Docker 环境重建。Go 输出包含 `auriga-nas-bootstrap` 和 `runtime-release`。Java 执行 `-DskipTests package`，此记录覆盖编译与装配。
+
+镜像身份、产物摘要、健康检查和余项记录在[构建验收记录](../../deploy/forgejo/build-acceptance.json)，新增包的完整回读统计见[发布核验记录](../../deploy/forgejo/publication-verification.json)。
+
+公开 `init.sh`、`start.sh --network-offline` 起栈后，平台正式 TLS 探针及 edge、bifrost、PostgreSQL、NATS 健康检查通过。门户和管理台 HTML 返回 200，实际 JavaScript 与冷建产物逐字节一致。首次管理员初始化被 `unknown NAS source leaf: uac` 阻断，Agent 等待首次加入令牌并周期重启。正常登录、Agent 加入和真实 DSH 签名运行时导入仍需主控完成验收。
 
 ## 清单与配置
 
-`node deploy/forgejo/inventory.mjs` 从 Git 跟踪文件生成 `forgejo-deps-inventory.json`。记录 npm 所有 lock、pnpm packages、Go 模块与校验、Maven 依赖/插件/扩展/工具、Docker FROM、Compose 镜像、脚本和工作流的下载引用，以及输入文件 SHA-256。`download-reference` 是待逐条解析的引用，不代表一个已锁定的包。缺失版本/摘要使用 null；Maven 的继承和传递依赖需要完成 reactor 后生成有效闭包。Go sum 包含历史和其他平台条目。
+`forgejo-deps-inventory.json` 保留原始 6980 条发现及输入摘要，`acceptanceSourceCommit` 记录本轮构建源码。每项通过 `forgejo.evidence` 或 `inputGroup` 指向 `closure-index.json` 中的成员、精确版本、SHA-256 和包路径。Go 的 `h1`、npm/pnpm 的完整性与锁文件匹配，Maven 继承版本来自有效 POM。
 
-`deploy/forgejo/artifacts.json` 单独记录已有 Forgejo 构建依赖包的版本、分片路径、长度与 SHA-256。路径中的 `{owner}` 由私有配置提供。`api-listed` 仅表示 API 列出该分片；下载器回读成功才表示内容已验证。不能由归档名称推断其中每个包都覆盖当前锁文件。源码清单与归档内容的对应关系须通过离线配方的 source-locks 校验。
+- `present` 表示已有可定位的 Forgejo 输入，包含本轮补齐的输入。
+- `source` 表示固定源码提供的本地模块、辅助脚本或应用构建输出。
+- `platform-excluded` 保留锁文件明确排除 Linux x64 glibc 的包及其约束。
+- `non-input-reference` 保留资金链接、测试样例、健康探针和源代码属性等扫描结果。
+- `missing` 保留尚无精确证据的输入。
 
-复制 `config.example.json` 至 `config.local.json`，设置 Forgejo HTTPS 根地址、包所有者和只读 token 的环境变量名。凭据只通过环境注入，不写配置。下载器拒绝跳转、跨源路径、路径穿越、摘要不符、重复目标和覆盖已有输入；无外部回退地址。
+本次共有 5908 条 Forgejo 输入记录、114 条源码记录、506 条平台排除和 452 条非输入引用，缺失为 0。`supplyCounts` 中 5384 条只引用既有归档，524 条包含本轮补包证据。同一依赖可以由多个归档提供。本轮新增七个包、242 个文件，完整回读共 907937376 字节。
+
+`artifacts.json` 记录分片路径、长度和 SHA-256。`api-listed` 表示既有 API 元数据，`uploaded-readback` 表示本轮完整回读通过。完整归档摘要及分片顺序以 `closure-index.json` 为准。`java-release.json` 复用 Maven 工位的完整发布索引，其余 `*-release.json` 记录增量包。CI action 源码已按完整提交冻结，运行 GitHub 工作流所需的 runner 和服务集成由 CI 环境提供。
+
+重新发现和映射时输出临时文件，保留发布清单便于比较。
 
 ```sh
-node deploy/forgejo/download.mjs deploy/forgejo/config.local.json \
-  deploy/forgejo/operator-inputs.json /data/auriga/operator-downloads
-sh deploy/forgejo/operator-verify.sh /data/auriga/operator-downloads /data/auriga/operator-work
+node deploy/forgejo/inventory.mjs /data/auriga/discovery.json
+node deploy/forgejo/map-inventory.mjs /data/auriga/discovery.json \
+  deploy/forgejo/closure-index.json /data/auriga/mapped.json
 ```
 
-使用 Node 24；临时文件与归档均放有空间的数据盘。为其他闭包下载时，从 `artifacts.json` 选出所需包版本的全部分片组成同格式的 manifest。分片按编号连接后，还必须核发布方记录的完整归档 SHA-256；不得只校验分片后跳过完整归档校验。下载命令不执行归档里的脚本。
+从 Forgejo 准备两个源码检出目录。`recipes` 使用本分支的构建入口，`source` 固定到验收提交。将 `recipes/deploy/nas/offline-build/` 复制到 `source/deploy/nas/offline-build/`，其余源码保持验收提交内容。后续源码或锁文件变化时重新采集并验证对应闭包。
+
+在 `recipes` 下复制 `deploy/forgejo/config.example.json` 为 `deploy/forgejo/config.local.json`，设置现场 HTTPS 根地址、包所有者和只读 token 环境变量名。凭据通过环境注入。使用 Node 24，并把下载、临时目录及 Docker 数据目录放到数据盘。以下命令在 `recipes` 下执行。
+
+```sh
+export work=/data/auriga/forgejo-rebuild
+mkdir -p "$work"
+node --input-type=module - "$work" <<'JS'
+import { readFileSync, writeFileSync } from 'node:fs';
+const work = process.argv[2];
+const closure = JSON.parse(readFileSync('deploy/forgejo/closure-index.json'));
+const overlay = JSON.parse(readFileSync('deploy/forgejo/overlay-release.json'));
+const artifacts = [...new Map([
+  ...closure.archives.flatMap(archive => archive.parts), ...overlay.artifacts,
+].map(part => [part.path, part])).values()];
+writeFileSync(work + '/download-manifest.json', JSON.stringify({ artifacts }, null, 2));
+JS
+node deploy/forgejo/download.mjs deploy/forgejo/config.local.json \
+  "$work/download-manifest.json" "$work/parts"
+```
+
+下载器核长度和 SHA-256，拒绝跳转、跨源路径、路径穿越、重复目标及覆盖。已有输出需保留供核查，并选择新目录继续下载。按索引顺序拼接后再次核完整归档摘要。
+
+```sh
+node --input-type=module - "$work" <<'JS'
+import { readFileSync, mkdirSync, openSync, writeFileSync, closeSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+const work = process.argv[2];
+const closure = JSON.parse(readFileSync('deploy/forgejo/closure-index.json'));
+mkdirSync(work + '/archives');
+for (const archive of closure.archives) {
+  const output = openSync(work + '/archives/' + archive.name, 'wx');
+  const digest = createHash('sha256');
+  try {
+    for (const part of archive.parts) {
+      const bytes = readFileSync(work + '/parts/' + part.file);
+      if (bytes.length !== part.bytes || createHash('sha256').update(bytes).digest('hex') !== part.sha256)
+        throw Error('Part changed: ' + part.file);
+      writeFileSync(output, bytes);
+      digest.update(bytes);
+    }
+  } finally { closeSync(output); }
+  if (digest.digest('hex') !== archive.sha256) throw Error('Archive mismatch: ' + archive.name);
+}
+JS
+```
 
 ## 从依赖构建
 
-解包后核各目录 `SHA256SUMS`，从基镜像归档加载镜像，核 Linux amd64 与镜像 config 摘要。具体装配步骤见 [离线重建](../../deploy/nas/offline-build/README.zh.md)。Go 配方设置 `GOPROXY=file:///inputs/download`，禁止外网回退；Maven 使用恢复的本地仓库与 `-o`；Web 恢复 pnpm、供应链元数据和 store 后离线安装。保留原有源码锁、依赖完整性、签名和策略检查。
+从已核验归档恢复目录，并在各目录执行 `sha256sum -c SHA256SUMS`。
 
-先以 `--network none --pull never`、空构建缓存运行编译容器，再使用 `assemble-image.sh` 的 `--network=none --pull=false --no-cache` 装配。Operator 使用本地 wheel 的 `--no-index`，不访问 PyPI。基础镜像需提前加载；Docker build 的网络参数不会隔离 Docker daemon 自身。
+- Go 输入归档 `auriga-go-inputs-linux-amd64-963bfe65.tar.gz` 解到 `inputs/go`。
+- Web 输入归档 `auriga-build-web-inputs-linux-amd64-963bfe65-r2.tar.gz` 解到 `inputs/web`。
+- Java 输入归档 `auriga-build-java-inputs-linux-amd64-784643c8.tar.gz` 解到 `inputs/java`。
+- agent DEB、bifrost APK、platform DEB、operator wheel 归档分别解到 `output/system/agent`、`output/system/bifrost`、`output/system/platform`、`output/system/operator`。
+
+Java 先按原始清单全量复核，再应用 `java-overlay-84dca4a6.json`。核对 `baseArchiveSha256` 及两个覆盖文件的 SHA-256，把 `java-source-locks-84dca4a6.sha256` 复制为 `inputs/java/source-locks.sha256`，把 `java-files-84dca4a6.sha256` 复制为 `inputs/java/SHA256SUMS`，再次全量校验。此覆盖绑定 collab POM 新增的 BouncyCastle 1.83 声明，对应 JAR 已在原始输入中。覆盖适用于固定的验收源码。
+
+加载索引中的八个构建/运行基镜像 Docker 归档，以及 PostgreSQL、NATS、registry 归档，核镜像身份和 Linux amd64 架构。DSH Node 基底采用 OCI layout，归档内根目录为 `node-base`，通过支持 OCI layout 的工具导入。它和 DSH npm 缓存供原有签名构建流程使用。
+
+Go 配方使用 `GOPROXY=file:///inputs/download`，Maven 使用本地仓库及 `-o`，Web 恢复 pnpm、供应链元数据和 store 后离线安装，Operator 从本地 wheel 执行 `--no-index` 安装。
+
+在只允许 Forgejo 的独立 VM/网络环境串行构建，环境同时限制 Docker daemon 出站。编译容器使用空临时目录、空输出目录及 `--network none --pull never`，源码和输入只读挂载，按配方设置资源上限。C 盘低于 15 GiB 时暂停。五镜像通过 `assemble-image.sh` 串行装配，脚本固定使用 `--network=none --pull=false --no-cache`。完整挂载、镜像参数和打包命令见[离线重建说明](../../deploy/nas/offline-build/README.zh.md)。
 
 ## 正式验收
 
-由现场维护者提供只允许 Forgejo 的独立 VM/网络环境，限制 IPv4、IPv6、DNS 和 Docker daemon 出站。不要修改共享开发网络来做隔离。从空 Git/语言/Docker 缓存开始，用 Forgejo clone 指定完整源码 SHA，下载同版本归档，保存访问日志与每步退出码。生产发行清单还需包含部署的第三方镜像、Docker/Compose/ORAS、DSH 上游闭包和已签名运行材料。
+将应用镜像、两个 Go 辅助程序和公开 NAS 目录组成发行材料，按正常安装流程填写访问地址及镜像摘要，执行 `scripts/init.sh`、`scripts/start.sh --network-offline`。用生成的正式 TLS 探针检查平台，从门户、管理台页面继续验收首管创建、登录、Agent 加入及签名运行时导入。
 
-串行编译十个 Go 程序、前端与 Java，装配五应用镜像；按 [NAS 安装说明](../../deploy/nas/README.md) 起栈并从正常入口测试登录和健康。真实 DSH 按原运行时签名/导入流程验收。当前单服务测试不能替代此流程。Maven 采集缓存由原任务独占；接续前先由主控安排资源和交接，禁止两个容器同时写同一缓存。
+本轮五镜像 Docker 归档及 Go/JAR/Web 产物留在工位供主控取用，NAS 部署由主控串行安排。`uac` 安装白名单阻塞需在对应任务修复后复测。签名、源码范围及运行时校验继续按[正常安装流程](../../deploy/nas/README.md)执行。临时验证栈在结束后清理。

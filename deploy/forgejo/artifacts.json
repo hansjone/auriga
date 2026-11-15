@@ -1,7 +1,510 @@
 {
   "schemaVersion": 1,
-  "verification": "Forgejo file API metadata; content readback is a separate acceptance step",
   "artifacts": [
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-000",
+      "bytes": 67108864,
+      "sha256": "103577643361891380ed6460bb8d600214db336e8b6ea122afac254e3aed7bee",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-001",
+      "bytes": 67108864,
+      "sha256": "ee8f138de45cfdaa61b922fd6e33ae7374b98244c2219cfb8ef817e0a5dd4df4",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-000",
+      "bytes": 4194304,
+      "sha256": "c211e346f0defff92ba497cda4b48edda228d18657b386fd02d2cb3ce1e1adb6",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-002",
+      "bytes": 4194304,
+      "sha256": "195d8bf407ff700715e7edf1ad43803f14320417d2ac43a6e255c5755571bdc1",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-001",
+      "bytes": 4194304,
+      "sha256": "7bcd6bb8fbfcd98f15d015e0c0998a80c47a75772eac076e11a36502399d671a",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-003",
+      "bytes": 4194304,
+      "sha256": "620bd542ef4cb9ef7f408a61c695ef2c45d572d670e3b32cf43d1a3a847ee66e",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-004",
+      "bytes": 4194304,
+      "sha256": "39be8b080065cf043c57915fe3d2dcf03fc7b206c174ed3297c61e2feeb0151c",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-005",
+      "bytes": 4194304,
+      "sha256": "2e53ce63b686ab4f76d749f63a611e07b6b1a60ed7776e15187f721127dc9652",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-006",
+      "bytes": 4194304,
+      "sha256": "11797893392b87cb8727d9cf97a06d90557bd5db201146d0143c9af42b7c7141",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-007",
+      "bytes": 4194304,
+      "sha256": "d98ce5b5a618aca6b2d05dac5f7b925996d4ae5dd6df33a13ce99e42223f5620",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-008",
+      "bytes": 4194304,
+      "sha256": "74456fe55069656aacf3aff05ca10647a69cc0ed6d1845789e7b6ab269dacf33",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-009",
+      "bytes": 4194304,
+      "sha256": "81ac5a691748ebf36a5564edd7363f9b58b9f8651eefd1181de1fe582008386c",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-010",
+      "bytes": 4194304,
+      "sha256": "198535a41ecf2bda3da7d659bef89008751ac7fa3bb9a86374d7ea31e00bcd26",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-011",
+      "bytes": 4194304,
+      "sha256": "acb94e528237b3fea16abf930bb4f5220bd3c7a7648af50e7acc452acc98259f",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-012",
+      "bytes": 4194304,
+      "sha256": "1e572eee843d83d7aae132ee895cf8c8badbd84ecd8ffd8ce33bb4759a5d13d9",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-013",
+      "bytes": 4194304,
+      "sha256": "2349fb0a66a1520bcd8fa203f91c6ef670949ec522d02a34594d4561cc628463",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-014",
+      "bytes": 4194304,
+      "sha256": "e20c7c73ddb7e304f77a00decd45dbf98ec2a552ad116f3ff12919dc051f5ffc",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-015",
+      "bytes": 4194304,
+      "sha256": "97997946358642dfbd968515d3e834a682fdc7246fffc5cd9b3321be32b7965e",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-000",
+      "bytes": 4194304,
+      "sha256": "e02d18dd6698724beefd26df88432bfdce6f0673661f4d3f738475c825c69d47",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-002",
+      "bytes": 4194304,
+      "sha256": "66bcee7568d3508f9f0c13d97163bb449ebaee7ef126bedf4c88dea7b6f7d9aa",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-001",
+      "bytes": 4194304,
+      "sha256": "38c0705d8f8a9db2ad44915748558bce946e2cc30c6b134dc3f35827a5cb252a",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-003",
+      "bytes": 4194304,
+      "sha256": "6d3b2706855cc5536eda16c4d2e3f5a581533e0c8d0495bb0f926f4fb6bb1f0b",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-004",
+      "bytes": 4194304,
+      "sha256": "e502bdbd45b128fe5e1c96fa3abf3075c42e57d22e010f4cf03825e84a3805b4",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-005",
+      "bytes": 4194304,
+      "sha256": "c355ba118a53dc1f203ece6bde99c681bea10640919042eb24ebaea2c420dcd9",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-006",
+      "bytes": 4194304,
+      "sha256": "e78e88454474ff82422ff2863847cc8777ffa0ac58170ff06bedcfedce3d3989",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-008",
+      "bytes": 4194304,
+      "sha256": "fe221a09275e876db291ba8f91305cc097f2f2ca44f7172b8ef526ddf12f5f2f",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-007",
+      "bytes": 4194304,
+      "sha256": "068eed3925a6a936b2c8fab2bbfe48d84df29e074f7870ae9cbe639433fb3e2c",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-009",
+      "bytes": 4194304,
+      "sha256": "a6a0542249173dfd9065efc64a6a621c0818881f3fa4907024eb8f0b92e6178a",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-010",
+      "bytes": 4194304,
+      "sha256": "cbd49d23fbb63182f0e875a59470a7e93a629ebd4bc9fd8822e9dc34e1fa8609",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-011",
+      "bytes": 4194304,
+      "sha256": "c1e9dfe17b4131b098b23a310e0c3d88238a696f54fd8b2fa450039b4c57ed07",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-012",
+      "bytes": 4194304,
+      "sha256": "1155aa892ec0951394a5e489cc8a0eca472e44578d6940f1fdab560744d55fe2",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-013",
+      "bytes": 4194304,
+      "sha256": "eb0a1f4e6a484e8ad4b75a96dd3cf36ac02cb118898224485e6011357901ad88",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-014",
+      "bytes": 4194304,
+      "sha256": "21a418e842abe96fb2c48d372b6a45826e0394ba21477b4ce6ff7854e5556871",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-015",
+      "bytes": 4194304,
+      "sha256": "e7b2925f862e74b770120c02463ec48a589d6f30e5bd84e077917c67a4af44d7",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-000",
+      "bytes": 4194304,
+      "sha256": "864bb23637d43fccebcba141d4eea759908880669f0512c75844b0a13f730c2a",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-001",
+      "bytes": 4194304,
+      "sha256": "336d58493a2bbfa99a1934a6616952e3fff7c947cb2444dc454fa7bc66a8009c",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-002",
+      "bytes": 4194304,
+      "sha256": "cdb5a85cf7741c1853cb30992f7c8b6c389c83924b4352b0ac371180b7f4f551",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-004",
+      "bytes": 4194304,
+      "sha256": "2f1c40cfe01adad8d83746eaa589198b6dc1742376cbabf81a50e09fc1e9903c",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-003",
+      "bytes": 4194304,
+      "sha256": "301b0d420d88d8e8b266f871d06b0e034a3a4e84a4e5eb3bf066ca3f89bd18eb",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-005",
+      "bytes": 4194304,
+      "sha256": "b5580060e1f25e147dd57c5ee03b687fc8b77789631e9579b790e1e40d4a4131",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-006",
+      "bytes": 4194304,
+      "sha256": "9683047f388ce5e7f73884bf3205180de02ce9b250260e9cf2e6603057481cad",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-007",
+      "bytes": 4194304,
+      "sha256": "32eeb1a01efc17bc19032f493fc21fd189548f9883425eb7000c7fb53abef086",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-008",
+      "bytes": 4194304,
+      "sha256": "d5c180587e52999110e9a87fd5969a30dfa4a2fec494bb8960b0e4006fb5b05c",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-009",
+      "bytes": 4194304,
+      "sha256": "99624a6c3d3fd1cee06bccac3d8c5a8860b71dbee9a13b0b3042105e69ce5577",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-010",
+      "bytes": 4194304,
+      "sha256": "3ba3e402cc51a989cca3e11b9835ffe832638465f1eac828687d1021e13b1843",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-011",
+      "bytes": 4194304,
+      "sha256": "c4af730002a8f8764d62ad5db037d59f0def29913736241d376d843126eb3c1f",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-012",
+      "bytes": 4194304,
+      "sha256": "4fa69fa1d1f8f871f5bbef674bfe8f7d058f18a7823ef1ad6b99ff97bcfb04a7",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-013",
+      "bytes": 4194304,
+      "sha256": "250843dd49de02f3aff62c553391171f096f0100d86a558275a90ca16dc9b43b",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-014",
+      "bytes": 4194304,
+      "sha256": "65ec343fa25556cf9f068e26afb0856315c48e7d1d73bca9f8422528e5e24bfa",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-015",
+      "bytes": 4194304,
+      "sha256": "a0a1c4aa029c65dadc7e55a5929c87d8d91a846b671cd78e52bac5b48e650c05",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-000",
+      "bytes": 4194304,
+      "sha256": "d6d3c2ac338b95038ba5ca0c4ebf03aadc15931936ff248632a23ecc5975e534",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-001",
+      "bytes": 4194304,
+      "sha256": "396461ddd7ee3787c2e7d6004e613be6265cfbc24ef6f1f40458ef501970c0de",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-002",
+      "bytes": 4194304,
+      "sha256": "211e64eb56fb56a0fa9135aa7c864f3fe2471e9ad646755696696fffb927ced3",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-003",
+      "bytes": 4194304,
+      "sha256": "da11ccf383ed7f1193f4fcc7fb604d90e2de3628dfd774f890217d5444418408",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-004",
+      "bytes": 4194304,
+      "sha256": "06e6b2005f810b6b7752902f1f739ca729f1b42adca782d2cc97924efba47e41",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-006",
+      "bytes": 3011682,
+      "sha256": "97a3b7a8443ea2e3dbca580cc597fc24c17b4b039b1d75d5665e0696524893b9",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "JAVA-PARTS.SHA256SUMS",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/JAVA-PARTS.SHA256SUMS",
+      "bytes": 7516,
+      "sha256": "108ec7722cd28592351016a6f15919d808d4abfa0193bbdcdcba20ff126abec9",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.sha256",
+      "bytes": 119,
+      "sha256": "2fed43a0828dbfb0ae6fe9093cc8fbff2ce9d57bd479542183aaa5f5cc6305ef",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-005",
+      "bytes": 4194304,
+      "sha256": "4454c42613c75c6e203c73f22c77e5e5078581a3d7155f36f5774fd7c31cabd9",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "java-dependencies.json",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/java-dependencies.json",
+      "bytes": 639327,
+      "sha256": "d7c89755a1f3252733074dcdac7f2877066896ce71cb5a334406da11acedc6ae",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "java-source-locks.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/java-source-locks.sha256",
+      "bytes": 2532,
+      "sha256": "0f0b50ead7efd27d9c5a93bd5bd808205b254ab69e18f532dde193428681503c",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "java-input-files.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/java-input-files.sha256",
+      "bytes": 527124,
+      "sha256": "88ac59948bcc6e63984bf2d40e5634008f0a67239f05ebb49f8a7982c4170146",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
+    {
+      "file": "java-release-784643c8.json",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-java-inputs/784643c8-linux-amd64-r1/java-release-784643c8.json",
+      "bytes": 26322,
+      "sha256": "bfadbeb21222b4c4c58c6c45f1d4bd9071782d76d2f01578e61c292e1d9d43d3",
+      "availability": "api-listed",
+      "version": "784643c8-linux-amd64-r1"
+    },
     {
       "file": "auriga-build-java-contracts-npm-inputs-linux-amd64-784643c8.tar.gz.part000",
       "path": "/api/packages/{owner}/generic/auriga-site-build-deps/784643c8-linux-amd64-java-contracts-npm-rc1/auriga-build-java-contracts-npm-inputs-linux-amd64-784643c8.tar.gz.part000",
@@ -3873,6 +4376,1950 @@
       "sha256": "85b81522bc65a777c500301d92fa2b73b47aa73df3595b7bce90e4e4f84a7c09",
       "availability": "api-listed",
       "version": "20261115-amd64-rc2"
+    },
+    {
+      "file": "auriga-offline-tools-linux-amd64.tar.gz",
+      "path": "/api/packages/{owner}/generic/auriga-site-offline-tools/20261115-amd64-rc1/auriga-offline-tools-linux-amd64.tar.gz",
+      "bytes": 23271177,
+      "sha256": "0d7d6d6dd766f9e7f118add08cdc35df76c6664d9da4d3bcef64ee986b4ee10e",
+      "availability": "api-listed",
+      "version": "20261115-amd64-rc1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "b8b18066a6069bfe5d873f653e31ec05352cd4c8f45be7d530f307a209065189",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "3816d0c62350ea8b56d60b9cf7d94529570606fa27ee7485f6bb256307c9fcb0",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "2327d0008d0fd2e74560f14c034b3f804bc509916fd0f58e4e1a897cbf9a6610",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "0af1c0fe2ca4471e1f21d0a65753a7a9d31a282be4a59f1f284c33876ff72a01",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "0cc6cf9b09e84506f35a71b7db8fc6f3a68e8c55c8a8eb856cfed07a253330a3",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "527887638cc75186258f36401ad09fdd09934a2dc39e6e9e439aae3ffb5d994b",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "77e4fe068a9f9af7eca055ab428226eff2f300c371970aa9c85d23b87d1d3c78",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "6d05e6eb523e6d52b9870ff6d5aedc46bde7a68d78690e07ef1ea7a52ec736df",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "67823dda283c051858a38ec7d4fd3d993020e16ef824f31ef91679d2eb706cf7",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "c8344c4d800cfa89ecd8641c51ac1ecf9f8b5879201ba80eff653e3b6aadcf00",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "c315b916e1fd6de9712ba8aa2b01f7c8be2eb03bf0ac2ec6723f11577d2c0da4",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "dc689fdbc2c96dd648d24fc2e862dfa6c22477dc427eab13e07abdfae51aacdf",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "2ca10618f1e73b8d016cb496873f4e7a123a09f44f0fe7b565ef447ff201d561",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "25c39b874b357f54af7d3fffbae0947831e7e67001ec437fc9527f53bcaea4ac",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "05a53d90693034a4115f4f38bd7ead204999bb12e7931954e1d04bc0f7b594af",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part015",
+      "bytes": 4194304,
+      "sha256": "7fd7478e3336ef763ba69c914486dee8c4ab654f19e15c026debc2cb5c9a2c79",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part016",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part016",
+      "bytes": 4194304,
+      "sha256": "4da15746309d46541537ebc9a2e16f9febe479973234edb0ffe7548abf80c6a8",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part017",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part017",
+      "bytes": 4194304,
+      "sha256": "d5127beb04be2320597fa8eea0e76d05862d75bc4575774defbbd811c2681e69",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part018",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part018",
+      "bytes": 4194304,
+      "sha256": "5628584936ccc045bd2c8f954e80402792ad031b36ab71abda6f4127a0a6324e",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part019",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part019",
+      "bytes": 4194304,
+      "sha256": "c9fd63eb4e717b7d846e73ed558319fd7264ded61cd1273a68cd722956637430",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part020",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part020",
+      "bytes": 4194304,
+      "sha256": "8bcde168ddd85fd5a295c6c85d7699bf7b796487aa96e8278e64a21ccfe5c6a9",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part021",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part021",
+      "bytes": 4194304,
+      "sha256": "28b1318326164b41b9c9653535d7969b8b947f9573f5c3e5827cc860d4baf92e",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part022",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part022",
+      "bytes": 4194304,
+      "sha256": "bcb4ccbf270bf5e45fb35de80898ca05a6828a7f40a33d295deffbf8bfe1f426",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part023",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part023",
+      "bytes": 4194304,
+      "sha256": "3a3385f9e580c4f145aa912c307e219679912b3b161b9bf46e0cbc3d6b7f6435",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part024",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part024",
+      "bytes": 4194304,
+      "sha256": "7d5d4a0adf6a6e276582da6f2b9ab05bc6053e9bfbd638b30861022d31a221fe",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part025",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part025",
+      "bytes": 4194304,
+      "sha256": "65835e6f9038ce0b14b1a7b4ec1f7e96d7e75b6ce5f546150a99954cabfc2fd8",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part026",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part026",
+      "bytes": 4194304,
+      "sha256": "dd6361676213100c0cbb811df898176e428808e77636e935bfc1e6e219af11c9",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part027",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part027",
+      "bytes": 4194304,
+      "sha256": "a34992db2a3428b19941de978c7f40db6bddfd149e8085c3eea689a2d8229eb6",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part028",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part028",
+      "bytes": 4194304,
+      "sha256": "cdca717fa9dd1e0849756afc11435ab8d0e005fb8b5929c9be14b6f0a0761442",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part029",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part029",
+      "bytes": 4194304,
+      "sha256": "b6a5dab84780aa6862a7a54bde01787e4e0e9fabaf2eb5dfab433e967008fbb3",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part030",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part030",
+      "bytes": 4194304,
+      "sha256": "0cd660f8683e4d73da176167f0ebb76bf5bdd417c5db50371104a5b44a1ec763",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part031",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part031",
+      "bytes": 4194304,
+      "sha256": "33482b043d90077d02b0ca62f92b88fa61b62b69c5a5f6fac5124d5671d6432d",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part032",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part032",
+      "bytes": 4194304,
+      "sha256": "12441a84ff2e1058498157eee961e9029ae6f809b2df119bb7aa1dcbd2287db7",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part033",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part033",
+      "bytes": 4194304,
+      "sha256": "59780ad62d552ddb8898c48a2b29e5db2e39acb46ddde435dfba5cd126bf2100",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part034",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part034",
+      "bytes": 4194304,
+      "sha256": "ef1e9d4ebc51fb10c0d01a315c91c35679be9cea9b40ba1a54cc7c4f3461d28f",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part035",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part035",
+      "bytes": 4194304,
+      "sha256": "032dda03b03f0daf0a05753cee4557a7420187bff41f9a4d67e8b7d6e6abccab",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part036",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part036",
+      "bytes": 4194304,
+      "sha256": "5952feed994f8a629b30ba5610e9c126726ad7f692c4726167b2d74b04f7cd7e",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part037",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part037",
+      "bytes": 4194304,
+      "sha256": "5912c2393309acef68fb969ed0dc670d94ba0245143bb1aaeeb1a9b7bc1f1e7e",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part038",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part038",
+      "bytes": 4194304,
+      "sha256": "84ea9dc009eb1e043854ad886dc0909657b30b3786efd70973e54fb5f271e399",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part039",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part039",
+      "bytes": 4194304,
+      "sha256": "23104101009f61736ffdb45edd04740aa9d49c253ddc8dac7d1092585efbd24c",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part040",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part040",
+      "bytes": 4194304,
+      "sha256": "5187775fc90811f5d5f06f39c4feafa8881be9b95b7be282bb67480586e721ae",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part041",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part041",
+      "bytes": 4194304,
+      "sha256": "0077cfcba5c25907eee3b5c8b06dab8acca02c5497239e5a641832418d4781a7",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part042",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part042",
+      "bytes": 4194304,
+      "sha256": "8ac2bc27e374c0263bdf2e5cf582af89f46f5e5d66b4bd0579a9d8ad5276b6bc",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part043",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part043",
+      "bytes": 4194304,
+      "sha256": "b808fd39718473fcf5f1ed8df8e38e57d9bcbf72ae2edb7d96ec1ca488653415",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part044",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part044",
+      "bytes": 4194304,
+      "sha256": "ee0008840d6207dc7b7a0f24e5300118f87bc4e09e79f73d1536de7db6819134",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part045",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part045",
+      "bytes": 4194304,
+      "sha256": "507558343ce7319ffc0edec158b4cdad6d175d0df3d26ca0f182385dc092e0bc",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part046",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part046",
+      "bytes": 4194304,
+      "sha256": "e900a58f52e0ca42f0f8cd5b0618d2ae11bad28b4c62a40dde8bba8aee93a196",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part047",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part047",
+      "bytes": 4194304,
+      "sha256": "1abe96ea3e72839e48b443c238338d2374362b8cfd29cc469fdfc1b41922a4d0",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part048",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part048",
+      "bytes": 4194304,
+      "sha256": "11effab6c20efc511063825b484536b15265450f981a27fa2e6fba51ce4c9963",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part049",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part049",
+      "bytes": 4194304,
+      "sha256": "73dcc700956bef52d7d5e31dd0f00673f7cc7383f82ea1675dc897671f878ba0",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part050",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part050",
+      "bytes": 4194304,
+      "sha256": "29d5320c03f05720d4a02e4158da7a366288c7a199a81c91e277e336480d4a36",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part051",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part051",
+      "bytes": 4194304,
+      "sha256": "372c1f9a5a519e51b992b374437fa9454ef59217f34ae702db68c7d9b099c559",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part052",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part052",
+      "bytes": 4194304,
+      "sha256": "3007b261e22a4425b037b048256731a1266f39dec1ff5f7d35037221d6142eae",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part053",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part053",
+      "bytes": 4194304,
+      "sha256": "5cf14eb70447d09b03632dbc2875cd2398e4044b667abe52f176f6ff1378b33a",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part054",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part054",
+      "bytes": 3801640,
+      "sha256": "0db3ec03dc6b6b88ff23472d8710235d17dce9e2e453bef270ce514c375449d6",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "java-extra-84dca4a6.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-java/84dca4a6-linux-amd64-r1/java-extra-84dca4a6.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "59301998c553bc181a403167954cc719221b97a9509cddd951e67b06a276b0d9",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "java-extra-84dca4a6.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-java/84dca4a6-linux-amd64-r1/java-extra-84dca4a6.tar.gz.part001",
+      "bytes": 1056292,
+      "sha256": "fa27dbf4f6d22a134de5eb587bea327b5d9f5ffec9a43620804573ae4c9121d5",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "89293682445aa39b503832ad342bd2105930e5b7da43e5c3259b2f715daf4f62",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "96d9be035cfd2100d4cddc99dbe8d2d00f40eefa90fa4308c02105945229da70",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "8b6886326eb35ef42676bb2d2670fd2a4efe945fbf67df91c3f813c79f7929d7",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "8fed46b8ac3569cbdc63ab172f4f7a96e52889b1ae1ff196d3269c3062e118c8",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "ee16a4d8ec211154bb07d266f0fe3eaf78d6075cc4398bed0decf4b766565974",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "f3b15e0e552ba389a8bfc842bafb9234281ec5690b242f07c41fc258672f80fb",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "2d2eaa4512b1f25a7ee83b5aae1dd0b6ab6583bb345ea110e259004b9e8087bf",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "442c90e728e4a42fe0f79c8283781bcba3ba1a1d656b5ec73c49b5510b44ed86",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "70cf0c4072044ccffe72af139c52a0f1f03518b2c1982bc335cfff4b0b038be4",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "584c72308f4c3890440eba320638635a4074b83da46c8d4e764aba48502f5b43",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "195458b30cefcdcb92d3da43b337fdcec489e97eb9a0a4903dea7592ee5515c6",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "3b4023b43ff87be2077670771b741992aec8b9a5b4e479414917e8bbeeac64e3",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "00ffe923c1e503b9eab6b9bd4d30e32647caf704e49c7ccaf0af9e0fe9b8548d",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "33296fc2b2f5c4c8c4b3362b3296ff2a6dbec812290d9bfdd86e50322328f456",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "633ef57cb4d0cc1bfe746d12e13ccce95eba273b1fb1daa82be06ca58d933d39",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part015",
+      "bytes": 4194304,
+      "sha256": "8caacfde14993f482f0846c9b484aa585880355b534f3dde4e7231b77bff3716",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part016",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part016",
+      "bytes": 4194304,
+      "sha256": "614ce855e66b446df9f7694e9a0eeac050b4321e8ee04961be802073e42896d0",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part017",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part017",
+      "bytes": 4194304,
+      "sha256": "478056c580f270f61d12945a6d81ea6858dcdce37b239d0b7ea4d61ff8a43c6c",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part018",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part018",
+      "bytes": 4194304,
+      "sha256": "45aff2a60256f3e67fd3dc18b71be6b46490097c4ad825d4e4e8be9a1480fc8d",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part019",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part019",
+      "bytes": 4194304,
+      "sha256": "bf4331f5e5f4ec187419d0ca811d8218c4f9517f6ec0c91bc1bd324afbb0436f",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part020",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part020",
+      "bytes": 4194304,
+      "sha256": "d6dd6d418e20ee594c4e68bf8e889315da8a16e150edae57176d74af0f5f89a5",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part021",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part021",
+      "bytes": 4194304,
+      "sha256": "606418d1a6182946f945eed120150df2024cb63b1247419b7cab2323a25956ce",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part022",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part022",
+      "bytes": 4194304,
+      "sha256": "bc26cb89d4ce6a2dfb6cb787fc0293400cc906369aa3beda893039a4f5483a52",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part023",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part023",
+      "bytes": 4194304,
+      "sha256": "f5a08f147b1a42deea62e810652ce60ea73c4782415af03f47940341e60164de",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part024",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part024",
+      "bytes": 4194304,
+      "sha256": "41748b51a06f011a6890f98642dacd3743572b54d2a3cf2aaf45a17030747cbd",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part025",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part025",
+      "bytes": 4194304,
+      "sha256": "ed2ff2f30c4f44ff17b56e6ae5dd2b2d556481513b8865b7fb1175d6c41c9523",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part026",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part026",
+      "bytes": 4194304,
+      "sha256": "f89d84323d2f4b14b547164878f42445bde099f7b5b5d43fec1d36008a2958df",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part027",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part027",
+      "bytes": 4194304,
+      "sha256": "6f2b02ae1f2ea6e162ba8d627b5053c1cc65582c88e2e0282baa27f82a1e3483",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part028",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part028",
+      "bytes": 4194304,
+      "sha256": "00daae5eb0450d11617a9f2227670d3500c829f03687a38eef08ff31554ed990",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part029",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part029",
+      "bytes": 4194304,
+      "sha256": "322c8298641ae168d2e1b51b643916e2fc970505c1beba77249cb7a88ef06909",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part030",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part030",
+      "bytes": 4194304,
+      "sha256": "fc5976f47b96f414d0934f4b6a1e15a32618e3a4cbbf856365c6bb9f56899a0d",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part031",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part031",
+      "bytes": 4194304,
+      "sha256": "bdaf6d0e742ad3d3fd88e88f5235e2f9faf9906cb47654df0d6d67a18619ca7d",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part032",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part032",
+      "bytes": 4194304,
+      "sha256": "99223a5fe97a76d0ef53421baf0f795fa487e78469dba834da13863b9261083b",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part033",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part033",
+      "bytes": 4194304,
+      "sha256": "16ce488a00cb1abefe31fe9e8a6730a530c5dd05aaaaff00c659f43269a8548a",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part034",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part034",
+      "bytes": 4194304,
+      "sha256": "36496e99f47275e9a685ac9a08972eb9f98a660a40e12e010313650aeb4ba092",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part035",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part035",
+      "bytes": 4194304,
+      "sha256": "4cf28f24f3c91dd257394dd1f8880dba8691ad896103bd9b2ad9a622ed53ec3b",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part036",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part036",
+      "bytes": 4194304,
+      "sha256": "b5efbacb480cc2c22343042fda7d8706d785350b7aabd4e90c6a6819a3850bd3",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part037",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part037",
+      "bytes": 3160765,
+      "sha256": "d4d3fbe67fb0b4d10f986212c69565d0f7203f95100e22d16110e8d5d81bd17f",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "71a350cac2ca9b5181353d9a09763b5a08a60bba5724fb66e71d80b544f39033",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "5e99eba48dcf9a943a448a52fdda5bfc6e23e52d232f46600b6998448183ac37",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "30f95dc30ee4c5f042e4ccbea4319fe95d434f4712e49298c022fc0776837499",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "d8fe5ea8a4562a254a292a97bcd66fd2d1cfb9f5eaf8b724306d7426ed3eafcb",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "f6405aba3dcba87c4f36f4bd01612e2f54f610843eb2cbfa74bec98a468b2588",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "b3cb151362f83a12f6af403bb75d64fa6d186309c58f390b0eeaa97821e0fb6f",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "61529962bb5e0114abd78bd3d37e0f8a6e0d319b744546923703c024d89682d9",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "76885e37a23a3d2e06824e55869b58a84eea7ab2d02b90c3e8b562dfff056f02",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "8fe5f8ec51adecdec8b6efab6a3429c7c15c15f149175b23e5ecee8ec743b0d0",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "afb62d2e42434087c1c899dc65e061b7b681d8f1ccaa87ce9d3dc14df6c8c791",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "315e34b14c3615684fc1ecca2c1cb69fe33d4a1d08623a8ff0c00c6b4d9954dd",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "64e84832ce407e4f4aaa79d4c73bc8e32383e732a3618bb544c02232ea1128ef",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "df476f4d8edd85a0ff555da449bb821471fe3eb8ebd2bb91dafa54c2f9bac5cc",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "95ce6355ae19c4bd9775b63070ee36a902a5254db9791038027732ab5f416819",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "368e155b94714468c18698323922de120786701ce58c25bac938fcd931be1258",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part015",
+      "bytes": 4194304,
+      "sha256": "d355884deb9b6a3eb896e5bf63b70f8f97705ce2838493fb871fdeefab66b349",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part016",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part016",
+      "bytes": 4194304,
+      "sha256": "c32ac862b1681c65b11f1dfc6db0ac36756b4b14e5cbdd545e31cdf3ebc92d1b",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part017",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part017",
+      "bytes": 4194304,
+      "sha256": "70e9dc8c378c51ba7b05cdfd2047bb1f22f1c52b1c215056745774d68c4e602c",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part018",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part018",
+      "bytes": 4194304,
+      "sha256": "0c4886ced0dba102954513b3b75875bc29d3cac45dd47982a29af213aba3d391",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part019",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part019",
+      "bytes": 4194304,
+      "sha256": "60ae885cd40ca7658f720239e20c40834871a6cfa30de585d06657871857e4ef",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part020",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part020",
+      "bytes": 4194304,
+      "sha256": "865cfe506407ccbf07a200be80f47907acdcc875ce434a2b0aca27fb2d03af70",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part021",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part021",
+      "bytes": 4194304,
+      "sha256": "30339c95b10edcd3eb8d82e33104ee36e7c9cf4522814eaecc281fedc5e3cb25",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part022",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part022",
+      "bytes": 4194304,
+      "sha256": "77ac0b5bdd7905c451941e7939553f2b7e8905a48f5719a61561c641551436d7",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part023",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part023",
+      "bytes": 4194304,
+      "sha256": "f74c1f75b0380944d3c8564d2657000c65d645479175ccb101ff04a440f214bb",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part024",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part024",
+      "bytes": 4194304,
+      "sha256": "0180ae25cb41f876d3bffa8a0d9a030e8b839ce62719d3f734b372898aef0f09",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part025",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part025",
+      "bytes": 4194304,
+      "sha256": "7b6804f9788eefafbdbf2702faf34b73eaba57c8ffc53afd54aab06d92d5f809",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part026",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part026",
+      "bytes": 4194304,
+      "sha256": "218c5a30060e116c69c2dbfa6b9f8860685aa3736402f4f0d2f1fdddf21db2b9",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part027",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part027",
+      "bytes": 4194304,
+      "sha256": "fab79240406af05e69bfa7c8cd66fe39f40595e8d37f5e11e935aab36641f339",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part028",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part028",
+      "bytes": 4194304,
+      "sha256": "1e8bcd02f28ee415814e2eb534352113e9f7c50b0ab8edeac82dd07509348817",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part029",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part029",
+      "bytes": 4194304,
+      "sha256": "2bb24b1b61d794ac205bf33ce1fadb671aadee2ab9d097b2d512d868483e39ec",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part030",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part030",
+      "bytes": 4194304,
+      "sha256": "ffbeefac16e5ffbbe867cc56b95f7afdca7edb6693b41b0b1fe43b3919bd820e",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part031",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part031",
+      "bytes": 4194304,
+      "sha256": "5a852cec5aed17974a130c2f8d39a68a849ed296ad58334d04dcd2df14111828",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part032",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part032",
+      "bytes": 4194304,
+      "sha256": "d6dc55fa21db8e884329482d4c84ad811d1f95376f2e6dd2e5c2536967cd2c36",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part033",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part033",
+      "bytes": 4194304,
+      "sha256": "2db0ff95b468a63d994c1190984ac9067daf7325f29af13aa4c1dbaa8ec73430",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part034",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part034",
+      "bytes": 4194304,
+      "sha256": "e89165d7d8e23c0f22deb8419aec4b661462bcfebb24123d27a0a513882d4300",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part035",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part035",
+      "bytes": 4194304,
+      "sha256": "8442ed0e10f0f45a9b444bf93406c870a007230eff4793e52f49418523f3b57b",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part036",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part036",
+      "bytes": 4194304,
+      "sha256": "3a4b3c87bc4656931a90ffb6a7fdd4c2e96155258d891b61877c6341ace17a56",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part037",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part037",
+      "bytes": 4194304,
+      "sha256": "a5b3953cc256df468aba6e8bf545d3be80ee9a94674800aba5813bf56cbc2de9",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part038",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part038",
+      "bytes": 4194304,
+      "sha256": "4f0e593a1a27c43cbc965faddbfb1f346ae62223d3f140efda61dd611d07545e",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part039",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part039",
+      "bytes": 4194304,
+      "sha256": "4d4224368aa35d6785a2f13cc63c4669e408941abb4107550228f879d631942a",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part040",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part040",
+      "bytes": 4194304,
+      "sha256": "ffe9727aa2b8c9dcb34f3399f6cfcaeffede621e1af5a41f5356cc9552e3fef2",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part041",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part041",
+      "bytes": 4194304,
+      "sha256": "7cee81a792eb066f67757c34c5b522ca1b82f8525ac74d453e1052c57efcae89",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part042",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part042",
+      "bytes": 4194304,
+      "sha256": "441156e86e143e3f4ed6f8bad7f331a1e175d158a76c335c1e5b5ee7870d0c0d",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part043",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part043",
+      "bytes": 4194304,
+      "sha256": "549070faafdd94b18d26c7a323557dd2574f9d4a7910282f0795b82cc36b3d71",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part044",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part044",
+      "bytes": 4194304,
+      "sha256": "d5939cc756fd7585f27dcf68bbf26ca1fe476bf26ee6323b8e47ea4bf302a294",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part045",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part045",
+      "bytes": 4194304,
+      "sha256": "cbea942067b2f56f5cd89c2b871c12495d47791b1ec7ee08652bef18e850e8ea",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part046",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part046",
+      "bytes": 4194304,
+      "sha256": "9a63c4f1d8862a9f0ad9c0a168edb9b3fdf6384ae0f2e07eafab06fbb96d4e6c",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part047",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part047",
+      "bytes": 4194304,
+      "sha256": "69fa0fff2734c2ea0fe69b56b9f9cf672ff616c3163e2a2afa9ffc5f6400eb50",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part048",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part048",
+      "bytes": 4194304,
+      "sha256": "e2e2b3540d0d19e14e3b78864f122caa0d80eeea3519d59212a95200c214ccdf",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part049",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part049",
+      "bytes": 4194304,
+      "sha256": "680890b1d44bb60f9ccd02b7a024ba132b348ff7db6b3d18c24de22c28722a1d",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part050",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part050",
+      "bytes": 4194304,
+      "sha256": "90b037054d27cb962dff5eb620aec0f32af6d2983dc687972c6fc0c7098d73dd",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part051",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part051",
+      "bytes": 4194304,
+      "sha256": "7e07e57aa96dd8d0689d7d91cc44bd8b54a9847fb3d10549dbddb51e26287202",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part052",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part052",
+      "bytes": 4194304,
+      "sha256": "e0227696688ef7c274f37094e87f1919c3724221179c4f0221ff4ad68c81704b",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part053",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part053",
+      "bytes": 4194304,
+      "sha256": "7498568c7299569bf7a59ec2db5c8a5a151d76966537690ea33c4581694de419",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part054",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part054",
+      "bytes": 853671,
+      "sha256": "fbc49e353ea5159444d924a31362baf448bd03a431d688568b6cfac1166a0796",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "e5301e9a05bce51f7e20682470b9cce3209d37a5dfe178045277ad2f5b318124",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "2137ced1769e50ccccc88ea06456465fc1778cb3fdd3173877df4ac05e5ba317",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "4dc8a476501e1072e893aba610333874bbc61df49ec779258452a97dcfc17e09",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "ac82f459db5c34cee9baa391261d338b36bc6da94853d4550adcb23a1614c85c",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "739c5214678096e5db3bfb4ee435657e8880877827ac08aaa03055b72ca07c06",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "474bdc7f6c860b71925923c386ad138ee57087e4d3ebe682c453603728afb44b",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "33ae37dd08664285eb8d171bb68febd76090d51078afe1ac6164f67d49e2305f",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "fd50a3e0fb5f857f528221391381545e161d191962f5f6f485d1755e61e237b1",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "36d209053edc82190ee488b602c78edb56aa966e6e71a1c41e550a3f383ae4db",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "cc1a1822c2cb2a5c035cc2572adbe6811f52ab16e6123e9404d64f65c8fdc15f",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "55dac0126c839f427b080190ea4674c6b5be2a75fda6abbe48f5aaf890f72dd0",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "c3fd9ef43efeb03784f52df238d97089255f55eecd18b7fb55769837cb71b4a0",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "4e70cc996be420aa075a06a80f1ea539c7b0c5fdbd9e8aeb741a3df0a1e317b1",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "23f82581562371bfc8dcc28c40c86da31487bdef6a90431f8b800f14cb683b4e",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "f8725f20cd9797beaa76f9e0986928de803b73c5e600a706948ee166618b12c6",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part015",
+      "bytes": 3842813,
+      "sha256": "9d37710b6e69d6e3851c0af88aa703bcd8448ab5cb445496c6715427fc3920e8",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "buf-Linux-x86_64.part000",
+      "bytes": 4194304,
+      "sha256": "562a6fed6f186a5f27075cd54bf42a2cdad327ce5c8fa3820eb37b0452a2f461",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part001",
+      "bytes": 4194304,
+      "sha256": "55e1975f628f569b956aa99c1d174110a742132db14aa89d8a404beb5386a4ee",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part001",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part002",
+      "bytes": 4194304,
+      "sha256": "7b0e31d564f164cec1bd4a46dd1d837d28e344c0885e77f7cf6c4f341f5ac083",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part002",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part003",
+      "bytes": 4194304,
+      "sha256": "d3f4a418e001caea4d87231af1ead89bf62e93631189f2b4dce98576fce2d6a4",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part003",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part005",
+      "bytes": 4194304,
+      "sha256": "3fd8fe8ae4fa0c59939f1e408395678ce80b04073d584c81f2fbb298075fa53a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part005",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar.part003",
+      "bytes": 2291043,
+      "sha256": "0720d156c9a60bf4c648a84ee874e2c1320bdfffbfe961ee7e3b2fba614037bd",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-linux-amd64-17.5.0.jar.part003",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-checkout-11d5960a326750d5838078e36cf38b85af677262.tar.gz.part000",
+      "bytes": 434773,
+      "sha256": "0f48a50cf2edeea3d6e270f8dae645529128ca8b2954993891a2fb8f7b16145a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-checkout-11d5960a326750d5838078e36cf38b85af677262.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "extra-release.json",
+      "sha256": "1b527653ffa970848ad23be90d4f030c08a86016cee57afc017494debba17ad1",
+      "bytes": 18940,
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/extra-release.json",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "extra-java-release.json",
+      "sha256": "f29d632c98f88b1b46f3861a29e11cb328050c04cc6a204124a241d5aedfdf7a",
+      "bytes": 972,
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-java/84dca4a6-linux-amd64-r1/extra-java-release.json",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "extra-images-release.json",
+      "sha256": "c177c6a6a2a349687c9048a11887c9cdf5e8400fa59083e7ce23c5934b5301ea",
+      "bytes": 39339,
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/extra-images-release.json",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "overlay-release.json",
+      "sha256": "24ae7a8946f9e160c8b812cedde18ff27653e5b1467d36404800c480084ba416",
+      "bytes": 1094,
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/84dca4a6-linux-amd64-r1/overlay-release.json",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "fcf5373013d5ba3bd960c6680f76cff1af5068370caf17945a5a7fc704339ed2",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "2185ccb37b08d11c7a6106627ecf80a96a10a3d55d8134dc18786ef0b513aa51",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "b57d8650584627067c9a49d4c288d9f2b7c37542d13e20acfffbe4bc4602313b",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "f532844040120bbe48c28768d1b9cf94dcfbcb23079621d14dedcb341c2e2897",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "57a0cd4949278a2a60089037c1401b5ad07532e86287d8f927e980f2409518c7",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "1b3b235a21e027b83b034df95d2e53f7668ca373642d1d5e541da5e7991857de",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "e70338a94005d66b2a822d241ba8d8b947fa9de37c7197a18e121db44730d1cd",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "a51af3dcd1cd9fb2ba70657a0631aeacd34fe0a4173e7c85a0104dab0e8ea54a",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "75c89975f728bac7fea8d5c4f7ea7b2c630167a373b701a8405912f3919020f4",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "6d259634e8af0bcc4856de8a8a7198874db88ae7cea03f39f30c5c3b0cb82fd3",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part010",
+      "bytes": 1338859,
+      "sha256": "dbbb47fffd8745c4acf64a9a3ac28f56c661c66a66b74af535ef6a404837262e",
+      "availability": "uploaded-readback",
+      "version": "84dca4a6-linux-amd64-r1"
+    },
+    {
+      "file": "buf-Linux-x86_64.part004",
+      "bytes": 4194304,
+      "sha256": "18a0e4da99aae47b1fde19b148e7cc618529a29eaafeca1a1c92b21327df4c9a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part004",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part011",
+      "bytes": 1945762,
+      "sha256": "28240904aaf3ea28c73a4bd236e2476489a9b964f07a047702acf3b464ae4c0e",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part011",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-sha256.txt.part000",
+      "bytes": 5312,
+      "sha256": "ca4df0bbe2327eaaca4eda4035b49164b2a7fd47f42345bfa4a126b4c28f1efb",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-sha256.txt.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "gitleaks_8.30.1_linux_x64.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "8d646f2b463a7fd54cdbd91689c736613a5ac3309fe33101b0caee337669a4bd",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/gitleaks_8.30.1_linux_x64.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "gitleaks_8.30.1_checksums.txt.part000",
+      "bytes": 999,
+      "sha256": "061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/gitleaks_8.30.1_checksums.txt.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar.part000",
+      "bytes": 4194304,
+      "sha256": "c2f67a4e1a45608272ccfafbe6344be06a3d9551d25ebeb1e0054fa418d043d8",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-linux-amd64-17.5.0.jar.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar.part001",
+      "bytes": 4194304,
+      "sha256": "3db2cbf60b8639572d62c448087b933c8b020f24ac587a87f170b3fd91895b6a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-linux-amd64-17.5.0.jar.part001",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part005",
+      "bytes": 2214146,
+      "sha256": "0ecf73fa5839a63a9114ad96f4e19ff837cea01026076d98cc1ea29903f72aa3",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part005",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-cache-0400d5f644dc74513175e3cd8d07132dd4860809.tar.gz.part000",
+      "bytes": 2134721,
+      "sha256": "f8b60e48c9625ef99a6693976d07ff05bfa54f58367da903bc5efb52f4d8978b",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-cache-0400d5f644dc74513175e3cd8d07132dd4860809.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "pnpm-action-setup-b906affcce14559ad1aafd4ab0e942779e9f58b1.tar.gz.part000",
+      "bytes": 2284682,
+      "sha256": "3b1f54546ef1858bfc2dd693f8201408ae3510f699bb7a8c822c0a93ba8e06f0",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/pnpm-action-setup-b906affcce14559ad1aafd4ab0e942779e9f58b1.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-setup-node-49933ea5288caeca8642d1e84afbd3f7d6820020.tar.gz.part000",
+      "bytes": 1902516,
+      "sha256": "8897425776cbef7ddfca2275e536ecc0c26b313161de2235c5aa9fda8ce961fc",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-node-49933ea5288caeca8642d1e84afbd3f7d6820020.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz.part000",
+      "bytes": 2222593,
+      "sha256": "b7e8bdaab718e6bd4b78925b8880a96bfc0272338005017453e24ab3f83149d0",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "652a9aef078698fedeab514ced4d605b0b6911018b9601d2ba2ec77f3cdd7880",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part002",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-setup-node-949feb2413d6458794dcd2491c4babbbce0c15c1.tar.gz.part000",
+      "bytes": 1775200,
+      "sha256": "738f1f022b9004d05770ca7d294748ef37f40f977472ce978c1f3f74aaa45e34",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-node-949feb2413d6458794dcd2491c4babbbce0c15c1.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz.part001",
+      "bytes": 924266,
+      "sha256": "26ed07ed68e7b445fe3e0bbe31206123ff2f3382a25b5b492a3d6f23eadd3ebe",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz.part001",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-setup-go-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e.tar.gz.part000",
+      "bytes": 1622901,
+      "sha256": "c0f9ce2412e45f9ed1115f9950a01403b58b7f2b830cbcf52b186bb7a2d5b120",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-go-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "golangci-golangci-lint-action-ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a.tar.gz.part000",
+      "bytes": 1816199,
+      "sha256": "f7cd537719f033db8543d360e1255bcc0f29a883f36c678336ae879492620a16",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/golangci-golangci-lint-action-ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz.part000",
+      "bytes": 1198533,
+      "sha256": "ede236531fa097435a9ecd9c2f75ad1eb43cbfced4d9c8d472e617751f40c452",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "pnpm-action-setup-73e46992e05b19abd31f2f3c20e0e7370d762115.tar.gz.part000",
+      "bytes": 401920,
+      "sha256": "b200b6e446f4829b93eba705797464bdc3ceb8b69a946c7ed5d697241af1b43b",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/pnpm-action-setup-73e46992e05b19abd31f2f3c20e0e7370d762115.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "java-files-84dca4a6.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/84dca4a6-linux-amd64-r1/java-files-84dca4a6.sha256",
+      "bytes": 527124,
+      "sha256": "480d744a3721048c614257f44bb7f2f0d0e8e628cfdb75553d186fdfe9f35d68",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "java-overlay-84dca4a6.json",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/84dca4a6-linux-amd64-r1/java-overlay-84dca4a6.json",
+      "bytes": 1026,
+      "sha256": "b6716595944f66ae5096c5d755c87eeb712be157b191a306df1a9a6aa2beaaae",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "java-source-locks-84dca4a6.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/84dca4a6-linux-amd64-r1/java-source-locks-84dca4a6.sha256",
+      "bytes": 2532,
+      "sha256": "37e311b7b3bc7935230bc4cb9c6933c3247a995ae100b581c074a1264c2c31ae",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "ci-tools-release.json",
+      "sha256": "65b6ac3f1af7bf21c7b7560ef45e25bbb417faba14c4341e34c31729a643aca3",
+      "bytes": 5832,
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/ci-tools-release.json",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "ci-postgres-release.json",
+      "sha256": "54a0b6513966fddcd357a2ebe32e66ed2396015732a279d682ace53c2d308b0a",
+      "bytes": 4568,
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/ci-postgres-release.json",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "ci-actions-release.json",
+      "sha256": "32cc06787e7bfb0057d81e37144e161e26a062836e9045c7800f9715b6735070",
+      "bytes": 20245,
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/ci-actions-release.json",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part010",
+      "bytes": 4194304,
+      "sha256": "94ee6825ad428a1bb4942551131b775031f2d74828ac4f772eaaf6b0b44a1106",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part010",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar.part002",
+      "bytes": 4194304,
+      "sha256": "9a13d742e2df5e0849a71ebfe0f5f9931df3d46716b8d3216a1c608df0b84153",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-linux-amd64-17.5.0.jar.part002",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part000",
+      "bytes": 4194304,
+      "sha256": "3f8483f647830e97d6e96daeb004cb3a30531df54b6bb128295b935548f2c36f",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part001",
+      "bytes": 4194304,
+      "sha256": "1f46eb3d54246c15f60c9568d5c2a4ca47d3f0f74955985756d2dfd748bb9bed",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part001",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part002",
+      "bytes": 4194304,
+      "sha256": "48e9c253f779c5b3f4abcd78ef86d4b8e0759273cf307c1ec04e77d44c838a36",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part002",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part003",
+      "bytes": 4194304,
+      "sha256": "22599ff23b10f267eef5c15e69ff23b7766c871c1a9e0647648e9bb1753238ab",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part003",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part004",
+      "bytes": 4194304,
+      "sha256": "edcc4b67fa41e5a36b2682fb3beb57188fa22e981b0e8bc46c9e134b828306b5",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part004",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "e4bbb4305440129d33c9705a92900f4bc2ae25681399dd3b7b4df9135c4f65cf",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part007",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "a7d5de61f729b0e4676badf0890a853446885e10c493e90923ca026a8c88461c",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part008",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "f963303447a98ba3ef6630d09db14cc0096d0adad35d47d31a49d0a7a7215b75",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part009",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "dc436600e40828aa572c7d6bb627bb2cf52846dc156a66edbe33bb070679cdc9",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part010",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "977669109ccf39bd587de007473a48b339313998f47518f72c3f3adacf9c14fc",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part011",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "196803a23a92ad8aeced1bf27873f269727751f4608df47c2b460bf025969e2a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part012",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part013",
+      "bytes": 1575457,
+      "sha256": "6bb596f23cdd8ff65d177dad39a7dd3f4c8aa778f076d8587ff56bf3caad992f",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part013",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-checkout-3d3c42e5aac5ba805825da76410c181273ba90b1.tar.gz.part000",
+      "bytes": 476180,
+      "sha256": "b59292069298c7be5ffd9c636431a229faff70ece00e0c24fd31baeb7b309fa3",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-checkout-3d3c42e5aac5ba805825da76410c181273ba90b1.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "347b6e32fdffddf59ec8affa9e67608890757ae1bf17520c25b7c4ec89abfc54",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "actions-setup-java-b843ebf9b913146b38da2eaa7aeddf76074ae1ad.tar.gz.part000",
+      "bytes": 3777994,
+      "sha256": "90a9af11994aae3471cee220bc1375cdcd26ffc5c064a63d901a5dce152863fc",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-java-b843ebf9b913146b38da2eaa7aeddf76074ae1ad.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "pnpm-action-setup-0977fd99725f1db4007ccb2928dbb4e90d06cc86.tar.gz.part000",
+      "bytes": 388049,
+      "sha256": "6a52f32a33d5f531e49825e4db6f135e2ab64777a32daa4015232b563fb5559e",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/pnpm-action-setup-0977fd99725f1db4007ccb2928dbb4e90d06cc86.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part006",
+      "bytes": 4194304,
+      "sha256": "2a01d5dd723f6315f878b1ef62692bbc6665d2b91b31c3e805fbf2efb3f9263a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part006",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part007",
+      "bytes": 4194304,
+      "sha256": "549c17cc60ab78a096aa2dc3616e84773e963bb7b62c211c1c376c960fa8e077",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part007",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part008",
+      "bytes": 4194304,
+      "sha256": "814c7cdda340ee70aa72f9c011a033776f7f299452872bf5d05765f942d6b3a8",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part008",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "buf-Linux-x86_64.part009",
+      "bytes": 4194304,
+      "sha256": "14d20aca64c13eea6848cc79915d28d13b96bd9342e4ee4f262c7645cab0b2a2",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part009",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "gitleaks_8.30.1_linux_x64.tar.gz.part001",
+      "bytes": 4036098,
+      "sha256": "39f387f53156038a7ad26e44f548c8c8297fa9c8d1f933bbb9baf25035de8633",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/gitleaks_8.30.1_linux_x64.tar.gz.part001",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "3929237a5d49655846a7153c08ca3638e1f64dc37335fe4ab31d3747fb9e9eb7",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part000",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "5496ed252a5c615d4645860009b679df174a93f909a04c267760839789d4c301",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part001",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "7ab795925819a5cb8b3405151ce5ad52d66e99c4faeaf385a4685b7ceb7bedad",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part003",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "31f937dec94fce7d34ecc8927bde6a7aeaf4a794601fb90e789522612d2dc761",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part004",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "563d39fb2e2afc55d1b4417868dc3216d1e522208bf74313af394585dda4fa96",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part005",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "64abda61b9acd5c61573dd7a25bb0fd3f858b158675bb7500978cc7ea73060c2",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part006",
+      "version": "84dca4a6-linux-amd64-r1",
+      "availability": "uploaded-readback"
     }
   ]
 }

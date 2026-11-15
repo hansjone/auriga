@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 1,
+  "package": "auriga-site-build-ci-actions",
+  "version": "84dca4a6-linux-amd64-r1",
+  "inputs": [
+    {
+      "file": "actions-cache-0400d5f644dc74513175e3cd8d07132dd4860809.tar.gz",
+      "source": "https://codeload.github.com/actions/cache/tar.gz/0400d5f644dc74513175e3cd8d07132dd4860809",
+      "reference": "actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809",
+      "version": "0400d5f644dc74513175e3cd8d07132dd4860809",
+      "bytes": 2134721,
+      "sha256": "f8b60e48c9625ef99a6693976d07ff05bfa54f58367da903bc5efb52f4d8978b"
+    },
+    {
+      "file": "actions-checkout-11d5960a326750d5838078e36cf38b85af677262.tar.gz",
+      "source": "https://codeload.github.com/actions/checkout/tar.gz/11d5960a326750d5838078e36cf38b85af677262",
+      "reference": "actions/checkout@v4",
+      "version": "11d5960a326750d5838078e36cf38b85af677262",
+      "bytes": 434773,
+      "sha256": "0f48a50cf2edeea3d6e270f8dae645529128ca8b2954993891a2fb8f7b16145a"
+    },
+    {
+      "file": "pnpm-action-setup-b906affcce14559ad1aafd4ab0e942779e9f58b1.tar.gz",
+      "source": "https://codeload.github.com/pnpm/action-setup/tar.gz/b906affcce14559ad1aafd4ab0e942779e9f58b1",
+      "reference": "pnpm/action-setup@v4",
+      "version": "b906affcce14559ad1aafd4ab0e942779e9f58b1",
+      "bytes": 2284682,
+      "sha256": "3b1f54546ef1858bfc2dd693f8201408ae3510f699bb7a8c822c0a93ba8e06f0"
+    },
+    {
+      "file": "actions-setup-node-49933ea5288caeca8642d1e84afbd3f7d6820020.tar.gz",
+      "source": "https://codeload.github.com/actions/setup-node/tar.gz/49933ea5288caeca8642d1e84afbd3f7d6820020",
+      "reference": "actions/setup-node@v4",
+      "version": "49933ea5288caeca8642d1e84afbd3f7d6820020",
+      "bytes": 1902516,
+      "sha256": "8897425776cbef7ddfca2275e536ecc0c26b313161de2235c5aa9fda8ce961fc"
+    },
+    {
+      "file": "actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz",
+      "source": "https://codeload.github.com/actions/upload-artifact/tar.gz/ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "reference": "actions/upload-artifact@v4",
+      "version": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "bytes": 2222593,
+      "sha256": "b7e8bdaab718e6bd4b78925b8880a96bfc0272338005017453e24ab3f83149d0"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz",
+      "source": "https://codeload.github.com/contributor-assistant/github-action/tar.gz/ca4a40a7d1004f18d9960b404b97e5f30a505a08",
+      "reference": "contributor-assistant/github-action@v2.6.1",
+      "version": "ca4a40a7d1004f18d9960b404b97e5f30a505a08",
+      "bytes": 56101409,
+      "sha256": "d69ea6e3b91b95dc626394b1a0e4f8185e266742a42a10383579541e65e471eb"
+    },
+    {
+      "file": "actions-checkout-3d3c42e5aac5ba805825da76410c181273ba90b1.tar.gz",
+      "source": "https://codeload.github.com/actions/checkout/tar.gz/3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "reference": "actions/checkout@v7",
+      "version": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "bytes": 476180,
+      "sha256": "b59292069298c7be5ffd9c636431a229faff70ece00e0c24fd31baeb7b309fa3"
+    },
+    {
+      "file": "actions-setup-node-949feb2413d6458794dcd2491c4babbbce0c15c1.tar.gz",
+      "source": "https://codeload.github.com/actions/setup-node/tar.gz/949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "reference": "actions/setup-node@v7",
+      "version": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "bytes": 1775200,
+      "sha256": "738f1f022b9004d05770ca7d294748ef37f40f977472ce978c1f3f74aaa45e34"
+    },
+    {
+      "file": "actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz",
+      "source": "https://codeload.github.com/actions/setup-java/tar.gz/d1374f8ac74474200d16ef8ecee22c7ae7a51880",
+      "reference": "actions/setup-java@v6",
+      "version": "d1374f8ac74474200d16ef8ecee22c7ae7a51880",
+      "bytes": 5118570,
+      "sha256": "cd5d0975fcae1dbbb407e61a50e3f3b87827403f0504bffab82e0d7f9c0f8b2f"
+    },
+    {
+      "file": "actions-setup-go-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e.tar.gz",
+      "source": "https://codeload.github.com/actions/setup-go/tar.gz/b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "reference": "actions/setup-go@v7",
+      "version": "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "bytes": 1622901,
+      "sha256": "c0f9ce2412e45f9ed1115f9950a01403b58b7f2b830cbcf52b186bb7a2d5b120"
+    },
+    {
+      "file": "golangci-golangci-lint-action-ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a.tar.gz",
+      "source": "https://codeload.github.com/golangci/golangci-lint-action/tar.gz/ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a",
+      "reference": "golangci/golangci-lint-action@v9",
+      "version": "ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a",
+      "bytes": 1816199,
+      "sha256": "f7cd537719f033db8543d360e1255bcc0f29a883f36c678336ae879492620a16"
+    },
+    {
+      "file": "actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz",
+      "source": "https://codeload.github.com/actions/download-artifact/tar.gz/d3f86a106a0bac45b974a628896c90dbdf5c8093",
+      "reference": "actions/download-artifact@v4",
+      "version": "d3f86a106a0bac45b974a628896c90dbdf5c8093",
+      "bytes": 1198533,
+      "sha256": "ede236531fa097435a9ecd9c2f75ad1eb43cbfced4d9c8d472e617751f40c452"
+    },
+    {
+      "file": "actions-checkout-3d3c42e5aac5ba805825da76410c181273ba90b1.tar.gz",
+      "source": "https://codeload.github.com/actions/checkout/tar.gz/3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "reference": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "version": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "bytes": 476180,
+      "sha256": "b59292069298c7be5ffd9c636431a229faff70ece00e0c24fd31baeb7b309fa3"
+    },
+    {
+      "file": "actions-setup-java-b843ebf9b913146b38da2eaa7aeddf76074ae1ad.tar.gz",
+      "source": "https://codeload.github.com/actions/setup-java/tar.gz/b843ebf9b913146b38da2eaa7aeddf76074ae1ad",
+      "reference": "actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad",
+      "version": "b843ebf9b913146b38da2eaa7aeddf76074ae1ad",
+      "bytes": 3777994,
+      "sha256": "90a9af11994aae3471cee220bc1375cdcd26ffc5c064a63d901a5dce152863fc"
+    },
+    {
+      "file": "actions-setup-go-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e.tar.gz",
+      "source": "https://codeload.github.com/actions/setup-go/tar.gz/b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "reference": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "version": "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "bytes": 1622901,
+      "sha256": "c0f9ce2412e45f9ed1115f9950a01403b58b7f2b830cbcf52b186bb7a2d5b120"
+    },
+    {
+      "file": "actions-setup-node-949feb2413d6458794dcd2491c4babbbce0c15c1.tar.gz",
+      "source": "https://codeload.github.com/actions/setup-node/tar.gz/949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "reference": "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "version": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "bytes": 1775200,
+      "sha256": "738f1f022b9004d05770ca7d294748ef37f40f977472ce978c1f3f74aaa45e34"
+    },
+    {
+      "file": "pnpm-action-setup-0977fd99725f1db4007ccb2928dbb4e90d06cc86.tar.gz",
+      "source": "https://codeload.github.com/pnpm/action-setup/tar.gz/0977fd99725f1db4007ccb2928dbb4e90d06cc86",
+      "reference": "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86",
+      "version": "0977fd99725f1db4007ccb2928dbb4e90d06cc86",
+      "bytes": 388049,
+      "sha256": "6a52f32a33d5f531e49825e4db6f135e2ab64777a32daa4015232b563fb5559e"
+    },
+    {
+      "file": "actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz",
+      "source": "https://codeload.github.com/actions/upload-artifact/tar.gz/ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "reference": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "version": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "bytes": 2222593,
+      "sha256": "b7e8bdaab718e6bd4b78925b8880a96bfc0272338005017453e24ab3f83149d0"
+    },
+    {
+      "file": "pnpm-action-setup-73e46992e05b19abd31f2f3c20e0e7370d762115.tar.gz",
+      "source": "https://codeload.github.com/pnpm/action-setup/tar.gz/73e46992e05b19abd31f2f3c20e0e7370d762115",
+      "reference": "pnpm/action-setup@v6",
+      "version": "73e46992e05b19abd31f2f3c20e0e7370d762115",
+      "bytes": 401920,
+      "sha256": "b200b6e446f4829b93eba705797464bdc3ceb8b69a946c7ed5d697241af1b43b"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "actions-cache-0400d5f644dc74513175e3cd8d07132dd4860809.tar.gz.part000",
+      "bytes": 2134721,
+      "sha256": "f8b60e48c9625ef99a6693976d07ff05bfa54f58367da903bc5efb52f4d8978b",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-cache-0400d5f644dc74513175e3cd8d07132dd4860809.tar.gz.part000"
+    },
+    {
+      "file": "actions-checkout-11d5960a326750d5838078e36cf38b85af677262.tar.gz.part000",
+      "bytes": 434773,
+      "sha256": "0f48a50cf2edeea3d6e270f8dae645529128ca8b2954993891a2fb8f7b16145a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-checkout-11d5960a326750d5838078e36cf38b85af677262.tar.gz.part000"
+    },
+    {
+      "file": "pnpm-action-setup-b906affcce14559ad1aafd4ab0e942779e9f58b1.tar.gz.part000",
+      "bytes": 2284682,
+      "sha256": "3b1f54546ef1858bfc2dd693f8201408ae3510f699bb7a8c822c0a93ba8e06f0",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/pnpm-action-setup-b906affcce14559ad1aafd4ab0e942779e9f58b1.tar.gz.part000"
+    },
+    {
+      "file": "actions-setup-node-49933ea5288caeca8642d1e84afbd3f7d6820020.tar.gz.part000",
+      "bytes": 1902516,
+      "sha256": "8897425776cbef7ddfca2275e536ecc0c26b313161de2235c5aa9fda8ce961fc",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-node-49933ea5288caeca8642d1e84afbd3f7d6820020.tar.gz.part000"
+    },
+    {
+      "file": "actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz.part000",
+      "bytes": 2222593,
+      "sha256": "b7e8bdaab718e6bd4b78925b8880a96bfc0272338005017453e24ab3f83149d0",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz.part000"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "3929237a5d49655846a7153c08ca3638e1f64dc37335fe4ab31d3747fb9e9eb7",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part000"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "5496ed252a5c615d4645860009b679df174a93f909a04c267760839789d4c301",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part001"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "652a9aef078698fedeab514ced4d605b0b6911018b9601d2ba2ec77f3cdd7880",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part002"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "7ab795925819a5cb8b3405151ce5ad52d66e99c4faeaf385a4685b7ceb7bedad",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part003"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "31f937dec94fce7d34ecc8927bde6a7aeaf4a794601fb90e789522612d2dc761",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part004"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "563d39fb2e2afc55d1b4417868dc3216d1e522208bf74313af394585dda4fa96",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part005"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "64abda61b9acd5c61573dd7a25bb0fd3f858b158675bb7500978cc7ea73060c2",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part006"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "e4bbb4305440129d33c9705a92900f4bc2ae25681399dd3b7b4df9135c4f65cf",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part007"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "a7d5de61f729b0e4676badf0890a853446885e10c493e90923ca026a8c88461c",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part008"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "f963303447a98ba3ef6630d09db14cc0096d0adad35d47d31a49d0a7a7215b75",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part009"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "dc436600e40828aa572c7d6bb627bb2cf52846dc156a66edbe33bb070679cdc9",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part010"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "977669109ccf39bd587de007473a48b339313998f47518f72c3f3adacf9c14fc",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part011"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "196803a23a92ad8aeced1bf27873f269727751f4608df47c2b460bf025969e2a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part012"
+    },
+    {
+      "file": "contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part013",
+      "bytes": 1575457,
+      "sha256": "6bb596f23cdd8ff65d177dad39a7dd3f4c8aa778f076d8587ff56bf3caad992f",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part013"
+    },
+    {
+      "file": "actions-checkout-3d3c42e5aac5ba805825da76410c181273ba90b1.tar.gz.part000",
+      "bytes": 476180,
+      "sha256": "b59292069298c7be5ffd9c636431a229faff70ece00e0c24fd31baeb7b309fa3",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-checkout-3d3c42e5aac5ba805825da76410c181273ba90b1.tar.gz.part000"
+    },
+    {
+      "file": "actions-setup-node-949feb2413d6458794dcd2491c4babbbce0c15c1.tar.gz.part000",
+      "bytes": 1775200,
+      "sha256": "738f1f022b9004d05770ca7d294748ef37f40f977472ce978c1f3f74aaa45e34",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-node-949feb2413d6458794dcd2491c4babbbce0c15c1.tar.gz.part000"
+    },
+    {
+      "file": "actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "347b6e32fdffddf59ec8affa9e67608890757ae1bf17520c25b7c4ec89abfc54",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz.part000"
+    },
+    {
+      "file": "actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz.part001",
+      "bytes": 924266,
+      "sha256": "26ed07ed68e7b445fe3e0bbe31206123ff2f3382a25b5b492a3d6f23eadd3ebe",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-java-d1374f8ac74474200d16ef8ecee22c7ae7a51880.tar.gz.part001"
+    },
+    {
+      "file": "actions-setup-go-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e.tar.gz.part000",
+      "bytes": 1622901,
+      "sha256": "c0f9ce2412e45f9ed1115f9950a01403b58b7f2b830cbcf52b186bb7a2d5b120",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-go-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e.tar.gz.part000"
+    },
+    {
+      "file": "golangci-golangci-lint-action-ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a.tar.gz.part000",
+      "bytes": 1816199,
+      "sha256": "f7cd537719f033db8543d360e1255bcc0f29a883f36c678336ae879492620a16",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/golangci-golangci-lint-action-ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a.tar.gz.part000"
+    },
+    {
+      "file": "actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz.part000",
+      "bytes": 1198533,
+      "sha256": "ede236531fa097435a9ecd9c2f75ad1eb43cbfced4d9c8d472e617751f40c452",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz.part000"
+    },
+    {
+      "file": "actions-setup-java-b843ebf9b913146b38da2eaa7aeddf76074ae1ad.tar.gz.part000",
+      "bytes": 3777994,
+      "sha256": "90a9af11994aae3471cee220bc1375cdcd26ffc5c064a63d901a5dce152863fc",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-java-b843ebf9b913146b38da2eaa7aeddf76074ae1ad.tar.gz.part000"
+    },
+    {
+      "file": "pnpm-action-setup-0977fd99725f1db4007ccb2928dbb4e90d06cc86.tar.gz.part000",
+      "bytes": 388049,
+      "sha256": "6a52f32a33d5f531e49825e4db6f135e2ab64777a32daa4015232b563fb5559e",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/pnpm-action-setup-0977fd99725f1db4007ccb2928dbb4e90d06cc86.tar.gz.part000"
+    },
+    {
+      "file": "pnpm-action-setup-73e46992e05b19abd31f2f3c20e0e7370d762115.tar.gz.part000",
+      "bytes": 401920,
+      "sha256": "b200b6e446f4829b93eba705797464bdc3ceb8b69a946c7ed5d697241af1b43b",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/pnpm-action-setup-73e46992e05b19abd31f2f3c20e0e7370d762115.tar.gz.part000"
+    }
+  ]
+}
